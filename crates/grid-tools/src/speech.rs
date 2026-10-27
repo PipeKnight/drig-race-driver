@@ -1292,6 +1292,10 @@ pub struct Entry {
     /// [`Identity::key`] and [`Identity::team`].
     pub key: i32,
     pub team: i32,
+    /// Arc length along the racing line (race car +0x78), the key of the track order.
+    pub arc: f32,
+    /// Racing: the entry's race state (vf 0x50) is 0.
+    pub racing: bool,
 }
 
 /// The race kind flags of the race block (0x451A20).
@@ -1502,6 +1506,10 @@ struct Record {
     /// taken at the first refresh.
     key: Option<i32>,
     team: Option<i32>,
+    /// +0x75: racing (vf 0x50 is 0).
+    racing: bool,
+    /// +0x34: the entry's place in the track order (game interface vf 0x80, 0x445770).
+    track: i32,
 }
 impl Record {
     /// 0x438C10. The previous position changes only when the position does.
@@ -1529,6 +1537,7 @@ impl Record {
         self.grid = e.grid as u32;
         self.key.get_or_insert(e.key);
         self.team.get_or_insert(e.team);
+        self.racing = e.racing;
     }
 }
 
@@ -1665,6 +1674,15 @@ pub struct Collector {
     coll_key: i32,
     keys_out: i32,
     key_team: i32,
+    /// The race's track order (race +0x21A0 → +0xD0): entries by arc along the racing line,
+    /// ascending, kept from frame to frame (insertion sort 0x91B240).
+    track: Vec<usize>,
+    /// +0xEC/+0x2FC the car ahead on the track and +0xF0/+0x378 the car behind (car + 1 or 0).
+    ahead: (usize, Record),
+    behind: (usize, Record),
+    /// +0xB414 the track place reference and +0xB424 `playerMovedTrackPos`.
+    track_reference: i32,
+    moved: bool,
     params: Params,
 }
 impl Default for Collector {
@@ -1735,6 +1753,11 @@ impl Default for Collector {
             coll_key: -1,
             keys_out: 0,
             key_team: 0,
+            track: Vec::new(),
+            ahead: Default::default(),
+            behind: Default::default(),
+            track_reference: 0,
+            moved: false,
             params: Params::default(),
         }
     }
@@ -1792,6 +1815,8 @@ impl Collector {
         self.plus1 = Default::default();
         self.minus1 = Default::default();
         self.leader = Default::default();
+        self.ahead = Default::default();
+        self.behind = Default::default();
         self.teammate = None;
         self.mate = Record::default();
         self.teammate_number = -1;
@@ -1839,6 +1864,7 @@ impl Collector {
         self.mate_hit_player = false;
         self.coll_key = -1;
         self.key_slots[0].collision = false;
+        self.moved = false;
     }
 
     /// Entry `i`'s key driver number, taken once (entry +0x50/+0x54 through a record, vf 0x4C).
@@ -1872,6 +1898,8 @@ impl Collector {
         self.plus1 = Default::default();
         self.minus1 = Default::default();
         self.leader = Default::default();
+        self.ahead = Default::default();
+        self.behind = Default::default();
         self.teammate = None;
         self.mate = Record::default();
         self.paused = true;
@@ -1999,7 +2027,20 @@ impl Collector {
                 _ => {}
             }
         }
+        // 0x917190: the track order follows the arcs every frame.
+        if self.track.len() != v.entries.len() {
+            self.track = (0..v.entries.len()).collect();
+        }
+        for i in 1..self.track.len() {
+            let mut j = i;
+            while j > 0 && v.entries[self.track[j - 1]].arc > v.entries[self.track[j]].arc {
+                self.track.swap(j - 1, j);
+                j -= 1;
+            }
+        }
+        let place = self.track.iter().position(|&k| k == v.player);
         self.player.refresh(&me);
+        self.player.track = place.map_or(0, |p| p as i32);
         self.player.off_track = v.off_track;
         self.car = v.car;
         self.best = self.best.min(me.position as u32);
@@ -2045,8 +2086,22 @@ impl Collector {
                 0 => follow(&mut self.plus1, (position < self.cars as usize).then(|| at(position + 1)).flatten()),
                 1 => follow(&mut self.minus1, (position > 1).then(|| at(position - 1)).flatten()),
                 2 => follow(&mut self.leader, at(1)),
-                // 3: the cars ahead and behind on the track (lapping lines), not ported.
-                _ => {}
+                // 3: the next and previous entries of the track order (vf 0x48, 0x4456F0:
+                // 0x46D260 and 0x46D320 without wrapping).
+                _ => {
+                    let ahead = place.and_then(|p| self.track.get(p + 1)).copied();
+                    let behind = place.and_then(|p| p.checked_sub(1)).map(|p| self.track[p]);
+                    for (slot, car) in [(&mut self.ahead, ahead), (&mut self.behind, behind)] {
+                        if slot.0 != car.map_or(0, |k| k + 1) {
+                            slot.1 = Record::default();
+                        }
+                        slot.0 = car.map_or(0, |k| k + 1);
+                        if let Some(k) = car {
+                            slot.1.refresh(&v.entries[k]);
+                            keys.push(k);
+                        }
+                    }
+                }
             }
         }
         for k in keys {
@@ -2070,6 +2125,14 @@ impl Collector {
             if self.counter.is_multiple_of(60) {
                 self.reference = place;
             }
+        }
+        // 0x452CBD: `playerMovedTrackPos` when the track place passes the reference, which
+        // follows every 60th frame (in and out of the race).
+        if self.player.track > self.track_reference {
+            self.moved = true;
+        }
+        if self.counter.is_multiple_of(60) {
+            self.track_reference = self.player.track;
         }
         // 0x431200 and 0x424780 on this frame's car.
         if self.in_race && !self.end_race && self.cars > 0 {
@@ -2260,6 +2323,18 @@ impl Collector {
         p.flag(AiRoll, self.ai_roll);
         p.flag(IsDrift, k.drift);
         p.set(PlayerVehicleId, self.player_id as f32);
+        // Part 3: the cars ahead and behind on the track. `carAheadTerminal` is 0 only for a
+        // racing car that is not terminally damaged, so a cleared record reads 1 (0x418A60).
+        let out = |r: &Record| if !r.terminal && r.racing { 0. } else { 1. };
+        p.set(CarAheadLap, self.ahead.1.lap);
+        p.set(CarBehindLap, self.behind.1.lap);
+        p.set(CarAheadDistance, self.ahead.1.fraction);
+        p.set(CarBehindDistance, self.behind.1.fraction);
+        p.set(CarAheadTerminal, out(&self.ahead.1));
+        p.set(CarBehindTerminal, out(&self.behind.1));
+        p.set(CarAheadSpeed, self.ahead.1.speed);
+        p.set(CarBehindSpeed, self.behind.1.speed);
+        p.flag(PlayerMovedTrackPos, self.moved);
         // Step 4: key drivers, teams and the teammate. Records read −1 while cleared.
         let key = |r: &Record| r.key.unwrap_or(-1) as f32;
         let team = |r: &Record| r.team.unwrap_or(-1) as f32;
@@ -2950,6 +3025,43 @@ mod tests {
     }
 
     #[test]
+    fn the_track_order_names_the_cars_ahead_and_behind() {
+        let mut c = Collector::default();
+        let mut v = racing(1.5);
+        // Arcs along a 1000 m line: entry 3 is just ahead of the player on the track but a lap
+        // down; entry 1 leads the race but is behind on the track.
+        for (e, (arc, laps)) in v.entries.iter_mut().zip([(500., 1), (100., 2), (900., 1), (560., 0)]) {
+            (e.arc, e.laps, e.racing) = (arc, laps, true);
+            e.progress = f64::from(laps) + f64::from(arc) / 1000.;
+            e.speed = 30.;
+        }
+        let mut p = Params::default();
+        for _ in 0..3 {
+            p = c.update(&v, 0.1).clone();
+        }
+        // Counter 3: the ahead and behind records.
+        assert_eq!((p.get(Param::CarAheadLap), p.get(Param::CarBehindLap)), (1., 3.));
+        assert!((p.get(Param::CarAheadDistance) - 0.56).abs() < 1e-6);
+        assert!((p.get(Param::CarBehindDistance) - 0.1).abs() < 1e-6);
+        assert_eq!((p.get(Param::CarAheadTerminal), p.get(Param::CarAheadSpeed)), (0., 30. * MPH));
+        // The reference starts at place 0, so place 1 counts as moved until frame 60 takes it.
+        assert_eq!(p.get(Param::PlayerMovedTrackPos), 1.);
+        for _ in 0..58 {
+            p = c.update(&v, 0.1).clone();
+        }
+        assert_eq!(p.get(Param::PlayerMovedTrackPos), 0.);
+        // The player passes entry 3 on the track: its place rises above the reference.
+        v.entries[0].arc = 600.;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::PlayerMovedTrackPos), 1.);
+        // Out of the race, a cleared record reads 1 for `carAheadTerminal`.
+        c.restart();
+        v.started = false;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::CarAheadTerminal), 1.);
+    }
+
+    #[test]
     fn voices_number_the_teammate() {
         assert_eq!((voice_number("us_1"), voice_number("british_1"), voice_number("irish_1")), (1, 4, 14));
         assert_eq!((voice_number("french_1"), voice_number("italian_1")), (7, 8));
@@ -3037,6 +3149,44 @@ mod tests {
         // Front third (z = 0): 3 records, mean square 0.03 → RMS 0.1732 × 5/3 = 0.2887.
         let expected = 30. + (0.09f32 / 3.).sqrt() * 1.666_666_6 * 100.;
         assert!((total_damage_percent(&v) - expected).abs() < 1e-2, "{}", total_damage_percent(&v));
+    }
+
+    /// The purchased rules through the collector: the leading player on lap 3 with entry 3 a lap
+    /// down moving past it on the track at `lapped(t)` laps from the player, over `seconds`.
+    fn lapping_lines(lapped: impl Fn(f32) -> f64, seconds: f32) -> Vec<String> {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT");
+        let mut m = Manager::new(std::sync::Arc::new(Rules::load(Path::new(&root)).unwrap()), 1);
+        let mut c = Collector::default();
+        let mut v = racing(2.3);
+        v.entries = vec![entry(1, 0, 2.3), entry(2, 1, 2.2), entry(3, 2, 2.15), entry(4, 3, 1.3)];
+        let (mut t, mut busy_until, mut played) = (0f32, -1f32, Vec::new());
+        while t < seconds {
+            v.clock = 60. + f64::from(t);
+            v.entries[3].progress = 1.3 + lapped(t);
+            for e in &mut v.entries {
+                (e.arc, e.racing) = ((e.progress.fract() * 1000.) as f32, true);
+            }
+            let p = c.update(&v, 1. / 60.).clone();
+            if let Some(l) = m.frame(1. / 60., &p, t < busy_until, false, &|_| true).play {
+                played.push(l.message);
+                busy_until = t + 2.;
+            }
+            t += 1. / 60.;
+        }
+        played
+    }
+
+    #[test]
+    #[ignore = "requires the purchased GRID installation (GRID_GAME_ROOT)"]
+    fn purchased_rules_play_the_lapping_lines() {
+        // 0.07 laps ahead on the track: `dontWorryCarAhead`.
+        let played = lapping_lines(|_| 0.07, 60.);
+        assert!(played.iter().any(|m| m == "dontWorryCarAhead"), "{played:?}");
+        // Passed every 10 s from 0.02 ahead to 0.07 behind: `lappedDriver` while the place is
+        // above the 60th-frame reference.
+        let played = lapping_lines(|t| if ((t / 10.) as u32).is_multiple_of(2) { 0.02 } else { -0.07 }, 120.);
+        assert!(played.iter().any(|m| m == "lappedDriver"), "{played:?}");
+        assert!(!played.iter().any(|m| m == "dontWorryCarAhead"), "{played:?}");
     }
 
     /// The purchased files: every parameter of the slice resolves and the documented quirks hold.

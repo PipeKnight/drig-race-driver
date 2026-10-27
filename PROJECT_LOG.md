@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F622](log/F0622.md) | 2026-10-27 | Speech part 3 step 1: the lapping lines from the track order |
 | [F621](log/F0621.md) | 2026-10-27 | Owner request: PC graphics options as in the original, later |
 | [F620](log/F0620.md) | 2026-10-27 | AI car wedged against Washington tyre stacks: stuck retire requests removal |
 | [F619](log/F0619.md) | 2026-10-27 | Camera: every view against the F470 captures with the final code; live captures still needed |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F565](log/F0565.md) | 2026-10-24 | Detached panels are world bodies: 9EC9B0 part decisions in the simulation, cars collide with the panels |
 | [F564](log/F0564.md) | 2026-10-24 | Broken tyres drawn on their bodies and lifted out of the road |
 | [F563](log/F0563.md) | 2026-10-23 | Detached panels settle lying flat: rigid box with the original's detached-part body parameters |
-| [F562](log/F0562.md) | 2026-10-23 | Playable 14696d47fe1e with no mid-air parking (F561), portable copy and APKs 99fef6aca274 |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

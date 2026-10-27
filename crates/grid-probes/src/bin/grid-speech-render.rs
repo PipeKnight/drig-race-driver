@@ -89,6 +89,9 @@ fn view(green: Option<f64>, ids: &Identities) -> RaceView {
                 damage: if (k == 3 || k == 4) && green.is_some() && t >= 70. { 6. } else { 0. },
                 key: ids.entries[k].key,
                 team: ids.entries[k].team,
+                // A 1000 m lap: the arc is the lap fraction.
+                arc: (p.fract() * 1000.) as f32,
+                racing: p < LAPS,
             }
         })
         .collect();

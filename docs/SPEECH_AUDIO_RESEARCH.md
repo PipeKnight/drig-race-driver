@@ -252,7 +252,7 @@ Race entry getters are those of docs/RACE_RULES_RESEARCH.md §1 (vtable 0xD0E898
 | isNetRace, isTestDrive, isHeadToHead, inIntroRace, isTouge, isLeMans, isDriftBattle, isDestructionDerby | race kind flags (0x451A20) |
 | isFinalRace, isFinalCareerEvent, wonChampionship, numRaceWins, numEventWins, racesCurTrack | career and profile values (0x451A20) |
 | carPosMinus1KeyDriver, leadingCarKeyDriver, team parameters | named rival drivers and teams |
-| carAhead*, carBehind* | the cars ahead and behind on the track (lapping lines) |
+| carAhead*, carBehind* | the cars ahead and behind on the track (lapping lines, §17) |
 
 **Integer division [O].** At 0x452A42 the start percentage is computed as
 `div dword [+0xAC]` on the integer grid slot + 1 before `fild` and × 100. It is therefore 0 for
@@ -773,3 +773,67 @@ keeps them until the record is cleared again. So:
 - Render (`local/speech-render/render-06`): AI_3_AISpin is followed by `Names_AI/Chief_AI_457`
   (entry 2, driver 5), AI_05_accidentTerm by `Chief_AI_443` (entry 4, driver 10) and
   AI_02_tyreBlow by `Chief_AI_467` (entry 1, driver 4).
+
+## 17. The port, part 3 step 1: the lapping lines (cars ahead and behind on the track) [O]
+
+**The track order.** The race keeps a list of its entries sorted by position on the track, not by
+race position (race +0x21A0 → +0xCC; elements of 12 bytes: entry, line descriptor, key).
+- `track_order_update` (0x917190) runs every frame. For each element it takes the race car's
+  line descriptor (+0x74) and its arc along the racing line (+0x78, distance through 0x909340)
+  as the key.
+- `track_order_sort` (0x91B240, through 0x91BA70) is an insertion sort, ascending by the key (the
+  descriptor at DAT_00E4F564 has byte +1 = 1). The list survives from frame to frame.
+  `track_order_add` (0x91BCB0) adds an entry; `track_order_find` (0x46E8D0) finds an entry's node.
+- `track_order_next` (0x46D260) and `track_order_prev` (0x46D320) step to the next (ahead) and
+  previous (behind) element. They are called with 0: no wrap at the ends of the list.
+- Game interface vf 0x80 (`track_order_index`, 0x445770) gives an entry's index in the list;
+  vf 0x48 (`cars_ahead_behind_on_track`, 0x4456F0) writes the next and the previous entry
+  (0 when none).
+
+**The collector (0x452810, case 3 of `counter % 4`, 0x452B8C).** It calls vf 0x48 for the player
+with both outputs preset to 0. For each output: if the car changed, the record (+0x2FC ahead,
++0x378 behind) is cleared (0x4689C0); a present car's record is refreshed through vf 0x4C. The
+player record's +0x34 is the player's index (vf 0x80).
+
+**`playerMovedTrackPos` (+0xB424).** Set when the player's index is above the reference +0xB414
+(signed). The reference takes the index every 60th frame (0x4692B0), in and out of the race; it
+is 0 after construction and never reset. The flag is one-shot: 0x417ED0 clears it after the
+publish.
+
+**Getters.**
+
+| Parameter | Getter | Value |
+| --- | --- | --- |
+| carAheadLap, carBehindLap | 0x4187A0, 0x4187F0 | record +0x38 (lap) |
+| carAheadDistance, carBehindDistance | 0x418A00, 0x418A10 | record +0x18 (lap fraction) |
+| carAheadTerminal, carBehindTerminal | 0x418A60, 0x418AA0 | 0 if the car is not terminally damaged and racing (+0x74 clear, +0x75 set), else 1; a cleared record reads 1 |
+| carAheadSpeed, carBehindSpeed | 0x418AE0, 0x418AF0 | record +0xC (mph) |
+| playerMovedTrackPos | | +0xB424 |
+
+**The lines.**
+- `dontWorryCarAhead` (Position, `inRacePlus1`): the car ahead on the track is a lap or more down
+  (`playerLap` > `carAheadLap` > 1), racing, 0.05 to 0.1 laps ahead and above 40 mph. The
+  Position event also needs `playerLapDist` < 0.85.
+- `lappedDriver`: the player has just moved up the track order (`playerMovedTrackPos`) past a
+  racing car one lap down, now 0.05 to 0.1 laps behind it and above 40 mph, with the player past
+  0.1 of the lap.
+- LeMans `leMansCarBehind` reads the same parameters (Le Mans is not in the port's slice).
+
+**The port.**
+- `Entry::arc` and `Entry::racing`; the collector keeps the order, sorts it the same way every
+  frame and fills the ahead/behind records in case 3.
+- [I] grid-app's arc is the nearest racing-line point (`ai_driver::Line::arc`, a global search)
+  for every car, finished cars included, not the original route tracker's +0x78. `racing` is
+  `Standings` status `Racing`.
+- The render probe's entries use the lap fraction × 1000 as the arc. Its scenario cannot stage a
+  lapping line: the player leads only from 164 s of lap 3, the Position event stops at a lap
+  fraction of 0.85 (171 s), and `greatOverTaking` takes that slot with the 7 s minimum silence.
+
+**Checks.**
+- Unit test `the_track_order_names_the_cars_ahead_and_behind`: the sort, the ahead/behind
+  records, the terminal getter of a cleared record and the 60th-frame reference.
+- Purchased-rules test `purchased_rules_play_the_lapping_lines`: the leading player on lap 3
+  with a lapped car 0.07 ahead hears `dontWorryCarAhead`; passing it every 10 s gives
+  `lappedDriver`.
+- Render `local/speech-render/render-07`: the lines of render-06; only the end-of-race variation
+  picks differ, as the rolls now see the lapping parameters.

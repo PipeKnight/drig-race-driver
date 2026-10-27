@@ -235,6 +235,7 @@ fn view(
     let standings = &o.standings;
     let clock = trial.and_then(|t| t.race_time(driving.runtime.ticks));
     let speeds = o.speeds(&driving.runtime);
+    let positions = o.positions(&driving.runtime);
     let order = standings.order();
     let player = &driving.runtime;
     // Car 0 is the player (its own runtime); the opponents are the shared world's cars 1….
@@ -264,6 +265,10 @@ fn view(
                 }),
                 key: ids.entries.get(k).map_or(0, |i| i.key),
                 team: ids.entries.get(k).map_or(0, |i| i.team),
+                // The track order's key: the arc along the racing line every frame, finished
+                // cars included [I: nearest line point; the original's route tracker +0x78].
+                arc: positions.get(k).map_or(0., |&p| o.ai.line.arc(p)),
+                racing: standings.status(k) == grid_tools::race::Status::Racing,
             }
         })
         .collect();
