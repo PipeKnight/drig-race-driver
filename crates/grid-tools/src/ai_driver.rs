@@ -2496,6 +2496,10 @@ pub struct AiDriver {
     look_ahead: f32,
     curvature: f32,
     offset: f32,
+    /// Planned offset at the car's own link (view +0x1A0, 0x788030): it moves
+    /// toward the same request at the same rate as `offset` (+0xE0) but stops
+    /// at the limits at the car. The PID error is measured from it.
+    offset_here: f32,
     desired_offset: f32,
     offset_timer: f32,
     alone: bool,
@@ -2543,6 +2547,32 @@ pub struct AiDriver {
 fn clamp01(x: f32) -> f32 {
     x.clamp(0., 1.)
 }
+/// 0x782D20 as 0x7878F0 and 0x788030 use it: a positive offset stops at the
+/// right limit and a negative one at the left, each moved inward by our half
+/// width (view +0x60 = car state +0x110). When that edge lies past the racing
+/// line, on the other side, the offset is set to the line (0x782D20 clears
+/// its signed limit distance before 0x779CB0 writes the offset).
+fn stop_at_limits(offset: f32, limits: [f32; 2], half_width: f32) -> f32 {
+    if offset > 0. {
+        let edge = limits[1] - half_width;
+        if 0. < edge && edge < offset {
+            return edge;
+        }
+        if edge < 0. {
+            return 0.;
+        }
+    } else if offset < 0. {
+        let edge = limits[0] + half_width;
+        if offset < edge && edge < 0. {
+            return edge;
+        }
+        if edge > 0. {
+            return 0.;
+        }
+    }
+    offset
+}
+
 fn approach(current: f32, target: f32, up: f32, down: f32, dt: f32) -> f32 {
     if current <= target {
         (current + dt * up).min(target)
@@ -2633,6 +2663,7 @@ impl AiDriver {
             other_segments: Vec::new(),
             curvature: 0.,
             offset: 0.,
+            offset_here: 0.,
             desired_offset: 0.,
             offset_timer: 0.,
             alone: false,
@@ -2797,6 +2828,7 @@ impl AiDriver {
             let (_, _, from) = old.line.project(position, self.segment);
             let (_, _, to) = new.line.project(position, self.segment);
             self.offset += to - from;
+            self.offset_here += to - from;
             self.desired_offset += to - from;
             self.on_drift_line = drift_line.is_some();
         }
@@ -3558,12 +3590,13 @@ impl AiDriver {
                     // plus asTargetBuffer minus g, is below minSpace, move
                     // away by minSpace ("squeezed", +0x30). Displaced toward
                     // that car with g above maxSpace: back to the racing line.
-                    // The room at the car uses the planned offset +0xE0 for
-                    // the car link's own +0x1A0, which is not kept [I].
+                    // The room at the car uses the car link's planned
+                    // offset +0x1A0.
+                    let here = self.offset_here;
                     let (g, room_here, room_ahead, away) = if left {
-                        (gaps[0], cur - limits_here[0], cur - limits_ahead[0], 1.)
+                        (gaps[0], here - limits_here[0], cur - limits_ahead[0], 1.)
                     } else {
-                        (gaps[1], limits_here[1] - cur, limits_ahead[1] - cur, -1.)
+                        (gaps[1], limits_here[1] - here, limits_ahead[1] - cur, -1.)
                     };
                     let mut desired = cur;
                     if g < tr.min_space {
@@ -3774,16 +3807,25 @@ impl AiDriver {
                 self.drive_failure(data, &mut request, arc, speed, own.half_width(), dt);
             }
         }
-        // Planned offset moves toward the request at its merge rate.
+        // Both planned offsets move toward the request at its merge rate
+        // (0x7878F0 at the look-ahead, 0x788030 at the car).
         if speed < SLOW_SPEED {
             self.offset = if self.behaviour == Behaviour::RaceStart {
                 own_lateral
             } else {
                 line_distance
             };
+            self.offset_here = self.offset;
         } else {
             self.offset = approach(
                 self.offset,
+                request.desired_offset,
+                request.merge,
+                request.merge,
+                dt,
+            );
+            self.offset_here = approach(
+                self.offset_here,
                 request.desired_offset,
                 request.merge,
                 request.merge,
@@ -3807,22 +3849,17 @@ impl AiDriver {
         } else {
             limits
         };
-        // 0x7878F0 / 0x782D20: a positive offset stops at the right limit and
-        // a negative one at the left, each moved inward by our half width
-        // (view +0x60 = car state +0x110); a limit already past the line
-        // does not move it.
+        // 0x7878F0 / 0x782D20 at the look-ahead limits.
         let half_width = own.half_width();
-        if self.offset > 0. {
-            let edge = limits[1] - half_width;
-            if 0. < edge && edge < self.offset {
-                self.offset = edge;
-            }
-        } else if self.offset < 0. {
-            let edge = limits[0] + half_width;
-            if edge < 0. && self.offset < edge {
-                self.offset = edge;
-            }
-        }
+        self.offset = stop_at_limits(self.offset, limits, half_width);
+        // 0x788030 stops the planned offset at the car the same way at the
+        // limits there (the +0x150 block's limit links).
+        let limits_car = if request.track_limits {
+            data.line.track_limits_at(arc)
+        } else {
+            limits_here
+        };
+        self.offset_here = stop_at_limits(self.offset_here, limits_car, half_width);
         // 0x798E90: the angle between the line laterals at the car (+0x180)
         // and at the look-ahead (+0xC0), acos of their clamped dot product,
         // negative when the look-ahead point lies on the car lateral's
@@ -3842,7 +3879,7 @@ impl AiDriver {
         let planned: [f32; 3] = std::array::from_fn(|k| point[k] + lateral[k] * self.offset);
         let target = if on_track {
             let [kp, ki, kd, lp, li, ld, lo] = p.pid;
-            let error = own_lateral - self.offset;
+            let error = own_lateral - self.offset_here;
             let [previous_error, _, integral] = self.pid_state;
             // 0x7790B0: the limits clamp the raw terms; the derivative starts
             // from a zero previous error.
@@ -4599,6 +4636,22 @@ impl AiDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offsets_stop_at_the_limits_or_on_the_line() {
+        // Half width 1: the edges are the limits moved 1 m inward.
+        let limits = [-4., 3.];
+        assert_eq!(stop_at_limits(1.5, limits, 1.), 1.5);
+        assert_eq!(stop_at_limits(2.5, limits, 1.), 2.);
+        assert_eq!(stop_at_limits(-3.5, limits, 1.), -3.);
+        assert_eq!(stop_at_limits(0., limits, 1.), 0.);
+        // An edge past the line (Donington's left racing limit 0.5 m from
+        // the line) puts the offset on the line (0x782D20).
+        assert_eq!(stop_at_limits(-3., [-0.5, 3.], 1.), 0.);
+        assert_eq!(stop_at_limits(2., [-4., 0.8], 1.), 0.);
+        // An edge exactly on the line leaves it.
+        assert_eq!(stop_at_limits(-3., [-1., 3.], 1.), -3.);
+    }
 
     #[test]
     fn traction_control_limits_the_throttle_by_driven_wheel_spin() {

@@ -4,7 +4,7 @@
 # tools/prepush.ps1 (full tier) compares against this file. A commit that changes the simulation
 # on purpose updates the hashes here and names the change in its log entry.
 name	args	env	sha256
-solo	1 11200 ai	-	b9323a8c783dfd43b989eaacdf36ed72171f9a54d3aa4d9583a4870ac7b4c1af
-12-car	12 11200 ai	-	ebcd001294a3a75e304851456130e073a663180e839d6873b2f946a86ed951be
-12-car-df	12 11200 ai	DF+AI	b91a4eb3da3a3bbe785397fff19a87338ba055cd0f4135e182a91cf26b9cacea
-derby-df	--route tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai	DF+AI	b1422ccba34f4b9318c9082644c9bd3f01fecbb207f8f1281bf6937a441ea4d9
+solo	1 11200 ai	-	69fdf81f73fb2114636c3ecbfd554d20c561ec543bfad9078f4fc433e0262e58
+12-car	12 11200 ai	-	25ed3727ba6e2775eadcd4f85b047c92d7a1f628b2de543dc9564540959ff37c
+12-car-df	12 11200 ai	DF+AI	b82bbde38d402b88fe77b49ff5e506dbc6c1a90174ee17939b116b4556acd131
+derby-df	--route tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai	DF+AI	fb7f8ffc91fa0fb118dfea134a21fadf22029cbcc1d67d10b9da1c933fbfa244

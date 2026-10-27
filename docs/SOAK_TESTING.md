@@ -529,6 +529,17 @@ F585's follow-up (coordinator's approval of 26 October 2026, harness only) widen
 - Replays and single runs need `GRID_AI_CHARACTERISTICS` like `prepush.ps1`'s soak step;
   without it the scenario's `characteristics=1` runs a different trajectory.
 
+F604 (coordinator's approval of 27 October 2026, harness only) adds the flight path:
+- `pressed_by=NoGroundOnPath`: a prop or detached piece (never a car) whose straight xz flight
+  crosses a point with no packed triangle at all (`Track::triangles_under`, the
+  `grid-road-hole` brute-force test, every 1 m). Checked after `NoGroundAtFall`.
+- The flight, per body: from its last contact of any kind (any normal, within 2 m) after its
+  last support, to its first contact after a tick with none, or to the failure point.
+- Case [V]: quick seed 15 on F604, prop piece 19 flies from a crash over a pocket of Istanbul
+  Park without collision and falls through it (ROBUSTNESS_RESEARCH §9 has the tick trace).
+- Quick 1..56: catches that body only. Tests: `soak::tests::touching_takes_any_near_contact`,
+  asset test `hole_on_path_finds_the_pocket_a_piece_flew_over`.
+
 ## Known failures on F585: seeds 39, 40 and 46 (outside the default set)
 
 `grid-soak quick --seeds 1..56` on F585 (with `GRID_AI_CHARACTERISTICS`), compared with the

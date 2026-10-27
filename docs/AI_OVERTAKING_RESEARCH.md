@@ -34,7 +34,9 @@ at +8); accessor 0x7A3820(out, i) reads `map[i+1]` (0-based) [V].
   stops it at a reached racing limit (flags view +0x238/+0x239), and re-projects the old
   planned point when the car changes link [V]. View +0xD0 = line point + lateral × that offset.
   Sample 2 (+0x150 block, offset +0x1A0) is the look-ahead equivalent (0x788030).
-  This is the port's `offset` state.
+  This is the port's `offset` state. (F604: with the correction below, +0xE0 is the look-ahead
+  offset, the port's `offset`; +0x1A0 is the car-link offset, the port's `offset_here`, which
+  the lateral PID error and the room at the car read; FIRST_CORNER_LIVE §11.)
 - **Correction (2026-10-26, drift-battle-ai):** the sample positions in this and the previous
   bullet are swapped, as AI_AVOID_RECOVERY_RESEARCH §1 already found for the blocks. 0x798E90
   builds the +0x90 block (+0xE0) at the look-ahead link and the +0x150 block (+0x1A0) at the

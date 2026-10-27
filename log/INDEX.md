@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F606](F0606.md) | 2026-10-27 | AI planned offset at the car and the limit clamp's far-side case: Donington |
 | [F605](F0605.md) | 2026-10-27 | Playable f1e871287420 with F593-F603 and portable copy; APKs deferred |
 | [F604](F0604.md) | 2026-10-27 | Android pad rumble and phone vibration from the GameFFB task |
 | [F603](F0603.md) | 2026-10-27 | Phones without BC: OSD textures made before the upload path was chosen are converted; desktop check with BC off the device |
