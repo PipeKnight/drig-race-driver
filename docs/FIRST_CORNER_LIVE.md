@@ -223,3 +223,77 @@ Next:
   original at the Milan grid;
 - ~~the 0.5–1 s launch gap~~: the race manager's race-start factors (F460);
 - port comparisons need the mixed field and the race manager: `GRID_REFERENCE_CAR=11 … --cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`.
+
+## 9. First-corner queues against the original; alongside parts, observer list and path scan ported
+
+2026-10-26, Claude Code (drift-battle-ai). The owner approved a live x32dbg capture at Jarama
+route 0 with touring cars; it was **not run**: Race Day Touring Cars does not offer Jarama
+(§8). The three existing 12-car touring captures (Donington field02, Milan01, Spa01; one
+car model per grid slot as in §8) already pass through corners where the port loses cars, so
+they were compared with the port first. No game run, no user files changed.
+
+Evidence (ignored, this worktree `local/alongside/`): `live/queue.py` (queue geometry from the
+go: nearest car ahead in a 2.2 m corridor, bumper gap, overlaps; time-weighted), `live/stall.py`
+(the matrix's "above 10 m/s, then below 3 m/s within 30 s" rule), `live/corner.py`,
+`live/spread.py`, `live/offref.py` (lateral offset from the live leader's path), port runs
+`live/{base,all,final}-s{0,1,2}/` with `GRID_PARKED_CAR=11 GRID_GRID_HOLD=3.7,3.04
+GRID_REFERENCE_CAR=11 --cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`, the alongside
+decision trace `live/al-don.err`, matrices `matrix3.log`, `matrix4.log`.
+
+**Observations [V]** (25 s from the go, AI cars):
+
+| | original Donington / Milan / Spa | port base, 3 seeds (range) |
+|---|---|---|
+| a car ahead within 3 m bumper gap | 7.3 / 14.0 / 9.3 % of the time | 3.7–6.0 / 0.9–1.7 / 6.3–8.1 % |
+| bumper gap p5 | 2.25 / 0.48 / 1.35 m | 0.4–2.9 / 4.2–4.8 / 0.0–1.1 m |
+| overlapped (along < 4.6 m and lateral < 4 m apart) | 8.6 / 19.6 / 8.5 % | 6–9 / 1–6 / 8–15 % |
+| cars stalled within 30 s | 0 / 0 / 0 | 1–2 / 0–1 / 2–3 per seed |
+| Spa leader's minimum at La Source | 20.9 m/s | 16.4–16.6 m/s |
+
+- The original queues nose-to-tail at least as tightly as the port (Milan's tail runs under
+  0.5 m bumper gap 5 % of the time). So the faithful gap-0 "alongside" of a car directly ahead
+  (0x795C00) is a normal state in the original, not the cause of pile-ups.
+- Lateral spread from the leader's path through La Source is the same (mean 2.9 m original,
+  2.3–2.8 m port).
+- Spa: the port's cars 7 and 9 hit the hairpin wall at about 10 m/s (no car contact), behind a
+  leader 4–5 m/s slower than the original's. The corner-speed gap is the AI braking/corner-speed
+  topic, not traffic.
+- Donington: the port's grid slots 2/4/6 drift 1–2.6 m further left than the original's before
+  Redgate (slot 4: −4.1 m against −1.5 m at 8 s). Slot 4 is in Alongside with a car on its right
+  at 1.2 m gap; the min-space move takes its planned offset to −2.9 m while the racing limit at
+  the car is −1.0 m (the clamp uses the look-ahead limits, as 0x7878F0 does). It leaves the
+  road at 58 m/s, scores Recovery, holds full lock and hits the wall at 10 s, in every variant.
+
+**Static fix [V]:** 0x798E90 fills view +0x218/+0x21C (track) and +0x220/+0x224 (racing
+limits) from the +0x150 block **at the car**, and +0x228/+0x22C and **+0x230/+0x234 from the
++0x90 block at the look-ahead**; 0x797190 returns (block planned offset + line length) − left
+limit and right limit − that. AI_OVERTAKING_RESEARCH §1 had the two the other way round, and
+the port followed it in five readers. Now the room at the look-ahead is used by the race start
+(0x78A740 room, 0x776740 side), the overtake side choice (0x77BD20) and the yield (0x789780),
+and the alongside squeeze (0x799630) is `room_ahead − ((room_car + asTargetBuffer) − g) <
+minSpace`. The room at the car uses the planned offset +0xE0 for the car link's own +0x1A0,
+which the port does not keep [I].
+
+**Measured** (24 first-corner starts: Jarama 0/1, Long Beach 0/1/3/4, Detroit 1, Nürburgring 0
+at 10/11/12 cars, 2000 ticks; cars lost per seed offset):
+
+| variant | s0 | s1 | s2 | s3 | s4 | s5 | sum | 12-car starts | contacts |
+|---|---|---|---|---|---|---|---|---|---|
+| old main | 40 | 53 | 43 | 39 | 45 | 66 | 286 | 103 | 196k |
+| room fix only | 37 | 63 | 28 | 34 | 37 | 60 | 259 | 98 | 184k |
+| room fix + alongside parts + observer list + path scan (adopted) | 39 | 38 | 63 | 29 | 38 | 33 | 240 | 83 | 171k |
+| (seeds 0–2) fix + alongside parts only | 53 | 65 | 53 | | | | | | |
+| (seeds 0–2) fix + parts + scan, no list | 46 | 38 | 55 | | | | | | |
+| (seeds 0–2, before the fix) all three | 60 | 54 | 69 | | | | | | |
+
+The seed spread (28–66) is larger than any one difference; over six seeds the adopted
+variant loses 16 % fewer cars than old main. On the three live-capture tracks it is unchanged
+(12 stalls over 3 seeds, as old main); the original loses none. Those stalls are the La
+Source corner speed and the Donington run-off above, not the parts ported here.
+
+**What a live capture would still settle:** the planned offsets +0xE0/+0x1A0 and the
+alongside fields (+0x0C/+0x10 gaps, +0x24/+0x25) of the cars at Donington's run to Redgate,
+grid slots 2–6, 5–9 s after the go (Race Day, Touring Cars, Donington GP, grid Back): whether
+the original's min-space move pushes a car past the racing limit at the car as the port's
+does. Breakpoint logging at 0x799630 entry (ECX test object, view = [arg+0x18]: +0xE0,
++0x1A0, +0x220..+0x234) and 0x795C00 return, read-only.

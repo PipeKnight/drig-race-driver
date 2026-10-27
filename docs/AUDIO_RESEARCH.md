@@ -1569,3 +1569,108 @@ events over `base`:
 - the authored pull at 90.10 s (`hbrakeon`, RMS 0.055);
 - the release at 91.10 s (`hbrakeoff`, RMS 0.065).
 Not compared with the original by ear or capture.
+
+## 27. Damage and suspension sounds of the player's car ported (F586)
+
+26 October 2026, Claude Code (car-series, owner task item 4). Static (`grid_re.py`
+decompile/dis, cache `local/re-cache`) and offline renders; GRID was not launched.
+
+457BE0 calls, for the player's car only (car-audio +0xA4D8 set), 4560E0, 43C320 (§26), 44DF60,
+453A70 and 4562F0 every frame; none was ported before. With P = [[car-audio +0x2C] +0x18] = M+0x70
+(§7.4) the CollisionInfos they read are P+0x10 SuspensionUp*, P+0x14 SuspensionDown*, P+0x18
+DamageBreak, P+0x28 DamageSuspension, P+0x2C DamageSteering (an impact-variety table: +0x28 Start,
++0x2C End, +0x30 EndDammy) and P+0xC8 damageEngineLoop (car_genmec).
+
+**Inputs [O].** Car-audio +0x24 is the vehicle.
+- 9961D0(i) = vehicle +0xE18 + 4i, negated for i = 6 (×[CB0948] = −1): 2 = +0xE20 the brake,
+  6 = −(+0xE30) the steering. 9961B0(8) = +0xE38 the handbrake (§26).
+- The damage object is [car-audio +0xA338] + 0xAB20 = vehicle +0xCDF0 (41DB20: +0xA338 =
+  98DA40(vehicle) = vehicle +0x22D0), the component levels of MECHANICAL_DAMAGE.md [I: offset
+  arithmetic, consistent with the port's `0xcdf0 + 4i` levels]:
+  99A4D0(i) = +0xCDF0 + 4i (3 = engine temperature), 99A540(i) = wheels +0xCE08 + 4i (i < 4, else
+  0), 99A580(i) = suspension +0xCE18 + 4i, 99A5C0(i) = brakes +0xCE28 + 4i.
+- Wheel i's record: vehicle +0x1990 + 0x150·i; its position is transformed by the car matrix
+  car-audio +0xA3F0 (or 422200 in the other camera branch).
+- r = vehicle +0x1894 / +0x17A4, the engine speed over its maximum.
+
+**44DF60, engine damage loop [O].** l = 99A4D0(3), the engine temperature level.
+- l ≤ 0.1: stops the voice +0xA3A4.
+- Otherwise the first frame starts `damageEngineLoop` (`dam_engine`, preset enginedamage) with the
+  car's +0xA3C4 priority, group car-audio +0x10 (Engine) and returns.
+- Later frames: v = 1, or (1 − (r − 0.3))² for r ≥ 0.3; v = clamp(min(v, l), 0, …); v = 0 while
+  [+0xA494] +0xD8 is set; pitch = clamp((r − 0.3)·0.5 + 0.5, 0.5, 2); level lin2db(v), position
+  emitter +0x7B0 (444280 clamps the level to −48…0 dB and the pitch to 0.5…2).
+
+**453A70 / 44DB50, brake damage [O].** b = 9961D0(2), the brake pedal.
+- b ≤ 0.1: stops every wheel's voice +0xA340 + 4i.
+- Otherwise for each wheel with brake damage d = 99A5C0(i) > 0.1: the first frame starts
+  `DamageBreak` (`dam_brake`, group car-audio +8 = Other Mech) at −48 dB.
+- Later frames, at the wheel's position: s = |car velocity| (A69800 on [vehicle +0xDB0]: body +0x220,
+  the linear velocity); a smoothed brake +0xA350+4i follows b at
+  0.2 a frame (zeroed while wheel +0xC8 = 0, no contact); x = s·0.2 below 5 m/s, else 1;
+  level lin2db(smoothed·x·d·0.75); pitch = 413130 (a clamped lerp) from 1.05 down to 0.975 over
+  0–5 m/s, then 0.975 up to 1.025 over 22.5–40 m/s, − 0.05 + 0.05·b.
+- 44DB50 reads `mechanical_damage_gain` only in a removed block (Ghidra: unreachable).
+
+**4560E0 / 4441F0 / 453DA0, suspension [O].** Per wheel, with w = wheel record +0x40 (the
+suspension travel [I]) and the previous value at car-audio +0xA5C8+4i:
+- u = (w − previous)·100 (per frame); u = 0 ends the whole loop for that frame (a `return`).
+- u > SuspensionUp minVel: 4441F0 plays the SuspensionUp soft/med/hard CI (by u) once, latched in
+  the per-wheel byte manager +0x4E68 + 6·slot + i until u falls back; u < −SuspensionDown minVel:
+  the same with SuspensionDown and |u|; else the latch clears.
+- 453DA0 with u·0.01: if suspension damage 99A580(i) ≥ 0.2, x = damage·|car-audio velocity
+  +0xA480 (four components)|·|u·0.01| starts or updates the `DamageSuspension` one-shot (CI 0.01–2.5,
+  −48…0 dB, pitch 0.9–1.1) at the wheel, group car-audio +0xC (Displacement).
+
+**4562F0 / 454430 / 44ED30, steering damage [O].** m = max(99A540(2), 99A540(3)) (the rear
+wheels' damage [I: wheel order]), s = 9961D0(6).
+- m ≤ 0.3 or |s| ≤ 0.05: stops the voice +0xA370 (after one more 454430(0)).
+- Otherwise the steering smoothed at +0xA4A8 follows s at 0.1 a frame; 454430(|smoothed|) starts or
+  updates the DamageSteering loop at the Cockpit emitter +0x7E0, group car-audio +8: the CI is the
+  first of Start (0–0.8), End (0.8–1.0), EndDammy whose range holds x; level and pitch interpolate
+  its range. While the voice plays and x > End's minVel + k (k = 0.1, or 0 at x = 0), the counter
+  +0xA4AC grows by [CAF888] = 1 a frame and x += sin(c·[CB4418] = 1/3)·sin(c·0.1)·k (BF4E44 is the
+  CRT sine, §20).
+
+**Constants [O]** (read from `local/compatibility/grid-unpacked.exe`): the brake pitch ends
+[CB4AFC] 1.05, [CB503C] 0.975, [CB5044] 1.025, the bend [CB5048] 22.5 with slope [CB5040]
+0.0571 (1/17.5), the speed limit [CB093C] 5.0, the brake term [CB082C] 0.05; the grind step
+[CAF888] 1.0, [CAFCD4] 0.1, [CB4418] 1/3.
+
+**Port.**
+- `grid_tools::damage_audio`:
+  - `Input::vehicle` reads the words above, and the body velocity for the speed.
+  - `Damage::frame` runs 4560E0, 44DF60, 453A70 and 4562F0 in 457BE0's order, once per vehicle tick. It returns the loops (engine, four brakes, steering), loop stops and one-shots, each with its place (EngineBay, Cockpit or wheel i) and group.
+- `collision_audio`:
+  - the bank also loads the `car_genmec` samples its varieties name;
+  - `Curve::contains` and `Listener::cooled` (435EA0 with its cooldown) are public;
+  - the mixer's loops take slots (`LOOP_SLOTS` and up for the damage loops) and can stop.
+- grid-app `collision_sound`:
+  - the player's damage sounds run after its contacts each tick;
+  - a wheel's place is its record anchor through the car pose, and EngineBay and Cockpit are the carsetup offsets;
+  - Engine and Other Mech are heard from the camera, as the engine and mechanical voices are; Displacement is heard from the car, as the player's other collision one-shots are [I];
+  - a new segment resets the state and stops the loops.
+- [I] Two simplifications:
+  - 453DA0's playing one-shot is updated by 44F160 in the original. The port instead blocks a new one for the variety's longest sample length.
+  - [+0xA494] +0xD8, which silences the engine loop, is not traced and stays clear.
+- Not ported: the per-frame rates (the original runs these per rendered frame; the port per 16 ms tick); opponents (the original has none).
+
+**Shipped thresholds [O]** (asset test `shipped_damage_sounds_load`). SuspensionUp Soft/Med/Hard:
+minVel 2/6/15, maxVel 6/15/30, −7…−4/−3.5…−1/−2…0 dB. As §7.4 found, the Up CIs name the Down
+varieties and the Down CIs the Up varieties. A bump therefore needs at least 2 cm of travel in one
+frame. DamageSteering Start 0–0.8 (−50…−2 dB), End 0.8–1 (−30…−2), EndDammy 1–1 (−40…−2).
+DamageSuspension at 0.01–2.5 starts at −48 dB, so with the −8.5 dB Displacement group (Bonnet
+camera, Normal mode) x must exceed about 0.5 (for example damage 0.8 · 20 m/s · 4 cm) to clear the
+−48 dB floor of A23B70.
+
+**Render** (`grid-probes` `grid-damage-audio`, `local/damage/render-02`, `analysis.txt`; Lacetti,
+bumper view, authored 16 s script, mono; `off` = every damage level 0). Seen in the trace and the
+levels, not by listening:
+- 0–4 s engine loop (temperature 0.6, revs 0.3→1): off silent, on −30.1 dBFS RMS.
+- 4–8 s brakes (0.8 pedal from 30 m/s, brake damage 0.6): off silent, on −18.8 dBFS RMS.
+- 8–12 s steering sweep ±0.6 (rear wheel damage 0.5): off silent, on −46.7 dBFS RMS (Start CI).
+- 12–16 s bumps of 8 and 20 cm at 20 m/s (suspension damage 0.8): off has 9 bump one-shots, on
+  has the same 9 plus 8 DamageSuspension one-shots (17), at −9 to −14 dBFS peak per bump in both.
+  The per-bump peaks differ between off and on because the random sample pick diverges.
+- An earlier render (`render-01`) with 1.5 cm a tick bumps and damage 0.5 played no one-shot.
+  Both thresholds above explain that, and the script was changed.

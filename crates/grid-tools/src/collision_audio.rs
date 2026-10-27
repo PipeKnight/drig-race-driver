@@ -50,12 +50,13 @@ impl Curve {
         let pitch = self.min_pitch + (self.max_pitch - self.min_pitch) * t;
         (volume.clamp(-48., 0.), pitch.clamp(0.5, 2.))
     }
-    fn contains(&self, x: f32) -> bool {
+    pub fn contains(&self, x: f32) -> bool {
         self.min_vel <= x && x <= self.max_vel
     }
 }
 
-/// An AudioVariety of `car_collisions`: samples and preset distances.
+/// An AudioVariety of `car_collisions` or `car_genmec`: samples and preset
+/// distances.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Variety {
     pub samples: Vec<usize>,
@@ -124,7 +125,11 @@ impl Bank {
         let audio = root.join("audio");
         Ok(Arc::new(Self::parse(
             &read(&audio.join("CMSamples.dic"))?,
-            &read(&audio.join("car_collisions.WIP"))?,
+            &[
+                ("car_collisions", &read(&audio.join("car_collisions.WIP"))?),
+                // The player's damage sounds (`damage_audio`).
+                ("car_genmec", &read(&audio.join("car_genmec.WIP"))?),
+            ],
             &read(&audio.join("audioVarieties.bin"))?,
             &read(&audio.join("CollisionInfos.bin"))?,
             &read(&audio.join("ImpactVarieties.bin"))?,
@@ -132,27 +137,46 @@ impl Bank {
         )?))
     }
 
+    /// `banks`: each WIP bank's name and data.
     pub fn parse(
         dictionary: &[u8],
-        data: &[u8],
+        banks: &[(&str, &[u8])],
         varieties: &[u8],
         infos: &[u8],
         impacts: &[u8],
         materials: &[u8],
     ) -> Result<Self, String> {
         let dictionary = audio_dictionary::read(dictionary).map_err(|e| format!("{e:?}"))?;
-        let bank = dictionary
-            .banks
-            .iter()
-            .find(|b| b.name == "car_collisions")
-            .ok_or("car_collisions bank absent")?;
         let mut sounds = Vec::new();
         let mut index = HashMap::new();
-        for (i, s) in bank.samples.iter().enumerate() {
-            index.insert(s.name, sounds.len());
-            sounds.push(wip_sound(bank, i, data)?);
+        // The first bank's samples all load; the others' only when a variety
+        // names them.
+        let mut found = Vec::new();
+        for (k, &(name, data)) in banks.iter().enumerate() {
+            let bank = dictionary.banks.iter().find(|b| b.name == name).ok_or(format!("{name} bank absent"))?;
+            if k == 0 {
+                for (i, s) in bank.samples.iter().enumerate() {
+                    index.insert((name, s.name), sounds.len());
+                    sounds.push(wip_sound(bank, i, data)?);
+                }
+            }
+            found.push((bank, data));
         }
-        // audioVarieties: presets (min/max distance) and car_collisions varieties.
+        let mut sample = |bank: &str, name: &str| -> Result<Option<usize>, String> {
+            if let Some(&i) = index.get(&(bank, name)) {
+                return Ok(Some(i));
+            }
+            let Some(k) = banks.iter().position(|(b, _)| *b == bank) else { return Ok(None) };
+            let (b, data) = found[k];
+            let Some(i) = b.samples.iter().position(|s| s.name == name) else { return Ok(None) };
+            // A sample the HUD decoder does not take stays out; its variety
+            // is then silent, the collisions unaffected.
+            let Ok(sound) = wip_sound(b, i, data) else { return Ok(None) };
+            index.insert((banks[k].0, b.samples[i].name), sounds.len());
+            sounds.push(sound);
+            Ok(Some(sounds.len() - 1))
+        };
+        // audioVarieties: presets (min/max distance) and the banks' varieties.
         let doc = binxml::read(varieties).map_err(|e| format!("audioVarieties: {e:?}"))?;
         let mut presets: HashMap<&str, (f32, f32)> = HashMap::new();
         for e in doc.elements.iter().filter(|e| e.name == "Preset") {
@@ -162,15 +186,17 @@ impl Bank {
         }
         let mut out_varieties = HashMap::new();
         for (i, v) in doc.elements.iter().enumerate() {
-            if v.name != "AudioVariety" || attr(v, "bank") != Some("car_collisions") {
+            let Some(bank) = attr(v, "bank").filter(|b| banks.iter().any(|(name, _)| name == b)) else {
                 continue;
+            };
+            let mut samples = Vec::new();
+            for s in doc.elements.iter().filter(|s| s.name == "Sample" && s.parent.is_some_and(|p| doc.elements[p].parent == Some(i))) {
+                if let Some(n) = attr(s, "index")
+                    && let Some(k) = sample(bank, n)?
+                {
+                    samples.push(k);
+                }
             }
-            let samples: Vec<usize> = doc
-                .elements
-                .iter()
-                .filter(|s| s.name == "Sample" && s.parent.is_some_and(|p| doc.elements[p].parent == Some(i)))
-                .filter_map(|s| attr(s, "index").and_then(|n| index.get(n).copied()))
-                .collect();
             let (min_distance, max_distance) = attr(v, "preset")
                 .and_then(|p| presets.get(p).copied())
                 .unwrap_or((1., 2.));
@@ -576,6 +602,14 @@ impl Listener {
         }
     }
 
+    /// 435EA0 with its cooldown on: CollisionInfo `info` at `x`, unless too
+    /// quiet or its variety is cooling down (no position).
+    pub fn cooled(&mut self, info: &str, x: f32, group: usize) -> Option<Play> {
+        let mut out = Vec::new();
+        self.one_shot(info, x, [0.; 3], group, true, &mut out);
+        out.pop()
+    }
+
     fn one_shot(&mut self, info: &str, x: f32, position: [f32; 3], group: usize, cooldown: bool, out: &mut Vec<Play>) {
         let Some(curve) = self.bank.infos.get(info).cloned() else { return };
         let (volume_db, pitch) = curve.at(x);
@@ -815,7 +849,8 @@ pub struct Mixer {
     voices: Vec<Voice>,
     random: u32,
     last: HashMap<String, usize>,
-    /// One looping scrape voice per car; its sample is picked when it starts.
+    /// Looping voices by slot (each car's scrape at its index, see
+    /// [`Mixer::looped`]); a sample is picked when the loop starts.
     loops: Vec<Option<Loop>>,
 }
 
@@ -833,6 +868,9 @@ struct Loop {
 /// Per-sample approach of a loop's gain and pitch to the tick's targets,
 /// about 10 ms at 48 kHz [I: smoothing between ticks only].
 const LOOP_GLIDE: f32 = 0.002;
+
+/// Loop slots of the cars' scrapes; the player's damage loops follow.
+pub const LOOP_SLOTS: usize = 64;
 
 /// One-shots playing at once at most [I: no cap found in 435B20; bounded here].
 pub const VOICES: usize = 32;
@@ -866,17 +904,30 @@ impl Mixer {
     /// Car `car`'s scrape loop this tick: started on its first call (one
     /// sample of `variety`, looped), then gain, pan and pitch follow.
     pub fn scrape(&mut self, car: usize, variety: &str, pitch: f32, gain: f32, pan: [f32; 2]) {
-        if self.loops.len() <= car {
-            self.loops.resize(car + 1, None);
+        self.looped(car, variety, pitch, gain, pan);
+    }
+
+    /// Loop `slot` this tick, as [`Mixer::scrape`]; slots below
+    /// [`LOOP_SLOTS`] are the cars' scrapes.
+    pub fn looped(&mut self, slot: usize, variety: &str, pitch: f32, gain: f32, pan: [f32; 2]) {
+        if self.loops.len() <= slot {
+            self.loops.resize(slot + 1, None);
         }
-        if self.loops[car].is_none() {
+        if self.loops[slot].is_none() {
             let Some(sound) = self.pick(variety) else { return };
             let step = f64::from(pitch) * f64::from(self.bank.sounds[sound].rate) / f64::from(self.rate);
-            self.loops[car] = Some(Loop { sound, position: 0., step, target_step: step, gain: [0.; 2], target: [0.; 2] });
+            self.loops[slot] = Some(Loop { sound, position: 0., step, target_step: step, gain: [0.; 2], target: [0.; 2] });
         }
-        if let Some(l) = &mut self.loops[car] {
+        if let Some(l) = &mut self.loops[slot] {
             l.target = pan.map(|p| gain.max(0.) * p);
             l.target_step = f64::from(pitch) * f64::from(self.bank.sounds[l.sound].rate) / f64::from(self.rate);
+        }
+    }
+
+    /// Ends loop `slot` at once (the voice's stop, A23350).
+    pub fn stop(&mut self, slot: usize) {
+        if let Some(l) = self.loops.get_mut(slot) {
+            *l = None;
         }
     }
 
@@ -1137,7 +1188,8 @@ mod tests {
     fn shipped_collision_data_and_listener() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let bank = Bank::load(Path::new(&root)).unwrap();
-        assert_eq!(bank.sounds.len(), 307);
+        // 307 collision samples and the 19 car_genmec samples the varieties name.
+        assert_eq!(bank.sounds.len(), 326);
         assert_eq!(
             bank.impacts["PrimaryFrontBack"],
             ["carFBSoft".to_string(), "carFBMed".into(), "carFBHard".into()]

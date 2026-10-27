@@ -1381,6 +1381,56 @@ its decoded images equal the second Off exactly; comparing it against On reprodu
 the same eight pixels. Existing repeat evidence therefore does not establish noise.
 The diagnostic remains default-off with unresolved strict image-neutrality, and the
 original failed admission is preserved. No additional renderer or tolerance was used.
+## Car part batching (F584)
+
+Before, every car part was its own entity: at Donington 107 player parts and 1,177 opponent parts,
+all drawn, each going through visibility, the shadow cascade, mesh collection and the draw queues.
+`car_batch` (common build; `GRID_CAR_BATCH=0` keeps the parts separate) now merges each car's parts
+per material into one mesh in the car's frame:
+- members: no wheel (it turns on the car), an opaque or masked material, an indexed triangle list
+  with the static batch's attributes, and no per-entity render setting (render layers, shadow or
+  range settings, parents, facing foliage, the sidewall filter). At Donington: 888 parts in 108
+  groups of 12 cars, one batch each;
+- the vertices are baked with the part's rest matrix (`static_batch::build`); the batch's transform
+  is the car's pose, taken from its largest part;
+- a batched part keeps its entity and every component the presentation writes (transform,
+  visibility, material, deformed mesh) and moves to render layer 30, which no camera or light
+  draws;
+- each frame (PostUpdate, after the asset events, before transform propagation) a part stays in
+  its batch while it is at its rest place on the car (1 mm, 1e-4 on the axes), not hidden, and
+  keeps its material and mesh. Otherwise it leaves and is drawn on its own: a loose or detached
+  panel, smashed glass, cracked-glass material. A part back in place for 30 frames (a restart)
+  rejoins. When most of a car's parts disagree with its anchor, the car's batches hold for that
+  frame and the next part anchors;
+- a deformed member mesh (body damage) rebuilds its batch the same frame, so the dents show as
+  before.
+
+Entity counts, phone view, frame 3,600 (drawn): opponent parts 961 → 375 (wheels, glass and other
+blended parts) plus 108 car batches; player parts 107 → 33. Rebuilds in that race: 1,132, of which
+827 for deformation, 83 ms in all (about 0.02 ms per frame).
+
+**Picture.** Not bit-identical. Fixed-frame renders, 1600 × 900, Donington, on against off with the
+same executable: tick 300 0.085 % of pixels differ (largest channel difference 20), tick 2,400
+0.21 % (29), tick 6,000 after contact 0.17 % (24). The changed pixels are single MSAA samples on
+coplanar stickers (number band, NGK, KW, LUK) and their edges, where body and sticker depths
+z-fight; the baked vertex positions round differently from the per-part model matrices. Zoomed
+crops look the same, and the same differences remain with shadows off. Two renders of one path are
+identical. Motion check (the coordinator's condition for default on): 120 consecutive frames at
+virtual 60 fps behind the player's car. Pixels that change by more than 24 levels and back within
+three frames: off 640,383, on 640,337; in the car's region: off 111,620, on 111,573. Batching adds
+no flicker, so it is on by default; `GRID_CAR_BATCH=0` turns it off for comparison.
+
+**Cost** (desktop, phone view 1539 × 720, mobile preset, 4 compute threads, profile build, two
+alternating rounds, 26 October 23:25–23:37), off → on:
+- `prepared_mesh_producer` 1.12-1.17 → 0.51 ms, `collect_meshes_for_gpu_building` 0.39-0.41 →
+  0.28-0.31 ms, render schedule 20.0-20.8 → 19.0-20.0 ms, extract 4.8-5.0 → 4.1-4.8 ms;
+- main thread about even: `car_batch::refresh` 0.16-0.18 ms, the visibility passes and
+  `mark_dirty_trees` save about as much; PostUpdate 4.31-4.54 → 4.25-4.50 ms;
+- frame mean 22.8-23.6 → 21.9-22.9 ms (the PC was slower in this period than at 22:12, when a
+  first pair gave 17.0 ms for both, near the 60 Hz pacing).
+
+Phone [I], not measured: about 3x the desktop CPU times, so about 2 ms less on the render thread
+and no change on the main thread, which the phone log shows as the critical path.
 
 ## Demolition derby frame rate and parallel debris (F568)
 
@@ -1595,3 +1645,7 @@ names are the nearest public symbols, so call paths are approximate; the leaf
 `response_consumption::validate` (8 % of busy samples in the drift race) led to the first fix.
 Evidence (machine-local): worktree `local/tick-growth/` (`runs.txt` lists every run with its start
 time and the lock state).
+
+### G300 integration ownership guard (27 October 2026)
+
+F584's reported measurements remain historical evidence for its exact build. During graphics integration on pinned F586, player source entities carrying car0/ and no OpponentPart are conservatively excluded from new car batching: existing main-view bumper suppression and probe ownership use those source roots. Opponent batching remains enabled, including the same model prefix on explicitly marked opponents. Layered/probe/glass exclusions already protect several paths, so this is a precise ownership guard rather than a claim that every batch broke rendering. The actual ECS fixture passes with retained player originals and constructed opponent geometry; the full1137-test gate, four incoming identities,24quick-soak cases and fresh native BMW/Istanbul smoke controls also pass (G300). Actual bumper/Manual/general rendering remains outside that bounded GPU proof. No new FPS gain is claimed for the adjusted graphics build.

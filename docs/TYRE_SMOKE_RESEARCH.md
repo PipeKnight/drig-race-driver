@@ -1115,3 +1115,9 @@ merged binary and clean unforced Manual arguments, preserving raw log/exit code
 without a timeout. It is labelled MANUAL_INPUT_TEST_ONLY; accepted launchers and
 the guarded validated-release template remain unchanged. This test's existence
 is not evidence that C/R or general playability passed.
+
+## G300 pinned F586 integration smoke control (27 October 2026)
+
+The F584-F586 integration conservatively retains player SourcePart roots outside new car batching while leaving explicitly marked opponents enabled. This protects existing bumper/probe ownership policies; it does not establish that the five-handle native smoke routing was universally broken. An actual ECS mesh test, full1137tests/Clippy/four incoming identities/24quick-soak and native-feature Clippy/build pass. New executable75ccb3ba... has two fresh Istanbul Off/Late controls:197ordered-family rows and90request records match, while raw inter-family order differs and is retained.182native PNGs are preserved, with actual current setup/copy observations rather than an old cube hash.
+
+Root's selected dense0053 view shows glass/lamp/tyre curves attenuating with the car; thin0001/final remain coherent. Actual HDR1 terminal/restoration and five groups are logged; full hashes/step times/independent audit/visual review and cleanup receipts are in G300. This is limited Image proof, not whole-image old/new equality, per-PNG GPU-stage joins, SDK dispatch, a laid-skid counter, real bumper/Manual C/R, every car/damage state or a default/playable promotion. G299's separate scripted damaged-window reset retains its original source/artifact scope. Owner baseline smoke and Motion packages remain unchanged.

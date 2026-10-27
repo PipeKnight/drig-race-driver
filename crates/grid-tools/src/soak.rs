@@ -745,6 +745,63 @@ struct PieceHistory {
     woke: Option<u64>,
     /// A road contact since that wake.
     road_since_wake: bool,
+    /// The body's xz at its last tick with a supporting contact (see
+    /// [`supported`]): where a free fall began.
+    contact_xz: Option<[f32; 2]>,
+}
+
+/// Contacts farther than this from a body's centre are pool records kept
+/// from earlier steps, not touching it now (AUTHORED, grid-soak only).
+const SUPPORT_REACH: f32 = 2.;
+
+/// Whether a body at `centre` is held from below: one of its contacts, as
+/// (body is the first side, normal pushing the first side, point), lies
+/// within [`SUPPORT_REACH`] and pushes the body up (normal y above 0.5 on
+/// its side). A wall beside a falling body does not count.
+fn supported(
+    contacts: impl IntoIterator<Item = (bool, [f32; 3], [f32; 3])>,
+    centre: [f32; 3],
+) -> bool {
+    contacts.into_iter().any(|(first, n, p)| {
+        let d = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
+        let up = if first { n[1] } else { -n[1] };
+        d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < SUPPORT_REACH * SUPPORT_REACH && up > 0.5
+    })
+}
+
+/// The contacts of `body` (index) in a world contact list, as
+/// [`supported`] takes them (normal +0x60, point +0x50).
+fn contacts_of(
+    contacts: &[grid_world::contact_groups::Contact],
+    body: usize,
+) -> Vec<(bool, [f32; 3], [f32; 3])> {
+    let g = |c: &grid_world::contact_groups::Contact, o: usize| f32::from_bits(c[o / 4]);
+    contacts
+        .iter()
+        .filter(|c| **c != grid_world::contact_groups::EMPTY_CONTACT)
+        .filter(|c| c[1] as usize == body + 1 || c[2] as usize == body + 1)
+        .map(|c| {
+            (
+                c[1] as usize == body + 1,
+                [g(c, 0x60), g(c, 0x64), g(c, 0x68)],
+                [g(c, 0x50), g(c, 0x54), g(c, 0x58)],
+            )
+        })
+        .collect()
+}
+
+/// Whether a vertical segment of [`NO_GROUND_SPAN`] up and down at `xz`
+/// finds no road chunk (expected loss (i)).
+fn no_road_at(track: &crate::track::Track, xz: [f32; 2]) -> bool {
+    let mut cache = grid_world::rectangle_cull::Cache::default();
+    matches!(
+        track.query(
+            [xz[0], NO_GROUND_SPAN, xz[1], 0.],
+            [xz[0], -NO_GROUND_SPAN, xz[1], 0.],
+            &mut cache,
+        ),
+        Ok(q) if q.hit.is_none()
+    )
 }
 
 /// Vertical half span of the no-ground query (expected loss (i)).
@@ -1215,8 +1272,17 @@ impl Session {
                     .borrow()
                     .get(&(self.resets, i))
                     .is_some_and(|h| h.boxed);
+                // (i) also where its free fall began: no road chunk under
+                // its last contact (it drifted over road while falling).
+                let fall_start = self
+                    .piece_history
+                    .borrow()
+                    .get(&(self.resets, i))
+                    .and_then(|h| h.contact_xz);
                 if matches!(ground, Ok(q) if q.hit.is_none()) {
                     crate::dynamic_props::Pressed::NoGround
+                } else if fall_start.is_some_and(|xz| no_road_at(car.track(), xz)) {
+                    crate::dynamic_props::Pressed::NoGroundAtFall
                 } else if in_run {
                     crate::dynamic_props::Pressed::EntityBoxInRun
                 } else if parked_deep {
@@ -1269,6 +1335,28 @@ impl Session {
             }
             if p.entity_down {
                 entry.entity = Some(tick);
+            }
+        }
+        // Where each prop body was last supported (expected loss (i) at
+        // the fall start).
+        for (i, body) in snapshot.bodies.iter().enumerate().skip(snapshot.cars) {
+            let p = body_floats(body, 0x200, 3);
+            let centre = [p[0], p[1], p[2]];
+            let held = match &self.race {
+                Some(race) => supported(
+                    race.multi
+                        .contacts_with(i)
+                        .into_iter()
+                        .map(|(a, _, n, point, ..)| (a == i, n, point)),
+                    centre,
+                ),
+                None => supported(
+                    contacts_of(&self.runtime.state.world.groups.contacts, i),
+                    centre,
+                ),
+            };
+            if held {
+                history.entry((self.resets, i)).or_default().contact_xz = Some([p[0], p[2]]);
             }
         }
         // Parks and wakes of every prop body (expected loss ParkedDeep).
@@ -2050,6 +2138,44 @@ impl AppLog {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn support_needs_a_near_contact_pushing_up() {
+        let centre = [590., 21.3, 12.];
+        // The road under it (body is the first side, normal up).
+        assert!(supported([(true, [0., 1., 0.], [590., 21., 12.])], centre));
+        // A car on top of it pushes the car up: down on the body (second side).
+        assert!(!supported([(false, [0., 1., 0.], [590., 21.6, 12.])], centre));
+        // The body on top of a car: the car is pushed down, the body up.
+        assert!(supported([(false, [0., -1., 0.], [590., 21., 12.])], centre));
+        // A wall beside it, and a stale road record 25 m above.
+        assert!(!supported([(true, [-0.38, 0., -0.93], [590.3, 21.3, 12.])], centre));
+        assert!(!supported([(true, [0., 1., 0.], [587., 21., 12.])], [600., -3., 11.]));
+        // Contacts read back from the world list.
+        use grid_world::contact_groups::EMPTY_CONTACT;
+        let mut c = EMPTY_CONTACT;
+        c[1] = 14;
+        c[0x64 / 4] = 1f32.to_bits();
+        c[0x50 / 4] = 590f32.to_bits();
+        c[0x54 / 4] = 21f32.to_bits();
+        c[0x58 / 4] = 12f32.to_bits();
+        assert!(supported(contacts_of(&[EMPTY_CONTACT, c], 13), centre));
+        assert!(contacts_of(&[c], 12).is_empty());
+    }
+
+    /// Quick seed 15 (F585 trajectories): the player's lost wheel 13 rolls
+    /// off Istanbul Park's road chunks at about (590, 12) and fails at
+    /// (604, 10), where road lies 24 m above it.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn no_road_at_tells_the_fall_start_from_the_failure_point() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let route = crate::route::Route::new("tracks/europe/istanbul_park/route_0").unwrap();
+        let bytes = std::fs::read(std::path::Path::new(&root).join(route.file("track.jpk"))).unwrap();
+        let track = crate::track::Track::read(&bytes).unwrap();
+        assert!(no_road_at(&track, [590.0, 11.95]));
+        assert!(!no_road_at(&track, [604.14, 10.21]));
+    }
 
     #[test]
     fn rng_is_reproducible_and_in_range() {

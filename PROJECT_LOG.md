@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G300 (2026-10-27): pinned F584-F586 integrated with player source ownership retained and opponent batching enabled. New ECS test/full1137tests/Clippy/4identities/24soak/native build and fresh2Istanbul smoke controls pass. Manual/general/default remain open; see PERFORMANCE/TYRE_SMOKE_RESEARCH.
 - G299 (2026-10-27): existing Lacetti Fresnel/current-sort native-DLAA fixture shows cracked glass before scripted R and intact glass/restored body afterward. One early-capture failure retained; corrected run and independent audit pass. Manual/Smashed/general remain open. See LACETTI_GRAPHICS_MATERIALS.
 - G298 (2026-10-27): default-off standalone road roughness trial passes458app tests/Clippy, native-feature build and3static GPU cases. Off/0.70 images exact;0.65 gives only subtle brightening. Current default retained; grazing-angle response remains open. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G297 (2026-10-27): F573-F583 integrated with full1124tests/Clippy/4identities/24soak, native34/skid6 checks and a fresh paired Istanbul GPU comparison. Streaming strips/glass/lens ghosts attenuate through smoke. Private unforced C/R test available; actual Manual feedback remains open, accepted launchers unchanged. See TYRE_SMOKE_RESEARCH.
@@ -146,6 +147,9 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F586](log/F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
+| [F585](log/F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
+| [F584](log/F0584.md) | 2026-10-26 | Car part batching |
 | [F583](log/F0583.md) | 2026-10-26 | Engine audio: the handbrake ported (hbrakeon/hbrakeoff on the player's handbrake edges); wind is never started |
 | [F582](log/F0582.md) | 2026-10-26 | Engine audio: opponents' backfire and gear whine; the original's 120-voice pool |
 | [F581](log/F0581.md) | 2026-10-26 | Playable 975c018e7e2c with F569-F580, portable copy and APKs a2fc9b444690 |
@@ -203,9 +207,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F529](log/F0529.md) | 2026-10-20 | Engine audio research: the Car listener (43F7A0), the gear clunk, the backfire and the whine/turbo wiring |
 | [F528](log/F0528.md) | 2026-10-20 | Engine audio: gear shifts of 451770 ported: RPM dip, off-load crossfade and pitch wobble |
 | [F527](log/F0527.md) | 2026-10-20 | Opponent engine mix confirmed offline against the original's group table |
-| [F526](log/F0526.md) | 2026-10-20 | Row 41, Washington route 0: the AI's no-brake bend explained from the shipped data; no 1:1 fix found; row 41 text updated |
-| [F524](log/F0524.md) | 2026-10-20 | Build gate: launcher smoke, memory growth, tick-cost budget and a nightly long soak of the real app |
-| [F523](log/F0523.md) | 2026-10-20 | Washington after F520: the Lacetti wreck 1 km into route 0 was driving and is gone since F517; routes 0, 2, 3, 5, 7 and 8 re-surveyed |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -385,6 +385,12 @@ instrumentation, removed).
     and 37 option A losses (Jarama 1010, 1013). Quick 1..24 passes 24/24 again; Haruna seeds 29 (known since
     F412) and 32 (a car off an unwalled edge, new with F444's trajectories) fail outside the default set.
 
+- **(i) at the fall start** (F585's follow-up, coordinator's approval of 26 October 2026,
+  harness only): `Pressed::NoGroundAtFall`, an expected loss, when there is no road chunk
+  under the body's xz at its last supported tick (a contact within 2 m pushing it up). It
+  catches quick seed 15's lost wheel, which rolls off Istanbul Park's packed road and
+  drifts 14 m over road while falling, and nothing else in quick 1..56 (SOAK_TESTING.md).
+
 ## 10. Sarthe: "invalid contact material inputs" (F458)
 
 le-mans saw it once on 592430d: the 9-car Sarthe quick scenario of the then seed 39 (stock cars)

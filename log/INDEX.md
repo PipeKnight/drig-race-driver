@@ -8,6 +8,9 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F586](F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
+| [F585](F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
+| [F584](F0584.md) | 2026-10-26 | Car part batching |
 | [F583](F0583.md) | 2026-10-26 | Engine audio: the handbrake ported (hbrakeon/hbrakeoff on the player's handbrake edges); wind is never started |
 | [F582](F0582.md) | 2026-10-26 | Engine audio: opponents' backfire and gear whine; the original's 120-voice pool |
 | [F581](F0581.md) | 2026-10-26 | Playable 975c018e7e2c with F569-F580, portable copy and APKs a2fc9b444690 |
@@ -486,6 +489,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G300](G0300.md) | 2026-10-27 | Integrate F584-F586 preserving player render ownership |
 | [G299](G0299.md) | 2026-10-27 | Verify rendered cracked-window reset lifecycle |
 | [G298](G0298.md) | 2026-10-27 | Bounded authored asphalt roughness comparison |
 | [G297](G0297.md) | 2026-10-26 | Integrate F573-F583 while preserving native smoke and skid ownership |

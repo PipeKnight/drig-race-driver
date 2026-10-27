@@ -20,6 +20,7 @@ pub fn install(app: &mut App) {
     // The mesh report needs every kind registered, spawned or not.
     let world = app.world_mut();
     world.register_component::<crate::static_batch::Batch>();
+    world.register_component::<crate::car_batch::Batch>();
     world.register_component::<crate::track_surface::SourcePart>();
     world.register_component::<crate::dynamic_props::IntactProp>();
     world.register_component::<crate::dynamic_props::PropPiece>();
@@ -57,6 +58,7 @@ fn mesh_report(world: &World, frame: u32) {
     type Kinds = (
         Has<Disabled>,
         Has<crate::static_batch::Batch>,
+        Has<crate::car_batch::Batch>,
         Has<crate::track_surface::SourcePart>,
         Has<crate::dynamic_props::IntactProp>,
         Has<crate::dynamic_props::PropPiece>,
@@ -68,13 +70,13 @@ fn mesh_report(world: &World, frame: u32) {
     let Some(mut query) = world.try_query_filtered::<Kinds, (With<Mesh3d>, Allow<Disabled>)>() else {
         return;
     };
-    let names = ["batch", "intact", "piece", "foliage", "player", "opponent", "track", "other"];
-    let mut counts = [[0usize; 3]; 8];
-    for (disabled, batch, track, intact, piece, foliage, player, opponent, seen) in query.iter(world) {
-        let kind = [batch, intact, piece, foliage, player, opponent, track]
+    let names = ["batch", "car_batch", "intact", "piece", "foliage", "player", "opponent", "track", "other"];
+    let mut counts = [[0usize; 3]; 9];
+    for (disabled, batch, car_batch, track, intact, piece, foliage, player, opponent, seen) in query.iter(world) {
+        let kind = [batch, car_batch, intact, piece, foliage, player, opponent, track]
             .iter()
             .position(|&k| k)
-            .unwrap_or(7);
+            .unwrap_or(8);
         counts[kind][0] += 1;
         counts[kind][1] += usize::from(disabled);
         counts[kind][2] += usize::from(!disabled && seen.get());
