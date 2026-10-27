@@ -242,6 +242,15 @@ pub enum Source {
     Touch(crate::touch_controls::Button),
     /// AUTHORED phone tilt as a bi-axis raw value (0.5 + 0.5 tilt).
     Tilt,
+    /// The DirectInput wheel (`win_con_di_*`, force_feedback/windows.rs): an axis in record order
+    /// X, Y, Z, Rx, Ry, Rz, Slider0, Slider1 (raw/65536), a button, or a POV 0 direction (up,
+    /// right, down, left) read as a button.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    WheelAxis(u8),
+    #[cfg_attr(not(windows), allow(dead_code))]
+    WheelButton(u8),
+    #[cfg_attr(not(windows), allow(dead_code))]
+    WheelPov(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -374,6 +383,80 @@ impl ActionMap {
         (map, unknown)
     }
 
+    /// The bindings of an original wheel preset (actionMapPreset1/2/3/5: G25, MOMO, DFP, RGT):
+    /// every `Axis` of the preset's device. Returns the unknown axis names.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn wheel(preset: &action_map::ActionMap) -> (Self, Vec<String>) {
+        let mut map = Self::default();
+        let mut unknown = Vec::new();
+        for action in &preset.actions {
+            let Some(id) = Action::from_name(&action.name) else {
+                continue;
+            };
+            for axis in action.axes.iter().filter(|a| a.device_name == preset.device_type) {
+                let source = match axis.axis_name.as_str() {
+                    "unmapped" => Source::Unmapped,
+                    name => dinput_source(name).unwrap_or_else(|| {
+                        unknown.push(name.to_owned());
+                        Source::Unmapped
+                    }),
+                };
+                let base = Calibration::default();
+                map.bind(
+                    id,
+                    source,
+                    Calibration::new(
+                        axis.calibration,
+                        axis.dead_zone.unwrap_or(base.dead_zone),
+                        axis.saturation.unwrap_or(base.saturation),
+                        axis.threshold.unwrap_or(base.threshold),
+                    ),
+                );
+            }
+        }
+        (map, unknown)
+    }
+
+    /// AUTHORED wheel preset for a wheel none of the original presets names (the original has no
+    /// fallback, 83A130). Laid out like the G25 preset: X steering biLower/biUpper dz 0 sat 1,
+    /// separate pedals uniNegative dz 0 sat 1 (uniPositive with `wheel_pedals=normal`), Gear
+    /// Up/Down, Handbrake and Change View on buttons; axes and buttons are settings. Only axes the
+    /// device has are bound: an unbound uniNegative pedal would read full (B7C120's idle 0).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn generic_wheel(w: &WheelKeys, has_axis: impl Fn(u8) -> bool) -> (Self, Vec<String>) {
+        use Action::*;
+        let mut map = Self::default();
+        let mut missing = Vec::new();
+        let full = |kind| Calibration::new(kind, 0., 1., 0.5);
+        let pedal = full(if w.pedals_inverted() {
+            CalibrationType::UniNegative
+        } else {
+            CalibrationType::UniPositive
+        });
+        for (action, axis, calibration) in [
+            (SteerLeft, 0, full(CalibrationType::BiLower)),
+            (SteerRight, 0, full(CalibrationType::BiUpper)),
+            (Accelerate, w.accelerate(), pedal),
+            (Brake, w.brake(), pedal),
+        ] {
+            if has_axis(axis) {
+                map.bind(action, Source::WheelAxis(axis), calibration);
+            } else {
+                missing.push(format!("axis{}", WHEEL_AXES[usize::from(axis)]));
+            }
+        }
+        let button = Calibration::default();
+        for (action, b) in [
+            (GearUp, w.gear_up()),
+            (GearDown, w.gear_down()),
+            (Handbrake, w.handbrake()),
+            (ChangeView, w.view()),
+        ] {
+            map.bind(action, Source::WheelButton(b), button);
+        }
+        (map, missing)
+    }
+
     /// AUTHORED phone controls (P11). Touch zones act as keys with the
     /// keyboard preset's calibrations (pedals uniPos dz 0 sat 1, buttons the
     /// constructor defaults), so they give exact 0/1 like the original's
@@ -449,6 +532,49 @@ impl ActionMap {
     }
 }
 
+/// DirectInput `win_con_di_*` names onto the wheel record.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn dinput_source(name: &str) -> Option<Source> {
+    let name = name.strip_prefix("win_con_di_")?;
+    if let Some(n) = name.strip_prefix("button") {
+        return n.parse::<u8>().ok().filter(|n| *n < 64).map(Source::WheelButton);
+    }
+    match name.strip_prefix("axis")? {
+        "DPad0up" => Some(Source::WheelPov(0)),
+        "DPad0right" => Some(Source::WheelPov(1)),
+        "DPad0down" => Some(Source::WheelPov(2)),
+        "DPad0left" => Some(Source::WheelPov(3)),
+        a => wheel_axis(a).map(Source::WheelAxis),
+    }
+}
+
+/// The wheel record's axes, in `win_con_di_axis*` spelling.
+pub const WHEEL_AXES: [&str; 8] = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Slider0", "Slider1"];
+
+fn wheel_axis(name: &str) -> Option<u8> {
+    WHEEL_AXES.iter().position(|n| n.eq_ignore_ascii_case(name)).map(|i| i as u8)
+}
+
+/// A wheel source's raw value from the device state; `None` for an axis the device lacks.
+#[cfg(windows)]
+fn wheel_raw(state: &crate::force_feedback::windows::WheelState, source: Source) -> Option<f32> {
+    match source {
+        Source::WheelAxis(i) => state.axes.get(usize::from(i)).copied().flatten(),
+        Source::WheelButton(b) => Some(f32::from(u8::from(state.buttons >> b & 1 != 0))),
+        Source::WheelPov(d) => {
+            // Hundredths of a degree clockwise from up; the low word 0xFFFF is centred.
+            let pov = state.pov[0];
+            let held = pov & 0xFFFF != 0xFFFF && {
+                let centre = u32::from(d) * 9000;
+                let off = (pov % 36000 + 36000 - centre) % 36000;
+                !(6750..=36000 - 6750).contains(&off)
+            };
+            Some(f32::from(u8::from(held)))
+        }
+        _ => None,
+    }
+}
+
 /// XInput `win_con_xi_*` names onto Bevy's gamepad layout (gilrs maps known
 /// pads onto the Xbox layout).
 fn xinput_source(name: &str) -> Option<Source> {
@@ -494,6 +620,11 @@ pub struct Actions {
     /// Which connected gamepads may drive.
     pads: Pads,
     state: [State; ACTIONS],
+    /// A DirectInput wheel is bound (its sources read the device thread's state).
+    wheel: bool,
+    /// `wheel_trace=on`: log the wheel's axes and buttons when they change.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    trace: bool,
 }
 
 impl Actions {
@@ -502,7 +633,14 @@ impl Actions {
             map,
             pads,
             state: [State::default(); ACTIONS],
+            wheel: false,
+            trace: false,
         }
+    }
+
+    /// Whether a DirectInput wheel drives (the device class of `device=auto`).
+    pub fn wheel(&self) -> bool {
+        self.wheel
     }
 
     /// B7C120 for every action: the value is the maximum over the bindings
@@ -692,14 +830,56 @@ pub fn sample(
     mobile: Option<Res<crate::touch_controls::Mobile>>,
     mut actions: ResMut<Actions>,
     mut queue: ResMut<ShiftQueue>,
+    #[cfg(windows)] mut traced: Local<Option<crate::force_feedback::windows::WheelState>>,
 ) {
     // One player device: the first accepted connected pad.
     let pad = pads.iter().min_by_key(|(e, _)| *e).map(|(_, p)| p);
+    #[cfg(windows)]
+    let wheel = if actions.wheel {
+        crate::force_feedback::windows::started().and_then(|h| h.shared.lock().ok().map(|s| s.state))
+    } else {
+        None
+    };
+    #[cfg(windows)]
+    if actions.trace
+        && let Some(state) = wheel
+        && traced.is_none_or(|t| {
+            t.buttons != state.buttons
+                || t.pov != state.pov
+                || t.axes
+                    .iter()
+                    .zip(&state.axes)
+                    .any(|(a, b)| (a.unwrap_or(0.) - b.unwrap_or(0.)).abs() > 0.05)
+        })
+    {
+        *traced = Some(state);
+        let axes: Vec<String> = WHEEL_AXES
+            .iter()
+            .zip(&state.axes)
+            .filter_map(|(n, v)| v.map(|v| format!("{n}={v:.3}")))
+            .collect();
+        let buttons: Vec<String> = (0..64)
+            .filter(|b| state.buttons >> b & 1 != 0)
+            .map(|b: u32| b.to_string())
+            .collect();
+        log_line!(
+            "drive_input_wheel_trace {} buttons=[{}] pov={}",
+            axes.join(" "),
+            buttons.join(","),
+            state.pov[0]
+        );
+    }
     actions.update(|source| match source {
         Source::Key(k) => keys.as_ref().map(|k2| f32::from(k2.pressed(k))),
         Source::Unmapped => None,
         Source::Touch(b) => mobile.as_ref().map(|m| f32::from(m.held.down(b))),
         Source::Tilt => mobile.as_ref().and_then(|m| m.tilt_raw()),
+        #[cfg(windows)]
+        Source::WheelAxis(_) | Source::WheelButton(_) | Source::WheelPov(_) => {
+            wheel.as_ref().and_then(|w| wheel_raw(w, source))
+        }
+        #[cfg(not(windows))]
+        Source::WheelAxis(_) | Source::WheelButton(_) | Source::WheelPov(_) => None,
         _ => pad.and_then(|p| pad_raw(p, source)),
     });
     for shift in actions.shifts() {
@@ -801,6 +981,56 @@ pub struct Settings {
     /// `auto` (`None`) captures the neutral from the first reading.
     pub tilt_neutral: Option<f32>,
     pub tilt_smoothing: Option<f32>,
+    /// Force feedback and rumble (docs/FORCE_FEEDBACK.md §6): the profile's `forcefeedback`
+    /// (default on) and the Advanced Controls `feedback_force`, `feedback_friction` and
+    /// `feedback_effects` sliders, 0..10 (default 5).
+    pub force_feedback: Option<bool>,
+    pub feedback: [Option<u8>; 3],
+    /// The AUTHORED generic wheel preset's axes and buttons.
+    pub wheel: WheelKeys,
+}
+
+/// `[input]` keys of the AUTHORED generic wheel preset ([`ActionMap::generic_wheel`]); `None`
+/// keeps the default in brackets.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WheelKeys {
+    /// `wheel_accelerate` (Y), `wheel_brake` (Rz): axis indices in [`WHEEL_AXES`].
+    pub accelerate: Option<u8>,
+    pub brake: Option<u8>,
+    /// `wheel_pedals=inverted|normal` (inverted: uniNegative, released at the top of the range).
+    pub pedals_inverted: Option<bool>,
+    /// `wheel_gear_up` (4), `wheel_gear_down` (5), `wheel_handbrake` (6), `wheel_view` (17):
+    /// button numbers, the G25 preset's.
+    pub gear_up: Option<u8>,
+    pub gear_down: Option<u8>,
+    pub handbrake: Option<u8>,
+    pub view: Option<u8>,
+    /// `wheel_trace=on`: log the wheel's axes and buttons when they change.
+    pub trace: Option<bool>,
+}
+
+impl WheelKeys {
+    pub fn accelerate(&self) -> u8 {
+        self.accelerate.unwrap_or(1)
+    }
+    pub fn brake(&self) -> u8 {
+        self.brake.unwrap_or(5)
+    }
+    pub fn pedals_inverted(&self) -> bool {
+        self.pedals_inverted.unwrap_or(true)
+    }
+    pub fn gear_up(&self) -> u8 {
+        self.gear_up.unwrap_or(4)
+    }
+    pub fn gear_down(&self) -> u8 {
+        self.gear_down.unwrap_or(5)
+    }
+    pub fn handbrake(&self) -> u8 {
+        self.handbrake.unwrap_or(6)
+    }
+    pub fn view(&self) -> u8 {
+        self.view.unwrap_or(17)
+    }
 }
 
 impl Settings {
@@ -867,10 +1097,82 @@ impl Settings {
                         _ => settings.tilt_smoothing = v,
                     }
                 }
+                "force_feedback" | "wheel_trace" => {
+                    let on = match value.as_str() {
+                        "on" | "true" | "1" | "yes" => true,
+                        "off" | "false" | "0" | "no" => false,
+                        _ => return Err(format!("input setting `{key}` needs on or off")),
+                    };
+                    if key == "force_feedback" {
+                        settings.force_feedback = Some(on);
+                    } else {
+                        settings.wheel.trace = Some(on);
+                    }
+                }
+                "feedback_force" | "feedback_friction" | "feedback_effects" => {
+                    let v = match value.parse::<u8>() {
+                        Ok(v) if v <= 10 => v,
+                        _ => return Err(format!("input setting `{key}` needs 0..10")),
+                    };
+                    let i = ["feedback_force", "feedback_friction", "feedback_effects"]
+                        .iter()
+                        .position(|k| *k == key)
+                        .unwrap_or(0);
+                    settings.feedback[i] = Some(v);
+                }
+                "wheel_accelerate" | "wheel_brake" => {
+                    let axis = wheel_axis(&value).ok_or_else(|| {
+                        format!("input setting `{key}` needs x, y, z, rx, ry, rz, slider0 or slider1")
+                    })?;
+                    if key == "wheel_accelerate" {
+                        settings.wheel.accelerate = Some(axis);
+                    } else {
+                        settings.wheel.brake = Some(axis);
+                    }
+                }
+                "wheel_pedals" => {
+                    settings.wheel.pedals_inverted = Some(match value.as_str() {
+                        "inverted" => true,
+                        "normal" => false,
+                        _ => return Err("input setting `wheel_pedals` needs inverted or normal".into()),
+                    })
+                }
+                "wheel_gear_up" | "wheel_gear_down" | "wheel_handbrake" | "wheel_view" => {
+                    let b = match value.trim_start_matches("button").parse::<u8>() {
+                        Ok(b) if b < 64 => b,
+                        _ => return Err(format!("input setting `{key}` needs a button number 0..63")),
+                    };
+                    match key.as_str() {
+                        "wheel_gear_up" => settings.wheel.gear_up = Some(b),
+                        "wheel_gear_down" => settings.wheel.gear_down = Some(b),
+                        "wheel_handbrake" => settings.wheel.handbrake = Some(b),
+                        _ => settings.wheel.view = Some(b),
+                    }
+                }
                 _ => return Err(format!("unknown input setting `{key}`")),
             }
         }
         Ok(settings)
+    }
+
+    /// `device=auto` with a DirectInput wheel bound: the wheel class (unassisted steering), as the
+    /// original gives a wheel device.
+    pub fn apply_wheel(&self, assists: &mut Assists, wheel: bool) {
+        if self.device == Device::Auto && wheel {
+            assists.input = Input::Wheel;
+        }
+    }
+
+    /// Force feedback on (the profile's `forcefeedback`, default on).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn force_feedback(&self) -> bool {
+        self.force_feedback.unwrap_or(true)
+    }
+
+    /// The three FFB gains as the original reads its sliders: value / 10, default 5.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn feedback_gains(&self) -> [f32; 3] {
+        self.feedback.map(|v| f32::from(v.unwrap_or(5)) / 10.)
     }
 
     /// The device class sets the assisted-steering choice (`Assists.input`).
@@ -959,6 +1261,40 @@ impl std::fmt::Display for Settings {
                 write!(f, ",{name}={v}")?;
             }
         }
+        // Force feedback and wheel keys only when set, like the phone keys.
+        if let Some(v) = self.force_feedback {
+            write!(f, ",force_feedback={}", on(v))?;
+        }
+        for (name, value) in ["feedback_force", "feedback_friction", "feedback_effects"]
+            .iter()
+            .zip(self.feedback)
+        {
+            if let Some(v) = value {
+                write!(f, ",{name}={v}")?;
+            }
+        }
+        let w = &self.wheel;
+        for (name, axis) in [("wheel_accelerate", w.accelerate), ("wheel_brake", w.brake)] {
+            if let Some(a) = axis {
+                write!(f, ",{name}={}", WHEEL_AXES[usize::from(a)].to_ascii_lowercase())?;
+            }
+        }
+        if let Some(v) = w.pedals_inverted {
+            write!(f, ",wheel_pedals={}", if v { "inverted" } else { "normal" })?;
+        }
+        for (name, button) in [
+            ("wheel_gear_up", w.gear_up),
+            ("wheel_gear_down", w.gear_down),
+            ("wheel_handbrake", w.handbrake),
+            ("wheel_view", w.view),
+        ] {
+            if let Some(b) = button {
+                write!(f, ",{name}={b}")?;
+            }
+        }
+        if let Some(v) = w.trace {
+            write!(f, ",wheel_trace={}", on(v))?;
+        }
         Ok(())
     }
 }
@@ -991,8 +1327,58 @@ pub fn load(
             Err(error) => format!("unavailable({error})"),
         };
     }
+    let wheel = wheel_bindings(root, settings, &mut map);
+    let status = match &wheel {
+        Some(w) => format!("{pad} wheel={w}"),
+        None => pad,
+    };
     settings.tune(&mut map)?;
-    Ok((Actions::new(map, settings.pads()), pad))
+    let mut actions = Actions::new(map, settings.pads());
+    actions.wheel = wheel.is_some();
+    actions.trace = settings.wheel.trace.unwrap_or(false);
+    Ok((actions, status))
+}
+
+/// With `device=auto` or `wheel` on Windows: the DirectInput wheel's bindings, from the original
+/// preset whose deviceType is the wheel's product name, else the AUTHORED generic preset.
+/// Returns the log text, `None` without a wheel.
+#[cfg(windows)]
+fn wheel_bindings(root: &std::path::Path, settings: &Settings, map: &mut ActionMap) -> Option<String> {
+    if !matches!(settings.device, Device::Auto | Device::Wheel) {
+        return None;
+    }
+    let wheel = crate::force_feedback::windows::device().wheel.as_ref()?;
+    let original = [1, 2, 3, 5].into_iter().find_map(|n| {
+        let path = root.join("ActionMap").join(format!("actionMapPreset{n}.xml"));
+        let text = std::fs::read_to_string(path).ok()?;
+        let preset = action_map::read(&text).ok()?;
+        (preset.device_type == wheel.name).then_some((n, preset))
+    });
+    let (wheel_map, unknown, preset) = match original {
+        Some((n, preset)) => {
+            let (m, unknown) = ActionMap::wheel(&preset);
+            (m, unknown, format!("actionMapPreset{n}"))
+        }
+        None => {
+            let (m, missing) = ActionMap::generic_wheel(&settings.wheel, |a| wheel.axes[usize::from(a)]);
+            (m, missing, "generic".into())
+        }
+    };
+    map.extend(&wheel_map);
+    let axes: Vec<&str> = WHEEL_AXES.iter().zip(wheel.axes).filter(|(_, on)| *on).map(|(n, _)| *n).collect();
+    Some(format!(
+        "{:?} preset={preset} ffb={} axes={} buttons={}{}",
+        wheel.name,
+        wheel.force_feedback,
+        axes.join("|"),
+        wheel.buttons,
+        if unknown.is_empty() { String::new() } else { format!(" unbound={}", unknown.join("|")) }
+    ))
+}
+
+#[cfg(not(windows))]
+fn wheel_bindings(_: &std::path::Path, _: &Settings, _: &mut ActionMap) -> Option<String> {
+    None
 }
 
 fn read_preset(path: &std::path::Path) -> Result<(ActionMap, Vec<String>), String> {
@@ -1093,6 +1479,7 @@ mod tests {
                 Source::Key(_) => key,
                 Source::Unmapped => None,
                 Source::Touch(_) | Source::Tilt => None,
+                Source::WheelAxis(_) | Source::WheelButton(_) | Source::WheelPov(_) => None,
             });
             (
                 actions.value(Action::SteerLeft),

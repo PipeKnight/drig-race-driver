@@ -50,9 +50,10 @@ the port (no original equivalent).
 | | FFBCollision | scale +4, thresholdLow +8, thresholdHigh +C, damageZone +10 (never read), freq +14, length +18, sample name +1C | `7EBFD0` |
 | | FFBSample | wave, envelope, channel (0), wheelScale (1), rubmlerScale (1) | `7EB2A0`, `7E7DA0` |
 
-Effects are kept in one list in parser order (caster, lateral, surface, ... [I: the dispatcher
-`7ED250` was not decompiled]); the order matters only because the caster multiplies the friction
-accumulated so far (§4.2).
+Effects are kept in one list in parser order. The effectsetup handler `7ECA30` (reached from the
+dispatcher `7ED250`) runs the parsers as samples, caster, lateral, collision, surface, gear
+change, wheel damage, skid, suspension [D]. The order matters only because the caster multiplies
+the friction accumulated before it by its scale; the lateral friction comes after, unscaled.
 
 **Samples** (`7E7DA0`) [D]: `wave` and `envelope` are copied with `strncpy(.., 16)`, so at most 16
 digits each (the shipped 17-digit envelopes lose their last digit). The count is the index of the
@@ -250,19 +251,49 @@ Slots: +0 tick `B8CD80`, +4 is-wheel `B8CD40` (constant-force effect exists), +8
 
 | Part | Where | Label |
 |---|---|---|
-| XML setup, snapshot builder, GameFFB processor, samples, device damping, rumble scaling | `crates/grid-app/src/force_feedback.rs` (pure, unit-tested against §2–5) | ORIGINAL |
-| DirectInput 8 wheel: enumerate, exclusive acquire, autocentre off, one constant force, X-axis read for damping and steering | `crates/grid-app/src/force_feedback/windows.rs` (thin hand-written COM binding, `raw-dylib`) | ORIGINAL output; device choice [A] |
-| XInput pad rumble | same file, `XInputSetState` | ORIGINAL |
+| XML setup (a small attribute reader; atof-style numbers, so `"0.5f"` reads 0.5), snapshot builder, GameFFB task with every effect, sample playback, device apply, DirectInput damping and magnitude, XInput motor scaling | `crates/grid-app/src/force_feedback.rs`, pure, unit tests against §2–5 | ORIGINAL |
+| DirectInput 8 wheel: enumerate, exclusive background acquire, range 0..65535, dead zone 0, autocentre off, one infinite constant force on X with direction (1, 0), `SetParameters` every 10 ms; the wheel's axes, buttons and POV for input | `crates/grid-app/src/force_feedback/windows.rs`: a thin hand-written COM binding through the vtables, `raw-dylib` (dinput8, xinput1_4, user32, kernel32), no new crate | ORIGINAL output; device choice [A] |
+| The FFB task thread: `Sleep(10)`, device tick, then the task | same file, thread "FFB updateTask" | ORIGINAL |
+| XInput pad motors | same file, `XInputSetState` to the first connected pad | ORIGINAL scaling; pad choice [A] |
+| One snapshot of the player's car per physics tick; pause | `crates/grid-app/src/ffb.rs` | ORIGINAL data, per tick [A] |
+| Wheel input: `win_con_di_*` sources, the original preset whose deviceType equals the wheel's product name (G25, MOMO, DFP, RGT), else a generic preset; `device=auto` with a wheel gives the wheel class (unassisted steering) | `crates/grid-app/src/input.rs` | ORIGINAL presets; generic preset [A] |
 | Android phone vibration and pad rumble | not yet | [A] |
 
-Differences: the FFB thread is fed once per fixed 16 ms physics tick (the original per frame);
-wheels other than the original's four named presets get an AUTHORED generic preset (X steering,
-pedals configurable); the FFB device is opened with `DISCL_EXCLUSIVE|DISCL_BACKGROUND` [A: the
-original's flags are open].
+Why a hand-written binding: the `windows` crate (0.62.2, already in Cargo.lock through Bevy) has
+the DirectInput 8 COM wrappers, but enabling its HumanInterfaceDevice feature in grid-app adds a
+large crate build and still lacks the `c_dfDIJoystick` data format, which lives in `dinput8.lib`'s
+static part. The binding needs about 15 vtable slots and a dozen structures from `dinput.h`.
+SDL3 (F321's plan) would add a C library; the original's single constant-force effect needs none of
+its effect types.
+
+Differences from the original:
+- The task is fed once per fixed 16 ms physics tick (the original once per car-manager step, one
+  per frame).
+- Wheels other than the original's four named presets get the AUTHORED generic preset: X
+  steering, pedals on Y and Rz (uniNegative), Gear Up/Down on buttons 4/5, Handbrake 6, Change
+  View 17 (the G25 preset's), all settings (`[input]` `wheel_*`, docs/SETTINGS.md). Only axes
+  the device has are bound.
+- `DISCL_EXCLUSIVE|DISCL_BACKGROUND` on a hidden window of the FFB thread [A: the original's
+  flags are open]; without force feedback, or when exclusive access fails, the wheel is read
+  non-exclusively.
+- The outputs go to zero 0.25 s after the race stops queueing snapshots (menus, the end of a
+  race) and while the game is paused [A].
+- `rand()` for the sample sets is the MSVC generator seeded with 1 [A]; the original shares the
+  CRT generator with the rest of the game.
+
+### 7.1 Settings (`[input]`)
+
+| Key | Values | Original |
+|---|---|---|
+| `force_feedback` | `on` (default) / `off` | profile `forcefeedback` |
+| `feedback_force`, `feedback_friction`, `feedback_effects` | 0..10, default 5 | Advanced Controls sliders, /10 |
+| `wheel_accelerate`, `wheel_brake` | `x`, `y`, `z`, `rx`, `ry`, `rz`, `slider0`, `slider1` (default `y`, `rz`) | [A] generic preset |
+| `wheel_pedals` | `inverted` (default: released at the top of the axis) / `normal` | [A] |
+| `wheel_gear_up`, `wheel_gear_down`, `wheel_handbrake`, `wheel_view` | button numbers 0..63 (default 4, 5, 6, 17) | [A] |
+| `wheel_trace` | `on` / `off` (default): log `drive_input_wheel_trace` lines with the axes and buttons when they change, to find a wheel's pedal axes and buttons | [A] |
 
 ## 8. Open
 
 1. The original's `SetCooperativeLevel` flags and its device enumeration filter (F321 item 4).
-2. The effect list order (dispatcher `7ED250`).
-3. A live trace of `trunc(F·10000)` against a known manoeuvre would verify the whole chain; it
+2. A live trace of `trunc(F·10000)` against a known manoeuvre would verify the whole chain; it
    needs the owner's go for a capture (docs/CAPTURE_BACKLOG.md).

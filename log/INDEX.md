@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F602](F0602.md) | 2026-10-27 | Force feedback port: GameFFB, DirectInput wheel input and force, XInput rumble |
 | [F601](F0601.md) | 2026-10-27 | AI corner lift only above the brake-line target: Spa La Source |
 | [F600](F0600.md) | 2026-10-27 | Grid start: GPU pass timer and opponent shadow bodies |
 | [F599](F0599.md) | 2026-10-27 | Speech part 2 step 2: the player's damage, performance, strategy and wrong-way lines |

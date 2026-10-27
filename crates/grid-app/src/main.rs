@@ -37,6 +37,11 @@ mod damage_parts;
 mod drift_event;
 mod dynamic_props;
 mod engine_sound;
+// The device side is Windows-only for now; the pure task is shared.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod force_feedback;
+#[cfg(windows)]
+mod ffb;
 mod event_menu;
 mod flashback;
 mod free_look;
@@ -2196,6 +2201,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let touch_screen = false;
         let touch = input_settings.touch_active(touch_screen);
         let (actions, pad) = input::load(&root, &input_settings, touch)?;
+        // device=auto with a DirectInput wheel bound: the wheel class.
+        input_settings.apply_wheel(&mut driver_aids, actions.wheel());
         if touch {
             let tilt = input_settings.tilt_settings();
             println!(
@@ -2959,6 +2966,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(actions) = drive_input.take() {
+            #[cfg(windows)]
+            {
+                let status = ffb::install(&mut app, &root, &input_settings, actions.wheel(), field.models[0].stem());
+                println!("drive_force_feedback {status}");
+            }
             // The original's pause menu (docs/PAUSE_MENU.md): Race Day free
             // race for timed events, test drive for free practice.
             let mut menu = pause_menu::PauseMenu::new(
