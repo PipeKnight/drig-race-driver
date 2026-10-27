@@ -210,7 +210,7 @@ The same end state is reached exactly another way (AUTHORED):
   event-time rule); `replay::stream` (`a_jump_in_cut_keeps_the_frames_up_to_it_and_records_on`).
 - Asset (`--include-ignored`), the pause-menu race harness with the recorder and Flashback,
   3 AI cars, the player driven by keys as a function of the tick (throttle, weaving, braking):
-  - `flashback::race_tests::a_flashback_resumes_the_race_tick_for_tick_on_every_circuit`:
+  - `flashback::race_tests::a_flashback_resumes_the_race_on_*`:
     Donington, Nürburgring, Istanbul Park, Long Beach, Jarama; Lacetti and BMW in every field,
     the player's car alternating; at tick 900 the Instant Replay key, 1.4 s of rewind, Jump In.
     The jump-in frame is the one at or before the replay time, the stream is cut there, the

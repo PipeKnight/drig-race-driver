@@ -220,24 +220,48 @@ fn check(case: &Case) {
     assert_eq!(r.stream.tick(r.stream.frames().end - 1), END);
 }
 
-#[test]
-#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
-fn a_flashback_resumes_the_race_tick_for_tick_on_every_circuit() {
-    big_stack(|| {
-        for (i, route) in CIRCUITS.into_iter().enumerate() {
-            // Both cars in every field; the player's alternates.
-            let models: &[&str] = if i % 2 == 0 { &["lac", "bmw"] } else { &["bmw", "lac"] };
-            check(&Case {
-                route,
-                models,
-                laps: 2,
-                drift: false,
-                // A pause-menu car reset between the checkpoint and the frame.
-                reset_at: (route == DONINGTON).then_some(160),
-            });
-        }
+/// A Flashback resumes the race tick for tick on circuit `i` of `CIRCUITS`.
+fn resumes_on_circuit(i: usize) {
+    let route = CIRCUITS[i];
+    big_stack(move || {
+        // Both cars in every field; the player's alternates.
+        let models: &[&str] = if i.is_multiple_of(2) { &["lac", "bmw"] } else { &["bmw", "lac"] };
+        check(&Case {
+            route,
+            models,
+            laps: 2,
+            drift: false,
+            // A pause-menu car reset between the checkpoint and the frame.
+            reset_at: (route == DONINGTON).then_some(160),
+        });
     });
 }
+
+// One test per circuit, so the circuits run in parallel: as one loop this was the
+// workspace's longest test (93 s). A new circuit fails this until it gets its test.
+const _: () = assert!(CIRCUITS.len() == 11, "add a_flashback_resumes_the_race_on_* for the new circuit");
+macro_rules! resumes_on {
+    ($($name:ident = $i:literal),* $(,)?) => {$(
+        #[test]
+        #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+        fn $name() {
+            resumes_on_circuit($i);
+        }
+    )*};
+}
+resumes_on!(
+    a_flashback_resumes_the_race_on_donington = 0,
+    a_flashback_resumes_the_race_on_nurburgring = 1,
+    a_flashback_resumes_the_race_on_istanbul_park = 2,
+    a_flashback_resumes_the_race_on_long_beach = 3,
+    a_flashback_resumes_the_race_on_jarama = 4,
+    a_flashback_resumes_the_race_on_yokohama = 5,
+    a_flashback_resumes_the_race_on_spa = 6,
+    a_flashback_resumes_the_race_on_milan = 7,
+    a_flashback_resumes_the_race_on_shibuya = 8,
+    a_flashback_resumes_the_race_on_san_francisco = 9,
+    a_flashback_resumes_the_race_on_le_mans = 10,
+);
 
 #[test]
 #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]

@@ -22,7 +22,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [build_seed.ps1](build_seed.ps1) | Build a new cargo build-dir seed beside C:\cargo-build\seed and swap it in. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [dedup_hardlinks.py](dedup_hardlinks.py) | Replace byte-identical files under a directory with NTFS hard links. | [DISK_USAGE](../docs/DISK_USAGE.md) |
 | [disk_report.ps1](disk_report.ps1) | Report disk usage of the project folder: cargo target dirs, worktrees and local/ captures. | [DISK_USAGE](../docs/DISK_USAGE.md) |
-| [identity.tsv](identity.tsv) | Solo-lap identity check (docs/TOOLCHAIN.md "Identity check"): sha256 of the standard output of target/release/grid-opponent-race ROOT CD01 BP01 <args> env "-": … | [PERFORMANCE](../docs/PERFORMANCE.md) |
+| [identity.tsv](identity.tsv) | Solo-lap identity check (docs/TOOLCHAIN.md "Identity check"): sha256 of the standard output of target/release/grid-opponent-race ROOT CD01 BP01 <args> env "-": … | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [index_files.py](index_files.py) | Generate tools/README.md and docs/INDEX.md: one line per tool and per document. |  |
 | [install_native_build_tools.ps1](install_native_build_tools.ps1) | Install authorized native development prerequisites from official sources. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [install_research_tool.ps1](install_research_tool.ps1) | Download official pinned research packages into ignored project-local storage. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |

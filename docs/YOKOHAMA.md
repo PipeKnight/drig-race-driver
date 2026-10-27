@@ -59,8 +59,8 @@ Evidence (ignored, this worktree's `local/track-readers/`): `survey-*/japan_yoko
 - Launchers: `Play GRID Race Yokohama.cmd` (`settings/race-yokohama.ini`, three
   laps, 11 opponents, back of the grid) and `Play GRID Drift Battle
   Yokohama.cmd` (`settings/drift-battle-yokohama.ini`, two laps, 7 AI BMWs).
-- App tests: `pause_menu::race_tests::retire_from_race_shows_the_results_on_every_circuit`
-  and `flashback::race_tests::a_flashback_resumes_the_race_tick_for_tick_on_every_circuit`
+- App tests: `pause_menu::race_tests::retire_from_race_shows_the_results_on_*`
+  and `flashback::race_tests::a_flashback_resumes_the_race_on_*`
   (over `route::CIRCUITS`) include Yokohama.
 
 ## 4. Open

@@ -129,51 +129,64 @@ fn run(app: &mut App, end: u64) -> Vec<Live> {
     lives
 }
 
-#[test]
-#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
-fn recorded_frames_equal_the_live_race_on_every_circuit() {
-    big_stack(|| {
-        for route in [DONINGTON, NURBURGRING, ISTANBUL_PARK, LONG_BEACH] {
-            // Both cars in the field; the AI drives the player's car too.
-            let mut app = with_replay(race_app_with(route, &["lac", "bmw"], 2, true), route);
-            let lives = run(&mut app, 1600);
-            check(&mut app, &lives);
-            let r = replay(&app);
-            // 30 Hz of simulation time: 12 samples per 25 ticks.
-            let frames = r.stream.frames().len() as u64;
-            assert_eq!(frames, 1600 * 12 / 25 + 1, "{route}");
-            assert!(r.stream.memory_bytes() <= stream::MEMORY_BYTES, "{route}");
-            // The director's zones are passed by the car on the racing line.
-            let entries = r.entries.len();
-            // Nearest approach of the player's path to each zone centre.
-            let path: Vec<Vec3> = lives
-                .iter()
-                .map(|l| Vec3::new(l.poses[0][12], l.poses[0][13], l.poses[0][14]))
-                .collect();
-            for (z, zone) in r.director.as_ref().unwrap().zones.iter().enumerate().take(6) {
-                let near = path
-                    .iter()
-                    .min_by(|a, b| {
-                        a.xz().distance(zone.centre.xz()).total_cmp(&b.xz().distance(zone.centre.xz()))
-                    })
-                    .unwrap();
-                eprintln!(
-                    "replay_zone route={route} zone={z} centre={} nearest={near} local={}",
-                    zone.centre,
-                    zone.rotation.inverse() * (*near - zone.centre)
-                );
-            }
-            eprintln!(
-                "replay_route route={route} frames={frames} bytes={} zone_entries={entries} first={:?}",
-                r.stream.memory_bytes(),
-                r.entries.first()
-            );
-            assert!(entries >= 3, "{route}: {entries} zone entries");
-            assert!(matches!(
-                r.activation(1600),
-                Some(director::Activation::Track(_) | director::Activation::Car(_))
-            ));
+// One test per circuit, so the circuits run in parallel (as one loop: 42 s).
+macro_rules! recorded_frames_on {
+    ($($name:ident = $route:ident),* $(,)?) => {$(
+        #[test]
+        #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+        fn $name() {
+            recorded_frames_equal_the_live_race($route);
         }
+    )*};
+}
+recorded_frames_on!(
+    recorded_frames_equal_the_live_race_on_donington = DONINGTON,
+    recorded_frames_equal_the_live_race_on_nurburgring = NURBURGRING,
+    recorded_frames_equal_the_live_race_on_istanbul_park = ISTANBUL_PARK,
+    recorded_frames_equal_the_live_race_on_long_beach = LONG_BEACH,
+);
+
+fn recorded_frames_equal_the_live_race(route: &'static str) {
+    big_stack(move || {
+        // Both cars in the field; the AI drives the player's car too.
+        let mut app = with_replay(race_app_with(route, &["lac", "bmw"], 2, true), route);
+        let lives = run(&mut app, 1600);
+        check(&mut app, &lives);
+        let r = replay(&app);
+        // 30 Hz of simulation time: 12 samples per 25 ticks.
+        let frames = r.stream.frames().len() as u64;
+        assert_eq!(frames, 1600 * 12 / 25 + 1, "{route}");
+        assert!(r.stream.memory_bytes() <= stream::MEMORY_BYTES, "{route}");
+        // The director's zones are passed by the car on the racing line.
+        let entries = r.entries.len();
+        // Nearest approach of the player's path to each zone centre.
+        let path: Vec<Vec3> = lives
+            .iter()
+            .map(|l| Vec3::new(l.poses[0][12], l.poses[0][13], l.poses[0][14]))
+            .collect();
+        for (z, zone) in r.director.as_ref().unwrap().zones.iter().enumerate().take(6) {
+            let near = path
+                .iter()
+                .min_by(|a, b| {
+                    a.xz().distance(zone.centre.xz()).total_cmp(&b.xz().distance(zone.centre.xz()))
+                })
+                .unwrap();
+            eprintln!(
+                "replay_zone route={route} zone={z} centre={} nearest={near} local={}",
+                zone.centre,
+                zone.rotation.inverse() * (*near - zone.centre)
+            );
+        }
+        eprintln!(
+            "replay_route route={route} frames={frames} bytes={} zone_entries={entries} first={:?}",
+            r.stream.memory_bytes(),
+            r.entries.first()
+        );
+        assert!(entries >= 3, "{route}: {entries} zone entries");
+        assert!(matches!(
+            r.activation(1600),
+            Some(director::Activation::Track(_) | director::Activation::Car(_))
+        ));
     });
 }
 

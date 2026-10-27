@@ -108,7 +108,7 @@ car; not a route fault. The soak does not count it as pressed down at spawn.
   `Play GRID Race San Francisco.cmd` run `settings/race-{milan,shibuya,san-francisco}.ini`: three
   laps, 11 opponents, back of the grid.
 - App tests:
-  - `pause_menu::race_tests::retire_from_race_shows_the_results_on_every_circuit` includes the
+  - `pause_menu::race_tests::retire_from_race_shows_the_results_on_*` includes the
     three (Milan lac, Shibuya bmw, San Francisco lac);
   - the flashback test runs over `route::CIRCUITS`.
 - Not checked here: a static render or a windowed race.
