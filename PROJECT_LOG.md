@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F620](log/F0620.md) | 2026-10-27 | AI car wedged against Washington tyre stacks: stuck retire requests removal |
 | [F619](log/F0619.md) | 2026-10-27 | Camera: every view against the F470 captures with the final code; live captures still needed |
 | [F618](log/F0618.md) | 2026-10-27 | Camera: the player's cockpit in the head-cam, no car in the bumper views |
 | [F617](log/F0617.md) | 2026-10-27 | Speech part 2 step 5: the namedAI name phrase |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F563](log/F0563.md) | 2026-10-23 | Detached panels settle lying flat: rigid box with the original's detached-part body parameters |
 | [F562](log/F0562.md) | 2026-10-23 | Playable 14696d47fe1e with no mid-air parking (F561), portable copy and APKs 99fef6aca274 |
 | [F561](log/F0561.md) | 2026-10-23 | No body parks in the air: far islands rest for turnOffTime before they stop; detached parts land on the track |
-| [F560](log/F0560.md) | 2026-10-23 | Playable 67dbeb3a5158 with Render height Auto (F559), portable copy and APKs f2af457cca2c |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

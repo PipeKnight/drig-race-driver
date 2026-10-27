@@ -4584,19 +4584,36 @@ fn drive_tick(
                 let speeds = opponents.speeds(&driving.runtime);
                 opponents.standings.finalize(&speeds, time, &[0]);
             }
+            // The autopilot's retire drive stopped the player's car (stuck or
+            // failure, removal request req+0x38): its race ends as on
+            // terminal damage (AUTHORED; the original has no AI-driven
+            // player car).
+            if opponents.autopilot.as_ref().is_some_and(|p| p.removal_requested())
+                && opponents.standings.status(0) == Status::Racing
+            {
+                opponents.standings.retire(0, Out::Wrecked);
+                let speeds = opponents.speeds(&driving.runtime);
+                opponents.standings.finalize(&speeds, time, &[0]);
+                log_line!(
+                    "drive_ai_event version=1 segment={} tick={} car=0 retired=removal",
+                    driving.segment,
+                    driving.runtime.ticks
+                );
+            }
             for i in 1..opponents.standings.len() {
                 if opponents.multi.cars[i].terminal_wheel().is_some()
                     && opponents.standings.status(i) == Status::Racing
                 {
                     opponents.standings.retire(i, Out::Wrecked);
                 }
-                // Stopped by the AI's failure/damage retire drive (AUTHORED).
+                // Stopped by the AI's retire drive: stuck, failure or damage
+                // (AUTHORED).
                 if opponents.drivers[i - 1].removal_requested()
                     && opponents.standings.status(i) == Status::Racing
                 {
                     opponents.standings.retire(i, Out::Wrecked);
                     log_line!(
-                        "drive_ai_event version=1 segment={} tick={} car={i} retired=failure",
+                        "drive_ai_event version=1 segment={} tick={} car={i} retired=removal",
                         driving.segment,
                         driving.runtime.ticks
                     );

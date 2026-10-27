@@ -3796,9 +3796,14 @@ impl AiDriver {
                 }
             }
             Behaviour::Retire => {
-                // Drive 0x79C6E0 for a stuck car: stop and hold.
+                // Drive 0x79C6E0 for a stuck car: stop and hold; once below
+                // rtStoppedSpeed it requests removal (req+0x38), as the
+                // failure retire does at its retire point.
                 request.force_brake = true;
                 request.no_steer = true;
+                if speed < self.parameters.faults.stopped_speed {
+                    self.failure.removal = true;
+                }
             }
             Behaviour::LostControl
             | Behaviour::ControlledStop
