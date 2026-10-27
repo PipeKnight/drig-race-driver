@@ -811,8 +811,8 @@ impl Runtime {
         let output = match geometry {
             Some(Geometry::Deforming(geometry)) => {
                 let resource = std::cell::RefCell::new(geometry.clone());
-                let mut publication = |owner: &vehicle_publication::State, delta| {
-                    resource.borrow_mut().publish_deformation(owner, delta)
+                let mut publication = |owner: vehicle_publication::State, delta| {
+                    resource.borrow_mut().publish_deformation(&owner, delta)
                 };
                 let mut provider_calls = 0;
                 let provider = |bodies: &mut [grid_world::contact_groups::Body], remaining| {

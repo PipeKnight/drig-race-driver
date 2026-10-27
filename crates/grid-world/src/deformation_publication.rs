@@ -23,7 +23,13 @@ fn squared(a: [f32; 4], b: [f32; 4]) -> f32 {
     (d[1] * d[1] + d[0] * d[0]) + d[2] * d[2]
 }
 pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
-    let b = &input.vehicle;
+    calculate_owned(input.clone(), delta)
+}
+
+/// [`calculate`] on a state the caller gives up (an error drops it). No word
+/// it writes is read after the write, so the update runs in place.
+pub fn calculate_owned(mut next: State, delta: f32) -> Result<State, Error> {
+    let b = &next.vehicle;
     if b.len() != VEHICLE_WORDS || !delta.is_finite() || !(0. ..=0.1).contains(&delta) {
         return Err(Error("invalid deformation publication framing"));
     }
@@ -47,10 +53,11 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
             "unsupported deformation publication ownership or pending rebuild",
         ));
     }
-    let mut next = vehicle_publication::update_without_rebuild(input, delta);
+    vehicle_publication::update_in(&mut next, delta);
+    let b = &mut next.vehicle;
     if b[0xc7a0 / 4] == 1 {
-        next.vehicle[0xcdfc / 4] = 1f32.to_bits();
-        next.vehicle[0xcdf4 / 4] = 1f32.to_bits();
+        b[0xcdfc / 4] = 1f32.to_bits();
+        b[0xcdf4 / 4] = 1f32.to_bits();
     }
     if byte(b, 4) == 0 {
         return Ok(next);
@@ -76,7 +83,7 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
     }
     if byte(b, 0xc7ad) == 0 {
         for i in 0..4 {
-            put_byte(&mut next.vehicle, 0xcde0 + i, 255);
+            put_byte(b, 0xcde0 + i, 255);
         }
         return Ok(next);
     }
@@ -106,7 +113,7 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
         let sampled = grid.sample(point)?;
         let local = std::array::from_fn(|a| sampled[a] - f(b, 0xc740 + a * 4));
         if squared(original, local) > f(b, 0xee40) * f(b, 0xee40) {
-            next.vehicle[at / 4] = 2;
+            b[at / 4] = 2;
         }
     }
     for i in 0..4 {
@@ -128,7 +135,7 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
             return Err(Error("published wheel damage conversion exceeds i32"));
         }
         let level = 255i32.wrapping_sub(amount as i32).clamp(0, 255) as u8;
-        put_byte(&mut next.vehicle, 0xcde0 + i, level);
+        put_byte(b, 0xcde0 + i, level);
     }
     Ok(next)
 }
@@ -137,19 +144,23 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
 /// geometry. Stage the original dirty flag/body4 transition and whole wheel
 /// update, then the reached publication. This does not implement A01960.
 pub fn after_geometry_rebuild(input: &State, delta: f32) -> Result<State, Error> {
-    if input.vehicle.len() != VEHICLE_WORDS
-        || byte(&input.vehicle, 0xc7f2) > 1
-        || byte(&input.vehicle, 4) > 1
+    after_geometry_rebuild_owned(input.clone(), delta)
+}
+
+/// [`after_geometry_rebuild`] on a state the caller gives up.
+pub fn after_geometry_rebuild_owned(mut next: State, delta: f32) -> Result<State, Error> {
+    if next.vehicle.len() != VEHICLE_WORDS
+        || byte(&next.vehicle, 0xc7f2) > 1
+        || byte(&next.vehicle, 4) > 1
     {
         return Err(Error("invalid completed deformation rebuild boundary"));
     }
-    let mut next = input.clone();
-    if byte(&input.vehicle, 0xc7f2) != 0 {
+    if byte(&next.vehicle, 0xc7f2) != 0 {
         put_byte(&mut next.vehicle, 0xc7f2, 0);
         put_byte(&mut next.vehicle, 4, 1);
         next.vehicle = crate::wheel_deformation_state::calculate(&next.vehicle)?;
     }
-    calculate(&next, delta)
+    calculate_owned(next, delta)
 }
 
 #[cfg(test)]

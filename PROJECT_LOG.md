@@ -148,6 +148,10 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F590](log/F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |
+| [F589](log/F0589.md) | 2026-10-27 | OSD timer box sounds are online-only; speech and music sized |
+| [F588](log/F0588.md) | 2026-10-27 | Shadow and bounds passes skip batched and static meshes |
+| [F587](log/F0587.md) | 2026-10-26 | Early-race tick cost: whole vehicle-record copies cut |
 | [F586](log/F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
 | [F585](log/F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
 | [F584](log/F0584.md) | 2026-10-26 | Car part batching |
@@ -204,10 +208,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F533](log/F0533.md) | 2026-10-21 | Shared reverse-engineering base: docs/re/symbols.tsv, tools/re, one master Ghidra project |
 | [F532](log/F0532.md) | 2026-10-21 | Project log split into one file per entry; tools/log_entry.py numbers, checks and indexes them; capture backlog |
 | [F531](log/F0531.md) | 2026-10-20 | Playable e57f2fd391e2 with F521–F530, the portable copy refreshed, APKs a11cddf7de27, and a pause of several days |
-| [F530](log/F0530.md) | 2026-10-20 | Contacts whose normal drifted off unit length no longer pause the race |
-| [F529](log/F0529.md) | 2026-10-20 | Engine audio research: the Car listener (43F7A0), the gear clunk, the backfire and the whine/turbo wiring |
-| [F528](log/F0528.md) | 2026-10-20 | Engine audio: gear shifts of 451770 ported: RPM dip, off-load crossfade and pitch wobble |
-| [F527](log/F0527.md) | 2026-10-20 | Opponent engine mix confirmed offline against the original's group table |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

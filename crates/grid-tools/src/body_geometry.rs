@@ -84,6 +84,15 @@ impl BodyGeometry {
         state: &grid_world::vehicle_publication::State,
         delta: f32,
     ) -> Result<(Option<Self>, grid_world::vehicle_publication::State), Error> {
+        self.deformation_publication_owned(state.clone(), delta)
+    }
+
+    /// [`Self::deformation_publication`] on a state the caller gives up.
+    pub fn deformation_publication_owned(
+        &self,
+        state: grid_world::vehicle_publication::State,
+        delta: f32,
+    ) -> Result<(Option<Self>, grid_world::vehicle_publication::State), Error> {
         use grid_world::{
             deformation_grid::Grid, deformation_publication, vehicle_publication::VEHICLE_WORDS,
         };
@@ -92,7 +101,7 @@ impl BodyGeometry {
             return Err(Error("invalid deformation geometry publication framing"));
         }
         if (b[0xc7f0 / 4] >> 16) & 255 == 0 {
-            return Ok((None, deformation_publication::calculate(state, delta)?));
+            return Ok((None, deformation_publication::calculate_owned(state, delta)?));
         }
         let dimensions: [usize; 3] = std::array::from_fn(|i| b[0xc714 / 4 + i] as usize);
         if dimensions.iter().any(|d| !(2..=16).contains(d))
@@ -111,7 +120,7 @@ impl BodyGeometry {
         };
         let mut geometry = self.clone();
         geometry.rebuild_from_deformation(&grid)?;
-        let next = deformation_publication::after_geometry_rebuild(state, delta)?;
+        let next = deformation_publication::after_geometry_rebuild_owned(state, delta)?;
         Ok((Some(geometry), next))
     }
     /// Source NED, verified owner layout offset, and locally prepared private

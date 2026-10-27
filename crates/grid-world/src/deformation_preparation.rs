@@ -19,50 +19,67 @@ pub fn calculate(
     center: [f32; 4],
     contacts: &[[u32; 32]],
     cursor: usize,
-    mut budget: usize,
-    mut skip: usize,
+    budget: usize,
+    skip: usize,
     parameters: limit::Parameters,
 ) -> Result<Output, Error> {
-    if contacts.len() > crate::MAX_WORLD_CONTACTS
-        || cursor > contacts.len()
-        || budget > 10000
-        || skip > 10000
-    {
-        return Err(Error("invalid deformation preparation bounds"));
-    }
-    // Validate the descriptor/body even for an empty collection. These owned
-    // fields are required by this API's bounded domain, not native dereferences.
-    let mut placeholder = [0; 32];
-    placeholder[3] = 1;
-    // One grid verdict for the descriptor: the limit never writes its grid.
-    let mut grid = None;
-    limit::validate_cached(
-        descriptor,
-        &mut grid,
-        body,
-        center,
-        &placeholder,
-        parameters,
-    )?;
-    for c in contacts {
-        if c[1] > 1 {
-            return Err(Error("invalid preparation owner token"));
-        }
-        if c[1] == 0 {
-            limit::validate_cached(descriptor, &mut grid, body, center, c, parameters)?;
-            if !f32::from_bits(c[0x3c / 4]).is_finite() {
-                return Err(Error("invalid preparation existing cap"));
-            }
-        }
-    }
     let mut out = Output {
         descriptor: descriptor.to_vec(),
         contacts: contacts.to_vec(),
         cursor,
         complete: false,
     };
-    while out.cursor < contacts.len() {
-        let c = &mut out.contacts[out.cursor];
+    // In place: an error discards `out`, so no input changes.
+    (out.cursor, out.complete) = calculate_in(
+        &mut out.descriptor,
+        &mut None,
+        body,
+        center,
+        &mut out.contacts,
+        cursor,
+        budget,
+        skip,
+        parameters,
+    )?;
+    Ok(out)
+}
+
+/// [`calculate`]'s checks alone, without copying the descriptor or contacts:
+/// `Ok` exactly when [`calculate`] from cursor 0 with no budget would succeed.
+/// `grid` caches the descriptor's grid verdict for [`calculate_in`] on the
+/// same descriptor.
+pub(crate) fn validate(
+    descriptor: &[u32],
+    grid: &mut Option<Result<usize, Error>>,
+    body: &[u32; limit::PHYSICAL_WORDS],
+    center: [f32; 4],
+    contacts: &[[u32; 32]],
+    parameters: limit::Parameters,
+) -> Result<(), Error> {
+    check(descriptor, grid, body, center, contacts, 0, 0, 0, parameters)
+}
+
+/// [`calculate`] writing the descriptor and contacts in place; returns the
+/// cursor and whether it completed. On an error the checks failed before any
+/// write, or a later contact failed and both buffers may be partly written.
+/// `grid` is empty or [`validate`]'s cache for this descriptor.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calculate_in(
+    descriptor: &mut [u32],
+    grid: &mut Option<Result<usize, Error>>,
+    body: &[u32; limit::PHYSICAL_WORDS],
+    center: [f32; 4],
+    contacts: &mut [[u32; 32]],
+    mut cursor: usize,
+    mut budget: usize,
+    mut skip: usize,
+    parameters: limit::Parameters,
+) -> Result<(usize, bool), Error> {
+    check(
+        descriptor, grid, body, center, contacts, cursor, budget, skip, parameters,
+    )?;
+    while cursor < contacts.len() {
+        let c = &mut contacts[cursor];
         if c[1] == 0 {
             if skip != 0 {
                 skip -= 1;
@@ -70,10 +87,9 @@ pub fn calculate(
                 if budget == 0 {
                     break;
                 }
-                // In place: an error discards `out`, so no input changes.
                 let (contact, cap) = limit::calculate_side_in(
-                    &mut out.descriptor,
-                    &mut grid,
+                    descriptor,
+                    grid,
                     body,
                     center,
                     c,
@@ -93,8 +109,55 @@ pub fn calculate(
                 budget -= 1;
             }
         }
-        out.cursor += 1;
+        cursor += 1;
     }
-    out.complete = out.cursor == contacts.len();
-    Ok(out)
+    Ok((cursor, cursor == contacts.len()))
+}
+
+/// The bounds, descriptor and contact checks, caching the descriptor's grid
+/// verdict for the limit in `grid`.
+#[allow(clippy::too_many_arguments)]
+fn check(
+    descriptor: &[u32],
+    grid: &mut Option<Result<usize, Error>>,
+    body: &[u32; limit::PHYSICAL_WORDS],
+    center: [f32; 4],
+    contacts: &[[u32; 32]],
+    cursor: usize,
+    budget: usize,
+    skip: usize,
+    parameters: limit::Parameters,
+) -> Result<(), Error> {
+    if contacts.len() > crate::MAX_WORLD_CONTACTS
+        || cursor > contacts.len()
+        || budget > 10000
+        || skip > 10000
+    {
+        return Err(Error("invalid deformation preparation bounds"));
+    }
+    // Validate the descriptor/body even for an empty collection. These owned
+    // fields are required by this API's bounded domain, not native dereferences.
+    let mut placeholder = [0; 32];
+    placeholder[3] = 1;
+    // One grid verdict for the descriptor: the limit never writes its grid.
+    limit::validate_cached(
+        descriptor,
+        grid,
+        body,
+        center,
+        &placeholder,
+        parameters,
+    )?;
+    for c in contacts {
+        if c[1] > 1 {
+            return Err(Error("invalid preparation owner token"));
+        }
+        if c[1] == 0 {
+            limit::validate_cached(descriptor, grid, body, center, c, parameters)?;
+            if !f32::from_bits(c[0x3c / 4]).is_finite() {
+                return Err(Error("invalid preparation existing cap"));
+            }
+        }
+    }
+    Ok(())
 }

@@ -48,6 +48,12 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
 /// reached resource/view branches. The legacy public API retains all guards.
 pub(crate) fn update_without_rebuild(input: &State, delta: f32) -> State {
     let mut next = input.clone();
+    update_in(&mut next, delta);
+    next
+}
+
+/// [`update_without_rebuild`] in place.
+pub(crate) fn update_in(next: &mut State, delta: f32) {
     let b = &mut next.vehicle;
     let mut timer = f(b, 0xc798);
     if timer > 0. {
@@ -70,7 +76,6 @@ pub(crate) fn update_without_rebuild(input: &State, delta: f32) -> State {
         b[car / 4 + 3] = 0;
         next.physical[physical / 4..physical / 4 + 4].copy_from_slice(&b[car / 4..car / 4 + 4]);
     }
-    next
 }
 
 #[cfg(test)]

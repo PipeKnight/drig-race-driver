@@ -1432,6 +1432,33 @@ alternating rounds, 26 October 23:25–23:37), off → on:
 Phone [I], not measured: about 3x the desktop CPU times, so about 2 ms less on the render thread
 and no change on the main thread, which the phone log shows as the critical path.
 
+## PostUpdate: shadow and bounds passes (F588)
+
+What PostUpdate spends in the phone view (desktop, profile build, after F584), per frame:
+- the directional light's cascade visibility (`check_dir_light_mesh_visibility` and its parallel
+  loops) about 0.55 ms;
+- camera visibility about 0.35 ms, the visibility resets about 0.17 ms, bounds (`calculate_bounds`)
+  0.14 ms, `update_mesh_previous_global_transforms` 0.16 ms, `mark_dirty_trees` 0.14 ms,
+  `car_batch::refresh` 0.17 ms;
+- several Bevy systems show far more inclusive than exclusive time (for example
+  `check_entities_needing_specialization` 0.23-0.29 ms inclusive, 0.02-0.08 ms exclusive): they wait
+  for their parallel loops on the compute pool [I].
+
+Mesh asset changes are not the cause: a probe (not committed) saw a mesh change in 117 of 600
+frames (wheel debris, and one car's parts and its batch during a deformation burst), so the
+`AssetChanged` filters cost nothing on most frames.
+
+Changes, picture bit-identical (fixed-frame renders at ticks 300, 2,400 and 6,000: 0 pixels differ):
+- batched car parts also carry `NotShadowCaster` while they are batched (removed when they leave),
+  so the cascade passes skip them: 163 → 124 parallel batches per frame;
+- car batches, static batches and single static track parts carry `NoAutoAabb` with their bounds
+  computed once. Car parts keep the bounds the presentation sets on deformation. Bevy's per-frame
+  bounds pass now checks only the other meshes.
+
+Result, F584 → F588 executables alternating, two rounds (27 October 01:30-01:37): bounds 0.14 →
+0.07 ms, cascade loops 0.35 → 0.32 ms, about 0.1 ms in all; PostUpdate 4.41-4.64 → 4.57-4.61 ms,
+inside the noise. Phone [I]: about 0.3 ms.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,
@@ -1649,3 +1676,92 @@ time and the lock state).
 ### G300 integration ownership guard (27 October 2026)
 
 F584's reported measurements remain historical evidence for its exact build. During graphics integration on pinned F586, player source entities carrying car0/ and no OpponentPart are conservatively excluded from new car batching: existing main-view bumper suppression and probe ownership use those source roots. Opponent batching remains enabled, including the same model prefix on explicitly marked opponents. Layered/probe/glass exclusions already protect several paths, so this is a precise ownership guard rather than a claim that every batch broke rendering. The actual ECS fixture passes with retained player originals and constructed opponent geometry; the full1137-test gate, four incoming identities,24quick-soak cases and fresh native BMW/Istanbul smoke controls also pass (G300). Actual bumper/Manual/general rendering remains outside that bounded GPU proof. No new FPS gain is claimed for the adjusted graphics build.
+
+## Early-race tick cost: whole-record copies (round 2)
+
+Coordinator's task (26 October 2026): after F579 the phone still pays about 2.8 ms per tick early
+in a race at 4 threads (Donington, 12 cars; owner's log `log-20261026-125712.txt`). Profile the
+early-race tick and cut its largest costs with bit-identical results.
+
+**Profile [O]** (`tools/sample_profile.py --busy` on a line-tables build of `grid-opponent-race`
+with deformation, AI and props, 12 cars, 4 threads; new option `--path-frames N` prints longer call
+paths). The leaf `_NLG_Return2` (vcruntime's memcpy) was 31.6 % of all samples. About 26 points of
+that fell inside `MultiRuntime::tick` (69 % of samples; the rest is loading), so about 40 % of the
+tick's CPU was copying. Each car's 132 KB vehicle record was copied about eight times per tick:
+- in the serial body events, the mirror copy into the deformation registration (9.3 % inclusive
+  at that one line);
+- in the serial world advance, the deforming frame's `owner.to_vec()` (5.9 %) and a
+  validation-only `deformation_preparation::calculate` call that copied the 42 KB descriptor and
+  the contacts and threw them away (about 3.4 %). The descriptor's 400-node grid check also ran
+  twice per frame (3.1 %);
+- in the parallel vehicle stage, the staged registration's owner clone, the sync slice (53 KB:
+  `to_vec`, a clone inside `vehicle_sync::calculate`, and the copy back), the deformation
+  publication's whole-state clone (`update_without_rebuild`), and the handling update's clone of
+  the publication's fresh output.
+
+**Changes [V], all result-preserving:**
+- The vehicle stage moves the car's record into its staged registration (`mem::take`); nothing
+  reads the staged state's record before the body events take it back.
+- `deformation_world::Registration::owner` is documented as a slot that is valid only during a
+  world tick. Every caller fills it from the car first: the solo `vehicle_world` path copies it,
+  and the multi-car runtime moves it in. No reader looks at its content between ticks (checked:
+  grid-app, grid-tools, the probes and the tests read only `bulk_calls`, `records`, `random_seed`,
+  `owner_toggle`, or the owner's length for the flashback memory estimate). So the multi-car body
+  events no longer copy the car's record back into it; the committed registration keeps an empty
+  owner.
+- The body events run on the compute pool, one run of cars per thread, joined in car order (each
+  car touches only its own staged state, registration and damage RNG).
+- `deforming_physical_frame` is split into `prepare` (every check, no owner) and `finish` (takes
+  the owner record by value). `deformation_world::calculate_group` moves the registration's owner
+  in; a failure inside the frame drops it, and both callers discard the registration with the
+  failed tick (the solo path works on a clone, the multi-car path on per-tick staging).
+- `deformation_preparation::validate` (the checks alone) replaces the validation-only call, and
+  `calculate_in` runs the prepare phase on the context's own descriptor and contacts. The grid
+  verdict from the validation is kept for the prepare phase, which sees the same descriptor word
+  for word, and the limit never writes the grid.
+- `vehicle_sync::calculate_in` updates the record and the physical body in place. Every word it
+  reads after its first write is one it never writes. `vehicle_job::calculate_staged` uses it on
+  its staged copy.
+- `vehicle_job::Publication` takes the owner state by value.
+  `deformation_publication::calculate_owned` and `after_geometry_rebuild_owned` update in place
+  (`vehicle_publication::update_in`). The words the update writes (+C780..+C798, +15CC, +15DC,
+  physical +210/+220) are not among those read after it, and each later write is read, if at all,
+  before it. `BodyGeometry::deformation_publication_owned` serves the multi-car stage.
+- `vehicle_handling::calculate_with_empty_notification_receiver_owned` takes the publication's
+  output by value. The damage dispatches' inputs (wheel impacts, collision points, the physical
+  record) are read before the state becomes the output, as the copying version read them from its
+  input.
+- Kept: `Runtime::staged_car`'s copy, which is the car's rollback state when the world tick fails.
+
+**Identity [V]** (base = origin/main 12aa5b00 built in this worktree; fixed = the change):
+- grid-opponent-race with props, 4 threads: derby `e9011d21…` and Nürburgring `0eaebdd8…`, base =
+  fixed, and the same with `GRID_SERIAL_TWIN=1`.
+- Headless drive samples without wall-clock fields (`GRID_AUTOPILOT=1 GRID_THREADS=4`, no timers):
+  drift battle `d01bde2a…`, Donington 12 bmw `5be6f0c1…`, base = fixed.
+- Solo grid-opponent-race (Donington route_0, `1 5600 ai`) with `GRID_ENGINE_AUDIO_TRACE`, with and
+  without `GRID_DEFORMATION_PARAMETERS`: race output and trace base = fixed in both. The
+  deformation parameters alone change this lap (86.792 s without, 86.785 s with, from tick 1518).
+  That explains a reported lap difference against an F578-era trace, which ran without them.
+- `tools/identity.tsv` in the full prepush tier.
+
+**Before and after at 4 threads** (headless `GRID_PERF_TIMING=1`, base against fixed, alternating,
+three rounds, all under the build lock, 22:42-22:49 on 26 October, after the owner had finished
+playing; an earlier set at 22:04 was disturbed by outside load and dropped). ms per world tick;
+early = ticks 600-3000, late = the last 3000:
+
+| Event | Window | base | fixed |
+|---|---|---:|---:|
+| Donington, 12 bmw | early | 0.70-0.74 | 0.46-0.50 |
+| Donington, 12 bmw | late (56 pieces, asleep) | 1.00-1.08 | 0.61-0.67 |
+| Drift battle | early | 0.51-0.53 | 0.37-0.38 |
+| Drift battle | late (268 pieces) | 3.86-3.94 | 3.63-3.71 |
+
+Donington early by stage, base → fixed: `WorldAdvance` 0.18-0.19 → 0.08; `VehicleStage`
+0.27-0.29 → 0.18-0.21; `BodyEvents` 0.08-0.09 → 0.05; `Commit` (which holds the body events)
+0.13 → 0.08-0.09.
+
+- [I] Early in a Donington race the PC's tick falls by about a third. At the phone's 2.8 ms that
+  would be about 1.9 ms per tick (2.8 × 0.48 / 0.72), assuming the phone's cost scales like the
+  PC's. Memory-bound copies may gain more on the phone; this is not measured there.
+- Left: the vehicle stage itself (wheels, suspension, contact updates; 0.18-0.21 ms on 4 threads),
+  `staged_car`'s rollback copy, and in an awake pile the solve of a car group's contacts.

@@ -15,7 +15,7 @@ use crate::track_surface::{SourcePart, SurfaceMaterial};
 use bevy::{
     camera::{
         primitives::{Aabb, MeshAabb},
-        visibility::{RenderLayers, VisibilityClass, VisibilityRange, VisibilitySystems},
+        visibility::{NoAutoAabb, RenderLayers, VisibilityClass, VisibilityRange, VisibilitySystems},
     },
     light::NotShadowCaster,
     mesh::{Indices, MeshVertexAttributeId, PrimitiveTopology, VertexAttributeValues, VertexFormat},
@@ -198,6 +198,10 @@ fn merge<M: Material>(
             let chunk = &group[start..end];
             start = end;
             if chunk.len() < 2 && !key.intact {
+                // A single part stays, with fixed bounds.
+                if let Some(aabb) = meshes.get(&chunk[0].mesh).and_then(|m| m.compute_aabb()) {
+                    commands.entity(chunk[0].entity).insert((aabb, NoAutoAabb));
+                }
                 continue;
             }
             let (mesh, indices, ranges) = build(chunk, &meshes, origin, &key.layout);
@@ -210,12 +214,16 @@ fn merge<M: Material>(
             stats[if key.intact { 3 } else { 1 }] += 1;
             stats[4] += count;
             let shown = vec![true; parts.len()];
+            let bounds = mesh.compute_aabb().unwrap_or_default();
             commands.spawn((
                 Name::new(format!("static_batch/{}/{}_{}", if key.intact { "intact" } else { "track" }, key.cell.0, key.cell.1)),
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(chunk[0].material.clone()),
                 Transform::from_translation(origin),
                 Batch { indices, parts, shown },
+                // Hiding a prop only drops triangles: the bounds stay valid.
+                bounds,
+                NoAutoAabb,
             ));
             for part in chunk {
                 if part.intact {

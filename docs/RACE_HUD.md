@@ -84,7 +84,7 @@ are the same for both.
 | Position (right top) | POS n/total. Split pills: the car ahead, the player and the car behind, with name, position and the gap in seconds | Pills show for 5 s after each completed lap (the `minduration`) [I]. The rows and trigger were not traced. Gaps are race distance at the player's speed (floor 10 m/s), as before. |
 | Dial (right bottom) | Speed (km/h or mph), gear (N, R, 1…), rpm bar with red zone, GEAR and REV lights, throttle and brake bars, odometer | rpm = engine word +0x1894 × 60/2π against the limit +0x17A4 (rad/s [I]). Scale: the smallest range ≥ the limit [I]; red zone: its last 2000 rpm [I]. GEAR at 0.90 and REV at 0.95 of the limit [D values, I meaning]. The odometer is the distance driven this event [I]. |
 | Damage icons | the F333 panel, moved beside the dial | `dial_damage` is part of `dial_main` [D]. |
-| Message box (centre) | countdown number, then GO for 1 s | AUTHORED timing for GO. |
+| Message box (centre) | solo time trial only: countdown number, then GO for 1 s | AUTHORED timing for GO. Races show no box (F590): the original single-player session never starts it (AUDIO_RESEARCH §28). |
 | Wrong way (top) | WRONG WAY! | Shown after 4 s moving against the racing line (speed > 3 m/s), hidden after 2 s the right way [D intervals, I reading]. |
 | Minimap (left bottom) | the AI racing line (up to 160 points) and a dot per car (player yellow), CHEQUERED when the leader has the flag | AUTHORED: the original draws `track_mask` from its own data, with world +Z up [I]. |
 

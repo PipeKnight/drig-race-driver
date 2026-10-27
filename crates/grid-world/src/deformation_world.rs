@@ -6,6 +6,11 @@ use crate::{
 };
 #[derive(Clone)]
 pub struct Registration {
+    /// The registered car's vehicle record while a world tick runs (the
+    /// original registers the car itself). Between ticks it is only a slot:
+    /// each tick's caller fills it from the car's record first (the solo
+    /// `vehicle_world` path copies it, the multi-car runtime moves it in and
+    /// leaves it empty after the tick), so nothing reads it outside a tick.
     pub owner: Vec<u32>,
     pub limit: deformation_contact_limit::Parameters,
     pub bulk: deformation_callback_state::Parameters,
@@ -45,29 +50,31 @@ pub(crate) fn calculate_group(
             c
         })
         .collect();
-    // The frame sees the owner with its +C7F8 link cleared; the registration
-    // is restored before any failure returns, so it stays unchanged.
+    // The frame sees the owner with its +C7F8 link cleared. A failed check
+    // restores the registration; a failure inside the frame drops its owner
+    // record, which the callers discard with the failed world tick.
     registration.owner[0xc7f8 / 4] = 0;
-    let (owner, settings) = (
-        &registration.owner,
-        &registration.owner[0xd240 / 4..(0xd240 + 0x1054) / 4],
-    );
-    let result = deforming_physical_frame::calculate_rows(
-        deforming_physical_frame::Input {
-            frame,
-            owner,
-            physical,
-            contacts: &raw,
-            settings,
-            shapes,
-            limit: registration.limit,
-            bulk: &registration.bulk,
-            random_seed: registration.random_seed,
-        },
-        rows,
-    );
-    registration.owner[0xc7f8 / 4] = 0xd240;
-    let result = result?;
+    let prepared = deforming_physical_frame::prepare(deforming_physical_frame::Input {
+        frame,
+        owner: &registration.owner,
+        physical,
+        contacts: &raw,
+        settings: &registration.owner[0xd240 / 4..(0xd240 + 0x1054) / 4],
+        shapes,
+        limit: registration.limit,
+        bulk: &registration.bulk,
+        random_seed: registration.random_seed,
+    });
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            registration.owner[0xc7f8 / 4] = 0xd240;
+            return Err(error);
+        }
+    };
+    // Moved, not copied: the frame hands the record back in its output.
+    let owner = std::mem::take(&mut registration.owner);
+    let result = deforming_physical_frame::finish(frame, rows, prepared, owner)?;
     let mut returned = contacts.to_vec();
     for (output, raw) in returned.iter_mut().zip(&result.contacts) {
         for at in [0x38, 0x3c, 0x40, 0x44] {

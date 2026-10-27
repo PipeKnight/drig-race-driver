@@ -8,6 +8,10 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F590](F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |
+| [F589](F0589.md) | 2026-10-27 | OSD timer box sounds are online-only; speech and music sized |
+| [F588](F0588.md) | 2026-10-27 | Shadow and bounds passes skip batched and static meshes |
+| [F587](F0587.md) | 2026-10-26 | Early-race tick cost: whole vehicle-record copies cut |
 | [F586](F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
 | [F585](F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
 | [F584](F0584.md) | 2026-10-26 | Car part batching |
@@ -489,6 +493,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G302](G0302.md) | 2026-10-27 | Integrate F587-F590 preserving graphics ownership |
 | [G301](G0301.md) | 2026-10-27 | Compare main-view display transforms for Lacetti paint |
 | [G300](G0300.md) | 2026-10-27 | Integrate F584-F586 preserving player render ownership |
 | [G299](G0299.md) | 2026-10-27 | Verify rendered cracked-window reset lifecycle |

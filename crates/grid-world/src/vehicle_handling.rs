@@ -235,7 +235,7 @@ pub fn calculate_with_queries(
     delta: f32,
     queries: Option<&[QueryRecord]>,
 ) -> Result<State, Error> {
-    calculate_owned(input, delta, queries, false)
+    calculate_owned(input.clone(), delta, queries, false)
 }
 
 /// Complete wheel-terminal transition with an owned component whose event
@@ -246,12 +246,22 @@ pub fn calculate_with_empty_notification_receiver(
     delta: f32,
     queries: Option<&[QueryRecord]>,
 ) -> Result<State, Error> {
+    calculate_owned(input.clone(), delta, queries, true)
+}
+
+/// [`calculate_with_empty_notification_receiver`] on a state the caller gives
+/// up (an error drops it).
+pub(crate) fn calculate_with_empty_notification_receiver_owned(
+    input: State,
+    delta: f32,
+    queries: Option<&[QueryRecord]>,
+) -> Result<State, Error> {
     calculate_owned(input, delta, queries, true)
 }
 
 #[allow(clippy::assign_op_pattern)] // Preserve the original SSE operand order.
 fn calculate_owned(
-    input: &State,
+    input: State,
     delta: f32,
     queries: Option<&[QueryRecord]>,
     empty_notification_receiver: bool,
@@ -267,10 +277,13 @@ fn calculate_owned(
     // 9F3EAC..9F3EB7: either activation byte clear returns at once. The damage
     // option's mode 0 (mechanical_damage::Damage::Off) clears +B14.
     if byte(car, 0xb13) == 0 || byte(car, 0xb14) == 0 {
-        return Ok(input.clone());
+        return Ok(input);
     }
     let b = &car[MUTABLE / 4..(MUTABLE + 0x460) / 4];
-    let p = &input.physical;
+    // The input's physical record; the damage dispatches below may change
+    // the state's copy, and every read below is of the input's.
+    let physical = input.physical;
+    let p = &physical;
     if car[0xdb0 / 4] != 0
         || b[0x214 / 4] != 0
         || car[0x1620 / 4] != 4
@@ -336,20 +349,25 @@ fn calculate_owned(
             return Err(Error("invalid active handling wheel-wear divisor"));
         }
     }
-    let mut next = input.clone();
-    if let Some(mut random_state) = input.damage_random_state {
+    // The dispatches read the input's wheel impacts and collision points, so
+    // they are taken before the state becomes the output.
+    let hits: [Option<(f32, [f32; 4])>; 4] = std::array::from_fn(|i| {
+        let impact = f(car, 0x1ac8 + i * 0x150) * delta;
+        if impact <= threshold {
+            return None;
+        }
+        let local: [f32; 4] = std::array::from_fn(|j| f(b, 0x60 + i * 0x30 + j * 4));
+        let point = std::array::from_fn(|j| {
+            (local[3] * f(p, 0x200 + j * 4) + local[1] * f(p, 0x1e0 + j * 4))
+                + (local[2] * f(p, 0x1f0 + j * 4) + local[0] * f(p, 0x1d0 + j * 4))
+        });
+        Some((impact, point))
+    });
+    let mut next = input;
+    if let Some(mut random_state) = next.damage_random_state {
         // Original order: all four collision dispatches precede wheel wear.
         // Transform grouping follows 9F3F7D..9F3FD0, including homogeneous W.
-        for i in 0..4 {
-            let impact = f(car, 0x1ac8 + i * 0x150) * delta;
-            if impact <= threshold {
-                continue;
-            }
-            let local: [f32; 4] = std::array::from_fn(|j| f(b, 0x60 + i * 0x30 + j * 4));
-            let point = std::array::from_fn(|j| {
-                (local[3] * f(p, 0x200 + j * 4) + local[1] * f(p, 0x1e0 + j * 4))
-                    + (local[2] * f(p, 0x1f0 + j * 4) + local[0] * f(p, 0x1d0 + j * 4))
-            });
+        for (impact, point) in hits.into_iter().flatten() {
             let output = crate::collision_damage::calculate_with_queries(
                 &next,
                 point,
@@ -506,7 +524,7 @@ pub fn publish_with_empty_notification_receiver(
     queries: Option<&[QueryRecord]>,
 ) -> Result<State, Error> {
     let published = crate::vehicle_publication::calculate(input, delta)?;
-    calculate_with_empty_notification_receiver(&published, delta, queries)
+    calculate_owned(published, delta, queries, true)
 }
 
 #[cfg(test)]
