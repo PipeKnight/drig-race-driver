@@ -22,7 +22,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [build_seed.ps1](build_seed.ps1) | Build a new cargo build-dir seed beside C:\cargo-build\seed and swap it in. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [dedup_hardlinks.py](dedup_hardlinks.py) | Replace byte-identical files under a directory with NTFS hard links. | [DISK_USAGE](../docs/DISK_USAGE.md) |
 | [disk_report.ps1](disk_report.ps1) | Report disk usage of the project folder: cargo target dirs, worktrees and local/ captures. | [DISK_USAGE](../docs/DISK_USAGE.md) |
-| [identity.tsv](identity.tsv) | Solo-lap identity check (docs/TOOLCHAIN.md "Identity check"): sha256 of the standard output of target/release/grid-opponent-race ROOT CD01 BP01 <args> env "-": … | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
+| [identity.tsv](identity.tsv) | Solo-lap identity check (docs/TOOLCHAIN.md "Identity check"): sha256 of the standard output of target/release/grid-opponent-race ROOT CD01 BP01 <args> env "-": … | [PERFORMANCE](../docs/PERFORMANCE.md) |
 | [index_files.py](index_files.py) | Generate tools/README.md and docs/INDEX.md: one line per tool and per document. |  |
 | [install_native_build_tools.ps1](install_native_build_tools.ps1) | Install authorized native development prerequisites from official sources. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [install_research_tool.ps1](install_research_tool.ps1) | Download official pinned research packages into ignored project-local storage. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
@@ -153,7 +153,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [prepare_deformed_wheel_geometry.py](prepare_deformed_wheel_geometry.py) | Run whole wheel geometry with retained grids and explicit policy provenance. | [DEFORMATION_GRID](../docs/DEFORMATION_GRID.md) |
 | [prepare_texture_candidate.py](prepare_texture_candidate.py) | Package an opaque diffuse upscale privately, preserving mean linear colour. | [TEXTURE_OVERRIDES](../docs/TEXTURE_OVERRIDES.md) |
 | [re/GhidraMaster.ps1](re/GhidraMaster.ps1) | Dot-source from tools/run_ghidra_*.ps1: runs Ghidra headless scripts on the shared master project (<main checkout>/local/ghidra-master, program grid-unpacked.exe) … | [re/README](../docs/re/README.md) |
-| [re/grid_re.py](re/grid_re.py) | Address helpers for the unpacked GRID executable (local/compatibility/grid-unpacked.exe). | [re/README](../docs/re/README.md) |
+| [re/grid_re.py](re/grid_re.py) | Address helpers for the unpacked GRID executable (local/compatibility/grid-unpacked.exe). | [AUDIO_RESEARCH](../docs/AUDIO_RESEARCH.md) |
 | [re/harvest_projects.py](re/harvest_projects.py) | Export user names/comments from every Ghidra project under local/ (main checkout and worktrees). | [re/README](../docs/re/README.md) |
 | [re/master.py](re/master.py) | Manage the shared master Ghidra project in <main checkout>/local/ghidra-master. | [re/README](../docs/re/README.md) |
 | [re/merge_symbols.py](re/merge_symbols.py) | Merge names/comments exported by tools/ghidra/ExportSymbols.java into docs/re/symbols.tsv. | [re/README](../docs/re/README.md) |
