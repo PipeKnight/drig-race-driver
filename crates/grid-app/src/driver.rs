@@ -409,6 +409,7 @@ mod tests {
             track: false,
             liveries: Vec::new(),
             low_lods: Vec::new(),
+            ornament_lods: Default::default(),
         };
         let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY).unwrap();
         let (driver, wheel) = (cockpit.driver.unwrap(), cockpit.wheel.unwrap());

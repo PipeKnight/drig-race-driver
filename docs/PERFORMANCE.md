@@ -1530,6 +1530,63 @@ Cascades 1 and 2 (the coordinator's item): the original's caster callback skips 
 world caster, not only opponents (docs/CAR_LOD.md "Cascades (F616)"), so the port's rule is already
 the equivalent one. Not changed.
 
+## Track scenery levels of detail (F633)
+
+The owner saw frame drops at Washington and asked whether its tall buildings are simplified with
+distance. They were not: grid-app drew every placed ornament at level 0 at any distance. The
+original selects each ornament's level per frame from the route's `ornament_attributes.xml`
+distances and culls it beyond the last one (docs/TRACK_LOD.md). `ornament_lod.rs` ports that rule;
+`GRID_ORNAMENT_LOD=0` gives the old picture.
+
+- Level entities: every level of every placed ornament draw is an entity; a per-frame system shows
+  one level per instance and hides the rest (no index rewrites, no uploads when a level changes).
+  They are not merged by `static_batch`. Washington: 7,008 track entities instead of 1,381 plus
+  740 fewer static batches (`mesh_entities` at frame 3,600); the drawn track entities stay near 100.
+- Shadows: every ornament casts with its level 1, as in the original (pass 0x401).
+
+Washington Viper race, 12 cars, PC, `--benchmark-frames 3600` after 240 warm-up frames, two runs
+each, under the build lock (no build alongside), means over the 5 s GPU windows [O]:
+
+| | phone view 1539x720, mobile preset | desktop 1920x1080 |
+|---|---|---|
+| camera triangles, off / on | 558k, 546k / 330k, 332k | 526k, 511k / 319k, 316k |
+| triangles in the 4 shadow cascades | 494k, 479k / 361k, 363k | 450k, 448k / 340k, 339k |
+| `main_opaque_pass_3d` GPU ms | 0.42, 0.53 / 0.37, 0.43 | 0.59, 0.62 / 0.65, 0.57 |
+| frame interval mean / p95 / p99 ms | 17.8, 18.2 / 17.8, 17.6; p95 23.6, 27.1 / 23.7, 22.4; p99 40.3, 39.7 / 39.9, 38.4 | 17.8, 18.4 / 17.8, 18.4 |
+| MainSchedule / RenderSchedule ms | 8.4, 9.4 / 8.8, 8.0; 14.8, 14.3 / 14.2, 13.5 | 8.0, 9.4 / 8.4, 9.1; 13.0, 14.4 / 13.8, 14.5 |
+
+On the PC the frame is CPU-bound and the GPU is far from busy, so the frame rate does not move; the
+CPU cost of the extra hidden entities is within the run-to-run noise. Shadows were measured
+separately on the Donington phone view (a GPU span around both shadow passes, PC): 2.0 ms GPU
+against 1.3 ms for the main opaque pass, the largest pass. That span hung the app at exit with GPU
+timing on and was not kept.
+
+Picture: fixed step, 1600x900, off against on: Washington tick 300 7.1 % and tick 3,000 6.5 % of
+pixels differ, Donington tick 300 5.6 % and 6,000 1.1 %. Almost all of it is shadow detail (level 1
+casters: e.g. less self-shadow under overhangs); near geometry is the same. Distant ornaments draw
+their coarser levels and vanish past `lod_distance_02`. The original cross-fades scenery over 20 m;
+the port switches in the middle of that overlap. The owner approved the change for desktop and
+phone (28 October: "everywhere, as in the original"), an exception to the identical-desktop rule.
+
+Washington spikes: the frames over 45 ms fall at the same benchmark frames with the levels off and
+on (about frames 480 and 550, then single frames), so scenery does not cause them. The 10 s window
+that holds the first ones has 36.9 mesh modifications per second (`asset_churn`: `car_batch` and
+opponent LOD meshes, the pack's contacts after the start) against 1.5-6.5 in later windows [I: the
+car-batch rebuilds and deformation uploads after the first contacts are the cause; not traced
+further]. Backlog.
+
+Phone [I]: about 40 % fewer camera triangles and 25 % fewer shadow-cascade triangles at Washington.
+The phone's frame was GPU-bound at the grid (F555), so some of that should show as GPU time. Check
+in the owner's log: `view_triangles view=camera0` total and the cascade lines, `gpu_pass ...
+main_opaque_pass_3d`, and `perf_timing` MainSchedule / RenderSchedule (the hidden level entities
+are main-world work).
+
+Not done (backlog after the slow-down of 27 October): per-route-block `world_cull_dist`, the
+instance caps, the scenery cross-fade; shadow caster culling and static shadow caching; the car
+mesh rebuilds behind the Washington spikes; ground cover partial writes (F592); per-island
+`WorldAdvance` (F568); the car-group contact solve and asleep pieces (F579); the vehicle stage
+(round 2).
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

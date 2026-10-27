@@ -67,6 +67,7 @@ mod motion_capture;
 mod particles;
 mod pause_menu;
 mod post_race;
+mod ornament_lod;
 mod osd_scene;
 mod race_hud;
 mod race_osd;
@@ -121,7 +122,7 @@ use bevy::{
     window::ExitCondition,
     winit::WinitPlugin,
 };
-use grid_formats::{collision, entities, jpk, material, mesh, ornaments, pssg, scene, texture};
+use grid_formats::{binxml, collision, entities, jpk, material, mesh, ornaments, pssg, scene, texture};
 use grid_tools::{car::Car as CarModel, route::Route};
 use std::{
     collections::BTreeMap,
@@ -146,6 +147,8 @@ struct Car {
     liveries: Vec<BTreeMap<String, Vec<u8>>>,
     /// Per field model: the opponents' low-detail levels (docs/CAR_LOD.md).
     low_lods: Vec<LowLod>,
+    /// Track ornaments' levels of detail (docs/TRACK_LOD.md).
+    ornament_lods: ornament_lod::Levels,
 }
 /// A model's `_lowLOD.pssg` for its opponents.
 #[derive(Default)]
@@ -730,6 +733,7 @@ fn load_package(
         track,
         liveries: Vec::new(),
         low_lods: Vec::new(),
+        ornament_lods: Default::default(),
     };
     if objects {
         append_objects(root, route, &mut car)?;
@@ -808,6 +812,82 @@ fn append_route_split(
     );
     Ok(())
 }
+/// The ornament types and instances of a route (docs/TRACK_LOD.md): level
+/// counts from the library, distances from `ornament_attributes.xml`, the
+/// `scenery` category from `ornaments.bin` and each instance's world box.
+fn ornament_types(
+    root: &Path,
+    route: &Route,
+    placement_bytes: &[u8],
+    placements: &ornaments::Ornaments,
+    draws: &[(u8, scene::Draw)],
+) -> Result<ornament_lod::Levels, Box<dyn std::error::Error>> {
+    let mut distances: BTreeMap<String, [f32; 3]> = BTreeMap::new();
+    let path = root.join(route.file("ornament_attributes.xml"));
+    if path.is_file() {
+        let bytes = read(&path)?;
+        let document = binxml::read(&bytes)?;
+        for element in document.elements.iter().filter(|e| e.name == "ornament_attributes") {
+            let field = |key: &str| element.attributes.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+            let Some(name) = field("name") else { continue };
+            let mut d = ornament_lod::DEFAULT_DISTANCES;
+            for (i, value) in d.iter_mut().enumerate() {
+                if let Some(v) = field(&format!("lod_distance_0{i}")) {
+                    *value = v.trim().parse()?;
+                }
+            }
+            distances.insert(name.to_owned(), d);
+        }
+    }
+    let mut levels: BTreeMap<&[u8], u8> = BTreeMap::new();
+    for (level, draw) in draws {
+        if let Some(p) = draw.prototype {
+            let n = levels.entry(p).or_default();
+            *n = (*n).max(level + 1);
+        }
+    }
+    let mut result = ornament_lod::Levels::default();
+    let mut missing = 0;
+    for p in &placements.prototypes {
+        let root_name = [p.name, b" Root".as_slice()].concat();
+        // +44: offset of the category string, 0xFFFFFFFF for none (0x980830).
+        let category = placement_bytes
+            .get(p.opaque_words[0] as usize..)
+            .and_then(|b| b.split(|&c| c == 0).next());
+        let name = String::from_utf8_lossy(p.name);
+        let d = distances.get(name.as_ref()).copied().unwrap_or_else(|| {
+            missing += 1;
+            ornament_lod::DEFAULT_DISTANCES
+        });
+        let kind = result.types.len() as u32;
+        result.types.push(ornament_lod::Type {
+            distances: d,
+            levels: levels.get(root_name.as_slice()).copied().unwrap_or(1),
+            scenery: category == Some(b"scenery".as_slice()),
+        });
+        let [x0, y0, z0, x1, y1, z1] = p.bounds;
+        let (a, b) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
+        let (lo, hi) = (a.min(b), a.max(b));
+        for placement in &p.transforms {
+            let m = Mat4::from_cols_array(placement);
+            let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+            for c in 0..8 {
+                let corner = Vec3::select(BVec3::new(c & 1 != 0, c & 2 != 0, c & 4 != 0), hi, lo);
+                let w = m.transform_point3(corner);
+                min = min.min(w);
+                max = max.max(w);
+            }
+            result.instances.push(ornament_lod::Instance { kind, min, max });
+        }
+    }
+    println!(
+        "ornament_types types={} instances={} scenery={} without_attributes={missing}",
+        result.types.len(),
+        result.instances.len(),
+        result.types.iter().filter(|t| t.scenery).count()
+    );
+    Ok(result)
+}
 fn append_objects(
     root: &Path,
     route: &Route,
@@ -817,9 +897,27 @@ fn append_objects(
     let tree = pssg::read_tree(&bytes)?;
     // Static meshes plus the skinned damage meshes broken pieces draw (F566).
     let sources = mesh::read_object_meshes(&tree)?;
-    let draws = scene::read_object_draws(&tree, &sources)?;
+    let lod = ornament_lod::enabled();
+    let draws: Vec<(u8, scene::Draw)> = if lod {
+        scene::read_object_level_draws(&tree, &sources)?
+    } else {
+        scene::read_object_draws(&tree, &sources)?
+            .into_iter()
+            .map(|d| (0, d))
+            .collect()
+    };
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
+    // First instance index of each prototype.
+    let mut lod_first: BTreeMap<String, u32> = BTreeMap::new();
+    if lod {
+        car.ornament_lods = ornament_types(root, route, &placement_bytes, &placements, &draws)?;
+        let mut first = 0u32;
+        for p in &placements.prototypes {
+            lod_first.insert(format!("{} Root", String::from_utf8_lossy(p.name)), first);
+            first += p.transforms.len() as u32;
+        }
+    }
     let transforms: BTreeMap<_, _> = placements
         .prototypes
         .iter()
@@ -866,14 +964,14 @@ fn append_objects(
             }
         }
     }
-    for draw in draws {
+    for (level, draw) in draws {
         let prototype =
             String::from_utf8(draw.prototype.ok_or("object prototype absent")?.to_vec())?;
         let Some(placements) = transforms.get(&prototype) else {
             unplaced.insert(prototype);
             continue;
         };
-        selected.insert(prototype);
+        selected.insert(prototype.clone());
         if placements.is_empty() {
             continue;
         }
@@ -902,8 +1000,19 @@ fn append_objects(
             .collect::<Vec<_>>();
         draw_count += matrices.len();
         triangles += mesh.count_vertices();
+        let part_name = if lod {
+            let name = format!("ornament/{level}/{}", String::from_utf8_lossy(draw.id));
+            let first = lod_first[&prototype];
+            let instances = (first..first + matrices.len() as u32).collect();
+            if car.ornament_lods.parts.insert(name.clone(), (level, instances)).is_some() {
+                return Err(format!("duplicate ornament level draw {name}").into());
+            }
+            name
+        } else {
+            String::from_utf8(draw.id.to_vec())?
+        };
         car.parts.push(Part {
-            name: String::from_utf8(draw.id.to_vec())?,
+            name: part_name,
             joint: String::new(),
             material: name,
             mesh,
@@ -1319,6 +1428,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         track: true,
         liveries: Vec::new(),
         low_lods: Vec::new(),
+        ornament_lods: Default::default(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -3331,6 +3441,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         lean_pieces::install(&mut app);
         // Static track parts and intact props drawn as merged meshes (F576).
         static_batch::install(&mut app);
+        // Track ornaments at the original's levels of detail (docs/TRACK_LOD.md).
+        ornament_lod::install(&mut app);
         // Car parts drawn as one mesh per car and material (F584), opponents
         // at the original's levels of detail (docs/CAR_LOD.md).
         car_lod::load(&root);
@@ -3595,6 +3707,8 @@ fn setup(
     let mut piece_meshes: std::collections::HashMap<(String, String, u64), Vec<Handle<Mesh>>> =
         std::collections::HashMap::new();
     let mut piece_parts = 0;
+    let ornament_levels = std::mem::take(&mut car.ornament_lods);
+    let ornament_shadows = !ornament_levels.parts.is_empty();
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
             && graphics.smooth_tyres
@@ -3750,7 +3864,8 @@ fn setup(
         } else {
             Some(meshes.add(part.mesh))
         };
-        for matrix in part.matrices {
+        let ornament = ornament_levels.parts.get(&part.name);
+        for (index, matrix) in part.matrices.into_iter().enumerate() {
             let mesh = shared
                 .clone()
                 .unwrap_or_else(|| meshes.add(original.as_ref().unwrap().clone()));
@@ -3791,6 +3906,20 @@ fn setup(
             }
             if track && let Some(entity) = &mut entity {
                 entity.insert(track_surface::SourcePart(part.material.clone()));
+            }
+            if let Some((level, instances)) = ornament
+                && let Some(entity) = &mut entity
+            {
+                let instance = instances[index];
+                entity.insert((
+                    ornament_lod::OrnamentLevel { instance, level: *level },
+                    Visibility::Hidden,
+                ));
+                if *level == ornament_levels.shadow_level(instance) {
+                    entity.insert(bevy::camera::visibility::RenderLayers::layer(0));
+                } else {
+                    entity.insert(bevy::light::NotShadowCaster);
+                }
             }
             if moving && let Some(entity) = &mut entity {
                 entity.insert((
@@ -4050,9 +4179,12 @@ fn setup(
             graphics.cascades(),
         ))
         .id();
+    if ornament_shadows {
+        commands.insert_resource(ornament_lod::Lods::new(ornament_levels));
+    }
     // The sun also takes casters from the cockpit's layer and, with shadow
-    // bodies, theirs, which no camera draws.
-    commands.entity(sun).insert(if shadow_bodies_spawned {
+    // bodies or ornament shadow levels, theirs, which no camera draws.
+    commands.entity(sun).insert(if shadow_bodies_spawned || ornament_shadows {
         car_batch::sun_layers().with(cockpit::LAYER)
     } else {
         bevy::camera::visibility::RenderLayers::from_layers(&[0, cockpit::LAYER])
@@ -5609,6 +5741,7 @@ mod driving_tests {
                         track: true,
                         liveries: Vec::new(),
                         low_lods: Vec::new(),
+                        ornament_lods: Default::default(),
                     };
                     append_route_split(root, &route, &model, &mut car)
                         .unwrap_or_else(|e| panic!("{}: {e}", route.path()));

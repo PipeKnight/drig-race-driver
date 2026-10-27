@@ -198,6 +198,7 @@ mod tests {
                 BTreeMap::from([("car0/lac_main_m1.tga".to_owned(), medium)]),
             ],
             low_lods: Vec::new(),
+            ornament_lods: Default::default(),
         };
         let original = car.textures.clone();
         let banks = car.liveries.clone();
