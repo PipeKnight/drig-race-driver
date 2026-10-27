@@ -1,14 +1,20 @@
 //! Force feedback in the race (docs/FORCE_FEEDBACK.md): after every player physics tick, the
 //! snapshot `7E9D60` of the player's car goes to the GameFFB task, which runs on the device
-//! thread of `force_feedback::windows` (DirectInput wheel or XInput pad). The original queues one
-//! snapshot per car manager step; the port queues one per fixed 16 ms tick.
+//! thread of `force_feedback::windows` (DirectInput wheel or XInput pad) or
+//! `force_feedback::android` (pad or phone vibrator). The original queues one snapshot per car
+//! manager step; the port queues one per fixed 16 ms tick.
 
 use crate::force_feedback::{Body, Ffb, Setup, Snapshot};
 use crate::input::{Device, Settings};
 use bevy::prelude::*;
 use std::sync::{Arc, Mutex};
 
-type Shared = crate::force_feedback::windows::Shared;
+#[cfg(target_os = "android")]
+use crate::force_feedback::android as output;
+#[cfg(windows)]
+use crate::force_feedback::windows as output;
+
+type Shared = output::Shared;
 
 #[derive(Resource)]
 struct Feedback {
@@ -21,7 +27,8 @@ struct Feedback {
 
 /// The device the player's FFB goes to: the DirectInput wheel when one is bound and has force
 /// feedback, else an XInput pad's motors (the original's device `XBOX360 Controller`, delay
-/// 0.1 s) unless `device=keyboard`. Returns the log text.
+/// 0.1 s) unless `device=keyboard`; on Android a pad's or the phone's vibrator with that device.
+/// Returns the log text.
 pub fn install(app: &mut App, root: &std::path::Path, settings: &Settings, wheel_bound: bool, car: &str) -> String {
     if !settings.force_feedback() {
         return "off".into();
@@ -30,10 +37,17 @@ pub fn install(app: &mut App, root: &std::path::Path, settings: &Settings, wheel
         Ok(s) => s,
         Err(error) => return format!("unavailable({error})"),
     };
-    let handle = crate::force_feedback::windows::device();
-    let wheel = handle.wheel.as_ref().filter(|w| wheel_bound && w.force_feedback);
+    let handle = output::device();
+    #[cfg(windows)]
+    let wheel = handle.wheel.as_ref().filter(|w| wheel_bound && w.force_feedback).map(|w| w.name.clone());
+    // No DirectInput: never a wheel.
+    #[cfg(not(windows))]
+    let wheel: Option<String> = {
+        let _ = wheel_bound;
+        None
+    };
     let (name, is_wheel) = match wheel {
-        Some(w) => (w.name.clone(), true),
+        Some(w) => (w, true),
         None if settings.device == Device::Keyboard => return "off(keyboard)".into(),
         None => ("XBOX360 Controller".to_owned(), false),
     };

@@ -244,3 +244,28 @@ pub fn data_ready() -> bool {
     with_activity(|env, activity| env.call_method(activity, "dataReady", "()Z", &[])?.z())
         .unwrap_or(true)
 }
+
+/// `MainActivity.rumble(left, right)`: vibration amplitudes 0..255 for a pad's two motors, or
+/// the phone's vibrator (force_feedback/android.rs). The FFB thread stays attached to the VM.
+pub fn rumble(left: u8, right: u8) {
+    with_activity(|env, activity| {
+        env.call_method(
+            activity,
+            "rumble",
+            "(II)V",
+            &[JValue::Int(left.into()), JValue::Int(right.into())],
+        )
+        .map(drop)
+    });
+}
+
+/// Attaches the calling thread to the VM until it ends, so frequent `with_activity` calls from
+/// it do not attach and detach each time (the FFB thread).
+pub fn attach_thread() {
+    if let Some(app) = bevy::android::ANDROID_APP.get()
+        // SAFETY: as in `with_activity`.
+        && let Ok(vm) = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr().cast()) }
+    {
+        let _ = vm.attach_current_thread_permanently();
+    }
+}

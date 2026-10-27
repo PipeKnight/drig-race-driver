@@ -67,7 +67,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - Android P9–P12: code-only APK importing the user's own GRID folder (F405), bundled event APKs
   (F418), touch/tilt/pad controls (P11, F404), per-system profiling (F395); docs/ANDROID.md.
 - Open: the a11cddf7de27 APKs are not tested on the phone; CPU-bound at about 30–34 FPS (row 85);
-  no phone vibration or Android pad rumble (row 22).
+  pad rumble and phone vibration are not felt on the phone yet (row 22).
 
 ### Tooling and process
 - Build gate `tools/build_gate.ps1` and nightly soak (F524); shared seed build and rust-lld (F467);
@@ -82,7 +82,7 @@ The full list is [docs/FIDELITY_BACKLOG.md](docs/FIDELITY_BACKLOG.md) (rows 1–
 impact" at its head). The most visible now:
 1. AI first-corner pile-ups (rows 30, 31).
 2. Missing sounds and the artificial engine (rows 70–72).
-3. Force feedback, wheel input and pad rumble on Windows (F602) need the owner's wheel test (row 22).
+3. Force feedback, wheel input and pad rumble on Windows (F602), pad and phone vibration on Android (F604) need the owner's wheel test (row 22).
 4. Le Mans body-contact blow-up (row 90).
 5. Drift Battle stand-in cars and low AI drift scores (rows 36, 52).
 Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG.md](docs/CAPTURE_BACKLOG.md).
@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F604](log/F0604.md) | 2026-10-27 | Android pad rumble and phone vibration from the GameFFB task |
 | [F603](log/F0603.md) | 2026-10-27 | Phones without BC: OSD textures made before the upload path was chosen are converted; desktop check with BC off the device |
 | [F602](log/F0602.md) | 2026-10-27 | Force feedback port: GameFFB, DirectInput wheel input and force, XInput rumble |
 | [F601](log/F0601.md) | 2026-10-27 | AI corner lift only above the brake-line target: Spa La Source |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F547](log/F0547.md) | 2026-10-21 | Playable 945575e57651 with the cheaper tick and parking (F546), portable copy and APKs 6087fbcafa30 |
 | [F546](log/F0546.md) | 2026-10-21 | Physics tick cost and parking |
 | [F545](log/F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
-| [F544](log/F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

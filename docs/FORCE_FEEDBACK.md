@@ -257,7 +257,7 @@ Slots: +0 tick `B8CD80`, +4 is-wheel `B8CD40` (constant-force effect exists), +8
 | XInput pad motors | same file, `XInputSetState` to the first connected pad | ORIGINAL scaling; pad choice [A] |
 | One snapshot of the player's car per physics tick; pause | `crates/grid-app/src/ffb.rs` | ORIGINAL data, per tick [A] |
 | Wheel input: `win_con_di_*` sources, the original preset whose deviceType equals the wheel's product name (G25, MOMO, DFP, RGT), else a generic preset; `device=auto` with a wheel gives the wheel class (unassisted steering) | `crates/grid-app/src/input.rs` | ORIGINAL presets; generic preset [A] |
-| Android phone vibration and pad rumble | not yet | [A] |
+| Android pad rumble and phone vibration (§7.2) | `crates/grid-app/src/force_feedback/android.rs`, `android.rs` `rumble`, `android/.../Rumble.java` | [A] |
 
 Why a hand-written binding: the `windows` crate (0.62.2, already in Cargo.lock through Bevy) has
 the DirectInput 8 COM wrappers, but enabling its HumanInterfaceDevice feature in grid-app adds a
@@ -291,6 +291,27 @@ Differences from the original:
 | `wheel_pedals` | `inverted` (default: released at the top of the axis) / `normal` | [A] |
 | `wheel_gear_up`, `wheel_gear_down`, `wheel_handbrake`, `wheel_view` | button numbers 0..63 (default 4, 5, 6, 17) | [A] |
 | `wheel_trace` | `on` / `off` (default): log `drive_input_wheel_trace` lines with the axes and buttons when they change, to find a wheel's pedal axes and buttons | [A] |
+
+### 7.2 Android [A]
+
+The original has no Android version; this part is AUTHORED. The phone runs the same task with
+the original's `XBOX360 Controller` device (delay 0.1 s, `scaleEffects` 1). Its two motor
+channels carry only the effect samples: surfaces and rumble strips, gear changes, collisions,
+landings and bumps, skids and a damaged wheel. The steady self-aligning force and friction never
+reach motors (§5), so nothing buzzes in a plain corner.
+
+- The task thread is the same as on Windows ("FFB updateTask", `Sleep(10)`); its motor levels
+  become 8-bit amplitudes. `Vibration` (pure, tested) sends a change at most every 30 ms, a stop
+  at once and a running level again every 60 ms, so JNI is called about 15–33 times a second
+  while something vibrates and not at all otherwise.
+- `MainActivity.rumble(left, right)` runs `Rumble.java` on the UI thread. A connected pad with
+  vibrators (`InputDevice.getVibratorManager()`, API 31) gets the left level on its first
+  vibrator and the right one on its second (a single vibrator takes the larger). A pad without
+  vibrators gets nothing, and the phone stays still because it is probably not in the hand. With
+  no pad the phone's own vibrator plays the larger level, with amplitude control when it has it,
+  else on from level 128. Each call plays a 100 ms one-shot, renewed while the level lasts.
+- The manifest asks for `android.permission.VIBRATE`, a normal permission granted at install.
+- `[input] force_feedback = off` stops it; `feedback_effects` (0..10, default 5) scales it.
 
 ## 8. Open
 

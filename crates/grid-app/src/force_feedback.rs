@@ -3,10 +3,14 @@
 //! The pure part, tested against the decompiled formulas: the `forcefeedback/*.xml` setup, the
 //! snapshot `7E9D60` read from the vehicle record, the FFB task `7ECAC0` with its effects and
 //! vibration samples, and the DirectInput device's software damping (`B8CD80`) and XInput motor
-//! scaling. The device output is `force_feedback/windows.rs`; the Bevy glue is `ffb_glue.rs`.
+//! scaling. The device output is `force_feedback/windows.rs` (wheel and XInput pad) and
+//! `force_feedback/android.rs` (pad or phone vibrator); the Bevy glue is `ffb.rs`.
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
+#[cfg(target_os = "android")]
+pub mod android;
 #[cfg(windows)]
 pub mod windows;
 
@@ -767,6 +771,7 @@ impl Ffb {
     }
 
     /// `B8CD40`: a wheel (constant-force effect) rather than a rumble device.
+    #[cfg_attr(not(windows), allow(dead_code))] // The DirectInput wheel only.
     pub fn wheel(&self) -> bool {
         self.wheel
     }
@@ -1103,6 +1108,7 @@ fn play(setup: &Setup, wheel: bool, p: &Playing, now: f32, channels: &mut [f32; 
 // ------------------------------------------------------------------------------------- devices
 
 /// `B8CD80`: the DirectInput wheel's software damping and constant-force magnitude.
+#[cfg_attr(not(windows), allow(dead_code))] // The DirectInput wheel only.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Damping {
     velocity: f32,
@@ -1113,6 +1119,7 @@ pub struct Damping {
 impl Damping {
     /// The magnitude for `DICONSTANTFORCE` from the device outputs, the X axis (0..1, raw/65536)
     /// and the FFB tick's dt. [A] clamped to ±10000, DirectInput's nominal range.
+    #[cfg_attr(not(windows), allow(dead_code))] // The DirectInput wheel only.
     pub fn magnitude(&mut self, out: &Output, axis: f32, dt: f64) -> i32 {
         let force = out.channels[0] + out.force;
         let friction = out.friction;
@@ -1134,6 +1141,41 @@ impl Damping {
 pub fn motors(out: &Output) -> (u16, u16) {
     let speed = |x: f32| (clamp_to(x, -1., 1.).abs() * 65_535.) as u16;
     (speed(out.channels[0]), speed(out.channels[1]))
+}
+
+/// When an Android vibrator is called [A]: the task runs every 10 ms, a call through JNI costs
+/// more, and a vibrator cannot follow faster changes. The motor speeds become 8-bit amplitudes;
+/// a change is sent at most every 30 ms, a stop at once, and a running level again every 60 ms
+/// (the Java side plays 100 ms one-shots).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[derive(Default)]
+pub struct Vibration {
+    sent: (u8, u8),
+    at: Option<Instant>,
+}
+
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+impl Vibration {
+    const CHANGE: Duration = Duration::from_millis(30);
+    const REFRESH: Duration = Duration::from_millis(60);
+
+    /// The amplitudes to send now, if any.
+    pub fn due(&mut self, now: Instant, motors: (u16, u16)) -> Option<(u8, u8)> {
+        let level = ((motors.0 >> 8) as u8, (motors.1 >> 8) as u8);
+        let since = self.at.map(|t| now.saturating_duration_since(t));
+        let send = if level == (0, 0) {
+            self.sent != (0, 0)
+        } else if level != self.sent {
+            since.is_none_or(|d| d >= Self::CHANGE)
+        } else {
+            since.is_none_or(|d| d >= Self::REFRESH)
+        };
+        send.then(|| {
+            self.sent = level;
+            self.at = Some(now);
+            level
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1407,6 +1449,23 @@ mod tests {
     fn motors_are_the_absolute_channels() {
         let out = Output { channels: [-0.5, 2., 0.], ..Output::default() };
         assert_eq!(motors(&out), (32767, 65535));
+    }
+
+    #[test]
+    fn vibration_limits_the_calls_and_stops_at_once() {
+        let mut v = Vibration::default();
+        let t = Instant::now();
+        let ms = |n: u64| t + Duration::from_millis(n);
+        assert_eq!(v.due(t, (0, 0)), None);
+        assert_eq!(v.due(t, (65_535, 0x1234)), Some((255, 0x12)));
+        // A change within 30 ms waits; the same level is sent again after 60 ms.
+        assert_eq!(v.due(ms(10), (0x8000, 0x1234)), None);
+        assert_eq!(v.due(ms(30), (0x8000, 0x1234)), Some((0x80, 0x12)));
+        assert_eq!(v.due(ms(80), (0x8000, 0x1234)), None);
+        assert_eq!(v.due(ms(90), (0x8000, 0x1234)), Some((0x80, 0x12)));
+        // Stop at once, then nothing more.
+        assert_eq!(v.due(ms(95), (0x00ff, 0)), Some((0, 0)));
+        assert_eq!(v.due(ms(200), (0, 0)), None);
     }
 
     #[test]

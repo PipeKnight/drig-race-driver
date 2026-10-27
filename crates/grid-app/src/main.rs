@@ -37,10 +37,10 @@ mod damage_parts;
 mod drift_event;
 mod dynamic_props;
 mod engine_sound;
-// The device side is Windows-only for now; the pure task is shared.
-#[cfg_attr(not(windows), allow(dead_code))]
+// Device output on Windows and Android; the pure task builds everywhere.
+#[cfg_attr(not(any(windows, target_os = "android")), allow(dead_code))]
 mod force_feedback;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "android"))]
 mod ffb;
 mod event_menu;
 mod flashback;
@@ -2972,7 +2972,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(actions) = drive_input.take() {
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "android"))]
             {
                 let status = ffb::install(&mut app, &root, &input_settings, actions.wheel(), field.models[0].stem());
                 println!("drive_force_feedback {status}");

@@ -97,6 +97,11 @@ final class PadBridge implements InputManager.InputDeviceListener {
         }
     }
 
+    /** The first connected pad's device id, or -1 (Rumble.java). */
+    int first() {
+        return pads.size() > 0 ? pads.keyAt(0) : -1;
+    }
+
     /** In the background no input arrives: release the pads. */
     void stop() {
         if (manager != null) {

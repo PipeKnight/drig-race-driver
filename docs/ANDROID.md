@@ -229,7 +229,7 @@ Bluetooth and USB pads (Xbox, DualSense, other HID pads Android classifies as ga
 
 **Pad takes over from touch.** With `[input] device = auto` (the default) and the phone controls on, a connected accepted pad hides every touch zone and the tilt bar, ignores touches, and silences tilt (`Mobile::tilt_raw` is `None`). On disconnect they come back; fingers down at either change are ignored until lifted. `device = pad` or `keyboard` keeps the zones (no takeover). Log lines: `drive_input_pad android_device=ID entity=... name=... vendor=... product=...` on connect, `drive_input_pad connected=... preset4=used|ignored(...)` from input.rs, `drive_input_pad takeover=on|off`, `drive_input_pad android_device=ID disconnected`.
 
-**Not covered:** rumble (the original drives XInput motors; Android's `Vibrator` per `InputDevice` would be needed), pad-specific glyphs in help texts, more than one player, the DualSense touchpad and motion sensors (separate input devices, not pads). Desktop gamepads are unchanged (gilrs; `ClassifiedPad` is never set there).
+**Rumble:** the original's XInput motor levels go to the pad's vibrators, or to the phone's vibrator when no pad is connected ([FORCE_FEEDBACK.md](FORCE_FEEDBACK.md) §7.2; `[input] force_feedback`, `feedback_effects`). **Not covered:** pad-specific glyphs in help texts, more than one player, the DualSense touchpad and motion sensors (separate input devices, not pads). Desktop gamepads are unchanged (gilrs; `ClassifiedPad` is never set there).
 
 **Checks [V]:** mapping unit tests (`android_pad::tests`, desktop), wheel guard test, tilt silenced while a pad holds; `cargo ndk … clippy --release --lib -p grid-app -- -D warnings` clean; Java compiles in the APK build. [N] Not tried with a real pad on a phone.
 

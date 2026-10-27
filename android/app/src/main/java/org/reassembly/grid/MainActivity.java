@@ -20,6 +20,7 @@ public class MainActivity extends GameActivity {
 
     private volatile String logPath;
     private final PadBridge pads = new PadBridge(this);
+    private final Rumble rumble = new Rumble(this);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -131,6 +132,14 @@ public class MainActivity extends GameActivity {
         }
         logPath = file.shownPath;
         return file.descriptor.detachFd();
+    }
+
+    /**
+     * Called by the FFB thread (force_feedback/android.rs): vibration levels 0..255 for a pad's
+     * left and right motor, or the phone's vibrator when no pad is connected (Rumble.java).
+     */
+    public void rumble(int left, int right) {
+        runOnUiThread(() -> rumble.set(left, right, pads.first()));
     }
 
     /**
