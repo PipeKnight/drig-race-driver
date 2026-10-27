@@ -22,6 +22,7 @@ pub enum Mode {
     Control,
     StaticBillboards,
     OneNeutralActor,
+    OneArmPose,
 }
 impl Mode {
     pub fn parse(s: &str) -> Result<Self, &'static str> {
@@ -30,7 +31,10 @@ impl Mode {
             "control" => Ok(Self::Control),
             "static-billboards" => Ok(Self::StaticBillboards),
             "one-neutral-actor" => Ok(Self::OneNeutralActor),
-            _ => Err("--crowd-preview needs off, control, static-billboards or one-neutral-actor"),
+            "one-arm-pose" => Ok(Self::OneArmPose),
+            _ => Err(
+                "--crowd-preview needs off, control, static-billboards, one-neutral-actor or one-arm-pose",
+            ),
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -255,12 +259,16 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
     if rows.is_empty() || rows.len() > 100_000 {
         return Err("crowd preview count absent/exceeds bound".into());
     }
-    if mode == Mode::OneNeutralActor {
+    if matches!(mode, Mode::OneNeutralActor | Mode::OneArmPose) {
         let row = rows.get(4275).ok_or("neutral actor row4275 absent")?;
         if row.sex != 1 || row.cell != 89 || !row.position.is_finite() {
             return Err("neutral female row4275/cell89 differs".into());
         }
-        let actor = super::crowd_rig::prepare(root)?;
+        let actor = if mode == Mode::OneArmPose {
+            super::crowd_rig::prepare_arm_pose(root)?
+        } else {
+            super::crowd_rig::prepare(root)?
+        };
         println!(
             "crowd_neutral_selected ordinal=4275 cell=89 sex=female source_position={:?} model_scale=1 yaw=authored-camera-facing-XZ foot_alignment=authored-neutral-bounds clocks=off",
             row.position
@@ -409,7 +417,7 @@ impl MaterialExtension for Tint {
     }
 }
 pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
-    if prepared.mode != Mode::OneNeutralActor {
+    if !matches!(prepared.mode, Mode::OneNeutralActor | Mode::OneArmPose) {
         println!(
             "crowd_preview mode={:?} total_source={} selected_grandstand={} variant=0 colour_set=0 scale_fixture_draws=5000,5000 poses=unswayed-static-billboards alpha=Bevy-A2C lighting=PBR source_parity=false shadows=disabled unknown_scalar=opaque rotation_pair=retained-billboard-source-faces-camera",
             prepared.mode,
@@ -419,7 +427,7 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     }
     if !matches!(
         prepared.mode,
-        Mode::StaticBillboards | Mode::OneNeutralActor
+        Mode::StaticBillboards | Mode::OneNeutralActor | Mode::OneArmPose
     ) {
         return Ok(());
     }
@@ -589,7 +597,11 @@ fn spawn(
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, actor.uv.clone());
         mesh.insert_indices(Indices::U16(actor.indices.clone()));
         commands.spawn((
-            Name::new("crowd-preview/one-neutral-female4275"),
+            Name::new(if actor.pose.is_some() {
+                "crowd-preview/one-authored-arm-female4275"
+            } else {
+                "crowd-preview/one-neutral-female4275"
+            }),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(handles[1].clone()),
             Transform {
@@ -599,8 +611,13 @@ fn spawn(
             },
             NotShadowCaster,
         ));
+        let label = if actor.pose.is_some() {
+            "crowd_authored_arm_spawn"
+        } else {
+            "crowd_neutral_spawn"
+        };
         println!(
-            "crowd_neutral_spawn actors=1 ordinal=4275 row_position={:?} neutral_bounds={:?}/{:?} foot_offset={:?} raw_position_count={} raw_normal_count={} position_error={} palette_error={} inverse_affine_error={} yaw={:?} material=authored-near-PBR-tint-opaque-two-sided texture=near1024x512 textureShift=0 UV=source normals=weighted-normalized raw_attributes=retained shadows=off original_pose_parity=false",
+            "{label} actors=1 ordinal=4275 row_position={:?} neutral_bounds={:?}/{:?} foot_offset={:?} raw_position_count={} raw_normal_count={} position_error={} palette_error={} inverse_affine_error={} yaw={:?} material=authored-near-PBR-tint-opaque-two-sided texture=near1024x512 textureShift=0 UV=source normals=weighted-normalized raw_attributes=retained shadows=off original_pose_parity=false",
             row.position,
             actor.source_min,
             actor.source_max,

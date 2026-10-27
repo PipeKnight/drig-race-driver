@@ -495,6 +495,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G307](G0307.md) | 2026-10-27 | Add one authored fixed forearm pose to the crowd preview |
 | [G306](G0306.md) | 2026-10-27 | Render one bounded neutral USA crowd actor |
 | [G305](G0305.md) | 2026-10-27 | Preserve all four authored skin influence lanes |
 | [G304](G0304.md) | 2026-10-27 | Integrate F591-F592 static and skid streaming optimizations |

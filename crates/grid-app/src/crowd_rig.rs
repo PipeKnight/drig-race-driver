@@ -12,7 +12,22 @@ struct Node {
     parent: Option<usize>,
     local: [f32; 16],
 }
+pub(crate) struct PoseStats {
+    pub affected_palette: Vec<usize>,
+    pub affected_bones: Vec<String>,
+    pub affected_nodes: usize,
+    pub influenced_vertices: usize,
+    pub moved_vertices: usize,
+    pub max_displacement: f32,
+}
+struct Rig {
+    nodes: Vec<Node>,
+    names: Vec<Vec<u8>>,
+    inverse: Vec<[f32; 16]>,
+    affine_error: f32,
+}
 pub(crate) struct Actor {
+    pub pose: Option<PoseStats>,
     pub source_positions: Vec<[f32; 3]>,
     pub source_normals: Vec<[f32; 3]>,
     pub positions: Vec<[f32; 3]>,
@@ -32,6 +47,14 @@ fn palettes(
     nodes: &[Node],
     joints: &[Vec<u8>],
     inverse: &[[f32; 16]],
+) -> AnyResult<(Vec<[f32; 16]>, f32)> {
+    palette_values(nodes, joints, inverse, true)
+}
+fn palette_values(
+    nodes: &[Node],
+    joints: &[Vec<u8>],
+    inverse: &[[f32; 16]],
+    require_neutral: bool,
 ) -> AnyResult<(Vec<[f32; 16]>, f32)> {
     if nodes.is_empty()
         || nodes.len() > 128
@@ -85,10 +108,131 @@ fn palettes(
         }
         result.push(p);
     }
-    if max_error > 1e-5 {
+    if require_neutral && max_error > 1e-5 {
         return Err(format!("neutral inverse/world cancellation error {max_error}").into());
     }
     Ok((result, max_error))
+}
+fn skin_vertex(
+    p: [f32; 3],
+    n: [f32; 3],
+    weights: &[f32; 4],
+    joints: &[u8; 4],
+    palette: &[[f32; 16]],
+) -> AnyResult<([f32; 3], [f32; 3])> {
+    if weights.iter().any(|v| !v.is_finite()) || joints.iter().any(|&j| j as usize >= palette.len())
+    {
+        return Err("invalid retained influence".into());
+    }
+    let mut q = Vec3::ZERO;
+    let mut normal = Vec3::ZERO;
+    for (&w, &j) in weights.iter().zip(joints) {
+        let m = &palette[j as usize];
+        q += Vec3::from_array(scene::transform_point(m, p)) * w;
+        normal += Vec3::new(
+            n[0] * m[0] + n[1] * m[4] + n[2] * m[8],
+            n[0] * m[1] + n[1] * m[5] + n[2] * m[9],
+            n[0] * m[2] + n[1] * m[6] + n[2] * m[10],
+        ) * w;
+    }
+    let normal_length = normal.length_squared();
+    if !q.is_finite() || !normal.is_finite() || !normal_length.is_finite() || normal_length < 1e-12
+    {
+        return Err("unsupported neutral vertex/normal".into());
+    }
+    Ok((q.to_array(), normal.normalize().to_array()))
+}
+// Caller first validates the unchanged saved neutral rig with palettes().
+fn rotated_local(nodes: &[Node], target: usize) -> AnyResult<(Vec<Node>, Vec<bool>)> {
+    if target >= nodes.len() || nodes[target].parent.is_none() {
+        return Err("authored forearm cannot be a root".into());
+    }
+    let mut affected = Vec::with_capacity(nodes.len());
+    for start in 0..nodes.len() {
+        let mut at = Some(start);
+        let mut hit = false;
+        let mut steps = 0;
+        while let Some(i) = at {
+            if i >= nodes.len() || steps >= 128 {
+                return Err("authored descendant ancestry invalid".into());
+            }
+            steps += 1;
+            if i == target {
+                hit = true;
+            }
+            at = nodes[i].parent;
+        }
+        affected.push(hit);
+    }
+    let (sin, cos) = 20f32.to_radians().sin_cos();
+    let rotation = [
+        cos, sin, 0., 0., -sin, cos, 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+    ];
+    let mut posed = nodes.to_vec();
+    let saved = posed[target].local;
+    posed[target].local = scene::compose(&rotation, &saved);
+    // Preserve saved translation bits, including signed zero.
+    posed[target].local[12..15].copy_from_slice(&saved[12..15]);
+    Ok((posed, affected))
+}
+fn pose_vertices(
+    source: &[[f32; 3]],
+    source_normals: &[[f32; 3]],
+    skin: &mesh::SkinInfluences4,
+    palette: &[[f32; 16]],
+    affected: &[bool],
+    positions: &mut [[f32; 3]],
+    normals: &mut [[f32; 3]],
+) -> AnyResult<(usize, usize, f32)> {
+    if [
+        source_normals.len(),
+        skin.weights.len(),
+        skin.joints.len(),
+        positions.len(),
+        normals.len(),
+    ]
+    .iter()
+    .any(|&n| n != source.len())
+        || affected.len() != palette.len()
+    {
+        return Err("authored pose vertex lengths differ".into());
+    }
+    let mut influenced = 0;
+    let mut moved = 0;
+    let mut maximum = 0f32;
+    for i in 0..source.len() {
+        if skin.joints[i].iter().any(|&j| j as usize >= affected.len()) {
+            return Err("authored palette index outside bounds".into());
+        }
+        if !skin.weights[i]
+            .iter()
+            .zip(&skin.joints[i])
+            .any(|(&w, &j)| w != 0. && affected[j as usize])
+        {
+            continue;
+        }
+        influenced += 1;
+        let (p, n) = skin_vertex(
+            source[i],
+            source_normals[i],
+            &skin.weights[i],
+            &skin.joints[i],
+            palette,
+        )?;
+        let displacement = (Vec3::from_array(p) - Vec3::from_array(positions[i]))
+            .abs()
+            .max_element();
+        if !displacement.is_finite() {
+            return Err("nonfinite authored displacement".into());
+        }
+        if displacement > 0. {
+            moved += 1;
+        }
+        maximum = maximum.max(displacement);
+        positions[i] = p;
+        normals[i] = n;
+    }
+    Ok((influenced, moved, maximum))
 }
 fn inverse(data: &[u8]) -> AnyResult<([f32; 16], f32)> {
     if data.len() != 64 {
@@ -111,7 +255,7 @@ fn inverse(data: &[u8]) -> AnyResult<([f32; 16], f32)> {
     // Preserve every saved value: no clearing of tolerated affine noise.
     Ok((m, error))
 }
-fn rig(tree: &pssg::Tree<'_>) -> AnyResult<(Vec<[f32; 16]>, f32, f32)> {
+fn rig(tree: &pssg::Tree<'_>) -> AnyResult<Rig> {
     let transform_nodes: Vec<_> = (0..tree.nodes.len())
         .filter(|&i| {
             matches!(
@@ -194,10 +338,20 @@ fn rig(tree: &pssg::Tree<'_>) -> AnyResult<(Vec<[f32; 16]>, f32, f32)> {
         matrices.push(m);
         affine = affine.max(e);
     }
-    let (p, error) = palettes(&nodes, &names, &matrices)?;
-    Ok((p, error, affine))
+    Ok(Rig {
+        nodes,
+        names,
+        inverse: matrices,
+        affine_error: affine,
+    })
 }
 pub(crate) fn prepare(root: &Path) -> AnyResult<Actor> {
+    prepare_actor(root, false)
+}
+pub(crate) fn prepare_arm_pose(root: &Path) -> AnyResult<Actor> {
+    prepare_actor(root, true)
+}
+fn prepare_actor(root: &Path, arm_pose: bool) -> AnyResult<Actor> {
     let path = root.join("anims/cr_female_usa.pssg");
     if std::fs::metadata(&path)?.len() > 16 * 1024 * 1024 {
         return Err("near actor package exceeds bound".into());
@@ -220,37 +374,21 @@ pub(crate) fn prepare(root: &Path) -> AnyResult<Actor> {
     {
         return Err("female !C geometry contract differs".into());
     }
-    let (palette, max_palette_error, max_inverse_affine_error) = rig(&tree)?;
+    let rig = rig(&tree)?;
+    let (palette, max_palette_error) = palettes(&rig.nodes, &rig.names, &rig.inverse)?;
+    let max_inverse_affine_error = rig.affine_error;
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     let mut max_position_error = 0f32;
     for (i, (&p, &n)) in source.positions.iter().zip(&source.normals).enumerate() {
-        if skin.weights[i].iter().any(|v| !v.is_finite()) || skin.joints[i].iter().any(|&j| j >= 23)
-        {
-            return Err("invalid retained influence".into());
-        }
-        let mut q = Vec3::ZERO;
-        let mut normal = Vec3::ZERO;
-        for (&w, &j) in skin.weights[i].iter().zip(&skin.joints[i]) {
-            let m = &palette[j as usize];
-            q += Vec3::from_array(scene::transform_point(m, p)) * w;
-            normal += Vec3::new(
-                n[0] * m[0] + n[1] * m[4] + n[2] * m[8],
-                n[0] * m[1] + n[1] * m[5] + n[2] * m[9],
-                n[0] * m[2] + n[1] * m[6] + n[2] * m[10],
-            ) * w;
-        }
-        let normal_length = normal.length_squared();
-        if !q.is_finite()
-            || !normal.is_finite()
-            || !normal_length.is_finite()
-            || normal_length < 1e-12
-        {
-            return Err("unsupported neutral vertex/normal".into());
-        }
-        max_position_error = max_position_error.max((q - Vec3::from_array(p)).abs().max_element());
-        positions.push(q.to_array());
-        normals.push(normal.normalize().to_array());
+        let (q, normal) = skin_vertex(p, n, &skin.weights[i], &skin.joints[i], &palette)?;
+        max_position_error = max_position_error.max(
+            (Vec3::from_array(q) - Vec3::from_array(p))
+                .abs()
+                .max_element(),
+        );
+        positions.push(q);
+        normals.push(normal);
     }
     if max_position_error > 1e-5 {
         return Err(format!("neutral weighted position error {max_position_error}").into());
@@ -271,6 +409,66 @@ pub(crate) fn prepare(root: &Path) -> AnyResult<Actor> {
     if !source_min.is_finite() || !source_max.is_finite() || !foot_offset.is_finite() {
         return Err("unsupported neutral bounds/foot alignment".into());
     }
+    // Placement/yaw/foot offset and bounds above belong to NEUTRAL baseline.
+    // Never recompute them from this authored arm pose.
+    let pose = if arm_pose {
+        const TARGET: &[u8] = b"Bip_01 L Forearm";
+        if rig.names.get(15).map(Vec::as_slice) != Some(TARGET) {
+            return Err("selected forearm palette15 differs".into());
+        }
+        let target = rig
+            .nodes
+            .iter()
+            .position(|n| n.name == TARGET)
+            .ok_or("selected forearm absent")?;
+        let (posed_nodes, affected_nodes) = rotated_local(&rig.nodes, target)?;
+        let (posed_palette, _) = palette_values(&posed_nodes, &rig.names, &rig.inverse, false)?;
+        let affected: Vec<_> = rig
+            .names
+            .iter()
+            .map(|name| {
+                rig.nodes
+                    .iter()
+                    .position(|n| n.name == *name)
+                    .map(|i| affected_nodes[i])
+                    .ok_or("authored joint absent")
+            })
+            .collect::<Result<_, _>>()?;
+        let affected_palette: Vec<_> = affected
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &hit)| hit.then_some(i))
+            .collect();
+        if affected_palette != [15, 16, 17] {
+            return Err("selected forearm descendant palette differs".into());
+        }
+        let affected_bones = affected_palette
+            .iter()
+            .map(|&i| String::from_utf8(rig.names[i].clone()))
+            .collect::<Result<_, _>>()?;
+        let (influenced_vertices, moved_vertices, max_displacement) = pose_vertices(
+            &source.positions,
+            &source.normals,
+            &skin,
+            &posed_palette,
+            &affected,
+            &mut positions,
+            &mut normals,
+        )?;
+        if moved_vertices == 0 || max_displacement <= 1e-6 {
+            return Err("authored arm pose produced no observable vertex displacement".into());
+        }
+        Some(PoseStats {
+            affected_palette,
+            affected_bones,
+            affected_nodes: affected_nodes.iter().filter(|&&v| v).count(),
+            influenced_vertices,
+            moved_vertices,
+            max_displacement,
+        })
+    } else {
+        None
+    };
     let textures = texture::read_named(&tree, &[b"cr_female_usa_d.tga", b"cr_female_usa_m.tga"])?;
     let d = textures
         .iter()
@@ -289,7 +487,22 @@ pub(crate) fn prepare(root: &Path) -> AnyResult<Actor> {
     println!(
         "crowd_neutral_cpu source=female-USA/!C vertices=786 indices=3468 joints=23 position_error={max_position_error} palette_error={max_palette_error} inverse_affine_error={max_inverse_affine_error} neutral_bounds={source_min:?}/{source_max:?} foot_offset={foot_offset:?} hierarchy=saved-neutral weights=preserved pose_clock_parity=false"
     );
+    if let Some(pose) = &pose {
+        println!(
+            "crowd_authored_pose local_axis=Z degrees=20 target=left-forearm palette15=true affected_palette={:?} affected_bones={:?} affected_nodes={} influenced_vertices={} moved_vertices={} max_displacement={} neutral_position_error={} neutral_palette_error={} baseline_foot_offset={:?} root=saved-neutral clock=none source_pose_parity=false",
+            pose.affected_palette,
+            pose.affected_bones,
+            pose.affected_nodes,
+            pose.influenced_vertices,
+            pose.moved_vertices,
+            pose.max_displacement,
+            max_position_error,
+            max_palette_error,
+            foot_offset
+        );
+    }
     Ok(Actor {
+        pose,
         source_positions: source.positions,
         source_normals: source.normals,
         positions,
@@ -353,5 +566,62 @@ mod tests {
         let mut missing = nodes;
         missing[2].parent = Some(99);
         assert!(palettes(&missing, &names, &inverse).is_err());
+    }
+    #[test]
+    fn fixed_forearm_rotation_preserves_pivot_root_and_uninfluenced_vertex() {
+        let nodes = vec![
+            Node {
+                name: b"root".to_vec(),
+                parent: None,
+                local: IDENTITY,
+            },
+            Node {
+                name: b"forearm".to_vec(),
+                parent: Some(0),
+                local: translation(1., 0., 0.),
+            },
+            Node {
+                name: b"hand".to_vec(),
+                parent: Some(1),
+                local: translation(1., 0., 0.),
+            },
+        ];
+        let names = vec![b"forearm".to_vec(), b"hand".to_vec(), b"root".to_vec()];
+        let inverse = [translation(-1., 0., 0.), translation(-2., 0., 0.), IDENTITY];
+        palettes(&nodes, &names, &inverse).unwrap();
+        let (posed, affected_nodes) = rotated_local(&nodes, 1).unwrap();
+        assert_eq!(posed[0].local, nodes[0].local);
+        assert_eq!(posed[1].local[12..15], nodes[1].local[12..15]);
+        assert_eq!(affected_nodes, vec![false, true, true]);
+        let (palette, _) = palette_values(&posed, &names, &inverse, false).unwrap();
+        let source = [[2., 0., 0.], [0., 1., 0.]];
+        let source_normals = [[0., 0., 1.]; 2];
+        let mut positions = source;
+        let mut normals = source_normals;
+        let skin = mesh::SkinInfluences4 {
+            weights: vec![[0.5, 0.5, 0., 0.], [1., 0., 0., 0.]],
+            joints: vec![[1, 2, 0, 0], [2, 0, 1, 0]],
+        };
+        let (influenced, moved, _) = pose_vertices(
+            &source,
+            &source_normals,
+            &skin,
+            &palette,
+            &[true, true, false],
+            &mut positions,
+            &mut normals,
+        )
+        .unwrap();
+        assert_eq!((influenced, moved), (1, 1));
+        assert_eq!(positions[1].map(f32::to_bits), source[1].map(f32::to_bits));
+        assert_eq!(
+            normals[1].map(f32::to_bits),
+            source_normals[1].map(f32::to_bits)
+        );
+        let (sin, cos) = 20f32.to_radians().sin_cos();
+        assert!(
+            (Vec3::from_array(positions[0]) - Vec3::new(1.5 + 0.5 * cos, 0.5 * sin, 0.)).length()
+                < 1e-6
+        );
     }
 }
