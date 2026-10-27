@@ -1364,6 +1364,33 @@ camera visibility 0.16-0.17 → 0.15 ms, `collect_meshes_for_gpu_building` 0.29-
 `queue_submit` 2.05 → 1.76-1.88 ms, frame mean 23.1-23.5 → 22.1-23.4 ms. The shadow instance
 buffer writes stayed at 0.64-0.68 ms. Phone [I]: about 0.6 ms less on the main thread.
 
+## Render-thread chain: streamed mesh bytes (F592)
+
+Round 2, step 4. The render thread's largest items in the phone view (desktop, profile build,
+after F591): `queue_submit` 1.7-2.0 ms, `prepare_preprocess_bind_groups` about 1.0 ms,
+`grid_app::mesh_stream::upload` 0.6-0.8 ms, `prepare_clusters_for_gpu_clustering` 0.7 ms, the
+shadow instance buffer writes 0.65 ms, `prepared_mesh_producer` 0.5 ms (1.1 ms before F584).
+
+A byte probe on `mesh_stream::upload` (not committed), frames 2,400-3,000 at Donington:
+- skid marks: the whole mesh, 760 KB, in 548 of 600 frames (694 KB per frame), although a frame
+  changes only the strips being laid or faded;
+- ground cover: 4.7 MB per regather, 150 regathers (1.18 MB per frame), plus three smaller cover
+  and smoke streams of 28-110 KB.
+
+Change: `MeshStream::write_at` writes part of a mesh's vertex buffer at a vertex offset; the rest
+keeps the bytes written before (Bevy's slab allocator copies a slab's contents when it grows it).
+`skid_marks` keeps a copy of the strips as last written, and packs and writes only the runs of
+strips that differ. A unit test checks that the partial writes over the previous bytes equal the
+whole packed buffer through laying, chaining, ending, fading and clearing.
+
+Picture: fixed-frame renders at ticks 2,400 and 6,000, F591 against F592: 0 pixels differ.
+Cost (F591 and F592 alternating, two rounds, 27 October 05:02-05:09): `skid_marks::present` on the
+main thread 0.25 → 0.09 ms; `mesh_stream::upload` 0.78 → 0.59-0.77 ms, which the ground cover's
+regathers dominate. Phone [I]: about 0.4 ms less on the main thread.
+
+Left: ground cover writes all its billboards on each regather. Stable slots for the billboards
+would let it write only the ones that enter or leave; not done here.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,
