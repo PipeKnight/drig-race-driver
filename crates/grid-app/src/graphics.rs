@@ -65,6 +65,8 @@ pub struct Settings {
     pub asphalt_soften: f32,
     /// Blend original and filtered road RGB;1 preserves the existing mip pilot.
     pub asphalt_filter_strength: f32,
+    /// Optional authored roughness for audited standalone Donington asphalt only.
+    pub asphalt_roughness: Option<f32>,
     /// Optional Bevy directional blur; fraction of the rendered frame, not milliseconds.
     pub motion_shutter: f32,
     /// Bounded scripted DLAA diagnostic only; never a playable default.
@@ -159,6 +161,7 @@ impl Default for Settings {
             surface_view_mip_bias: false,
             asphalt_soften: 0.,
             asphalt_filter_strength: 1.,
+            asphalt_roughness: None,
             motion_shutter: 0.,
             dlaa_reset_every_frame: false,
             thin_motion_antenna: false,

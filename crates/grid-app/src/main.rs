@@ -2114,6 +2114,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.motion_shutter = value;
             }
+            "--asphalt-roughness" => {
+                graphics.asphalt_roughness = match args.next().as_deref() {
+                    Some("off") => None,
+                    Some("0.70") => Some(0.70),
+                    Some("0.65") => Some(0.65),
+                    _ => return Err("--asphalt-roughness needs off, 0.70 or 0.65".into()),
+                };
+            }
             "--asphalt-filter-strength" => {
                 let value: f32 = args.next().ok_or("--asphalt-filter-strength needs 0..1")?.parse()?;
                 if !value.is_finite() || !(0.0..=1.0).contains(&value) {
@@ -2197,6 +2205,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
+                println!("--asphalt-roughness off|0.70|0.65: authored standalone Donington road-lobe comparison; enhanced source layers/source-base mask, no RGB-filter pilot; default off.");
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
                 println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
@@ -2328,6 +2337,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         graphics.surface_specular = track_surface::Specular::SourceBase;
     }
     graphics.surface_specular.validate_context(graphics.layered_track, track || drive, collision)?;
+    if graphics.asphalt_roughness.is_some()
+        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive)
+            || collision || headless || route.path() != "tracks/europe/donington/route_0"
+            || route.subroute() != 0
+            || graphics.surface_specular != track_surface::Specular::SourceBase
+            || graphics.surface_view_mip_bias || graphics.asphalt_soften != 0.
+            || graphics.asphalt_filter_strength != 1.)
+    {
+        return Err("--asphalt-roughness requires rendered enhanced Donington route_0/subroute0 source track layers with source-base specular and the RGB/mip filter pilots off".into());
+    }
     if (surface_rgb_override.is_some() || graphics.ground_edge_pilot || graphics.surface_view_mip_bias || graphics.asphalt_soften > 0. || graphics.asphalt_filter_strength != 1.)
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {

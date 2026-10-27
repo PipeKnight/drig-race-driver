@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G298 (2026-10-27): default-off standalone road roughness trial passes458app tests/Clippy, native-feature build and3static GPU cases. Off/0.70 images exact;0.65 gives only subtle brightening. Current default retained; grazing-angle response remains open. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G297 (2026-10-27): F573-F583 integrated with full1124tests/Clippy/4identities/24soak, native34/skid6 checks and a fresh paired Istanbul GPU comparison. Streaming strips/glass/lens ghosts attenuate through smoke. Private unforced C/R test available; actual Manual feedback remains open, accepted launchers unchanged. See TYRE_SMOKE_RESEARCH.
 - G296 (2026-10-26): BMW/Donington and Istanbul native-DLAA HDR smoke replay passes Image controls and source04 checks/16 CLI refusals; dense glass/lens/skid ghosts attenuate. Manual cold Window renders, but UI input was not consumed and finite test timed out: C/R unverified, no validated native release. Owner baseline/Motion preserved; see TYRE_SMOKE_RESEARCH.
 - G294 (2026-10-26): native reverse-pipe CPU graph/failure proof and shared installer transaction pass443app tests/Clippy after F571 integration. Existing early body and accepted BMW/Motion playables preserved; HDR1 late profile/admission and actual DLAA rendering remain unverified. See TYRE_SMOKE_RESEARCH.

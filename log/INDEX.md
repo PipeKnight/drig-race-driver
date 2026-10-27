@@ -486,6 +486,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G298](G0298.md) | 2026-10-27 | Bounded authored asphalt roughness comparison |
 | [G297](G0297.md) | 2026-10-26 | Integrate F573-F583 while preserving native smoke and skid ownership |
 | [G296](G0296.md) | 2026-10-26 | Add a bounded native DLAA late smoke profile for BMW |
 | [G295](G0295.md) | 2026-10-26 | Integrate the current engine-audio main into the graphics branch |

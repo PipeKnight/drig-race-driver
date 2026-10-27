@@ -429,6 +429,15 @@ fn asphalt_layer(name: &str) -> bool {
     matches!(name, "don_track1_d.tga" | "don_track2_d.tga" | "don_track3_d.tga" | "don_track4_d.tga")
 }
 
+// Narrow host-only lighting experiment: both layers must be audited pure road.
+// Keep mixed atlases and every infield-family definition on their existing response.
+fn standalone_asphalt(definition: &Definition) -> bool {
+    definition.dry_ground.x == 0.
+        && definition.dry_ground.y == 0.
+        && asphalt_layer(&definition.textures[0])
+        && asphalt_layer(&definition.textures[1])
+}
+
 // A direct function of physical speed, not render delta or displacement per frame.
 // Fade in between 18 and108 km/h; reverse gets the same filtering at equal speed.
 fn asphalt_bias(velocity: [f32; 4], maximum: f32) -> f32 {
@@ -476,6 +485,16 @@ pub(crate) fn attach(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<SurfaceMaterial>>,
 ) {
+    // Refuse a no-target comparison before mutating meshes, images or materials.
+    if settings.asphalt_roughness.is_some() {
+        let eligible = query.iter().any(|(_, name, identity, mesh, _)| {
+            let Some(draw) = source.draws.get(name.as_str()) else { return false; };
+            draw.material == identity.0
+                && standalone_asphalt(&source.definitions[&draw.material])
+                && meshes.get(&mesh.0).is_some_and(|mesh| mesh.count_vertices() == draw.uv.len())
+        });
+        assert!(eligible, "asphalt roughness pilot has no eligible attached standalone road draw");
+    }
     let textures: BTreeMap<_, _> = source
         .textures
         .iter()
@@ -510,6 +529,8 @@ pub(crate) fn attach(
     let mut handles = BTreeMap::new();
     let mut attached = 0;
     let mut mismatched = 0;
+    let mut roughness_draws = 0;
+    let mut roughness_materials = 0;
     for (entity, name, identity, mesh, base) in &query {
         let Some(draw) = source.draws.get(name.as_str()) else {
             continue;
@@ -526,16 +547,22 @@ pub(crate) fn attach(
         }
         target.insert_attribute(Mesh::ATTRIBUTE_UV_1, draw.uv.clone());
         target.insert_attribute(Mesh::ATTRIBUTE_COLOR, draw.masks.clone());
+        let d = &source.definitions[&draw.material];
+        let roughness = settings.asphalt_roughness.filter(|_| standalone_asphalt(d));
+        if roughness.is_some() { roughness_draws += 1; }
         let handle = handles
             .entry(draw.material.clone())
             .or_insert_with(|| {
-                let d = &source.definitions[&draw.material];
                 let mut base = standard
                     .get(&base.0)
                     .expect("source base material ready")
                     .clone();
                 // The extension composes albedo explicitly; never tint by mask colors.
                 base.base_color_texture = None;
+                if let Some(roughness) = roughness {
+                    base.perceptual_roughness = roughness;
+                    roughness_materials += 1;
+                }
                 materials.add(ExtendedMaterial {
                     base,
                     extension: Surface {
@@ -583,6 +610,9 @@ pub(crate) fn attach(
     }
     println!("asphalt_soften maximum={} scope=don_track1-4-rgb-only speed_mps=5..30 default=off alpha_macro_skids=preserved", settings.asphalt_soften);
     println!("asphalt_filter_strength value={} scope=rgb-only alpha_macro_skids=preserved", settings.asphalt_filter_strength);
+    if let Some(value) = settings.asphalt_roughness {
+        println!("asphalt_roughness value={value} source_materials={roughness_materials} source_draws={roughness_draws} before_static_batch=true scope=standalone-don-track1-4-both-layers authored=true default=off masks_rgb_ground_motion=unchanged");
+    }
     println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(
         "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} specular={:?} uv1=true masks=linear-ARGB-to-RGBA",
