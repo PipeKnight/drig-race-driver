@@ -2119,6 +2119,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.motion_shutter = value;
             }
+            "--asphalt-grazing" => {
+                graphics.asphalt_grazing_gain = match args.next().as_deref() {
+                    Some("off") => None,
+                    Some("gain2") => Some(2.),
+                    _ => return Err("--asphalt-grazing needs off or gain2".into()),
+                };
+            }
             "--asphalt-roughness" => {
                 graphics.asphalt_roughness = match args.next().as_deref() {
                     Some("off") => None,
@@ -2211,6 +2218,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
+                println!("--asphalt-grazing off|gain2: default-off authored view-dependent F0 gain on standalone Donington SourceBase road only; NdotV0.10..0.35, inherited roughness, no independent physical F90 or original parity.");
                 println!("--asphalt-roughness off|0.70|0.65: authored standalone Donington road-lobe comparison; enhanced source layers/source-base mask, no RGB-filter pilot; default off.");
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
                 println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
@@ -2352,6 +2360,17 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         graphics.surface_specular = track_surface::Specular::SourceBase;
     }
     graphics.surface_specular.validate_context(graphics.layered_track, track || drive, collision)?;
+    if graphics.asphalt_grazing_gain.is_some()
+        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive)
+            || collision || headless || route.path() != "tracks/europe/donington/route_0"
+            || route.subroute() != 0
+            || graphics.surface_specular != track_surface::Specular::SourceBase
+            || graphics.surface_view_mip_bias || graphics.asphalt_soften != 0.
+            || graphics.asphalt_filter_strength != 1. || graphics.asphalt_roughness.is_some()
+            || graphics.ground_edge_pilot || surface_rgb_override.is_some())
+    {
+        return Err("--asphalt-grazing requires rendered enhanced Donington route_0/subroute0 standalone source-base road with roughness/RGB/mip/ground pilots off".into());
+    }
     if graphics.asphalt_roughness.is_some()
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive)
             || collision || headless || route.path() != "tracks/europe/donington/route_0"
@@ -2691,7 +2710,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
                     && graphics.object_coverage==object_materials::CoverageMode::Off && !graphics.double_fence_wire
                     && !source_haze && !reflection_calibration && !include_batches && !audio_check
-                    && !nondefault_tone_map,
+                    && !nondefault_tone_map && graphics.asphalt_grazing_gain.is_none(),
                 camera_off:!render_fixed_step && capture_orbit_rate.is_none() && eye.is_none() && target.is_none(),
                 groups_ground:smoke_order==tyre_smoke::SmokeOrder::Groups && ground_effect_assets::enabled(),
                 overrides_off:window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none()

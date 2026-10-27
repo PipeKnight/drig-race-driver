@@ -93,6 +93,14 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let weight = select(clamp(layer.a, 0.0, 1.0), 1.0, sampling.y > 1.5);
         pbr.material.reflectance *= sqrt(weight);
     }
+    // Default-off authored view-dependent F0 adaptation, NOT independent physical F90.
+    // Host admits only standalone Donington road with SourceBase. Keep source alpha
+    // weighting and normal-view response; no distance/speed/mip dependency.
+    if rgb_filter.y > 1.0 {
+        let ndotv = clamp(dot(pbr.N, pbr.V), 0.0, 1.0);
+        let grazing = 1.0 - smoothstep(0.10, 0.35, ndotv);
+        pbr.material.reflectance *= sqrt(1.0 + (rgb_filter.y - 1.0) * grazing);
+    }
     // Follow the same authored vertex blend as the diffuse layers. This keeps
     // road/curb response unchanged while dry terrain loses the broad wet sheen.
     // Do not derive roughness from source specular alpha or albedo brightness.

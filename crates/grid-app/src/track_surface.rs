@@ -99,7 +99,8 @@ pub struct Surface {
     // controls.w remains the source world-projected UV scale.
     #[uniform(113)]
     sampling: Vec4,
-    // Original-to-filtered RGB mixture; YZW reserved. Alpha stays on original taps.
+    // X: RGB mixture; Y: standalone-road authored grazing F0 gain or0; ZW reserved.
+    // Alpha stays on original taps.
     #[uniform(114)]
     rgb_filter: Vec4,
 }
@@ -486,14 +487,14 @@ pub(crate) fn attach(
     mut materials: ResMut<Assets<SurfaceMaterial>>,
 ) {
     // Refuse a no-target comparison before mutating meshes, images or materials.
-    if settings.asphalt_roughness.is_some() {
+    if settings.asphalt_roughness.is_some() || settings.asphalt_grazing_gain.is_some() {
         let eligible = query.iter().any(|(_, name, identity, mesh, _)| {
             let Some(draw) = source.draws.get(name.as_str()) else { return false; };
             draw.material == identity.0
                 && standalone_asphalt(&source.definitions[&draw.material])
                 && meshes.get(&mesh.0).is_some_and(|mesh| mesh.count_vertices() == draw.uv.len())
         });
-        assert!(eligible, "asphalt roughness pilot has no eligible attached standalone road draw");
+        assert!(eligible, "asphalt material pilot has no eligible attached standalone road draw");
     }
     let textures: BTreeMap<_, _> = source
         .textures
@@ -531,6 +532,8 @@ pub(crate) fn attach(
     let mut mismatched = 0;
     let mut roughness_draws = 0;
     let mut roughness_materials = 0;
+    let mut grazing_draws = 0;
+    let mut grazing_materials = 0;
     for (entity, name, identity, mesh, base) in &query {
         let Some(draw) = source.draws.get(name.as_str()) else {
             continue;
@@ -549,6 +552,8 @@ pub(crate) fn attach(
         target.insert_attribute(Mesh::ATTRIBUTE_COLOR, draw.masks.clone());
         let d = &source.definitions[&draw.material];
         let roughness = settings.asphalt_roughness.filter(|_| standalone_asphalt(d));
+        let grazing_gain = settings.asphalt_grazing_gain.filter(|_| standalone_asphalt(d));
+        if grazing_gain.is_some() { grazing_draws += 1; }
         if roughness.is_some() { roughness_draws += 1; }
         let handle = handles
             .entry(draw.material.clone())
@@ -563,6 +568,7 @@ pub(crate) fn attach(
                     base.perceptual_roughness = roughness;
                     roughness_materials += 1;
                 }
+                if grazing_gain.is_some() { grazing_materials += 1; }
                 materials.add(ExtendedMaterial {
                     base,
                     extension: Surface {
@@ -580,7 +586,7 @@ pub(crate) fn attach(
                                     + 2. * f32::from(asphalt_layer(&d.textures[1]))
                             } else { 0. },
                         ),
-                        rgb_filter: Vec4::new(settings.asphalt_filter_strength, 0., 0., 0.),
+                        rgb_filter: Vec4::new(settings.asphalt_filter_strength, grazing_gain.unwrap_or(0.), 0., 0.),
                         controls: d.controls,
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
@@ -612,6 +618,9 @@ pub(crate) fn attach(
     println!("asphalt_filter_strength value={} scope=rgb-only alpha_macro_skids=preserved", settings.asphalt_filter_strength);
     if let Some(value) = settings.asphalt_roughness {
         println!("asphalt_roughness value={value} source_materials={roughness_materials} source_draws={roughness_draws} before_static_batch=true scope=standalone-don-track1-4-both-layers authored=true default=off masks_rgb_ground_motion=unchanged");
+    }
+    if let Some(gain) = settings.asphalt_grazing_gain {
+        println!("asphalt_grazing gain={gain} ndotv_full=0.10 ndotv_off=0.35 source_materials={grazing_materials} source_draws={grazing_draws} before_static_batch=true scope=standalone-don-track1-4-both-layers-source-base authored_view_dependent_F0=true independent_physical_F90=false default=off alpha_rgb_macro_skids_ground_roughness_motion=unchanged");
     }
     println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(

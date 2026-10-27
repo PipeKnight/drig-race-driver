@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G309 (2026-10-27): default-off angular asphalt F0 trial passes464app tests/Clippy/build and4static controls: restrained lowangle brightening, overhead PNG/RGB exact. Moving/Motion combination and original/default parity remain open. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G308 (2026-10-27): first stored S4 forearm-key hypothesis passes464app tests/Clippy/build and2static views;104vertices deform coherently and neutral PNG equals G307. Native DeltaYes/reference/clock/full animation remain open. See CROWD_ANIMATION_RESEARCH.
 - G307 (2026-10-27): one-arm-pose fixed20degree diagnostic passes463app tests/Clippy/build and2static views;104vertices move in the expected forearm branch, neutral PNG byte-identical to G306 and placement retained. Source animation/clock/default remain open. See CROWD_ANIMATION_RESEARCH.
 - G306 (2026-10-27): opt-in one-neutral-actor renders a coherent textured USA female;462app tests/Clippy/build and2static controls pass after a preserved private saved-path-verifier failure. Neutral error<1e-6; feet occluded, source clock/pose/LOD/animation/default remain open. See CROWD_ANIMATION_RESEARCH.
