@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F590](F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |
 | [F589](F0589.md) | 2026-10-27 | OSD timer box sounds are online-only; speech and music sized |
 | [F588](F0588.md) | 2026-10-27 | Shadow and bounds passes skip batched and static meshes |
 | [F587](F0587.md) | 2026-10-26 | Early-race tick cost: whole vehicle-record copies cut |

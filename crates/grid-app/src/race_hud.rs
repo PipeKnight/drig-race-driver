@@ -576,7 +576,10 @@ fn frame(
     let race = driving.opponents.as_ref().filter(|_| trial.is_some());
     let finished = trial.as_ref().is_some_and(|t| t.finished());
     let go = view.label("osd_GO");
-    let countdown = trial.as_ref().and_then(|t| match t.state.phase() {
+    // The message box counts down only the solo time trial (AUTHORED, no
+    // start lights). Races start on the lights alone: the original's box
+    // runs only for the online session's timer (docs/AUDIO_RESEARCH.md §28).
+    let countdown = trial.as_ref().filter(|t| !t.race).and_then(|t| match t.state.phase() {
         grid_tools::time_trial::Phase::Countdown(_) => t.state.countdown_label().map(|n| n.to_string()),
         grid_tools::time_trial::Phase::Running if t.state.elapsed() < 1. => Some(go),
         _ => None,

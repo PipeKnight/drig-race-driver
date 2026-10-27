@@ -1714,7 +1714,7 @@ there is nothing to port. Not ported, and correctly so for offline play.
 
 Side finding: the port shows `object/messagebox=counter` with 3, 2, 1, GO at every race start
 (`race_osd.rs`, from the time-trial countdown). In the original, single-player race sessions do not
-start the box. Whether the port should hide it is a HUD question; it is left to the HUD owner.
+start the box. Fixed in F590: races no longer show it.
 `drift_countdown_1` stays unported: it comes from `Osd/dial2.pssg` animation notes on the drift
 combo timer, and the port does not show that group.
 
