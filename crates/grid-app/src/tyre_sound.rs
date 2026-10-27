@@ -275,6 +275,7 @@ mod tests {
     fn endless_tyre_voices_play_once() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let bank = Bank::load(std::path::Path::new(&root)).unwrap();
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<TyreSource>()

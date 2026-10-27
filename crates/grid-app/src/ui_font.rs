@@ -54,6 +54,7 @@ mod tests {
 
     #[test]
     fn install_replaces_the_default_font_after_the_text_plugin() {
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,

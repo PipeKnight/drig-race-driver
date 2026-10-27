@@ -857,6 +857,7 @@ mod tests {
         let banks = load_banks(std::path::Path::new(&root), &models);
         assert_eq!(banks.iter().map(Option::is_some).collect::<Vec<_>>(), [true, false, true]);
         let spawned = |banks: Vec<Option<Arc<EngineBank>>>| {
+            crate::mobile::init_test_pool();
             let mut app = App::new();
             app.add_plugins((bevy::asset::AssetPlugin::default(), bevy::app::TaskPoolPlugin::default()))
                 .init_asset::<EngineSource>()
@@ -879,6 +880,7 @@ mod tests {
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();
+            crate::mobile::init_test_pool();
             let mut app = App::new();
             app.insert_resource(sound).init_resource::<ButtonInput<KeyCode>>()
                 .add_message::<AppExit>()

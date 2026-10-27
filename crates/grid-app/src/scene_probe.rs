@@ -605,6 +605,7 @@ mod tests {
                 .unwrap();
         let initial =
             Mat4::from_cols_array(&runtime.pose()).transform_point3(Vec3::new(0., 1.3, 0.));
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(super::super::Driving {
             notices: Vec::new(),
