@@ -99,7 +99,9 @@ Each frame `car_batch::select_levels` applies 0x9F42A0 with `car_lod::select` an
 - caps per level, nearest first, a full level pushes the car coarser, no hysteresis.
 The batches and extras of the chosen level go to the default layer, the others to the hidden layer. Cars that show LOD0: the player, a model without a low file, and an opponent with a LOD0 part off its batch (a loose or detached panel, AUTHORED: the original moves its low panels too, not traced). `GRID_CAR_LOD=0` keeps every car at LOD0 (comparisons).
 
-AUTHORED / not ported: the original submits opponents only to CSM cascades 1 and 2; Bevy draws a caster into every cascade whose frustum holds it. The original's focus-car `car_layer` maps, the cockpit rule (opponents have no cockpit here), the replay and FE sets and the `vehicles lodQuality` option are not modelled.
+Cascades (F616): 0x5C02D0 returns at once for cascade 0 (`0 < param_1`) and otherwise submits every caster list it has for that cascade with code 0x401: the list at `+0x38+4n` through 0x95FE90, the vehicles (0x9CB5B0), and the lists through 0x85CC80, 0x979430/0x979590 and 0x97A160/0x97A250 (characters, trees, ornaments [I]) [O]. So cascade 0 takes no world caster at all, opponents and scenery alike; the world's shadow uses cascades 1 and 2, and opponents cast in both like the rest of the scene [I: what cascade 0 draws is not traced; 0x5CCDC0's focus-car `car_layer` maps are the likely use]. The port's four Bevy cascades are all world cascades (the track casts in each), so opponents casting in every cascade is the equivalent rule; dropping them from the nearest cascade would remove their near shadows, which the original keeps. Not changed.
+
+AUTHORED / not ported: the original's focus-car `car_layer` maps, the cockpit rule (opponents have no cockpit here), the replay and FE sets and the `vehicles lodQuality` option are not modelled.
 
 `grid-car-lod-draws PATH.pssg` (grid-probes) lists a package's draws per `LODn_` bundle: BMW high 107 draws / 23,105 triangles (LOD0), 100 / 16,195 (LOD1); low 94 / 7,548, 70 / 4,018, 46 / 1,546, 3 / 494 (LOD2..5). The low file uses the same 16 material names as the high file.
 

@@ -623,10 +623,31 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
     app.insert_resource(Installed)
         .init_resource::<crate::mesh_stream::MeshStream>()
         .add_systems(Update, spawn)
-        .add_systems(PostUpdate, (resize, animate, texts, visibility).chain().before(TransformSystems::Propagate));
+        .add_systems(PostUpdate, (resize, animate, texts, visibility).chain().before(TransformSystems::Propagate))
+        .add_systems(
+            PostUpdate,
+            drop_sun_cascades
+                .after(SimulationLightSystems::UpdateDirectionalLightCascades)
+                .before(SimulationLightSystems::UpdateLightFrusta),
+        );
     Ok(())
 }
 
+/// The sun's cascades for the OSD camera: Bevy builds them for every active
+/// camera, but the render world never draws the sun for this view (its layer
+/// is not the sun's), so they only cost main-world frusta and caster
+/// visibility each frame. Dropped; the picture is unchanged.
+fn drop_sun_cascades(osd: Query<Entity, With<OsdCamera>>, mut lights: Query<&mut Cascades>) {
+    for camera in &osd {
+        for mut cascades in &mut lights {
+            if cascades.cascades.contains_key(&camera) {
+                cascades.cascades.remove(&camera);
+            }
+        }
+    }
+}
+
+use bevy::light::{Cascades, SimulationLightSystems};
 use bevy::transform::TransformSystems;
 
 #[derive(Component)]

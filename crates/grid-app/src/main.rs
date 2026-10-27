@@ -3569,6 +3569,12 @@ fn setup(
                 .cloned()
         })
         .collect();
+    // Breakable-prop pieces of one library draw share a mesh asset.
+    // Keyed by source mesh, draw and material, plus a hash of the indices;
+    // each key keeps every distinct index list.
+    let mut piece_meshes: std::collections::HashMap<(String, String, u64), Vec<Handle<Mesh>>> =
+        std::collections::HashMap::new();
+    let mut piece_parts = 0;
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
             && graphics.smooth_tyres
@@ -3691,6 +3697,31 @@ fn setup(
         }
         let shared = if deformable {
             None
+        } else if let Some(key) = dynamic_props::piece_draw(&part.name) {
+            piece_parts += 1;
+            let indices = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                if let Some(indices) = part.mesh.indices() {
+                    indices.iter().for_each(|i| i.hash(&mut hasher));
+                }
+                hasher.finish()
+            };
+            let key = (key.to_owned(), part.material.clone(), indices);
+            // The source fixes the vertices; shared only with equal indices.
+            let same = |a: &Mesh| match (a.indices(), part.mesh.indices()) {
+                (Some(x), Some(y)) => x.iter().eq(y.iter()),
+                (x, y) => x.is_none() && y.is_none(),
+            };
+            let candidates = piece_meshes.entry(key).or_default();
+            match candidates.iter().find(|h| meshes.get(*h).is_some_and(same)) {
+                Some(handle) => Some(handle.clone()),
+                None => {
+                    let handle = meshes.add(part.mesh);
+                    candidates.push(handle.clone());
+                    Some(handle)
+                }
+            }
         } else {
             Some(meshes.add(part.mesh))
         };
@@ -3849,6 +3880,13 @@ fn setup(
                 }
             }
         }
+    }
+    if piece_parts > 0 {
+        println!(
+            "piece_meshes parts={piece_parts} draws={} meshes={}",
+            piece_meshes.len(),
+            piece_meshes.values().map(Vec::len).sum::<usize>()
+        );
     }
     // Opponents cast their shadow with their model's coarsest level and draw
     // its low-detail levels as the original selects them; car_batch poses the

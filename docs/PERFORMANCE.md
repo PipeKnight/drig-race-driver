@@ -1483,6 +1483,53 @@ first windows, compared with the same lines in 3c7a3516's logs.
 
 The start mesh-allocation hitch (F600) is unchanged.
 
+## Start hitch: shared prop-piece meshes, OSD camera cascades (F616)
+
+Phone (APK 3c7a3516, Nürburgring) [O]: the first two frames after loading take 787 and 1,109 ms
+(`frame_stats frames=2`); `allocate_and_free_meshes` averages 3.46 ms per frame over the first
+`profile_window` (242 frames), about 840 ms in all. The cars then wait on the grid for about 20 s,
+so the hitch is the moment the grid first appears.
+
+Cause, PC, phone view (Donington, 12 cars, `GRID_ASSET_COUNTS=1`) [O]: 19,888 mesh assets for 22,898
+entities. 14,706 of the entities are the hidden pieces of the 1,021 breakable props
+(`dynamic_props`), and 14,706 of the meshes were theirs: each piece draw got its own mesh holding
+its source's whole vertex arrays. Bevy uploads every mesh asset, drawn or not, in the first frames.
+
+Change: `setup` gives pieces with the same source mesh, draw, material and index list one mesh asset
+(`dynamic_props::piece_draw`; the piece name now carries the source index). `draw_mesh` builds a
+piece's mesh from its source and indices only, so equal keys give equal meshes. `piece_meshes
+parts=14706 draws=63 meshes=63`: 63 meshes for all pieces; 5,245 mesh assets in all. The
+`mesh_entities` line of `GRID_ASSET_COUNTS` now also gives distinct meshes per kind.
+
+| first frames after loading, PC profile build | before | after |
+|---|---|---|
+| `allocate_and_free_meshes` | 570 + 570 + 82 = 1,222 ms | 321 ms |
+| `extract_render_asset<RenderMesh>` | 253 + 5 = 258 ms | 69 ms |
+| `prepare_assets<RenderMesh>` | 114 + 7 ms | below the list |
+| mesh assets | 19,888 | 5,245 |
+
+`setup` is unchanged (147 against 140 ms). Remaining mesh assets: 3,080 opponent meshes (deforming
+parts own a mesh per car), 990 static batches, 383 car batches, 376 track parts, 258 others.
+
+OSD camera: Bevy builds the sun's four cascades for every active camera, also for the OSD dial
+camera (`osd_scene`, order -20). The render world never draws the sun for that view (its layer is not
+the sun's), so those cascades only cost main-world frusta and caster visibility. `osd_scene` now
+drops them after Bevy builds them. `check_dir_light_mesh_visibility` 0.38 ms per frame (mean of 42
+two-second windows) → about 0.07-0.11 ms (below the profile list in all but one window).
+
+Picture: fixed step, desktop 1600x900, against the build before: Donington ticks 300 and 6000 (one
+prop broken) and the demolition derby at tick 2,700: 0 pixels differ.
+
+Phone [I]: the first frames lose roughly three quarters of their mesh work, about 0.6 s of the 1.9 s
+the two frames take, and the main thread about 1 ms per frame of caster visibility if the phone is
+3-4x slower than the PC. Check in the owner's log: the first `frame_stats frames=2` line (avg_ms),
+`allocate_and_free_meshes` and `check_dir_light_mesh_visibility` in the first and later
+`profile_window`s, and `asset_counts ... meshes=`.
+
+Cascades 1 and 2 (the coordinator's item): the original's caster callback skips cascade 0 for every
+world caster, not only opponents (docs/CAR_LOD.md "Cascades (F616)"), so the port's rule is already
+the equivalent one. Not changed.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

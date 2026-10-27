@@ -69,6 +69,16 @@ pub(crate) fn draw_mesh(source: &mesh::Mesh<'_>, indices: Vec<u16>) -> Mesh {
     mesh
 }
 
+/// The source mesh and draw of a piece part's name (`PIECE` b/s/source/draw
+/// id). Pieces with the same source and indices have the same mesh
+/// ([`draw_mesh`]).
+pub(crate) fn piece_draw(name: &str) -> Option<&str> {
+    let mut fields = name.strip_prefix(PIECE)?.splitn(3, '/');
+    fields.next()?;
+    fields.next()?;
+    fields.next()
+}
+
 /// Piece parts: every piece's draws under its body anchor in the damage
 /// renderable, placed with the entity transform. Returns the piece count drawn.
 pub(crate) fn append_pieces(
@@ -111,7 +121,7 @@ pub(crate) fn append_pieces(
                 let matrix =
                     Mat4::from_cols_array(&scene::compose(&draw.transform, &breakable.placement));
                 car.parts.push(Part {
-                    name: format!("{PIECE}{b}/{s}/{}", String::from_utf8_lossy(draw.id)),
+                    name: format!("{PIECE}{b}/{s}/{}/{}", draw.source, String::from_utf8_lossy(draw.id)),
                     material,
                     mesh: draw_mesh(source, draw.indices),
                     matrices: vec![matrix],
