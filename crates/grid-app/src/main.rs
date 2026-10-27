@@ -27,6 +27,7 @@ mod body_occlusion;
 #[cfg(feature = "paint-specular")]
 mod body_specular;
 mod camera;
+mod cockpit;
 mod collision_sound;
 mod car_materials;
 mod car_numbers;
@@ -2746,6 +2747,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+    let mut cockpit = None;
     if reference {
         let model = if let Some(driving) = &driving {
             model_offset(&driving.runtime)
@@ -2753,6 +2755,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             anchor.unwrap()
         };
         append_car(&root, &lod, &mut car, model, &player_car, 0)?;
+        // The cockpit of the player only (0x6138D0), when driving.
+        if driving.is_some() {
+            match cockpit::append(&root, player_car.stem(), &mut car, model) {
+                Ok(c) => cockpit = Some(c),
+                Err(error) => eprintln!("cockpit skipped: {error}"),
+            }
+        }
         if let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
             // Other models are placed by the first opponent that drives them.
             for (m, model) in field.models.iter().enumerate().skip(1) {
@@ -3418,6 +3427,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Update, career_screen::track_top_speed)
             .add_systems(Last, career_screen::write_result);
     }
+    if let Some(cockpit) = cockpit {
+        app.insert_resource(cockpit);
+    }
     let exit = app
         .insert_resource(body_occlusion)
         .insert_resource(field)
@@ -3606,7 +3618,7 @@ fn setup(
                 let glass = matches!(
                     name,
                     "Window Glass" | "Grills Glass" | "Head Lights Glass" | "Rear Lights Glass"
-                );
+                ) || name.starts_with("interior/glass/");
                 let mut material = StandardMaterial {
                     base_color_texture: bindings
                         .get(&part.material)
@@ -3635,7 +3647,10 @@ fn setup(
                     } else {
                         0.0
                     },
-                    alpha_mode: if name.starts_with("objects/") || name.starts_with("trees/") {
+                    alpha_mode: if name.starts_with("objects/")
+                        || name.starts_with("trees/")
+                        || name.starts_with("interior/alpha/")
+                    {
                         AlphaMode::Mask(0.5)
                     } else if glass {
                         AlphaMode::Blend
@@ -3674,6 +3689,7 @@ fn setup(
             })
             .clone();
         let model = part_model(&part.material);
+        let interior = part.material.starts_with("car0/interior/");
         // Deforming body parts own their mesh per car (any car of the model).
         let deformable = driving.as_ref().is_some_and(|d| {
             d.runtime.deformation_enabled
@@ -3682,7 +3698,8 @@ fn setup(
                     .is_some_and(|o| o.multi.cars.iter().any(|c| c.deformation_enabled))
         }) && model.is_some()
             && part.wheel.is_none()
-            && part.material.split_once('/').map(|x| x.1) != Some("Aerials");
+            && part.material.split_once('/').map(|x| x.1) != Some("Aerials")
+            && !interior;
         // The player's model is drawn on the player; other models only on
         // the opponents that drive them.
         let player_part = model.is_none_or(|m| m == 0);
@@ -3776,6 +3793,9 @@ fn setup(
                     },
                     damage_parts::Joint::new(&part.joint),
                 ));
+                if interior {
+                    entity.insert((cockpit::InteriorPart, Visibility::Hidden));
+                }
                 if part.material == "car0/Tyre Wall"
                     && let Some(wheel) = part.wheel
                 {
@@ -3789,7 +3809,10 @@ fn setup(
                     });
                 }
             }
-            if moving && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
+            if moving
+                && !interior
+                && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref())
+            {
                 for car in 1..opponents.multi.cars.len() {
                     if model != Some(field.car_model[car]) {
                         continue;

@@ -266,7 +266,8 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a
                         return fail(tree.nodes[stream].offset, "duplicate skin index stream");
                     }
                 }
-                (b"Vertex", b"float3") => {
+                // Cockpit displays (int_<stem>.pssg) store half4 positions.
+                (b"Vertex", b"float3" | b"half4") => {
                     total_vertices = total_vertices.checked_add(count).ok_or(crate::Error {
                         offset: 0,
                         message: "vertex count overflow",
@@ -277,10 +278,16 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a
                             "total vertex inspector limit exceeded",
                         );
                     }
-                    if positions
-                        .replace(floats(data, count, offset, stride, true)?)
-                        .is_some()
-                    {
+                    let values = if format == b"half4" {
+                        let values = halves::<3>(data, count, offset, stride)?;
+                        if values.iter().flatten().any(|v| !v.is_finite()) {
+                            return fail(tree.nodes[stream].offset, "nonfinite half position");
+                        }
+                        values
+                    } else {
+                        floats(data, count, offset, stride, true)?
+                    };
+                    if positions.replace(values).is_some() {
                         return fail(tree.nodes[stream].offset, "duplicate position stream");
                     }
                 }

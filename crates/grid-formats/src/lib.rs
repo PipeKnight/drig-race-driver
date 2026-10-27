@@ -20,6 +20,7 @@ pub mod graphics_grade;
 pub mod grid;
 pub mod ground_cover;
 pub mod handling_damage;
+pub mod interior;
 mod handling_damage_fields;
 pub mod jpk;
 pub mod kickup;

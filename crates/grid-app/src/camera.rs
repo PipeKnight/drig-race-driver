@@ -1739,6 +1739,44 @@ pub fn transition_shot(tr: &Transition, from: &Shot, to: &Shot) -> Shot {
     }
 }
 
+/// What a view draws of the player car (0x607BC0 per frame, 0x99C2F0,
+/// 0x9FDEF0; docs/CAMERA_VIEWS.md "Own car per view").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnCar {
+    /// Every exterior part, no cockpit.
+    Whole,
+    /// Nothing (the bumper views).
+    Hidden,
+    /// The cockpit and the exterior nodes `int_<stem>.xml` keeps
+    /// (highResInterior: the head-cam).
+    Interior,
+}
+
+impl OwnCar {
+    /// Whether a player part is drawn: `interior` for a cockpit part, else
+    /// `joint` is its node without the LOD prefix.
+    pub fn shows(self, interior: bool, joint: &str, active: &[String]) -> bool {
+        match self {
+            OwnCar::Whole => !interior,
+            OwnCar::Hidden => false,
+            OwnCar::Interior => interior || active.iter().any(|a| a == joint),
+        }
+    }
+}
+
+/// The player car's rule this frame: the driving view's, the whole car
+/// during a replay or without a cockpit [AUTHORED: replays pick their own
+/// views].
+pub fn own_car(cameras: Option<&Cameras>, replay: Option<&crate::replay::Replay>, cockpit: bool) -> OwnCar {
+    if replay.is_some_and(|r| r.session.is_some()) {
+        return OwnCar::Whole;
+    }
+    match cameras.map_or(OwnCar::Whole, Cameras::own_car) {
+        OwnCar::Interior if !cockpit => OwnCar::Whole,
+        rule => rule,
+    }
+}
+
 /// The car's views, all updated every frame as the original's manager in a
 /// race (+0x122 = 1), and the Change View blend between them.
 #[derive(Resource, Clone, Debug)]
@@ -1905,6 +1943,23 @@ impl Cameras {
             );
         }
         shot
+    }
+
+    /// What the view on screen draws of the player car (the current view
+    /// until a blend commits): the bumper views none of it (0x607BC0 ident
+    /// test), a highResInterior view its cockpit [I: the head-cam's own
+    /// highResInterior flag is taken as "inside"].
+    pub fn own_car(&self) -> OwnCar {
+        let Some(view) = self.shown.map(|i| &self.views.0[i]) else {
+            return OwnCar::Whole;
+        };
+        if matches!(view.ident.as_str(), "bumper" | "bumper_reverse") {
+            OwnCar::Hidden
+        } else if inside(&view.rig) {
+            OwnCar::Interior
+        } else {
+            OwnCar::Whole
+        }
     }
 
     /// The shown view's history.
@@ -2370,6 +2425,36 @@ mod tests {
         assert_eq!(cameras.ident(), "head-cam");
     }
 
+    #[test]
+    fn views_draw_the_own_car_as_the_original() {
+        let at = |t: u64| sample(Mat4::IDENTITY, Vec3::ZERO, t);
+        let active = ["bonnet".to_string(), "door_fl".to_string()];
+        let mut seen = Vec::new();
+        for ident in ["chase_close", "chase_far", "bumper", "bonnet", "head-cam"] {
+            let mut cameras = Cameras::new(lacetti(), ident, None);
+            assert_eq!(cameras.own_car(), OwnCar::Whole, "nothing shown yet");
+            cameras.frame(&at(0), false, Look::default(), |o| o);
+            seen.push(cameras.own_car());
+            // Looking back from the bumper shows bumper_reverse: still hidden.
+            cameras.frame(&at(1), true, Look::default(), |o| o);
+            assert_eq!(cameras.own_car() == OwnCar::Hidden, ident == "bumper", "{ident} back");
+        }
+        assert_eq!(
+            seen,
+            [OwnCar::Whole, OwnCar::Whole, OwnCar::Hidden, OwnCar::Whole, OwnCar::Interior]
+        );
+        // The head-cam keeps the file's exterior nodes and the cockpit.
+        let rule = OwnCar::Interior;
+        assert!(rule.shows(true, "int_dash", &active) && rule.shows(false, "door_fl", &active));
+        assert!(!rule.shows(false, "body", &active) && !rule.shows(false, "wheel_fl", &active));
+        assert!(OwnCar::Whole.shows(false, "body", &active) && !OwnCar::Whole.shows(true, "x", &active));
+        assert!(!OwnCar::Hidden.shows(false, "bonnet", &active));
+        // Without a loaded cockpit the head-cam keeps the whole car.
+        let mut cameras = Cameras::new(lacetti(), "head-cam", None);
+        cameras.frame(&at(0), false, Look::default(), |o| o);
+        assert_eq!(own_car(Some(&cameras), None, false), OwnCar::Whole);
+        assert_eq!(own_car(Some(&cameras), None, true), OwnCar::Interior);
+    }
     #[test]
     fn change_view_ends_look_back_until_it_is_pressed_again() {
         let at = |t: u64| sample(Mat4::IDENTITY, Vec3::ZERO, t);

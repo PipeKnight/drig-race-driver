@@ -253,6 +253,16 @@ Open [I]:
 - The bonnet's displayed-only step (slot 12, 0x805790, ident `bonnet`) runs only with the camera upside down: a ±2·near vertical ray against the track moves the eye up and sets near 0.02 [D, E]. The bumper branch of the same function (camera +0x104) was not traced.
 - transitionSpeed/Strength/Direction belong to the `linear` path only.
 
+### Own car per view [D, V, 27 October 2026]
+
+Static analysis and shipped data (no live run). Evidence: worktree camera-dynamics-11a55d `local/cam/interior/findings.md` (pseudocode and PSSG surveys of all 44 interiors).
+- **Loading.** The race loader 0x6138D0 loads `interiors/<stem>/int_<stem>.pssg`, `int_<stem>_environmentmap.pssg` and `int_<stem>.xml` for the player only (participant +0x1C = 2), whatever the view; `n12` when the car has none. 0x9E8590 clones its Scene Root as `interiorRoot`, a child of the car's scene node, whose matrix 0xA18460 writes each frame from the model frame 0x9AE3A0. The Scene Root is the identity in all 44 files, so the cockpit's vertices are in the body's model frame.
+- **Per frame** (0x607BC0, from the current view 0x82D190):
+  - `bumper` and `bumper_reverse` do not draw the player car (0x99C2F0; LOD max+1);
+  - a highResInterior view (the head-cam; Mounted +0x190, Head +0x29C) shows `interiorRoot` and hides every exterior part except the `active_nodes` of `int_<stem>.xml` (0x9FDEF0; Lacetti and BMW: x0_bonnet, x0_door_fl/fr, x0_wing_fl/fr, x0_wing_mirror_l/r, x0_engine, x0_under_f);
+  - every other view draws all exterior parts and no cockpit; bonnet and dashboard views force LOD0.
+- The driver (`driver_model.pssg`, skinned) and the steering wheel's turn (NeAnim clips) are not ported.
+
 ### FOV convention [D, F461]
 
 The record holds fov · 0.0174533 at +0x30 and the near plane at +0x34. Both projection builders found use it as the **vertical** field of view: 0x8163F0 computes f = tan(π/2 − fov/2), x-scale f / aspect, y-scale f (aspect = width/height, 0x7F4F30), and the PSSG camera node 0xBAAFD0 has the same form. The path from record +0x30 to the main render camera's node was not traced. The port's vertical `PerspectiveProjection::fov` is therefore the same convention.
@@ -273,6 +283,12 @@ Change View (F613, `Cameras::change_view`, `transition_lift`, `transition_shot`)
 - the blend advances once per camera step (the clock's step: one tick by default, 1/f with `camera_fps`) and commits when its time passes the duration. With the default tick the first blended frame is the press frame's tick (the "controller first" order [I]); the commit comes on the 32nd tick (0.512 s);
 - Change View clears look back until Look Back is released and pressed again; the audio camera and the saved view follow the current view, which changes at the commit;
 - no collision geometry (body contacts off): no lift [AUTHORED].
+
+Own car per view (F618, `camera::OwnCar`, `cockpit`):
+- driving, the player's cockpit `int_<stem>.pssg` (`n12` fallback) is loaded with the body and placed on the same model frame; its shader groups interior.fx (opaque), interior_alpha.fx (alpha mask 0.5) and interior_windscreen.fx (blended like the car's glass) go through the car's existing material path (base colour = TDiffuseAlphaMap, no new shading). The LCD and motec displays and the mirror (lcd_text.fx, motec.fx, mirror.fx: 5 of 49 Lacetti draws) are not drawn yet. Cockpit parts follow the car but never deform and are never merged into the car's batches;
+- the view on screen decides what is drawn (`damage_parts::present` hides, `car_batch` draws the player's parts on their own while a view hides any of them): bumper views nothing, the head-cam the cockpit and the `int_<stem>.xml` exterior nodes, every other view the whole exterior. During a replay, or when the cockpit failed to load, the whole car is drawn [AUTHORED];
+- `grid_formats::mesh` reads `Vertex half4` positions (the cockpit displays), `grid_formats::interior` the active nodes.
+- Image check (worktree `local/cam/render/`, `render.ps1` with `--render-fixed-step` at 300 ticks, `compare.py`): two runs of one build are bit-identical; F613 against F618: chase_close, chase_far and bonnet 0 differing pixels; bumper (car gone) and head-cam (cockpit) changed. The bonnet view already showed the hood (the 2026-10-17 note below is superseded).
 
 Previously the prototype's C key was look back. It now changes the view, as in the original.
 
@@ -323,11 +339,12 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
   - the bonnet's upside-down eye fix (slot 12, §2 Change View blend; needs a track ray from the camera) and the untraced bumper branch;
   - the manager's `linear` transitions (transitionType; unused in a race);
   - drift and replay views.
-- Cockpit rendering: head-cam needs the high-detail interior (`interiors/lac/int_lac.pssg`, `highResInterior`), which the app does not load yet. From the seat the exterior body is seen from inside.
+- Cockpit rendering (F618): the cockpit, without its driver, steering-wheel turn, displays, mirror image and environment map; not yet compared with the original's picture.
+- Camera determinism: without `--render-fixed-step` a capture's chase views depend on how ticks fall into rendered frames (the chase steps once per rendered frame with dt = ticks · 0.016 s), so two runs differ by sub-pixel offsets [V, 27 October 2026].
 - The chase, Mounted and head views were compared with the running original in F470 (section 2, "Live comparison"); the FOV values match the records. The head dynamics were ported in F472 from the image and checked against the same run (§2 Head). The spin hold and the knock are proven on a deterministic scene against the emulated original (§2 Spin hold scene), not live. Open: the head-cam at a different frame rate and its spring state directly (next capture, below).
 - **Next head-cam capture** (needs a live run; not done in F472). Record per view record, every camera frame (sample on each change of record +0xF0, or log +0xF0 with the target state): record +0x000..+0x1BF (adds the head spring +0x160..+0x1BF: last input +0x170, acceleration +0x180, offset +0x190, velocity +0x1A0, besides the body +0x110..+0x14F); object +0x170..+0x188 and +0x1F0..+0x208 (spring parameters as loaded), +0x244 (headBuffeting), +0x284 (wind amplitude), +0xD0 and +0x2A0 (transition), record +0xD8/+0xDC/+0xE4/+0xE8 (look). Run once unlocked and once at a vsync 60 fps to show the frame-rate dependence, with a braking stop and a kerb strike on the head-cam.
 - **Look capture** (F499, needs a live run): the controller's +0x1C..+0x1F bytes during a race (controller `[[car+0x90]+0x2250]` per 0x584842), and per frame chase record +0xA4/+0xA8, bumper/bonnet +0xB0, head +0xD8/+0xDC/+0xE4/+0xE8/+0xF4 with the eye and quaternion while holding Delete, then PageDown, then the pad's right stick, once at a standstill and once above 5 m/s, in each view and while looking back.
-- Renders (main checkout `local/cameras/renders/`, both cars) show the bonnet view without a visible hood. The eye may sit at or under the hood surface, which is back-face culled. This is not compared with the original.
+- Renders of 2026-10-17 (main checkout `local/cameras/renders/`) showed the bonnet view without a visible hood; the F470 model-frame mount fixed it (F618 renders show the hood).
 
 ## 5. Tests
 
@@ -358,5 +375,6 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
 - F508 shake: the noise table against the emulated initializer (four entries; the ignored `shake_table_equals_the_emulated_table` compares all 6000 bit for bit with GRID_SHAKE_TABLE), the bonnet amplitude (0.49896473 after one step at 55.46 m/s, decay at 0.1798/s, zero below 1e-4, no state when all-zero), the noise (0.05897939 up, 0.075486794 side) and the eye moved along the view's up and right, the angle pitching down;
 - F499 look input: the chase look point against the emulated sequence (eases in at rest, snaps at speed, rests without input), the chase turn about the car, the bonnet turn and lift (B0 0.2, 0.36; lift 0.018) and the bumper's turn without it, the head's smoothing (0.2, 0.36 … 0.9885, release 0.6326, 0.4049), its curve and its 180°/s approach to 40° and 12°;
 - F613 Change View: the lift against the emulated set-up with the stand-in box (`change_view_lift_matches_the_emulated_set_up`: 0, 3.2003, 1.7067), the blend against the emulated tracker (`change_view_blend_matches_the_emulated_tracker`: 4 + 4 + 3 frames to 2e-6, the end at t > 0.5, the negated quaternion, the cut), the commit on the 32nd tick with every view running hidden (`change_view_blends_half_a_second_and_keeps_every_view_running`: the shot after the commit equals a camera that showed chase_far all along), the lift over a box, the cut into the head-cam, the dropped press, and look back cleared until pressed again (`change_view_ends_look_back_until_it_is_pressed_again`);
+- F618 own car: `views_draw_the_own_car_as_the_original` (bumper and its reverse hide the car, head-cam keeps the cockpit and the file's exterior nodes, the whole car without a cockpit); `grid_formats::interior` (active nodes, and the ignored shipped checks: nine nodes for lac and bmw, the lac/bmw/n12 cockpits read as static scenes with half4 positions);
 - bit-identical repeat runs;
 - reset clears the history.

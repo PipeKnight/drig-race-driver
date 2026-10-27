@@ -197,6 +197,7 @@ type Candidate = (
         Has<Children>,
         Has<crate::source_trees::Facing>,
         Has<crate::sidewall_filter::Sidewall>,
+        Has<crate::cockpit::InteriorPart>,
     ),
 );
 type NewPart = Or<(
@@ -218,6 +219,12 @@ type Body = (
     &'static mut Transform,
     &'static mut Visibility,
 );
+/// What the view draws of the player car.
+type OwnCarView<'w> = (
+    Option<Res<'w, crate::camera::Cameras>>,
+    Option<Res<'w, crate::replay::Replay>>,
+    Option<Res<'w, crate::cockpit::Cockpit>>,
+);
 /// The viewer camera, disjoint from the batch and body transforms.
 type ViewerFilter = (With<crate::ViewerCamera>, Without<Batch>, Without<ShadowBody>);
 
@@ -233,8 +240,14 @@ fn refresh(
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<Assets<StandardMaterial>>,
     mut events: MessageReader<AssetEvent<Mesh>>,
+    own: OwnCarView,
 ) {
     let state = &mut *state;
+    // A view that hides some of the player car draws its parts on their own
+    // (docs/CAMERA_VIEWS.md "Own car per view").
+    let loose = crate::camera::own_car(own.0.as_deref(), own.1.as_deref(), own.2.is_some())
+        != crate::camera::OwnCar::Whole;
+    let loose_slot = state.groups.iter().find(|g| g.car == 0 && loose).map(|g| g.slot);
     let start = std::time::Instant::now();
     for (body, ..) in &bodies {
         if body.is_added() {
@@ -287,7 +300,8 @@ fn refresh(
         member.alive = true;
         // A batched part carries our layer and no shadow of its own.
         let ours = layers.is_some_and(|l| *l == hidden);
-        member.placed = *visibility != Visibility::Hidden
+        member.placed = Some(group.slot) != loose_slot
+            && *visibility != Visibility::Hidden
             && (layers.is_none() || ours)
             && (!shadowless || ours || group.shadow_body)
             && !ranged
@@ -306,7 +320,8 @@ fn refresh(
     let held: Vec<bool> = poses
         .iter()
         .zip(&votes)
-        .map(|(pose, [out, placed])| pose.is_none() || out > placed)
+        .enumerate()
+        .map(|(slot, (pose, [out, placed]))| Some(slot) != loose_slot && (pose.is_none() || out > placed))
         .collect();
     state.shown.resize(anchors.len(), 0);
     state.posed.resize(anchors.len(), 0);
@@ -499,7 +514,7 @@ fn register(
             (_, Some(m)) => (0, m.rest, m.wheel),
             _ => continue,
         };
-        let (layers, shadowless, ranged, child, parent, facing, sidewall) = special;
+        let (layers, shadowless, ranged, child, parent, facing, sidewall, interior) = special;
         // A car with a shadow body casts no shadow from its parts.
         let shadow_body = opponent.is_some() && shadow_cars.contains(&car);
         if shadow_body && !shadowless {
@@ -518,7 +533,7 @@ fn register(
                 extras.push((car, level, entity));
             }
         };
-        if wheel.is_some() || own_settings || ranged || child || parent || facing || sidewall {
+        if wheel.is_some() || own_settings || ranged || child || parent || facing || sidewall || interior {
             extra(extras);
             continue;
         }

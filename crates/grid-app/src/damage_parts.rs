@@ -1022,8 +1022,13 @@ fn present(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut glass: Option<ResMut<crate::collision_sound::GlassBreaks>>,
+    own: OwnCarView,
 ) {
     let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DamageParts);
+    // What the view draws of the player car (docs/CAMERA_VIEWS.md "Own car per view").
+    let (cameras, replay, cockpit, interiors) = own;
+    let view = crate::camera::own_car(cameras.as_deref(), replay.as_deref(), cockpit.is_some());
+    let active = cockpit.as_ref().map_or(&[][..], |c| &c.active[..]);
     let damage = &mut *damage;
     for m in 0..damage.models.len() {
         if damage.models[m].layout.is_none() {
@@ -1214,7 +1219,8 @@ fn present(
         }
         let window = WINDOWS.iter().position(|(w, _)| *w == name);
         let glass = window.map_or(Glass::Intact, |w| car.windows[w]);
-        let hidden = glass == Glass::Smashed;
+        let hidden = glass == Glass::Smashed
+            || (index == 0 && !view.shows(interiors.contains(entity), name, active));
         let target = if hidden {
             Visibility::Hidden
         } else {
@@ -1322,6 +1328,12 @@ fn present(
     }
 }
 
+type OwnCarView<'w, 's> = (
+    Option<Res<'w, crate::camera::Cameras>>,
+    Option<Res<'w, crate::replay::Replay>>,
+    Option<Res<'w, crate::cockpit::Cockpit>>,
+    Query<'w, 's, (), With<crate::cockpit::InteriorPart>>,
+);
 type PartQuery<'w, 's> = Query<
     'w,
     's,

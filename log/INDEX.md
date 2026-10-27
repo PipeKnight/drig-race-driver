@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F618](F0618.md) | 2026-10-27 | Camera: the player's cockpit in the head-cam, no car in the bumper views |
 | [F617](F0617.md) | 2026-10-27 | Speech part 2 step 5: the namedAI name phrase |
 | [F616](F0616.md) | 2026-10-27 | Start hitch: prop pieces share meshes; OSD camera without sun cascades; cascade rule checked |
 | [F615](F0615.md) | 2026-10-27 | The Viper race at Washington in every bundled APK: menu entry race_viper, traced data, stage check |
