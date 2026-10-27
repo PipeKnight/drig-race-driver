@@ -304,6 +304,10 @@ pub struct Entry {
     pub car: Car,
     pub livery: String,
     pub livery_index: Option<usize>,
+    /// The entry's `driver.id`: a `free_race_drivers` row (0x664630) or the
+    /// `lemans_restrictions` row's `driver_id` (0x663860); `None` for the
+    /// player's own entry.
+    pub driver: Option<i32>,
 }
 
 /// The free-race field of a pool (0x65FF70, 0x664630, 0x66D350 [V]):
@@ -322,7 +326,8 @@ pub struct Field {
 ///   name is not "banned" and, with `match_vehicle_class`, its class is the
 ///   player's. While more than four remain one is removed at random. The
 ///   player's vehicle replaces the first when its model is missing.
-/// - Drivers: the 16 `free_race_drivers`, reduced to `max_cars` at random.
+/// - Drivers: the 16 `free_race_drivers` in table order, reduced to
+///   `max_cars` by removing index `rng(0, len) % len`; entry i gets driver i.
 /// - Entry i drives vehicle `(i / k) % len` (k = max(max_cars / 4, 1)) in
 ///   that vehicle's AI livery `i % min(liveries, k)`.
 /// - The player replaces one entry drawn at random.
@@ -406,14 +411,16 @@ pub fn build_field(
         list[0] = player_id;
     }
     let mut manager = Mt::new(seed.wrapping_add(1));
-    let mut drivers = table(db, "free_race_drivers")?.rows.len();
-    if drivers < max_cars {
+    let mut drivers: Vec<Option<i32>> = table(db, "free_race_drivers")?
+        .rows()
+        .map(|r| r.int("driver_id"))
+        .collect();
+    if drivers.len() < max_cars {
         return Err("fewer free-race drivers than cars".into());
     }
-    while drivers > max_cars {
-        let n = drivers as u32;
-        let _ = manager.range(0, n) % n;
-        drivers -= 1;
+    while drivers.len() > max_cars {
+        let n = drivers.len() as u32;
+        drivers.remove((manager.range(0, n) % n) as usize);
     }
     let k = (max_cars >> 2).max(1);
     let mut entries = Vec::with_capacity(max_cars);
@@ -431,6 +438,7 @@ pub fn build_field(
             car: Car::new(stem)?,
             livery,
             livery_index,
+            driver: drivers[i],
         });
     }
     let player = (manager.range(0, max_cars as u32) % max_cars as u32) as usize;
@@ -475,7 +483,7 @@ pub fn build_lemans_field_for(
         .find(|l| l.text("file_string") == Some(&format!("{}_00", player.stem())))
         .or_else(|| liveries.rows().find(|l| l.int("vehicle_id") == vehicle_id))
         .ok_or(format!("no livery for {player}"))?;
-    let entry = |livery: grid_formats::database::Row<'_>| -> Result<Entry, Box<dyn std::error::Error>> {
+    let entry = |livery: grid_formats::database::Row<'_>, driver: Option<i32>| -> Result<Entry, Box<dyn std::error::Error>> {
         let file = livery.text("file_string").ok_or("livery file absent")?;
         let stem = vehicles
             .rows()
@@ -488,9 +496,10 @@ pub fn build_lemans_field_for(
             livery_index: file
                 .strip_prefix(&format!("{stem}_"))
                 .and_then(|n| n.parse().ok()),
+            driver,
         })
     };
-    let mut field = vec![entry(own)?];
+    let mut field = vec![entry(own, None)?];
     for row in table(db, "lemans_restrictions")?.rows() {
         if row.int("player_vehicle_id") != vehicle_id
             || row.int("lemans_24") != Some(i32::from(lemans_24))
@@ -505,7 +514,7 @@ pub fn build_lemans_field_for(
             .rows()
             .find(|l| l.int("id") == livery_id)
             .ok_or("entrant livery absent")?;
-        field.push(entry(livery)?);
+        field.push(entry(livery, row.int("driver_id"))?);
     }
     if field.len() < 2 {
         return Err(format!("no Le Mans Series field for {player}").into());
@@ -876,6 +885,22 @@ mod tests {
         );
         assert!(touring.player < 12);
         assert_eq!(touring.entries[4].livery_index, Some(1));
+        // Twelve different free-race drivers, in table order after the removals.
+        let rows: Vec<i32> = db
+            .tables
+            .iter()
+            .find(|t| t.name == "free_race_drivers")
+            .unwrap()
+            .rows()
+            .filter_map(|r| r.int("driver_id"))
+            .collect();
+        let drivers: Vec<i32> = touring.entries.iter().map(|e| e.driver.unwrap()).collect();
+        let positions: Vec<usize> = drivers
+            .iter()
+            .map(|d| rows.iter().position(|r| r == d).unwrap())
+            .collect();
+        assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
+        assert_eq!((rows.len(), drivers.len()), (16, 12));
         // Pro Tuned: four models, so no vehicle draw; three cars each.
         let pro = build_field(&db, "pro_tuned", 12, &Car::new("sky").unwrap(), 1).unwrap();
         let stems: Vec<&str> = pro.entries.iter().map(|e| e.car.stem()).collect();
@@ -937,6 +962,9 @@ mod tests {
         let count = |f: &[Entry], s: &str| f.iter().filter(|e| e.car.stem() == s).count();
         assert_eq!(count(&dbr, "lc7"), 3);
         assert_eq!(count(&dbr, "c65"), 4);
+        // Every AI entry names its row's driver; the player's has none.
+        assert_eq!(dbr[0].driver, None);
+        assert!(dbr[1..].iter().all(|e| e.driver.is_some_and(|d| d > 0)));
         // Spyker: 16 rows, one in spk_00.
         let spk = build_lemans_field(&db, &Car::new("spk").unwrap()).unwrap();
         assert_eq!(spk.len(), 16);

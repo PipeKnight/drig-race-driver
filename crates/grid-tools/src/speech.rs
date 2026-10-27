@@ -15,8 +15,9 @@ use std::{collections::VecDeque, path::Path};
 /// The `.raw` lines are PCM16 mono at 32 kHz (stream setup 0x42BD4B: 32000, AL_FORMAT_MONO16).
 pub const LINE_RATE: u32 = 32_000;
 /// Events evaluated [AUTHORED scope: part 1 the race start, position calls and finish; part 2
-/// the player's damage, performance, strategy and rules lines, the accidents and AI events].
-pub const SLICE: [&str; 8] = ["Position", "EndOfRace", "CarDamage", "Performance", "Strategy", "Rules", "CrashesAccidents", "AIEvents"];
+/// the player's damage, performance, strategy and rules lines, the accidents and AI events, the
+/// teammate].
+pub const SLICE: [&str; 9] = ["Position", "EndOfRace", "CarDamage", "Performance", "Strategy", "Rules", "CrashesAccidents", "AIEvents", "Teammates"];
 /// An absent condition value or second parameter (0xC61C3C00).
 const UNSET: f32 = -10000.;
 /// The silence base after a line starts: now + 2.5 s (0xCB092C, 0x42FFC0).
@@ -162,6 +163,19 @@ params!(
     KeyDriversOut = "keyDriversOut",
     KeyTeamInRace = "keyTeamInRace",
     IsDrift = "isDrift",
+    // Step 4: the teammate (§11, §15).
+    TeammatePos = "teammatePos",
+    TeammateFinished = "teammateFinished",
+    TeammateTermDam = "teammateTermDam",
+    TeammateTotDam = "teammateTotDam",
+    TeamDriverChampWinPos = "teamDriverChampWinPos",
+    PlayerCollideWithTeammate = "playerCollideWithTeammate",
+    TmTimeInCurrentPos = "tmTimeInCurrentPos",
+    TeamDamFromCollision = "teamDamFromCollision",
+    TeammateTyreBlown = "teammateTyreBlown",
+    TeammateSpun = "teammateSpun",
+    TeammateRoll = "teammateRoll",
+    TeammateEngBlown = "teammateEngBlown",
 );
 
 /// The numbered getter families of 0x45F590: `AI1…AI20` (race entries 0…19) and `Key1…Key24`
@@ -188,6 +202,97 @@ pub const PARAMS: usize = NAMED + AI_SLOTS * AI_FIELDS.len() + KEYS * KEY_FIELDS
 /// The value index of `AI<slot + 1><field>`.
 pub fn ai_param(slot: usize, field: AiField) -> usize {
     NAMED + field as usize * AI_SLOTS + slot
+}
+
+/// The value index of `Key<n><field>` (`field` 0 Collision, 1 CollisionDam, 2 TermDam; n from 1).
+pub fn key_param(n: usize, field: usize) -> usize {
+    NAMED + AI_SLOTS * AI_FIELDS.len() + field * KEYS + n - 1
+}
+
+/// 0x4244B0: a `nationality_voice.voice` name as `teammateNumber`; 0 for any other name (the
+/// database's `japan_1` among them).
+pub fn voice_number(voice: &str) -> i32 {
+    match voice {
+        "us_1" => 1,
+        "us_2" => 2,
+        "us_3" => 3,
+        "british_1" => 4,
+        "british_2" => 5,
+        "british_3" => 6,
+        "french_1" => 7,
+        "italian_1" => 8,
+        "german_1" => 9,
+        "spanish_1" => 10,
+        "japanese_1" => 11,
+        "japanese_2" => 12,
+        "scan_1" => 13,
+        "irish_1" => 14,
+        _ => 0,
+    }
+}
+
+/// A race entry's driver as the car record reads it (0x438C10).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Identity {
+    /// `driver.audio_key_driver_number` (+0x3C), 0 without a driver.
+    pub key: i32,
+    /// `team.id` of the entry's team (+0x44), 0 without one [I: the port's entry has its
+    /// driver's `driver.team_id`].
+    pub team: i32,
+    /// `driver.pit_speech_filename`, the name phrase of `namedAI` lines.
+    pub name_file: Option<String>,
+}
+
+/// The drivers of a race for the collector.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Identities {
+    /// By race entry.
+    pub entries: Vec<Identity>,
+    /// The teammate's entry (vf 0x5C, 0x430AA0).
+    pub teammate: Option<usize>,
+    /// Race block +0x34 (`teammateNumber`).
+    pub teammate_number: i32,
+}
+
+impl Identities {
+    /// `drivers[k]` is race entry k's `driver.id`. `teammate` is an entry index. In a career race
+    /// (`career`) the race block takes the teammate's voice through 0x430D60, 0 without one;
+    /// elsewhere it keeps the cleared −1 (0x451A20 computes it only in the career mode) [I: the
+    /// two event kinds 0x451A20 also excludes are not identified].
+    ///
+    /// 0x430D60 skips (count of picks for the nationality) % (voices of the nationality) rows of
+    /// `nationality_voice` and counts the pick; the port's count is 0, the first teammate of a
+    /// game session [I: the original keeps the counts and the last driver's voice for the whole
+    /// session].
+    pub fn load(db: &grid_formats::database::Database, drivers: &[Option<i32>], teammate: Option<usize>, career: bool) -> Self {
+        let row = |id: i32| db.table("driver")?.rows().find(|r| r.int("id") == Some(id));
+        let entries = drivers
+            .iter()
+            .map(|d| match d.and_then(row) {
+                Some(r) => Identity {
+                    key: r.int("audio_key_driver_number").unwrap_or(0),
+                    team: r.int("team_id").unwrap_or(0),
+                    name_file: r.text("pit_speech_filename").map(str::to_owned),
+                },
+                None => Identity::default(),
+            })
+            .collect();
+        let teammate = teammate.filter(|&t| drivers.get(t).copied().flatten().is_some());
+        let teammate_number = if !career {
+            -1
+        } else {
+            let nationality = teammate.and_then(|t| drivers[t]).and_then(row).and_then(|r| r.int("nationality_id"));
+            let voice = nationality.and_then(|n| {
+                db.table("nationality_voice")?.rows().find(|r| r.int("nationality_id") == Some(n))?.text("voice").map(str::to_owned)
+            });
+            voice.map_or(0, |v| voice_number(&v))
+        };
+        Self {
+            entries,
+            teammate,
+            teammate_number,
+        }
+    }
 }
 
 /// The value index of a registered name, or `None`.
@@ -1107,6 +1212,9 @@ pub struct Entry {
     /// The car's total damage percentage of 0x424650: [`Car::total`] for the player's car,
     /// [`ai_total_percent`] for the others.
     pub damage: f32,
+    /// [`Identity::key`] and [`Identity::team`].
+    pub key: i32,
+    pub team: i32,
 }
 
 /// The race kind flags of the race block (0x451A20).
@@ -1289,6 +1397,9 @@ pub struct RaceView {
     pub status_changes: Vec<(usize, u32)>,
     /// The choreographer's `AIChoreographerEvent`s of this frame (0x408E50 → 0x417CB0).
     pub ai_events: Vec<crate::ai_pacing::Message>,
+    /// [`Identities::teammate`] and [`Identities::teammate_number`].
+    pub teammate: Option<usize>,
+    pub teammate_number: i32,
 }
 
 /// A car record (0x438C10) with the collector's time in position.
@@ -1310,6 +1421,10 @@ struct Record {
     terminal: bool,
     grid: u32,
     in_position: f32,
+    /// +0x3C the key driver number and +0x44 the team: −1 in a cleared record (0x4689C0), then
+    /// taken at the first refresh.
+    key: Option<i32>,
+    team: Option<i32>,
 }
 impl Record {
     /// 0x438C10. The previous position changes only when the position does.
@@ -1335,6 +1450,8 @@ impl Record {
         self.finished = e.finished;
         self.terminal = e.terminal;
         self.grid = e.grid as u32;
+        self.key.get_or_insert(e.key);
+        self.team.get_or_insert(e.team);
     }
 }
 
@@ -1362,6 +1479,16 @@ struct Slot {
     /// +0xB674 + 0x14·k + i, in 0x417CB0's order: engine blown, tyre blown, spun, roll, forced
     /// retire.
     events: [bool; 5],
+}
+
+/// One key driver's values: +0xB465 + n `KeynCollision`, +0xB47C + 4n the last total,
+/// +0xB4DC + 4n `KeynCollisionDam`, +0xB53F + n `KeynTermDam`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct KeySlot {
+    collision: bool,
+    total: f32,
+    damage: f32,
+    terminal: bool,
 }
 
 /// `audio_game_info_collector` (0x452810) for the parameters of [`Param`].
@@ -1431,6 +1558,36 @@ pub struct Collector {
     /// +0xB6D9 `aiSpin`, +0xB6D8 `aiRoll`.
     ai_spin: bool,
     ai_roll: bool,
+    /// +0xE8 the teammate's entry (cleared with the records, 0x417E40), +0x3F4 its record and
+    /// +0xB408 its position at the last frame.
+    teammate: Option<usize>,
+    mate: Record,
+    mate_previous: f32,
+    /// Race block +0x34 `teammateNumber` (−1 when cleared).
+    teammate_number: i32,
+    /// +0xB724 `teammateVehicleID`.
+    teammate_id: u32,
+    /// +0xB43C `playerCollideWithTeammate`; +0xB43D `teammateCollision` and +0xB43E/+0xB43F (the
+    /// teammate hit a car, the player; no getter).
+    hit_mate: bool,
+    mate_collision: bool,
+    mate_hit_car: bool,
+    mate_hit_player: bool,
+    /// +0xB3E4 `teammateTotDam`, +0xB444 `teamDamFromCollision`.
+    mate_total: f32,
+    mate_damage: f32,
+    /// +0xB434 + k: the teammate's flags in 0x417CB0's order (`teammateEngBlown`,
+    /// `teammateTyreBlown`, `teammateSpun`, `teammateRoll`, a forced retirement without getter).
+    mate_events: [bool; 5],
+    /// Each race entry's key driver number once taken (entry +0x50/+0x54).
+    keys: Vec<Option<i32>>,
+    /// By key driver number; index 0 (+0xB465) is cleared but never set.
+    key_slots: [KeySlot; KEYS + 1],
+    /// +0xB558 `playerCollWithKeyPlayer` (−1 when cleared), +0xB6E8 `keyDriversOut`, +0xB6EC
+    /// `keyTeamInRace`.
+    coll_key: i32,
+    keys_out: i32,
+    key_team: i32,
     params: Params,
 }
 impl Default for Collector {
@@ -1484,6 +1641,23 @@ impl Default for Collector {
             slots: [Slot::default(); AI_SLOTS],
             ai_spin: false,
             ai_roll: false,
+            teammate: None,
+            mate: Record::default(),
+            mate_previous: 0.,
+            teammate_number: -1,
+            teammate_id: 0,
+            hit_mate: false,
+            mate_collision: false,
+            mate_hit_car: false,
+            mate_hit_player: false,
+            mate_total: 0.,
+            mate_damage: 0.,
+            mate_events: [false; 5],
+            keys: Vec::new(),
+            key_slots: [KeySlot::default(); KEYS + 1],
+            coll_key: -1,
+            keys_out: 0,
+            key_team: 0,
             params: Params::default(),
         }
     }
@@ -1515,6 +1689,16 @@ impl Collector {
             slot.damage = 0.;
             slot.events = [false; 5];
         }
+        self.mate_damage = 0.;
+        self.mate_collision = false;
+        for k in &mut self.key_slots {
+            k.collision = false;
+            k.terminal = false;
+            k.damage = 0.;
+        }
+        self.mate_events = [false; 5];
+        self.keys_out = 0;
+        self.key_team = 0;
         self.no_collision = 0.;
         self.off_track_time = 0.;
         self.clear_events();
@@ -1531,6 +1715,9 @@ impl Collector {
         self.plus1 = Default::default();
         self.minus1 = Default::default();
         self.leader = Default::default();
+        self.teammate = None;
+        self.mate = Record::default();
+        self.teammate_number = -1;
         if was_racing {
             self.on_grid = grid;
         }
@@ -1557,6 +1744,10 @@ impl Collector {
             slot.distance = 0.;
             slot.total = 0.;
         }
+        self.mate_total = 0.;
+        for k in &mut self.key_slots {
+            k.total = 0.;
+        }
     }
 
     /// 0x417ED0, after every refresh: the one-shot flags.
@@ -1566,6 +1757,32 @@ impl Collector {
         self.overtook = 0;
         self.ai_spin = false;
         self.ai_roll = false;
+        self.hit_mate = false;
+        self.mate_hit_car = false;
+        self.mate_hit_player = false;
+        self.coll_key = -1;
+        self.key_slots[0].collision = false;
+    }
+
+    /// Entry `i`'s key driver number, taken once (entry +0x50/+0x54 through a record, vf 0x4C).
+    fn key_of(&mut self, i: usize, v: &RaceView) -> i32 {
+        if self.keys.len() < v.entries.len() {
+            self.keys.resize(v.entries.len(), None);
+        }
+        match (self.keys.get_mut(i), v.entries.get(i)) {
+            (Some(k), Some(e)) => *k.get_or_insert(e.key),
+            _ => 0,
+        }
+    }
+
+    /// `KeynCollision` for a key driver n above 0, and `keyTeamInRace` = n (0x430F50).
+    fn key_collision(&mut self, n: i32) {
+        if n > 0 {
+            self.key_team = n;
+            if let Some(k) = self.key_slots.get_mut(n as usize) {
+                k.collision = true;
+            }
+        }
     }
 
     /// The Paused mix mode, or no player car: 0x417ED0 and 0x417E40 once.
@@ -1578,15 +1795,28 @@ impl Collector {
         self.plus1 = Default::default();
         self.minus1 = Default::default();
         self.leader = Default::default();
+        self.teammate = None;
+        self.mate = Record::default();
         self.paused = true;
     }
 
     /// One collector frame and the refresh after it (0x44C640); returns the parameters.
     pub fn update(&mut self, v: &RaceView, dt: f32) -> &Params {
-        // TerminalDamageMessage (0x41BC70 → 0x417C10): the entry's terminal flag.
+        // TerminalDamageMessage (0x41BC70 → 0x417C10): the entry's terminal flag. The first
+        // message of an entry whose key is not yet taken sets `keyTeamInRace` to its team.
         for &(car, status) in &v.status_changes {
             if let Some(slot) = self.slots.get_mut(car) {
                 slot.terminal = status != 7;
+            }
+            if self.keys.get(car).copied().flatten().is_none() {
+                self.key_team = v.entries.get(car).map_or(0, |e| e.team);
+            }
+            let n = self.key_of(car, v);
+            if n > 0
+                && let Some(k) = self.key_slots.get_mut(n as usize)
+            {
+                k.terminal = status != 7;
+                self.keys_out += if status != 7 { 1 } else { -1 };
             }
         }
         // AIChoreographerEvent (0x4457F0 → 0x417CB0): the type picks the slot and the
@@ -1606,8 +1836,9 @@ impl Collector {
                 6 => 4,
                 _ => continue,
             };
-            // No teammate in the port's races (§11).
-            if let Some(slot) = self.slots.get_mut(e.car) {
+            if self.teammate == Some(e.car) {
+                self.mate_events[k] = e.on;
+            } else if let Some(slot) = self.slots.get_mut(e.car) {
                 slot.events[k] = e.on;
             }
         }
@@ -1635,6 +1866,7 @@ impl Collector {
             self.cars = v.entries.len() as u32;
             self.kind = v.kind;
             self.track_laps = v.track_laps;
+            self.teammate_number = v.teammate_number;
             if v.started {
                 self.block(v);
             }
@@ -1643,14 +1875,32 @@ impl Collector {
         let Some(&me) = v.entries.get(v.player) else { return };
         // 0x430F50 for this frame's contacts (they arrive before the update).
         for c in &v.contacts {
-            if c.other.is_some() {
-                self.car_to_car = true;
-            }
+            // The other car's key driver.
+            let other_key = c.other.map(|o| self.key_of(o, v));
+            self.key_collision(other_key.unwrap_or(0));
+            self.car_to_car = c.other.is_some();
             if c.car == v.player {
                 self.collision = true;
-                if c.other.is_some() {
+                if let Some(o) = c.other {
                     self.hit_car = true;
+                    // Against another car the original clears `AITermUserImpact`, always 0.
+                    if self.teammate == Some(o) && !self.mate.terminal {
+                        self.hit_mate = true;
+                    }
+                    if let Some(n) = other_key.filter(|&n| n > 0) {
+                        self.coll_key = n;
+                    }
                 }
+            } else if self.teammate == Some(c.car) {
+                self.mate_collision = true;
+                if let Some(o) = c.other {
+                    self.mate_hit_car = true;
+                    self.mate_hit_player |= o == v.player;
+                }
+            } else {
+                // The car hit's own key driver (+0xB730, the other car's driver, has no getter).
+                let n = self.key_of(c.car, v);
+                self.key_collision(n);
             }
             // `AI(i+1)Collision` for an entry index above 0 (0x4311E7: entry 0 never).
             if c.car > 0
@@ -1676,20 +1926,36 @@ impl Collector {
         self.player.off_track = v.off_track;
         self.car = v.car;
         self.best = self.best.min(me.position as u32);
+        // 0x452997: the teammate's entry when unset, then its record every frame.
+        if self.teammate.is_none() {
+            self.teammate = v.teammate;
+        }
+        if let Some(t) = self.teammate
+            && let Some(e) = v.entries.get(t)
+        {
+            self.mate.refresh(e);
+            self.key_of(t, v);
+        }
         if !self.in_race && self.cars > 0 {
             self.open_cockpit = v.open_cockpit;
             self.player_id = v.player as u32 + 1;
+            if let Some(t) = self.teammate {
+                self.teammate_id = t as u32 + 1;
+            }
             // 0x452A42: integer division before × 100.
             self.start_percent = ((self.player.grid + 1) / self.cars) as f32 * 100.;
         }
         let at = |position: usize| v.entries.iter().position(|e| e.position == position);
-        let follow = |slot: &mut (usize, usize, Record), car: Option<usize>| match car {
+        // A record's first refresh takes its entry's key (0x438C10).
+        let mut keys = vec![v.player];
+        let mut follow = |slot: &mut (usize, usize, Record), car: Option<usize>| match car {
             Some(k) => {
                 if slot.0 != k + 1 {
                     slot.2 = Record::default();
                 }
                 slot.0 = k + 1;
                 slot.2.refresh(&v.entries[k]);
+                keys.push(k);
             }
             None => {
                 slot.2 = Record::default();
@@ -1705,6 +1971,9 @@ impl Collector {
                 // 3: the cars ahead and behind on the track (lapping lines), not ported.
                 _ => {}
             }
+        }
+        for k in keys {
+            self.key_of(k, v);
         }
         // 0x452C1E: the damage object is copied on even frames.
         if self.counter.is_multiple_of(2) {
@@ -1735,6 +2004,9 @@ impl Collector {
         self.sat = if self.in_race && progress_change < 1e-5 { self.sat + dt } else { 0. };
         // Times in position (0x452D7D…): + dt while unchanged, else 0.
         self.player.in_position = if self.player.position == previous_position { self.player.in_position + dt } else { 0. };
+        // 0x452DAD: `tmTimeInCurrentPos` against the teammate's position at the last frame.
+        self.mate.in_position = if self.mate.position == self.mate_previous { self.mate.in_position + dt } else { 0. };
+        self.mate_previous = self.mate.position;
         for slot in [&mut self.plus1, &mut self.minus1] {
             slot.2.in_position = if slot.0 != 0 && slot.0 == slot.1 { slot.2.in_position + dt } else { 0. };
             slot.1 = slot.0;
@@ -1777,10 +2049,27 @@ impl Collector {
                 return;
             }
         }
-        // Not the teammate (none in the port's races): the slot's collision damage.
+        // The teammate while `teammateCollision` is set.
+        if self.teammate == Some(i) && self.mate_collision {
+            self.mate_damage = (total - self.mate_total).abs();
+            self.mate_total = total;
+            if self.mate_damage < 1. {
+                self.mate_collision = false;
+            }
+            return;
+        }
+        // The slot's collision damage, and a key driver's whose number the entry has taken.
         if let Some(slot) = self.slots.get_mut(i)
             && slot.collision
         {
+            if let Some(Some(n)) = self.keys.get(i).copied()
+                && n > 0
+                && let Some(k) = self.key_slots.get_mut(n as usize)
+            {
+                k.damage = (total - k.total).abs();
+                k.total = total;
+                k.collision = false;
+            }
             slot.damage = (total - slot.total).abs();
             slot.total = total;
             if slot.damage < 1. {
@@ -1894,13 +2183,42 @@ impl Collector {
         p.flag(AiRoll, self.ai_roll);
         p.flag(IsDrift, k.drift);
         p.set(PlayerVehicleId, self.player_id as f32);
-        // No teammate and no key drivers in the port's races: +0xB724, +0xB43D, +0xB558 (−1),
-        // +0xB6E8 and +0xB6EC keep their reset values (§10, §11).
-        p.set(TeammateVehicleId, 0.);
-        p.flag(TeammateCollision, false);
-        p.set(PlayerCollWithKeyPlayer, -1.);
-        p.set(KeyDriversOut, 0.);
-        p.set(KeyTeamInRace, 0.);
+        // Step 4: key drivers, teams and the teammate. Records read −1 while cleared.
+        let key = |r: &Record| r.key.unwrap_or(-1) as f32;
+        let team = |r: &Record| r.team.unwrap_or(-1) as f32;
+        p.set(LeadingCarKeyDriver, key(&self.leader.2));
+        p.set(LeadingCarTeam, team(&self.leader.2));
+        p.set(RaceWinnerTeam, team(&self.leader.2));
+        p.set(CarPosMinus1KeyDriver, key(&self.minus1.2));
+        p.set(TeammateVehicleId, self.teammate_id as f32);
+        p.flag(TeammateCollision, self.mate_collision);
+        p.set(PlayerCollWithKeyPlayer, self.coll_key as f32);
+        p.set(KeyDriversOut, self.keys_out as f32);
+        p.set(KeyTeamInRace, self.key_team as f32);
+        p.flag(PlayerHasTeammate, self.teammate.is_some());
+        p.set(TeammateNumber, self.teammate_number as f32);
+        p.set(TeammatePos, self.mate.position);
+        p.flag(TeammateFinished, self.mate.finished);
+        p.flag(TeammateTermDam, self.mate.terminal);
+        p.set(TmTimeInCurrentPos, self.mate.in_position);
+        // Record +0x40, a championship value (0x670470) [I: not ported, as `driverChampWinPos`].
+        p.set(TeamDriverChampWinPos, 0.);
+        p.flag(PlayerCollideWithTeammate, self.hit_mate);
+        p.set(TeammateTotDam, self.mate_total);
+        p.set(TeamDamFromCollision, self.mate_damage);
+        p.flag(TeammateEngBlown, self.mate_events[0]);
+        p.flag(TeammateTyreBlown, self.mate_events[1]);
+        p.flag(TeammateSpun, self.mate_events[2]);
+        p.flag(TeammateRoll, self.mate_events[3]);
+        for n in 1..=KEYS {
+            let b = |v: bool| if v { 1. } else { 0. };
+            // `Key19Collision` reads +0xB479, key 20's flag (getter 0x41B500).
+            let collision = self.key_slots[if n == 19 { 20 } else { n }].collision;
+            let k = &self.key_slots[n];
+            p.0[key_param(n, 0)] = b(collision);
+            p.0[key_param(n, 1)] = k.damage;
+            p.0[key_param(n, 2)] = b(k.terminal);
+        }
         for (i, slot) in self.slots.iter().enumerate() {
             let b = |v: bool| if v { 1. } else { 0. };
             let values = [
@@ -2365,8 +2683,9 @@ mod tests {
     fn ai_slots_follow_collisions_and_distance() {
         let mut c = Collector::default();
         let mut v = racing(0.5);
-        // Entry 2 hit by entry 1 at 20 %; entry 0 (the player) never gets an AI flag.
-        v.contacts = vec![Contact { car: 2, other: Some(1) }, Contact { car: 0, other: None }];
+        // Entry 2 hit by entry 1 at 20 %; entry 0 (the player) never gets an AI flag. Each
+        // contact sets `carToCarCollision` to whether the other is a car, so the last one stays.
+        v.contacts = vec![Contact { car: 0, other: None }, Contact { car: 2, other: Some(1) }];
         v.entries[2].damage = 20.;
         let p = c.update(&v, 0.1).clone();
         assert_eq!(p.at(ai_param(2, AiField::Collision)), 1.);
@@ -2419,6 +2738,101 @@ mod tests {
         assert_eq!(p.at(ai_param(2, AiField::Spun)), 0.);
         c.restart();
         assert_eq!(c.update(&v, 0.1).at(ai_param(1, AiField::TyreBlown)), 0.);
+    }
+
+    #[test]
+    fn the_teammate_has_its_record_collisions_and_events() {
+        use crate::ai_pacing::Message;
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        v.teammate = Some(3);
+        v.teammate_number = 4;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::PlayerHasTeammate), 1.);
+        assert_eq!((p.get(Param::TeammatePos), p.get(Param::TeammateNumber)), (3., 4.));
+        assert_eq!((p.get(Param::TmTimeInCurrentPos), p.get(Param::TeammateVehicleId)), (0., 0.));
+        let p = c.update(&v, 0.1).clone();
+        assert!((p.get(Param::TmTimeInCurrentPos) - 0.1).abs() < 1e-6);
+        // The player hits the teammate: one frame of `playerCollideWithTeammate`.
+        v.contacts = vec![Contact { car: 0, other: Some(3) }];
+        assert_eq!(c.update(&v, 0.1).get(Param::PlayerCollideWithTeammate), 1.);
+        v.contacts.clear();
+        assert_eq!(c.update(&v, 0.1).get(Param::PlayerCollideWithTeammate), 0.);
+        // A car hits the teammate: `teammateCollision` until a damage update finds less than 1.
+        v.contacts = vec![Contact { car: 3, other: Some(1) }];
+        v.entries[3].damage = 12.;
+        assert_eq!(c.update(&v, 0.1).get(Param::TeammateCollision), 1.);
+        v.contacts.clear();
+        let mut p = Params::default();
+        for _ in 0..4 {
+            p = c.update(&v, 0.1).clone();
+        }
+        assert_eq!((p.get(Param::TeammateTotDam), p.get(Param::TeamDamFromCollision)), (12., 12.));
+        assert_eq!(p.get(Param::TeammateCollision), 1.);
+        for _ in 0..4 {
+            p = c.update(&v, 0.1).clone();
+        }
+        assert_eq!((p.get(Param::TeammateCollision), p.get(Param::TeamDamFromCollision)), (0., 0.));
+        // Its choreographer events set the teammate's flags, not its AI slot.
+        v.ai_events = vec![Message { kind: 4, car: 3, on: true }];
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::TeammateSpun), p.at(ai_param(3, AiField::Spun))), (1., 0.));
+        // A restart clears the teammate and its flags; the next frame takes it again.
+        v.ai_events.clear();
+        c.restart();
+        v.started = false;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::PlayerHasTeammate), p.get(Param::TeammateSpun)), (1., 0.));
+        assert_eq!(p.get(Param::TeammateVehicleId), 4.);
+    }
+
+    #[test]
+    fn key_drivers_follow_records_collisions_and_terminal_messages() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        v.entries.push(entry(5, 4, 0.3));
+        for (e, (key, team)) in v.entries.iter_mut().zip([(0, 0), (19, 7), (20, 8), (5, 9), (3, 11)]) {
+            (e.key, e.team) = (key, team);
+        }
+        let key = |p: &Params, n, f| p.at(key_param(n, f));
+        // A terminal message of an entry not yet seen sets `keyTeamInRace` to its team.
+        v.status_changes = vec![(4, 5)];
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::KeyTeamInRace), key(&p, 3, 2), p.get(Param::KeyDriversOut)), (11., 1., 1.));
+        // The car ahead's record on the first frame, the leader's on the second.
+        assert_eq!((p.get(Param::CarPosMinus1KeyDriver), p.get(Param::LeadingCarKeyDriver)), (5., -1.));
+        v.status_changes.clear();
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::LeadingCarKeyDriver), 19.);
+        assert_eq!((p.get(Param::LeadingCarTeam), p.get(Param::RaceWinnerTeam)), (7., 7.));
+        // The player hits key driver 20; `Key19Collision` reads key 20's flag (0x41B500).
+        v.contacts = vec![Contact { car: 0, other: Some(2) }, Contact { car: 2, other: Some(0) }];
+        v.entries[2].damage = 4.;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::PlayerCollWithKeyPlayer), p.get(Param::KeyTeamInRace)), (20., 20.));
+        assert_eq!((key(&p, 20, 0), key(&p, 19, 0)), (1., 1.));
+        v.contacts.clear();
+        let mut p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::PlayerCollWithKeyPlayer), key(&p, 20, 0)), (-1., 1.));
+        // The damage update of entry 2 measures key 20's damage and clears its flag.
+        for _ in 0..5 {
+            p = c.update(&v, 0.1).clone();
+        }
+        assert_eq!((key(&p, 20, 0), key(&p, 20, 1)), (0., 4.));
+        v.status_changes = vec![(4, 7)];
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((key(&p, 3, 2), p.get(Param::KeyDriversOut), p.get(Param::KeyTeamInRace)), (0., 0., 20.));
+        v.status_changes.clear();
+        c.restart();
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::KeyTeamInRace), key(&p, 20, 1)), (0., 0.));
+    }
+
+    #[test]
+    fn voices_number_the_teammate() {
+        assert_eq!((voice_number("us_1"), voice_number("british_1"), voice_number("irish_1")), (1, 4, 14));
+        assert_eq!((voice_number("french_1"), voice_number("italian_1")), (7, 8));
+        assert_eq!(voice_number("japan_1"), 0);
     }
 
     #[test]
@@ -2517,7 +2931,7 @@ mod tests {
         let bytes = std::fs::read(root.join("audio/eventSpeech.bin")).unwrap();
         assert_eq!(rules.unknown_params(&bytes), Vec::<String>::new());
         let slice: Vec<_> = rules.messages.iter().filter(|m| rules.events[m.event].on).collect();
-        assert_eq!(slice.len(), 620);
+        assert_eq!(slice.len(), 881);
         assert!(slice.iter().all(|m| m.speech.is_some()));
         let m = |n: &str| &rules.messages[rules.message(n).unwrap()];
         assert_eq!(m("keyDriver22Ahead3s").priority, 0);

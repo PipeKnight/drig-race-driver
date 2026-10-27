@@ -10,7 +10,7 @@ use bevy::{
 use grid_tools::{
     audio_mix::{self, Table},
     source_vehicle::DELTA,
-    speech::{self, Collector, Entry, Kind, Line, Manager, RaceView, Rules},
+    speech::{self, Collector, Entry, Identities, Kind, Line, Manager, RaceView, Rules},
 };
 use std::{
     path::PathBuf,
@@ -43,6 +43,8 @@ pub(crate) struct SpeechSound {
     manager: Manager,
     collector: Collector,
     player_slot: usize,
+    /// The race's drivers (docs/SPEECH_AUDIO_RESEARCH.md §15).
+    identities: Identities,
     commands: Sender<Command>,
     /// Codriver and 3DSpeech levels in dB.
     group_db: Arc<[AtomicU32; 2]>,
@@ -164,7 +166,13 @@ pub(crate) fn list_files(args: &[String]) -> Result<(), Box<dyn std::error::Erro
 }
 
 /// Loads the rules from `root`; without them the race runs silent of speech.
-pub(crate) fn install(app: &mut App, root: PathBuf, table: Option<Arc<Table>>, player_slot: usize) -> Result<(), String> {
+pub(crate) fn install(
+    app: &mut App,
+    root: PathBuf,
+    table: Option<Arc<Table>>,
+    player_slot: usize,
+    identities: Identities,
+) -> Result<(), String> {
     let rules = Arc::new(Rules::load(&root)?);
     app.add_audio_source::<SpeechSource>();
     let (commands, receiver) = channel();
@@ -174,12 +182,20 @@ pub(crate) fn install(app: &mut App, root: PathBuf, table: Option<Arc<Table>>, p
         group_db: group_db.clone(),
     };
     let lines = rules.messages.iter().filter(|m| rules.events[m.event].on).count();
+    let keys: Vec<String> = identities.entries.iter().map(|i| format!("{}/{}", i.key, i.team)).collect();
+    println!(
+        "speech_audio version=1 event=drivers keys={} teammate={} teammate_number={}",
+        keys.join(","),
+        identities.teammate.map_or(-1, |t| t as i64),
+        identities.teammate_number
+    );
     app.insert_resource(SpeechSound {
         root,
         table,
         manager: Manager::new(rules, SEED),
         collector: Collector::default(),
         player_slot,
+        identities,
         commands,
         group_db,
         ends: 0.,
@@ -206,7 +222,13 @@ fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets:
 }
 
 /// The race as the collector sees it, from the shared-world standings.
-fn view(driving: &super::Driving, trial: Option<&super::time_trial::Trial>, kind: Kind, player_slot: usize) -> Option<RaceView> {
+fn view(
+    driving: &super::Driving,
+    trial: Option<&super::time_trial::Trial>,
+    kind: Kind,
+    player_slot: usize,
+    ids: &Identities,
+) -> Option<RaceView> {
     let o = driving.opponents.as_ref()?;
     let standings = &o.standings;
     let clock = trial.and_then(|t| t.race_time(driving.runtime.ticks));
@@ -238,6 +260,8 @@ fn view(driving: &super::Driving, trial: Option<&super::time_trial::Trial>, kind
                     let vehicle = &c.state.car.owner.vehicle;
                     if k == 0 { speech::Car::read(vehicle).total() } else { speech::ai_total_percent(vehicle) }
                 }),
+                key: ids.entries.get(k).map_or(0, |i| i.key),
+                team: ids.entries.get(k).map_or(0, |i| i.team),
             }
         })
         .collect();
@@ -285,6 +309,8 @@ fn view(driving: &super::Driving, trial: Option<&super::time_trial::Trial>, kind
         open_cockpit: false,
         status_changes: Vec::new(),
         ai_events: Vec::new(),
+        teammate: ids.teammate,
+        teammate_number: ids.teammate_number,
     })
 }
 
@@ -353,7 +379,7 @@ fn tick(
             touge: touge.is_some(),
             derby: derby.is_some(),
         };
-        let Some(mut v) = view(&driving, listening.trial.as_deref(), kind, sound.player_slot) else { return };
+        let Some(mut v) = view(&driving, listening.trial.as_deref(), kind, sound.player_slot, &sound.identities) else { return };
         // The choreographer's messages since the last speech frame (several ticks can pass).
         if let Some(o) = driving.opponents.as_ref() {
             v.ai_events = o

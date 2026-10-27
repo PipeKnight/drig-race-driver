@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F614](F0614.md) | 2026-10-27 | Speech part 2 step 4: driver identities, key drivers and the teammate |
 | [F613](F0613.md) | 2026-10-27 | Camera: Change View blends as in a race, every view runs every frame |
 | [F612](F0612.md) | 2026-10-27 | Camera: spin hold proven on a deterministic scene, the chase knock, and the original's per-frame clock (camera_fps) |
 | [F611](F0611.md) | 2026-10-27 | Speech part 2 step 3: accidents and AI events by race entry |

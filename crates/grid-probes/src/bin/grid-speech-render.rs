@@ -11,13 +11,16 @@
 //!   lost. 100–112 s the wrong way at full speed.
 //! - 70 s: entries 3 and 4 collide 2 % of a lap ahead of the player; entry 3 takes 6 % damage,
 //!   entry 4 a terminal wheel (status 3).
+//! - The field is a career race's: entries 1–11 are database drivers 4, 5, 7, 10, 11, 12, 8,
+//!   13, 14, 15 and 16, and entry 7 (driver 8, British) is the teammate. The teammate spins
+//!   from 130 s to 134 s.
 //!
 //! `speech.wav`: mono PCM16 at the lines' 32 kHz, the Codriver group level of the Chase camera
 //! with the Talking mix while a line plays. `lines.txt`: each line with its time.
 use grid_tools::{
     audio_mix::{self, Camera, ModeMix, Table},
     source_vehicle::DELTA,
-    speech::{Car, Collector, Contact, Entry, Kind, Manager, RaceView, Rules, part_id},
+    speech::{Car, Collector, Contact, Entry, Identities, Kind, Manager, RaceView, Rules, part_id},
 };
 use std::{fs, io::Write, path::Path, sync::Arc};
 
@@ -27,6 +30,9 @@ const LAPS: f64 = 3.;
 const CODRIVER: usize = 14;
 /// As grid-app's speech_sound [AUTHORED].
 const SEED: u32 = 5489;
+/// Entries 1–11's `driver.id` and the teammate's entry [AUTHORED].
+const DRIVERS: [i32; CARS - 1] = [4, 5, 7, 10, 11, 12, 8, 13, 14, 15, 16];
+const TEAMMATE: usize = 7;
 
 fn wave(path: &Path, pcm: &[i16], rate: u32) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = (pcm.len() * 2) as u32;
@@ -58,7 +64,7 @@ fn place(t: f64) -> usize {
 }
 
 /// The race at `t` seconds after the green light (`None`: on the grid).
-fn view(green: Option<f64>) -> RaceView {
+fn view(green: Option<f64>, ids: &Identities) -> RaceView {
     let t = green.unwrap_or(0.);
     let mine = if green.is_some() { place(t) } else { CARS };
     let progress = t / LAP;
@@ -81,6 +87,8 @@ fn view(green: Option<f64>) -> RaceView {
                 ai: k != 0,
                 terminal: k == 4 && green.is_some() && t >= 70.,
                 damage: if (k == 3 || k == 4) && green.is_some() && t >= 70. { 6. } else { 0. },
+                key: ids.entries[k].key,
+                team: ids.entries[k].team,
             }
         })
         .collect();
@@ -115,12 +123,22 @@ fn view(green: Option<f64>) -> RaceView {
         status_changes: if ahead { vec![(4, 3)] } else { Vec::new() },
         // The choreographer, between other lines and with the car ahead of the player on the
         // same lap (the rules compare lap fractions without wrapping): entry 2 power_spin from
-        // 25 s to 29 s, entry 1 blow_tyre from 160 s to 162 s.
-        ai_events: [(25., 4, 2, true), (29., 4, 2, false), (160., 1, 1, true), (162., 1, 1, false)]
+        // 25 s to 29 s, entry 1 blow_tyre from 160 s to 162 s; the teammate power_spin from 130 s
+        // to 134 s.
+        ai_events: [
+            (25., 4, 2, true),
+            (29., 4, 2, false),
+            (130., 4, TEAMMATE, true),
+            (134., 4, TEAMMATE, false),
+            (160., 1, 1, true),
+            (162., 1, 1, false),
+        ]
             .into_iter()
             .filter(|&(at, ..)| green.is_some() && (t - at).abs() < f64::from(DELTA) / 2.)
             .map(|(_, kind, car, on)| grid_tools::ai_pacing::Message { kind, car, on })
             .collect(),
+        teammate: ids.teammate,
+        teammate_number: ids.teammate_number,
     }
 }
 
@@ -136,6 +154,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("new private output required".into());
     }
     let rules = Arc::new(Rules::load(root)?);
+    let drivers: Vec<Option<i32>> = std::iter::once(None).chain(DRIVERS.map(Some)).collect();
+    let ids = Identities::load(&grid_tools::read_database(root)?, &drivers, Some(TEAMMATE), true);
+    println!(
+        "identities keys={:?} teams={:?} teammate={:?} teammate_number={}",
+        ids.entries.iter().map(|i| i.key).collect::<Vec<_>>(),
+        ids.entries.iter().map(|i| i.team).collect::<Vec<_>>(),
+        ids.teammate,
+        ids.teammate_number
+    );
     let table = Table::load(root)?;
     let mut manager = Manager::new(rules, SEED);
     let mut collector = Collector::default();
@@ -172,7 +199,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if !busy {
             mix.release();
         }
-        let params = collector.update(&view(green), DELTA).clone();
+        let params = collector.update(&view(green, &ids), DELTA).clone();
         let frame = manager.frame(DELTA, &params, busy, false, &exists);
         if frame.stop {
             voice = None;

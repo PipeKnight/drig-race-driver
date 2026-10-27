@@ -191,14 +191,27 @@ pub fn career_plan(
 
 /// The race profile of a race with the career field: its cars, liveries
 /// and names in grid order (the opponents take the free slots in car
-/// order), the player in `slot`.
-pub fn field_profile(field: &[FieldEntry], race: &Planned) -> String {
+/// order), the player in `slot`. `mate` is the hired team mate's
+/// `driver.id`: with it the profile names the opponents' drivers and the
+/// team mate's car for the race engineer (docs/SPEECH_AUDIO_RESEARCH.md).
+pub fn field_profile(field: &[FieldEntry], race: &Planned, mate: Option<i32>) -> String {
     let player = &field[0];
     let cars: Vec<&FieldEntry> = race.cars.iter().filter_map(|&i| field.get(i)).collect();
     let list = |f: &dyn Fn(&FieldEntry) -> String| cars.iter().map(|c| f(c)).collect::<Vec<_>>().join(",");
+    let driver = |c: &FieldEntry| match c.entrant {
+        Entrant::Ai { driver, .. } => driver.to_string(),
+        Entrant::TeamMate => mate.unwrap_or(0).to_string(),
+        Entrant::Player => "0".into(),
+    };
+    let teammate = cars
+        .iter()
+        .position(|c| c.entrant == Entrant::TeamMate)
+        .filter(|_| mate.is_some())
+        .map_or(0, |k| k + 1);
     format!(
         "# Written by the career screen (docs/CAREER_SCREEN.md) for the next career race.\n\
          [game]\nroute = {}\ncar = {}\nopponent_cars = {}\nopponent_liveries = {}\nopponent_names = {}\n\
+         opponent_drivers = {}\nteammate = {teammate}\n\
          [drive]\nenabled = on\nlaps = {}\nopponents = {}\ngrid_position = {}\n\
          ai_characteristics = ai-driver-characteristics.tsv\n\
          [ai]\ndifficulty = {DIFFICULTY}\ncatchup = on\nchoreographer = on\nmistakes = on\n\
@@ -208,6 +221,7 @@ pub fn field_profile(field: &[FieldEntry], race: &Planned) -> String {
         list(&|c| c.stem.clone()),
         list(&|c| c.livery.to_string()),
         list(&|c| c.name.clone()),
+        list(&driver),
         race.laps,
         cars.len(),
         race.slot + 1,
@@ -2048,7 +2062,7 @@ impl Screen {
         } else if e.field.is_empty() {
             race_profile(&e.car, &e.field_cars, next, self.solo(e))
         } else {
-            field_profile(&e.field, next)
+            field_profile(&e.field, next, self.career.team_mate.as_ref().map(|t| t.driver_id))
         };
         if let Some(points) = self.event_points(e) {
             profile = with_points(&profile, &points);
@@ -2768,13 +2782,16 @@ opponent_names = Ann Example,Lee Niven
         // bmw_si_tour scores with points table 6 (US_Rookie) [D].
         let points = &cat.points[&cat.event(7).unwrap().points_id];
         assert_eq!(points[..3], [20, 18, 16]);
-        let profile = with_points(&field_profile(&field, &planned[0]), points);
+        let profile = with_points(&field_profile(&field, &planned[0], None), points);
         let mut s = crate::settings::Settings::new();
         s.apply(&profile, Path::new(".")).unwrap();
         assert_eq!(s.points.as_ref(), Some(points));
         assert_eq!((s.opponents, s.grid_position), (Some(19), Some(planned[0].slot + 1)));
         assert_eq!(s.opponent_liveries.as_ref().map(Vec::len), Some(19));
         assert_eq!(s.opponent_names.as_ref().map(Vec::len), Some(19));
+        let drivers = s.opponent_drivers.as_ref().unwrap();
+        assert!(drivers.len() == 19 && drivers.iter().all(|&d| d > 0));
+        assert_eq!(s.teammate, Some(0));
         // A race result maps back to the field's drivers and teams.
         let mut result = out(&(0..20).collect::<Vec<_>>(), false).result;
         to_field(&mut result, &field, &planned[0]);
@@ -2858,7 +2875,7 @@ opponent_names = Ann Example,Lee Niven
         assert_eq!(planned.len(), 1);
         assert_eq!(planned[0].cars, [1]);
         let mut s = crate::settings::Settings::new();
-        s.apply(&field_profile(&field, &planned[0]), Path::new(".")).unwrap();
+        s.apply(&field_profile(&field, &planned[0], None), Path::new(".")).unwrap();
         assert_eq!((s.opponents, s.points.as_ref()), (Some(1), None));
         // Lost: nothing but sponsor money; won: the prize, no reputation.
         let rival = field[1].entrant;

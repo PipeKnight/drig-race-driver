@@ -1540,6 +1540,22 @@ fn series_seed(profile: Option<u32>) -> u32 {
                 .map_or(0, |d| d.as_millis() as u32)
         })
 }
+/// The race engineer's drivers: entry 0 is the player, entry k opponent k. `teammate` is the
+/// career profile's opponent number (0 none); a career race has it, others do not.
+fn speech_identities(root: &Path, opponents: &[Option<i32>], teammate: Option<usize>) -> grid_tools::speech::Identities {
+    if opponents.iter().all(Option::is_none) {
+        return grid_tools::speech::Identities { teammate_number: if teammate.is_some() { 0 } else { -1 }, ..Default::default() };
+    }
+    let drivers: Vec<Option<i32>> = std::iter::once(None).chain(opponents.iter().copied()).collect();
+    match grid_tools::read_database(root) {
+        Ok(db) => grid_tools::speech::Identities::load(&db, &drivers, teammate.filter(|&t| t > 0), teammate.is_some()),
+        Err(error) => {
+            warn!("Speech drivers unavailable: {error}");
+            grid_tools::speech::Identities { teammate_number: -1, ..Default::default() }
+        }
+    }
+}
+
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
     // Settings files first (docs/SETTINGS.md); the flags below override them.
@@ -1568,6 +1584,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .map(|v| v.iter().map(|&i| Some(i)).collect())
         .unwrap_or_default();
     let opponent_names = profile.opponent_names.clone();
+    // Opponent k's `driver.id` (0 none) for the race engineer: the career field's, or a series
+    // event's (docs/SPEECH_AUDIO_RESEARCH.md §15). Other races have no drivers.
+    let mut opponent_drivers: Vec<Option<i32>> = profile
+        .opponent_drivers
+        .as_ref()
+        .map(|v| v.iter().map(|&d| (d > 0).then_some(d)).collect())
+        .unwrap_or_default();
     let race_points = profile.points.clone();
     // A Le Mans Series race's class name keys by car (results Class column).
     let mut car_classes: Vec<String> = Vec::new();
@@ -2158,6 +2181,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if opponent_cars.is_none() {
             opponent_cars = Some(event.cars());
             series_liveries = event.opponents.iter().map(|e| e.livery_index).collect();
+            opponent_drivers = event.opponents.iter().map(|e| e.driver).collect();
             car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
@@ -3102,7 +3126,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             // Speech needs a race of the shared world (its standings).
             if driving.opponents.is_some()
-                && let Err(error) = speech_sound::install(&mut app, root.clone(), mix.clone(), player_slot)
+                && let Err(error) = speech_sound::install(
+                    &mut app,
+                    root.clone(),
+                    mix.clone(),
+                    player_slot,
+                    speech_identities(&root, &opponent_drivers, profile.teammate),
+                )
             {
                 warn!("Speech unavailable; driving continues: {error}");
             }

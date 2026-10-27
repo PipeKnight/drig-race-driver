@@ -259,6 +259,12 @@ pub struct Settings {
     /// `[game] opponent_names`: each opponent's name on the HUD and the
     /// results, comma separated, in car order (the career field).
     pub opponent_names: Option<Vec<String>>,
+    /// `[game] opponent_drivers`: each opponent's `driver.id` in car order,
+    /// 0 for none (the career field), and `[game] teammate`: the team
+    /// mate's opponent number from 1, 0 for none. The race engineer reads
+    /// them (docs/SPEECH_AUDIO_RESEARCH.md); older profiles have neither.
+    pub opponent_drivers: Option<Vec<i32>>,
+    pub teammate: Option<usize>,
     /// `[game] points`: the event's points table by finishing position
     /// (career races), shown in the results' Points column.
     pub points: Option<Vec<i32>>,
@@ -476,6 +482,20 @@ impl Settings {
                 }
                 ("game", "opponent_names") => {
                     self.opponent_names = Some(value.split(',').map(|v| v.trim().to_owned()).collect())
+                }
+                ("game", "opponent_drivers") => {
+                    self.opponent_drivers = Some(
+                        value
+                            .split(',')
+                            .filter(|v| !v.trim().is_empty())
+                            .map(|v| v.trim().parse::<i32>())
+                            .collect::<Result<_, _>>()
+                            .map_err(|_| at("[game] opponent_drivers needs numbers".into()))?,
+                    )
+                }
+                ("game", "teammate") => {
+                    self.teammate =
+                        Some(value.parse().map_err(|_| at("[game] teammate needs an opponent number".into()))?)
                 }
                 ("game", "series") => {
                     let name = value.to_ascii_lowercase();

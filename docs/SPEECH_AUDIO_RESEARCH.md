@@ -646,15 +646,96 @@ registered, including the ones that stay constant. An unregistered name would re
 **Reset [O].** 0x452520 always clears the slots' collision, terminal, collision damage and event
 flags, and with p = 1 also their distance and last total.
 
-**Not available in the port's races.**
-- Driver identities:
-  - free races have none;
-  - career races pass names but not driver ids to the race.
-- Without them:
-  - no key-driver number exists, so the `Keyn` values, `keyTeamInRace` and `keyDriversOut` stay 0
-    and `playerCollWithKeyPlayer` stays −1;
-  - every key-driver group stays silent;
-  - the `namedAI` name phrase (§3) cannot be armed. The original builds
-    `speech/<lang>/Names_AI/<driver.pit_speech_filename>.raw` from the entry `userData` − 1
-    (0x437F70 → game interface vf 0xC, 0x430530). The message's own line still plays.
-- `teammateVehicleID` is 0 (no teammate entry).
+**Not available in the port's races (step 3).** Driver identities: step 4 (§15) adds them.
+
+## 15. The port, part 2 step 4: drivers, key drivers and the teammate
+
+`SLICE` adds Teammates (261 messages; 881 lines in all).
+
+**Where the drivers come from.**
+- Career races: the career screen writes `[game] opponent_drivers` (each opponent's `driver.id`
+  in car order, 0 for none) and `[game] teammate` (the hired team mate's opponent number, 0 for
+  none) into the race profile. Profiles without them load as before and have no drivers.
+- Free races of a series: `series::build_field` keeps the `free_race_drivers` rows that the
+  removal draws leave (0x664630). The draws were already ported; the port now removes the drawn
+  row instead of only counting it, so the RNG stream is unchanged. Entry i gets driver i.
+- Le Mans Series fields: each `lemans_restrictions` row's `driver_id` (0x663860).
+- Other races (no series, no pool, no career field) have no drivers: every key is 0.
+- [I] An entry's team is its driver's `driver.team_id`. The original reads the race entry's team
+  object (0x62AC70); the port has no team objects.
+- The player's entry has no driver in the port (key 0, team 0) [I].
+
+**The car record (0x438C10, 0x4689C0) [O].** A cleared record has key (+0x3C) and team (+0x44)
+−1. The first refresh takes the entry's key (cached on the entry at +0x50/+0x54) and team, and
+keeps them until the record is cleared again. So:
+- `leadingCarKeyDriver` (getter 0x418130, +0x2BC) and `leadingCarTeam` (0x418140, +0x2C4) read the
+  leader's record (+0x280);
+- `raceWinnerTeam` (0x418160) reads the same +0x2C4;
+- `carPosMinus1KeyDriver` (0x418BA0, +0x240) reads the record of the car one place ahead (+0x204);
+- all four read −1 while their record is cleared.
+
+**Key drivers [O].**
+- The entry's key is taken once (entry +0x50) by a record refresh, a terminal message or a
+  collision that involves the entry.
+- 0x430F50, for each accepted contact:
+  - when the other object is a car with key n > 0: `keyTeamInRace` = n (the key number, not a team)
+    and `KeynCollision` = 1;
+  - `carToCarCollision` is assigned (not or-ed): the last contact of a frame decides it;
+  - the player hit by a car with key n > 0: `playerCollWithKeyPlayer` = n. 0x417ED0 sets it back to
+    −1 after every refresh, so it lasts one frame;
+  - an AI car hit (not the player, not the teammate): its own key n > 0 sets `keyTeamInRace` = n
+    and `KeynCollision`.
+- 0x424780, an AI slot with its collision flag set and a key n > 0 taken: `KeynCollisionDam` =
+  |total − the last total of key n| (+0xB47C + 4n), the last total is updated, and
+  `KeynCollision` is cleared, whatever the damage.
+- 0x417C10 (`TerminalDamageMessage`): if the entry's key is not yet taken, `keyTeamInRace` = the
+  entry's team, then the key is taken. For a key n > 0, `KeynTermDam` = status ≠ 7 and
+  `keyDriversOut` counts +1 or −1.
+- Getters: `KeynCollision` +0xB465 + n, `KeynCollisionDam` +0xB4DC + 4n, `KeynTermDam` +0xB53F + n.
+  `Key19Collision` (0x41B500) reads +0xB479, key 20's flag, as `Key20Collision` does; key 19's own
+  flag (+0xB478) is never read. The port keeps this.
+- 0x452520 clears every key's flags and damage, `keyDriversOut`, `keyTeamInRace` and
+  `playerCollWithKeyPlayer` (−1); with p = 1 also the last totals.
+
+**The teammate [O].**
+- 0x452997: while +0xE8 is 0 and the race interface has a teammate (vf 0x58), +0xE8 = vf 0x5C.
+  0x417E40 clears +0xE8 with the records, so a restart or a pause takes it again.
+- Its record (+0x3F4) is refreshed every frame. Getters: `teammatePos` +0x448, `teammateFinished`
+  +0x464, `teammateTermDam` +0x468, `teammateLap` +0x42C, `tmTimeInCurrentPos` +0x420,
+  `teamDriverChampWinPos` +0x434 (record +0x40, a championship value; the port keeps 0 [I], as
+  `driverChampWinPos`).
+- `tmTimeInCurrentPos` (0x452DAD) grows by dt while the teammate's position equals +0xB408 (its
+  position at the last frame), else 0. +0xB408 is set only here and by the constructor.
+- `teammateVehicleID` (+0xB724) = the teammate's entry + 1, taken before the race while a
+  teammate is known; it keeps its value otherwise.
+- `playerHasTeammate` (0x418980) = +0xE8 ≠ 0.
+- Collisions (0x430F50): the player hit by the teammate, while `teammateTermDam` is 0, sets
+  `playerCollideWithTeammate` (one frame: 0x417ED0 clears it). The teammate hit sets
+  `teammateCollision`; 0x424780 then writes `teammateTotDam` and `teamDamFromCollision`
+  (|Δ total|) on the teammate's frame and clears the flag below 1.
+- Choreographer messages for the teammate's entry set +0xB434 + slot (`teammateEngBlown`,
+  `teammateTyreBlown`, `teammateSpun`, `teammateRoll`) instead of its AI slot.
+- `teammateNumber` (race block +0x34, 0x451A20): cleared to −1 with the block. In the career mode
+  the block computes it once: 0 without a hired team mate, otherwise 0x430D60 for the team mate's driver:
+  - the `nationality_voice` rows of the driver's `nationality_id`;
+  - skip (picks for that nationality so far) % (rows) rows, count the pick, and cache the number
+    for that driver (+0xC0/+0xC4);
+  - 0x4244B0 maps the voice: `us_1`–`us_3` 1–3, `british_1`–`british_3` 4–6, `french_1` 7,
+    `italian_1` 8, `german_1` 9, `spanish_1` 10, `japanese_1`/`_2` 11/12, `scan_1` 13, `irish_1`
+    14; anything else 0 (the database's `japan_1`, nationality 37).
+  - [I] The port starts every race with no picks counted, which is the original's result for the
+    first team mate of a game session. The original keeps the counts and the last driver's number
+    for the whole session.
+  - [I] 0x451A20 also excludes two event kinds (`local_78[0x11]` 1 and 2) that are not
+    identified.
+- The Teammates lines are numbered by `teammateNumber` (`teammate4_spin`, `team4Plus1Less3s`, …),
+  so the voice decides which recorded name is said.
+
+**Checks.**
+- Unit tests: the teammate's record, collisions, events and restart; key drivers through records,
+  collisions (including the Key19 quirk), damage and terminal messages; the voice table; the
+  free-race drivers and the Le Mans driver ids; the career profile's drivers.
+- Offline render (`grid-speech-render`, local `render-05`): the authored race with a career field
+  (drivers 4, 5, 7, 10, 11, 12, 8, 13, 14, 15, 16; teammate driver 8, British, number 4) plays
+  key-driver and key-team position lines, `team4Plus1Less3s`, `team4Minus1Less3s`,
+  `teammate4_spin` and `playerWonTeam4`.
