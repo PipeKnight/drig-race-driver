@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F634](log/F0634.md) | 2026-10-28 | Playable 33ae510a4984 with F627-F633, portable copy and APKs 127ecf49439f |
 | [F633](log/F0633.md) | 2026-10-28 | Track scenery levels of detail as in the original (Washington buildings) |
 | [F632](log/F0632.md) | 2026-10-28 | grid-app compute pool with 64 MiB thread stacks (nested drive_tick overflow in parallel tests) |
 | [F631](log/F0631.md) | 2026-10-28 | Cockpit: driver and hands (skinned model, steering poses, two-bone IK) as the original |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F577](log/F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
 | [F576](log/F0576.md) | 2026-10-26 | Static world batching |
 | [F575](log/F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
-| [F574](log/F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
