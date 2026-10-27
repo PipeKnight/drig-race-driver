@@ -21,8 +21,9 @@ param(
     # phone controls drive); kept because build_android.ps1 -BundleData passes it.
     [switch]$NoAutopilot,
     # Event profile (android/events/<Event>.ini, written as event.ini): donington
-    # (solo Lacetti practice) or drift-nurburgring (Drift Battle, 7 AI BMWs).
-    [ValidateSet('donington', 'drift-nurburgring')]
+    # (solo Lacetti practice), drift-nurburgring (Drift Battle, 7 AI BMWs) or
+    # washington (the menu starts on the Viper race, F615).
+    [ValidateSet('donington', 'drift-nurburgring', 'washington')]
     [string]$Event = 'donington',
     # The private AI characteristics table for drift-nurburgring (data-dir relative
     # in the profile); never put into the repository.
@@ -63,8 +64,16 @@ $items = @(
     # The track's floor lift (Route::additional_ground_clearance), read when
     # body geometry is prepared; without it every race stopped there (F539).
     'database\schema.bin',
-    'database\database.bin'
+    'database\database.bin',
+    # The Viper race at Washington route 0 (event menu `race_viper`, F615): the
+    # car, its engine banks, the track's own files and route 0 (not routes 1-9).
+    'cars\vip',
+    'audio\eng_vip.WIP',
+    'audio\mec_vip.WIP',
+    'tracks\usa\washington\route_0'
 )
+$items += @(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'tracks\usa\washington') -File |
+    ForEach-Object { "tracks\usa\washington\$($_.Name)" })
 # Extra data per event (checked with -Stage and a desktop run, docs/ANDROID.md "Events").
 if ($Event -eq 'drift-nurburgring') {
     $items += @(
@@ -78,11 +87,11 @@ if ($Event -eq 'drift-nurburgring') {
     )
 }
 # Every file a desktop run of the event read (android/events/<event>.files,
-# written by tools/trace_bundle_files.ps1, F608): the Donington list for every
-# bundle (its menu offers the Donington races too), then the event's own. The
+# written by tools/trace_bundle_files.ps1, F608): the Donington and Washington
+# lists for every bundle (every menu offers those races, F615), then the event's own. The
 # lists above stay as the minimum; a traced file outside them is added here,
 # and a -Stage run fails when one is missing.
-$traced = @(foreach ($name in @('donington', $Event) | Select-Object -Unique) {
+$traced = @(foreach ($name in @('donington', 'washington', $Event) | Select-Object -Unique) {
     Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\android\events\$name.files") |
         Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $_.Replace('/', '\') }
 }) | Sort-Object -Unique
@@ -126,7 +135,7 @@ if ($Stage) {
 }
 
 $dest = "/sdcard/Android/data/$Package/files"
-& $Adb shell mkdir -p "$dest/Grid/audio" "$dest/Grid/language" "$dest/Grid/track_sponsors/tag_heuer" "$dest/Grid/track_sponsors/bridgestone" "$dest/Grid/tracks/europe" "$dest/Grid/cars" "$dest/Grid/frontend/fonts"
+& $Adb shell mkdir -p "$dest/Grid/audio" "$dest/Grid/language" "$dest/Grid/track_sponsors/tag_heuer" "$dest/Grid/track_sponsors/bridgestone" "$dest/Grid/tracks/europe" "$dest/Grid/tracks/usa/washington" "$dest/Grid/cars" "$dest/Grid/frontend/fonts"
 if ($LASTEXITCODE -ne 0) { throw 'adb shell mkdir failed (is the phone connected and the app installed?)' }
 foreach ($item in $items) {
     $parent = (Split-Path $item) -replace '\\', '/'

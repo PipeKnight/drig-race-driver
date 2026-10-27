@@ -42,6 +42,8 @@ pub const GO_MARKER: &str = "event-menu.go";
 /// Laps a lapped event offers (AUTHORED range; the original's free-race
 /// lap choices are not decoded).
 pub const MAX_LAPS: u32 = 10;
+/// The Viper race's route and car (`race_viper`, F615).
+pub const VIPER_RACE: (&str, &str) = ("tracks/usa/washington/route_0", "vip");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -272,6 +274,26 @@ impl Catalog {
                 experimental: false,
             },
         ];
+        // A race at Washington route 0 with the Viper, the field in Vipers
+        // (the race's default field is the player's car): the career's
+        // head-to-head layout, where the Lacetti wrecks (series.rs
+        // SURVEYED_ROUTES), so its own entry with only the Viper (F615).
+        let (route, car) = VIPER_RACE;
+        if present(route) && present(&format!("cars/{car}")) {
+            types.push(EventType {
+                kind: Kind::Race,
+                key: "race_viper".into(),
+                label: "Race - Dodge Viper".into(),
+                layouts: vec![names.layout(labels, route)],
+                cars: vec![car.into()],
+                stand_in_cars: false,
+                default_laps: Some(3),
+                opponents: Some((11, 11)),
+                times: Vec::new(),
+                directions: false,
+                experimental: false,
+            });
+        }
         if let Some(db) = db {
             let mut disciplines: Vec<(i32, i32, String)> = db
                 .table("free_race_discipline")
@@ -1376,7 +1398,10 @@ mod tests {
     fn without_a_database_race_and_time_trial_remain() {
         let c = catalog();
         let keys: Vec<&str> = c.types.iter().map(|t| t.key.as_str()).collect();
-        assert_eq!(keys, ["race", "time_trial"]);
+        // Everything present: the Viper race too (F615).
+        assert_eq!(keys, ["race", "time_trial", "race_viper"]);
+        assert_eq!(c.types[2].layouts[0].route, VIPER_RACE.0);
+        assert_eq!(c.types[2].cars, [VIPER_RACE.1]);
         assert_eq!(c.types[0].layouts.len(), route::CIRCUITS.len());
         // The phone's subset: only Donington and the Lacetti.
         let phone = Catalog::build(None, &Labels::default(), &|p| {

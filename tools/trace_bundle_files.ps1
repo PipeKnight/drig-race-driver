@@ -20,7 +20,7 @@
 # the ignored local/android/trace/mirror and is deleted unless -KeepMirror.
 # A window opens for the run; target/release/grid-app.exe must be built.
 param(
-    [ValidateSet('donington', 'drift-nurburgring')]
+    [ValidateSet('donington', 'drift-nurburgring', 'washington')]
     [string]$Event = 'donington',
     [string]$GameRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Grid',
     [string]$Stage = '',
@@ -63,7 +63,7 @@ if ($Stage) {
     Copy-Item -LiteralPath (Join-Path $root "android\events\$Event.ini") -Destination (Join-Path $data 'event.ini')
     $tsv = $Characteristics
 }
-if ($Event -ne 'donington' -and (Test-Path -LiteralPath $tsv)) { Copy-Item -LiteralPath $tsv -Destination $data }
+if ($Event -eq 'drift-nurburgring' -and (Test-Path -LiteralPath $tsv)) { Copy-Item -LiteralPath $tsv -Destination $data }
 $settings = ($settings -replace "`r`n", "`n").TrimEnd() + "`n[game]`nroot = $($gridRoot -replace '\\', '/')`n"
 [IO.File]::WriteAllText((Join-Path $data 'settings.ini'), $settings)
 
@@ -106,7 +106,7 @@ if (-not ($steps -match 'drive_script_complete')) { throw "the race did not comp
 if ($Stage) {
     # Every file read must be one the lists name (so a later build keeps it).
     $listed = @{}
-    foreach ($e in @('donington', $Event) | Select-Object -Unique) {
+    foreach ($e in @('donington', 'washington', $Event) | Select-Object -Unique) {
         Get-Content -LiteralPath (Join-Path $root "android\events\$e.files") |
             Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $listed[$_.ToLowerInvariant()] = $true }
     }

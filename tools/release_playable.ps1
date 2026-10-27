@@ -55,11 +55,11 @@ param(
     [switch]$AllowWorktree,
     [string]$Remote = 'origin',
     [string]$Branch = 'main',
-    [ValidateSet('donington', 'drift-nurburgring')]
+    [ValidateSet('donington', 'drift-nurburgring', 'washington')]
     [string]$Event = 'drift-nurburgring',
     # The bundled event of the -Profile APK: the drift bundle since F539, so it profiles the Drift
     # Battle the owner tests and has the drift APK's bundle version (no new data copy when switching).
-    [ValidateSet('donington', 'drift-nurburgring')]
+    [ValidateSet('donington', 'drift-nurburgring', 'washington')]
     [string]$ProfileEvent = 'drift-nurburgring',
     # Machine-private folder (inputs, outputs); default local\ of this checkout.
     [string]$Local,
