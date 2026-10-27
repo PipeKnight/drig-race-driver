@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F609](log/F0609.md) | 2026-10-27 | Grid start: opponent car levels by distance as in the original |
 | [F608](log/F0608.md) | 2026-10-27 | Bundled APKs carry every file their event reads: traced file lists, speech lines, a stage check |
 | [F607](log/F0607.md) | 2026-10-27 | Every route's own road: routesplit.pssg drawn; Washington's missing main straight and Milan's start |
 | [F606](log/F0606.md) | 2026-10-27 | AI planned offset at the car and the limit clamp's far-side case: Donington |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F552](log/F0552.md) | 2026-10-22 | Playable 01f22b4c80d3 with the tyre-pile fix (F551), portable copy and APKs f883be0507f0 |
 | [F551](log/F0551.md) | 2026-10-22 | Tyre piles sleep: original cylinder pair contacts and shell masses |
 | [F550](log/F0550.md) | 2026-10-22 | Playable 3bc513002bff with the mobile preset (F549), portable copy and APKs 32a08aa8e4a4 |
-| [F549](log/F0549.md) | 2026-10-22 | Mobile preset: Android default for 60 FPS (720 rows, one shadow cascade, small props culled, shorter ground cover, more compute threads); perf_test … |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

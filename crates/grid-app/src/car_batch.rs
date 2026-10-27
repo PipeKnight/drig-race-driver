@@ -22,6 +22,15 @@
 //! [`ShadowBody`], the model's coarsest level, as the original does
 //! (docs/CAR_LOD.md "Shadows"); its parts and batches cast none. The body
 //! sits on a layer only the sun takes casters from, and follows the car.
+//!
+//! Such an opponent also carries its low-detail levels 2..5 as [`LodPart`]s
+//! on the hidden layer, batched like its LOD0 parts. Each frame the original's
+//! selection ([`crate::car_lod`]) picks the level of every opponent whose LOD0
+//! parts are all batched; its batches and loose parts of the other levels move
+//! to the hidden layer. The low body parts deform with the car's field like
+//! its LOD0 parts. An opponent with a part off its place (a loose or detached
+//! panel) stays at LOD0 (AUTHORED: the low files have the panels, but how the
+//! original moves them is not traced).
 use crate::static_batch::{ATTRIBUTES, MAX_VERTICES, Part, build, supported};
 use bevy::{
     asset::AssetEventSystems,
@@ -86,6 +95,30 @@ pub fn sun_layers() -> RenderLayers {
     RenderLayers::from_layers(&[0, SHADOW_LAYER])
 }
 
+/// An opponent's part of low-detail `level` (2..5); spawned on
+/// [`hidden_layer`] and shown with its level.
+#[derive(Component)]
+pub struct LodPart {
+    pub level: u8,
+}
+
+/// The presentation skips this opponent part's pose: a low-detail part merged
+/// into its batches (the batch follows the car), or a loose part (wheel,
+/// glass) of a level its car does not show. A level's loose parts are posed
+/// one frame before the level is shown, so they appear in place.
+#[derive(Component)]
+pub struct Unposed;
+
+/// The layer no camera or light draws.
+pub fn hidden_layer() -> RenderLayers {
+    RenderLayers::layer(HIDDEN_LAYER)
+}
+
+/// Half extents of the box whose corners weigh a car partly off the screen,
+/// in the car's frame (metres; a saloon, AUTHORED).
+const CAR_BOX: Vec3 = Vec3::new(1., 0.75, 2.3);
+const CAR_BOX_CENTRE_Y: f32 = 0.7;
+
 /// A part that can be batched: its place in [`CarBatches`], so the per-frame
 /// check walks the parts in storage order.
 #[derive(Component)]
@@ -120,6 +153,8 @@ struct Group {
     dirty: bool,
     /// The car casts with its [`ShadowBody`]: parts and batches cast none.
     shadow_body: bool,
+    /// Level of detail: 0, or a low level 2..5.
+    level: u8,
 }
 
 #[derive(Resource, Default)]
@@ -127,8 +162,19 @@ struct CarBatches {
     groups: Vec<Group>,
     /// Per car: the (group, member) whose placement gives the car's pose.
     anchors: Vec<(usize, usize)>,
+    /// Per car (slot): the level shown, and the level whose loose parts are
+    /// posed (the next shown).
+    shown: Vec<u8>,
+    posed: Vec<u8>,
+    /// Opponent parts drawn on their own (wheels, glass): car, level, entity.
+    extras: Vec<(usize, u8, Entity)>,
     /// Cars with a [`ShadowBody`].
     shadow_cars: HashSet<usize>,
+    /// Car-frames per level shown, level changes and time in [`refresh`],
+    /// for the log.
+    shown_frames: [u64; 6],
+    level_changes: u64,
+    refresh_ns: u64,
     frames: u64,
     rebuilds: u64,
     /// Rebuilds for a deformed member mesh only, and the time of all.
@@ -142,6 +188,7 @@ type Candidate = (
     &'static MeshMaterial3d<StandardMaterial>,
     Option<&'static crate::OpponentPart>,
     Option<&'static crate::MovingPart>,
+    Option<&'static LodPart>,
     (
         Has<RenderLayers>,
         Has<NotShadowCaster>,
@@ -171,6 +218,8 @@ type Body = (
     &'static mut Transform,
     &'static mut Visibility,
 );
+/// The viewer camera, disjoint from the batch and body transforms.
+type ViewerFilter = (With<crate::ViewerCamera>, Without<Batch>, Without<ShadowBody>);
 
 #[allow(clippy::too_many_arguments)]
 fn refresh(
@@ -180,11 +229,13 @@ fn refresh(
     parts: Query<Placement, Without<Batch>>,
     mut batches: Query<(&mut Transform, &mut Visibility, &Mesh3d, &mut Aabb), With<Batch>>,
     mut bodies: Query<Body, (Without<Batch>, Without<Batchable>)>,
+    camera: Query<(&Transform, &Projection), ViewerFilter>,
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<Assets<StandardMaterial>>,
     mut events: MessageReader<AssetEvent<Mesh>>,
 ) {
     let state = &mut *state;
+    let start = std::time::Instant::now();
     for (body, ..) in &bodies {
         if body.is_added() {
             state.shadow_cars.insert(body.car);
@@ -200,6 +251,7 @@ fn refresh(
         &mut state.groups,
         &mut state.anchors,
         &state.shadow_cars,
+        &mut state.extras,
     ) || state.groups.is_empty()
     {
         return;
@@ -241,10 +293,12 @@ fn refresh(
             && !ranged
             && material.0 == group.material
             && mesh.0 == member.mesh
-            && pose.is_some_and(|p| in_place(transform.to_matrix(), p * member.rest));
+            // A merged low-detail part keeps no pose: it is on its car.
+            && pose.is_some_and(|p| group.level > 0 || in_place(transform.to_matrix(), p * member.rest));
     }
+    // Placement votes count the LOD0 parts (the low levels always follow).
     let mut votes = vec![[0usize; 2]; anchors.len()];
-    for group in &state.groups {
+    for group in state.groups.iter().filter(|g| g.level == 0) {
         for member in &group.members {
             votes[group.slot][usize::from(member.placed)] += 1;
         }
@@ -254,6 +308,54 @@ fn refresh(
         .zip(&votes)
         .map(|(pose, [out, placed])| pose.is_none() || out > placed)
         .collect();
+    state.shown.resize(anchors.len(), 0);
+    state.posed.resize(anchors.len(), 0);
+    // The level whose loose parts were posed last frame is shown now; the
+    // other levels' loose parts stop being posed.
+    for (slot, pose) in poses.iter().enumerate() {
+        let level = state.posed[slot];
+        let Some(pose) = pose.filter(|_| state.shown[slot] != level) else {
+            continue;
+        };
+        state.shown[slot] = level;
+        state.level_changes += 1;
+        let car = state.groups.iter().find(|g| g.slot == slot).map(|g| g.car);
+        for group in state.groups.iter().filter(|g| g.slot == slot) {
+            for &batch in &group.batches {
+                show(&mut commands, batch, group.level == level);
+                if group.level == level
+                    && let Ok((mut transform, ..)) = batches.get_mut(batch)
+                {
+                    transform.set_if_neq(Transform::from_matrix(pose));
+                }
+            }
+        }
+        for &(_, part_level, entity) in state.extras.iter().filter(|e| Some(e.0) == car) {
+            show(&mut commands, entity, part_level == level);
+            if part_level != level
+                && let Ok(mut entity) = commands.get_entity(entity)
+            {
+                entity.try_insert(Unposed);
+            }
+        }
+    }
+    let levels = select_levels(&state.groups, anchors.len(), &poses, &held, &state.posed, camera.single().ok());
+    for (slot, &level) in levels.iter().enumerate() {
+        state.shown_frames[usize::from(state.shown[slot]).min(5)] += 1;
+        if state.posed[slot] == level {
+            continue;
+        }
+        // Pose the new level's loose parts this frame; it shows next frame.
+        state.posed[slot] = level;
+        let car = state.groups.iter().find(|g| g.slot == slot).map(|g| g.car);
+        for &(_, part_level, entity) in state.extras.iter().filter(|e| Some(e.0) == car) {
+            if part_level == level
+                && let Ok(mut entity) = commands.get_entity(entity)
+            {
+                entity.try_remove::<Unposed>();
+            }
+        }
+    }
     let mut stats = [0usize; 2]; // members, batched
     for group in &mut state.groups {
         stats[0] += group.members.len();
@@ -289,6 +391,8 @@ fn refresh(
                     commands
                         .entity(member.entity)
                         .insert((hidden.clone(), NotShadowCaster));
+                } else if group.level > 0 {
+                    // A low-detail part is never drawn on its own.
                 } else if parts.get(member.entity).is_ok_and(|p| p.5 == Some(&hidden)) {
                     // A car with a shadow body keeps its parts shadowless.
                     if group.shadow_body {
@@ -310,10 +414,12 @@ fn refresh(
             state.rebuilds += 1;
             state.reshaped += u64::from(reshaped);
             let start = std::time::Instant::now();
-            rebuild(&mut commands, group, pose, &mut meshes, &mut batches);
+            let shown = state.shown.get(group.slot).copied().unwrap_or(0) == group.level;
+            rebuild(&mut commands, group, pose, shown, &mut meshes, &mut batches);
             state.rebuild_ns += start.elapsed().as_nanos() as u64;
         }
-        if let Some(pose) = pose {
+        // Batches of a level the car does not show keep their pose.
+        if let Some(pose) = pose.filter(|_| state.shown[group.slot] == group.level) {
             let next = Transform::from_matrix(pose);
             for &batch in &group.batches {
                 if let Ok((mut transform, ..)) = batches.get_mut(batch) {
@@ -351,18 +457,23 @@ fn refresh(
         };
     }
     state.frames += 1;
+    state.refresh_ns += start.elapsed().as_nanos() as u64;
     if state.frames == 1 || state.frames.is_multiple_of(REPORT_FRAMES) {
         let spawned: usize = state.groups.iter().map(|g| g.batches.len()).sum();
         println!(
-            "car_batch version=1 frame={} cars={} groups={} parts={} batched={} batches={spawned} rebuilds={} reshaped={} rebuild_ms={:.1}",
+            "car_batch version=2 frame={} cars={} groups={} parts={} batched={} batches={spawned} extras={} rebuilds={} reshaped={} rebuild_ms={:.1} refresh_ms={:.1} level_changes={} level_car_frames={:?}",
             state.frames,
             state.anchors.len(),
             state.groups.len(),
             stats[0],
             stats[1],
+            state.extras.len(),
             state.rebuilds,
             state.reshaped,
             state.rebuild_ns as f64 / 1e6,
+            state.refresh_ns as f64 / 1e6,
+            state.level_changes,
+            state.shown_frames,
         );
     }
 }
@@ -370,6 +481,7 @@ fn refresh(
 /// New car parts that can share a mesh: no wheel (it turns on the car), an
 /// opaque or masked material, a supported indexed triangle list, and no
 /// per-entity render setting.
+#[allow(clippy::too_many_arguments)]
 fn register(
     commands: &mut Commands,
     added: &Query<Candidate, NewPart>,
@@ -378,9 +490,10 @@ fn register(
     groups: &mut Vec<Group>,
     anchors: &mut Vec<(usize, usize)>,
     shadow_cars: &HashSet<usize>,
+    extras: &mut Vec<(usize, u8, Entity)>,
 ) -> bool {
     let before = groups.iter().map(|g| g.members.len()).sum::<usize>();
-    for (entity, mesh, material, opponent, moving, special) in added {
+    for (entity, mesh, material, opponent, moving, lod, special) in added {
         let (car, rest, wheel) = match (opponent, moving) {
             (Some(o), _) => (o.car, o.rest, o.wheel),
             (_, Some(m)) => (0, m.rest, m.wheel),
@@ -392,24 +505,32 @@ fn register(
         if shadow_body && !shadowless {
             commands.entity(entity).insert(NotShadowCaster);
         }
-        if wheel.is_some()
-            || layers
-            || shadowless
-            || ranged
-            || child
-            || parent
-            || facing
-            || sidewall
-        {
+        // Low-detail parts arrive on our layer and without a shadow.
+        let level = lod.map_or(0, |l| l.level);
+        // Hidden until its level is chosen, merged or not.
+        if level > 0 {
+            commands.entity(entity).insert(Unposed);
+        }
+        let own_settings = level == 0 && (layers || shadowless);
+        // An opponent part drawn on its own follows its car's level.
+        let extra = |extras: &mut Vec<(usize, u8, Entity)>| {
+            if opponent.is_some() && (level > 0 || !layers) {
+                extras.push((car, level, entity));
+            }
+        };
+        if wheel.is_some() || own_settings || ranged || child || parent || facing || sidewall {
+            extra(extras);
             continue;
         }
         if !materials
             .get(&material.0)
             .is_some_and(|m| matches!(m.alpha_mode, AlphaMode::Opaque | AlphaMode::Mask(_)))
         {
+            extra(extras);
             continue;
         }
         let Some(source) = meshes.get(&mesh.0) else {
+            extra(extras);
             continue;
         };
         let layout: Vec<_> = source
@@ -425,6 +546,7 @@ fn register(
                 .all(|(a, f)| ATTRIBUTES.contains(a) && supported(*f))
             || rest.determinant().abs() < 1e-12
         {
+            extra(extras);
             continue;
         }
         let member = Member {
@@ -438,9 +560,9 @@ fn register(
             alive: true,
             stable: REJOIN_FRAMES,
         };
-        let found = groups
-            .iter()
-            .position(|g| g.car == car && g.material == material.0 && g.layout == layout);
+        let found = groups.iter().position(|g| {
+            g.car == car && g.level == level && g.material == material.0 && g.layout == layout
+        });
         let index = found.unwrap_or(groups.len());
         let place = Batchable {
             group: index as u32,
@@ -468,6 +590,7 @@ fn register(
                     batches: Vec::new(),
                     dirty: true,
                     shadow_body,
+                    level,
                 });
             }
         }
@@ -479,7 +602,7 @@ fn register(
         let largest = groups
             .iter()
             .enumerate()
-            .filter(|(_, g)| g.slot == slot)
+            .filter(|(_, g)| g.slot == slot && g.level == 0)
             .flat_map(|(g, group)| {
                 group
                     .members
@@ -495,12 +618,103 @@ fn register(
     true
 }
 
+/// Draws `entity` (no layer: the default one) or moves it to the hidden
+/// layer. The entity may be gone with its scene.
+fn show(commands: &mut Commands, entity: Entity, visible: bool) {
+    let Ok(mut entity) = commands.get_entity(entity) else {
+        return;
+    };
+    if visible {
+        entity.try_remove::<RenderLayers>();
+    } else {
+        entity.try_insert(RenderLayers::layer(HIDDEN_LAYER));
+    }
+}
+
+/// Each car's level this frame (docs/CAR_LOD.md "Selection"): opponents with
+/// low levels whose LOD0 parts are all batched are served by
+/// FOV-scaled distance to the camera under the set's caps; every other car
+/// shows LOD0, and a held car keeps its level.
+fn select_levels(
+    groups: &[Group],
+    cars: usize,
+    poses: &[Option<Mat4>],
+    held: &[bool],
+    shown: &[u8],
+    camera: Option<(&Transform, &Projection)>,
+) -> Vec<u8> {
+    let mut levels: Vec<u8> = (0..cars).map(|s| shown.get(s).copied().unwrap_or(0)).collect();
+    let (Some(setting), Some((eye, Projection::Perspective(lens)))) = (crate::car_lod::setting(), camera)
+    else {
+        levels.fill(0);
+        return levels;
+    };
+    let view = eye.to_matrix().inverse();
+    let half = (lens.fov * 0.5).tan();
+    let side = half * lens.aspect_ratio;
+    let mut requests = Vec::new();
+    let mut slots = Vec::new();
+    for slot in 0..cars {
+        let (mut finest, mut coarsest) = (u8::MAX, 0);
+        let mut intact = true;
+        for group in groups.iter().filter(|g| g.slot == slot) {
+            if group.level > 0 {
+                finest = finest.min(group.level);
+                coarsest = coarsest.max(group.level);
+            } else if group.shadow_body {
+                intact &= group.members.iter().all(|m| m.batched);
+            }
+        }
+        if held[slot] {
+            continue;
+        }
+        let Some(pose) = poses[slot].filter(|_| coarsest > 0 && intact) else {
+            levels[slot] = 0;
+            continue;
+        };
+        // Box corners in view space: off to the side, or all behind or beyond
+        // the sides (culled, sorted last).
+        let mut outside = 0;
+        let mut culled = true;
+        for i in 0..8 {
+            let sign = Vec3::new(
+                if i & 1 == 0 { -1. } else { 1. },
+                if i & 2 == 0 { -1. } else { 1. },
+                if i & 4 == 0 { -1. } else { 1. },
+            );
+            let corner = pose.transform_point3(Vec3::Y * CAR_BOX_CENTRE_Y + sign * CAR_BOX);
+            let p = view.transform_point3(corner);
+            let beside = p.z >= 0. || p.x.abs() > -p.z * side;
+            outside += usize::from(beside);
+            culled &= beside || p.y.abs() > -p.z * half;
+        }
+        let metres = if culled {
+            crate::car_lod::CULLED_METRES
+        } else {
+            crate::car_lod::scaled(pose.w_axis.truncate().distance(eye.translation), lens.fov)
+        };
+        requests.push(crate::car_lod::Request {
+            metres,
+            key: metres * crate::car_lod::offscreen_weight(outside),
+            finest: usize::from(finest),
+            coarsest: usize::from(coarsest),
+        });
+        slots.push(slot);
+    }
+    for (slot, level) in slots.into_iter().zip(crate::car_lod::select(setting, &requests)) {
+        levels[slot] = level as u8;
+    }
+    levels
+}
+
 /// The group's batched parts in batches of at most [`MAX_VERTICES`], in
-/// spawn order; unused batches are hidden.
+/// spawn order; unused batches are hidden. New batches of a level the car
+/// does not show start on the hidden layer.
 fn rebuild(
     commands: &mut Commands,
     group: &mut Group,
     pose: Option<Mat4>,
+    shown: bool,
     meshes: &mut Assets<Mesh>,
     batches: &mut Query<(&mut Transform, &mut Visibility, &Mesh3d, &mut Aabb), With<Batch>>,
 ) {
@@ -544,6 +758,9 @@ fn rebuild(
                 ));
                 if group.shadow_body {
                     entity.insert(NotShadowCaster);
+                }
+                if !shown {
+                    entity.insert(RenderLayers::layer(HIDDEN_LAYER));
                 }
                 let entity = entity.id();
                 group.batches.push(entity);

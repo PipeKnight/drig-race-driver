@@ -1438,6 +1438,51 @@ Mesh allocation at the start: `allocate_and_free_meshes` 3.46 ms per frame in th
 (242 frames) is about 840 ms in total, the 0.8-1.1 s first two frames after loading (22,488 mesh
 entities uploaded); it does not appear in later windows. Not changed here.
 
+## Grid start: opponent car levels (F609)
+
+The original draws opponents with the low file's levels 2..5, chosen per frame by FOV-scaled
+distance under per-level caps (docs/CAR_LOD.md "Selection", "Port"). Change: car_batch selects a
+level per opponent each frame and shows that level's batches and loose parts; the others sit on a
+hidden layer. Hidden batches and loose parts are not posed (`car_batch::Unposed`); a level's loose
+parts are posed one frame before the level is shown.
+
+PC, desktop phone view (mobile preset, 1539x720), Donington, 12 cars, frozen at tick 1 [O]
+(local/gridstart/grid-s2.log):
+
+| view | F600 | F609 |
+|---|---|---|
+| camera | 806,139 (opponent cars 268,699) | 591,256 (opponent cars 53,816) |
+| cascades 0-3 | 786,599 | 786,599 (shadow bodies as in F600) |
+| total | 1,592,738 | 1,377,855 (-39 % against 2,266,764 before F600) |
+
+Over a 3,600-frame race in the phone view the opponents spend about 80 % of car-frames at levels
+2-5 (`level_car_frames=[17409,0,4421,5988,7469,29513]`); 108 level changes.
+
+CPU, the same race, release build on the PC, three alternating rounds, `perf_timing` mean ms per
+frame (wall time is capped at 60 Hz) [O]:
+
+| round | `GRID_CAR_LOD=0` Main / Render | LOD on Main / Render |
+|---|---|---|
+| 1 | 5.94 / 12.00 | 5.99 / 10.91 |
+| 2 | 4.79 / 9.73 | 5.29 / 9.52 |
+| 3 | 5.51 / 9.84 | 4.73 / 8.53 |
+
+The main schedule is within run-to-run noise; the render schedule is 0.2-1.3 ms lower with LOD on.
+The level selection and visibility switch add about 0.15 ms per frame (`refresh_ms`) and the extra
+posing about 0.07 ms per frame.
+
+Picture, fixed step, desktop 1600x900, against `GRID_CAR_LOD=0`: ticks 300 / 2400 / 6000 differ in
+0.83 / 0.12 / 0.03 % of pixels (coarser silhouettes of the cars further down the grid); the grid
+frame in the phone view against F600 differs in 1.53 %. Liveries and numbers stay on the low
+levels (local/gridstart/crop-grid-s2*.png, crop-2400-s2.png).
+
+Phone [I]: the camera loses about 0.21 M triangles more at the start, so the grid frame loses
+about 1.39 M of the original 2.27 M triangles in total. A profile APK shows it directly:
+`gpu_pass` lines (main opaque pass GPU ms and primitives) and `view_triangles` per view in the
+first windows, compared with the same lines in 3c7a3516's logs.
+
+The start mesh-allocation hitch (F600) is unchanged.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

@@ -408,7 +408,7 @@ mod tests {
             radius: 1.,
             track: true,
             liveries: Vec::new(),
-            shadow_bodies: Vec::new(),
+            low_lods: Vec::new(),
         };
         append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
         assert_eq!(car.parts.len(), 21);

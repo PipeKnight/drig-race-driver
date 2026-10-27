@@ -459,7 +459,7 @@ mod tests {
             radius: 1.,
             track: true,
             liveries: vec![BTreeMap::new()],
-            shadow_bodies: Vec::new(),
+            low_lods: Vec::new(),
         };
         let before = car.textures.clone();
         let banks_before = car.liveries.clone();

@@ -78,6 +78,7 @@ mod sky_environment;
 mod source_trees;
 mod speech_sound;
 mod car_batch;
+mod car_lod;
 mod static_batch;
 mod stereo;
 mod foliage_mips;
@@ -140,9 +141,18 @@ struct Car {
     track: bool,
     /// Opponent livery textures (car k uses entry k-1), keyed like `textures`.
     liveries: Vec<BTreeMap<String, Vec<u8>>>,
-    /// Per field model: the opponents' shadow mesh, the model's coarsest
-    /// level in its rest frame (docs/CAR_LOD.md "Shadows").
-    shadow_bodies: Vec<Option<Mesh>>,
+    /// Per field model: the opponents' low-detail levels (docs/CAR_LOD.md).
+    low_lods: Vec<LowLod>,
+}
+/// A model's `_lowLOD.pssg` for its opponents.
+#[derive(Default)]
+struct LowLod {
+    /// The shadow mesh: the coarsest level merged in the parts' rest frame
+    /// ("Shadows").
+    shadow: Option<Mesh>,
+    /// Levels 2..5 with their parts, materials prefixed and matrices placed
+    /// like the model's LOD0 parts ("Selection").
+    parts: Vec<(u8, Part)>,
 }
 /// Material/texture key prefix of the field's car model `m` (0 = the
 /// player's model; `Field::models` order).
@@ -713,7 +723,7 @@ fn load_package(
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
         liveries: Vec::new(),
-        shadow_bodies: Vec::new(),
+        low_lods: Vec::new(),
     };
     if objects {
         append_objects(root, route, &mut car)?;
@@ -1302,7 +1312,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
         liveries: Vec::new(),
-        shadow_bodies: Vec::new(),
+        low_lods: Vec::new(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -1356,46 +1366,123 @@ fn append_car(
             .insert(format!("{prefix}{name}"), format!("{prefix}{texture}"));
     }
     car.parts.extend(source.parts);
-    if car.shadow_bodies.len() <= m {
-        car.shadow_bodies.resize(m + 1, None);
+    while car.low_lods.len() <= m {
+        car.low_lods.push(LowLod::default());
     }
-    car.shadow_bodies[m] = shadow_body(root, model, anchor);
+    let low = low_lod(root, model, anchor, &prefix, &car.bindings);
+    println!(
+        "car_lod model={m} low_file={} shadow_triangles={} parts={}",
+        model.file("_lowLOD.pssg"),
+        low.shadow
+            .as_ref()
+            .and_then(|m| m.indices())
+            .map_or(0, |i| i.len() / 3),
+        low.parts.len()
+    );
+    car.low_lods[m] = low;
     Ok(())
 }
-/// An opponent's shadow caster as in the original (0x9CB5B0 pass 0x401): the
-/// model's coarsest level in `_lowLOD.pssg` (LOD5 `main_body`), merged in the
-/// rest frame of its parts (`anchor` times the draw matrix). None without a
-/// low file; that model keeps its parts' own shadows.
-fn shadow_body(root: &Path, model: &CarModel, anchor: Mat4) -> Option<Mesh> {
-    let bytes = read(&root.join(model.file("_lowLOD.pssg"))).ok()?;
-    let tree = pssg::read_tree(&bytes).ok()?;
-    let sources = mesh::read_meshes(&tree).ok()?;
-    let draws = (2..=5)
-        .rev()
-        .find_map(|n| scene::read_draws(&tree, &sources, format!("LOD{n}_").as_bytes()).ok())?;
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    for draw in &draws {
-        let base = positions.len() as u32;
-        let matrix = anchor * Mat4::from_cols_array(&draw.transform);
-        positions.extend(
-            sources[draw.source].positions[draw.vertices.clone()]
-                .iter()
-                .map(|p| matrix.transform_point3(Vec3::from_array(*p)).to_array()),
-        );
-        indices.extend(draw.indices.iter().map(|&i| base + u32::from(i)));
+/// A model's low-detail file for its opponents (docs/CAR_LOD.md): levels 2..5
+/// as parts placed like the LOD0 parts (`anchor` times the draw matrix,
+/// materials under `prefix`, only materials the LOD0 parts have), and the
+/// shadow caster as in the original (0x9CB5B0 pass 0x401), the coarsest level
+/// (LOD5 `main_body`) merged into one position mesh. Empty without a low file;
+/// that model keeps LOD0 and its parts' own shadows.
+fn low_lod(
+    root: &Path,
+    model: &CarModel,
+    anchor: Mat4,
+    prefix: &str,
+    bindings: &BTreeMap<String, String>,
+) -> LowLod {
+    let mut low = LowLod::default();
+    let Ok(bytes) = read(&root.join(model.file("_lowLOD.pssg"))) else {
+        return low;
+    };
+    let Ok(tree) = pssg::read_tree(&bytes) else {
+        return low;
+    };
+    let Ok(sources) = mesh::read_meshes(&tree) else {
+        return low;
+    };
+    for level in 2..=5u8 {
+        let Ok(draws) = scene::read_draws(&tree, &sources, format!("LOD{level}_").as_bytes()) else {
+            continue;
+        };
+        let mut positions: Vec<[f32; 3]> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        for draw in &draws {
+            let source = &sources[draw.source];
+            let matrix = anchor * Mat4::from_cols_array(&draw.transform);
+            let base = positions.len() as u32;
+            positions.extend(
+                source.positions[draw.vertices.clone()]
+                    .iter()
+                    .map(|p| matrix.transform_point3(Vec3::from_array(*p)).to_array()),
+            );
+            indices.extend(draw.indices.iter().map(|&i| base + u32::from(i)));
+            let Ok(name) = std::str::from_utf8(draw.material) else {
+                continue;
+            };
+            let material = format!("{prefix}{name}");
+            if !bindings.contains_key(&material) {
+                continue;
+            }
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                source.positions[draw.vertices.clone()].to_vec(),
+            );
+            if !source.texcoords.is_empty() {
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_UV_0,
+                    source.texcoords[draw.vertices.clone()].to_vec(),
+                );
+            }
+            mesh.insert_indices(Indices::U16(draw.indices.clone()));
+            let normals = if source.normals.is_empty() {
+                vec![]
+            } else {
+                source.normals[draw.vertices.clone()].to_vec()
+            };
+            if normals.is_empty() || normals.iter().any(|n| n.iter().any(|v| !v.is_finite())) {
+                mesh.compute_smooth_normals();
+            } else {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            }
+            if name == "Tyre Tread"
+                && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())
+            {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+            }
+            low.parts.push((
+                level,
+                Part {
+                    name: String::from_utf8_lossy(draw.id).into_owned(),
+                    joint: String::from_utf8_lossy(draw.joint).into_owned(),
+                    material,
+                    mesh,
+                    matrices: vec![matrix],
+                    wheel: wheel_joint(draw.joint),
+                },
+            ));
+        }
+        // The coarsest level present casts the shadow.
+        if !indices.is_empty() {
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            mesh.insert_indices(Indices::U32(indices));
+            mesh.compute_smooth_normals();
+            low.shadow = Some(mesh);
+        }
     }
-    if indices.is_empty() {
-        return None;
-    }
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh.compute_smooth_normals();
-    Some(mesh)
+    low
 }
 /// Shipped high-detail liveries `livery_00..` of a model (Lacetti 10, BMW 13).
 fn livery_count(root: &Path, model: &CarModel) -> usize {
@@ -3194,7 +3281,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         lean_pieces::install(&mut app);
         // Static track parts and intact props drawn as merged meshes (F576).
         static_batch::install(&mut app);
-        // Car parts drawn as one mesh per car and material (F584).
+        // Car parts drawn as one mesh per car and material (F584), opponents
+        // at the original's levels of detail (docs/CAR_LOD.md).
+        car_lod::load(&root);
         car_batch::install(&mut app);
         camera::install(&mut app, &root, field.models[0].stem());
         track_environment::install(&mut app, &root, &route);
@@ -3727,30 +3816,86 @@ fn setup(
             }
         }
     }
-    // Opponents cast their shadow with their model's coarsest level, as in
-    // the original; car_batch poses it and drops the parts' own shadows
-    // (docs/CAR_LOD.md "Shadows").
-    let shadow_bodies = std::mem::take(&mut car.shadow_bodies);
+    // Opponents cast their shadow with their model's coarsest level and draw
+    // its low-detail levels as the original selects them; car_batch poses the
+    // shadow body, merges the levels and shows one per car (docs/CAR_LOD.md).
+    let low_lods = std::mem::take(&mut car.low_lods);
     let mut shadow_bodies_spawned = false;
     if car_batch::enabled()
         && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref())
     {
-        let handles: Vec<Option<Handle<Mesh>>> =
-            shadow_bodies.into_iter().map(|m| m.map(|m| meshes.add(m))).collect();
-        let material = materials.add(StandardMaterial::default());
-        for k in 1..opponents.multi.cars.len() {
-            let Some(Some(mesh)) = handles.get(field.car_model[k]) else {
+        let shadow_material = materials.add(StandardMaterial::default());
+        for (m, low) in low_lods.into_iter().enumerate() {
+            let cars: Vec<usize> = (1..opponents.multi.cars.len())
+                .filter(|&k| field.car_model[k] == m)
+                .collect();
+            if let Some(shadow) = low.shadow.filter(|_| !cars.is_empty()) {
+                let mesh = meshes.add(shadow);
+                for &k in &cars {
+                    commands.spawn((
+                        Name::new(format!("opponent{k} shadow body")),
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(shadow_material.clone()),
+                        Transform::from_matrix(Mat4::from_cols_array(&opponents.multi.cars[k].pose())),
+                        car_batch::shadow_layer(),
+                        car_batch::ShadowBody { car: k },
+                    ));
+                    shadow_bodies_spawned = true;
+                }
+            }
+            if car_lod::setting().is_none() || cars.is_empty() {
                 continue;
-            };
-            commands.spawn((
-                Name::new(format!("opponent{k} shadow body")),
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                Transform::from_matrix(Mat4::from_cols_array(&opponents.multi.cars[k].pose())),
-                car_batch::shadow_layer(),
-                car_batch::ShadowBody { car: k },
-            ));
-            shadow_bodies_spawned = true;
+            }
+            for (level, part) in low.parts {
+                let bounds = part.mesh.compute_aabb().unwrap_or_default();
+                // Body parts deform with the car's field, as its LOD0 parts.
+                let deformable = part.wheel.is_none()
+                    && part.material.split_once('/').map(|x| x.1) != Some("Aerials");
+                let shared = meshes.add(part.mesh.clone());
+                let matrix = part.matrices[0];
+                for &k in &cars {
+                    let runtime = &opponents.multi.cars[k];
+                    let motion = part
+                        .wheel
+                        .map_or(Mat4::IDENTITY, |i| wheel_motion(runtime.wheels()[i]));
+                    // The material the car's LOD0 part of this name wears.
+                    let key = (k, part.material.clone());
+                    let Some(material) = occluded_liveries
+                        .get(&key)
+                        .or_else(|| livery_materials.get(&key))
+                        .or_else(|| material_handles.get(&part.material))
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    let own = deformable && runtime.deformation_enabled;
+                    let mesh = if own { meshes.add(part.mesh.clone()) } else { shared.clone() };
+                    let mut entity = commands.spawn((
+                        Name::new(format!("opponent{k} LOD{level} {}", part.name)),
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        Transform::from_matrix(
+                            Mat4::from_cols_array(&runtime.pose()) * motion * matrix,
+                        ),
+                        bounds,
+                        OpponentPart {
+                            car: k,
+                            rest: matrix,
+                            wheel: part.wheel,
+                            lost_with_wheel: lost_with_wheel(&part.joint),
+                        },
+                        car_batch::LodPart { level },
+                        car_batch::hidden_layer(),
+                        bevy::light::NotShadowCaster,
+                    ));
+                    if own {
+                        entity.insert(OpponentDeforming(DeformingPart {
+                            source: part.mesh.clone(),
+                            raw_bind: model_offset(runtime).inverse() * matrix,
+                        }));
+                    }
+                }
+            }
         }
     }
     if let Some(material) = material_handles.get("objects/start_lights").cloned()
@@ -4525,6 +4670,7 @@ fn drive_present(
             Option<&OpponentDeforming>,
             &Mesh3d,
             &mut Aabb,
+            Has<car_batch::Unposed>,
         ),
         (Without<MovingPart>, Without<ViewerCamera>),
     >,
@@ -4658,10 +4804,13 @@ fn drive_present(
                 dirty.push((car, field));
             }
         }
-        for (part, mut transform, deforming, handle, mut bounds) in &mut opponent_parts {
+        for (part, mut transform, deforming, handle, mut bounds, unposed) in &mut opponent_parts {
             let (pose, wheels) = &cars[part.car];
             let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
-            *transform = Transform::from_matrix(*pose * motion * part.rest);
+            // A part car_batch does not draw on its own keeps no pose.
+            if !unposed {
+                *transform = Transform::from_matrix(*pose * motion * part.rest);
+            }
             if let (Some(OpponentDeforming(source)), Some((_, field))) =
                 (deforming, dirty.iter().find(|(car, _)| *car == part.car))
                 && let Ok(mesh) = body_damage::project(&source.source, source.raw_bind, field)
@@ -5306,7 +5455,7 @@ mod driving_tests {
                         radius: car.radius,
                         track: true,
                         liveries: Vec::new(),
-                        shadow_bodies: Vec::new(),
+                        low_lods: Vec::new(),
                     };
                     append_route_split(root, &route, &model, &mut car)
                         .unwrap_or_else(|e| panic!("{}: {e}", route.path()));

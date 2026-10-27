@@ -91,7 +91,17 @@ Before F600: `crates/grid-app/src/main.rs` `load` always read `_highLOD.pssg`, a
 
 F600 (shadows): `append_car` also reads the model's `_lowLOD.pssg` and merges its coarsest level (the highest of `LOD5_`..`LOD2_` present) into one position mesh in the parts' rest frame (`shadow_body`). Each opponent gets a `car_batch::ShadowBody` with that mesh on render layer 29; the sun's layers become 0 and 29, so the body casts while no camera draws it. car_batch poses the body with the car (the pose its batches use) and hides it when none of the car's parts is in place. That car's parts and batches get `NotShadowCaster`, also a part that leaves its batch (a loose panel casts no shadow of its own). The player keeps its parts' shadows. A model without a low file keeps its parts' shadows. With `GRID_CAR_BATCH=0` nothing changes (no bodies).
 
-AUTHORED / not ported: the original submits opponents only to CSM cascades 1 and 2; Bevy draws a caster into every cascade whose frustum holds it. The original's focus-car `car_layer` maps are not modelled.
+F609 (levels): `low_lod` (main.rs, the same read as the shadow body) also keeps levels 2..5 as parts: placed like the LOD0 parts, materials under the model's prefix, only materials the LOD0 parts have (all of them on the BMW and the Lacetti). Each opponent gets those parts as `car_batch::LodPart { level }` opponent parts, spawned on the hidden layer without shadows and wearing the materials of its LOD0 parts of the same name (its livery, body occlusion). Wheels, tyres and discs follow the wheel motion like LOD0 wheels. Body parts own a mesh per car and deform with the car's field like the LOD0 parts (`OpponentDeforming`). car_batch merges each level per car and material as it does LOD0 and keeps the parts it cannot merge (wheels, glass) as extras.
+
+Each frame `car_batch::select_levels` applies 0x9F42A0 with `car_lod::select` and the race set of quality 2 ("high", read from `cars/carlodsettings.xml`, `car_lod::load`):
+- distance from the camera to the car's pose, scaled by `tan(fov/2)/tan(27.5 deg)` with Bevy's vertical FOV [I: the original's FOV axis is unverified];
+- sort key times 1.5 or 2.5 when 4 or 6 of the corners of a 2 x 1.5 x 4.6 m box around the car are beside the view (AUTHORED box), and `10000` m for a car wholly outside the view;
+- caps per level, nearest first, a full level pushes the car coarser, no hysteresis.
+The batches and extras of the chosen level go to the default layer, the others to the hidden layer. Cars that show LOD0: the player, a model without a low file, and an opponent with a LOD0 part off its batch (a loose or detached panel, AUTHORED: the original moves its low panels too, not traced). `GRID_CAR_LOD=0` keeps every car at LOD0 (comparisons).
+
+AUTHORED / not ported: the original submits opponents only to CSM cascades 1 and 2; Bevy draws a caster into every cascade whose frustum holds it. The original's focus-car `car_layer` maps, the cockpit rule (opponents have no cockpit here), the replay and FE sets and the `vehicles lodQuality` option are not modelled.
+
+`grid-car-lod-draws PATH.pssg` (grid-probes) lists a package's draws per `LODn_` bundle: BMW high 107 draws / 23,105 triangles (LOD0), 100 / 16,195 (LOD1); low 94 / 7,548, 70 / 4,018, 46 / 1,546, 3 / 494 (LOD2..5). The low file uses the same 16 material names as the high file.
 
 ## Unknown
 
