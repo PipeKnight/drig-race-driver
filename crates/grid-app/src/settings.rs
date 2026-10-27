@@ -267,8 +267,8 @@ pub struct Settings {
     pub teammate: Option<usize>,
     /// `[game] audio_name`: the profile's audio name the race engineer says,
     /// `M_01`…`M_100`, `F_01`…`F_55` or `N_01`…`N_42` (language ids
-    /// `commentary_name_*`), or `off` ("Disable Audio Name"). Default `M_01`
-    /// (docs/SPEECH_AUDIO_RESEARCH.md §18).
+    /// `commentary_name_*`), or `off` ("Disable Audio Name"). Default `M_46`
+    /// (Jack, docs/SPEECH_AUDIO_RESEARCH.md §18).
     pub audio_name: Option<String>,
     /// The career race's speech values, written by the career screen
     /// (docs/SPEECH_AUDIO_RESEARCH.md §19): `[game] speech_final_race`,

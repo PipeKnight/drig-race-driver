@@ -168,13 +168,13 @@ pub(crate) fn list_files(args: &[String]) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-/// The profile's audio name: `[game] audio_name`, `M_01` by default [I: the name of the
-/// owner's profile in the 2026-10-06 capture], `off` for none.
+/// The profile's audio name: `[game] audio_name`, `M_46` (Jack) by default [AUTHORED: the
+/// owner's choice; the original asks for a name on its profile screen], `off` for none.
 pub(crate) fn audio_name(profile: &crate::settings::Settings) -> Option<&str> {
     match profile.audio_name.as_deref() {
         Some("off") => None,
         Some(name) => Some(name),
-        None => Some("M_01"),
+        None => Some("M_46"),
     }
 }
 

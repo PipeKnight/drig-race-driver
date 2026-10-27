@@ -871,14 +871,15 @@ clears the three flags.
 **The port.**
 - `Manager::set_player_name` takes the audio name and builds the three `Chief_` lines
   (`speech::player_name_lines`); `try_start` arms the phrase, `playback` plays it before the line.
-- `[game] audio_name` (`M_nn`, `F_nn`, `N_nn` or `off`) in grid-app's settings. Default `M_01`
-  [I: the owner's profile in the capture; the port has no profile screen]. grid-app prints it in
+- `[game] audio_name` (`M_nn`, `F_nn`, `N_nn` or `off`) in grid-app's settings. Default `M_46`
+  (Jack) [AUTHORED: the owner's choice on 2026-10-27; the port has no profile screen; F623 had
+  `M_01`, the owner's profile in the capture]. grid-app prints it in
   `speech_audio … event=drivers … audio_name=`.
 - [I] A missing name file plays nothing, and the line follows at once. With number 0 the original
   still arms a flag on an empty stream; what that plays is not established. The port's `off` arms
   nothing (the roll is still drawn).
 - `grid-app --speech-files` lists the three `Chief_` files of the profile's audio name, so the APK
-  bundle lists carry `Chief_{OK,WD,BL}_M_01`.
+  bundle lists carry `Chief_{OK,WD,BL}_M_46`.
 
 ## 19. The port, part 3 step 3: the championship and career values [O static]
 
