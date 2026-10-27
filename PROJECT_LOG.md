@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F631](log/F0631.md) | 2026-10-28 | Cockpit: driver and hands (skinned model, steering poses, two-bone IK) as the original |
 | [F630](log/F0630.md) | 2026-10-27 | Cockpit: dash gauges (digital readouts, motec bars, shift lights, needles) as the original |
 | [F629](log/F0629.md) | 2026-10-27 | Speech audio name default Jack (M_46) |
 | [F628](log/F0628.md) | 2026-10-27 | Playable 6a19dc55687c with F610-F626, portable copy and APKs 081b8353acf7 |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F574](log/F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
 | [F573](log/F0573.md) | 2026-10-26 | Desktop Auto render height and compute threads on the desktop |
 | [F572](log/F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |
-| [F571](log/F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

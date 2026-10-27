@@ -462,6 +462,7 @@ fn scene_mesh() -> mesh::Mesh<'static> {
         texcoords: vec![[0.; 2]; 6],
         additional_texcoords: vec![],
         skin_indices: Some(vec![7.; 6]),
+        skin_weights: None,
         indices: vec![2, 3, 4],
     }
 }

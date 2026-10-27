@@ -496,6 +496,68 @@ fn decode_bind_matrix(data: &[u8], offset: usize) -> Result<[f32; 16]> {
     [m[3], m[7], m[11], m[15]] = [0., 0., 0., 1.];
     Ok(m)
 }
+/// A SKINNODE drawn with its joints (`characters/models/driver_model.pssg`).
+pub struct Skin<'a> {
+    /// The SKINJOINTs' JOINTNODEs, in skin order (a vertex's joint numbers
+    /// index this list).
+    pub joints: Vec<usize>,
+    /// Each joint's INVERSEBINDMATRIX: bind space to the joint.
+    pub inverse_bind: Vec<[f32; 16]>,
+    /// The `skinTransformLocal` instances: id, shader id and mesh source.
+    pub instances: Vec<(&'a [u8], &'a [u8], usize)>,
+}
+
+/// The SKINNODE `id` of `tree`, with `meshes` from
+/// [`crate::mesh::read_object_meshes`]; every instance needs its joints and
+/// weights.
+pub fn read_skin<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>], id: &[u8]) -> Result<Skin<'a>> {
+    let named = |kind: &[u8], id: &[u8]| {
+        (0..tree.nodes.len()).find(|&i| tree.name(i) == kind && tree.string(i, b"id").ok() == Some(id))
+    };
+    let Some(skin) = named(b"SKINNODE", id) else {
+        return fail(0, "skin node absent");
+    };
+    let skeleton = tree.string(skin, b"skeleton")?.strip_prefix(b"#").unwrap_or_default();
+    let Some(skeleton) = named(b"SKELETON", skeleton) else {
+        return fail(tree.nodes[skin].offset, "unresolved skin skeleton");
+    };
+    let inverse_bind: Vec<[f32; 16]> = (tree.nodes[skeleton].children.iter())
+        .filter(|&&c| tree.name(c) == b"INVERSEBINDMATRIX")
+        .map(|&c| decode_bind_matrix(tree.nodes[c].data.unwrap_or_default(), tree.nodes[c].offset))
+        .collect::<Result<_>>()?;
+    let mut joints = Vec::new();
+    let mut instances = Vec::new();
+    for &c in &tree.nodes[skin].children {
+        match tree.name(c) {
+            b"SKINJOINT" => {
+                let joint = tree.string(c, b"joint")?.strip_prefix(b"#").unwrap_or_default();
+                let Some(joint) = named(b"JOINTNODE", joint) else {
+                    return fail(tree.nodes[c].offset, "unresolved skin joint");
+                };
+                joints.push(joint);
+            }
+            b"MODIFIERNETWORKINSTANCE" if tree.string(c, b"network")?.ends_with(b"#skinTransformLocal") => {
+                let reference = tree.string(c, b"indices")?.strip_prefix(b"#").unwrap_or_default();
+                let Some(source) = meshes.iter().position(|m| m.id == reference) else {
+                    return fail(tree.nodes[c].offset, "unresolved skin source");
+                };
+                let Some((bound, _)) = &meshes[source].skin_weights else {
+                    return fail(tree.nodes[c].offset, "skinned source without joints");
+                };
+                if bound.iter().flatten().any(|&j| j as usize >= inverse_bind.len()) {
+                    return fail(tree.nodes[c].offset, "skin joint number out of range");
+                }
+                let shader = tree.string(c, b"shader")?.strip_prefix(b"#").unwrap_or_default();
+                instances.push((tree.string(c, b"id")?, shader, source));
+            }
+            _ => {}
+        }
+    }
+    if joints.len() != inverse_bind.len() || joints.len() != tree.integer(skin, b"jointCount")? as usize {
+        return fail(tree.nodes[skin].offset, "skin joint and bind matrix counts differ");
+    }
+    Ok(Skin { joints, inverse_bind, instances })
+}
 pub fn decode_matrix(data: &[u8], offset: usize) -> Result<[f32; 16]> {
     if data.len() != 64 {
         return fail(offset, "expected 16-float transform");

@@ -43,6 +43,8 @@ pub struct Cockpit {
     pub wheel: Option<Wheel>,
     /// The dash displays (docs/COCKPIT.md "Gauges").
     pub dash: crate::dash::Dash,
+    /// The driver (docs/COCKPIT.md "Driver").
+    pub driver: Option<crate::driver::Driver>,
 }
 
 /// The interior "Steering" clip and the steering wheel's frame
@@ -53,21 +55,42 @@ pub struct Cockpit {
 pub struct Wheel {
     /// The wheel node's parent in the car frame (anchor · scene world).
     parent: Mat4,
-    rotation: neanim::Keys,
-    translation: Vec<neanim::Keys>,
+    wheel: Keyed,
+    /// D_Lhand_Dummy and D_Rhand_Dummy under the wheel: keyed by the clip,
+    /// else their file transforms.
+    hands: [Result<Keyed, Mat4>; 2],
     duration: f32,
     /// Each part under the wheel: its frame relative to the wheel node.
     parts: BTreeMap<String, Mat4>,
+}
+
+/// A node's channels in the clip.
+#[derive(Clone, Debug)]
+struct Keyed {
+    rotation: neanim::Keys,
+    translation: Vec<neanim::Keys>,
+}
+
+impl Keyed {
+    fn local(&self, t: f32) -> Mat4 {
+        let q = Vec4::from_array(self.rotation.sample(t));
+        let v: Vec3 = self.translation.iter().map(|k| Vec4::from_array(k.sample(t)).truncate()).sum();
+        Mat4::from_rotation_translation(Quat::from_vec4(q).normalize(), v)
+    }
 }
 
 impl Wheel {
     /// The wheel node's local transform for the steering command `s`
     /// (+1 = full right).
     fn local(&self, s: f32) -> Mat4 {
+        self.wheel.local((s + 1.) * 0.5 * self.duration)
+    }
+
+    /// The hand dummies in the car frame for the steering command `s`.
+    pub fn hands(&self, s: f32) -> [Mat4; 2] {
+        let frame = self.parent * self.local(s);
         let t = (s + 1.) * 0.5 * self.duration;
-        let q = Vec4::from_array(self.rotation.sample(t));
-        let v: Vec3 = self.translation.iter().map(|k| Vec4::from_array(k.sample(t)).truncate()).sum();
-        Mat4::from_rotation_translation(Quat::from_vec4(q).normalize(), v)
+        self.hands.each_ref().map(|h| frame * h.as_ref().map_or_else(|m| *m, |k| k.local(t)))
     }
 }
 
@@ -130,6 +153,7 @@ pub fn install(app: &mut App) {
         }
     }
     crate::dash::install(app);
+    crate::driver::install(app);
     app.insert_resource(mirror)
         .add_systems(Update, (create_mirror, place_mirror).chain().after(crate::drive_present))
         .add_systems(Update, (attach_wheel, turn_wheel).chain().before(crate::drive_present))
@@ -441,7 +465,8 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
     car.parts.extend(parts);
     car.bindings.extend(bindings);
     car.textures.extend(images);
-    Ok(Cockpit { active, anchor, wheel, dash })
+    let driver = crate::driver::append(root, stem, &tree, anchor, car)?;
+    Ok(Cockpit { active, anchor, wheel, dash, driver })
 }
 
 /// The first `kind` element whose id is `id`.
@@ -489,16 +514,30 @@ fn steering_wheel(
     let Some(clip) = sets.first().and_then(|s| s.clips.iter().find(|c| c.name.eq_ignore_ascii_case("steering"))) else {
         return Ok(None);
     };
-    let of = |semantic: &'static str| {
-        clip.channels.iter().filter(move |c| c.target == "steering_wheel" && c.semantic == semantic)
+    let keyed = |target: &str| {
+        let of = |semantic: &'static str| {
+            clip.channels.iter().filter(move |c| c.target == target && c.semantic == semantic)
+        };
+        Some(Keyed {
+            rotation: of("rotation_quaternion").next()?.keys.clone(),
+            translation: of("translation").map(|c| c.keys.clone()).collect(),
+        })
     };
-    let Some(rotation) = of("rotation_quaternion").next() else {
+    let Some(wheel) = keyed("steering_wheel") else {
         return Ok(None);
     };
+    let mut hands = [Ok(wheel.clone()), Ok(wheel.clone())];
+    for (hand, name) in hands.iter_mut().zip(["D_Lhand_Dummy", "D_Rhand_Dummy"]) {
+        *hand = match (keyed(name), named(tree, b"NODE", name.as_bytes())) {
+            (Some(k), _) => Ok(k),
+            (None, Some(n)) => Err(Mat4::from_cols_array(&scene::matrix(tree, n)?)),
+            (None, None) => return Ok(None),
+        };
+    }
     let wheel = Wheel {
         parent: anchor * Mat4::from_cols_array(&scene::node_matrix(tree, parent)?),
-        rotation: rotation.keys.clone(),
-        translation: of("translation").map(|c| c.keys.clone()).collect(),
+        wheel,
+        hands,
         duration: clip.duration(),
         parts: BTreeMap::new(),
     };

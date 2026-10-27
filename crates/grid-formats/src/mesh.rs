@@ -22,8 +22,14 @@ pub struct Mesh<'a> {
     /// Further ST streams, in render-stream order; their shader use is separate.
     pub additional_texcoords: Vec<Vec<[f32; 2]>>,
     pub skin_indices: Option<Vec<f32>>,
+    /// The skinned reader's four joints (SKINJOINT positions) and weights
+    /// per vertex, as stored.
+    pub skin_weights: Option<SkinWeights>,
     pub indices: Vec<u16>,
 }
+
+/// Per vertex: four joint numbers and their weights.
+pub type SkinWeights = (Vec<[u8; 4]>, Vec<[f32; 4]>);
 
 fn child(tree: &Tree<'_>, node: usize, name: &[u8]) -> Result<usize> {
     let mut found = tree.nodes[node]
@@ -194,6 +200,7 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a
         let mut colors = None;
         let mut texcoords = Vec::new();
         let mut skin_indices = None;
+        let mut skin_weights = None;
         let mut weights: Option<Vec<[f32; 4]>> = None;
         let mut joints: Option<Vec<[u8; 4]>> = None;
         for stream in streams {
@@ -374,6 +381,7 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a
                     .map(|(w, j)| j[(0..4).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap()] as f32)
                     .collect();
                 skin_indices = Some(main);
+                skin_weights = Some((joints, weights));
             }
             (None, None) => {}
             _ => return fail(tree.nodes[source].offset, "skin weight and index streams differ"),
@@ -474,6 +482,7 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a
             texcoords: texcoords_first,
             additional_texcoords: texcoords,
             skin_indices,
+            skin_weights,
             indices,
         });
     }

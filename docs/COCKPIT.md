@@ -219,3 +219,52 @@ Checks:
 - Render (Nissan 350Z, `--car 350`, 10 displays: 2 analog, 8 analog_dummy): at rest the speed needle is at 0 and the tach at idle; after 500 ticks at full throttle the speedometer reads about 140 mph (HUD 225 km/h) and the tach about 6 krpm.
 
 Not verified: the digit orientation against the original's screen (font strip order [I]) and EmissiveFactor.
+
+## Driver
+
+### What the original does [D]
+
+- Model: `characters/models/driver_model.pssg`, one SKINNODE `body_x4` on 75 skin joints (a 3ds Max biped, `Bip01`, with fingers, roll bones, face bones and belt dummies) plus five plain NODEs in the joint tree: the IK hints `LA_hint`, `RA_hint`, `LL_hint`, `RL_hint` and `Bip01 Footsteps`. Its 16 `skinTransformLocal` instances (body, helmet and visor shaders) are named `_x1`..`_x6`.
+  - 0x85D960 sorts them into six level-of-detail slots, numbered by the digit after `_x` minus one (0x84A9D0).
+  - 0x85D310 picks the slot per driver. For the player it uses slot 1 whenever the view sets DisableDriverHead (driver node +0x170, from view +0xFD by 0x84E440).
+  - Slot 1 holds only `_x2`: the body without helmet and visor. So the head-cam shows arms, hands and torso, and no head. The same slot puts the player's animation LOD at 1 (no face clips).
+- Seat: 0x861C50 places the model on the interior's `D_bip_position` (the identity in every cockpit). The cockpit clip "Neutral" (`int_<stem>_driver_anims.pssg`, weight 1, 0x84BA20) seats the skeleton.
+- Steering poses (0x851730, 0x852030):
+  - with L = max(−s, 0) and R = max(s, 0), the clips 1..4 of `characters/anims/driver_anims.pssg` (`d_lhd_steer_toleft`, `_left`, `_toright`, `_right`) are added with weights min(2L, 1), max(2L − 1, 0), min(2R, 1) and max(2R − 1, 0);
+  - a clip below 0.01 is skipped;
+  - these clips are differences [V]: zero quaternions for bones they leave alone, small deltas elsewhere.
+- Blend: the evaluator (0xACD760, 0xACD500) adds weight × value per slot with no weight normalisation; the slot writer normalises each quaternion (0xAC67A0). So a rotation is Neutral plus the weighted deltas, normalised, and a translation is the plain sum.
+- IK (0x852EC0 legs, then 0x852FD0 arms; the arms weighted by the steering source of their crossfades, 1 in the steady state):
+  - targets: `D_Lfoot_Dummy` and `D_Rfoot_Dummy`, then `D_Lhand_Dummy` and `D_Rhand_Dummy` (children of `steering_wheel`, keyed by the interior "Steering" clip);
+  - the solver is NeAnimIKLimb (0xB00000) with the constructor's flags (0xAFF960): rotate the end, do not invert the bend.
+  - With p0 the upper bone's world position, L1 and L2 the lengths of the lower and end local offsets, and d = target − p0:
+    - the bend-plane normal is n = dir × (hint − p0), normalised, and u = n × dir;
+    - beyond reach the limb points straight at the target;
+    - otherwise c = (D² + L1² − L2²) / (2·L1·D), and the elbow is p0 + along·dir + perp·u, with perp = sin(acos c)·L1 in double precision and along = ±√(L1² − perp²) with the sign of c;
+    - with |c| > 1 the limb folds along dir.
+  - The upper and lower bones get frames with X along the bone and Y = n; their old twist is discarded. The end takes the target's rotation. Translations stay.
+  - The description was checked by emulating every instruction of 0xB00000–0xB01ADC against a Python model: 150 random cases (in reach, out of reach, too close, with random flags) agreed, quaternion signs included (private `local/cam/cockpit/driver/ik_emu/`).
+
+### The port (`driver.rs`)
+
+- `grid_formats::scene::read_skin` reads the skin's joints, inverse bind matrices and instances. `mesh::read_object_meshes` now also keeps each vertex's four joints and weights (`Mesh::skin_weights`).
+- The `_x2` instance is drawn through the car's material path as `car0/interior/driver/body`, with its TDiffuseAlphaMap and the default interior material, as a Bevy `SkinnedMesh`. It is an interior part, so it shows in the head-cam only. NoFrustumCulling, because the bind-pose bounds do not follow the seated pose.
+- Each frame, before `drive_present`:
+  - `s` = −(vehicle +0xE30), as for the wheel;
+  - the Neutral and steering poses are blended as above;
+  - the legs, then the arms, are solved (`ik::reach`) with this frame's FK;
+  - the joints are written as children of the body part.
+- Not ported:
+  - gear-change and handbrake reaches (state machine 0x8573E0, per-car sets from database.bin `vehicle_interior`);
+  - the pedal clips (the right foot follows a fixed `D_Rfoot_Dummy`);
+  - the g-force lean (0x857F20), breathing and face clips;
+  - `small_cockpit_anims.pssg` (cars with `small_cockpit`);
+  - the suit tint (TTintColourMask, tintColour1..3);
+  - the drivers seen through the windows in the other views and in the opponents' cars (slots 0, 2..5 and 0x862300).
+
+Checks:
+- `driver::tests::level_of_detail_slot_reads_the_digit_after_x`.
+- `lacetti_hands_reach_the_wheel_dummies` (ignored, GRID_GAME_ROOT): one drawn part (`_x2`), 80 joints and 75 skin joints. At s = −1, −0.5, 0, 0.5 and 1 both hands are within 1 mm and 1e-3 rad of their dummies.
+- Renders (Lacetti, `local/cam/render/driver*`): gloved hands on the rim at rest and following it to both locks (`driver/turns.png`). Chase_close, chase_far, bonnet and bumper: 0 px against F630.
+
+Not verified: the suit colours without the tint and the arm shape against a capture of the original.
