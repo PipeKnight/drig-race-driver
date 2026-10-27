@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G301 (2026-10-27): optional main-view AgX/Reinhard comparison passes460app tests/Clippy/combined-feature build and2native4K captures. Reinhard makes selected Lacetti paint more saturated; AgX default retained. One-component probe residual recorded; no original/moving/default parity claim. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G300 (2026-10-27): pinned F584-F586 integrated with player source ownership retained and opponent batching enabled. New ECS test/full1137tests/Clippy/4identities/24soak/native build and fresh2Istanbul smoke controls pass. Manual/general/default remain open; see PERFORMANCE/TYRE_SMOKE_RESEARCH.
 - G299 (2026-10-27): existing Lacetti Fresnel/current-sort native-DLAA fixture shows cracked glass before scripted R and intact glass/restored body afterward. One early-capture failure retained; corrected run and independent audit pass. Manual/Smashed/general remain open. See LACETTI_GRAPHICS_MATERIALS.
 - G298 (2026-10-27): default-off standalone road roughness trial passes458app tests/Clippy, native-feature build and3static GPU cases. Off/0.70 images exact;0.65 gives only subtle brightening. Current default retained; grazing-angle response remains open. See ASPHALT_PAINT_REFLECTION_CHECK.

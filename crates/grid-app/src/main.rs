@@ -2007,6 +2007,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--glass-roughness" => {
                 graphics.glass_roughness(&args.next().ok_or("--glass-roughness needs 0.04..1")?)?;
             }
+            "--tone-map" => {
+                graphics.tone_map(&args.next().ok_or("--tone-map needs agx or reinhard")?)?;
+            }
             "--post-saturation" => {
                 let value: f32 = args.next().ok_or("--post-saturation needs 0..2")?.parse()?;
                 if !value.is_finite() || !(0.0..=2.0).contains(&value) { return Err("post saturation must be finite 0..2".into()); }
@@ -2202,6 +2205,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
                 println!("--post-saturation 0..2: optional single-variable authored-grade diagnostic; enhanced only, temperature/tint unchanged, not combinable with track grade.");
+                println!("--tone-map agx|reinhard: enhanced main-view display diagnostic; absent/AgX preserve the current mode; Reinhard requires rendered authored-grade reference or bounded driving. Not original GRID grading.");
                 println!("--temporal-centre X,Y: bounded diagnostic ROI centre; default tracks the car, requires a temporal audit.");
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
@@ -2314,6 +2318,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
+    }
+    let bounded_tone_scene = if drive { drive_ticks.is_some() } else { reference };
+    let nondefault_tone_map = graphics.tone_map_override.is_some_and(|tone|
+        tone != bevy::core_pipeline::tonemapping::Tonemapping::AgX);
+    if (graphics.tone_map_override.is_some() && !graphics.enhanced())
+        || (nondefault_tone_map && (graphics.track_grade || output.is_none() || collision
+            || !bounded_tone_scene))
+    {
+        return Err("--tone-map requires enhanced graphics; nondefault modes require rendered authored-grade reference or bounded driving".into());
     }
     if graphics.post_saturation_override.is_some() && (!graphics.enhanced() || graphics.track_grade) {
         return Err("--post-saturation requires enhanced authored grade; do not combine with --grade track".into());
@@ -2676,7 +2689,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 scene_pilots_off:foundation_front==foundation_front::Mode::Off && foundation_backing==foundation_backing::Mode::Off
                     && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
                     && graphics.object_coverage==object_materials::CoverageMode::Off && !graphics.double_fence_wire
-                    && !source_haze && !reflection_calibration && !include_batches && !audio_check,
+                    && !source_haze && !reflection_calibration && !include_batches && !audio_check
+                    && !nondefault_tone_map,
                 camera_off:!render_fixed_step && capture_orbit_rate.is_none() && eye.is_none() && target.is_none(),
                 groups_ground:smoke_order==tyre_smoke::SmokeOrder::Groups && ground_effect_assets::enabled(),
                 overrides_off:window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none()

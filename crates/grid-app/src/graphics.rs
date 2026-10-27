@@ -88,6 +88,8 @@ pub struct Settings {
     pub exposure_ev100: f32,
     /// Optional single-variable authored-grade diagnostic; default preserves current look.
     pub post_saturation_override: Option<f32>,
+    /// Optional rendered authored-grade diagnostic; absent preserves AgX.
+    pub tone_map_override: Option<Tonemapping>,
     /// Window-only material control; light lenses are a separate material.
     pub window_roughness: f32,
     pub window_reflectance: f32,
@@ -175,6 +177,7 @@ impl Default for Settings {
             white_body_specular: false,
             exposure_ev100: 13.,
             post_saturation_override: None,
+            tone_map_override: None,
             window_roughness: 0.08,
             window_reflectance: 0.5,
             window_pilot: super::window_response::Mode::Off,
@@ -216,6 +219,16 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn tone_map(&mut self, value: &str) -> Result<(), &'static str> {
+        let mode = match value {
+            "agx" => Tonemapping::AgX,
+            "reinhard" => Tonemapping::Reinhard,
+            _ => return Err("--tone-map needs agx or reinhard"),
+        };
+        self.tone_map_override = Some(mode);
+        Ok(())
+    }
+
     pub fn race_number(&mut self, value: &str) -> Result<(), &'static str> {
         let number = grid_formats::car_decals::Number::parse(value).map_err(|_| "race number needs 1..3 decimal digits")?;
         self.player_race_number = Some(number);
@@ -375,6 +388,7 @@ pub fn configure(
     settings: &Settings,
     media: &mut Assets<ScatteringMedium>,
 ) {
+    let tone_map = settings.tone_map_override.unwrap_or(Tonemapping::AgX);
     println!(
         "graphics preset={:?} resolution={}x{} shadow_size={} anisotropy={} sky_ibl={} ssao={} taa={} tonemapping={}",
         settings.preset,
@@ -386,9 +400,9 @@ pub fn configure(
         settings.enhanced() && settings.ambient_occlusion,
         settings.enhanced() && settings.anti_aliasing == 0,
         if settings.enhanced() {
-            "AgX"
+            format!("{tone_map:?}")
         } else {
-            "Bevy-default"
+            "Bevy-default".to_owned()
         }
     );
     if !settings.enhanced() {
@@ -408,7 +422,8 @@ pub fn configure(
             fog.distance, fog.density_cap, fog.colour, fog.brightness, fog.base_height, fog.top_height);
     }
     println!("graphics_shadow_range metres={} cascades=4 first=18 map_size=4096 mapping=authored", settings.shadow_distance_metres);
-    println!("graphics_exposure ev100={} mode=fixed tonemapping=AgX", settings.exposure_ev100);
+    println!("graphics_exposure ev100={} mode=fixed tonemapping={tone_map:?}", settings.exposure_ev100);
+    println!("graphics_tone_map value={tone_map:?} override={} scope=main-view-authored-display-diagnostic exposure_grade_materials_probe_hdr=unchanged", settings.tone_map_override.is_some());
     println!("graphics_post_saturation value={} override={} scope=authored-camera-grade temperature_tint=unchanged", settings.post_saturation_override.unwrap_or(if settings.track_grade { 1.0 } else { 0.9 }), settings.post_saturation_override.is_some());
     commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight::NONE);
@@ -418,7 +433,7 @@ pub fn configure(
     commands.entity(camera).insert((
         Hdr,
         Exposure { ev100: settings.exposure_ev100 },
-        Tonemapping::AgX,
+        tone_map,
         // Authored restrained warm grade; original GRID's LUT is not recovered.
         ColorGrading {
             global: ColorGradingGlobal {

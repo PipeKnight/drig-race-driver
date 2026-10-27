@@ -489,6 +489,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G301](G0301.md) | 2026-10-27 | Compare main-view display transforms for Lacetti paint |
 | [G300](G0300.md) | 2026-10-27 | Integrate F584-F586 preserving player render ownership |
 | [G299](G0299.md) | 2026-10-27 | Verify rendered cracked-window reset lifecycle |
 | [G298](G0298.md) | 2026-10-27 | Bounded authored asphalt roughness comparison |
