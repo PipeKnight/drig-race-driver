@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F603](F0603.md) | 2026-10-27 | Phones without BC: OSD textures made before the upload path was chosen are converted; desktop check with BC off the device |
 | [F602](F0602.md) | 2026-10-27 | Force feedback port: GameFFB, DirectInput wheel input and force, XInput rumble |
 | [F601](F0601.md) | 2026-10-27 | AI corner lift only above the brake-line target: Spa La Source |
 | [F600](F0600.md) | 2026-10-27 | Grid start: GPU pass timer and opponent shadow bodies |

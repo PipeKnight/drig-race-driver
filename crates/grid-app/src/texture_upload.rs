@@ -8,7 +8,14 @@
 //!
 //! Without BC the order is ETC2, then RGBA8. Diagnostics `texture_fallback`
 //! `on`/`rgba8` forces RGBA8, `etc2` forces ETC2 (when the GPU has it); the
-//! legacy `GRID_TEXTURE_FALLBACK` takes the same values.
+//! legacy `GRID_TEXTURE_FALLBACK` takes the same values. A forced value also
+//! leaves BC off the device ([`render_creation`]), so the desktop fails like
+//! a phone without BC whenever a BC texture slips through.
+//!
+//! The device, and so the path, exists only once the app runs; loaders that
+//! build images while the app is assembled (the OSD scene) get the BC image.
+//! [`convert_existing`] puts those on the chosen path before the first frame
+//! and [`convert_added`] any BC image added later by any loader (F603).
 use bevy::{
     asset::RenderAssetUsages,
     image::{CompressedImageFormats, ImageSampler, ImageType, TextureError},
@@ -33,6 +40,7 @@ static DECODED: AtomicU64 = AtomicU64::new(0);
 static UPLOAD_BYTES: AtomicU64 = AtomicU64::new(0);
 static SOURCE_BYTES: AtomicU64 = AtomicU64::new(0);
 static DECODE_NANOS: AtomicU64 = AtomicU64::new(0);
+static LATE: AtomicU64 = AtomicU64::new(0);
 
 fn choose(bc: bool, etc2: bool, forced: Option<&str>) -> (u8, &'static str) {
     match forced {
@@ -46,6 +54,20 @@ fn choose(bc: bool, etc2: bool, forced: Option<&str>) -> (u8, &'static str) {
         _ if etc2 => (ETC2, "etc2-cache (no BC support)"),
         _ => (RGBA8, "rgba8-cpu-decode (no BC or ETC2 support)"),
     }
+}
+
+/// The renderer's device settings. A forced `texture_fallback` also leaves
+/// `TEXTURE_COMPRESSION_BC` off the device, so a desktop GPU rejects every BC
+/// texture as a Mali or Xclipse phone does (F603: the OSD's 48 BC3 textures
+/// were only caught on a friend's Mali-G77).
+pub(crate) fn render_creation() -> bevy::render::settings::RenderCreation {
+    let forced = crate::settings::diagnostics().texture_fallback.is_some();
+    bevy::render::settings::RenderCreation::Automatic(Box::new(
+        bevy::render::settings::WgpuSettings {
+            disabled_features: forced.then_some(WgpuFeatures::TEXTURE_COMPRESSION_BC),
+            ..default()
+        },
+    ))
 }
 
 /// Chooses the upload path before any Startup system creates images.
@@ -95,25 +117,7 @@ fn image_with_color_space(
         usage,
     )?;
     let source = image.data.as_ref().map_or(0, Vec::len) as u64;
-    let path = PATH.load(Ordering::Relaxed);
-    if path != BC {
-        let start = Instant::now();
-        let etc2 = if path == ETC2 {
-            etc2_image(dds, &image).unwrap_or_else(|error| {
-                warn!("ETC2 texture cache failed, using RGBA8: {error}");
-                None
-            })
-        } else {
-            None
-        };
-        if let Some(etc2) = etc2 {
-            image = etc2;
-            DECODED.fetch_add(1, Ordering::Relaxed);
-        } else if decode_in_place(&mut image)? {
-            DECODED.fetch_add(1, Ordering::Relaxed);
-        }
-        DECODE_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-    }
+    convert(&mut image, Some(dds))?;
     IMAGES.fetch_add(1, Ordering::Relaxed);
     SOURCE_BYTES.fetch_add(source, Ordering::Relaxed);
     UPLOAD_BYTES.fetch_add(
@@ -121,6 +125,108 @@ fn image_with_color_space(
         Ordering::Relaxed,
     );
     Ok(image)
+}
+
+/// Puts one BC1/BC3 image on the chosen path; false when nothing changed
+/// (the path is BC, or another format). `key` names the ETC2 cache entry:
+/// the DDS file, or without one the BC levels themselves.
+fn convert(image: &mut Image, key: Option<&[u8]>) -> Result<bool, TextureError> {
+    let path = PATH.load(Ordering::Relaxed);
+    if path == BC || !is_bc(image.texture_descriptor.format) {
+        return Ok(false);
+    }
+    let start = Instant::now();
+    let etc2 = if path == ETC2 {
+        let key = key.unwrap_or_else(|| image.data.as_deref().unwrap_or_default());
+        etc2_image(key, image).unwrap_or_else(|error| {
+            warn!("ETC2 texture cache failed, using RGBA8: {error}");
+            None
+        })
+    } else {
+        None
+    };
+    let changed = match etc2 {
+        Some(etc2) => {
+            *image = etc2;
+            true
+        }
+        None => decode_in_place(image)?,
+    };
+    if changed {
+        DECODED.fetch_add(1, Ordering::Relaxed);
+    }
+    DECODE_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    Ok(changed)
+}
+
+fn is_bc(format: TextureFormat) -> bool {
+    matches!(
+        format,
+        TextureFormat::Bc1RgbaUnorm
+            | TextureFormat::Bc1RgbaUnormSrgb
+            | TextureFormat::Bc3RgbaUnorm
+            | TextureFormat::Bc3RgbaUnormSrgb
+    )
+}
+
+/// PreStartup, after [`configure`]: the BC images already made (while the
+/// app was built) on the chosen path.
+pub(crate) fn convert_existing(mut images: ResMut<Assets<Image>>) {
+    println!(
+        "texture upload: images_before_startup={} bc={}",
+        images.len(),
+        images.iter().filter(|(_, i)| is_bc(i.texture_descriptor.format)).count()
+    );
+    let ids: Vec<AssetId<Image>> = images
+        .iter()
+        .filter(|(_, image)| is_bc(image.texture_descriptor.format))
+        .map(|(id, _)| id)
+        .collect();
+    convert_ids(&mut images, ids, "built");
+}
+
+/// Last, before extraction: BC images added this frame by any loader.
+pub(crate) fn convert_added(
+    mut events: MessageReader<AssetEvent<Image>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let added: Vec<AssetId<Image>> = events
+        .read()
+        .filter_map(|event| match event {
+            AssetEvent::Added { id } | AssetEvent::Modified { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    if PATH.load(Ordering::Relaxed) == BC {
+        return;
+    }
+    let ids = added
+        .into_iter()
+        .filter(|id| images.get(*id).is_some_and(|i| is_bc(i.texture_descriptor.format)))
+        .collect();
+    convert_ids(&mut images, ids, "added");
+}
+
+fn convert_ids(images: &mut Assets<Image>, ids: Vec<AssetId<Image>>, when: &str) {
+    if ids.is_empty() || PATH.load(Ordering::Relaxed) == BC {
+        return;
+    }
+    let (mut converted, mut failed) = (0, 0);
+    for id in ids {
+        let Some(mut image) = images.get_mut(id) else {
+            continue;
+        };
+        match convert(&mut image, None) {
+            Ok(true) => converted += 1,
+            Ok(false) => {}
+            Err(error) => {
+                failed += 1;
+                error!("texture upload: BC image {id:?} cannot be converted: {error}");
+            }
+        }
+    }
+    LATE.fetch_add(converted, Ordering::Relaxed);
+    println!("texture upload: late_converted={converted} failed={failed} when={when}");
 }
 
 /// The ETC2 image of a BC1/BC3 DDS image; `None` for other formats.
@@ -158,10 +264,11 @@ fn etc2_image(dds: &[u8], bc: &Image) -> Result<Option<Image>, String> {
 /// same again in the main world for MAIN_WORLD images).
 pub(crate) fn summary() -> String {
     format!(
-        "texture upload summary: path={} images={} decoded={} source_bytes={} upload_bytes={} decode_ms={:.1} {}",
+        "texture upload summary: path={} images={} decoded={} late_converted={} source_bytes={} upload_bytes={} decode_ms={:.1} {}",
         ["bc", "etc2", "rgba8"][usize::from(PATH.load(Ordering::Relaxed))],
         IMAGES.load(Ordering::Relaxed),
         DECODED.load(Ordering::Relaxed),
+        LATE.load(Ordering::Relaxed),
         SOURCE_BYTES.load(Ordering::Relaxed),
         UPLOAD_BYTES.load(Ordering::Relaxed),
         DECODE_NANOS.load(Ordering::Relaxed) as f64 / 1e6,

@@ -2812,6 +2812,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 // A capture's frame counter must not outrun background shader
                 // compilation. Interactive windows keep Bevy's async default.
                 .set(bevy::render::RenderPlugin {
+                    render_creation: texture_upload::render_creation(),
                     synchronous_pipeline_compilation: true,
                     ..default()
                 })
@@ -2851,22 +2852,27 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         app.add_plugins(with_profile(
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: if drive {
-                        "GRID independent driving prototype"
-                    } else {
-                        "GRID independent static resource viewer"
-                    }
-                    .into(),
-                    resolution: (graphics.width, graphics.height).into(),
-                    // [video] present_mode / frame_latency (default Bevy's Fifo, wgpu's 2).
-                    present_mode: profile.present_mode.unwrap_or_default(),
-                    desired_maximum_frame_latency: profile.frame_latency,
+            DefaultPlugins
+                .set(bevy::render::RenderPlugin {
+                    render_creation: texture_upload::render_creation(),
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: if drive {
+                            "GRID independent driving prototype"
+                        } else {
+                            "GRID independent static resource viewer"
+                        }
+                        .into(),
+                        resolution: (graphics.width, graphics.height).into(),
+                        // [video] present_mode / frame_latency (default Bevy's Fifo, wgpu's 2).
+                        present_mode: profile.present_mode.unwrap_or_default(),
+                        desired_maximum_frame_latency: profile.frame_latency,
+                        ..default()
+                    }),
                     ..default()
                 }),
-                ..default()
-            }),
         ));
         if !drive {
             app.add_systems(Update, update_orbit);
@@ -3238,7 +3244,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .insert_resource(InitialOrbit(orbit.clone()))
         .insert_resource(orbit)
         .insert_resource(ClearColor(Color::srgb(0.055, 0.07, 0.095)))
-        .add_systems(PreStartup, texture_upload::configure)
+        // The upload path, then the BC images made while the app was built
+        // (the OSD scene) and any added later on it (F603).
+        .add_systems(
+            PreStartup,
+            (texture_upload::configure, texture_upload::convert_existing).chain(),
+        )
+        .add_systems(Last, texture_upload::convert_added)
         .add_systems(Startup, setup)
         .run();
     // Leaving an event started from the menu (event_menu::leave).

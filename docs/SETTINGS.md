@@ -59,7 +59,7 @@ Grammar:
 | | `look_back` | `on`/`off` | `GRID_LOOK_BACK` |
 | | `damage_zones` | `on`/`off` | `GRID_DAMAGE_ZONES` |
 | | `damage_camera` | `car,x,y,z` | `GRID_DAMAGE_CAMERA` |
-| | `texture_fallback` | `etc2`: private ETC2 cache; `rgba8` or `on`: CPU BC decode; `off`: automatic (BC, ETC2, RGBA8 by GPU support) (P8) | `GRID_TEXTURE_FALLBACK=1`, `rgba8` or `etc2` |
+| | `texture_fallback` | `etc2`: private ETC2 cache; `rgba8` or `on`: CPU BC decode; `off`: automatic (BC, ETC2, RGBA8 by GPU support) (P8). A forced value also leaves `TEXTURE_COMPRESSION_BC` off the device, so the desktop rejects any BC texture as a phone without BC does (F603) | `GRID_TEXTURE_FALLBACK=1`, `rgba8` or `etc2` |
 | | `replay_capture` | seconds: after a scripted drive (`--drive-ticks`), play an Instant Replay and delay `--render` until it has run this long (docs/REPLAY.md) | `GRID_REPLAY_CAPTURE=S` |
 | | `flashback_capture` | seconds: in that Instant Replay, Jump In (Flashback) once it has run this long; the drive continues from the jump-in frame (docs/FLASHBACK.md). Use a value below `replay_capture` | `GRID_FLASHBACK_CAPTURE=S` |
 | | `max_ticks_per_frame` | interactive window only: at most this many 16 ms ticks per rendered frame, default 4; `0` restores Bevy's 250 ms clamp, for comparisons (docs/FRAME_STEPPING.md) | `GRID_MAX_TICKS_PER_FRAME=N` |
