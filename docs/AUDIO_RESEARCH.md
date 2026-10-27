@@ -1674,3 +1674,66 @@ levels, not by listening:
   The per-bump peaks differ between off and on because the random sample pick diverges.
 - An earlier render (`render-01`) with 1.5 cm a tick bumps and damage 0.5 played no one-shot.
   Both thresholds above explain that, and the script was changed.
+
+## 28. The OSD timer box sounds are online-only (research, F589)
+
+27 October 2026, Claude Code (car-series, owner task item 2: countdown and HUD beeps). Static only
+(`grid_re.py` dis/xrefs/decompile; the scripts `$TEMP` and the full `.text` listing are not kept); GRID
+was not launched. The start lights, drift cues and flashback (§7.6, F452) are already ported; what
+remained was the OSD timer box of §7.1.
+
+**The box [O].** The `object/messagebox=counter` widget (vtable 0xCEC0B8, constructor 0x69FF90,
+names `object/timer_segment=seg1..4.anim`, `timer_stash.anim`, `go`, `messagebox_anim.anim`):
+- Start 0x6A0390 (from the deferred OSD command 0x6C0070, queued by 0x6C1240): +0x140 = the
+  remaining time, segment timers +0x144…+0x150, last number +0x15C = −1, done +0x154 = 0. If the
+  message's second value is ≥ [0xD85A50] and below the remaining time, the update is run 100 times
+  with +0x160 set (a silent fast-forward).
+- Update 0x6AD220 (vtable slot 1): remaining −= dt; n = floor(remaining); when n changes the box
+  prints `%d` and plays HUD `sfx` `countdown_timer` (n > 0), or `countdown_go` (n ≤ 0, then done).
+  The sound needs the OSD's sound object and is skipped during the fast-forward.
+
+**Who starts it [O].** 0x6B0790 queues the start. Its two callers, 0x6B6CE0 (OSD start; sets +0x2A8)
+and 0x6BF070 (OSD update while +0x2A8), ask the provider at OSD +0x214 through its vtable +0x1C:
+`bool get(float *remaining, int *total, char **text, bool *shown)`. The provider is set from
+[[race +0xC0] +4] (0x6B0540, 0x6B6B20, 0x6B8FB0) or passed to the `playerspositioninterface`
+constructor 0x6B5240.
+- The race-session base 0x7F0500 (vtable 0xCFF378, constructor 0x7FC2B0, built by 0x67A9F9; its
+  slot 9 is the Le Mans countdown 0x80E5E0 of LE_MANS.md §2.4) clears `shown` and returns false:
+  no timer.
+- The only override found, 0x6F9D70 (vtable 0xCEFE10, constructors 0x6E78A0 and 0x6EC3D0, beside the
+  `racedriver-pc.live…demonware.net` hosts), belongs to the online session. It reports the box once
+  (+0x95), with total 30 and remaining = min(server ms (0x6E4230) / 1000, 30), only in session modes
+  4 or 0xB (0x46DBF0, an XOR-protected word).
+- [I] The override search covered every function referenced from .rdata whose first return is
+  `ret 0x10` and that stores a byte and a dword through pointer arguments. A longer override with a
+  different shape could have been missed.
+
+**Conclusion [I].** `countdown_timer` and `countdown_go` belong to an online 30 s timer, not to
+single-player race starts (those use the start lights, §7.1). The port has no online play, so
+there is nothing to port. Not ported, and correctly so for offline play.
+
+Side finding: the port shows `object/messagebox=counter` with 3, 2, 1, GO at every race start
+(`race_osd.rs`, from the time-trial countdown). In the original, single-player race sessions do not
+start the box. Whether the port should hide it is a HUD question; it is left to the HUD owner.
+`drift_countdown_1` stays unported: it comes from `Osd/dial2.pssg` animation notes on the drift
+combo timer, and the port does not show that group.
+
+**Sizes of the speech and music items [O data, I estimates]** (F589, for the owner's ordering):
+- **Music (large).** The original plays race music. 0x4127C0 (the `cmr6_audio_music_manager`
+  stream chooser) picks `audio/music/raceend.WIM` at the race end. While +0x121 is set it picks
+  `music0%i.WIM` with i = rand & 7 + 1. In a replay it picks `replay%i.WIM`, starting at channel
+  pair (n & 3)·2. A `race_music_option` (0x4A9E80, `DataRaceMusicToggle`) switches it; its default
+  was not traced. Eleven WIM streams of 27–30 MiB each (330 MiB) are in CMSamples.dic at 32 kHz with
+  flags 0xF0. The data is compressed (7.7 bits/byte, no Ogg, RIFF or Vorbis framing; no PCM channel
+  layout from 1 to 8 channels is smooth), and the CMStream system decodes it with a "compression
+  factor". Porting needs that codec reverse-engineered first, then the stream manager (start, stop,
+  fades, stems).
+- **Speech (large).** `audio/speech/<en|fr|ge|it|sp>/`, 2.5 GiB in total; English has 3814 lines,
+  585 MiB, in 21 folders (garage, highlights, intro, damage, position, rules, teammates 518,
+  performance, accidents, named AI, strategy, end of race, touge, drift, derby, Le Mans, start race,
+  AI names 541, player names). The lines are headerless PCM16 mono, which decodes trivially. The
+  work is in the triggers: `eventSpeech.bin` (290 KB) and `audioEventSpeech.bin` (148 KB) map race
+  events to lines, read by `audio_event_speech_manager` and `cmr6_audio_speech_manager`. That needs
+  their formats and the event semantics (position, gaps, teammates, damage, accidents, strategy),
+  most of which the port has only in part. A first slice (start race, position, end of race) is
+  medium; the full spotter is several pushes.
