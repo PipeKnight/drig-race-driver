@@ -556,6 +556,7 @@ description is the first header found. Rows with a single file are validators wi
 | source_boundary_plans | Read-only provenance and complete-file replay audit of scheduled driving. | [audit_source_boundary_plans.py](audit_source_boundary_plans.py) |  |
 | source_boundary_plans | Scheduled source driving regressions; no whole-original-frame oracle. | [validate_source_boundary_plans.py](validate_source_boundary_plans.py) | [SCHEDULED_DONINGTON_CONTACTS](../docs/SCHEDULED_DONINGTON_CONTACTS.md) |
 | source_drive | Source-only startup, retained original world and independent driving semantics. | [validate_source_drive.py](validate_source_drive.py) |  |
+| trace_bundle_files | Lists the GRID files grid-app reads for one bundled Android event (F608, docs/ANDROID.md "Bundle file list"): a desktop run of the event menu and the race, set up as the … | [trace_bundle_files.ps1](trace_bundle_files.ps1) | [ANDROID](../docs/ANDROID.md) |
 
 ## Candidates to retire
 

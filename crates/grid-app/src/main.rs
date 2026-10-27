@@ -1176,6 +1176,15 @@ fn main() {
             }
         }
     }
+    // `--speech-files`: the speech lines a bundled APK carries (speech_sound.rs).
+    #[cfg(not(target_os = "android"))]
+    if args.first().is_some_and(|a| a == "--speech-files") {
+        if let Err(error) = speech_sound::list_files(&args[1..]) {
+            eprintln!("grid-app: {error}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
     // `--career`: the career screen and its races (career_screen.rs).
     #[cfg(not(target_os = "android"))]
     if args.first().is_some_and(|a| a == "--career") {

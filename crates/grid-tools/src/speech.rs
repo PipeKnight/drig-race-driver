@@ -414,6 +414,27 @@ impl Rules {
         };
         Self::parse(&read("eventSpeech.bin")?, Bank::parse(&read("audioEventSpeech.bin")?)?)
     }
+    /// Every line the [`SLICE`] events can play: each message's long version
+    /// and variations (`try_start`). The bundled APKs carry these files, as a
+    /// run plays only some of them (F608).
+    pub fn playable_lines(&self) -> Vec<Line> {
+        let mut lines: Vec<Line> = Vec::new();
+        for msg in self.messages.iter().filter(|m| self.events[m.event].on) {
+            let Some(s) = msg.speech else { continue };
+            let speech = &self.bank.speeches[s];
+            for file in speech.long.iter().chain(&speech.variations) {
+                if !lines.iter().any(|l| l.folder == speech.folder && &l.file == file) {
+                    lines.push(Line {
+                        message: msg.name.clone(),
+                        folder: speech.folder.clone(),
+                        file: file.clone(),
+                        pa: speech.pa,
+                    });
+                }
+            }
+        }
+        lines
+    }
     pub fn parse(bytes: &[u8], bank: Bank) -> Result<Self, String> {
         let doc = binxml::read(bytes).map_err(|e| format!("eventSpeech: {e:?}"))?;
         let top = root(&doc, "Speeches")?;

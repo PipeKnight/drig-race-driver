@@ -77,6 +77,19 @@ if ($Event -eq 'drift-nurburgring') {
         'tracks\europe\nurburgring'
     )
 }
+# Every file a desktop run of the event read (android/events/<event>.files,
+# written by tools/trace_bundle_files.ps1, F608): the Donington list for every
+# bundle (its menu offers the Donington races too), then the event's own. The
+# lists above stay as the minimum; a traced file outside them is added here,
+# and a -Stage run fails when one is missing.
+$traced = @(foreach ($name in @('donington', $Event) | Select-Object -Unique) {
+    Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\android\events\$name.files") |
+        Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $_.Replace('/', '\') }
+}) | Sort-Object -Unique
+foreach ($file in $traced) {
+    $covered = $items | Where-Object { $file -ieq $_ -or $file.StartsWith("$_\", [StringComparison]::OrdinalIgnoreCase) }
+    if (-not $covered) { $items += $file }
+}
 $eventText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\android\events\$Event.ini")) -replace "`r`n", "`n"
 
 # The drive profile, shared with the code-only APK's import (P10):
@@ -105,7 +118,10 @@ if ($Stage) {
     if ($Event -eq 'drift-nurburgring' -and (Test-Path -LiteralPath $Characteristics)) {
         Copy-Item -LiteralPath $Characteristics -Destination (Join-Path $Stage 'ai-driver-characteristics.tsv') -Force
     }
-    Write-Output "staged $Stage"
+    # The APK build stops here when a file the event reads is not in the stage.
+    $missing = @($traced | Where-Object { -not (Test-Path -LiteralPath (Join-Path $grid $_) -PathType Leaf) })
+    if ($missing.Count) { throw "Missing in the stage ($($missing.Count)): $($missing -join ', ')" }
+    Write-Output "staged $Stage ($($traced.Count) traced files present)"
     return
 }
 

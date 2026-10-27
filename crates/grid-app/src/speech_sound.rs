@@ -145,6 +145,22 @@ impl Decodable for SpeechSource {
     }
 }
 
+/// `grid-app --speech-files`: the installation's speech files the ported
+/// events can play, relative to the game root, one per line. A run plays
+/// only some, so tools/trace_bundle_files.ps1 adds these to the bundle (F608).
+#[cfg(not(target_os = "android"))]
+pub(crate) fn list_files(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let profile = crate::settings::load(args)?;
+    let root = crate::game_root(profile.root.clone())?;
+    for line in Rules::load(&root)?.playable_lines() {
+        let path = line.path(std::path::Path::new(""), LANGUAGE);
+        if root.join(&path).is_file() {
+            println!("{}", path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    Ok(())
+}
+
 /// Loads the rules from `root`; without them the race runs silent of speech.
 pub(crate) fn install(app: &mut App, root: PathBuf, table: Option<Arc<Table>>, player_slot: usize) -> Result<(), String> {
     let rules = Arc::new(Rules::load(&root)?);
