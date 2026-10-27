@@ -1313,7 +1313,7 @@ impl Session {
                 // (i) over a hole in the collision data on the way: a prop
                 // or detached piece (never a car) that, after its last
                 // support, flew from its last contact, touching nothing,
-                // over a point with no packed triangle at all (F604,
+                // over a point with no packed triangle at all (F606,
                 // coordinator's approval of 27 October 2026).
                 let flew_over_hole = i >= self.car_count()
                     && history.is_some_and(|h| {
@@ -2242,7 +2242,7 @@ mod tests {
         assert!(!touching(&[], centre));
     }
 
-    /// Quick seed 15 on F604: piece 19 flies from (569.2, 16.4), beside the road at (572.9, 12.9),
+    /// Quick seed 15 on F606: piece 19 flies from (569.2, 16.4), beside the road at (572.9, 12.9),
     /// over a pocket of Istanbul with no packed triangle at all (586.7, -0.1
     /// to 620.7, -31.5) to the boundary sheet at (628.9, -38.8).
     #[test]

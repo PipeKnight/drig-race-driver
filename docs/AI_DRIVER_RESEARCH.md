@@ -225,7 +225,7 @@ driver's characteristic list (+0x30F4).
 8. **Limit clamp** 0x7878F0/0x788030 with 0x782FE0/0x782D20 [V static,
    F455]: a positive planned offset stops at the right limit line, a negative
    one at the left, each moved inward by view+0x60 = car half width
-   (car state +0x110, copied by 0x79C1F0). **Correction (F604):** when that moved-in
+   (car state +0x110, copied by 0x79C1F0). **Correction (F606):** when that moved-in
    limit lies on the far side of the racing line, 0x782D20 sets the planned offset to 0
    (the line), it does not leave it. Without limit lines: ±tgOffsetMaxNoLimits.
 9. **race_start** (score 0x78A6D0, activate 0x78A8F0, deactivate 0x776730,
