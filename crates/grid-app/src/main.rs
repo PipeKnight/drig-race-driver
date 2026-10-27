@@ -70,6 +70,7 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod speech_sound;
 mod car_batch;
 mod static_batch;
 mod stereo;
@@ -2890,6 +2891,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             match grid_tools::hud_audio::Bank::load(&root) {
                 Ok(bank) => hud_sound::install(&mut app, bank, mix.clone()),
                 Err(error) => warn!("HUD audio unavailable; driving continues: {error}"),
+            }
+            // Speech needs a race of the shared world (its standings).
+            if driving.opponents.is_some()
+                && let Err(error) = speech_sound::install(&mut app, root.clone(), mix.clone(), player_slot)
+            {
+                warn!("Speech unavailable; driving continues: {error}");
             }
             match grid_tools::tyre_audio::Bank::load(&root) {
                 Ok(bank) => tyre_sound::install(&mut app, bank, mix),

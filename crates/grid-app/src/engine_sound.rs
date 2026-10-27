@@ -528,6 +528,10 @@ impl Listening<'_, '_> {
         self.trial.as_ref().is_some_and(|t| t.finished())
             && driving.opponents.as_ref().is_none_or(|o| o.standings.over())
     }
+    /// Speech Volume as the Codriver/3DSpeech group trim in dB (4124A0, slider kind 2).
+    pub(crate) fn speech_trim(&self) -> f32 {
+        audio_mix::slider_db(self.menu.as_ref().map_or(1., |m| f32::from(m.values.speech) / 100.))
+    }
     /// The mix mode's current group terms.
     pub(crate) fn modes(&self) -> audio_mix::ModeMix {
         self.mode.as_ref().and_then(|m| m.0.lock().ok().map(|m| m.clone())).unwrap_or_default()

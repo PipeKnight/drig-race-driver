@@ -211,7 +211,7 @@ Race entry getters are those of docs/RACE_RULES_RESEARCH.md §1 (vtable 0xD0E898
 
 | Offset | Value |
 |---|---|
-| +0 | time = race time (vf 12) / race progress (vf 18; 0 → 1e-4). An average lap time, not a gap |
+| +0 | time = race time (vf 12) / race progress (vf 18; 0 → 1e-6, RAY_TOLERANCE 0xCB22E4). An average lap time, not a gap |
 | +4 | race progress (laps + lap fraction) |
 | +0xC | speed, mph |
 | +0x18 | lap fraction (vf 19) |
@@ -245,7 +245,7 @@ Race entry getters are those of docs/RACE_RULES_RESEARCH.md §1 (vtable 0xD0E898
 | numCarsInRace | entries − entries with controller type 3 |
 | playerStartPosPercentage | (grid slot + 1) / entries × 100, see below |
 | totalDam | 0x424650: 100 × mean of the six component levels (docs/MECHANICAL_DAMAGE.md) + the largest of four body-side percentages. Updated for the player only on collisions (0x424780) |
-| playerCollision | set by a player collision; cleared when an update changes totalDam by less than 1 |
+| playerCollision | set by a player collision whose impulse is at least half the physical mass (0x430F50: car +DB0 → +3F0 × 0.5, 0xCAF88C); cleared when an update changes totalDam by less than 1 |
 | noCollisionTime | + dt while playerCollision is clear, else 0 |
 | isNormalRace | not drift, Le Mans, touge or Demolition Derby |
 | isNetRace, isTestDrive, isHeadToHead, inIntroRace, isTouge, isLeMans, isDriftBattle, isDestructionDerby | race kind flags (0x451A20) |
@@ -283,3 +283,32 @@ every grid slot but the last, which gives 100. Of the `startingGridPos` messages
   - `raceEndOther`: 2nd–15th, championship and margin lines;
   - `endRaceWinningTeam` and `endRaceTeamCongrat`: teams.
   The lines are `isFinalMessage`, so the first one played ends the speech.
+
+## 7. The port (part 1)
+
+`grid_tools::speech` holds the files, the manager and the collector; grid-app's `speech_sound`
+plays the lines.
+- Only the Position and EndOfRace events are evaluated (`SLICE`, the scope of this part); the
+  others are parsed and skipped. Their messages' parameters all resolve (`unknown_params` is
+  empty for the purchased file).
+- The manager runs once per vehicle tick (16 ms) [I: the original once per audio frame].
+- Parameters the port does not have keep 0, except `numRaceWins` = 1 [AUTHORED], so
+  `firstWinEver` does not play at every win. Key drivers, teams, the cars ahead and behind on the
+  track, career and profile values are 0. So `inRaceCarAheadLess3s`, `inRaceCarFirst`, the team
+  lines and the lapping lines (`inRacePlus1`) do not play.
+- The generator is MT19937 (`series::Mt`) with an authored seed (5489); the line choice uses
+  int(0, n) as 0xA68410, and the name-phrase roll is drawn but nothing is armed (no profile name).
+- The line stream is ready at once and a missing file is a load error [I: the original loads
+  asynchronously]. The voice counts as busy for the line's length at 32 kHz from its start
+  [I: the device's voice state].
+- The voice plays on Codriver (14), PA lines on 3DSpeech (15), with the Speech Volume trim
+  (slider kind 2). While a line plays the mix is in Talking (`ModeMix::set_tied`, 0x411D40);
+  when it ends the remembered mode returns (`release`, 427ED0's +C28 check).
+- Pause (the port's pause menu) is the Paused case of 0x45E870: the queue is cleared and the
+  line stops.
+- Restart Race calls `Collector::restart` (0x452520(1)) and `Manager::reset_race`
+  (0x444E30(1)).
+- Speech runs only in races of the shared world (with opponents) [AUTHORED: solo drives are
+  test drives and time trials].
+- `grid-speech-render` (crates/grid-probes) renders an authored 12-car race through the
+  purchased rules and lines to a private WAV.
