@@ -22,7 +22,7 @@ use bevy::{
     asset::AssetEventSystems,
     camera::{
         primitives::{Aabb, MeshAabb},
-        visibility::{RenderLayers, VisibilityRange, VisibilitySystems},
+        visibility::{NoAutoAabb, RenderLayers, VisibilityRange, VisibilitySystems},
     },
     light::NotShadowCaster,
     mesh::{MeshVertexAttributeId, PrimitiveTopology, VertexFormat},
@@ -195,9 +195,11 @@ fn refresh(
         let pose = poses[group.slot];
         let member = &mut group.members[slot.member as usize];
         member.alive = true;
+        // A batched part carries our layer and no shadow of its own.
+        let ours = layers.is_some_and(|l| *l == hidden);
         member.placed = *visibility != Visibility::Hidden
-            && layers.is_none_or(|l| *l == hidden)
-            && !shadowless
+            && (layers.is_none() || ours)
+            && (!shadowless || ours)
             && !ranged
             && material.0 == group.material
             && mesh.0 == member.mesh
@@ -246,9 +248,13 @@ fn refresh(
                 member.batched = batched;
                 group.dirty = true;
                 if batched {
-                    commands.entity(member.entity).insert(hidden.clone());
+                    commands
+                        .entity(member.entity)
+                        .insert((hidden.clone(), NotShadowCaster));
                 } else if parts.get(member.entity).is_ok_and(|p| p.5 == Some(&hidden)) {
-                    commands.entity(member.entity).remove::<RenderLayers>();
+                    commands
+                        .entity(member.entity)
+                        .remove::<(RenderLayers, NotShadowCaster)>();
                 }
             } else if batched && modified.contains(&member.mesh.id()) {
                 reshaped |= !group.dirty;
@@ -377,7 +383,9 @@ fn register(
             group: index as u32,
             member: found.map_or(0, |g| groups[g].members.len()) as u32,
         };
-        commands.entity(entity).insert(place);
+        // Its bounds follow its mesh where the presentation changes it
+        // (deformation), so Bevy's per-frame bounds pass can skip it.
+        commands.entity(entity).insert((place, NoAutoAabb));
         match found.map(|g| &mut groups[g]) {
             Some(group) => group.members.push(member),
             None => {
@@ -469,6 +477,7 @@ fn rebuild(
                         pose.map_or_else(Transform::default, Transform::from_matrix),
                         bounds,
                         Batch,
+                        NoAutoAabb,
                     ))
                     .id();
                 group.batches.push(entity);

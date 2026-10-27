@@ -1311,6 +1311,33 @@ alternating rounds, 26 October 23:25–23:37), off → on:
 Phone [I], not measured: about 3x the desktop CPU times, so about 2 ms less on the render thread
 and no change on the main thread, which the phone log shows as the critical path.
 
+## PostUpdate: shadow and bounds passes (F588)
+
+What PostUpdate spends in the phone view (desktop, profile build, after F584), per frame:
+- the directional light's cascade visibility (`check_dir_light_mesh_visibility` and its parallel
+  loops) about 0.55 ms;
+- camera visibility about 0.35 ms, the visibility resets about 0.17 ms, bounds (`calculate_bounds`)
+  0.14 ms, `update_mesh_previous_global_transforms` 0.16 ms, `mark_dirty_trees` 0.14 ms,
+  `car_batch::refresh` 0.17 ms;
+- several Bevy systems show far more inclusive than exclusive time (for example
+  `check_entities_needing_specialization` 0.23-0.29 ms inclusive, 0.02-0.08 ms exclusive): they wait
+  for their parallel loops on the compute pool [I].
+
+Mesh asset changes are not the cause: a probe (not committed) saw a mesh change in 117 of 600
+frames (wheel debris, and one car's parts and its batch during a deformation burst), so the
+`AssetChanged` filters cost nothing on most frames.
+
+Changes, picture bit-identical (fixed-frame renders at ticks 300, 2,400 and 6,000: 0 pixels differ):
+- batched car parts also carry `NotShadowCaster` while they are batched (removed when they leave),
+  so the cascade passes skip them: 163 → 124 parallel batches per frame;
+- car batches, static batches and single static track parts carry `NoAutoAabb` with their bounds
+  computed once. Car parts keep the bounds the presentation sets on deformation. Bevy's per-frame
+  bounds pass now checks only the other meshes.
+
+Result, F584 → F588 executables alternating, two rounds (27 October 01:30-01:37): bounds 0.14 →
+0.07 ms, cascade loops 0.35 → 0.32 ms, about 0.1 ms in all; PostUpdate 4.41-4.64 → 4.57-4.61 ms,
+inside the noise. Phone [I]: about 0.3 ms.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

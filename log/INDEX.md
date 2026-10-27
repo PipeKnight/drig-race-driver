@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F588](F0588.md) | 2026-10-27 | Shadow and bounds passes skip batched and static meshes |
 | [F587](F0587.md) | 2026-10-26 | Early-race tick cost: whole vehicle-record copies cut |
 | [F586](F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
 | [F585](F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
