@@ -8,6 +8,7 @@ mod foundation_front_audit;
 mod foundation_backing;
 mod foundation_backing_audit;
 mod crowd_preview;
+mod crowd_rig;
 mod flash_fixture;
 mod flash_preview;
 // Source reference viewer and serial driving prototype. A plain comment, not
@@ -2217,7 +2218,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--native-smoke-boundary off|control|late: explicit BMW Don0/Istanbul0 HDR1 scope; all arms share native DLAA/probe3/clean-data/legacy-source-stock guards. Control registers no boundary. --native-smoke-profile image450|manual (default image450); manual uses direct --drive Race Options/Go To Race in the same process and forbids ALL explicit script/capture/clock flags, even neutral values.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
-                println!("--crowd-preview off|control|static-billboards: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture, PBR adaptation, no animation/flash or source parity.");
+                println!("--crowd-preview off|control|static-billboards|one-neutral-actor: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture; one-neutral-actor selects USA female!C row4275 saved bind pose with authored yaw/foot alignment and near PBR material, no animation/flash or source parity.");
                 println!("--motion-phase-map: default absent; exact baseline Derby Isolated|GroundFirst350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--foundation-front off|control|source-front: defaultoff exact Detroit front grandstand sheet only, static route8/sub0 LOD0 reference baseline/native1080/configAA0/actualMSAA4/source sky+track, clean settings, benchmark1..600/no other pilots. SourceFront uses inherited PBR with saved colour/separate-alpha/depth states; existing cull retained, no original shadow/auxiliary/source shader parity. BackingOpaque/fence unchanged.");

@@ -21,6 +21,7 @@ pub enum Mode {
     Off,
     Control,
     StaticBillboards,
+    OneNeutralActor,
 }
 impl Mode {
     pub fn parse(s: &str) -> Result<Self, &'static str> {
@@ -28,7 +29,8 @@ impl Mode {
             "off" => Ok(Self::Off),
             "control" => Ok(Self::Control),
             "static-billboards" => Ok(Self::StaticBillboards),
-            _ => Err("--crowd-preview needs off, control or static-billboards"),
+            "one-neutral-actor" => Ok(Self::OneNeutralActor),
+            _ => Err("--crowd-preview needs off, control, static-billboards or one-neutral-actor"),
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -76,6 +78,7 @@ struct Row {
 #[derive(Resource)]
 pub struct Prepared {
     mode: Mode,
+    actor: Option<super::crowd_rig::Actor>,
     rows: Vec<Row>,
     specs: [Spec; 2],
     diffuse: Vec<u8>,
@@ -252,6 +255,26 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
     if rows.is_empty() || rows.len() > 100_000 {
         return Err("crowd preview count absent/exceeds bound".into());
     }
+    if mode == Mode::OneNeutralActor {
+        let row = rows.get(4275).ok_or("neutral actor row4275 absent")?;
+        if row.sex != 1 || row.cell != 89 || !row.position.is_finite() {
+            return Err("neutral female row4275/cell89 differs".into());
+        }
+        let actor = super::crowd_rig::prepare(root)?;
+        println!(
+            "crowd_neutral_selected ordinal=4275 cell=89 sex=female source_position={:?} model_scale=1 yaw=authored-camera-facing-XZ foot_alignment=authored-neutral-bounds clocks=off",
+            row.position
+        );
+        return Ok(Prepared {
+            mode,
+            actor: Some(actor),
+            rows,
+            specs,
+            diffuse: Vec::new(),
+            tint: Vec::new(),
+            total: catalogue.total_instances,
+        });
+    }
     let atlas = std::fs::read(root.join("anims/cr_us_billboard.pssg"))?;
     let tree = pssg::read_tree(&atlas)?;
     let named = texture::read_named(&tree, &[b"cr_US_billboard_d.tga", b"cr_US_billboard_m.tga"])?;
@@ -274,6 +297,7 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
     }
     Ok(Prepared {
         mode,
+        actor: None,
         rows,
         specs,
         diffuse: d.validated_dds().0,
@@ -385,13 +409,18 @@ impl MaterialExtension for Tint {
     }
 }
 pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
-    println!(
-        "crowd_preview mode={:?} total_source={} selected_grandstand={} variant=0 colour_set=0 scale_fixture_draws=5000,5000 poses=unswayed-static-billboards alpha=Bevy-A2C lighting=PBR source_parity=false shadows=disabled unknown_scalar=opaque rotation_pair=retained-billboard-source-faces-camera",
+    if prepared.mode != Mode::OneNeutralActor {
+        println!(
+            "crowd_preview mode={:?} total_source={} selected_grandstand={} variant=0 colour_set=0 scale_fixture_draws=5000,5000 poses=unswayed-static-billboards alpha=Bevy-A2C lighting=PBR source_parity=false shadows=disabled unknown_scalar=opaque rotation_pair=retained-billboard-source-faces-camera",
+            prepared.mode,
+            prepared.total,
+            prepared.rows.len()
+        );
+    }
+    if !matches!(
         prepared.mode,
-        prepared.total,
-        prepared.rows.len()
-    );
-    if prepared.mode != Mode::StaticBillboards {
+        Mode::StaticBillboards | Mode::OneNeutralActor
+    ) {
         return Ok(());
     }
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
@@ -490,9 +519,14 @@ fn spawn(
         Msaa::Sample4,
         "bounded crowd preview requires actual MSAA4"
     );
+    let (diffuse_bytes, tint_bytes) = if let Some(actor) = &prepared.actor {
+        (&actor.diffuse, &actor.tint)
+    } else {
+        (&prepared.diffuse, &prepared.tint)
+    };
     let diffuse = images.add(
         super::texture_upload::image(
-            &prepared.diffuse,
+            diffuse_bytes,
             settings.sampler(false),
             RenderAssetUsages::default(),
         )
@@ -500,7 +534,7 @@ fn spawn(
     );
     let tint = images.add(
         super::texture_upload::image_linear(
-            &prepared.tint,
+            tint_bytes,
             settings.sampler(false),
             RenderAssetUsages::default(),
         )
@@ -513,7 +547,11 @@ fn spawn(
             materials.add(ExtendedMaterial {
                 base: StandardMaterial {
                     base_color_texture: Some(diffuse.clone()),
-                    alpha_mode: AlphaMode::AlphaToCoverage,
+                    alpha_mode: if prepared.actor.is_some() {
+                        AlphaMode::Opaque
+                    } else {
+                        AlphaMode::AlphaToCoverage
+                    },
                     perceptual_roughness: 1.,
                     reflectance: 0.,
                     cull_mode: None,
@@ -529,6 +567,53 @@ fn spawn(
             })
         })
         .collect();
+    if let Some(actor) = &prepared.actor {
+        let row = &prepared.rows[4275];
+        let d = camera.translation - row.position;
+        let len = d.x.hypot(d.z);
+        assert!(
+            d.is_finite() && len.is_finite() && len > 0.0001,
+            "invalid one-actor authored yaw"
+        );
+        // Camera-facing yaw is authored. Source orientation_pair remains opaque.
+        let forward = Vec3::new(d.x / len, 0., d.z / len);
+        let yaw = Quat::from_rotation_y(forward.x.atan2(forward.z));
+        let translation = row.position + yaw * actor.foot_offset;
+        assert!(translation.is_finite());
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, actor.positions.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, actor.normals.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, actor.uv.clone());
+        mesh.insert_indices(Indices::U16(actor.indices.clone()));
+        commands.spawn((
+            Name::new("crowd-preview/one-neutral-female4275"),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(handles[1].clone()),
+            Transform {
+                translation,
+                rotation: yaw,
+                ..default()
+            },
+            NotShadowCaster,
+        ));
+        println!(
+            "crowd_neutral_spawn actors=1 ordinal=4275 row_position={:?} neutral_bounds={:?}/{:?} foot_offset={:?} raw_position_count={} raw_normal_count={} position_error={} palette_error={} inverse_affine_error={} yaw={:?} material=authored-near-PBR-tint-opaque-two-sided texture=near1024x512 textureShift=0 UV=source normals=weighted-normalized raw_attributes=retained shadows=off original_pose_parity=false",
+            row.position,
+            actor.source_min,
+            actor.source_max,
+            actor.foot_offset,
+            actor.source_positions.len(),
+            actor.source_normals.len(),
+            actor.max_position_error,
+            actor.max_palette_error,
+            actor.max_inverse_affine_error,
+            yaw
+        );
+        return;
+    }
     let mut batches: BTreeMap<(usize, u32), Batch> = BTreeMap::new();
     for row in &prepared.rows {
         card(
