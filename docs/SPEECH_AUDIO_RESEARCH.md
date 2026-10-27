@@ -263,8 +263,10 @@ every grid slot but the last, which gives 100. Of the `startingGridPos` messages
 - 0x468A60 and 0x451A20 clear it (the latter while racing);
 - 0x452520(p) sets it to p only while the collector's in-race flag is set.
 
-0x452520(1) runs from the race (re)start 0x65B2C0 → 0x454870. The same call sets
-`startAfterRestart` (+0xB6FC) to 1, and only the constructor clears it. So:
+0x452520(1) runs from every race set-up 0x65B2C0 → 0x454870, the first one and each restart. The
+same call sets `startAfterRestart` (+0xB6FC) to 1. Besides the constructor, only the collector's
+load and unload handlers (0x4391E0, 0x455900, §8) clear it; a restart does not reload the audio
+subsystems [I], so after a restart from a race in progress the flag stays 1. So:
 - `startingGridPos` (`playerGridPosLast`) plays only after a restart from a race in progress;
 - `startingGridGen` (`playerGridNewbie`, `playerGrid2`, `playerGridvet`) needs `onStartingGrid` = 1
   with `startAfterRestart` = 0, which no path produces. It is unreachable.
@@ -312,3 +314,202 @@ plays the lines.
   test drives and time trials].
 - `grid-speech-render` (crates/grid-probes) renders an authored 12-car race through the
   purchased rules and lines to a private WAV.
+
+## 8. Part 2: how the parameters are refreshed [O]
+
+The collector (vtable 0xCB7804) has three interfaces:
+- +0: vf1 0x452810, the update with the frame time (§5, §9);
+- +4 (vtable 0xCB77F0): the audio subsystems' load and unload calls (base 0xCB0DF4):
+  - 0x4391E0, load. On phase 2 it registers the collision callback 0x430F50 on every car
+    (0x996150) and the part callback 0x417D60 on cars with controller type 0 (the player). It also
+    sets registered (+0xB41C) and enabled (+0x18).
+  - Then, for every phase, it sets the frame counter +0xB410 = 0, +0xB6E4 = 1 and
+    `startAfterRestart` = 0, and clears the race block (0x468B30).
+  - 0x455900, unload. On phase 2 it removes the callbacks. For every phase it runs 0x452520(1) and
+    clears `aiSpin`, `aiRoll`, `startAfterRestart`, +0xB6FD and `usedFlashback`.
+- +0x1C (vtable 0xCB77D8): the task 0x44C640, once per task frame unless disabled (+0xB740):
+  - 0x44C3C0 calls every registered getter (0x45F590) and stores its value in the value array
+    that the rule conditions read (§2);
+  - 0x417ED0 then clears the one-shot event flags: `carToCarCollision`, `hitAnotherCar`,
+    `playerCollideWithTeammate`, +0xB43E, +0xB43F, `playerCollWithKeyPlayer` (= −1), +0xB700,
+    `coolFinish`, `newPersonalBest`, `newWorldRecord`, `carsPlayerOverTook`,
+    `playerMovedTrackPos`, `aiSpin` and `aiRoll`.
+
+So an event flag set by a callback is seen by exactly one refresh. The conditions read the stored
+array, so a getter runs once per refresh. One getter has a side effect:
+- `playerCrossedSFLine` (0x418460). If the last seen lap (+0xB3F4, 1 after 0x452520(1)) is below
+  `playerLap`, it stores the lap and returns 1. It also moves the damage taken this lap (+0xB450)
+  to `damageTakenInPrevLap` (+0xB44C) and clears +0xB450. Otherwise it returns 0.
+
+While the collector is disabled (+0x18 clear, terminal damage, §9), 0x44C470 writes −10000 into
+every value once. In the Paused or Intro mix modes, or without a player car, the update runs
+0x417ED0 and 0x417E40 (which clears the records) once and returns.
+
+## 9. Part 2: player parameters [O unless marked]
+
+**The update 0x452810**, every frame once racing unless noted:
+- `carsPlayerOverTook` (+0xB418). Out of the race, the reference place +0xB40C is the player's
+  place. In the race, when the place is better than the reference, the count is the difference.
+  The reference moves to the place only once the player has gained two or more. Every 60th frame
+  (0x4692B0: counter % 60 == 0) the reference is set to the place.
+- `playerMovedTrackPos` (+0xB424) is set when record +0x34 (vf 0x80 of the car) exceeds the
+  reference +0xB414. The reference follows every 60th frame.
+- `satOnTrackTime` (+0xB3F0): + dt while racing and the race progress grew by less than 1e-5
+  this frame (0xCB46B4), else 0.
+- `slipStreamTime` (+0xB3FC): + dt while the vehicle's air density (+0x21C4, 0x98DFE0) is at most
+  0.6 (0xCB0B74), else 0. The density is written only at construction
+  (docs/AI_MISTAKES_PACING_RESEARCH.md §2), so this timer never runs and the slipstream line is
+  dead.
+- `wrongWayTime` (+0xB400): + dt while the race interface's wrong-way flag (+0x18) is set.
+- `noCollisionTime` (+0xB454): + dt while `playerCollision` is clear (part 1).
+- `timeOffTrack` (+0xB430): + dt while `droveOffTrack` is set, else 0.
+- `tmTimeInCurrentPos` (+0x420): the player's timer, for the teammate's place.
+- Every second frame the collector copies the player's damage object (vehicle +0x22D0 → own
+  +0x470, 0x9EF020), so `engDam` and the other damage values lag by up to one frame.
+- On terminal damage (record +0x74) the collector disables itself (+0x18 = 0).
+
+**The car record (0x438C10)** adds these fields to part 1's:
+- +8 `playerPrevLapTime`: the last completed lap's time (vf 0x5C), or the record time while
+  fewer than two laps are counted;
+- +0x10 `maxPlayerCarSpeed`: the highest mph so far;
+- +0x3C the driver's `audio_key_driver_number` (database `driver`), cached per entry (+0x50/+0x54);
+- +0x40 a championship value (0x670470) [I]; +0x44 the team id (`team.id`);
+- +0x71 `droveOffTrack`, player car only: the result of the car's AI driver test of type 11
+  (`on_track`, driver +0x2C64 → +0x2C) is 0;
+- +0x74 `terminalDam`: the damage status (+0x444) is not 7 (0x99A720);
+- +0x75 racing (status 0).
+
+**The race block (0x451A20)** adds:
+- +0x68 `currentPaceTime`: the mean of race time / race progress over cars that:
+  - have a controller type other than 0;
+  - are not terminally damaged;
+  - have progress > 0;
+  - are faster than 10 mph;
+- +0x80 `currentTrackLaps`: the race's lap count;
+- +0x84 `numRunningCars`: the cars of `currentPaceTime` without the speed and progress
+  conditions, plus 1;
+- career and mode flags [O, career]: `isTestDrive`, `isNetRace`, `inIntroRace`, `isHeadToHead`,
+  `isFinalRace`, and the objectives `bonusObjWinPos` (+0x88), `hasNoDamageObj` (+0xDC) and
+  `anyDamageIndOn` (+0xE1).
+
+**Damage getters** read the copied damage object (component levels at +0, wheels at +0x18):
+- `engDam` = component 3 × 100, `radiatorDam` = component 2 × 100, `gearboxDam` = component 5 × 100.
+- `frontRightTyreDam`, `frontLeftTyreDam`, `rearRightTyreDam` and `rearLeftTyreDam` = wheel 3, 2,
+  1 and 0 × 100. `frontTyreDamage` = (wheel 3 + wheel 2) × 50, `rearTyreDam` = (wheel 1 + wheel 0)
+  × 50, and `tyreDamage` = the sum of the four × 25.
+- `frontDam`, `rearDam`, `rightDam` and `leftDam` (+0xB70C…+0xB718) are the four body-side terms
+  of 0x424650 (part 1) × 100. `bodyDam` (+0xB708) is the largest of them. All five are refreshed
+  only when `totalDam` is, after a player collision.
+- `damLastAccident` (+0xB440) = |ΔtotalDam| of that update. The same amount is added to the lap's
+  damage (+0xB450, §8).
+- +0xB42C is set when the car's up axis points down at that update [I: 0xA69630 transform].
+
+**Part losses (0x417D60).** The vehicle's detach callback (+0x7BFC) is called from the timed
+detach 0x9FF4F0 with the part id. It sets:
+
+| Part id | Flag |
+|---|---|
+| 10 | `looseBonnet` |
+| 12–17 | `lossBumper` |
+| 22–25 | `lossDoor` |
+| 84 | `lossRearWing` |
+| 85 | `lossRightWing` |
+| 86 | `lossLeftWing` |
+| 87 | `lossFrontWing` |
+
+The flags stay set until 0x452520.
+
+**Messages** (0x44C670 subscribes the collector):
+- `BroadcastMessage_NewPersonalBestMessage` and `…NewWorldRecordMessage` set `newPersonalBest`
+  and `newWorldRecord` (one-shot, §8).
+- `RaceResults` (0x41BC70 → 0x417C10): a car whose result status is not 7 gets its AI terminal
+  flag. For a key driver it also sets the key driver's flag (+0xB53F + n) and counts
+  `keyDriversOut` (+0xB6E8) up, or down when the status is 7.
+- `TerminalDamageMessage` (0x4457F0 → 0x417CB0): §10.
+
+**Other values.**
+- `playerGoodStart` = 1 when the vehicle's +0x2204 byte is 0 [I: the low-speed flag of
+  docs/SUSPENSION_GRIP_PIPELINE.md].
+- `playerCarRevRatio` = revs (+0x1894) / limiter (+0x17A4).
+- `isPlayerCarOpenCockpit` (+0xB72C), `playerVehicleID` (+0xB720 = the player's entry + 1) and
+  `teammateVehicleID` are taken before the race.
+- `AITermUserImpact` (+0xB448) is only ever cleared (0x4310EB, 0x465DB6), so it is always 0.
+- `noRestartOptionEnabled` is the race interface's vf 0x64. `terminalDamageCount` (+0xA0) is a
+  profile count [I].
+- `usedFlashback` (+0xB72D) is set by a flashback (0x454910, 0x453000).
+
+## 10. Part 2: collisions, AI slots and key drivers [O]
+
+**Slots.** `AIn…` parameters index the race entry n − 1 (vf 0x1C order). `playerVehicleID` is the
+player's entry + 1, so each `AI_0n_…` message excludes the player's own slot. Key drivers are
+numbered by `driver.audio_key_driver_number` (1–24); `KeynX` reads key driver n.
+
+**The collision callback 0x430F50** is registered per car and gets the car hit, the other object
+and the impulse.
+- It returns unless the impulse is at least 0.5 × the car's physical mass, the collector is
+  enabled and a player record exists.
+- `carToCarCollision` = the other object is a car.
+- If the other object is a car with a key driver n: +0xB6EC = n and `KeynCollision` = 1.
+- If the car hit is the player's:
+  - `playerCollision` = 1;
+  - against a car, `hitAnotherCar` = 1;
+  - against the teammate (not terminally damaged), `playerCollideWithTeammate` = 1;
+  - against a key driver, `playerCollWithKeyPlayer` = n.
+- If the car hit is the teammate's:
+  - `teammateCollision` = 1;
+  - against a car, +0xB43E = 1;
+  - against the player, +0xB43F = 1.
+- Otherwise (an AI car): its own key driver number sets +0xB6EC and `KeynCollision`, and +0xB730
+  = the other car's driver id.
+- Finally, if the car hit's entry index i is above 0, `AI(i+1)Collision` is set.
+
+**Per-car update 0x431200.** It handles one entry per frame (counter % entries) and skips entries
+with controller type 3:
+- `AInDistance` (+0xB55C + 4i) = the entry's lap fraction (vf 0x3C → vf 0x4C);
+- `AInTermDam` (+0xB660 + i) = its damage status is not 7. It also keeps the count of newly
+  wrecked cars (+0xB458) and the last wrecked driver (+0xB734);
+- `AInForcedRetire` (+0xB6C4 + i) = 1 when the entry's state (+0x2E64) is 2;
+- in a Demolition Derby, the pile-up count (+0xB6DC), not needed here.
+
+**Damage of AI cars (0x424780, on the same slot).** For an entry whose `AInCollision` is set:
+- total damage = 0x99EBB0 × 100 (the RMS over the whole lattice × 5/3, clamped to 1) + the mean of
+  the six components × 100;
+- `AInCollisionDam` (+0xB610 + 4i) = |Δ| since its last update. Below 1 the collision flag clears;
+- for a key driver, `KeynCollisionDam` (+0xB4DC + 4n) is computed the same way, and
+  `KeynCollision` clears.
+- For the teammate, while `teammateCollision` is set, the update writes `teammateTotDam` (+0xB3E4)
+  and `teamDamFromCollision` (+0xB444). Below 1 the flag clears.
+
+**Terminal status messages.** A car's damage status (+0x444, 7 = running) changes through
+0x9E64E0. Each change away from running broadcasts `TerminalDamageMessage` with the new status as
+its type, the car and a flag.
+- Statuses: 3 terminal wheel damage (9F2F80), 4 a detached wheel (9E65B0), 5 the engine (A03220
+  `publish`), 6 disqualified (derby, out of bounds; 60D590, 612BD0, 630CF0, 5EBCA0).
+- 0x417CB0 maps the type to a slot: 1 → `TyreBlown`, 2 → `EngBlown`, 3 and 4 → `Spun` (and
+  `aiSpin`), 5 → `Roll` (and `aiRoll`), 6 → `ForcedRetire`.
+- For the teammate the flags are +0xB434 + slot (`teammateEngBlown`, `teammateTyreBlown`,
+  `teammateSpun`, `teammateRoll`). For other cars they are +0xB674 + 0x14·slot + i (`AInEngBlown`,
+  `AInTyreBlown`, `AInSpun`, `AInRoll`, `AInForcedRetire`).
+- So the original's names do not match the causes. A terminal wheel plays the "spun" lines and
+  the engine the "roll" lines. No shipped path sends types 1 or 2 [O static].
+
+## 11. Part 2: teammate [O]
+
+- The race interface's vf 0x58 tells whether the player has a teammate. vf 0x5C (0x430AA0)
+  returns the entry whose driver is the profile's team-mate. The collector keeps it (+0xE8) and
+  refreshes its record (+0x3F4, the layout of 0x438C10) every frame.
+- Fields: `teammatePos` +0x448, `teammateFinished` +0x464, `teammateTermDam` +0x468, `teammateLap`
+  +0x42C, `teamDriverChampWinPos` +0x434, `tmTimeInCurrentPos` +0x420 (§9).
+- Collisions and terminal messages: §10.
+
+## 12. Part 2: what can play [O static]
+
+- Dead in the original:
+  - the `AITermUserImpact` lines;
+  - `slipStream2s`;
+  - lines needing message types 1 or 2 (`AInTyreBlown`, `AInEngBlown`, `teammateTyreBlown`,
+    `teammateEngBlown`).
+- Career-only inputs (objectives, championship values, final race, `1_2Finish`, team to beat)
+  are 0 outside the career.
+- Lines that need the player's profile statistics (`terminalDamageCount`, `numRaceWins`, …) use
+  the port's defaults (§7).

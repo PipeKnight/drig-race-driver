@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F596](F0596.md) | 2026-10-27 | Speech part 2 research: damage, performance, accidents, teammate and key-driver parameters |
 | [F595](F0595.md) | 2026-10-27 | Speech part 1 ported: race start, position calls and finish lines |
 | [F594](F0594.md) | 2026-10-27 | Speech research: triggers, choice and queue of the race engineer's lines |
 | [F593](F0593.md) | 2026-10-27 | Playable b90f145101b3 with F581-F592, portable copy and APKs 3c7a3516e27a |
