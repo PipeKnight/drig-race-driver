@@ -39,7 +39,7 @@ Visible views, in file order, with their reverse views:
 | bonnet | Mounted | offset (0, 1.1055, 0.8556) / (0, 1.163, 0.729), pitch 0.0734, fov 60, near 0.1; axisScale (0, 0.08, 0.08), maximumShift 0.0999, movementSpeed 1.7264 | bonnet_reverse (yaw π, pitch 0.2, offset (0, 1.24, −1.437) / (0, 1.309, −1.29), fov 71.84 / 60) |
 | head-cam | Head | position (0.3604, 1.1047, −0.1923) / (0.4310, 1.0713, −0.2152), tilt −7.3736 / −10, fov 48, near 0.075, highResInterior true | head-cam_reverse (Mounted, the same as bonnet_reverse) |
 
-The other hidden views are drift_cam_rear and the replay views: wing1/2, rear1/2, roof1/2, driver1/2 and terminal. All in-race views use `transitionType=switch`, an instant cut.
+The other hidden views are drift_cam_rear and the replay views: wing1/2, rear1/2, roof1/2, driver1/2 and terminal. All in-race views have `transitionType=switch`. That parameter is read only by the manager's own `linear` path (0x82CE90), never by Change View, which blends by its own rules (§2 Change View blend).
 
 ## 2. Original behaviour found
 
@@ -209,12 +209,12 @@ So damping is Coulomb (a constant speed off per frame): the offset moves only wh
 
 Traced statically and emulated function by function in Unicorn 2.1.4 against reference models (worktree camera-dynamics `local/cam/look/`: `look-findings.md`, `look_emu.py`, `results.txt`). Nothing was run live.
 
-- **Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C is set it sends a type 1 message to **every** view entry (camera slot 7) with `x = v(Look Left) − v(Look Right)`, `y = v(Look Up) − v(Look Down)`, the calibrated action values (analog); then, if +0x1E, a type 2 message (`x` = Look Back value while looking back, else 0) to the shown view. Every call, not only on change. The enable bytes come from 0x7EE8F0(value, mask) (bits 1 → +0x1C look, 2 → +0x1E look back, 4 → +0x1F change view, 8 → +0x1D FE tweak): the constructor sets look on, the race reset 0x584810 turns all off and sends one (0, 0), race-state slot 10 (0x5849F0) and 0x57AA5C turn all on [D; that this is the race start is I].
+- **Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C is set it sends a type 1 message to **every** view entry (camera slot 7) with `x = v(Look Left) − v(Look Right)`, `y = v(Look Up) − v(Look Down)`, the calibrated action values (analog); then, if +0x1E, a type 2 message (`x` = Look Back value while looking back, else 0) to the shown view. Every call, not only on change. The enable bytes come from 0x7EE8F0(value, mask) (bits 1 → +0x1C look, 2 → +0x1E look back, 4 → +0x1F change view, 8 → +0x1D FE tweak): the constructor sets look on, 0x584810 turns all off and sends one (0, 0), 0x5849F0 and 0x57AA5C turn all on [D]. Correction (27 October 2026): 0x584810/0x5849F0 are the enter and slot 10 of StatePostRaceSetReplayCamera (vtable 0xCDB624), not the race reset and start.
 - Shipped bindings: keyboard preset 0 Look Left `win_key_delete`, Look Right `win_key_pageDown`, Look Up/Down unmapped; XInput preset 4 the right stick X and Y (biDirectionalLower/Upper, dead zone 0.3, saturation 0.8).
 - **Chase** (slot 7 0x840A20 → 0x7FE690, every chase view including the reverses) [E, 4000 cases]: the point (A4, A8 + 0.1) at record +0xA4/+0xA8 follows (x, y + 0.1) in polar form: w = clamp(0.2 · speed) (car +0x1648, signed), blend B = 0.1 + 0.4 w, snap threshold A = 3.2 (1 − w) + w; with a1 = atan2(A4, A8 + 0.1), a2 = atan2(x, y + 0.1), d = a2 − a1 wrapped to ±3.141592: if A > |d| the angle becomes a1 + B · d and the radius r1 + B · (r2 − r1), else the point snaps to the input. After the chase pipeline (end of 0x82B6B0) **0x7FEC40** [E, 300 cases; V: run C's records reproduced with A4 = A8 = 0] turns the view and eye by a = atan2(A4, A8 + 0.1) about the world vertical through the car's model origin (record +0x110), toward +X for a > 0. So above 5 m/s a full Look Left snaps to 84.29° and back; at rest it eases in (8.4°, 16.0°, 22.8° … 78.2°) and out.
 - **Mounted** (slot 7 0x840A30; idents `bumper` and `bonnet` only, not the reverses) [E]: `B0 += (x − B0) · 0.2` per message, used as Y(yaw + B0) in 0x803270. For `bonnet`, 0x822510 adds 0.05 · |B0| to the local eye's y and z (0xE4DDA0/A4) [E]: a lift and forward move of up to 5 cm, not a turn (correction of the F461 note).
 - **Head** (slot 7 0x840EF0 → 0x801230) [E, 3000 cases]: type 1, `D8 = 0.8 D8 + 0.2 x`, `DC = 0.8 DC + 0.2 y`, looking (+0xF4 = 1) while x or y is not 0; type 2 (x = 0 while the head-cam shows) multiplies both by 0.8 unless looking. Held, D8 → x by ×0.8 per frame; released, ×0.64 per frame. Then 0x814BC0 → 0x801D10 (§ Head step 6): yaw toward maxHeadLook · g(D8) degrees (40°), pitch toward maxHeadLook · g(DC) · 0.3 (0xCFFDBC = 0.00523599 rad per degree: 12°), each at most 180°/s.
-- **View change** [D]: the newly shown view's slot 10 zeroes its look state (chase A4/A8, mounted B0, head D8..EC); hidden views keep receiving messages but start from zero when shown. While looking back, a chase reverse view turns with the input; the Mounted reverses do not (ident check).
+- **View change** [D]: slot 10 zeroes the look state (chase A4/A8, mounted B0, head D8..EC) only in a manager with +0x122 = 0. In a race +0x122 = 1 (§2 Change View blend): slot 10 is skipped, every view keeps receiving messages and appears with its running look state (correction of F499). While looking back, a chase reverse view turns with the input; the Mounted reverses do not (ident check).
 - All the smoothing is per message without dt (only the head's angle rate uses dt), so its speed follows the frame rate.
 
 ### Change View order [D, F461]
@@ -223,7 +223,35 @@ The in-race camera controller 0x8348F0 calls 0x833DD0 on a Change View press (ac
 
 chase_close → chase_far → bumper → bonnet → head-cam → chase_close.
 
-That the manager's entries are in file order is [I] (the parser loop was not traced; the restore fallback 0x832570 takes the first visible entry). Open: 0x833DD0 calls next, then previous (0x8326D0), and commits the new index through the transition manager (+0x123, +0x4D0, +0x510 → +0x128); which value +0x123 has in a normal race was not determined.
+That the manager's entries are in file order is [I] (the parser loop was not traced; the restore fallback 0x832570 takes the first visible entry). 0x833DD0 calls next, then previous (0x8326D0), and commits the new index through the transition manager (+0x123, +0x4D0, +0x510 → +0x128): see the next section.
+
+### Change View blend [D, E, 27 October 2026]
+
+Capstone disassembly and Unicorn emulation of the image's own code (no live run). Evidence: worktree camera-dynamics-11a55d `local/cam/change/` (`findings.md`, `transition.txt` with the exact pseudo-code and the numeric cases, `transition_emu.py` 0x82A4E0 against a model, worst 4.3e-7; `setup_emu.py` 0x7F9CA0 with a stand-in car box; `bonnet_emu.py`).
+
+Manager (car +0x2E44) in a race:
+- **+0x122 = 1**, "update every view every frame": the car attach 0x98D700 sets it and nothing clears it. The manager update 0x82C550 runs slot 11 for every entry and skips slots 9/10, so nothing is reset when a view is shown. A view appears with its running state (lag, spin, follow height, 5 m/s latch, shift and tilt, head springs, look). This matches F470: all 20 records change every frame.
+- **+0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the race-running state) (1), its exit (0x57E11E, 0 only while a blend runs, cancelling it), StatePostRaceSetReplayCamera's enter 0x584810 (0) and two others (1) [D; that nothing else clears it is I].
+
+Press (0x8348F0 → 0x833DD0; Change View edge, no blend active, otherwise the press is dropped):
+1. Look back (+0x121) is cleared. The controller sets it again only on a new Look Back press, so the view shown is A, not its reverse.
+2. A = the current view, B = the next visible view. The index stays at A until the commit.
+3. Set-up 0x7F9CA0. "Inside" is the head-cam (kind 3) or a view with highResInterior (+0xFC; among the visible views only head-cam).
+   - A = B, or inside ≠ outside: duration 0, a cut.
+   - Same side: duration 0.5 s (0xE4E160).
+   - Both outside: a lift over the car as well. The eye line P0 → P3 (both views' eyes of the last update, carried by the car's current pose), L = |P3 − P0|, e = its direction, u = the up made perpendicular to it. 32 samples s = i · L / 33 each cast the segment from low + u · L/2 down to low = P0 + s e − near_B · u onto the car's `CAR_` box (0x7F73B0 → 0xA6A530; the box of `body_geometry::car_box`). An upward face hit at fraction frac gives h = ((1 − frac) · L/2 + near_B) / √(1 − x²), x = (s − L/2) / L · 2; the lift is the largest h. Stand-in box values: chase_close → chase_far 0, chase_far → bumper 3.2003 (19 hits), bumper → bonnet 1.7067.
+
+Blend (0x82A4E0, once per manager update, after every view's update):
+- t += dt; past the duration (strict >) the blend ends and the manager commits the index (+0x128 = +0x510) in the same update, which then draws B.
+- Otherwise f = t / duration (1 for duration 0). The eye is the cubic Bernstein curve P0, P0 + lift · k, P3 + lift · k, P3 with k = normalize(−d.x d.y, d.x² + d.z², −d.y d.z) of the live path direction d. The rotation slerps (lerp at dot ≥ 0.999, the from quaternion negated for the short way) with r = 0.5 ∓ 0.5 |1 − 2f|^0.6 (pow in double). FOV and near are linear in f (the chase near is 0.1).
+- The endpoints are the two views' fresh records of this update.
+- Shipped Lacetti: chase_close → chase_far 0.5 s; chase_far → bumper 0.5 s over the car; bumper → bonnet 0.5 s; bonnet → head-cam and head-cam → chase_close cut. At 60 fps the 31st update (t just over 0.5) commits.
+- Render camera 0x8279D0: the blend's output while active, else the shown record with the look-back redirect. Look Back during a blend takes effect at the commit; its press and release are cuts.
+
+Open [I]:
+- Frame order. The controller (0x834E60) and the ViewManagerJob (0x82D1B0) run from a scheduler that was not found. Controller first: the first blended frame has f = dt / 0.5. Job first: the press frame draws A and the blend starts a frame later. A cut draws B on the press frame either way.
+- The bonnet's displayed-only step (slot 12, 0x805790, ident `bonnet`) runs only with the camera upside down: a ±2·near vertical ray against the track moves the eye up and sets near 0.02 [D, E]. The bumper branch of the same function (camera +0x104) was not traced.
+- transitionSpeed/Strength/Direction belong to the `linear` path only.
 
 ### FOV convention [D, F461]
 
@@ -239,6 +267,13 @@ Shipped presets:
 
 Change View pressed edge (keyboard C, pad LB through the F325 action map) moves to the next visible view. While Look Back is held (End, pad Y, or diagnostics `look_back`), the view's `reverseCamera` is shown.
 
+Change View (F613, `Cameras::change_view`, `transition_lift`, `transition_shot`) follows §2 Change View blend:
+- every view of the car's file is updated every frame with the same sample and look input, so nothing is reset on a view change or a look-back toggle; the free look (AUTHORED) moves only the view on screen;
+- a press starts the blend from the current view to the next visible one (0.5 s between outside views, lifted over the car's collision box when body contacts are on, 0.5 s without lift between inside views, a cut between inside and outside) and is dropped while a blend runs;
+- the blend advances once per camera step (the clock's step: one tick by default, 1/f with `camera_fps`) and commits when its time passes the duration. With the default tick the first blended frame is the press frame's tick (the "controller first" order [I]); the commit comes on the 32nd tick (0.512 s);
+- Change View clears look back until Look Back is released and pressed again; the audio camera and the saved view follow the current view, which changes at the commit;
+- no collision geometry (body contacts off): no lift [AUTHORED].
+
 Previously the prototype's C key was look back. It now changes the view, as in the original.
 
 Look (F499): Look Left/Right (Delete/PageDown, pad right stick X) and Look Up/Down (pad right stick Y) give `camera::Look { x: left − right, y: up − down }` each frame. The chase views move their look point and turn about the car (0x7FE690, 0x7FEC40), the bumper and bonnet turn (and the bonnet's eye lifts), the head-cam smooths the input and turns up to 40° sideways and 12° up, all as in § Look input. The look messages are taken once per physics tick, like the head-cam springs [AUTHORED: the original takes one per rendered frame, so its look speed follows the frame rate]. Replays pass no look input. The mouse free look (AUTHORED, F305) is unchanged.
@@ -249,7 +284,7 @@ Look (F499): Look Left/Right (Delete/PageDown, pad right stick X) and Look Up/Do
 | Mounted (bumper, bonnet, reverses) | Offset and acceleration shift as above, on the body pose. Rotation = body · twist · yaw · (face +Z) · pitch down · roll, with the twist frame of 0x803270 (F461; rows normalised, AUTHORED). FOV and near from the file. The shake of 0x815960 last (F508: the bonnet's speed-gated bob), its amplitude and time stepped once per physics tick [AUTHORED, as the look]. |
 | Head (head-cam) | The head-cam of section 2 (F472): seat velocity v + ω × r into the body spring (eye offset) and the head spring (view turn), the eye at position + bodyLength + body offset on the model frame, the view turned by the head offset and pitched by the tilt (negative looks down, emulated). FOV and near from the file, the spring parameters from the file over the constructor defaults. Not ported: look, buffeting, crash timer, TrackIR, transitions (all inactive in a race). |
 
-Camera time is simulation time: committed ticks × 0.016 s between frames. So pause holds the camera still, and scripted renders stay reproducible. The filter history resets on R (segment change), when ticks go backwards and on every view change.
+Camera time is simulation time: committed ticks × 0.016 s between frames. So pause holds the camera still, and scripted renders stay reproducible. Every view's history resets on R (segment change) and when ticks go backwards (which also cancels a blend); since F613 not on a view change (the original's +0x122).
 
 **Camera clock (F612, `camera::Clock`).** The original updates every view once per rendered frame with the frame time, and several of its rules have no dt, so its camera depends on the frame rate [D]:
 - the head-cam springs' centering (0x83E6D0). The spring's frequency is about √(centering/dt), so the head springs are about **1.6 times as stiff at 165 fps as at 60 fps** (√(165/60) = 1.66; body 18 against 11 rad/s, head 25 against 15 rad/s; test `head_springs_stiffen_with_the_frame_rate`);
@@ -285,7 +320,8 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
   - the gear drop-back input car +0x2E4 (exact while gearUpDropBack is 0, as in every in-race view);
   - the head-cam's wind and bumps (buffeting off in the shipped files), crash timer, TrackIR and its internal look-back state (§2 Head; inactive in a race);
   - the FE View Tweak message (front end only);
-  - transitions (all switch);
+  - the bonnet's upside-down eye fix (slot 12, §2 Change View blend; needs a track ray from the camera) and the untraced bumper branch;
+  - the manager's `linear` transitions (transitionType; unused in a race);
   - drift and replay views.
 - Cockpit rendering: head-cam needs the high-detail interior (`interiors/lac/int_lac.pssg`, `highResInterior`), which the app does not load yet. From the seat the exterior body is seen from inside.
 - The chase, Mounted and head views were compared with the running original in F470 (section 2, "Live comparison"); the FOV values match the records. The head dynamics were ported in F472 from the image and checked against the same run (§2 Head). The spin hold and the knock are proven on a deterministic scene against the emulated original (§2 Spin hold scene), not live. Open: the head-cam at a different frame rate and its spring state directly (next capture, below).
@@ -321,5 +357,6 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
 - spin hold and knock against the emulated original (`spin_hold_matches_the_emulated_original_on_the_spin_scene`, `knock_matches_the_emulated_dead_stop`); camera clock (`camera_fps_takes_the_originals_frames`: 62.5 fps equals the tick, 26 look messages in 10 ticks at 165 fps, no step in a 30 fps frame without a frame end; `head_springs_stiffen_with_the_frame_rate`: √(165/60));
 - F508 shake: the noise table against the emulated initializer (four entries; the ignored `shake_table_equals_the_emulated_table` compares all 6000 bit for bit with GRID_SHAKE_TABLE), the bonnet amplitude (0.49896473 after one step at 55.46 m/s, decay at 0.1798/s, zero below 1e-4, no state when all-zero), the noise (0.05897939 up, 0.075486794 side) and the eye moved along the view's up and right, the angle pitching down;
 - F499 look input: the chase look point against the emulated sequence (eases in at rest, snaps at speed, rests without input), the chase turn about the car, the bonnet turn and lift (B0 0.2, 0.36; lift 0.018) and the bumper's turn without it, the head's smoothing (0.2, 0.36 … 0.9885, release 0.6326, 0.4049), its curve and its 180°/s approach to 40° and 12°;
+- F613 Change View: the lift against the emulated set-up with the stand-in box (`change_view_lift_matches_the_emulated_set_up`: 0, 3.2003, 1.7067), the blend against the emulated tracker (`change_view_blend_matches_the_emulated_tracker`: 4 + 4 + 3 frames to 2e-6, the end at t > 0.5, the negated quaternion, the cut), the commit on the 32nd tick with every view running hidden (`change_view_blends_half_a_second_and_keeps_every_view_running`: the shot after the commit equals a camera that showed chase_far all along), the lift over a box, the cut into the head-cam, the dropped press, and look back cleared until pressed again (`change_view_ends_look_back_until_it_is_pressed_again`);
 - bit-identical repeat runs;
 - reset clears the history.

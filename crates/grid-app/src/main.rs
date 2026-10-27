@@ -4840,11 +4840,24 @@ fn drive_present(
         Some(c) => c,
         None => fallback.insert(camera::Cameras::new(camera::Views::fallback(), "", None)),
     };
-    if actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView)) {
-        cameras.change_view();
-        log_line!("drive_camera event=change view={} tick={}", cameras.ident(), driving.runtime.ticks);
-    }
     let sample = camera::Sample::of(&driving.runtime, driving.segment);
+    if actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView)) {
+        // The blend's lift clears the car's collision box (0x7F9CA0).
+        let car = driving
+            .geometry
+            .as_ref()
+            .and_then(|g| g.car_box(&driving.runtime.state.world.groups.bodies[0]).ok());
+        if let Some(t) = cameras.change_view(&sample, car.as_ref()) {
+            log_line!(
+                "drive_camera event=change view={} from={} duration={} lift={} tick={}",
+                cameras.views.0[t.to].ident,
+                cameras.views.0[t.from].ident,
+                t.duration,
+                t.lift,
+                driving.runtime.ticks
+            );
+        }
+    }
     // Look Left/Right/Up/Down (Delete/PageDown, pad right stick) turn the
     // view as in the original (0x8348F0, docs/CAMERA_VIEWS.md "Look input").
     let look = actions.as_ref().map_or_else(camera::Look::default, |a| camera::Look {

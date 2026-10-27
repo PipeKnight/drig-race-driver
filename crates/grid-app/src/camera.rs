@@ -172,6 +172,9 @@ pub struct Mounted {
     pub look: MountedLook,
     /// shake* parameters (binder 0x7F4BE0, object +0x134..+0x14C).
     pub shake: Shake,
+    /// highResInterior (+0x190): the view is inside the car for Change View
+    /// (0x7F9CA0).
+    pub high_res_interior: bool,
 }
 
 /// A view's shake (0x815960): shakeAngle (degrees), shakeDamping (per
@@ -320,6 +323,7 @@ impl Views {
                         "bonnet" => MountedLook::TurnAndLift,
                         _ => MountedLook::Fixed,
                     },
+                    high_res_interior: v.flag("highResInterior").unwrap_or(false),
                 }),
                 Kind::Head => {
                     // Binder 0x7F3A70 over the constructor's defaults (0x820A40).
@@ -1602,15 +1606,155 @@ fn advance(
     }
 }
 
-/// The current view and its filter history.
+/// Length of a Change View blend between two views on the same side of the
+/// glass (0xE4E160), and the samples of its lift (0xE4E15C).
+const TRANSITION_TIME: f32 = 0.5;
+const LIFT_SAMPLES: u32 = 32;
+/// The chase views' near plane (record +0x34; the app's default near).
+const CHASE_NEAR: f32 = 0.1;
+
+/// A Change View blend (0x82A4E0, manager +0x4D0): from the shown view to the
+/// next over `duration`, the eye on a cubic raised by `lift` over the car.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Transition {
+    pub from: usize,
+    pub to: usize,
+    pub t: f32,
+    pub duration: f32,
+    pub lift: f32,
+    /// Simulation time not yet stepped (the views' clock).
+    pending: f32,
+}
+
+/// 0x7F9CA0's "inside": the head-cam, or a view with highResInterior.
+fn inside(rig: &Rig) -> bool {
+    match rig {
+        Rig::Chase(_) => false,
+        Rig::Mounted(m) => m.high_res_interior,
+        Rig::Head(_) => true,
+    }
+}
+
+fn near(rig: &Rig) -> f32 {
+    match rig {
+        Rig::Chase(_) => CHASE_NEAR,
+        Rig::Mounted(m) => m.near,
+        Rig::Head(h) => h.near,
+    }
+}
+
+/// The car box segment test of 0x7F73B0 → 0xA6A530 for the segment `top`
+/// → `low`: the fraction from `top` and the face normal where it enters; a
+/// segment starting inside or missing the box does not hit [I: slab test in
+/// the box frame, the setup harness's stand-in].
+fn box_hit(b: &grid_world::phantom_post::Box, top: Vec3, low: Vec3) -> Option<(f32, Vec3)> {
+    let centre = Vec3::new(b.centre[0], b.centre[1], b.centre[2]);
+    let (mut near, mut far, mut normal) = (0f32, 1f32, None);
+    for (k, axis) in b.axes.iter().enumerate() {
+        let axis = Vec3::new(axis[0], axis[1], axis[2]);
+        let (p, d, half) = ((top - centre).dot(axis), (low - top).dot(axis), b.half[k]);
+        if d == 0. {
+            if p.abs() > half {
+                return None;
+            }
+            continue;
+        }
+        let (a, c) = ((-half - p) / d, (half - p) / d);
+        let (a, c) = if a > c { (c, a) } else { (a, c) };
+        if a > near {
+            near = a;
+            normal = Some(if d > 0. { -axis } else { axis });
+        }
+        far = far.min(c);
+        if near > far {
+            return None;
+        }
+    }
+    normal.map(|n| (near, n))
+}
+
+/// 0x7F9CA0's lift: the eye path from `from` to `to` (world) sampled 32
+/// times, each sample cast down onto the car box from half the eye distance
+/// above; the highest clearance scaled to an ellipse peak.
+pub fn transition_lift(from: Vec3, to: Vec3, margin: f32, car: &grid_world::phantom_post::Box) -> f32 {
+    let d = to - from;
+    let e = d.normalize_or_zero();
+    let a = Vec3::new(e.z, 0., -e.x);
+    let u = e.cross(a).normalize_or_zero();
+    let length = e.dot(d);
+    let half = length * 0.5;
+    let mut lift = 0f32;
+    for i in 1..=LIFT_SAMPLES {
+        let s = i as f32 * length / (LIFT_SAMPLES + 1) as f32;
+        let low = from + s * e - margin * u;
+        let top = low + u * half;
+        let Some((frac, normal)) = box_hit(car, top, low) else {
+            continue;
+        };
+        if normal.dot(u) <= 0. {
+            continue;
+        }
+        let x = (s - half) / length * 2.;
+        let h = ((1. - frac) * half + margin) / (1. - x * x).sqrt();
+        lift = lift.max(h);
+    }
+    lift
+}
+
+/// One evaluation of the blend (0x82A4E0) at `t` between the live shots.
+pub fn transition_shot(tr: &Transition, from: &Shot, to: &Shot) -> Shot {
+    let f = if tr.duration != 0. { tr.t / tr.duration } else { 1. };
+    let (p0, p3) = (from.eye, to.eye);
+    let d = (p3 - p0).normalize_or_zero();
+    // '+y': the world up made perpendicular to the path.
+    let k = Vec3::new(-d.x * d.y, d.x * d.x + d.z * d.z, -d.y * d.z).normalize_or_zero();
+    let (p1, p2) = (p0 + tr.lift * k, p3 + tr.lift * k);
+    let g = 1. - f;
+    let eye = g * g * g * p0 + 3. * f * g * g * p1 + 3. * f * f * g * p2 + f * f * f * p3;
+    let r = if f <= 0.5 {
+        0.5 - 0.5 * pow(1. - 2. * f, 0.6)
+    } else {
+        0.5 + 0.5 * pow(2. * f - 1., 0.6)
+    };
+    let (mut q0, q1) = (from.rotation, to.rotation);
+    let mut dot = q0.dot(q1);
+    if dot < 0. {
+        q0 = -q0;
+        dot = -dot;
+    }
+    let (w0, w1) = if dot < 0.999 {
+        let th = dot.acos();
+        ((((1. - r) * th).sin()) / th.sin(), (r * th).sin() / th.sin())
+    } else {
+        (1. - r, r)
+    };
+    let (n0, n1) = (from.near.unwrap_or(CHASE_NEAR), to.near.unwrap_or(CHASE_NEAR));
+    Shot {
+        eye,
+        // The original keeps the weighted sum; the port renders it normalised
+        // [AUTHORED].
+        rotation: Quat::from_vec4(w0 * Vec4::from(q0) + w1 * Vec4::from(q1)).normalize(),
+        fov: (to.fov - from.fov) * f + from.fov,
+        near: Some((n1 - n0) * f + n0),
+    }
+}
+
+/// The car's views, all updated every frame as the original's manager in a
+/// race (+0x122 = 1), and the Change View blend between them.
 #[derive(Resource, Clone, Debug)]
 pub struct Cameras {
     pub views: Views,
     pub current: usize,
-    /// Which view the history belongs to (the reverse view while looking back).
+    /// The view on screen (the current view's reverse while looking back).
     shown: Option<usize>,
-    history: History,
-    last: Option<(u64, u64)>,
+    /// Every view's state and its last shot (the original's records).
+    histories: Vec<History>,
+    shots: Vec<Option<Shot>>,
+    /// Segment, ticks and pose of the last frame.
+    last: Option<(u64, u64, Mat4)>,
+    transition: Option<Transition>,
+    /// Change View turned look back off until Look Back is released (+0x121).
+    back_cleared: bool,
     /// Where the chosen view is saved at exit; None in tests.
     profile: Option<PathBuf>,
     /// Camera clock (diagnostics `camera_fps`; Clock::Tick by default).
@@ -1620,19 +1764,52 @@ pub struct Cameras {
 impl Cameras {
     pub fn new(views: Views, saved: &str, profile: Option<PathBuf>) -> Self {
         let current = views.restore(saved);
+        let n = views.0.len();
         Self {
             views,
             current,
             shown: None,
-            history: History::default(),
+            histories: vec![History::default(); n],
+            shots: vec![None; n],
             last: None,
+            transition: None,
+            back_cleared: false,
             profile,
             clock: Clock::Tick,
         }
     }
 
-    pub fn change_view(&mut self) {
-        self.current = self.views.next(self.current);
+    /// Change View (0x833DD0): starts the blend from the current view to the
+    /// next visible one, placed with `sample`'s pose; `car` is the car's
+    /// collision box for the lift. A press during a blend is dropped.
+    pub fn change_view(&mut self, sample: &Sample, car: Option<&grid_world::phantom_post::Box>) -> Option<Transition> {
+        if self.transition.is_some() {
+            return None;
+        }
+        self.back_cleared = true;
+        let (from, to) = (self.current, self.views.next(self.current));
+        let (a, b) = (&self.views.0[from].rig, &self.views.0[to].rig);
+        let (duration, lift) = if from == to || inside(a) != inside(b) {
+            (0., 0.)
+        } else if inside(a) || inside(b) {
+            (TRANSITION_TIME, 0.)
+        } else {
+            // The records' eyes of the last frame, carried by the car to now.
+            let carried = |i: usize| {
+                let (_, _, pose) = self.last?;
+                let eye = self.shots[i]?.eye;
+                Some((sample.pose * pose.inverse()).transform_point3(eye))
+            };
+            let lift = match (carried(from), carried(to), car) {
+                (Some(p0), Some(p3), Some(car)) => transition_lift(p0, p3, near(b), car),
+                // No collision geometry: no lift [AUTHORED].
+                _ => 0.,
+            };
+            (TRANSITION_TIME, lift)
+        };
+        let tr = Transition { from, to, t: 0., duration, lift, pending: self.histories[from].pending };
+        self.transition = Some(tr);
+        Some(tr)
     }
 
     pub fn ident(&self) -> &str {
@@ -1649,27 +1826,75 @@ impl Cameras {
         })
     }
 
-    /// Frames the current (or, looking back, its reverse) view for `sample`.
-    pub fn frame(&mut self, sample: &Sample, back: bool, look: Look, orbit: impl Fn(Vec3) -> Vec3) -> Shot {
-        let view = &self.views.0[self.current];
-        let shown = if back {
-            view.reverse.unwrap_or(self.current)
-        } else {
-            self.current
-        };
-        let reset = self.shown != Some(shown)
-            || self.last.is_none_or(|(segment, ticks)| {
-                segment != sample.segment || sample.ticks < ticks
-            });
-        if reset {
-            self.history = History::default();
-            self.shown = Some(shown);
-            self.last = Some((sample.segment, sample.ticks));
+    /// The view on screen: the current one, or its reverse while looking back.
+    fn on_screen(&self, back: bool) -> usize {
+        match back {
+            true => self.views.0[self.current].reverse.unwrap_or(self.current),
+            false => self.current,
         }
-        let ticks = self.last.map_or(0, |(_, t)| sample.ticks - t);
-        self.last = Some((sample.segment, sample.ticks));
+    }
+
+    /// Advances every view by the ticks since the last frame (0x82C550: slot
+    /// 11 for all, nothing reset on a view change) and frames the shown one,
+    /// or the blend while Change View runs.
+    pub fn frame(&mut self, sample: &Sample, back: bool, look: Look, orbit: impl Fn(Vec3) -> Vec3) -> Shot {
+        // Change View turns look back off; it takes a new press (0x8348F0).
+        self.back_cleared &= back;
+        let back = back && !self.back_cleared;
+        let reset = self.last.is_none_or(|(segment, ticks, _)| {
+            segment != sample.segment || sample.ticks < ticks
+        });
+        if reset {
+            self.histories.fill(History::default());
+            self.shots.fill(None);
+            self.transition = None;
+        }
+        let ticks = match self.last {
+            Some((_, t, _)) if !reset => sample.ticks - t,
+            _ => 0,
+        };
+        self.last = Some((sample.segment, sample.ticks, sample.pose));
         let dt = ticks as f32 * grid_tools::source_vehicle::DELTA;
-        let shot = shot_clocked(self.clock, &self.views.0[shown].rig, &mut self.history, sample, dt, look, orbit);
+        // The look messages go to every view (0x8348F0); the free look only
+        // to the one on screen.
+        let shown = self.on_screen(back);
+        for (i, view) in self.views.0.iter().enumerate() {
+            let history = &mut self.histories[i];
+            self.shots[i] = Some(match i == shown {
+                true => shot_clocked(self.clock, &view.rig, history, sample, dt, look, &orbit),
+                false => shot_clocked(self.clock, &view.rig, history, sample, dt, look, |o| o),
+            });
+        }
+        let mut blend = None;
+        if let Some(tr) = &mut self.transition {
+            let (frames, step) = match self.clock {
+                Clock::Tick => (steps(&mut tr.pending, dt), grid_tools::source_vehicle::DELTA),
+                Clock::Fps(fps) => (frames(&mut tr.pending, dt, 1. / fps), 1. / fps),
+                Clock::Frame => (u32::from(dt > 0.), dt),
+            };
+            // 0x82A4E0 once per camera frame: past the duration it ends and
+            // the manager commits the new view (+0x128 = +0x510).
+            let mut ended = false;
+            for _ in 0..frames {
+                tr.t += step;
+                ended |= tr.t > tr.duration;
+            }
+            if !ended {
+                let shot = |i: usize| self.shots[i].expect("every view framed");
+                blend = Some(transition_shot(tr, &shot(tr.from), &shot(tr.to)));
+            }
+        }
+        if blend.is_none()
+            && let Some(tr) = self.transition.take()
+        {
+            self.current = tr.to;
+            if cfg!(not(test)) {
+                println!("drive_camera event=commit view={} tick={}", self.views.0[tr.to].ident, sample.ticks);
+            }
+        }
+        let shown = self.on_screen(back);
+        self.shown = Some(shown);
+        let shot = blend.unwrap_or_else(|| self.shots[shown].expect("every view framed"));
         if reset && cfg!(not(test)) {
             println!(
                 "drive_camera event=start view={} tick={} eye={:?} model_origin={:?}",
@@ -1680,6 +1905,12 @@ impl Cameras {
             );
         }
         shot
+    }
+
+    /// The shown view's history.
+    #[cfg(test)]
+    fn history(&self) -> &History {
+        &self.histories[self.shown.unwrap_or(self.current)]
     }
 
     /// Writes the original's saved name (0x584E70) to the profile file.
@@ -1799,6 +2030,7 @@ mod tests {
             tilt_distance: 1.,
             look: MountedLook::Fixed,
             shake: Shake::default(),
+            high_res_interior: false,
         }
     }
 
@@ -1992,6 +2224,169 @@ mod tests {
         shot.rotation * Vec3::NEG_Z
     }
 
+    /// setup_emu.py's car: at (10, 0, 20), unturned, a stand-in box.
+    fn stand_in_car() -> grid_world::phantom_post::Box {
+        grid_world::phantom_post::Box {
+            axes: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+            centre: [10., 0.725, 20., 1.],
+            half: [0.9, 0.725, 2.3, 0.],
+        }
+    }
+
+    #[test]
+    fn change_view_lift_matches_the_emulated_set_up() {
+        let at = Vec3::new(10., 0., 20.);
+        let lift = |a: Vec3, b: Vec3, near: f32| transition_lift(at + a, at + b, near, &stand_in_car());
+        let (close, far) = (Vec3::new(0., 1.7227, -4.7393), Vec3::new(0., 1.8637, -5.1838));
+        let (bumper, bonnet) = (Vec3::new(0., 0.7275, 1.7706), Vec3::new(0., 1.1055, 0.8556));
+        // No sample hits the car between the chase views; 19 of 32 do on the
+        // way to the bumper (whose eye is inside the box), only the last on
+        // the way to the bonnet.
+        assert_eq!(lift(close, far, 0.1), 0.);
+        assert!((lift(far, bumper, 0.2) - 3.200_307).abs() < 1e-4);
+        assert!((lift(bumper, bonnet, 0.1) - 1.706_726).abs() < 1e-4);
+    }
+
+    // The emulated original's values, printed in full (60° is the bumper's fov).
+    #[allow(clippy::excessive_precision, clippy::approx_constant)]
+    #[test]
+    fn change_view_blend_matches_the_emulated_tracker() {
+        let shot = |q: [f32; 4], eye: [f32; 3], fov: f32, near: f32| Shot {
+            eye: Vec3::from(eye),
+            rotation: Quat::from_array(q),
+            fov,
+            near: Some(near),
+        };
+        type Case<'a> = &'a [(f32, Option<Shot>)];
+        let run = |from: &Shot, to: &Shot, duration: f32, lift: f32, case: Case| {
+            let mut tr = Transition { from: 0, to: 1, t: 0., duration, lift, pending: 0. };
+            for (k, (dt, expected)) in case.iter().enumerate() {
+                tr.t += dt;
+                let Some(e) = expected else {
+                    assert!(tr.t > tr.duration, "case row {k}: ended");
+                    continue;
+                };
+                let s = transition_shot(&tr, from, to);
+                assert!(s.eye.abs_diff_eq(e.eye, 2e-6), "row {k}: {} {}", s.eye, e.eye);
+                assert!(s.rotation.abs_diff_eq(e.rotation.normalize(), 2e-6), "row {k}: {} {}", s.rotation, e.rotation);
+                assert!((s.fov - e.fov).abs() < 1e-6, "row {k}: {} {}", s.fov, e.fov);
+                assert!((s.near.unwrap() - e.near.unwrap()).abs() < 1e-6, "row {k}");
+            }
+        };
+        let close = shot([0.0436193874, 0., 0., 0.999048222], [0., 1.7227, -4.7393], 0.907571211, 0.1);
+        let far = shot([0.0348994967, 0., 0., 0.999390827], [0., 1.8637, -5.1838], 0.959931089, 0.1);
+        let bumper = shot([0.0497794182, 0., 0., 0.998760236], [0., 0.7275, 1.7706], 1.04719755, 0.2);
+        let turned = shot([0., 0.996194698, 0., 0.0871557427], [0.3, 1.2, 2.], 0.837758041, 0.075);
+        let a = 1. / 60.;
+        run(&close, &far, 0.5, 0., &[
+            (0., Some(shot([0.0436193869, 0., 0., 0.999048233], [0., 1.7227, -4.73929977], 0.907571197, 0.1))),
+            (a, Some(shot([0.0434425883, 0., 0., 0.999055147], [0., 1.72315955, -4.74074841], 0.90931654, 0.1))),
+            (a, Some(shot([0.04326066, 0., 0., 0.999062359], [0., 1.72449648, -4.74496317], 0.911061883, 0.1))),
+            (0.1, Some(shot([0.042019289, 0., 0., 0.999111116], [0., 1.74743247, -4.81726837], 0.921533823, 0.1))),
+        ]);
+        // Over the car: the eye rises on the lifted cubic.
+        run(&far, &bumper, 0.5, 0.8, &[
+            (0.1, Some(shot([0.0368634835, 0., 0., 0.999307632], [0., 2.12451053, -4.39862633], 0.977384388, 0.120000005))),
+            (0.1, Some(shot([0.039506834, 0., 0., 0.999195576], [0., 2.0322206, -2.64297676], 0.994837701, 0.140000001))),
+            (0.1, Some(shot([0.0451720804, 0., 0., 0.998955488], [0., 1.69590545, -0.584474027], 1.01229095, 0.159999996))),
+            (0.15, Some(shot([0.0488471165, 0., 0., 0.998799741], [0., 0.972487211, 1.6107049], 1.03847098, 0.189999998))),
+            (0.1, None),
+        ]);
+        // A slerp over a large turn, and the same with the target's sign
+        // flipped (the from quaternion is negated: every output negates).
+        let turning = [
+            (0.05, Some(shot([0.043077182, 0.0928215608, 0., 0.9947505], [0.00867827237, 1.78882229, -4.54434824], 0.900589883, 0.0975000039))),
+            (0.2, Some(shot([0.0295825228, 0.675615966, 0., 0.736659944], [0.150772989, 1.68567753, -1.35228574], 0.87266463, 0.087500006))),
+            (0.2, Some(shot([0.00406428706, 0.983811677, 0., 0.17915985], [0.291878283, 1.29539359, 1.81755054], 0.844739377, 0.0775000006))),
+        ];
+        run(&close, &turned, 0.5, 0.3, &turning);
+        let negated = turning.map(|(dt, s)| (dt, s.map(|s| Shot { rotation: -s.rotation, ..s })));
+        run(&close, &Shot { rotation: -turned.rotation, ..turned }, 0.5, 0.3, &negated);
+        // Inside <-> outside: duration 0 draws the new view at once.
+        run(&bumper, &turned, 0., 0., &[(0., Some(turned)), (a, None)]);
+    }
+
+    #[test]
+    fn change_view_blends_half_a_second_and_keeps_every_view_running() {
+        let pose = |t: u64| {
+            Mat4::from_rotation_translation(Quat::from_rotation_y(t as f32 * 0.01), Vec3::new(0., 0., t as f32 * 0.5))
+        };
+        let at = |t: u64| sample(pose(t), Vec3::new(0., 0., 31.25), t);
+        let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
+        // chase_far shown all along: the views run hidden, nothing resets.
+        let mut far = Cameras::new(lacetti(), "chase_far", None);
+        for t in 0..10 {
+            cameras.frame(&at(t), false, Look::default(), |o| o);
+            far.frame(&at(t), false, Look::default(), |o| o);
+        }
+        let tr = cameras.change_view(&at(10), None).expect("press");
+        assert_eq!((tr.from, tr.to, tr.duration, tr.lift), (0, 2, 0.5, 0.));
+        assert!(cameras.change_view(&at(10), None).is_none(), "a press during a blend is dropped");
+        // 31 blended frames (t to 0.496 s); the 32nd tick passes 0.5 s and
+        // commits.
+        for t in 10..=41 {
+            let shot = cameras.frame(&at(t), false, Look::default(), |o| o);
+            let reference = far.frame(&at(t), false, Look::default(), |o| o);
+            if t < 41 {
+                assert_eq!(cameras.ident(), "chase_close", "tick {t}");
+                assert_ne!(shot, reference);
+            } else {
+                assert_eq!(cameras.ident(), "chase_far");
+                assert_eq!(shot, reference);
+            }
+        }
+        // Outside views blend over the car's box; bonnet -> head-cam cuts.
+        let mut t = 42;
+        for (ident, lifted) in [("bumper", true), ("bonnet", true)] {
+            let car = grid_world::phantom_post::Box {
+                axes: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]].map(|r| {
+                    let v = pose(t).transform_vector3(Vec3::from_slice(&r));
+                    [v.x, v.y, v.z, 0.]
+                }),
+                centre: {
+                    let c = pose(t).transform_point3(Vec3::Y * 0.725);
+                    [c.x, c.y, c.z, 1.]
+                },
+                half: [0.9, 0.725, 2.3, 0.],
+            };
+            let tr = cameras.change_view(&at(t), Some(&car)).expect("press");
+            assert_eq!(tr.duration, 0.5);
+            assert_eq!(tr.lift > 0.5, lifted, "{ident} {}", tr.lift);
+            for _ in 0..32 {
+                cameras.frame(&at(t), false, Look::default(), |o| o);
+                t += 1;
+            }
+            assert_eq!(cameras.ident(), ident);
+        }
+        // A frame without a tick draws the head-cam through the blend at
+        // f = 1; the next tick commits it.
+        let tr = cameras.change_view(&at(t - 1), None).expect("press");
+        assert_eq!((tr.duration, tr.lift), (0., 0.));
+        let shot = cameras.frame(&at(t - 1), false, Look::default(), |o| o);
+        let head = cameras.shots[8].unwrap();
+        assert!(shot.eye.abs_diff_eq(head.eye, 1e-6) && shot.rotation.abs_diff_eq(head.rotation, 1e-6));
+        assert_eq!(cameras.ident(), "bonnet");
+        assert_eq!(cameras.frame(&at(t), false, Look::default(), |o| o), cameras.shots[8].unwrap());
+        assert_eq!(cameras.ident(), "head-cam");
+    }
+
+    #[test]
+    fn change_view_ends_look_back_until_it_is_pressed_again() {
+        let at = |t: u64| sample(Mat4::IDENTITY, Vec3::ZERO, t);
+        let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
+        cameras.frame(&at(0), true, Look::default(), |o| o);
+        assert_eq!(cameras.shown, Some(1));
+        cameras.change_view(&at(1), None).expect("press");
+        for t in 1..40 {
+            cameras.frame(&at(t), true, Look::default(), |o| o);
+        }
+        // Still held after the commit: the new view, not its reverse.
+        assert_eq!((cameras.current, cameras.shown), (2, Some(2)));
+        cameras.frame(&at(40), false, Look::default(), |o| o);
+        cameras.frame(&at(41), true, Look::default(), |o| o);
+        assert_eq!(cameras.shown, Some(3));
+    }
+
     #[test]
     fn change_view_cycles_visible_views_and_wraps() {
         let views = lacetti();
@@ -2107,7 +2502,7 @@ mod tests {
         let y = cameras_frame_y(&mut cameras, at(2.), Vec3::ZERO, 4);
         // These speed steps (over 50 m/s² within a tick) also knock the eye
         // (envelope 2), which is not the height rule under test.
-        let knock = cameras.history.chase.knock;
+        let knock = cameras.history().chase.knock;
         let y = y - knock.blend * knock.spring.off.y;
         assert!(knock.blend > 0. && (y - (start + 2.)).abs() < 1e-5, "{y}");
     }
@@ -2348,8 +2743,8 @@ mod tests {
             let pose = Mat4::from_translation(Vec3::new(1., 2., 3. + 0.48 * t as f32));
             cameras.frame(&sample(pose, Vec3::Z * 30., t), false, Look::default(), |v| v);
         }
-        assert_eq!(cameras.history.head.body.off, Vec3::ZERO);
-        assert_eq!(cameras.history.head.head.off, Vec3::ZERO);
+        assert_eq!(cameras.history().head.body.off, Vec3::ZERO);
+        assert_eq!(cameras.history().head.head.off, Vec3::ZERO);
     }
 
     #[test]
@@ -2433,14 +2828,14 @@ mod tests {
             z += speed * 0.016;
         }
         // 20 m/s² is above the body's 12 and the head's 15.9 m/s².
-        let h = cameras.history.head;
+        let h = cameras.history().head;
         assert!(h.body.off.z > 0.005 && h.body.off.z <= 0.07 + 1e-6, "{}", h.body.off);
         // The head's equilibrium: (20 · 0.3399 − 5.4045) · 0.016 / 3.8697 ≈ 0.0058.
         assert!(h.head.off.z > 0.004 && h.head.off.z < 0.007, "{}", h.head.off);
         for t in 40..200u64 {
             cameras.frame(&sample(Mat4::from_translation(Vec3::Z * z), Vec3::Z * speed, t), false, Look::default(), |v| v);
         }
-        let h = cameras.history.head;
+        let h = cameras.history().head;
         assert!(h.body.off.length() < 1e-4 && h.head.off.length() < 1e-4, "{h:?}");
     }
 
@@ -2643,7 +3038,7 @@ mod tests {
                 cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * v, t), false, Look::default(), |v| v);
                 t += stride;
             }
-            cameras.history.head
+            cameras.history().head
         };
         let (a, b) = (run(1), run(2));
         assert!(a.body.off.abs_diff_eq(b.body.off, 1e-6) && a.head.off.abs_diff_eq(b.head.off, 1e-6), "{a:?} {b:?}");
@@ -2740,7 +3135,7 @@ mod tests {
             let mut seen = Vec::new();
             for t in 0..=ticks {
                 cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * 30., t), false, look, |v| v);
-                seen.push(cameras.history.head.look.x);
+                seen.push(cameras.history().head.look.x);
             }
             seen
         };
@@ -2790,10 +3185,11 @@ mod tests {
                     Quat::from_rotation_y(a.sin()),
                     Vec3::new(a, 0., a * 2.),
                 );
+                let s = sample(pose, Vec3::new(a, 0., 30.), t);
                 if t == 120 {
-                    cameras.change_view();
+                    cameras.change_view(&s, None);
                 }
-                let s = cameras.frame(&sample(pose, Vec3::new(a, 0., 30.), t), t % 50 > 40, Look::default(), |v| v);
+                let s = cameras.frame(&s, t % 50 > 40, Look::default(), |v| v);
                 out.push((s.eye.to_array(), s.rotation.to_array()));
             }
             out
@@ -2806,10 +3202,10 @@ mod tests {
         let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
         cameras.frame(&sample(Mat4::IDENTITY, Vec3::ZERO, 0), false, Look::default(), |v| v);
         cameras.frame(&sample(Mat4::from_rotation_y(0.3), Vec3::ZERO, 1), false, Look::default(), |v| v);
-        assert!(cameras.history.chase.lag > 0.);
+        assert!(cameras.history().chase.lag > 0.);
         let mut s = sample(Mat4::IDENTITY, Vec3::ZERO, 0);
         s.segment = 1;
         cameras.frame(&s, false, Look::default(), |v| v);
-        assert_eq!(cameras.history.chase.lag, 0.);
+        assert_eq!(cameras.history().chase.lag, 0.);
     }
 }
