@@ -2,7 +2,9 @@
 //! mesh per material and 64 m cell, so the per-entity passes (visibility,
 //! shadow cascades, mesh collection, draw queues) see hundreds of entities
 //! instead of thousands. Vertices are moved into the cell's frame exactly as
-//! the vertex shader would place them, so the picture does not change.
+//! the vertex shader would place them, so the picture does not change. A part
+//! alone in its material and cell gathers with the others of a 256 m cell
+//! (F591).
 //!
 //! Intact breakable props are merged the same way in batches of their own.
 //! Their original entities stay (without a mesh) and keep the visibility that
@@ -27,6 +29,8 @@ use std::ops::Range;
 /// Edge of a batch cell on the ground plane, metres (`GRID_STATIC_BATCH_CELL`
 /// overrides it for measurements).
 const CELL_METRES: f32 = 64.;
+/// Cells per side of the coarse cell that gathers single parts.
+const COARSE: i32 = 4;
 
 fn cell_metres() -> f32 {
     std::env::var("GRID_STATIC_BATCH_CELL")
@@ -178,66 +182,94 @@ fn merge<M: Material>(
             });
     }
     let mut stats = [0usize; 5]; // parts, batches, intact parts, intact batches, vertices
-    let mut keys: Vec<_> = groups.into_iter().collect();
-    keys.sort_by_key(|(k, _)| (k.intact, k.cell));
-    for (key, mut group) in keys {
-        group.sort_by_key(|p| p.entity);
-        let origin = Vec3::new(
-            (key.cell.0 as f32 + 0.5) * cell_m,
-            0.,
-            (key.cell.1 as f32 + 0.5) * cell_m,
-        );
-        let mut start = 0;
-        while start < group.len() {
-            let mut end = start;
-            let mut count = 0;
-            while end < group.len() && count + group[end].vertices <= MAX_VERTICES {
-                count += group[end].vertices;
-                end += 1;
-            }
-            let chunk = &group[start..end];
-            start = end;
-            if chunk.len() < 2 && !key.intact {
-                // A single part stays, with fixed bounds.
-                if let Some(aabb) = meshes.get(&chunk[0].mesh).and_then(|m| m.compute_aabb()) {
-                    commands.entity(chunk[0].entity).insert((aabb, NoAutoAabb));
+    // A part alone in its cell and material gathers with the others of a
+    // cell COARSE times wider (F591): fewer entities for the cascade and
+    // camera passes, the same triangles.
+    let (mut pass, mut size, mut single) = (groups, cell_m, 0);
+    for round in 0..2 {
+        let mut leftovers: HashMap<Key, Vec<Part<M>>> = HashMap::new();
+        let mut keys: Vec<_> = pass.into_iter().collect();
+        keys.sort_by_key(|(k, _)| (k.intact, k.cell));
+        for (key, mut group) in keys {
+            group.sort_by_key(|p| p.entity);
+            let origin = Vec3::new(
+                (key.cell.0 as f32 + 0.5) * size,
+                0.,
+                (key.cell.1 as f32 + 0.5) * size,
+            );
+            let mut start = 0;
+            while start < group.len() {
+                let mut end = start;
+                let mut count = 0;
+                while end < group.len() && count + group[end].vertices <= MAX_VERTICES {
+                    count += group[end].vertices;
+                    end += 1;
                 }
-                continue;
-            }
-            let (mesh, indices, ranges) = build(chunk, &meshes, origin, &key.layout);
-            let parts: Vec<_> = chunk
-                .iter()
-                .zip(ranges)
-                .map(|(p, r)| (p.intact.then_some(p.entity), r))
-                .collect();
-            stats[if key.intact { 2 } else { 0 }] += chunk.len();
-            stats[if key.intact { 3 } else { 1 }] += 1;
-            stats[4] += count;
-            let shown = vec![true; parts.len()];
-            let bounds = mesh.compute_aabb().unwrap_or_default();
-            commands.spawn((
-                Name::new(format!("static_batch/{}/{}_{}", if key.intact { "intact" } else { "track" }, key.cell.0, key.cell.1)),
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(chunk[0].material.clone()),
-                Transform::from_translation(origin),
-                Batch { indices, parts, shown },
-                // Hiding a prop only drops triangles: the bounds stay valid.
-                bounds,
-                NoAutoAabb,
-            ));
-            for part in chunk {
-                if part.intact {
-                    commands
-                        .entity(part.entity)
-                        .remove::<(Mesh3d, MeshMaterial3d<M>, Aabb, VisibilityClass)>();
-                } else {
-                    commands.entity(part.entity).despawn();
+                let chunk = &group[start..end];
+                start = end;
+                if chunk.len() < 2 && !key.intact {
+                    let part = &chunk[0];
+                    if round == 0 {
+                        leftovers
+                            .entry(Key {
+                                material: key.material,
+                                layout: key.layout.clone(),
+                                intact: false,
+                                cell: (key.cell.0.div_euclid(COARSE), key.cell.1.div_euclid(COARSE)),
+                            })
+                            .or_default()
+                            .push(Part {
+                                entity: part.entity,
+                                material: part.material.clone(),
+                                intact: false,
+                                mesh: part.mesh.clone(),
+                                matrix: part.matrix,
+                                vertices: part.vertices,
+                            });
+                    } else if let Some(aabb) = meshes.get(&part.mesh).and_then(|m| m.compute_aabb()) {
+                        // A single part stays, with fixed bounds.
+                        single += 1;
+                        commands.entity(part.entity).insert((aabb, NoAutoAabb));
+                    }
+                    continue;
+                }
+                let (mesh, indices, ranges) = build(chunk, &meshes, origin, &key.layout);
+                let parts: Vec<_> = chunk
+                    .iter()
+                    .zip(ranges)
+                    .map(|(p, r)| (p.intact.then_some(p.entity), r))
+                    .collect();
+                stats[if key.intact { 2 } else { 0 }] += chunk.len();
+                stats[if key.intact { 3 } else { 1 }] += 1;
+                stats[4] += count;
+                let shown = vec![true; parts.len()];
+                let bounds = mesh.compute_aabb().unwrap_or_default();
+                commands.spawn((
+                    Name::new(format!("static_batch/{}/{}_{}", if key.intact { "intact" } else { "track" }, key.cell.0, key.cell.1)),
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(chunk[0].material.clone()),
+                    Transform::from_translation(origin),
+                    Batch { indices, parts, shown },
+                    // Hiding a prop only drops triangles: the bounds stay valid.
+                    bounds,
+                    NoAutoAabb,
+                ));
+                for part in chunk {
+                    if part.intact {
+                        commands
+                            .entity(part.entity)
+                            .remove::<(Mesh3d, MeshMaterial3d<M>, Aabb, VisibilityClass)>();
+                    } else {
+                        commands.entity(part.entity).despawn();
+                    }
                 }
             }
         }
+        pass = leftovers;
+        size *= COARSE as f32;
     }
     println!(
-        "static_batch version=1 material={} parts={} batches={} intact_parts={} intact_batches={} vertices={} blended={blended} unsupported={unsupported} cell_m={cell_m}",
+        "static_batch version=1 material={} parts={} batches={} intact_parts={} intact_batches={} vertices={} blended={blended} unsupported={unsupported} single={single} cell_m={cell_m}",
         std::any::type_name::<M>().rsplit("::").next().unwrap_or("?"),
         stats[0],
         stats[1],

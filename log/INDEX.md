@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F592](F0592.md) | 2026-10-27 | Skid marks stream only changed strips |
+| [F591](F0591.md) | 2026-10-27 | Single static parts gather in coarse cells |
 | [F590](F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |
 | [F589](F0589.md) | 2026-10-27 | OSD timer box sounds are online-only; speech and music sized |
 | [F588](F0588.md) | 2026-10-27 | Shadow and bounds passes skip batched and static meshes |
@@ -493,6 +495,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G304](G0304.md) | 2026-10-27 | Integrate F591-F592 static and skid streaming optimizations |
 | [G303](G0303.md) | 2026-10-27 | Sample one ordinary L4 crowd packet through the linked reader |
 | [G302](G0302.md) | 2026-10-27 | Integrate F587-F590 preserving graphics ownership |
 | [G301](G0301.md) | 2026-10-27 | Compare main-view display transforms for Lacetti paint |

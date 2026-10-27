@@ -146,7 +146,7 @@ fn choose(wheel: &Wheel, profile: &Profile) -> Option<(Kind, Layer)> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Point {
     center: Vec3,
     side: Vec3,
@@ -157,7 +157,7 @@ struct Point {
     alpha: f32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Strip {
     points: Vec<Point>,
     /// (car, wheel) while the strip is being extended.
@@ -189,6 +189,8 @@ pub(crate) struct SkidMarks {
     entity: Entity,
     layout: Option<VertexLayout>,
     dirty: bool,
+    /// The strips as last written to the mesh (none yet: write it whole).
+    written: Option<Vec<Strip>>,
     pub laid: u64,
 }
 
@@ -208,6 +210,7 @@ impl SkidMarks {
             entity: Entity::PLACEHOLDER,
             layout: None,
             dirty: true,
+            written: None,
             laid: 0,
         }
     }
@@ -449,7 +452,39 @@ impl SkidMarks {
     }
 
     /// The packed vertex bytes of `streamed()`.
+    #[cfg(test)]
     fn pack(&self, layout: &VertexLayout, bytes: &mut Vec<u8>) {
+        self.pack_strips(layout, 0..STRIPS, bytes);
+    }
+
+    /// Runs of strips that differ from the ones last written, which become
+    /// the written ones (F592). All of them the first time.
+    fn changes(&mut self) -> Vec<std::ops::Range<usize>> {
+        let Some(written) = &mut self.written else {
+            self.written = Some(self.strips.clone());
+            return std::iter::once(0..STRIPS).collect();
+        };
+        let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
+        for (i, (now, old)) in self.strips.iter().zip(written.iter_mut()).enumerate() {
+            if now == old {
+                continue;
+            }
+            old.clone_from(now);
+            match runs.last_mut() {
+                Some(run) if run.end == i => run.end = i + 1,
+                _ => runs.push(i..i + 1),
+            }
+        }
+        runs
+    }
+
+    /// The packed vertex bytes of the strip slots in `strips`.
+    fn pack_strips(
+        &self,
+        layout: &VertexLayout,
+        strips: std::ops::Range<usize>,
+        bytes: &mut Vec<u8>,
+    ) {
         let at = |attribute| layout.offset(attribute).expect("skid mark attribute");
         let (p, n, uv, c) = (
             at(Mesh::ATTRIBUTE_POSITION),
@@ -458,9 +493,9 @@ impl SkidMarks {
             at(Mesh::ATTRIBUTE_COLOR),
         );
         let start = bytes.len();
-        bytes.resize(start + STRIPS * SLOT * layout.stride, 0);
+        bytes.resize(start + strips.len() * SLOT * layout.stride, 0);
         let mut vertex = start;
-        for strip in &self.strips {
+        for strip in &self.strips[strips] {
             for k in 0..SLOT {
                 let (pv, nv, uvv, cv) = Self::slot_vertex(strip, k);
                 put(bytes, vertex + p, pv);
@@ -657,6 +692,8 @@ fn lay(
 
 /// Writes the changed marks over the mesh's GPU allocation (F580; before,
 /// every change replaced the asset, which Bevy reallocated and repacked).
+/// Only the strips that changed since the last write are packed and sent
+/// (F592; before, all 240 slots, 760 KB, nearly every frame).
 fn present(marks: Option<ResMut<SkidMarks>>, stream: Res<MeshStream>) {
     let Some(mut marks) = marks else { return };
     if !marks.dirty {
@@ -665,7 +702,13 @@ fn present(marks: Option<ResMut<SkidMarks>>, stream: Res<MeshStream>) {
     let start = std::time::Instant::now();
     marks.dirty = false;
     if let Some(layout) = &marks.layout {
-        stream.write(marks.mesh.id(), |bytes| marks.pack(layout, bytes));
+        let layout = layout.clone();
+        for run in marks.changes() {
+            let first = (run.start * SLOT) as u32;
+            stream.write_at(marks.mesh.id(), first, layout.stride, |bytes| {
+                marks.pack_strips(&layout, run, bytes)
+            });
+        }
         stream.sort_centre(marks.entity, marks.sort_centre());
     }
     super::ground_effect_assets::charge(super::ground_effect_assets::SKID, start);
@@ -866,6 +909,44 @@ mod tests {
         assert_eq!(bytes, streamed.create_packed_vertex_buffer_data());
         let built = marks.build().compute_aabb().map(|a| Vec3::from(a.center));
         assert_eq!(Some(marks.sort_centre()), built);
+    }
+
+    /// Writing only the changed strip runs over the previous bytes gives the
+    /// whole packed buffer (F592).
+    #[test]
+    fn changed_strip_runs_rebuild_the_whole_buffer() {
+        let mut marks = SkidMarks::new(profile());
+        marks.heads.resize(2, [None; 4]);
+        let layout = VertexLayout::of(&marks.streamed());
+        let mut gpu = Vec::new();
+        let apply = |marks: &mut SkidMarks, gpu: &mut Vec<u8>| {
+            let runs = marks.changes();
+            for run in runs {
+                let mut part = Vec::new();
+                marks.pack_strips(&layout, run.clone(), &mut part);
+                let at = run.start * SLOT * layout.stride;
+                if gpu.len() < at + part.len() {
+                    gpu.resize(at + part.len(), 0);
+                }
+                gpu[at..at + part.len()].copy_from_slice(&part);
+            }
+            let mut whole = Vec::new();
+            marks.pack(&layout, &mut whole);
+            assert_eq!(*gpu, whole);
+        };
+        apply(&mut marks, &mut gpu);
+        for step in 0..120 {
+            let z = step as f32 * 0.15;
+            marks.advance(0, 0, &wheel(b"STDR", 3.0, 0., z));
+            marks.advance(1, 2, &wheel(b"STDR", 3.0, 0., 40. + z * 1.3));
+            if step % 37 == 36 {
+                marks.end(0, 0);
+            }
+            marks.maintain();
+            apply(&mut marks, &mut gpu);
+        }
+        marks.clear();
+        apply(&mut marks, &mut gpu);
     }
 
     #[test]

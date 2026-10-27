@@ -42,10 +42,14 @@ use std::{
 /// Vertex bytes written this frame, handed from the main world to the render
 /// world at extraction. Both sides keep their buffers, so after the first
 /// frames nothing is allocated.
+/// One write: the mesh, its bytes, and for a part of the buffer its first
+/// vertex and stride.
+type Write = (AssetId<Mesh>, Range<usize>, Option<(u32, usize)>);
+
 #[derive(Default)]
 struct Writes {
     bytes: Vec<u8>,
-    meshes: Vec<(AssetId<Mesh>, Range<usize>)>,
+    meshes: Vec<Write>,
     /// Local-space transparent sort centres by main-world entity.
     centres: Vec<(Entity, Vec3)>,
 }
@@ -72,7 +76,25 @@ impl MeshStream {
         let start = writes.bytes.len();
         fill(&mut writes.bytes);
         let end = writes.bytes.len();
-        writes.meshes.push((mesh, start..end));
+        writes.meshes.push((mesh, start..end, None));
+    }
+
+    /// Queue part of `mesh`'s vertex buffer from vertex `first`: `fill`
+    /// appends whole packed vertices of `stride` bytes. The rest of the
+    /// buffer keeps what was written before (Bevy's slab allocator copies a
+    /// slab's contents when it grows it) (F592).
+    pub(crate) fn write_at(
+        &self,
+        mesh: AssetId<Mesh>,
+        first: u32,
+        stride: usize,
+        fill: impl FnOnce(&mut Vec<u8>),
+    ) {
+        let mut writes = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let start = writes.bytes.len();
+        fill(&mut writes.bytes);
+        let end = writes.bytes.len();
+        writes.meshes.push((mesh, start..end, Some((first, stride))));
     }
 
     /// Sort the alpha-blended `entity` as if its mesh asset had just been
@@ -96,7 +118,7 @@ impl MeshStream {
     #[cfg(test)]
     pub(crate) fn queued(&self, mesh: AssetId<Mesh>) -> Option<Vec<u8>> {
         let writes = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, range) = writes.meshes.iter().rev().find(|(id, _)| *id == mesh)?;
+        let (_, range, _) = writes.meshes.iter().rev().find(|(id, ..)| *id == mesh)?;
         Some(writes.bytes[range.clone()].to_vec())
     }
 }
@@ -137,18 +159,31 @@ fn extract(main: Extract<Option<Res<MeshStream>>>, mut render: ResMut<RenderWrit
 /// After Bevy (re)allocated this frame's extracted meshes, so a mesh that was
 /// also re-extracted keeps the streamed bytes (queue writes apply in order).
 fn upload(writes: Res<RenderWrites>, allocator: Res<MeshAllocator>, queue: Res<RenderQueue>) {
-    for (mesh, range) in &writes.0.meshes {
+    for (mesh, range, at) in &writes.0.meshes {
         // Not allocated yet (first frame of a new asset): its own data is drawn.
         let Some(slice) = allocator.mesh_vertex_slice(mesh) else {
             continue;
         };
         let bytes = &writes.0.bytes[range.clone()];
         let vertices = slice.range.end - slice.range.start;
-        if vertices == 0 || !bytes.len().is_multiple_of(vertices as usize) {
-            continue;
-        }
-        let stride = (bytes.len() / vertices as usize) as u64;
-        queue.write_buffer(slice.buffer, slice.range.start as u64 * stride, bytes);
+        let (first, stride) = match *at {
+            Some((first, stride)) => {
+                if stride == 0
+                    || !bytes.len().is_multiple_of(stride)
+                    || first as usize + bytes.len() / stride > vertices as usize
+                {
+                    continue;
+                }
+                (u64::from(first), stride as u64)
+            }
+            None => {
+                if vertices == 0 || !bytes.len().is_multiple_of(vertices as usize) {
+                    continue;
+                }
+                (0, (bytes.len() / vertices as usize) as u64)
+            }
+        };
+        queue.write_buffer(slice.buffer, (u64::from(slice.range.start) + first) * stride, bytes);
     }
 }
 
