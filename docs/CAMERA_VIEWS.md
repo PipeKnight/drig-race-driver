@@ -137,6 +137,22 @@ The live runs never started the spin hold, so it was proven on a deterministic s
 - **Result** (`local/cam/spin/compare_scene.py`, port `replay_live_trace` on Clock::Frame): the hold arms at row 429, starts at 431, re-arms at 442, restarts at 444 and is cut to 1.2 s at 445 while still spinning, as the rules predict. Envelope time and blend equal the original's to 2.4e-7 and 3e-8 over all 741 rows; the lag to 1e-6; through the impact (rows 429–520, knock up to 0.65 m) the eye agrees to 0.04 mm and the direction to 0.001°. The only larger difference is the start at rest (rows 0–26, at most 92 mm, decaying): the harness starts from a freshly constructed record, the port from its reset.
 - Tests: `spin_hold_matches_the_emulated_original_on_the_spin_scene` (the scene's |ω'| through `spin_step`, 11 checkpoints), `knock_matches_the_emulated_dead_stop` (the harness's dead-stop vector).
 
+### Final per-view comparison with the F470 captures [V, 27 October 2026]
+
+After F612, F613 and F618 every view of the three F470 runs was replayed with the final code (`camera::tests::replay_live_trace` on `Clock::Frame`, missed camera frames filled; `local/cam/live/compare3.py RUN 6` with SINGLE=1: rows one world step apart, the bumper synced to 3 cm and the view's own record updated). Evidence: worktree camera-dynamics-11a55d `local/cam/live/run{A,B,C}.port6.tsv`.
+
+| view | run C (CM02, with car +0x10): eye | direction | runs A / B (CM01): eye p50 | direction p50 |
+|---|---|---|---|---|
+| chase_close (n 912) | p50 0.53 mm, p99 291 mm | p50 0.004°, p99 0.15° | 37 / 38 mm | 0.34° / 0.35° |
+| chase_far (n 929) | p50 0.51 mm, p99 56 mm | p50 0.004°, p99 0.12° | 37 / 38 mm | 0.31° / 0.32° |
+| bumper (n 946) | p50 0.005 mm, p99 0.46 mm | p99 0.016° | 11 / 12 mm | 0.37° / 0.37° |
+| bonnet (n 943) | p50 0.18 mm, p99 1.05 mm | p99 0.12° | 7.7 / 7.5 mm | 0.36° / 0.37° |
+| head-cam (n 936) | p50 0.018 mm, p99 1.43 mm | p99 0.05° | 6.2 / 6.1 mm | 0.38° / 0.40° |
+
+- Run C is the reference: every view matches the original to about a millimetre and a twentieth of a degree on single-frame rows. The chase tail (2.5 % of rows, up to one frame of travel) is the capture reading the record a frame apart from the pose (F612), not the camera.
+- Runs A and B lack car +0x10 (the chassis-motion matrix, CM01 captures), so even the rigid bumper is off by its sway (11 mm, 0.37°). They do not test the camera further.
+- Not covered by any capture: a spin hold or a knock, a Change View blend, the look input, the head-cam at another frame rate, the cockpit's picture. These are proven only against the emulated original (§2) and are listed in §4 "Live captures still needed".
+
 ### Mounted movement [D, 0x822510]
 
 This runs only when `movementSpeed ≠ 0`:
@@ -342,6 +358,13 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
 - Cockpit rendering (F618): the cockpit, without its driver, steering-wheel turn, displays, mirror image and environment map; not yet compared with the original's picture.
 - Camera determinism: without `--render-fixed-step` a capture's chase views depend on how ticks fall into rendered frames (the chase steps once per rendered frame with dt = ticks · 0.016 s), so two runs differ by sub-pixel offsets [V, 27 October 2026].
 - The chase, Mounted and head views were compared with the running original in F470 (section 2, "Live comparison"); the FOV values match the records. The head dynamics were ported in F472 from the image and checked against the same run (§2 Head). The spin hold and the knock are proven on a deterministic scene against the emulated original (§2 Spin hold scene), not live. Open: the head-cam at a different frame rate and its spring state directly (next capture, below).
+- **Live captures still needed** (camera series end, 27 October 2026; launching the original needs the owner's go). Each with car +0x10 (CM02) and the record read in the same frame as the pose:
+  1. head-cam frame rate: the head-cam at a vsync 60 fps and unlocked (about 165 fps), braking stop and kerb strike, with the head spring state (below, "Next head-cam capture"). Checks `Clock::Fps` and the 1.6× stiffness;
+  2. look input in every view (below, "Look capture");
+  3. Change View: presses through all five views at speed and at rest, recording manager +0x4FC..+0x520 (tracker active, from/to, duration, lift, output record) and +0x128 per frame. Checks the blend, the lift over the real `CAR_` box and the open frame order;
+  4. impact envelopes live: a handbrake spin and a hard wall impact in chase_close/chase_far, recording object +0x220 (spin blend), +0x230..+0x23C (held forward) and the knock state. Checks the spin hold and the knock outside emulation;
+  5. own car picture: screenshots of the original in bumper, bonnet and head-cam at a fixed spot (the grid slot), for an image comparison of the hidden car, the hood and the cockpit;
+  6. a rollover in the bonnet view: the upside-down eye fix (slot 12) before porting it.
 - **Next head-cam capture** (needs a live run; not done in F472). Record per view record, every camera frame (sample on each change of record +0xF0, or log +0xF0 with the target state): record +0x000..+0x1BF (adds the head spring +0x160..+0x1BF: last input +0x170, acceleration +0x180, offset +0x190, velocity +0x1A0, besides the body +0x110..+0x14F); object +0x170..+0x188 and +0x1F0..+0x208 (spring parameters as loaded), +0x244 (headBuffeting), +0x284 (wind amplitude), +0xD0 and +0x2A0 (transition), record +0xD8/+0xDC/+0xE4/+0xE8 (look). Run once unlocked and once at a vsync 60 fps to show the frame-rate dependence, with a braking stop and a kerb strike on the head-cam.
 - **Look capture** (F499, needs a live run): the controller's +0x1C..+0x1F bytes during a race (controller `[[car+0x90]+0x2250]` per 0x584842), and per frame chase record +0xA4/+0xA8, bumper/bonnet +0xB0, head +0xD8/+0xDC/+0xE4/+0xE8/+0xF4 with the eye and quaternion while holding Delete, then PageDown, then the pad's right stick, once at a standstill and once above 5 m/s, in each view and while looking back.
 - Renders of 2026-10-17 (main checkout `local/cameras/renders/`) showed the bonnet view without a visible hood; the F470 model-frame mount fixed it (F618 renders show the hood).
