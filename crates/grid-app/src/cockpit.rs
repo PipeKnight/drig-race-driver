@@ -41,6 +41,8 @@ pub struct Cockpit {
     pub anchor: Mat4,
     /// The steering wheel, when the cockpit and its "Steering" clip have one.
     pub wheel: Option<Wheel>,
+    /// The dash displays (docs/COCKPIT.md "Gauges").
+    pub dash: crate::dash::Dash,
 }
 
 /// The interior "Steering" clip and the steering wheel's frame
@@ -127,6 +129,7 @@ pub fn install(app: &mut App) {
             None => warn!("GRID_MIRROR: expected off or WIDTHxHEIGHT[/FRAMES], got {value:?}"),
         }
     }
+    crate::dash::install(app);
     app.insert_resource(mirror)
         .add_systems(Update, (create_mirror, place_mirror).chain().after(crate::drive_present))
         .add_systems(Update, (attach_wheel, turn_wheel).chain().before(crate::drive_present))
@@ -331,9 +334,8 @@ pub struct InteriorPart;
 
 /// Appends the cockpit of the player's model `stem` to `car` (material and
 /// texture keys under `car0/interior/`), placed by `anchor` like the body's
-/// parts. Shader groups other than interior.fx, interior_alpha.fx and
-/// interior_windscreen.fx (the LCD and motec displays, the mirror) are not
-/// drawn yet.
+/// parts. Draws of other shader groups than interior.fx, interior_alpha.fx,
+/// interior_windscreen.fx, mirror.fx, lcd_text.fx and motec.fx are skipped.
 pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Cockpit, Box<dyn Error>> {
     let file = |stem: &str, ext: &str| root.join(format!("interiors/{stem}/int_{stem}.{ext}"));
     let stem = if file(stem, "pssg").is_file() { stem } else { "n12" };
@@ -342,6 +344,8 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
     let sources = mesh::read_static_meshes(&tree)?;
     let draws = scene::read_static_draws(&tree, &sources)?;
     let mut wheel = steering_wheel(root, stem, &tree, anchor)?;
+    let xml = std::fs::read_to_string(file(stem, "xml"))?;
+    let dash = crate::dash::prepare(root, &xml, &tree, &draws)?;
     let mut groups = BTreeMap::new();
     for i in (0..tree.nodes.len()).filter(|&i| tree.name(i) == b"SHADERINSTANCE") {
         groups.insert(tree.string(i, b"id")?, tree.string(i, b"shaderGroup")?);
@@ -361,6 +365,8 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
             b"interior.fx" => "",
             b"interior_alpha.fx" => "alpha/",
             b"interior_windscreen.fx" => "glass/",
+            b"lcd_text.fx" => "lcd/",
+            b"motec.fx" => "motec/",
             b"mirror.fx" => "mirror/",
             _ => {
                 skipped += 1;
@@ -421,7 +427,7 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
     if bindings.values().any(|key| !images.contains_key(key)) {
         return Err("cockpit diffuse texture unresolved".into());
     }
-    let active = interior::read_active_nodes(&std::fs::read_to_string(file(stem, "xml"))?)?;
+    let active = interior::read_active_nodes(&xml)?;
     let active: Vec<String> = active.iter().map(|n| n.strip_prefix("x0_").unwrap_or(n).to_string()).collect();
     let wheel = wheel.map(|(w, _, _)| w).filter(|w| !w.parts.is_empty());
     println!(
@@ -435,16 +441,16 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
     car.parts.extend(parts);
     car.bindings.extend(bindings);
     car.textures.extend(images);
-    Ok(Cockpit { active, anchor, wheel })
+    Ok(Cockpit { active, anchor, wheel, dash })
 }
 
 /// The first `kind` element whose id is `id`.
-fn named(tree: &pssg::Tree, kind: &[u8], id: &[u8]) -> Option<usize> {
+pub(crate) fn named(tree: &pssg::Tree, kind: &[u8], id: &[u8]) -> Option<usize> {
     (0..tree.nodes.len()).find(|&i| tree.name(i) == kind && tree.string(i, b"id").ok() == Some(id))
 }
 
 /// `node` is `ancestor` or below it.
-fn descends(tree: &pssg::Tree, mut node: usize, ancestor: usize) -> bool {
+pub(crate) fn descends(tree: &pssg::Tree, mut node: usize, ancestor: usize) -> bool {
     loop {
         if node == ancestor {
             return true;

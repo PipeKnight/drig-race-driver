@@ -141,3 +141,81 @@ The cockpit's wheel is not turned by a computed angle. It is an animation clip s
 Image proof (fixed-step renders against F625's):
 - chase_far, bonnet and bumper are 0 px different. chase_close is 0 px on a rerun; its first run differed in one pixel by 6, which the rerun showed to be run-to-run noise.
 - In the head-cam, `--steering 1` (the port's controls: positive to the left) turns the wheel 90° counter-clockwise and `--steering -1` 90° clockwise. Renders: `local/cam/render/wheel`, `wheel_s-1`, `wheel_s1`.
+
+## Gauges
+
+### What the original does [D]
+
+Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/gauges/findings.txt` (with the motec, lcd and interior shader disassembly).
+
+Files and parser:
+- The `<displays type=…>` blocks of `int_<stem>.xml` are read by `interior_xml_parse` (0xA13AC0).
+- Types: `analog` (0xA124E0), `analog_dummy` (0xA12A50), `digital` (0xA12770), `indicator_light` (0xA12BF0) and `motec` (0xA12E90). A display whose node is missing is not created.
+- Across 43 cockpits: digital 38, indicator 33, motec 23, analog 18, analog_dummy 19. n12, the fallback cockpit, has no xml and no displays.
+
+Updates:
+- Every frame `interior_update` (0x9FDE40) updates the displays while the interior is shown.
+- The race update feeds them through `interior_feed_displays` (0xA04DB0), but only when the frame's dt is not 0 (no feed while paused).
+
+The values:
+- tach = car +0x17A4 (the limiter, rad/s) × the engine audio's displayed ratio (0x414C70).
+- speed = car +0x1648 m/s × 0.62137121, so the xml factor 3.6 gives mph.
+- gear = car +0x196C as an integer (0 = N, 9 = R).
+- boost = the turbo model's value; drift_angle and drift_peak come from the drift scorer.
+
+Digital readouts (0x9E9DE0, 0x99DAC0, 0x9D07F0):
+- n = trunc(v · factor), and the gear goes in as an integer directly.
+- The text is itoa(n), cut to the leftmost `num_chars` characters and right-aligned over leading zeros; '-' and any other character draw glyph 0.
+- The glyphs come from a simple font: `simplefonts/<font>_font.xml` and a 32 × 320 strip in `simple_fonts.pssg`. The strip is stored bottom-up; read upright, glyph 0 is at the top, and the gear fonts read N, 1–8, R.
+- The texture is double-buffered (`digital_display_update` (0x99DAE0) uploads the other one), so a readout shows the previous feed.
+- lcd_text.fx draws the readout's alpha in dark segments (EmissiveMapScale 0 by day). The gear uses an emissive interior.fx variant: TEmissiveMap × EmissiveMapScale 1.0 × EmissiveFactor.
+
+Motec bars (`motec_set_value` (0x99DDC0), motec.fx):
+- AlphaRef = (v − min_value) · ((max_alpha − min_alpha) / 255) / (max_value − min_value) · factor + min_alpha / 255.
+- Every texel whose TAlphaMaskMap value is at most AlphaRef shows the "_2" maps, the lit bars.
+
+Indicator lights (`indicator_light_set_value` (0x99DC90)):
+- x = factor · v; ScrollU = shift (default 0.5) when cond_min ≤ x ≤ cond_max, else 0.
+- ScrollU moves every texture lookup, so the light shows the other half of its maps. The glow is that half of the emissive map; the diffuse halves are nearly alike [V].
+
+Needles:
+- `analog_needle_set_value` (0x9D03D0) turns the node about its local Z by clamp(factor · v · sweep / (max − min), 0, sweep), where sweep = acos(Y · Y_max) of the node and its `_max` node, or 2π minus that with `long_way`.
+- `analog_dummy_update` (0x9D0920) rests at the `_max` pose and wobbles by 2π · deviation · sin(2π · speed · t).
+
+Backlight (`interior_set_backlight` (0x9FE6A0)):
+- The shaders listed in `backlight_shaders` get EmissiveMapScale 0.3 while the player's headlights are on, and their file value (0 for Lacetti) otherwise.
+- 0.3 applies whenever `emissive_scale` is present, whatever its text; without it the default is 0.15.
+
+EmissiveFactor is never set by the code. Its constant-table default is 2.7 [I: whether that default is uploaded].
+
+### The port (`dash.rs`)
+
+- `grid_formats::interior` reads the displays, the backlight list and simple fonts.
+- `pssg::read_tree` keeps `TEXTUREIMAGE` as raw data: `simple_fonts.pssg` uses that older layout. A sample of 120 shipped PSSG files had no other TEXTUREIMAGE node.
+- The cockpit now draws its lcd_text.fx and motec.fx draws. Lacetti: 49 parts, none skipped.
+- `dash::prepare` (at load) finds each display's parts, decodes the motec maps, the light's emissive map and the font strips.
+- `attach` gives each display a copy of its part's material (the car's material path, no new shading):
+  - lcd: black base with the readout as alpha-blended base texture;
+  - gear: black base with the readout as emissive texture × 2.7;
+  - motec: the bar composite as base texture;
+  - lights: their emissive map × 2.7.
+- `feed`, before `drive_present`, runs only while the cockpit is shown and the race runs:
+  - digital readouts one feed late; the motec composite redrawn when the lit mask level changes; ScrollU as `uv_transform`;
+  - needle and dummy parts rebuilt like the steering wheel.
+- Values:
+  - speed and gear as the original;
+  - tach from car +0x1894 [I], the engine speed the HUD also shows, because 0x414C70 (the audio's displayed speed) is not ported;
+  - boost, drift_angle and drift_peak are fed 0 (not ported).
+- Backlight: not ported. By day the original's backlight shaders have no emissive, as the port draws them. At night (headlights on) they should glow at 0.3.
+
+Checks:
+- `dash::tests::readouts_follow_0x9d07f0`: leading zeros, overflow and '-'.
+- `shipped_needles_sweep_to_their_max_nodes`: on 350, cam, gto, ply, rx7, s15 and sky, the turned Y axis reaches the `_max` node's within 2e-3.
+- `interior::tests::displays_backlight_and_fonts_are_read`.
+- Renders (Lacetti):
+  - at rest: gear "1" in red, "000", the idle bars;
+  - after 600 ticks at full throttle: gear "5", "133" (the HUD shows 214 km/h = 133 mph), the bars at about three quarters, shift lights 1–3 lit and the limit light off.
+  - chase_close, chase_far, bonnet and bumper: 0 px against F627.
+- Render (Nissan 350Z, `--car 350`, 10 displays: 2 analog, 8 analog_dummy): at rest the speed needle is at 0 and the tach at idle; after 500 ticks at full throttle the speedometer reads about 140 mph (HUD 225 km/h) and the tach about 6 krpm.
+
+Not verified: the digit orientation against the original's screen (font strip order [I]) and EmissiveFactor.

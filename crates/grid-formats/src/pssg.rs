@@ -156,6 +156,7 @@ pub fn read_tree(bytes: &[u8]) -> Result<Tree<'_>> {
                     | b"RENDERINTERFACEBOUNDBUFFERED"
                     | b"SHADERINPUT"
                     | b"TEXTUREIMAGEBLOCKDATA"
+                    | b"TEXTUREIMAGE"
                     | b"TRANSFORM"
                     | b"TEMPLATETRANSFORM"
                     | b"NEANIMKEYS"

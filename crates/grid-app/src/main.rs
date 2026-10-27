@@ -34,6 +34,7 @@ mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
 mod damage_hud;
+mod dash;
 mod damage_parts;
 mod drift_event;
 mod dynamic_props;
