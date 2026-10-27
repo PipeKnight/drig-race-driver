@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F605](log/F0605.md) | 2026-10-27 | Playable f1e871287420 with F593-F603 and portable copy; APKs deferred |
 | [F604](log/F0604.md) | 2026-10-27 | Android pad rumble and phone vibration from the GameFFB task |
 | [F603](log/F0603.md) | 2026-10-27 | Phones without BC: OSD textures made before the upload path was chosen are converted; desktop check with BC off the device |
 | [F602](log/F0602.md) | 2026-10-27 | Force feedback port: GameFFB, DirectInput wheel input and force, XInput rumble |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F548](log/F0548.md) | 2026-10-22 | Floating tyre report: not reproduced, diagnostics |
 | [F547](log/F0547.md) | 2026-10-21 | Playable 945575e57651 with the cheaper tick and parking (F546), portable copy and APKs 6087fbcafa30 |
 | [F546](log/F0546.md) | 2026-10-21 | Physics tick cost and parking |
-| [F545](log/F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
