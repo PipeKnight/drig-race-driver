@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F621](F0621.md) | 2026-10-27 | Owner request: PC graphics options as in the original, later |
 | [F620](F0620.md) | 2026-10-27 | AI car wedged against Washington tyre stacks: stuck retire requests removal |
 | [F619](F0619.md) | 2026-10-27 | Camera: every view against the F470 captures with the final code; live captures still needed |
 | [F618](F0618.md) | 2026-10-27 | Camera: the player's cockpit in the head-cam, no car in the bumper views |
