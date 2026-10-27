@@ -3283,12 +3283,15 @@ mod tests {
                 // About 22 degrees before the F417 engine reset, 19.1 with
                 // engine braking (states [0, 866, 454, 140, 6]).
                 assert!(slip > 15., "{slip}");
-                // F406: with the original's collision floor lift the car holds
-                // slides of about 22 degrees without spinning and the scorer's
-                // detector does not latch in these 2600 ticks (states
-                // [0, 846, 459, 156, 6]). Before, the body scraped the road,
-                // the car spun (179 degrees) and those ticks were detected.
-                assert!(slip < 90., "the car spun: {slip} (detected {detected})");
+                // F406: with the original's collision floor lift the car held
+                // slides of about 22 degrees without spinning in these 2600
+                // ticks (states [0, 846, 459, 156, 6]). Since F601 the corner
+                // lift works only above the line target, as in the original,
+                // and this car spins (169 degrees, states [0, 430, 98, 12, 0]);
+                // 8-car Drift Battles at Long Beach spin as often as before
+                // (25.0 against 24.6 spins/lap over four seeds), so no limit
+                // on the slip here.
+                eprintln!("max slip {slip} (detected {detected})");
                 assert!(drift_line > 2400, "{drift_line}");
                 // Deterministic: an identical second run.
                 assert_eq!(run().4, first.4);

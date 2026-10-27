@@ -4076,13 +4076,20 @@ impl AiDriver {
             } else {
                 1.
             };
-            let corner = remap(
-                self.curvature.abs(),
-                p.corner_lift[0],
-                p.corner_lift[1],
-                1.,
-                p.th_corner_lift_min,
-            );
+            // The corner lift (0x77A940) works only above the brake line's
+            // target (controller +0x8, written by 0x7886C0): at or below it
+            // the bend does not lift the throttle.
+            let corner = if speed > self.lines.target {
+                remap(
+                    self.curvature.abs(),
+                    p.corner_lift[0],
+                    p.corner_lift[1],
+                    1.,
+                    p.th_corner_lift_min,
+                )
+            } else {
+                1.
+            };
             // Follow throttle (0x77A630).
             let [
                 small,

@@ -297,3 +297,33 @@ grid slots 2–6, 5–9 s after the go (Race Day, Touring Cars, Donington GP, gr
 the original's min-space move pushes a car past the racing limit at the car as the port's
 does. Breakpoint logging at 0x799630 entry (ECX test object, view = [arg+0x18]: +0xE0,
 +0x1A0, +0x220..+0x234) and 0x795C00 return, read-only.
+
+## 10. La Source: the corner lift works only above the line target
+
+2026-10-27, Claude Code (drift-battle-ai). Static; the original was not run. Evidence (ignored,
+this worktree `local/corners2/`): `live.sh` (the §9 12-car runs with the prepush
+characteristics), `run.sh` and `matrix*.sh` (the §9 24-start matrix, with characteristics),
+`lead2.py`, port runs `base-s*`, `gate*-s*`, `m-*-s*`, logs `matrix.log`, `matrix2.log`.
+
+**Observation [V]:** Spa01 leader (live car 1) against the port's car 0, seed 0: both brake from
+54–55 m/s at the same place, with the same pedal (0.58 → 0.91), to 23.5 / 22.6 m/s. After the
+release the original's throttle is 0.6–1.0 through the hairpin (21–24.7 m/s). The port's sits
+at 0.2, `thCornerLiftMin`, and the car slows to 16.9 m/s without braking.
+
+**Static [V]:** 0x77A940 starts with `comiss [car state +0xD0], [ecx+8]; jbe → return 1`: the
+corner lift applies only while the speed is above controller +0x8. The governor 0x77A4C0 reads
+the same field as the active line's target (it subtracts `thBrakeLineSpeedDrop` from it), and
+0x7886C0 writes it from the request line's target (`[ebp+0x20]`) whenever the class data is
+valid. That is the port's `lines.target`. The port applied the lift at any speed; now only above
+the target.
+
+**Measured** (12-car Donington / Milan / Spa as §9, seeds 0–2, cars stalled within 30 s of the
+go; and the §9 matrix, 24 starts × seeds 0–5, now with `GRID_AI_CHARACTERISTICS`):
+
+| variant | live tracks, stalls in 3 seeds (Spa) | matrix lost cars | in 12-car starts | contacts |
+|---|---|---|---|---|
+| before (main 0947dd94) | 17 (13) | 220 | 83 | 178k |
+| corner-lift gate | 4 (0) | 203 | 80 | 172k |
+
+Spa leader at La Source: 22.0 m/s in seed 0 (original 20.9; before 16.4–16.6). The four stalls
+left are Donington (slot 4 in seeds 0–2, see the next section) and Milan car 10 at 27.6 s.

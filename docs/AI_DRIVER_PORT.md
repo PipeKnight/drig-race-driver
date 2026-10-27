@@ -46,7 +46,7 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
 7. Brake 0x78E8A0: line brake, follow brake, spin (> π/2) -> 1.
 8. Throttle 0x783180: previous brake -> 0; otherwise min of governor 0x77A4C0 (target
    vt − 1 while a line is active, held vt for hold_time after passing; 1/0.4/hold/0.1/0
-   bands; 4/s approach), follow 0x77A630, slide lift 0x77A880, corner lift 0x77A940,
+   bands; 4/s approach), follow 0x77A630, slide lift 0x77A880, corner lift 0x77A940 (only above the brake line's target),
    throttle_confidence.
 9. Steering 0x77AC50: (2.7·heading error + stAngVelFactor·yaw rate) / steering lock
    (vehicle +E54, 0.576 rad for the Lacetti), clamped ±1. Signs: the port works in the

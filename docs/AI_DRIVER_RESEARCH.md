@@ -295,7 +295,8 @@ car's **brake** statistics table (grip = car state +0x144):
   e > 1 → 0. Approach `cur + clamp(dt·thTargetMoveSpeed(4)·(goal−cur), ±|goal−cur|)`.
 - Follow 0x77A630 (thFollow*), slide lift 0x77A880 (|slip| 0.2→0.6 rad →
   1→0.4 above 5 m/s), corner lift 0x77A940 (|κ| 0.01→0.03 rad/m → 1→
-  thCornerLiftMin 0.2), request cap +0x7C = throttle_confidence (live 0.9606),
+  thCornerLiftMin 0.2, only while the speed is above controller +0x8, the brake line's target
+  that 0x7886C0 writes and the governor reads; FIRST_CORNER_LIVE §10), request cap +0x7C = throttle_confidence (live 0.9606),
   traction control 0x77AA10 (tc* vehicle params), start stall/rev 0x775BF0.
 
 ### 4.4 Brake (0x78E8A0 = max of sources, capped by request+0xA0)
