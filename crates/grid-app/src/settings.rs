@@ -265,6 +265,11 @@ pub struct Settings {
     /// them (docs/SPEECH_AUDIO_RESEARCH.md); older profiles have neither.
     pub opponent_drivers: Option<Vec<i32>>,
     pub teammate: Option<usize>,
+    /// `[game] audio_name`: the profile's audio name the race engineer says,
+    /// `M_01`…`M_100`, `F_01`…`F_55` or `N_01`…`N_42` (language ids
+    /// `commentary_name_*`), or `off` ("Disable Audio Name"). Default `M_01`
+    /// (docs/SPEECH_AUDIO_RESEARCH.md §18).
+    pub audio_name: Option<String>,
     /// `[game] points`: the event's points table by finishing position
     /// (career races), shown in the results' Points column.
     pub points: Option<Vec<i32>>,
@@ -496,6 +501,17 @@ impl Settings {
                 ("game", "teammate") => {
                     self.teammate =
                         Some(value.parse().map_err(|_| at("[game] teammate needs an opponent number".into()))?)
+                }
+                ("game", "audio_name") => {
+                    let name = value.trim();
+                    let valid = name == "off"
+                        || name.split_once('_').is_some_and(|(kind, n)| {
+                            matches!(kind, "M" | "F" | "N") && n.len() >= 2 && n.bytes().all(|b| b.is_ascii_digit())
+                        });
+                    if !valid {
+                        return Err(at("[game] audio_name needs M_nn, F_nn, N_nn or off".into()));
+                    }
+                    self.audio_name = Some(name.to_owned());
                 }
                 ("game", "series") => {
                     let name = value.to_ascii_lowercase();

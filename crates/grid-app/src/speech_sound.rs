@@ -156,13 +156,24 @@ impl Decodable for SpeechSource {
 pub(crate) fn list_files(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let profile = crate::settings::load(args)?;
     let root = crate::game_root(profile.root.clone())?;
-    for line in Rules::load(&root)?.playable_lines() {
+    let names = audio_name(&profile).map(speech::player_name_lines).into_iter().flatten();
+    for line in Rules::load(&root)?.playable_lines().into_iter().chain(names) {
         let path = line.path(std::path::Path::new(""), LANGUAGE);
         if root.join(&path).is_file() {
             println!("{}", path.to_string_lossy().replace('\\', "/"));
         }
     }
     Ok(())
+}
+
+/// The profile's audio name: `[game] audio_name`, `M_01` by default [I: the name of the
+/// owner's profile in the 2026-10-06 capture], `off` for none.
+pub(crate) fn audio_name(profile: &crate::settings::Settings) -> Option<&str> {
+    match profile.audio_name.as_deref() {
+        Some("off") => None,
+        Some(name) => Some(name),
+        None => Some("M_01"),
+    }
 }
 
 /// Loads the rules from `root`; without them the race runs silent of speech.
@@ -172,6 +183,7 @@ pub(crate) fn install(
     table: Option<Arc<Table>>,
     player_slot: usize,
     identities: Identities,
+    audio_name: Option<&str>,
 ) -> Result<(), String> {
     let rules = Arc::new(Rules::load(&root)?);
     app.add_audio_source::<SpeechSource>();
@@ -184,12 +196,14 @@ pub(crate) fn install(
     let lines = rules.messages.iter().filter(|m| rules.events[m.event].on).count();
     let mut manager = Manager::new(rules, SEED);
     manager.set_ai_names(identities.entries.iter().map(|i| i.name_file.clone()).collect());
+    manager.set_player_name(audio_name);
     let keys: Vec<String> = identities.entries.iter().map(|i| format!("{}/{}", i.key, i.team)).collect();
     println!(
-        "speech_audio version=1 event=drivers keys={} teammate={} teammate_number={}",
+        "speech_audio version=1 event=drivers keys={} teammate={} teammate_number={} audio_name={}",
         keys.join(","),
         identities.teammate.map_or(-1, |t| t as i64),
-        identities.teammate_number
+        identities.teammate_number,
+        audio_name.unwrap_or("off")
     );
     app.insert_resource(SpeechSound {
         root,

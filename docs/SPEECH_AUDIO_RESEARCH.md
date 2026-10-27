@@ -744,8 +744,8 @@ keeps them until the record is cleared again. So:
 ## 16. The port, part 2 step 5: the `namedAI` name phrase [O]
 
 **Arming (0x437F70).** After a line loads, `int(0, 100)` ≤ `linkedPhrasePercentage` arms a name:
-- nameToSay 0–2 arm the player-name phrases only while the profile has names (+0x609); the port
-  has none, so they stay unarmed (§3);
+- nameToSay 0–2 arm the player-name phrases only while the profile has names (+0x609); ported
+  in §18;
 - nameToSay 3 (`namedAI`): n = (int) `userData` (+0x78). It requires n > 0, n − 1 > 0 and
   n − 1 < the entry count (game interface vf 0x10). So the `AI_01_…` messages (entry 0, the
   player's slot) never name anyone. The game interface's vf 0xC gives entry n − 1's driver, and
@@ -837,3 +837,45 @@ publish.
   `lappedDriver`.
 - Render `local/speech-render/render-07`: the lines of render-06; only the end-of-race variation
   picks differ, as the rolls now see the lapping parameters.
+
+## 18. The port, part 3 step 2: the player-name phrases [O]
+
+**The audio name.** The profile keeps an audio name of two words, read through the speech
+manager's +0xC object at +0x28: the kind (0 male, 1 female, 2 nickname) and a number.
+`audio_name_format` (0x470880) writes it as `%c_%02d` (`M_01`, `F_55`, `N_42`; with a prefix
+`%s_%c_%02d`). The front end offers it as "Audio Name" (language ids
+`commentary_name_M_01` Aaron … `commentary_name_M_100` William, `commentary_name_F_01` Abigail …
+`F_55` Victoria, `commentary_name_N_01` Ace … `N_42` Wingnut) and as "Disable Audio Name" with a
+warning popup. Number 0 is no name.
+
+**Loading (0x465690, the manager's vtable entry at 0xCB78A0).**
+- Mode 1 builds `speech/<lang>/Names_Player/man/Man_` + `WD_`/`Hi_`/`Hello_` + the name; mode 2
+  (a race) builds `speech/<lang>/Names_Player/pit/Chief_` + `WD_`/`BL_`/`OK_` + the name, each with
+  `.raw` (strings at 0xCB3364 `BL_`, 0xCB336C `Hi_`, 0xCB3370 `WD_`, 0xCB0F74 `.raw`).
+- The three streams: +0x1D8 (`WD_`), +0x288 (`Hi_`/`BL_`) and +0x338 (`Hello_`/`OK_`). +0x608 marks
+  the paths built, +0x609 the streams loaded (all three ready, or one failed).
+- Number 0 sets +0x608 and +0x609 without building or loading anything.
+- [V] The 2026-10-06 race-load capture (docs/REFERENCE_DEPENDENCIES.md) read
+  `Names_Player/pit/Chief_BL_M_01`, `Chief_OK_M_01` and `Chief_WD_M_01`: a race uses mode 2, and
+  the owner's profile had `M_01`.
+
+**Arming (0x437F70).** After a line loads and `int(0, 100)` ≤ `linkedPhrasePercentage`: with +0x609
+set, nameToSay 0 (neutral) sets +0x3E4 (`OK_`), 1 (positive) +0x284 (`WD_`) and 2 (negative)
++0x334 (`BL_`), and the load returns; otherwise `namedAI` (§16).
+
+**Playing (0x42FFC0).** An armed flag (+0x284 first, then +0x334, then +0x3E4) and no line load
+error (+0x1D5): the name stream plays on group 14 and its flag clears. Pending and the silence base
+do not change, so the line plays on a later call, once the voice is free. Every stop (0x430350)
+clears the three flags.
+
+**The port.**
+- `Manager::set_player_name` takes the audio name and builds the three `Chief_` lines
+  (`speech::player_name_lines`); `try_start` arms the phrase, `playback` plays it before the line.
+- `[game] audio_name` (`M_nn`, `F_nn`, `N_nn` or `off`) in grid-app's settings. Default `M_01`
+  [I: the owner's profile in the capture; the port has no profile screen]. grid-app prints it in
+  `speech_audio … event=drivers … audio_name=`.
+- [I] A missing name file plays nothing, and the line follows at once. With number 0 the original
+  still arms a flag on an empty stream; what that plays is not established. The port's `off` arms
+  nothing (the roll is still drawn).
+- `grid-app --speech-files` lists the three `Chief_` files of the profile's audio name, so the APK
+  bundle lists carry `Chief_{OK,WD,BL}_M_01`.

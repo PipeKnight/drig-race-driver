@@ -3141,6 +3141,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     mix.clone(),
                     player_slot,
                     speech_identities(&root, &opponent_drivers, profile.teammate),
+                    speech_sound::audio_name(&profile),
                 )
             {
                 warn!("Speech unavailable; driving continues: {error}");

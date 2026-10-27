@@ -169,6 +169,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let table = Table::load(root)?;
     let mut manager = Manager::new(rules, SEED);
     manager.set_ai_names(ids.entries.iter().map(|i| i.name_file.clone()).collect());
+    manager.set_player_name(Some("M_01"));
     let mut collector = Collector::default();
     let mut mix = ModeMix::default();
     mix.set(audio_mix::START_LINE);
