@@ -495,6 +495,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G312](G0312.md) | 2026-10-27 | Allow the optional Reinhard display mode in ordinary interactive driving |
 | [G311](G0311.md) | 2026-10-27 | Exercise one finite source-guided forearm sweep with real Extract receipts |
 | [G310](G0310.md) | 2026-10-27 | Compare the grazing asphalt pilot with accepted Motion DLAA in motion |
 | [G309](G0309.md) | 2026-10-27 | Test a bounded grazing-angle asphalt reflection gain |

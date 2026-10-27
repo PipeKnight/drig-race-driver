@@ -2213,7 +2213,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
                 println!("--post-saturation 0..2: optional single-variable authored-grade diagnostic; enhanced only, temperature/tint unchanged, not combinable with track grade.");
-                println!("--tone-map agx|reinhard: enhanced main-view display diagnostic; absent/AgX preserve the current mode; Reinhard requires rendered authored-grade reference or bounded driving. Not original GRID grading.");
+                println!("--tone-map agx|reinhard: enhanced main-view display diagnostic; absent/AgX preserve the current mode; Reinhard requires authored-grade rendered reference/bounded driving or ordinary interactive driving. Not original GRID grading.");
                 println!("--temporal-centre X,Y: bounded diagnostic ROI centre; default tracks the car, requires a temporal audit.");
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
@@ -2329,13 +2329,17 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", event.log_line());
     }
     let bounded_tone_scene = if drive { drive_ticks.is_some() } else { reference };
+    let rendered_tone_scene = output.is_some() && bounded_tone_scene;
+    // Admit ordinary Window driving; other input/capture/clock validation
+    // remains independent.
+    let manual_tone_scene = drive && output.is_none() && drive_ticks.is_none() && !headless;
     let nondefault_tone_map = graphics.tone_map_override.is_some_and(|tone|
         tone != bevy::core_pipeline::tonemapping::Tonemapping::AgX);
     if (graphics.tone_map_override.is_some() && !graphics.enhanced())
-        || (nondefault_tone_map && (graphics.track_grade || output.is_none() || collision
-            || !bounded_tone_scene))
+        || (nondefault_tone_map && (graphics.track_grade || collision
+            || !(rendered_tone_scene || manual_tone_scene)))
     {
-        return Err("--tone-map requires enhanced graphics; nondefault modes require rendered authored-grade reference or bounded driving".into());
+        return Err("--tone-map requires enhanced graphics; nondefault modes require authored-grade rendered reference/bounded driving or ordinary interactive driving".into());
     }
     if graphics.post_saturation_override.is_some() && (!graphics.enhanced() || graphics.track_grade) {
         return Err("--post-saturation requires enhanced authored grade; do not combine with --grade track".into());
