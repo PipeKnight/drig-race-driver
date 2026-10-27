@@ -580,8 +580,16 @@ fn load_package(
         scene::read_draws(&tree, &sources, lod.as_bytes())?
     };
     let mut bindings = BTreeMap::new();
+    // A route's routesplit.pssg names the track's textures
+    // (`tracksplit.pssg#...`); append_route_split resolves them.
+    let mut shared = std::collections::BTreeSet::new();
     if track {
         for binding in material::read_texture_bindings(&tree)? {
+            if binding.sampler == b"TDiffuseAlphaMap"
+                && binding.container == Some(b"tracksplit.pssg".as_slice())
+            {
+                shared.insert(String::from_utf8(binding.texture.to_vec())?);
+            }
             if binding.sampler == b"TDiffuseAlphaMap"
                 && bindings
                     .insert(
@@ -686,7 +694,7 @@ fn load_package(
             }
             return Err(format!("unresolved diffuse material {:?}", part.material).into());
         };
-        if !textures.contains_key(name) {
+        if !textures.contains_key(name) && !shared.contains(name) {
             return Err(format!("missing diffuse texture: {name}").into());
         }
     }
@@ -742,6 +750,45 @@ fn append_land(
     }
     println!(
         "source_land appended=true draws={draws} source=land.pssg namespace=land physics=unchanged"
+    );
+    Ok(())
+}
+/// The route's own pieces (`route_N/routesplit.pssg`, docs/SKY.md section 8):
+/// on the street tracks the layout's road and kerbs (Washington route 0:
+/// 214 draws), on the circuits shadow proxies and a decal. Its diffuse maps
+/// are the track's (`tracksplit.pssg#...`), already in `car`.
+fn append_route_split(
+    root: &Path,
+    route: &Route,
+    model: &CarModel,
+    car: &mut Car,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file = route.file("routesplit.pssg");
+    if !root.join(&file).is_file() {
+        return Ok(());
+    }
+    let split = load_package(root, (route, model), "LOD0_", true, false, &file, false)?;
+    let draws = split.parts.len();
+    for mut part in split.parts {
+        part.name = format!("route/{}", part.name);
+        part.material = format!("route/{}", part.material);
+        car.parts.push(part);
+    }
+    for (name, texture) in split.bindings {
+        let texture = if split.textures.contains_key(&texture) {
+            format!("route/{texture}")
+        } else if car.textures.contains_key(&texture) {
+            texture
+        } else {
+            return Err(format!("{file}: missing shared diffuse texture {texture}").into());
+        };
+        car.bindings.insert(format!("route/{name}"), texture);
+    }
+    for (name, texture) in split.textures {
+        car.textures.insert(format!("route/{name}"), texture);
+    }
+    println!(
+        "source_route_split appended=true draws={draws} source={file} namespace=route physics=unchanged"
     );
     Ok(())
 }
@@ -2558,6 +2605,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             };
             field.car_model.push(m);
         }
+    }
+    if track && !collision {
+        append_route_split(&root, &route, &player_car, &mut car)?;
     }
     if track && !collision && graphics.enhanced() && graphics.source_land {
         append_land(&root, &route, &player_car, &mut car)?;
@@ -5215,6 +5265,56 @@ mod driving_tests {
         assert_ne!(reset, moving);
         app.update();
         assert_eq!(*app.world().get::<Transform>(part).unwrap(), reset);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_route_splits_resolve_on_every_route() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let model = CarModel::default();
+        let mut routes = 0;
+        let mut drawn = BTreeMap::new();
+        for region in ["europe", "japan", "usa"] {
+            for track in std::fs::read_dir(root.join("tracks").join(region)).unwrap() {
+                let track = track.unwrap().file_name().into_string().unwrap();
+                let mut track_car = None;
+                for r in 0..10 {
+                    let route = Route::new(&format!("tracks/{region}/{track}/route_{r}")).unwrap();
+                    if !root.join(route.file("routesplit.pssg")).is_file() {
+                        continue;
+                    }
+                    let car = track_car.get_or_insert_with(|| {
+                        let file = route.track_file("tracksplit.pssg");
+                        load_package(root, (&route, &model), "LOD0_", true, false, &file, false)
+                            .unwrap()
+                    });
+                    let mut car = Car {
+                        parts: Vec::new(),
+                        textures: car.textures.clone(),
+                        bindings: car.bindings.clone(),
+                        center: car.center,
+                        radius: car.radius,
+                        track: true,
+                        liveries: Vec::new(),
+                        shadow_bodies: Vec::new(),
+                    };
+                    append_route_split(root, &route, &model, &mut car)
+                        .unwrap_or_else(|e| panic!("{}: {e}", route.path()));
+                    for part in &car.parts {
+                        assert!(car.bindings.contains_key(&part.material), "{}", part.name);
+                    }
+                    drawn.insert(route.path().to_owned(), car.parts.len());
+                    routes += 1;
+                }
+            }
+        }
+        println!("route_split routes={routes} draws={drawn:?}");
+        assert_eq!(routes, 62);
+        // The missing Washington main straight (docs/SKY.md section 8) and a circuit's
+        // decals only (the grid boxes); the shadow proxies stay omitted.
+        assert_eq!(drawn["tracks/usa/washington/route_0"], 185);
+        assert_eq!(drawn["tracks/europe/donington/route_0"], 4);
     }
 
     #[test]

@@ -192,3 +192,30 @@ contact sheets `local/sky/sheet-horizon.png`, `sheet-lemans-day.png`, `pair-*.pn
   cloth is not simulated.
 - `land.pssg` is drawn only in enhanced, which stays limited to Donington.
 - Normal/reflection maps of the track_surface, track_surface_reflective and dxt5nm groups.
+
+## 8. The route's own road: `routesplit.pssg` (F607)
+
+The owner's Washington route 0 screenshot (2026-10-27) showed the main straight partly as the
+background colour. Cause [V]: every route folder ships `route_N/routesplit.pssg` (62 files) beside the
+track's `tracksplit.pssg`, and grid-app read only the tracksplit.
+
+| Routes | routesplit draws (colour) | What [D] |
+|---|---|---|
+| Washington 0–9 | 148–216 | the layout's road, kerbs, walls and grid markings |
+| Milan 0–5 | 208–412 | the same; Milan's start straight had no road at all |
+| Okutama 0–5 | 239–492 | the same (Okutama still stops in the entity reader) |
+| San Francisco 0–6 | 134–172 | the same |
+| Detroit 8/9 (stadium) | 11 | markings |
+| every other route with a split | 3–5 | grid boxes and start line (`decal.fx`) |
+
+Plus `batched_track.fx` shadow proxies in every split (Washington route 0: 29 of 214), which stay
+omitted as in section 4.1. The split has no textures: each binding is `tracksplit.pssg#NAME`.
+
+Port: `main.rs` `append_route_split` appends the split under the `route/` namespace on every track
+scene in every preset, with the diffuse maps resolved against the tracksplit's textures;
+`track_surface::read_source` adds its layered materials (Washington route 0: 180 draws) with the
+tracksplit's textures. Physics does not read it. The tracks without split files (Le Mans,
+Nürburgring, Spa, Haruna, Yokohama) are unchanged; Donington changes only by its grid boxes.
+
+Tests: `purchased_route_splits_resolve_on_every_route` (grid-app, all 62 routes) and the per-route
+loop in `purchased_surfaces_resolve_on_every_track`.
