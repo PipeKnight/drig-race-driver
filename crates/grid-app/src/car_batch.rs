@@ -17,6 +17,11 @@
 //! restart) rejoins. A deformed member mesh rebuilds its batch. Wheels and
 //! blended materials keep their own entities. Common build;
 //! `GRID_CAR_BATCH=0` keeps every part separate (comparisons).
+//!
+//! An opponent whose model has a low-detail file casts its shadow with a
+//! [`ShadowBody`], the model's coarsest level, as the original does
+//! (docs/CAR_LOD.md "Shadows"); its parts and batches cast none. The body
+//! sits on a layer only the sun takes casters from, and follows the car.
 use crate::static_batch::{ATTRIBUTES, MAX_VERTICES, Part, build, supported};
 use bevy::{
     asset::AssetEventSystems,
@@ -33,6 +38,8 @@ use std::collections::HashSet;
 
 /// The layer of batched parts: no camera or light draws it.
 const HIDDEN_LAYER: usize = 30;
+/// The layer of the shadow bodies: the sun casts from it, no camera draws it.
+const SHADOW_LAYER: usize = 29;
 /// Frames a part must be back in place before it rejoins its batch.
 const REJOIN_FRAMES: u32 = 30;
 /// A part this far (metres, or matrix units for the rotation) from its rest
@@ -63,6 +70,21 @@ pub fn install(app: &mut App) {
 /// A merged mesh of one car's parts of one material.
 #[derive(Component)]
 pub struct Batch;
+
+/// Opponent `car`'s shadow caster: its model's coarsest level.
+#[derive(Component)]
+pub struct ShadowBody {
+    pub car: usize,
+}
+
+pub fn shadow_layer() -> RenderLayers {
+    RenderLayers::layer(SHADOW_LAYER)
+}
+
+/// The sun's layers with shadow bodies: the default layer and theirs.
+pub fn sun_layers() -> RenderLayers {
+    RenderLayers::from_layers(&[0, SHADOW_LAYER])
+}
 
 /// A part that can be batched: its place in [`CarBatches`], so the per-frame
 /// check walks the parts in storage order.
@@ -96,6 +118,8 @@ struct Group {
     members: Vec<Member>,
     batches: Vec<Entity>,
     dirty: bool,
+    /// The car casts with its [`ShadowBody`]: parts and batches cast none.
+    shadow_body: bool,
 }
 
 #[derive(Resource, Default)]
@@ -103,6 +127,8 @@ struct CarBatches {
     groups: Vec<Group>,
     /// Per car: the (group, member) whose placement gives the car's pose.
     anchors: Vec<(usize, usize)>,
+    /// Cars with a [`ShadowBody`].
+    shadow_cars: HashSet<usize>,
     frames: u64,
     rebuilds: u64,
     /// Rebuilds for a deformed member mesh only, and the time of all.
@@ -140,6 +166,11 @@ type Placement = (
     Has<NotShadowCaster>,
     Has<VisibilityRange>,
 );
+type Body = (
+    Ref<'static, ShadowBody>,
+    &'static mut Transform,
+    &'static mut Visibility,
+);
 
 #[allow(clippy::too_many_arguments)]
 fn refresh(
@@ -148,11 +179,17 @@ fn refresh(
     added: Query<Candidate, NewPart>,
     parts: Query<Placement, Without<Batch>>,
     mut batches: Query<(&mut Transform, &mut Visibility, &Mesh3d, &mut Aabb), With<Batch>>,
+    mut bodies: Query<Body, (Without<Batch>, Without<Batchable>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<Assets<StandardMaterial>>,
     mut events: MessageReader<AssetEvent<Mesh>>,
 ) {
     let state = &mut *state;
+    for (body, ..) in &bodies {
+        if body.is_added() {
+            state.shadow_cars.insert(body.car);
+        }
+    }
     // New parts take their place from the next frame (their marker is
     // inserted by command).
     if register(
@@ -162,6 +199,7 @@ fn refresh(
         &materials,
         &mut state.groups,
         &mut state.anchors,
+        &state.shadow_cars,
     ) || state.groups.is_empty()
     {
         return;
@@ -199,7 +237,7 @@ fn refresh(
         let ours = layers.is_some_and(|l| *l == hidden);
         member.placed = *visibility != Visibility::Hidden
             && (layers.is_none() || ours)
-            && (!shadowless || ours)
+            && (!shadowless || ours || group.shadow_body)
             && !ranged
             && material.0 == group.material
             && mesh.0 == member.mesh
@@ -252,9 +290,14 @@ fn refresh(
                         .entity(member.entity)
                         .insert((hidden.clone(), NotShadowCaster));
                 } else if parts.get(member.entity).is_ok_and(|p| p.5 == Some(&hidden)) {
-                    commands
-                        .entity(member.entity)
-                        .remove::<(RenderLayers, NotShadowCaster)>();
+                    // A car with a shadow body keeps its parts shadowless.
+                    if group.shadow_body {
+                        commands.entity(member.entity).remove::<RenderLayers>();
+                    } else {
+                        commands
+                            .entity(member.entity)
+                            .remove::<(RenderLayers, NotShadowCaster)>();
+                    }
                 }
             } else if batched && modified.contains(&member.mesh.id()) {
                 reshaped |= !group.dirty;
@@ -278,6 +321,20 @@ fn refresh(
                 }
             }
         }
+    }
+    // Shadow bodies follow their car while any of its parts is in place.
+    for (body, mut transform, mut visibility) in &mut bodies {
+        let Some(slot) = state.groups.iter().find(|g| g.car == body.car).map(|g| g.slot) else {
+            continue;
+        };
+        if let Some(pose) = poses[slot] {
+            transform.set_if_neq(Transform::from_matrix(pose));
+        }
+        visibility.set_if_neq(if votes[slot][1] > 0 {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
     // The next anchor of a held car: its next part, in registration order.
     for (slot, _) in held.iter().enumerate().filter(|(_, h)| **h) {
@@ -320,6 +377,7 @@ fn register(
     materials: &Assets<StandardMaterial>,
     groups: &mut Vec<Group>,
     anchors: &mut Vec<(usize, usize)>,
+    shadow_cars: &HashSet<usize>,
 ) -> bool {
     let before = groups.iter().map(|g| g.members.len()).sum::<usize>();
     for (entity, mesh, material, opponent, moving, special) in added {
@@ -329,6 +387,11 @@ fn register(
             _ => continue,
         };
         let (layers, shadowless, ranged, child, parent, facing, sidewall) = special;
+        // A car with a shadow body casts no shadow from its parts.
+        let shadow_body = opponent.is_some() && shadow_cars.contains(&car);
+        if shadow_body && !shadowless {
+            commands.entity(entity).insert(NotShadowCaster);
+        }
         if wheel.is_some()
             || layers
             || shadowless
@@ -404,6 +467,7 @@ fn register(
                     members: vec![member],
                     batches: Vec::new(),
                     dirty: true,
+                    shadow_body,
                 });
             }
         }
@@ -469,17 +533,19 @@ fn rebuild(
                 visibility.set_if_neq(Visibility::Inherited);
             }
             None => {
-                let entity = commands
-                    .spawn((
-                        Name::new(format!("car_batch/{}/{i}", group.car)),
-                        Mesh3d(meshes.add(mesh)),
-                        MeshMaterial3d(group.material.clone()),
-                        pose.map_or_else(Transform::default, Transform::from_matrix),
-                        bounds,
-                        Batch,
-                        NoAutoAabb,
-                    ))
-                    .id();
+                let mut entity = commands.spawn((
+                    Name::new(format!("car_batch/{}/{i}", group.car)),
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(group.material.clone()),
+                    pose.map_or_else(Transform::default, Transform::from_matrix),
+                    bounds,
+                    Batch,
+                    NoAutoAabb,
+                ));
+                if group.shadow_body {
+                    entity.insert(NotShadowCaster);
+                }
+                let entity = entity.id();
                 group.batches.push(entity);
             }
         }

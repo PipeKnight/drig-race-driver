@@ -197,6 +197,7 @@ mod tests {
                 BTreeMap::from([("car1/bmw_main_m1.tga".to_owned(), red)]),
                 BTreeMap::from([("car0/lac_main_m1.tga".to_owned(), medium)]),
             ],
+            shadow_bodies: Vec::new(),
         };
         let original = car.textures.clone();
         let banks = car.liveries.clone();

@@ -5,7 +5,7 @@ is a table in that script. Check here before writing a new document, and regener
 commit when you add or rename one. Current state: [PROJECT_LOG.md](../PROJECT_LOG.md); log entries:
 [log/INDEX.md](../log/INDEX.md); tools: [tools/README.md](../tools/README.md).
 
-Contents: [Project process, tooling and builds](#project-process-tooling-and-builds) · [Original reference, captures and owner sessions](#original-reference-captures-and-owner-sessions) · [Resource formats and data](#resource-formats-and-data) · [Audio](#audio) · [AI drivers](#ai-drivers) · [Events, race rules, career and series](#events-race-rules-career-and-series) · [Tracks and circuits](#tracks-and-circuits) · [Rendering and graphics](#rendering-and-graphics) · [Input, platforms and Android](#input-platforms-and-android) · [Damage and deformation](#damage-and-deformation) · [Collisions, contacts and the physical world](#collisions-contacts-and-the-physical-world) · [Vehicle physics: suspension, tyres, steering, drivetrain](#vehicle-physics-suspension-tyres-steering-drivetrain)
+Contents: [Project process, tooling and builds](#project-process-tooling-and-builds) · [Original reference, captures and owner sessions](#original-reference-captures-and-owner-sessions) · [Resource formats and data](#resource-formats-and-data) · [Audio](#audio) · [AI drivers](#ai-drivers) · [Events, race rules, career and series](#events-race-rules-career-and-series) · [Tracks and circuits](#tracks-and-circuits) · [Rendering and graphics](#rendering-and-graphics) · [Input, platforms and Android](#input-platforms-and-android) · [Damage and deformation](#damage-and-deformation) · [Collisions, contacts and the physical world](#collisions-contacts-and-the-physical-world) · [Vehicle physics: suspension, tyres, steering, drivetrain](#vehicle-physics-suspension-tyres-steering-drivetrain) · [Other](#other)
 
 ## Project process, tooling and builds
 
@@ -362,3 +362,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [WHEEL_ROTATION.md](WHEEL_ROTATION.md) Supplied wheel rotation contributions (F102) — `wheel_rotation::prepare` reproduces the active `9c1f60` operations preceding suspension/contact/tyre impulses.
 - [WHEEL_ROTATION_FILTERING.md](WHEEL_ROTATION_FILTERING.md) Wheel rotation quality, 30–300 FPS — This is graphics work in codex/grid-graphics, not a change to source vehicle dynamics.
 - [WHOLE_VEHICLE_DRIVER.md](WHOLE_VEHICLE_DRIVER.md) Complete selected original vehicle driver — F182 — The existing independently authored Rust driver now agrees with **one call to whole unchanged original `A03670`**, …
+
+## Other
+
+- [CAR_LOD.md](CAR_LOD.md) Car LOD selection and car shadow casters — How the original picks a level of detail for each car and which cars draw into the shadow maps.

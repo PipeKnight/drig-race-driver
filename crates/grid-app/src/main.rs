@@ -46,6 +46,7 @@ mod graphics;
 mod graphics_benchmark;
 mod perf_test;
 mod perf_timing;
+mod gpu_passes;
 #[cfg(feature = "profile")]
 mod span_profile;
 mod ground_detail;
@@ -134,6 +135,9 @@ struct Car {
     track: bool,
     /// Opponent livery textures (car k uses entry k-1), keyed like `textures`.
     liveries: Vec<BTreeMap<String, Vec<u8>>>,
+    /// Per field model: the opponents' shadow mesh, the model's coarsest
+    /// level in its rest frame (docs/CAR_LOD.md "Shadows").
+    shadow_bodies: Vec<Option<Mesh>>,
 }
 /// Material/texture key prefix of the field's car model `m` (0 = the
 /// player's model; `Field::models` order).
@@ -696,6 +700,7 @@ fn load_package(
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
         liveries: Vec::new(),
+        shadow_bodies: Vec::new(),
     };
     if objects {
         append_objects(root, route, &mut car)?;
@@ -1236,6 +1241,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
         liveries: Vec::new(),
+        shadow_bodies: Vec::new(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -1289,7 +1295,46 @@ fn append_car(
             .insert(format!("{prefix}{name}"), format!("{prefix}{texture}"));
     }
     car.parts.extend(source.parts);
+    if car.shadow_bodies.len() <= m {
+        car.shadow_bodies.resize(m + 1, None);
+    }
+    car.shadow_bodies[m] = shadow_body(root, model, anchor);
     Ok(())
+}
+/// An opponent's shadow caster as in the original (0x9CB5B0 pass 0x401): the
+/// model's coarsest level in `_lowLOD.pssg` (LOD5 `main_body`), merged in the
+/// rest frame of its parts (`anchor` times the draw matrix). None without a
+/// low file; that model keeps its parts' own shadows.
+fn shadow_body(root: &Path, model: &CarModel, anchor: Mat4) -> Option<Mesh> {
+    let bytes = read(&root.join(model.file("_lowLOD.pssg"))).ok()?;
+    let tree = pssg::read_tree(&bytes).ok()?;
+    let sources = mesh::read_meshes(&tree).ok()?;
+    let draws = (2..=5)
+        .rev()
+        .find_map(|n| scene::read_draws(&tree, &sources, format!("LOD{n}_").as_bytes()).ok())?;
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    for draw in &draws {
+        let base = positions.len() as u32;
+        let matrix = anchor * Mat4::from_cols_array(&draw.transform);
+        positions.extend(
+            sources[draw.source].positions[draw.vertices.clone()]
+                .iter()
+                .map(|p| matrix.transform_point3(Vec3::from_array(*p)).to_array()),
+        );
+        indices.extend(draw.indices.iter().map(|&i| base + u32::from(i)));
+    }
+    if indices.is_empty() {
+        return None;
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh.compute_smooth_normals();
+    Some(mesh)
 }
 /// Shipped high-detail liveries `livery_00..` of a model (Lacetti 10, BMW 13).
 fn livery_count(root: &Path, model: &CarModel) -> usize {
@@ -3108,6 +3153,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     asset_counts::install(&mut app);
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
+    if gpu_passes::enabled() {
+        gpu_passes::install(&mut app);
+    }
     mesh_stream::install(&mut app);
     if graphics.track_grade {
         track_grade::install(&mut app);
@@ -3596,6 +3644,32 @@ fn setup(
             }
         }
     }
+    // Opponents cast their shadow with their model's coarsest level, as in
+    // the original; car_batch poses it and drops the parts' own shadows
+    // (docs/CAR_LOD.md "Shadows").
+    let shadow_bodies = std::mem::take(&mut car.shadow_bodies);
+    let mut shadow_bodies_spawned = false;
+    if car_batch::enabled()
+        && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref())
+    {
+        let handles: Vec<Option<Handle<Mesh>>> =
+            shadow_bodies.into_iter().map(|m| m.map(|m| meshes.add(m))).collect();
+        let material = materials.add(StandardMaterial::default());
+        for k in 1..opponents.multi.cars.len() {
+            let Some(Some(mesh)) = handles.get(field.car_model[k]) else {
+                continue;
+            };
+            commands.spawn((
+                Name::new(format!("opponent{k} shadow body")),
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_matrix(Mat4::from_cols_array(&opponents.multi.cars[k].pose())),
+                car_batch::shadow_layer(),
+                car_batch::ShadowBody { car: k },
+            ));
+            shadow_bodies_spawned = true;
+        }
+    }
     if let Some(material) = material_handles.get("objects/start_lights").cloned()
         && start_light_images.iter().all(Option::is_some)
     {
@@ -3626,16 +3700,23 @@ fn setup(
             Transform::from_xyz(0.0, -0.05, 0.0),
         ));
     }
-    commands.spawn((
-        DirectionalLight {
-            illuminance: graphics.sun_illuminance(),
-            color: graphics.sun_colour(),
-            shadow_maps_enabled: true,
-            ..default()
-        },
-        graphics.sun_transform(),
-        graphics.cascades(),
-    ));
+    let sun = commands
+        .spawn((
+            DirectionalLight {
+                illuminance: graphics.sun_illuminance(),
+                color: graphics.sun_colour(),
+                shadow_maps_enabled: true,
+                ..default()
+            },
+            graphics.sun_transform(),
+            graphics.cascades(),
+        ))
+        .id();
+    if shadow_bodies_spawned {
+        // The sun also takes casters from the shadow bodies' layer, which no
+        // camera draws.
+        commands.entity(sun).insert(car_batch::sun_layers());
+    }
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 450.0,

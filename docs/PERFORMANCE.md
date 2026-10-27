@@ -1391,6 +1391,53 @@ regathers dominate. Phone [I]: about 0.4 ms less on the main thread.
 Left: ground cover writes all its billboards on each regather. Stable slots for the billboards
 would let it write only the ones that enter or leave; not done here.
 
+## Grid start: GPU passes and opponent shadow bodies (F600)
+
+Owner report, APK 3c7a3516: 30-50 FPS in the race, but below 30 FPS at the very start, where the
+render height drops. Phone logs (local/phone-start/, Adreno 740) [O]:
+- Nürburgring, cars waiting on the grid (16-38 s): a steady 35.4 ms frame (max 37). The render
+  thread waits 11-13 ms per frame in `present_frames`, and both threads are under 21 ms, so the
+  GPU sets the frame.
+- `render_dynamic` drops to 672 rows, gains about 2 ms (probe 2.12 ms against 4.56 ms if the
+  frame scaled with pixels) and returns to 720 rows as "ineffective" a second later: that is the
+  dip the owner sees. About half the GPU frame does not scale with pixels.
+- After the start the frame falls to 30-33 ms, and to 22-25 ms as the field spreads.
+
+Tool: `gpu_passes` (on in the profile build, or `GRID_GPU_PASSES=1`) logs per render pass the GPU
+time from timestamp queries, with primitives and shader invocations where the device has pipeline
+statistics (the Adreno 740 has both), and the triangles each view submits by owner from the
+visibility lists (`view_triangles`). Bevy does not time its shadow passes; their triangles show
+their size.
+
+PC, desktop phone view (mobile preset, 1539x720), Donington, 12 cars, frozen at tick 1 [O]:
+
+| view | before | F600 |
+|---|---|---|
+| camera | 806,139 (opponent cars 268,699) | 806,139 (268,699) |
+| cascades 0-3 | 124,843 + 248,016 + 442,119 + 645,647 = 1,460,625 (opponent cars 747,022) | 81,778 + 114,497 + 193,398 + 396,926 = 786,599 (opponent shadow bodies 988 + 2,964 + 5,434 + 5,434 = 14,820) |
+| total | 2,266,764 | 1,592,738 (-30 %) |
+
+During the first 66 s of the race (3-s windows, player at the back) the camera draws 0.35-1.4 M
+triangles and the cascades 0.86-1.39 M, opponent cars 0.25-0.27 M and 0.47-0.78 M of those. The
+grid is the worst case because all eleven opponents stand close together inside the first
+cascades.
+
+The original draws opponents into cascades 1 and 2 with the model's coarsest level only (LOD5
+`main_body`, 494 triangles on the BMW; docs/CAR_LOD.md "Shadows"). Change: each opponent gets
+that mesh as a shadow body on a layer only the sun takes casters from, posed by car_batch; the
+opponent's parts and batches cast no shadow. Picture, fixed step, desktop 1600x900, against
+`GRID_CAR_BATCH=0` (no bodies; it also unbatches, which alone flips 0.09-0.21 % of samples, F584):
+ticks 300 / 2400 / 6000 differ in 0.20 / 0.24 / 0.17 % of pixels: the outline of the opponents'
+ground shadows, no rear-wing shadow on their boot lid, and the player car's batching speckle. The
+grid frame in the phone view against main at F595 with the timer: 0.25 %, the same places
+(local/gridstart/crop-grid-s1*.png). Timing was not taken: the owner was playing on the PC.
+Phone [I]: the shadow passes lose about 0.67 M of 2.27 M triangles at the start; with about half
+the 35 ms GPU frame not scaling with pixels, a few ms less.
+
+Mesh allocation at the start: `allocate_and_free_meshes` 3.46 ms per frame in the first window
+(242 frames) is about 840 ms in total, the 0.8-1.1 s first two frames after loading (22,488 mesh
+entities uploaded); it does not appear in later windows. Not changed here.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,
