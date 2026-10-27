@@ -1,4 +1,4 @@
-//! Private offline render of the race engineer speech, part 1 (`grid_tools::speech`,
+//! Private offline render of the race engineer speech, parts 1 and 2 (`grid_tools::speech`,
 //! docs/SPEECH_AUDIO_RESEARCH.md) for listening checks. The purchased rules and lines run
 //! through the port's collector and manager on an authored 12-car race, one vehicle tick (16 ms)
 //! at a time; nothing is played on a device.
@@ -7,13 +7,15 @@
 //!   the grid again; green at 20 s.
 //! - The player gains a place every 14 s from 12th to 1st, loses 2nd once (to 3rd) and regains
 //!   it, leads, and finishes first after three laps of 60 s.
+//! - 50 s after the green light a car-to-car collision: 30 % component damage, the front bumper
+//!   lost. 100–112 s the wrong way at full speed.
 //!
 //! `speech.wav`: mono PCM16 at the lines' 32 kHz, the Codriver group level of the Chase camera
 //! with the Talking mix while a line plays. `lines.txt`: each line with its time.
 use grid_tools::{
     audio_mix::{self, Camera, ModeMix, Table},
     source_vehicle::DELTA,
-    speech::{Collector, Entry, Kind, Manager, RaceView, Rules},
+    speech::{Car, Collector, Contact, Entry, Kind, Manager, RaceView, Rules, part_id},
 };
 use std::{fs, io::Write, path::Path, sync::Arc};
 
@@ -73,18 +75,35 @@ fn view(green: Option<f64>) -> RaceView {
                 position,
                 finished: green.is_some() && p >= LAPS,
                 grid: if k == 0 { CARS - 1 } else { k - 1 },
+                last_lap: (p >= 1.).then_some(LAP),
+                ai: k != 0,
+                terminal: false,
             }
         })
         .collect();
+    // The collision frame (one vehicle tick).
+    let hit = green.is_some() && (t - 50.).abs() < f64::from(DELTA) / 2.;
+    let damaged = green.is_some() && t >= 50.;
     RaceView {
         clock: t,
         started: green.is_some(),
         over: finished,
+        track_laps: LAPS as u32,
         entries,
         player: 0,
         kind: Kind::default(),
-        collision: false,
-        damage: 0.,
+        contacts: if hit { vec![Contact { car: 0, other: Some(1) }] } else { Vec::new() },
+        car: Car {
+            components: if damaged { [0.3; 6] } else { [0.; 6] },
+            engine: 0.8,
+            limit: 1.,
+            density: 1.,
+            ..Car::default()
+        },
+        off_track: false,
+        wrong_way: green.is_some() && (100. ..112.).contains(&t),
+        parts_lost: if hit { vec![part_id("bumper_fm").unwrap()] } else { Vec::new() },
+        open_cockpit: false,
     }
 }
 

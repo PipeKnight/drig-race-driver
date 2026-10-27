@@ -491,6 +491,22 @@ impl Line {
         )?)
     }
 
+    /// The driver test of type 11 (`on_track`, 0x79B250) for `wheels` (world
+    /// positions): more than half of them inside the track limits at their
+    /// projection. [I] Projects without a segment hint, as for a car whose
+    /// driver has none (the player's, which the speech collector reads).
+    pub fn on_track(&self, wheels: &[[f32; 3]]) -> bool {
+        let inside = wheels
+            .iter()
+            .filter(|&&w| {
+                let (_, s, lat) = self.project(w, None);
+                let [left_limit, right_limit] = self.track_limits_at(s);
+                left_limit <= lat && lat <= right_limit
+            })
+            .count();
+        2 * inside > wheels.len()
+    }
+
     /// Player reset target for a car at `p`: the line point at the car's
     /// projection and the line's horizontal direction there.
     ///

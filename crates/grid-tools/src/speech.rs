@@ -1,12 +1,12 @@
-//! Race engineer speech, part 1 (docs/SPEECH_AUDIO_RESEARCH.md). This ports:
+//! Race engineer speech (docs/SPEECH_AUDIO_RESEARCH.md). This ports:
 //! - the original's data-driven rules (`audio/eventSpeech.bin`, parser 0x462FF0) over its line
 //!   bank (`audio/audioEventSpeech.bin`);
 //! - the evaluation, queue and playback rules of `audio_event_speech_manager` (0x45EC00,
 //!   0x44BE90, 0x45E870);
-//! - the parameters of `audio_game_info_collector` (0x452810) that the Position and EndOfRace
-//!   events read.
+//! - the parameters of `audio_game_info_collector` (0x452810, §5 and §8–§9) that the events of
+//!   [`SLICE`] read.
 //!
-//! Only those two events run ([`SLICE`], the AUTHORED scope of this part). Lines are loaded
+//! Only the events of [`SLICE`] run (the AUTHORED scope of parts 1 and 2). Lines are loaded
 //! from the owner's installation at run time.
 use crate::series::Mt;
 use grid_formats::binxml;
@@ -14,8 +14,9 @@ use std::{collections::VecDeque, path::Path};
 
 /// The `.raw` lines are PCM16 mono at 32 kHz (stream setup 0x42BD4B: 32000, AL_FORMAT_MONO16).
 pub const LINE_RATE: u32 = 32_000;
-/// Events evaluated in this part [AUTHORED scope: race start, position calls, finish].
-pub const SLICE: [&str; 2] = ["Position", "EndOfRace"];
+/// Events evaluated [AUTHORED scope: part 1 the race start, position calls and finish; part 2
+/// the player's damage, performance, strategy and rules lines].
+pub const SLICE: [&str; 6] = ["Position", "EndOfRace", "CarDamage", "Performance", "Strategy", "Rules"];
 /// An absent condition value or second parameter (0xC61C3C00).
 const UNSET: f32 = -10000.;
 /// The silence base after a line starts: now + 2.5 s (0xCB092C, 0x42FFC0).
@@ -27,8 +28,8 @@ const MPH: f32 = 2.236_936_3;
 
 macro_rules! params {
     ($($id:ident = $name:literal),* $(,)?) => {
-        /// The collector parameters the Position and EndOfRace rules read (names registered by
-        /// 0x45F590). `InRace` comes first: 0x44C510 resolves an unknown name to index 0.
+        /// The collector parameters the [`SLICE`] rules read (names registered by 0x45F590).
+        /// `InRace` comes first: 0x44C510 resolves an unknown name to index 0.
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum Param { $($id),* }
         pub const PARAM_NAMES: &[&str] = &[$($name),*];
@@ -92,6 +93,67 @@ params!(
     IsTouge = "isTouge",
     IsLeMans = "isLeMans",
     IsDriftBattle = "isDriftBattle",
+    // Part 2: CarDamage, Performance, Strategy and Rules.
+    TerminalDam = "terminalDam",
+    BodyDam = "bodyDam",
+    FrontDam = "frontDam",
+    RearDam = "rearDam",
+    RightDam = "rightDam",
+    LeftDam = "leftDam",
+    EngDam = "engDam",
+    RadiatorDam = "radiatorDam",
+    GearboxDam = "gearboxDam",
+    TyreDamage = "tyreDamage",
+    FrontTyreDamage = "frontTyreDamage",
+    RearTyreDam = "rearTyreDam",
+    FrontRightTyreDam = "frontRightTyreDam",
+    FrontLeftTyreDam = "frontLeftTyreDam",
+    RearRightTyreDam = "rearRightTyreDam",
+    RearLeftTyreDam = "rearLeftTyreDam",
+    DamLastAccident = "damLastAccident",
+    DamageTakenInPrevLap = "damageTakenInPrevLap",
+    LossRightWing = "lossRightWing",
+    LossLeftWing = "lossLeftWing",
+    LossFrontWing = "lossFrontWing",
+    LossRearWing = "lossRearWing",
+    LossDoor = "lossDoor",
+    LossBumper = "lossBumper",
+    LooseBonnet = "looseBonnet",
+    IsPlayerCarOpenCockpit = "isPlayerCarOpenCockpit",
+    HitAnotherCar = "hitAnotherCar",
+    CarToCarCollision = "carToCarCollision",
+    AiTermUserImpact = "AITermUserImpact",
+    NoRestartOptionEnabled = "noRestartOptionEnabled",
+    TerminalDamageCount = "terminalDamageCount",
+    HasNoDamageObj = "hasNoDamageObj",
+    AnyDamageIndOn = "anyDamageIndOn",
+    DroveOffTrack = "droveOffTrack",
+    TimeOffTrack = "timeOffTrack",
+    WrongWayTime = "wrongWayTime",
+    SatOnTrackTime = "satOnTrackTime",
+    SlipStreamTime = "slipStreamTime",
+    IsDriftFreeStyle = "isDriftFreeStyle",
+    IsDownhillDrift = "isDownhillDrift",
+    BonusObjWinPos = "bonusObjWinPos",
+    DriverChampWinPos = "driverChampWinPos",
+    OneTwoFinish = "1_2Finish",
+    PlayerCrossedSfLine = "playerCrossedSFLine",
+    CurrentTrackLaps = "currentTrackLaps",
+    CurrentPaceTime = "currentPaceTime",
+    NumRunningCars = "numRunningCars",
+    PlayerPrevLapTime = "playerPrevLapTime",
+    MaxPlayerCarSpeed = "maxPlayerCarSpeed",
+    PlayerCarRevRatio = "playerCarRevRatio",
+    PlayerGoodStart = "playerGoodStart",
+    CarsPlayerOverTook = "carsPlayerOverTook",
+    UsedFlashback = "usedFlashback",
+    NewWorldRecord = "newWorldRecord",
+    NewPersonalBest = "newPersonalBest",
+    TargetTime = "targetTime",
+    TargetSpeed = "targetSpeed",
+    TargetDamage = "targetDamage",
+    AiSpin = "aiSpin",
+    AiRoll = "aiRoll",
 );
 pub const PARAMS: usize = PARAM_NAMES.len();
 
@@ -963,6 +1025,12 @@ pub struct Entry {
     pub finished: bool,
     /// Zero-based grid slot (car +0x2E4C).
     pub grid: usize,
+    /// The last completed lap's time (s, vf 0x5C).
+    pub last_lap: Option<f64>,
+    /// Driven by the AI (controller type, entry +0x6C, other than 0).
+    pub ai: bool,
+    /// Terminally damaged: the damage status (+0x444, vehicle +0xD234) is not 7 (0x99A720).
+    pub terminal: bool,
 }
 
 /// The race kind flags of the race block (0x451A20).
@@ -970,9 +1038,124 @@ pub struct Entry {
 pub struct Kind {
     pub drift: bool,
     pub drift_battle: bool,
+    pub drift_freestyle: bool,
     pub le_mans: bool,
     pub touge: bool,
     pub derby: bool,
+}
+
+/// A contact the collision callback 0x430F50 accepts: its impulse is at least half the physical
+/// mass of `car`, the car hit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Contact {
+    /// The entry hit.
+    pub car: usize,
+    /// The other object's entry when it is a car.
+    pub other: Option<usize>,
+}
+
+/// The player's vehicle words the collector reads.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Car {
+    /// The damage object (vehicle +0xCDF0): component levels (+0) and wheel levels (+0x18,
+    /// records RL, RR, FL, FR), 0 to 1.
+    pub components: [f32; 6],
+    pub wheels: [f32; 4],
+    /// The body-side terms of 0x424650 in the order 0x99EEB0, 0x99ED10, 0x99F1F0, 0x99F050
+    /// (front, rear, right and left by the getters' names), 0 to 1.
+    pub sides: [f32; 4],
+    /// Engine speed (+0x1894) and its limit (+0x17A4).
+    pub engine: f32,
+    pub limit: f32,
+    /// The low byte of +0x2204 (the launch flag of the grip pipeline).
+    pub launch: u8,
+    /// Air density (+0x21C4, 0x98DFE0).
+    pub density: f32,
+}
+impl Car {
+    pub fn read(vehicle: &[u32]) -> Self {
+        let f = |o: usize| vehicle.get(o / 4).copied().map_or(0., f32::from_bits);
+        Self {
+            components: std::array::from_fn(|i| f(0xcdf0 + 4 * i)),
+            wheels: std::array::from_fn(|i| f(0xce08 + 4 * i)),
+            sides: body_sides(vehicle),
+            engine: f(0x1894),
+            limit: f(0x17a4),
+            launch: vehicle.get(0x2204 / 4).map_or(0, |w| (w & 255) as u8),
+            density: f(0x21c4),
+        }
+    }
+    /// 0x424650 for the player: the largest side term plus the mean of the six components, as
+    /// percentages.
+    pub fn total(&self) -> f32 {
+        let largest = self.sides.iter().fold(self.sides[3], |m, &s| if s > m { s } else { m }) * 100.;
+        largest + self.components.iter().sum::<f32>() * (1. / 6.) * 100.
+    }
+}
+
+/// The four body-side terms of 0x424650: 0x99EEB0, 0x99ED10, 0x99F1F0 and 0x99F050, the RMS
+/// lattice displacement over the back two thirds and the front third of the long axis and the
+/// two halves of the lateral axis, × 5/3, clamped to 1.
+///
+/// The deformation lattice is the one published at vehicle +0x2300 (records of 0x50 bytes at
+/// +0x2580 current and +0x2590 rest position; dimensions at +0xA414).
+fn body_sides(vehicle: &[u32]) -> [f32; 4] {
+    let f = |o: usize| vehicle.get(o / 4).copied().map_or(0., f32::from_bits);
+    let base = 0x2300;
+    let dim = |i: usize| vehicle.get((base + 0xa414) / 4 + i).copied().unwrap_or(0) as usize;
+    let (nx, ny, nz) = (dim(0), dim(1), dim(2));
+    let side = |z: std::ops::Range<usize>, x: std::ops::Range<usize>| -> f32 {
+        let (mut sum, mut count) = (0f32, 0f32);
+        for zi in z {
+            for yi in 0..ny {
+                for xi in x.clone() {
+                    let record = base + 0x2590 + ((zi * ny + yi) * nx + xi) * 0x50;
+                    count += 1.;
+                    sum += (0..3).map(|a| (f(record - 0x10 + 4 * a) - f(record + 4 * a)).powi(2)).sum::<f32>();
+                }
+            }
+        }
+        let v = (sum / count).sqrt() * 1.666_666_6;
+        v.clamp(0., 1.)
+    };
+    let third = nz / 3;
+    [side(third..nz, 0..nx), side(0..third.max(1), 0..nx), side(0..nz, 0..nx / 2), side(0..nz, nx / 2..nx)]
+}
+
+/// 0x424650 for the player:
+/// - 100 × the mean of the six component levels (vehicle +0xCDF0);
+/// - plus the largest of the four body-side terms ([`Car::sides`]) as a percentage.
+pub fn total_damage_percent(vehicle: &[u32]) -> f32 {
+    Car::read(vehicle).total()
+}
+
+/// The original part ids (name table 0xE4EF20) whose loss 0x417D60 reports, with the flag each
+/// sets: 10 bonnet; 12–17 the bumpers; 22–25 the doors; 84 `wing_bl`, 85 `wing_br`, 86 `wing_fl`
+/// and 87 `wing_fr`, whose flags are named rear, right, left and front.
+pub fn part_id(name: &str) -> Option<u32> {
+    Some(match name {
+        "bonnet" => 10,
+        "boot" => 11,
+        "bumper_bl" => 12,
+        "bumper_br" => 13,
+        "bumper_bm" => 14,
+        "bumper_fl" => 15,
+        "bumper_fr" => 16,
+        "bumper_fm" => 17,
+        "door_bl" => 22,
+        "door_br" => 23,
+        "door_fl" => 24,
+        "door_fr" => 25,
+        "exhaust" => 31,
+        "exhaust_b" => 34,
+        "wing_bl" => 84,
+        "wing_br" => 85,
+        "wing_fl" => 86,
+        "wing_fr" => 87,
+        "exhaust_bl" => 101,
+        "exhaust_br" => 102,
+        _ => return None,
+    })
 }
 
 /// What the app knows about the race this frame.
@@ -984,13 +1167,23 @@ pub struct RaceView {
     pub started: bool,
     /// Race over (manager +0x11).
     pub over: bool,
+    /// The race's lap count (race block +0x20).
+    pub track_laps: u32,
     pub entries: Vec<Entry>,
     pub player: usize,
     pub kind: Kind,
-    /// The player collided this frame (impulse at least half the mass, 0x430F50).
-    pub collision: bool,
-    /// The player's total damage percentage now ([`total_damage_percent`]).
-    pub damage: f32,
+    /// The contacts of this frame that pass 0x430F50's impulse test.
+    pub contacts: Vec<Contact>,
+    /// The player's vehicle.
+    pub car: Car,
+    /// The player's driver test of type 11 (`on_track`) fails (record +0x71).
+    pub off_track: bool,
+    /// The race interface's wrong-way flag (+0x18).
+    pub wrong_way: bool,
+    /// Part ids ([`part_id`]) the player's car lost this frame (0x9FF4F0 → 0x417D60).
+    pub parts_lost: Vec<u32>,
+    /// Car description byte +0xD4 (`isPlayerCarOpenCockpit`), read before the race.
+    pub open_cockpit: bool,
 }
 
 /// A car record (0x438C10) with the collector's time in position.
@@ -998,12 +1191,18 @@ pub struct RaceView {
 struct Record {
     time: f32,
     progress: f32,
+    /// +8: the last completed lap's time, or `time` before the second lap.
+    last_lap: f32,
     speed: f32,
+    /// +0x10: the highest speed since the record was cleared.
+    max_speed: f32,
     fraction: f32,
     lap: f32,
     position: f32,
     previous: f32,
     finished: bool,
+    off_track: bool,
+    terminal: bool,
     grid: u32,
     in_position: f32,
 }
@@ -1013,22 +1212,46 @@ impl Record {
         let progress = if e.progress == 0. { TINY_PROGRESS } else { e.progress };
         self.time = (e.time / progress) as f32;
         self.progress = e.progress as f32;
-        self.speed = e.speed * MPH;
-        self.fraction = e.progress.rem_euclid(1.) as f32;
         self.lap = (e.laps + 1) as f32;
+        self.last_lap = match e.last_lap {
+            Some(t) if self.lap > 1. => t as f32,
+            _ => self.time,
+        };
+        self.speed = e.speed * MPH;
+        if self.speed > self.max_speed {
+            self.max_speed = self.speed;
+        }
+        self.fraction = e.progress.rem_euclid(1.) as f32;
         let position = e.position as f32;
         if self.position != position {
             self.previous = self.position;
         }
         self.position = position;
         self.finished = e.finished;
+        self.terminal = e.terminal;
         self.grid = e.grid as u32;
     }
+}
+
+/// The player's part-loss flags of 0x417D60 (+0xB45C…+0xB462).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Lost {
+    door: bool,
+    bumper: bool,
+    front_wing: bool,
+    rear_wing: bool,
+    left_wing: bool,
+    right_wing: bool,
+    bonnet: bool,
 }
 
 /// `audio_game_info_collector` (0x452810) for the parameters of [`Param`].
 #[derive(Clone, Debug)]
 pub struct Collector {
+    /// +0x18: cleared by the player's terminal damage; the update then stops.
+    enabled: bool,
+    /// +0xB738: the paused path has cleared the records.
+    paused: bool,
     /// +0xB410 frame counter.
     counter: u32,
     in_race: bool,
@@ -1038,6 +1261,10 @@ pub struct Collector {
     clock: f32,
     cars: u32,
     kind: Kind,
+    /// Race block +0x08, +0x20 and +0x24.
+    pace: f32,
+    track_laps: u32,
+    running: u32,
     player: Record,
     /// Plus 1, minus 1 and the leader: (car + 1 or 0, previous frame's car + 1, record).
     plus1: (usize, usize, Record),
@@ -1045,14 +1272,47 @@ pub struct Collector {
     leader: (usize, usize, Record),
     best: u32,
     start_percent: f32,
+    /// The live vehicle and the damage object copied every second frame (+0x470, 0x9EF020).
+    car: Car,
+    copy: Car,
+    /// +0xB43A `playerCollision`, +0xB43B `hitAnotherCar`, +0xB439 `carToCarCollision`.
     collision: bool,
+    hit_car: bool,
+    car_to_car: bool,
     no_collision: f32,
+    /// +0xB3E0 `totalDam`, +0xB440 `damLastAccident`.
     total_damage: f32,
+    last_accident: f32,
+    /// +0xB708 `bodyDam` and +0xB70C…+0xB718 the four sides (0x424650).
+    body: f32,
+    sides: [f32; 4],
+    /// +0xB450 the damage of the lap so far, +0xB44C `damageTakenInPrevLap`, +0xB3F4 the lap
+    /// `playerCrossedSFLine` last saw.
+    lap_damage: f32,
+    prev_lap_damage: f32,
+    seen_lap: f32,
+    /// +0xB40C the overtake reference place and +0xB418 `carsPlayerOverTook`.
+    reference: u32,
+    overtook: u32,
+    /// +0xB3EC progress last frame; +0xB3F0, +0xB3FC, +0xB400 and +0xB430 the timers.
+    last_progress: f32,
+    sat: f32,
+    slipstream: f32,
+    wrong_way: f32,
+    off_track_time: f32,
+    lost: Lost,
+    open_cockpit: bool,
+    /// +0xB72D `usedFlashback`.
+    flashback: bool,
+    /// +0xB71C `1_2Finish` (career).
+    one_two: i32,
     params: Params,
 }
 impl Default for Collector {
     fn default() -> Self {
         Self {
+            enabled: true,
+            paused: false,
             counter: 0,
             in_race: false,
             end_race: false,
@@ -1061,40 +1321,138 @@ impl Default for Collector {
             clock: 0.,
             cars: 0,
             kind: Kind::default(),
+            pace: 0.,
+            track_laps: 0,
+            running: 0,
             player: Record::default(),
             plus1: Default::default(),
             minus1: Default::default(),
             leader: Default::default(),
             best: 20,
             start_percent: 0.,
+            car: Car::default(),
+            copy: Car::default(),
             collision: false,
+            hit_car: false,
+            car_to_car: false,
             no_collision: 0.,
             total_damage: 0.,
+            last_accident: 0.,
+            body: 0.,
+            sides: [0.; 4],
+            lap_damage: 0.,
+            prev_lap_damage: 0.,
+            // The race set-up runs 0x452520(1) before the first frame.
+            seen_lap: 1.,
+            reference: 0,
+            overtook: 0,
+            last_progress: 0.,
+            sat: 0.,
+            slipstream: 0.,
+            wrong_way: 0.,
+            off_track_time: 0.,
+            lost: Lost::default(),
+            open_cockpit: false,
+            flashback: false,
+            one_two: 0,
             params: Params::default(),
         }
     }
 }
 impl Collector {
-    /// The race (re)start reset 0x452520(1).
+    /// The race (re)start reset 0x452520(1): [`Self::reset`] with the grid flag.
     /// - `onStartingGrid` becomes 1 only if the race was running.
-    /// - `startAfterRestart` becomes 1 and is never cleared again.
-    /// - The best position and the damage terms start over.
+    /// - `startAfterRestart` becomes 1 and stays (§5).
     pub fn restart(&mut self) {
-        if self.in_race {
-            self.on_grid = true;
-        }
-        self.restarted = true;
-        self.best = 20;
-        self.total_damage = 0.;
-        self.collision = false;
+        self.reset(true);
+        // [I] The load handler 0x4391E0 enables the collector at a race set-up; whether a
+        // restart runs it is not established (§5). The port enables it, or a terminal damage
+        // would silence the speech for every later restart.
+        self.enabled = true;
+    }
+
+    /// A flashback (0x453000, 0x454910): 0x452520(0), then `usedFlashback`.
+    pub fn flashback(&mut self) {
+        self.reset(false);
+        self.flashback = true;
+    }
+
+    /// 0x452520(`grid`).
+    fn reset(&mut self, grid: bool) {
+        let was_racing = self.in_race;
         self.no_collision = 0.;
+        self.off_track_time = 0.;
+        self.clear_events();
+        // 0x468B30 and 0x417E40: the race block and the records.
+        self.in_race = false;
+        self.end_race = false;
+        self.clock = 0.;
+        self.cars = 0;
+        self.kind = Kind::default();
+        self.pace = 0.;
+        self.track_laps = 0;
+        self.running = 0;
+        self.player = Record::default();
         self.plus1 = Default::default();
         self.minus1 = Default::default();
         self.leader = Default::default();
+        if was_racing {
+            self.on_grid = grid;
+        }
+        if !grid {
+            self.enabled = true;
+        }
+        self.wrong_way = 0.;
+        self.lost = Lost::default();
+        if !grid {
+            return;
+        }
+        self.one_two = -1;
+        self.body = 0.;
+        self.sides = [0.; 4];
+        self.best = 20;
+        self.total_damage = 0.;
+        self.last_accident = 0.;
+        self.lap_damage = 0.;
+        self.prev_lap_damage = 0.;
+        self.seen_lap = 1.;
+        self.restarted = true;
+        self.flashback = false;
     }
 
-    /// One collector frame; returns the parameters.
+    /// 0x417ED0, after every refresh: the one-shot flags.
+    fn clear_events(&mut self) {
+        self.car_to_car = false;
+        self.hit_car = false;
+        self.overtook = 0;
+    }
+
+    /// The Paused mix mode, or no player car: 0x417ED0 and 0x417E40 once.
+    pub fn pause(&mut self) {
+        if self.paused {
+            return;
+        }
+        self.clear_events();
+        self.player = Record::default();
+        self.plus1 = Default::default();
+        self.minus1 = Default::default();
+        self.leader = Default::default();
+        self.paused = true;
+    }
+
+    /// One collector frame and the refresh after it (0x44C640); returns the parameters.
     pub fn update(&mut self, v: &RaceView, dt: f32) -> &Params {
+        if self.enabled {
+            self.frame(v, dt);
+        }
+        self.publish();
+        self.clear_events();
+        &self.params
+    }
+
+    /// The update 0x452810.
+    fn frame(&mut self, v: &RaceView, dt: f32) {
+        self.paused = false;
         self.counter = self.counter.wrapping_add(1);
         // Race block: refreshed every frame, but only on frames whose counter is not a multiple
         // of 5 once racing.
@@ -1107,12 +1465,44 @@ impl Collector {
             self.clock = v.clock as f32;
             self.cars = v.entries.len() as u32;
             self.kind = v.kind;
+            self.track_laps = v.track_laps;
+            if v.started {
+                self.block(v);
+            }
         }
         let previous_position = self.player.position;
-        let Some(&me) = v.entries.get(v.player) else { return &self.params };
+        let Some(&me) = v.entries.get(v.player) else { return };
+        // 0x430F50 for this frame's contacts (they arrive before the update).
+        for c in &v.contacts {
+            if c.other.is_some() {
+                self.car_to_car = true;
+            }
+            if c.car == v.player {
+                self.collision = true;
+                if c.other.is_some() {
+                    self.hit_car = true;
+                }
+            }
+        }
+        // 0x417D60: the part callback.
+        for &id in &v.parts_lost {
+            match id {
+                10 => self.lost.bonnet = true,
+                12..=17 => self.lost.bumper = true,
+                22..=25 => self.lost.door = true,
+                84 => self.lost.rear_wing = true,
+                85 => self.lost.right_wing = true,
+                86 => self.lost.left_wing = true,
+                87 => self.lost.front_wing = true,
+                _ => {}
+            }
+        }
         self.player.refresh(&me);
+        self.player.off_track = v.off_track;
+        self.car = v.car;
         self.best = self.best.min(me.position as u32);
         if !self.in_race && self.cars > 0 {
+            self.open_cockpit = v.open_cockpit;
             // 0x452A42: integer division before × 100.
             self.start_percent = ((self.player.grid + 1) / self.cars) as f32 * 100.;
         }
@@ -1140,18 +1530,44 @@ impl Collector {
                 _ => {}
             }
         }
-        // 0x431200 / 0x424780 on this frame's car: totalDam follows the damage only after a
-        // player collision, until an update changes it by less than 1.
-        if v.collision {
-            self.collision = true;
+        // 0x452C1E: the damage object is copied on even frames.
+        if self.counter.is_multiple_of(2) {
+            self.copy = v.car;
         }
-        if self.in_race && !self.end_race && self.cars > 0 && self.counter % self.cars == v.player as u32 && self.collision {
-            let change = (v.damage - self.total_damage).abs();
-            self.total_damage = v.damage;
-            if change < 1. {
-                self.collision = false;
+        // 0x452C76: overtakes. The reference follows the place every 60th frame (0x4692B0).
+        let place = me.position as u32;
+        if !self.in_race {
+            self.reference = place;
+        } else {
+            if place < self.reference {
+                self.overtook = self.reference - place;
+                if self.overtook >= 2 {
+                    self.reference = place;
+                }
+            }
+            if self.counter.is_multiple_of(60) {
+                self.reference = place;
             }
         }
+        // 0x424780 on this frame's car (the player's: 0x424650 and its collision damage).
+        if self.in_race && !self.end_race && self.cars > 0 && self.counter % self.cars == v.player as u32 {
+            let total = v.car.total();
+            self.sides = v.car.sides.map(|s| s * 100.);
+            self.body = self.sides.iter().fold(self.sides[3], |m, &s| if s > m { s } else { m });
+            if self.collision {
+                let change = (total - self.total_damage).abs();
+                self.total_damage = total;
+                self.lap_damage += change;
+                self.last_accident = change;
+                if self.last_accident < 1. {
+                    self.collision = false;
+                }
+            }
+        }
+        // 0x452D11: the progress change; `satOnTrackTime` while racing without progress.
+        let progress_change = self.player.progress - self.last_progress;
+        self.last_progress = self.player.progress;
+        self.sat = if self.in_race && progress_change < 1e-5 { self.sat + dt } else { 0. };
         // Times in position (0x452D7D…): + dt while unchanged, else 0.
         self.player.in_position = if self.player.position == previous_position { self.player.in_position + dt } else { 0. };
         for slot in [&mut self.plus1, &mut self.minus1] {
@@ -1160,11 +1576,34 @@ impl Collector {
         }
         self.leader.2.in_position = if self.leader.0 == self.leader.1 { self.leader.2.in_position + dt } else { 0. };
         self.leader.1 = self.leader.0;
+        // 0x452ED9…: slipstream (air density at most 0.6), wrong way, no collision, off track.
+        self.slipstream = if v.car.density <= 0.6 { self.slipstream + dt } else { 0. };
+        self.wrong_way = if v.wrong_way { self.wrong_way + dt } else { 0. };
         self.no_collision = if self.collision { 0. } else { self.no_collision + dt };
-        self.publish();
-        &self.params
+        self.off_track_time = if self.player.off_track { self.off_track_time + dt } else { 0. };
+        // Terminal damage disables the collector.
+        if self.player.terminal {
+            self.enabled = false;
+        }
     }
 
+    /// The race block's pace time and running cars (0x4521C4…), while the race runs.
+    fn block(&mut self, v: &RaceView) {
+        let (mut sum, mut count, mut running) = (0f32, 0u32, 0u32);
+        for e in v.entries.iter().filter(|e| e.ai && !e.terminal) {
+            if e.progress > 0. && e.speed * MPH > 10. {
+                sum += (e.time / e.progress) as f32;
+                count += 1;
+            }
+            running += 1;
+        }
+        self.pace = if count > 0 { sum / count as f32 } else { 0. };
+        self.running = running + 1;
+    }
+
+    /// The refresh 0x44C3C0: every getter into the values, in the map's order (ascending name
+    /// address), so `damageTakenInPrevLap` (0xCB6FCC) is read before `playerCrossedSFLine`
+    /// (0xCB7004) moves the lap's damage.
     fn publish(&mut self) {
         use Param::*;
         let p = &mut self.params;
@@ -1198,47 +1637,66 @@ impl Collector {
         p.flag(IsLeMans, k.le_mans);
         p.flag(IsTouge, k.touge);
         p.flag(IsDriftBattle, k.drift_battle);
+        p.flag(IsDriftFreeStyle, k.drift_freestyle);
         p.flag(IsDestructionDerby, k.derby);
-    }
-}
-
-/// 0x424650 for the player:
-/// - 100 × the mean of the six component levels (vehicle +0xCDF0);
-/// - plus the largest of the four body-side terms 0x99EEB0, 0x99ED10, 0x99F1F0 and 0x99F050:
-///   the RMS lattice displacement over the back two thirds and the front third of the long axis
-///   and the two halves of the lateral axis, × 5/3, clamped to 1, as percentages.
-///
-/// The deformation lattice is the one published at vehicle +0x2300 (records of 0x50 bytes at
-/// +0x2580 current and +0x2590 rest position; dimensions at +0xA414).
-pub fn total_damage_percent(vehicle: &[u32]) -> f32 {
-    let f = |o: usize| vehicle.get(o / 4).copied().map_or(0., f32::from_bits);
-    let components: f32 = (0..6).map(|i| f(0xcdf0 + 4 * i)).sum();
-    let base = 0x2300;
-    let dim = |i: usize| vehicle.get((base + 0xa414) / 4 + i).copied().unwrap_or(0) as usize;
-    let (nx, ny, nz) = (dim(0), dim(1), dim(2));
-    let side = |z: std::ops::Range<usize>, x: std::ops::Range<usize>| -> f32 {
-        let (mut sum, mut count) = (0f32, 0f32);
-        for zi in z {
-            for yi in 0..ny {
-                for xi in x.clone() {
-                    let record = base + 0x2590 + ((zi * ny + yi) * nx + xi) * 0x50;
-                    count += 1.;
-                    sum += (0..3).map(|a| (f(record - 0x10 + 4 * a) - f(record + 4 * a)).powi(2)).sum::<f32>();
-                }
-            }
+        // Part 2.
+        let c = &self.copy;
+        p.flag(TerminalDam, self.player.terminal);
+        p.set(BodyDam, self.body);
+        p.set(FrontDam, self.sides[0]);
+        p.set(RearDam, self.sides[1]);
+        p.set(RightDam, self.sides[2]);
+        p.set(LeftDam, self.sides[3]);
+        p.set(EngDam, c.components[3] * 100.);
+        p.set(RadiatorDam, c.components[2] * 100.);
+        p.set(GearboxDam, c.components[5] * 100.);
+        p.set(TyreDamage, (c.wheels[3] + c.wheels[2] + c.wheels[1] + c.wheels[0]) * 25.);
+        p.set(FrontTyreDamage, (c.wheels[3] + c.wheels[2]) * 50.);
+        p.set(RearTyreDam, (c.wheels[1] + c.wheels[0]) * 50.);
+        p.set(FrontRightTyreDam, c.wheels[3] * 100.);
+        p.set(FrontLeftTyreDam, c.wheels[2] * 100.);
+        p.set(RearRightTyreDam, c.wheels[1] * 100.);
+        p.set(RearLeftTyreDam, c.wheels[0] * 100.);
+        p.set(DamLastAccident, self.last_accident);
+        p.flag(LossDoor, self.lost.door);
+        p.flag(LossBumper, self.lost.bumper);
+        p.flag(LossFrontWing, self.lost.front_wing);
+        p.flag(LossRearWing, self.lost.rear_wing);
+        p.flag(LossLeftWing, self.lost.left_wing);
+        p.flag(LossRightWing, self.lost.right_wing);
+        p.flag(LooseBonnet, self.lost.bonnet);
+        p.flag(IsPlayerCarOpenCockpit, self.open_cockpit);
+        p.flag(HitAnotherCar, self.hit_car);
+        p.flag(CarToCarCollision, self.car_to_car);
+        p.flag(DroveOffTrack, self.player.off_track);
+        p.set(TimeOffTrack, self.off_track_time);
+        p.set(WrongWayTime, self.wrong_way);
+        p.set(SatOnTrackTime, self.sat);
+        p.set(SlipStreamTime, self.slipstream);
+        p.set(OneTwoFinish, self.one_two as f32);
+        p.set(CurrentTrackLaps, self.track_laps as f32);
+        p.set(CurrentPaceTime, self.pace);
+        p.set(NumRunningCars, self.running as f32);
+        p.set(PlayerPrevLapTime, self.player.last_lap);
+        p.set(MaxPlayerCarSpeed, self.player.max_speed);
+        p.set(PlayerCarRevRatio, self.car.engine / self.car.limit);
+        p.flag(PlayerGoodStart, self.car.launch == 0);
+        p.set(CarsPlayerOverTook, self.overtook as f32);
+        p.flag(UsedFlashback, self.flashback);
+        // Race block +0x14/+0x18 (−1 from 0x468B30) and +0x1C: the test-drive targets, set only
+        // by an objective (career).
+        p.set(TargetTime, -1.);
+        p.set(TargetSpeed, -1.);
+        // 0x418500 before 0x418460.
+        p.set(DamageTakenInPrevLap, self.prev_lap_damage);
+        let crossed = self.seen_lap < self.player.lap;
+        if crossed {
+            self.prev_lap_damage = self.lap_damage;
+            self.seen_lap = self.player.lap;
+            self.lap_damage = 0.;
         }
-        let v = (sum / count).sqrt() * 1.666_666_6;
-        v.clamp(0., 1.)
-    };
-    let third = nz / 3;
-    let sides = [
-        side(third..nz, 0..nx),
-        side(0..third.max(1), 0..nx),
-        side(0..nz, 0..nx / 2),
-        side(0..nz, nx / 2..nx),
-    ];
-    let largest = sides.iter().fold(sides[3], |m, &s| if s > m { s } else { m }) * 100.;
-    largest + components * (1. / 6.) * 100.
+        p.flag(PlayerCrossedSfLine, crossed);
+    }
 }
 
 #[cfg(test)]
@@ -1498,7 +1956,169 @@ mod tests {
             position,
             finished: false,
             grid,
+            ..Entry::default()
         }
+    }
+
+    /// A race in progress: the player 4th of 4 at `progress` laps.
+    fn racing(progress: f64) -> RaceView {
+        RaceView {
+            started: true,
+            clock: 60.,
+            track_laps: 3,
+            entries: vec![entry(4, 3, progress), entry(1, 0, progress + 0.1), entry(2, 1, progress + 0.05), entry(3, 2, progress + 0.02)],
+            car: Car { density: 1., limit: 1., ..Car::default() },
+            ..RaceView::default()
+        }
+    }
+
+    #[test]
+    fn overtakes_count_until_the_reference_follows() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        // On the grid the reference is the place.
+        v.started = false;
+        c.update(&v, 0.1);
+        assert_eq!(c.reference, 4);
+        v.started = true;
+        // One place: counted on every refresh until the 60th-frame reference update.
+        v.entries[0].position = 3;
+        v.entries[3].position = 4;
+        let mut counts = Vec::new();
+        while c.counter < 60 {
+            counts.push(c.update(&v, 0.1).get(Param::CarsPlayerOverTook));
+        }
+        assert!(counts.iter().all(|&n| n == 1.), "{counts:?}");
+        assert_eq!(c.update(&v, 0.1).get(Param::CarsPlayerOverTook), 0.);
+        // Two places at once: the reference follows at once.
+        v.entries[0].position = 1;
+        v.entries[1].position = 3;
+        assert_eq!(c.update(&v, 0.1).get(Param::CarsPlayerOverTook), 2.);
+        assert_eq!(c.update(&v, 0.1).get(Param::CarsPlayerOverTook), 0.);
+    }
+
+    #[test]
+    fn lap_damage_reaches_the_getter_one_crossing_late() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        v.contacts = vec![Contact { car: 0, other: Some(1) }];
+        v.car.components = [0.6; 6];
+        // Up to the player's slot (counter % 4 == 0): a collision of 60 %.
+        let mut p = Params::default();
+        for _ in 0..4 {
+            p = c.update(&v, 0.1).clone();
+            v.contacts.clear();
+        }
+        assert!((p.get(Param::TotalDam) - 60.).abs() < 1e-3 && p.get(Param::DamLastAccident) == p.get(Param::TotalDam));
+        assert_eq!(p.get(Param::NoCollisionTime), 0.);
+        // The first crossing: the getter still reads the earlier lap (0); the 60 move over.
+        v.entries[0].laps = 1;
+        v.entries[0].last_lap = Some(70.);
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::PlayerCrossedSfLine), p.get(Param::DamageTakenInPrevLap)), (1., 0.));
+        assert_eq!(p.get(Param::PlayerPrevLapTime), 70.);
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::PlayerCrossedSfLine), 0.);
+        assert!((p.get(Param::DamageTakenInPrevLap) - 60.).abs() < 1e-3);
+        // The second crossing: a clean lap.
+        v.entries[0].laps = 2;
+        c.update(&v, 0.1);
+        assert_eq!(c.update(&v, 0.1).get(Param::DamageTakenInPrevLap), 0.);
+    }
+
+    #[test]
+    fn damage_getters_read_the_copy_of_even_frames() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        v.car.components[3] = 0.25;
+        v.car.wheels = [0.1, 0.2, 0.3, 0.4];
+        // Frame 1 (odd): no copy yet.
+        assert_eq!(c.update(&v, 0.1).get(Param::EngDam), 0.);
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::EngDam), 25.);
+        assert_eq!((p.get(Param::FrontRightTyreDam), p.get(Param::RearLeftTyreDam)), (40., 10.));
+        assert!((p.get(Param::TyreDamage) - 25.).abs() < 1e-4);
+        assert!((p.get(Param::FrontTyreDamage) - 35.).abs() < 1e-4);
+    }
+
+    #[test]
+    fn lost_parts_set_their_flags_until_a_restart() {
+        assert_eq!(["wing_bl", "wing_br", "wing_fl", "wing_fr"].map(|n| part_id(n).unwrap()), [84, 85, 86, 87]);
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        v.parts_lost = vec![part_id("bumper_fm").unwrap(), part_id("wing_fl").unwrap()];
+        let p = c.update(&v, 0.1).clone();
+        // `wing_fl` is the flag named left.
+        assert_eq!((p.get(Param::LossBumper), p.get(Param::LossLeftWing), p.get(Param::LossFrontWing)), (1., 1., 0.));
+        v.parts_lost.clear();
+        assert_eq!(c.update(&v, 0.1).get(Param::LossBumper), 1.);
+        c.restart();
+        assert_eq!(c.update(&v, 0.1).get(Param::LossBumper), 0.);
+    }
+
+    #[test]
+    fn terminal_damage_freezes_the_collector_until_a_restart() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        v.entries[0].terminal = true;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::TerminalDam), 1.);
+        // Frozen: the clock no longer follows, the values still refresh.
+        v.clock = 90.;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::TerminalDam), p.get(Param::RaceTime)), (1., 60.));
+        c.restart();
+        v.entries[0].terminal = false;
+        assert_eq!(c.update(&v, 0.1).get(Param::TerminalDam), 0.);
+    }
+
+    #[test]
+    fn pace_counts_moving_ai_cars() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        for e in &mut v.entries[1..] {
+            e.ai = true;
+        }
+        v.entries[3].terminal = true;
+        // 4 m/s is under 10 mph: running, not in the pace.
+        v.entries[2].speed = 4.;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.get(Param::CurrentPaceTime), 100.);
+        assert_eq!(p.get(Param::NumRunningCars), 3.);
+        assert_eq!(p.get(Param::CurrentTrackLaps), 3.);
+    }
+
+    #[test]
+    fn timers_follow_their_conditions() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        v.wrong_way = true;
+        v.off_track = true;
+        for _ in 0..4 {
+            c.update(&v, 0.25);
+        }
+        let p = c.params.clone();
+        assert_eq!((p.get(Param::WrongWayTime), p.get(Param::TimeOffTrack)), (1., 1.));
+        // No progress after the first frame.
+        assert_eq!(p.get(Param::SatOnTrackTime), 0.75);
+        // Density 1.0: no slipstream.
+        assert_eq!(p.get(Param::SlipStreamTime), 0.);
+        v.wrong_way = false;
+        v.entries[0].progress = 0.6;
+        let p = c.update(&v, 0.25).clone();
+        assert_eq!((p.get(Param::WrongWayTime), p.get(Param::SatOnTrackTime)), (0., 0.));
+    }
+
+    #[test]
+    fn a_flashback_resets_without_the_grid_flags() {
+        let mut c = Collector::default();
+        let v = racing(0.5);
+        c.update(&v, 0.1);
+        c.flashback();
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::UsedFlashback), p.get(Param::StartAfterRestart), p.get(Param::OnStartingGrid)), (1., 0., 0.));
+        c.restart();
+        assert_eq!(c.update(&v, 0.1).get(Param::UsedFlashback), 0.);
     }
 
     #[test]
@@ -1597,7 +2217,7 @@ mod tests {
         let bytes = std::fs::read(root.join("audio/eventSpeech.bin")).unwrap();
         assert_eq!(rules.unknown_params(&bytes), Vec::<String>::new());
         let slice: Vec<_> = rules.messages.iter().filter(|m| rules.events[m.event].on).collect();
-        assert_eq!(slice.len(), 158);
+        assert_eq!(slice.len(), 252);
         assert!(slice.iter().all(|m| m.speech.is_some()));
         let m = |n: &str| &rules.messages[rules.message(n).unwrap()];
         assert_eq!(m("keyDriver22Ahead3s").priority, 0);

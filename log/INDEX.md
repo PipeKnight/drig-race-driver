@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F599](F0599.md) | 2026-10-27 | Speech part 2 step 2: the player's damage, performance, strategy and wrong-way lines |
 | [F598](F0598.md) | 2026-10-27 | Force feedback research: the original GameFFB pipeline, snapshot builder and device output |
 | [F597](F0597.md) | 2026-10-27 | Row 90 rechecked on current main: the Le Mans 24 Hours race runs to its end |
 | [F596](F0596.md) | 2026-10-27 | Speech part 2 research: damage, performance, accidents, teammate and key-driver parameters |

@@ -341,8 +341,18 @@ array, so a getter runs once per refresh. One getter has a side effect:
   `playerLap`, it stores the lap and returns 1. It also moves the damage taken this lap (+0xB450)
   to `damageTakenInPrevLap` (+0xB44C) and clears +0xB450. Otherwise it returns 0.
 
-While the collector is disabled (+0x18 clear, terminal damage, §9), 0x44C470 writes −10000 into
-every value once. In the Paused or Intro mix modes, or without a player car, the update runs
+The getters live in a std::map keyed by the name string's address (0x456B80 inserts, 0x7B0CF0
+compares the keys unsigned), and 0x44C3C0 walks it in order: ascending string address.
+`damageTakenInPrevLap` (string 0xCB6FCC) is therefore read before `playerCrossedSFLine`
+(0xCB7004) moves the lap's damage. At a crossing the refresh still reports the lap before; the
+value of the lap just completed appears on the next refresh, when `playerCrossedSFLine` is 0
+again. The lines that test both on the same refresh (`cleanLap`, `notCleanLapOffPace`,
+`offPace3s`, `aheadPace2s`) judge the lap before the one just completed [O static].
+
+While the collector is disabled (+0x18 clear, terminal damage, §9) the update stops, so the
+records and timers freeze (`terminalDam` stays 1). On its first disabled frame it also runs
+0x44C470, which writes −10000 into every value; the task's refresh is not gated by +0x18 and
+overwrites them [I: the task runs after the update in a frame]. In the Paused or Intro mix modes, or without a player car, the update runs
 0x417ED0 and 0x417E40 (which clears the records) once and returns.
 
 ## 9. Part 2: player parameters [O unless marked]
@@ -398,8 +408,9 @@ every value once. In the Paused or Intro mix modes, or without a player car, the
   1 and 0 × 100. `frontTyreDamage` = (wheel 3 + wheel 2) × 50, `rearTyreDam` = (wheel 1 + wheel 0)
   × 50, and `tyreDamage` = the sum of the four × 25.
 - `frontDam`, `rearDam`, `rightDam` and `leftDam` (+0xB70C…+0xB718) are the four body-side terms
-  of 0x424650 (part 1) × 100. `bodyDam` (+0xB708) is the largest of them. All five are refreshed
-  only when `totalDam` is, after a player collision.
+  of 0x424650 (part 1) × 100. `bodyDam` (+0xB708) is the largest of them. 0x424780 calls 0x424650
+  on every frame of the player's slot, so all five follow the body on those frames, collision or
+  not; `totalDam` follows only after a player collision (part 1).
 - `damLastAccident` (+0xB440) = |ΔtotalDam| of that update. The same amount is added to the lap's
   damage (+0xB450, §8).
 - +0xB42C is set when the car's up axis points down at that update [I: 0xA69630 transform].
@@ -513,3 +524,54 @@ its type, the car and a flag.
   are 0 outside the career.
 - Lines that need the player's profile statistics (`terminalDamageCount`, `numRaceWins`, …) use
   the port's defaults (§7).
+
+## 13. The port, part 2 step 2: the player's lines
+
+`SLICE` adds CarDamage, Performance, Strategy and Rules. Every parameter those events read is
+registered, including the ones that stay constant. An unregistered name would read `inRace`
+(0x44C510), which turns tests such as `isNetRace equals 0` false.
+
+**Reset 0x452520 [O].** The port's reset follows the original:
+- Every call clears:
+  - the one-shot flags and the overtake count;
+  - `noCollisionTime`, `timeOffTrack` and `wrongWayTime`;
+  - the part-loss flags;
+  - the race block (0x468B30: in-race and kind flags, lap count, pace; targets −1);
+  - every car record (0x417E40), including the player's. Part 1 kept the player's record over a
+    restart; `playerPrevPosition` and the time in position now start from 0 as in the original.
+- `playerCollision` (+0xB43A) is not cleared by the reset. Part 1 cleared it.
+- With p = 1 (race set-up and Restart Race) it also clears:
+  - the damage values (`totalDam`, `damLastAccident`, the lap damages, the sides);
+  - the best position and `usedFlashback`;
+  - it sets the seen lap to 1, `startAfterRestart` to 1 and `1_2Finish` to −1.
+- With p = 0 (a flashback, 0x453000/0x454910, followed by `usedFlashback` = 1) it re-enables the
+  collector.
+
+**Getters [O].**
+- The damage getters read the damage object copied on even frames (0x452C1E).
+- `playerCarRevRatio` and `playerGoodStart` read the live vehicle.
+- The refresh reads `damageTakenInPrevLap` before `playerCrossedSFLine` (§8).
+- Part ids come from the name table 0xE4EF20: 10 `bonnet`, 12–17 `bumper_bl/br/bm/fl/fr/fm`,
+  22–25 `door_bl/br/fl/fr`, 84–87 `wing_bl/br/fl/fr`. 0x417D60 calls them rear, right, left and
+  front wing. 0x9FF4F0 calls the part callback when a detached part's body is made, so the port
+  reports the parts that became detached in the tick.
+
+**Inputs that are the port's own [I].**
+- The wrong-way flag (race interface +0x18, set by the WrongWay message 0x431470 → 0x429640): the
+  HUD's input test, moving against the racing line faster than 3 m/s.
+- `droveOffTrack`: the player has no driver object in the port. The AI's `on_track` test is
+  applied to the player's wheel anchors on the racing line, without a segment hint.
+- Contacts: the port's solved contact impulses for every car, against half that car's physical
+  mass.
+- A flashback is taken when the flashback manager counts one used.
+- Restart Race re-enables a collector that terminal damage disabled. Whether the original's load
+  handler runs on a restart is not established (§5); without it, speech would stay silent after
+  restarting a wrecked car.
+- `isPlayerCarOpenCockpit` (car description +0xD4) is not traced to a port field and reads 0.
+
+**Not available outside the career or without a profile.**
+- `bonusObjWinPos`, `driverChampWinPos`, `1_2Finish`, `hasNoDamageObj`, `anyDamageIndOn` and the
+  test-drive targets.
+- `terminalDamageCount` (profile) is 0, so `terminalDamRestart` and `terminalDamNoRestart`
+  (count > 1) do not play.
+- `newPersonalBest` and `newWorldRecord` (broadcast messages) have no sender in the port.

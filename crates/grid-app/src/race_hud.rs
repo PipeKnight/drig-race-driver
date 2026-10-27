@@ -518,6 +518,18 @@ impl HudView {
     }
 }
 
+/// Wrong way: moving against the racing line (the HUD pill's input, and the
+/// speech collector's wrong-way flag [I]).
+pub(crate) fn wrong_way(driving: &crate::Driving) -> bool {
+    let v = driving.runtime.velocity();
+    let speed = f64::from((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
+    driving.reset_line.as_ref().is_some_and(|line| {
+        let p = driving.runtime.pose();
+        let (_, d) = line.reset_target([p[12], p[13], p[14]]);
+        speed > 3. && f64::from(v[0] * d[0] + v[2] * d[2]) < -1.
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn frame(
     driving: Res<crate::Driving>,
@@ -563,12 +575,7 @@ fn frame(
     } else {
         state.best.1 = (state.best.1 - dt).max(0.);
     }
-    // Wrong way: moving against the racing line.
-    let wrong = driving.reset_line.as_ref().is_some_and(|line| {
-        let p = driving.runtime.pose();
-        let (_, d) = line.reset_target([p[12], p[13], p[14]]);
-        speed > 3. && f64::from(v[0] * d[0] + v[2] * d[2]) < -1.
-    });
+    let wrong = wrong_way(&driving);
     let wrong_way = state.wrong_way.update(wrong && !driving.paused, if driving.paused { 0. } else { dt });
     let b = &driving.runtime.state.car.owner.vehicle;
     let word = |o: usize| f32::from_bits(b[o / 4]);

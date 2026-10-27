@@ -1,5 +1,6 @@
-//! Race engineer speech, part 1 (docs/SPEECH_AUDIO_RESEARCH.md): the original's event speech for
-//! the race start, position calls and the finish (`grid_tools::speech`). One voice on the
+//! Race engineer speech (docs/SPEECH_AUDIO_RESEARCH.md): the original's event speech for the
+//! events of `grid_tools::speech::SLICE` (race start, positions, finish, the player's damage,
+//! performance, strategy and rules lines). One voice on the
 //! Codriver group plays the lines from the installation; while it plays the mix is in Talking
 //! (0x411D40). Presentation only.
 use bevy::{
@@ -51,6 +52,8 @@ pub(crate) struct SpeechSound {
     /// Talking was set for the line playing.
     talking: bool,
     last: Option<(u64, u64)>,
+    /// Flashbacks used so far in this race.
+    flashbacks: u32,
 }
 
 #[derive(Asset, TypePath)]
@@ -164,6 +167,7 @@ pub(crate) fn install(app: &mut App, root: PathBuf, table: Option<Arc<Table>>, p
         ends: 0.,
         talking: false,
         last: None,
+        flashbacks: 0,
     })
     .insert_resource(PendingSource(Some(source)))
     .add_systems(Startup, start)
@@ -189,36 +193,73 @@ fn view(driving: &super::Driving, trial: Option<&super::time_trial::Trial>, kind
     let clock = trial.and_then(|t| t.race_time(driving.runtime.ticks));
     let speeds = o.speeds(&driving.runtime);
     let order = standings.order();
+    let player = &driving.runtime;
+    // Car 0 is the player (its own runtime); the opponents are the shared world's cars 1….
+    let car = |k: usize| if k == 0 { Some(player) } else { o.multi.cars.get(k) };
     let entries = (0..standings.len())
-        .map(|k| Entry {
-            time: standings.finished(k).unwrap_or(clock.unwrap_or(0.)),
-            progress: standings.progress(k),
-            laps: standings.lap_times(k).len() as u32,
-            speed: speeds.get(k).copied().unwrap_or(0.) as f32,
-            position: order.iter().position(|&c| c == k).map_or(0, |p| p + 1),
-            finished: standings.status(k) == grid_tools::race::Status::Finished,
-            // Car 0 is the player; the opponents fill the other slots in order.
-            grid: match k {
-                0 => player_slot,
-                k if k - 1 < player_slot => k - 1,
-                k => k,
-            },
+        .map(|k| {
+            let laps = standings.lap_times(k);
+            Entry {
+                time: standings.finished(k).unwrap_or(clock.unwrap_or(0.)),
+                progress: standings.progress(k),
+                laps: laps.len() as u32,
+                speed: speeds.get(k).copied().unwrap_or(0.) as f32,
+                position: order.iter().position(|&c| c == k).map_or(0, |p| p + 1),
+                finished: standings.status(k) == grid_tools::race::Status::Finished,
+                // The opponents fill the other grid slots in order.
+                grid: match k {
+                    0 => player_slot,
+                    k if k - 1 < player_slot => k - 1,
+                    k => k,
+                },
+                last_lap: laps.last().copied(),
+                ai: k != 0,
+                terminal: car(k).is_some_and(|c| c.state.car.owner.vehicle[0xd234 / 4] != 7),
+            }
         })
         .collect();
-    let impacts = o.multi.contact_impacts(0);
-    let player = &driving.runtime;
-    // 0x430F50: a player collision when the impulse is at least half the physical mass
+    // 0x430F50 on every car: a contact whose impulse is at least half the car's physical mass
     // (car +DB0 → +3F0) [I: the port's solved contact impulse].
-    let mass = f32::from_bits(player.state.car.owner.physical[0x3f0 / 4]);
+    let mut contacts = Vec::new();
+    for k in 0..o.multi.cars.len() {
+        let Some(c) = car(k) else { continue };
+        let mass = f32::from_bits(c.state.car.owner.physical[0x3f0 / 4]);
+        for (impact, other) in o.multi.contact_impacts(k) {
+            if impact.impact >= 0.5 * mass {
+                let other = match other {
+                    grid_tools::source_vehicle::multi::Contacted::Car(j) => Some(j),
+                    _ => None,
+                };
+                contacts.push(speech::Contact { car: k, other });
+            }
+        }
+    }
+    let vehicle = &player.state.car.owner.vehicle;
+    let wheels = grid_tools::tyre_audio::wheel_positions(vehicle, &player.state.car.owner.physical);
     Some(RaceView {
         clock: clock.unwrap_or(0.),
         started: clock.is_some(),
         over: standings.over(),
+        track_laps: standings.laps(),
         entries,
         player: 0,
         kind,
-        collision: impacts.iter().any(|(impact, _)| impact.impact >= 0.5 * mass),
-        damage: speech::total_damage_percent(&player.state.car.owner.vehicle),
+        contacts,
+        car: speech::Car::read(vehicle),
+        // The player's driver test of type 11 on the racing line [I: the port's player has no
+        // driver object; the AI's test is applied to its wheel anchors].
+        off_track: driving.reset_line.as_ref().is_some_and(|line| !line.on_track(&wheels)),
+        wrong_way: super::race_hud::wrong_way(driving),
+        // 0x9FF4F0 reports a part when its detached body is made: the parts detached this tick.
+        parts_lost: player
+            .parts()
+            .changes
+            .iter()
+            .filter(|c| c.state == grid_tools::loose_parts::State::Detached)
+            .filter_map(|c| speech::part_id(c.part))
+            .collect(),
+        // [I] Car description byte +0xD4 is not traced to a port field.
+        open_cockpit: false,
     })
 }
 
@@ -232,6 +273,7 @@ fn tick(
     le_mans: Option<Res<super::le_mans_event::LeMansEvent>>,
     touge: Option<Res<super::touge_event::TougeEvent>>,
     derby: Option<Res<super::demolition_event::DemolitionEvent>>,
+    flashback: Option<Res<super::flashback::Flashback>>,
 ) {
     let sound = &mut *sound;
     let now = (driving.segment, driving.runtime.ticks);
@@ -263,13 +305,24 @@ fn tick(
     sound.last = Some(now);
     let root = sound.root.clone();
     let exists = |line: &Line| line.path(&root, LANGUAGE).is_file();
+    // A flashback jump-in: 0x452520(0) and `usedFlashback` [I: taken when the flashback manager
+    // counts one used].
+    let used = flashback.as_ref().map_or(0, |f| f.manager.used);
+    if used > sound.flashbacks {
+        sound.collector.flashback();
+    }
+    sound.flashbacks = used;
     let out = if driving.paused {
-        // The pause menu: the original's Paused mix clears the queue and stops speech.
+        // The pause menu: the original's Paused mix clears the queue and stops speech; the
+        // collector clears its records once.
+        sound.collector.pause();
         sound.manager.frame(0., &speech::Params::default(), busy, true, &exists)
     } else if fresh {
+        let format = drift.as_ref().map(|d| d.format);
         let kind = Kind {
             drift: drift.is_some(),
-            drift_battle: drift.as_ref().is_some_and(|d| d.format == grid_tools::virtual_race::Format::DriftBattle),
+            drift_battle: format == Some(grid_tools::virtual_race::Format::DriftBattle),
+            drift_freestyle: format == Some(grid_tools::virtual_race::Format::DriftFreestyle),
             le_mans: le_mans.is_some(),
             touge: touge.is_some(),
             derby: derby.is_some(),
