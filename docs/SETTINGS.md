@@ -64,6 +64,7 @@ Grammar:
 | | `flashback_capture` | seconds: in that Instant Replay, Jump In (Flashback) once it has run this long; the drive continues from the jump-in frame (docs/FLASHBACK.md). Use a value below `replay_capture` | `GRID_FLASHBACK_CAPTURE=S` |
 | | `max_ticks_per_frame` | interactive window only: at most this many 16 ms ticks per rendered frame, default 4; `0` restores Bevy's 250 ms clamp, for comparisons (docs/FRAME_STEPPING.md) | `GRID_MAX_TICKS_PER_FRAME=N` |
 | | `tick_delay_ms` | milliseconds slept in every vehicle tick: a forced slow tick for frame-rate checks (docs/FRAME_STEPPING.md) | `GRID_TICK_DELAY_MS=MS` |
+| | `camera_fps` | frames per second of race time: the in-race views step by the original's per-frame rules at this rate (head-cam springs, look smoothing, follow damp, spin hold), for comparisons with the original at 60 or 165 fps; unset, one step per 16 ms tick (docs/CAMERA_VIEWS.md §3 "Camera clock") | `GRID_CAMERA_FPS=F` |
 
 Notes:
 

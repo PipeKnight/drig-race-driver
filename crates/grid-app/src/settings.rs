@@ -95,6 +95,10 @@ pub struct Diagnostics {
     /// Catch-up cap of the interactive app: at most this many fixed ticks per
     /// rendered frame; 0 restores Bevy's 250 ms clamp (docs/FRAME_STEPPING.md).
     pub max_ticks_per_frame: Option<u32>,
+    /// Frames per second of simulation time: the cameras step by the
+    /// original's per-frame rules at this rate instead of once per tick
+    /// (docs/CAMERA_VIEWS.md §3).
+    pub camera_fps: Option<f32>,
 }
 
 impl Default for Diagnostics {
@@ -116,6 +120,7 @@ impl Default for Diagnostics {
             results_continue: None,
             tick_delay_ms: None,
             max_ticks_per_frame: None,
+            camera_fps: None,
         }
     }
 }
@@ -144,6 +149,7 @@ impl Diagnostics {
             results_continue: text("GRID_RESULTS_CONTINUE").and_then(|v| v.parse().ok()),
             tick_delay_ms: text("GRID_TICK_DELAY_MS").and_then(|v| v.parse().ok()),
             max_ticks_per_frame: text("GRID_MAX_TICKS_PER_FRAME").and_then(|v| v.parse().ok()),
+            camera_fps: text("GRID_CAMERA_FPS").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -176,6 +182,7 @@ impl Diagnostics {
             "max_ticks_per_frame" => {
                 self.max_ticks_per_frame = Some(value.parse().map_err(|_| number(key))?)
             }
+            "camera_fps" => self.camera_fps = Some(value.parse().map_err(|_| number(key))?),
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
