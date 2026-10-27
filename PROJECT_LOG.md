@@ -54,6 +54,8 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G305 (2026-10-27): explicit four-weight mesh reader preserves selected USA actor geometry/3144weights/3144joints/23palette exactly against independent extraction; authored elbow test/full1139tests pass. Neutral rendering/arm motion/clock remain open. See CROWD_ANIMATION_RESEARCH.
+- G304 (2026-10-27): pinned F591/F592 integrated; full1139tests/Clippy/4identities/24soak, combined build and new2native BMW smoke controls pass with actually visible Off tyre curves attenuated in Late. Conditional cold-upload delivery/Manual/general/default remain open. See PERFORMANCE/TYRE_SMOKE_RESEARCH.
 - G303 (2026-10-27): linked ordinary L4 resource sampler passes195coordinates/49keys with unchanged980key bytes and independent bit reconstruction; shared full gate passes. Crowd clock/pose/rendered arm motion remain open. See CROWD_ANIMATION_RESEARCH.
 - G302 (2026-10-27): pinned F587-F590 integrated, player ownership/opponent batching retained; full1137tests/Clippy/4identities/24soak, combined build and fresh2native BMW smoke controls pass. Selected glass/lens/skid ghosts attenuate; minor wheel rings/Manual/general/default remain open. See TYRE_SMOKE_RESEARCH/PERFORMANCE.
 - G301 (2026-10-27): optional main-view AgX/Reinhard comparison passes460app tests/Clippy/combined-feature build and2native4K captures. Reinhard makes selected Lacetti paint more saturated; AgX default retained. One-component probe residual recorded; no original/moving/default parity claim. See ASPHALT_PAINT_REFLECTION_CHECK.

@@ -4,7 +4,7 @@
 //! Bounded resource diagnostic: grid-pssg-tree --check-l4-packet234 FILE PRIVATE_OUTDIR
 //! With FILTER, prints only the subtrees whose element name, or any attribute
 //! value, contains FILTER; at most MAX of them (default 20).
-use grid_formats::{anim_packet, pssg};
+use grid_formats::{anim_packet, mesh, pssg};
 use std::{fs, io::Write};
 
 fn value(v: &[u8]) -> String {
@@ -40,6 +40,10 @@ fn print(tree: &pssg::Tree<'_>, node: usize, depth: usize) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|s| s == "--check-crowd-skin-female-c") {
+        if args.len() != 4 { return Err("usage: grid-pssg-tree --check-crowd-skin-female-c FILE PRIVATE_OUTDIR".into()); }
+        return check_crowd_skin_female_c(&args[2], &args[3]);
+    }
     if args.get(1).is_some_and(|s| s == "--check-l4-packet234") {
         if args.len() != 4 { return Err("usage: grid-pssg-tree --check-l4-packet234 FILE PRIVATE_OUTDIR".into()); }
         return check_l4_packet234(&args[2], &args[3]);
@@ -208,5 +212,78 @@ fn check_l4_packet234(path: &str, output: &str) -> Result<(), Box<dyn std::error
     writeln!(rows, "SUMMARY\tL4\t1\t49\t195\tunchanged")?;
     rows.flush()?;
     println!("ONE_PACKET234_L4 channels=1 keys=49 queries=195 input_words_unchanged=true native_clock_pose_parity=false");
+    Ok(())
+}
+
+// One purchased CPU fixture only; no pose, LOD selection or skinning.
+fn check_crowd_skin_female_c(path: &str, output: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let out = std::path::Path::new(output).canonicalize()?;
+    if !out.starts_with(std::path::Path::new("local").canonicalize()?) {
+        return Err("private local output directory required".into());
+    }
+    if fs::metadata(path)?.len() != 848_496 { return Err("pinned female rig size differs".into()); }
+    let bytes = fs::read(path)?;
+    let tree = pssg::read_tree(&bytes)?;
+    let one_id = |id: &[u8]| -> Result<usize, &'static str> {
+        let mut matches = (0..tree.nodes.len()).filter(|&i| tree.string(i, b"id").is_ok_and(|v| v == id));
+        let found = matches.next().ok_or("selected ID absent")?;
+        if matches.next().is_some() { return Err("selected ID ambiguous"); }
+        Ok(found)
+    };
+    let child = |parent: usize, name: &[u8]| -> Result<usize, &'static str> {
+        let mut matches = tree.nodes[parent].children.iter().copied().filter(|&i| tree.name(i) == name);
+        let found = matches.next().ok_or("selected child absent")?;
+        if matches.next().is_some() { return Err("selected child ambiguous"); }
+        Ok(found)
+    };
+    let selected = mesh::read_four_weight_mesh(&tree, b"!C")?;
+    let geometry = &selected.mesh;
+    let influences = &selected.influences;
+    if geometry.id != b"!C" || geometry.positions.len() != 786
+        || influences.weights.len() != 786 || influences.joints.len() != 786 || geometry.skin_indices.is_some() {
+        return Err("selected four-weight source/count/representation differs".into());
+    }
+    let skin = one_id(b"f_US_lod0")?;
+    let skeleton = one_id(b"!A")?;
+    if tree.name(skin) != b"SKINNODE" || tree.string(skin, b"skeleton")? != b"#!A"
+        || tree.name(skeleton) != b"SKELETON" || tree.integer(skin, b"jointCount")? != 23
+        || tree.integer(skeleton, b"matrixCount")? != 23 {
+        return Err("selected skin/skeleton differs".into());
+    }
+    let joints: Vec<_> = tree.nodes[skin].children.iter().copied()
+        .filter(|&i| tree.name(i) == b"SKINJOINT").collect();
+    let inverse: Vec<_> = tree.nodes[skeleton].children.iter().copied()
+        .filter(|&i| tree.name(i) == b"INVERSEBINDMATRIX").collect();
+    if joints.len() != 23 || inverse.len() != 23
+        || inverse.iter().any(|&i| tree.nodes[i].data.is_none_or(|b| b.len() != 64))
+        || influences.joints.iter().flatten().any(|&j| j >= 23) {
+        return Err("palette/reference/count/range differs".into());
+    }
+    let index_source = child(one_id(b"!C")?, b"RENDERINDEXSOURCE")?;
+    let declared_count = tree.integer(index_source, b"count")? as usize;
+    let declared_max = tree.integer(index_source, b"maximumIndex")?;
+    if geometry.indices.len() != declared_count { return Err("geometry index count differs".into()); }
+    let mut rows = fs::OpenOptions::new().create_new(true).write(true).open(out.join("actual.tsv"))?;
+    writeln!(rows, "SKIN4\t1\t!C\t786\t23\t23")?;
+    writeln!(rows, "GEOMETRY\t{}\t{}\t{}", geometry.indices.len(),
+        geometry.indices.iter().copied().max().ok_or("empty geometry")?, declared_max)?;
+    for (index, &entry) in joints.iter().enumerate() {
+        let target = tree.string(entry, b"joint")?.strip_prefix(b"#").ok_or("nonlocal palette reference")?;
+        if tree.name(one_id(target)?) != b"JOINTNODE" || target.contains(&b'\t') || target.contains(&b'\n') {
+            return Err("palette target type/text differs".into());
+        }
+        writeln!(rows, "PALETTE\t{index}\t{}", std::str::from_utf8(target)?)?;
+    }
+    for index in 0..786 {
+        let p = geometry.positions[index].map(f32::to_bits);
+        let w = influences.weights[index].map(f32::to_bits);
+        let j = influences.joints[index];
+        writeln!(rows, "VERTEX\t{index}\t{:08x}\t{:08x}\t{:08x}\t{:08x}\t{:08x}\t{:08x}\t{:08x}\t{:02x}\t{:02x}\t{:02x}\t{:02x}",
+            p[0],p[1],p[2],w[0],w[1],w[2],w[3],j[0],j[1],j[2],j[3])?;
+    }
+    for (index, value) in geometry.indices.iter().enumerate() { writeln!(rows, "INDEX\t{index}\t{value}")?; }
+    writeln!(rows, "SUMMARY\t786\t3144\t3144\t23\t{}", geometry.indices.len())?;
+    rows.flush()?;
+    println!("ONE_FEMALE_C_SKIN4 vertices=786 weight_words=3144 joint_bytes=3144 palette=23 indices={} no_pose_clock_lod_claim=true", geometry.indices.len());
     Ok(())
 }

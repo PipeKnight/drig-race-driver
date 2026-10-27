@@ -495,6 +495,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G305](G0305.md) | 2026-10-27 | Preserve all four authored skin influence lanes |
 | [G304](G0304.md) | 2026-10-27 | Integrate F591-F592 static and skid streaming optimizations |
 | [G303](G0303.md) | 2026-10-27 | Sample one ordinary L4 crowd packet through the linked reader |
 | [G302](G0302.md) | 2026-10-27 | Integrate F587-F590 preserving graphics ownership |
