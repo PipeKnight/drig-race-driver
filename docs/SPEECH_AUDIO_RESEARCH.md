@@ -178,7 +178,8 @@ message (+0x62C).
   - it leaves the queue.
 - **Playback (0x42FFC0)** waits for now > L's queued-at + event delay + group delay + message
   delay + global delay, and for the voice to be free.
-  - It plays the armed name phrase first, if any, on the next call.
+  - It plays an armed player-name phrase first, if any, on the next call. A `namedAI` name plays
+    after the line instead (§16).
   - It then plays the line on the voice (0x421C90 with 2 and 14, PA lines 15 [I: group 14 Codriver and 15 3DSpeech]) and sets
     silence base = now + 2.5 (0xCB092C; 2.0 after a named-AI phrase).
   - It switches the mix to **Talking** (mode 1) through 0x411D40, except for PA lines, a mode-5
@@ -739,3 +740,36 @@ keeps them until the record is cleared again. So:
   (drivers 4, 5, 7, 10, 11, 12, 8, 13, 14, 15, 16; teammate driver 8, British, number 4) plays
   key-driver and key-team position lines, `team4Plus1Less3s`, `team4Minus1Less3s`,
   `teammate4_spin` and `playerWonTeam4`.
+
+## 16. The port, part 2 step 5: the `namedAI` name phrase [O]
+
+**Arming (0x437F70).** After a line loads, `int(0, 100)` ≤ `linkedPhrasePercentage` arms a name:
+- nameToSay 0–2 arm the player-name phrases only while the profile has names (+0x609); the port
+  has none, so they stay unarmed (§3);
+- nameToSay 3 (`namedAI`): n = (int) `userData` (+0x78). It requires n > 0, n − 1 > 0 and
+  n − 1 < the entry count (game interface vf 0x10). So the `AI_01_…` messages (entry 0, the
+  player's slot) never name anyone. The game interface's vf 0xC gives entry n − 1's driver, and
+  the named-AI stream (+0x3E8) loads `speech/<lang>/Names_AI/<pit_speech_filename>.raw`; +0x60E
+  is set.
+- [I] An entry without a driver in the port arms nothing. The original always has drivers.
+
+**Playing (0x42FFC0, called while +0x60C is pending and the voice is free).**
+1. The line plays. If the last message is `namedAI` and +0x60E is set, pending stays set and the
+   silence base is not moved; otherwise pending clears and the silence base is now + 2.5.
+2. On a later call, once the voice is free again: if the name loaded, it plays, pending clears,
+   the silence base is now + 2.0 and +0x60A clears. If the name failed to load ("Error loading
+   NAMED_AI"), pending clears and the silence base stays. Either way +0x60E clears.
+
+**Stops and resets.**
+- 0x430350(p) drops an armed name and the pending playback. With p = 1 it also empties a line
+  stream that is not loading (pause, a load error); preemption calls it with p = 0.
+- The reset 0x444E30 clears +0x60E, +0x60A and both streams.
+- The port now tracks the line stream's ready flag (+0x1D4) separately from the file name: the
+  repeat test still compares the last file, and a line is played once.
+
+**Checks.**
+- Unit test: the name follows the line once the voice is free, with the 2.0 s silence base; entry
+  0 and a driverless entry are never named; a missing name file ends the playback.
+- Render (`local/speech-render/render-06`): AI_3_AISpin is followed by `Names_AI/Chief_AI_457`
+  (entry 2, driver 5), AI_05_accidentTerm by `Chief_AI_443` (entry 4, driver 10) and
+  AI_02_tyreBlow by `Chief_AI_467` (entry 1, driver 4).

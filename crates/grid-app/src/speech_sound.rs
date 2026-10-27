@@ -182,6 +182,8 @@ pub(crate) fn install(
         group_db: group_db.clone(),
     };
     let lines = rules.messages.iter().filter(|m| rules.events[m.event].on).count();
+    let mut manager = Manager::new(rules, SEED);
+    manager.set_ai_names(identities.entries.iter().map(|i| i.name_file.clone()).collect());
     let keys: Vec<String> = identities.entries.iter().map(|i| format!("{}/{}", i.key, i.team)).collect();
     println!(
         "speech_audio version=1 event=drivers keys={} teammate={} teammate_number={}",
@@ -192,7 +194,7 @@ pub(crate) fn install(
     app.insert_resource(SpeechSound {
         root,
         table,
-        manager: Manager::new(rules, SEED),
+        manager,
         collector: Collector::default(),
         player_slot,
         identities,

@@ -22,6 +22,8 @@ pub const SLICE: [&str; 9] = ["Position", "EndOfRace", "CarDamage", "Performance
 const UNSET: f32 = -10000.;
 /// The silence base after a line starts: now + 2.5 s (0xCB092C, 0x42FFC0).
 const AFTER_LINE: f32 = 2.5;
+/// The silence base after a `namedAI` name: now + 2.0 (0x42FFC0).
+const AFTER_NAME: f32 = 2.;
 /// A zero race progress divides by this instead (RAY_TOLERANCE 0xCB22E4, 0x438C10).
 const TINY_PROGRESS: f64 = 1e-6;
 /// m/s to mph, as the record's speed (0x438C10).
@@ -543,6 +545,8 @@ pub struct Message {
     /// neutral 0, positive 1, negative 2, namedAI 3, none 4.
     pub name_to_say: u32,
     pub linked: u32,
+    /// `userData` (+0x78): for `namedAI`, the race entry + 1 whose driver is named.
+    pub user_data: f32,
     pub delay: f32,
     pub exclusive: bool,
     pub is_event: bool,
@@ -650,6 +654,7 @@ impl Rules {
                         max_event: int(x, "maxPlayCountInEvent") as u16,
                         name_to_say,
                         linked,
+                        user_data: float(x, "userData"),
                         delay: float(x, "delay"),
                         exclusive: boolean(x, "exclusive"),
                         is_event: boolean(x, "isEvent"),
@@ -782,6 +787,14 @@ pub struct Manager {
     pending: bool,
     /// The line stream's file (+0x12C) and the message it was loaded for.
     stream: Option<Line>,
+    /// +0x1D4: the line stream holds a line not yet played; +0x60A: the line was played.
+    line_ready: bool,
+    line_played: bool,
+    /// The named-AI stream (+0x3E8) and +0x60E: a `namedAI` name is armed for the line.
+    name: Option<Line>,
+    named: bool,
+    /// Each race entry's `driver.pit_speech_filename` (game interface vf 0xC; vf 0x10 the count).
+    ai_names: Vec<Option<String>>,
     state: Vec<State>,
 }
 
@@ -809,8 +822,18 @@ impl Manager {
             loaded: false,
             pending: false,
             stream: None,
+            line_ready: false,
+            line_played: false,
+            name: None,
+            named: false,
+            ai_names: Vec::new(),
             state,
         }
+    }
+
+    /// The race entries' name files for `namedAI` lines (entry k at k; `None` without a driver).
+    pub fn set_ai_names(&mut self, names: Vec<Option<String>>) {
+        self.ai_names = names;
     }
     pub fn rules(&self) -> &Rules {
         &self.rules
@@ -833,6 +856,10 @@ impl Manager {
         self.pending = false;
         self.silence = 0.;
         self.stream = None;
+        self.line_ready = false;
+        self.line_played = false;
+        self.name = None;
+        self.named = false;
         for (s, m) in self.state.iter_mut().zip(&self.rules.messages) {
             s.race = 0;
             s.last_played = 0.;
@@ -851,7 +878,7 @@ impl Manager {
         if paused {
             self.queue.clear();
             out.stop = voice_busy;
-            self.stop();
+            self.stop(true);
             return out;
         }
         self.now += dt;
@@ -862,7 +889,7 @@ impl Manager {
         }
         match self.current {
             Some(c) => self.loading(c, p, voice_busy, exists, &mut out),
-            None => self.playback(voice_busy, &mut out),
+            None => self.playback(voice_busy, exists, &mut out),
         }
         out
     }
@@ -882,7 +909,17 @@ impl Manager {
         }
     }
     /// 0x430350: forget the line being loaded.
-    fn stop(&mut self) {
+    /// 0x430350(`clear`): an armed name is dropped with the pending playback; `clear` also
+    /// empties a line stream that is not loading.
+    fn stop(&mut self, clear: bool) {
+        if self.named {
+            self.named = false;
+            self.pending = false;
+            self.name = None;
+        }
+        if clear && !self.loaded {
+            self.line_ready = false;
+        }
         self.loaded = false;
         self.current = None;
     }
@@ -1023,7 +1060,7 @@ impl Manager {
             if fe > ce && fp != 0 {
                 normal = true;
             } else if fp < self.msg(c).priority {
-                self.stop();
+                self.stop(false);
                 self.remove(c);
                 return;
             }
@@ -1100,8 +1137,25 @@ impl Manager {
         self.stream = Some(line);
         self.current = Some(f);
         self.loaded = true;
-        // The player-name phrase roll; the port has no profile names, so nothing is armed.
-        let _ = int_between(&mut self.rng, 0, 100) <= msg.linked;
+        // The name phrase roll (0x437F70). The player-name phrases (nameToSay 0–2) need the
+        // profile's names, which the port does not have (+0x609 clear), so they are not armed.
+        // `namedAI` (3) arms the driver of entry `userData` − 1, which must be above 0 and below
+        // the entry count [I: an entry without a driver arms nothing].
+        if int_between(&mut self.rng, 0, 100) <= msg.linked && msg.name_to_say == 3 {
+            let entry = msg.user_data as i32 - 1;
+            if msg.user_data as i32 > 0
+                && entry > 0
+                && let Some(Some(file)) = self.ai_names.get(entry as usize)
+            {
+                self.name = Some(Line {
+                    message: msg.name.clone(),
+                    folder: "Names_AI".into(),
+                    file: file.clone(),
+                    pa: false,
+                });
+                self.named = true;
+            }
+        }
         Start::Loaded
     }
 
@@ -1123,10 +1177,11 @@ impl Manager {
         let ready = self.stream.as_ref().is_some_and(exists);
         if ready && valid {
             self.commit(c, voice_busy, out);
+            self.line_ready = true;
             self.current = None;
             self.loaded = false;
         } else {
-            self.stop();
+            self.stop(true);
             self.stream = None;
             self.remove(c);
         }
@@ -1153,8 +1208,9 @@ impl Manager {
         self.remove(c);
     }
 
-    /// 0x45E870 → 0x42FFC0: the committed line plays once its delays have passed.
-    fn playback(&mut self, voice_busy: bool, out: &mut Output) {
+    /// 0x45E870 → 0x42FFC0: the committed line plays once its delays have passed, then an armed
+    /// `namedAI` name once the voice is free again.
+    fn playback(&mut self, voice_busy: bool, exists: &dyn Fn(&Line) -> bool, out: &mut Output) {
         let Some(l) = self.last else { return };
         if !self.pending || voice_busy {
             return;
@@ -1168,9 +1224,30 @@ impl Manager {
         if wait >= self.now {
             return;
         }
-        out.play = self.stream.clone();
-        self.pending = false;
-        self.silence = self.now + AFTER_LINE;
+        if self.line_ready {
+            out.play = self.stream.clone();
+            self.line_ready = false;
+            self.line_played = true;
+            // A `namedAI` line with its name armed stays pending for the name.
+            if !(self.msg(l).name_to_say == 3 && self.named) {
+                self.pending = false;
+                self.silence = self.now + AFTER_LINE;
+            }
+        } else if let Some(name) = self.name.clone() {
+            if !self.line_played {
+                return;
+            }
+            self.pending = false;
+            self.name = None;
+            // The name loaded: it plays, and the silence base is now + 2.0. A load error
+            // ("Error loading NAMED_AI") only ends the playback.
+            if exists(&name) {
+                out.play = Some(name);
+                self.silence = self.now + AFTER_NAME;
+                self.line_played = false;
+            }
+            self.named = false;
+        }
     }
 }
 
@@ -2324,6 +2401,7 @@ mod tests {
                 max_event: 0,
                 name_to_say: 4,
                 linked: 0,
+                user_data: 0.,
                 delay: 0.,
                 exclusive: *exclusive,
                 is_event: true,
@@ -2383,6 +2461,49 @@ mod tests {
             }
             t += 1. / 60.;
         }
+    }
+
+    /// Frames at 60 Hz with a voice busy for 1 s per play: (manager clock, folder, file).
+    fn plays(m: &mut Manager, p: &Params, seconds: f32, exists: &dyn Fn(&Line) -> bool) -> Vec<(f32, String, String)> {
+        let (mut busy_until, mut t, mut out) = (-1f32, 0f32, Vec::new());
+        while t < seconds {
+            if let Some(l) = m.frame(1. / 60., p, t < busy_until, false, exists).play {
+                out.push((m.now, l.folder, l.file));
+                busy_until = t + 1.;
+            }
+            t += 1. / 60.;
+        }
+        out
+    }
+
+    fn named(user_data: f32) -> Manager {
+        let mut r = rules(2, &[("aiTyreBlow", 2, false, false)]);
+        r.messages[0].name_to_say = 3;
+        r.messages[0].linked = 100;
+        r.messages[0].user_data = user_data;
+        r.messages[0].ignore_silence = true;
+        let mut m = Manager::new(std::sync::Arc::new(r), 1);
+        m.set_ai_names(vec![None, Some("Chief_AI_467".into()), None]);
+        m
+    }
+
+    #[test]
+    fn a_named_ai_line_plays_the_name_after_it() {
+        // `userData` 2 names entry 1 once the line has played and the voice is free.
+        let mut m = named(2.);
+        let out = plays(&mut m, &at(1.), 5., &|_| true);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!((out[0].1.as_str(), out[1].1.as_str(), out[1].2.as_str()), ("04_position", "Names_AI", "Chief_AI_467"));
+        assert!(out[1].0 - out[0].0 >= 1., "{out:?}");
+        assert!((m.silence - (out[1].0 + 2.)).abs() < 1e-4);
+        // Entry 0 (`userData` 1) and an entry without a driver are never named.
+        assert_eq!(plays(&mut named(1.), &at(1.), 5., &|_| true).len(), 1);
+        assert_eq!(plays(&mut named(3.), &at(1.), 5., &|_| true).len(), 1);
+        // A missing name file ends the playback without a name and without a new silence base.
+        let mut m = named(2.);
+        let out = plays(&mut m, &at(1.), 5., &|l| l.folder != "Names_AI");
+        assert_eq!(out.len(), 1);
+        assert!((m.silence - (out[0].0 + 2.5)).abs() > 1e-4 && !m.pending);
     }
 
     #[test]
