@@ -244,6 +244,9 @@ struct Opponents {
     throttles: Vec<f32>,
     /// Original race manager: catch-up and choreographer (`--ai`).
     pacing: grid_tools::ai_pacing::Field,
+    /// The choreographer's messages of the last ticks with their segment and tick, for the
+    /// race engineer (speech_sound), which runs once per frame.
+    ai_messages: Vec<(u64, u64, grid_tools::ai_pacing::Message)>,
     /// Each opponent's AI data with its own car's statistics (car k at k-1).
     car_ai: Vec<grid_tools::ai_driver::AiData>,
 }
@@ -2578,6 +2581,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     after_finish: None,
                     throttles: vec![0.; n],
                     pacing,
+                    ai_messages: Vec::new(),
                     car_ai,
                 })
             })
@@ -4318,6 +4322,11 @@ fn drive_tick(
                 &racing,
                 grid_tools::source_vehicle::DELTA,
             );
+            let tick = driving.runtime.ticks + 1;
+            opponents.ai_messages.retain(|&(segment, t, _)| segment == driving.segment && t + 60 > tick);
+            opponents
+                .ai_messages
+                .extend(opponents.pacing.messages.iter().map(|&m| (driving.segment, tick, m)));
             for line in &opponents.pacing.log {
                 log_line!(
                     "drive_ai_event version=1 segment={} tick={} {line}",

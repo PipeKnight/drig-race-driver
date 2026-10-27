@@ -120,6 +120,7 @@ pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: 
         after_finish: None,
         throttles: vec![0.; OPPONENTS],
         pacing,
+        ai_messages: Vec::new(),
     };
     let mut trial =
         time_trial::Trial::new(laps, grid_tools::time_trial::Mode::Events, false).unwrap();

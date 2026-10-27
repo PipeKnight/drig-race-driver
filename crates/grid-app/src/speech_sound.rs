@@ -54,6 +54,8 @@ pub(crate) struct SpeechSound {
     last: Option<(u64, u64)>,
     /// Flashbacks used so far in this race.
     flashbacks: u32,
+    /// Each car's damage status (vehicle +0xD234) last frame.
+    statuses: Vec<u32>,
 }
 
 #[derive(Asset, TypePath)]
@@ -184,6 +186,7 @@ pub(crate) fn install(app: &mut App, root: PathBuf, table: Option<Arc<Table>>, p
         talking: false,
         last: None,
         flashbacks: 0,
+        statuses: Vec::new(),
     })
     .insert_resource(PendingSource(Some(source)))
     .add_systems(Startup, start)
@@ -231,6 +234,10 @@ fn view(driving: &super::Driving, trial: Option<&super::time_trial::Trial>, kind
                 last_lap: laps.last().copied(),
                 ai: k != 0,
                 terminal: car(k).is_some_and(|c| c.state.car.owner.vehicle[0xd234 / 4] != 7),
+                damage: car(k).map_or(0., |c| {
+                    let vehicle = &c.state.car.owner.vehicle;
+                    if k == 0 { speech::Car::read(vehicle).total() } else { speech::ai_total_percent(vehicle) }
+                }),
             }
         })
         .collect();
@@ -276,6 +283,8 @@ fn view(driving: &super::Driving, trial: Option<&super::time_trial::Trial>, kind
             .collect(),
         // [I] Car description byte +0xD4 is not traced to a port field.
         open_cockpit: false,
+        status_changes: Vec::new(),
+        ai_events: Vec::new(),
     })
 }
 
@@ -300,6 +309,7 @@ fn tick(
         sound.manager.reset_race();
         let _ = sound.commands.send(Command::Stop);
         sound.ends = 0.;
+        sound.statuses.clear();
     }
     let busy = time < sound.ends;
     // 427ED0: Talking returns to the remembered mode once the voice has stopped.
@@ -318,7 +328,7 @@ fn tick(
         sound.group_db[slot].store(level.to_bits(), Ordering::Relaxed);
     }
     let fresh = sound.last != Some(now) && now.1 != 0 && driving.failure.is_none();
-    sound.last = Some(now);
+    let since = sound.last.replace(now);
     let root = sound.root.clone();
     let exists = |line: &Line| line.path(&root, LANGUAGE).is_file();
     // A flashback jump-in: 0x452520(0) and `usedFlashback` [I: taken when the flashback manager
@@ -343,7 +353,33 @@ fn tick(
             touge: touge.is_some(),
             derby: derby.is_some(),
         };
-        let Some(v) = view(&driving, listening.trial.as_deref(), kind, sound.player_slot) else { return };
+        let Some(mut v) = view(&driving, listening.trial.as_deref(), kind, sound.player_slot) else { return };
+        // The choreographer's messages since the last speech frame (several ticks can pass).
+        if let Some(o) = driving.opponents.as_ref() {
+            v.ai_events = o
+                .ai_messages
+                .iter()
+                .filter(|&&(segment, t, _)| since.is_none_or(|(s, last)| segment != s || t > last))
+                .map(|&(.., m)| m)
+                .collect();
+        }
+        // 0x9E64E0 broadcasts a TerminalDamageMessage when a car's status leaves running (7).
+        if let Some(o) = driving.opponents.as_ref() {
+            let statuses: Vec<u32> = (0..o.multi.cars.len())
+                .map(|k| if k == 0 { &driving.runtime } else { &o.multi.cars[k] })
+                .map(|c| c.state.car.owner.vehicle[0xd234 / 4])
+                .collect();
+            if statuses.len() == sound.statuses.len() {
+                v.status_changes = statuses
+                    .iter()
+                    .zip(&sound.statuses)
+                    .enumerate()
+                    .filter(|(_, (now, before))| now != before && **now != 7)
+                    .map(|(k, (now, _))| (k, *now))
+                    .collect();
+            }
+            sound.statuses = statuses;
+        }
         let params = sound.collector.update(&v, DELTA).clone();
         sound.manager.frame(DELTA, &params, busy, false, &exists)
     } else {

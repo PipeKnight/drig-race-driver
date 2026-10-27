@@ -433,10 +433,20 @@ The flags stay set until 0x452520.
 **Messages** (0x44C670 subscribes the collector):
 - `BroadcastMessage_NewPersonalBestMessage` and `…NewWorldRecordMessage` set `newPersonalBest`
   and `newWorldRecord` (one-shot, §8).
-- `RaceResults` (0x41BC70 → 0x417C10): a car whose result status is not 7 gets its AI terminal
-  flag. For a key driver it also sets the key driver's flag (+0xB53F + n) and counts
-  `keyDriversOut` (+0xB6E8) up, or down when the status is 7.
-- `TerminalDamageMessage` (0x4457F0 → 0x417CB0): §10.
+- Correction (F611): 0x44C670 registers each handler *before* the channel string it then
+  subscribes. Each registration helper builds a prototype of its message type, so the pairs are
+  fixed by the type name of the prototype's vtable [O]:
+  - `RaceResults` (helper 0x46CCE0, vtable 0xD0E77C) → 0x41BC60, which only returns 1;
+  - `TerminalDamageMessage` (helper 0x61FD50, type name at 0xCB14FC) → 0x41BC70 → 0x417C10;
+  - `AIChoreographerEvent` (helper 0x46CD90, vtable 0xCAFE10) → 0x4457F0 → 0x417CB0 (and
+    0x43D8A0).
+- `TerminalDamageMessage` → 0x417C10, with the message's +4 = the entry and +8 = its new status:
+  - `AInTermDam` = status ≠ 7;
+  - the first time an entry is seen (+0x50 clear), its record (vf 0x4C) caches the key driver
+    number (+0x54) and `keyTeamInRace` (+0xB6EC) becomes the record's team id (+0x44);
+  - for a key driver n: `KeynTermDam` (+0xB53F + n) = status ≠ 7, and `keyDriversOut` (+0xB6E8)
+    counts up when the status is not 7, down when it is.
+- `AIChoreographerEvent` → 0x417CB0: §10.
 
 **Other values.**
 - `playerGoodStart` = 1 when the vehicle's +0x2204 byte is 0 [I: the low-speed flag of
@@ -492,17 +502,28 @@ with controller type 3:
   and `teamDamFromCollision` (+0xB444). Below 1 the flag clears.
 
 **Terminal status messages.** A car's damage status (+0x444, 7 = running) changes through
-0x9E64E0. Each change away from running broadcasts `TerminalDamageMessage` with the new status as
-its type, the car and a flag.
-- Statuses: 3 terminal wheel damage (9F2F80), 4 a detached wheel (9E65B0), 5 the engine (A03220
-  `publish`), 6 disqualified (derby, out of bounds; 60D590, 612BD0, 630CF0, 5EBCA0).
+0x9E64E0. Each change away from running broadcasts `TerminalDamageMessage` with the car and the
+new status. Statuses: 3 terminal wheel damage (9F2F80), 4 a detached wheel (9E65B0), 5 the engine
+(A03220 `publish`), 6 disqualified (derby, out of bounds; 60D590, 612BD0, 630CF0, 5EBCA0). The
+collector handles it in 0x417C10 (§9): terminal and key-driver flags only.
+
+**Choreographer events (corrected in F611).** An earlier draft of this section had 0x417CB0
+handling the terminal messages. It handles `AIChoreographerEvent` (§9):
+- The choreographer runner 0x408E50 sends it. +4 is the event's `common.message_type`
+  (0x402830 parses it through the name table 0xDA83B0: 1 `blow_tyre`, 2 `blow_engine`,
+  3 `brake_spin`, 4 `power_spin`, 5 `roll`, 6 `retired`, 7 `brake_lock`), +8 the car's entry and
+  +0xC on/off. The runner sends it "on" once while the event is active (state 3, flag +0xBDC),
+  and "off" when the event ends (state 2 or 4). An event without a type (0) sends nothing.
+- Shipped events [D]: `powerout_spin` 4, `brake_spin` 3, `blow_tyre_slow`/`_fast` 1,
+  `blow_engine_slight`/`_total` 2, `brake_lock` 7.
 - 0x417CB0 maps the type to a slot: 1 → `TyreBlown`, 2 → `EngBlown`, 3 and 4 → `Spun` (and
-  `aiSpin`), 5 → `Roll` (and `aiRoll`), 6 → `ForcedRetire`.
+  `aiSpin`), 5 → `Roll` (and `aiRoll`), 6 → `ForcedRetire`; 7 is outside the jump table and
+  ignored. The slot's flag takes the message's on/off. `aiSpin`/`aiRoll` are set for "off" too.
 - For the teammate the flags are +0xB434 + slot (`teammateEngBlown`, `teammateTyreBlown`,
   `teammateSpun`, `teammateRoll`). For other cars they are +0xB674 + 0x14·slot + i (`AInEngBlown`,
   `AInTyreBlown`, `AInSpun`, `AInRoll`, `AInForcedRetire`).
-- So the original's names do not match the causes. A terminal wheel plays the "spun" lines and
-  the engine the "roll" lines. No shipped path sends types 1 or 2 [O static].
+- So the tyre, engine and spin lines follow the choreographer's failures and mistakes. No shipped
+  event has type 5 or 6, so the Roll and ForcedRetire messages are not sent by it.
 
 ## 11. Part 2: teammate [O]
 
@@ -518,8 +539,7 @@ its type, the car and a flag.
 - Dead in the original:
   - the `AITermUserImpact` lines;
   - `slipStream2s`;
-  - lines needing message types 1 or 2 (`AInTyreBlown`, `AInEngBlown`, `teammateTyreBlown`,
-    `teammateEngBlown`).
+  - the Roll lines (no shipped choreographer event has type 5).
 - Career-only inputs (objectives, championship values, final race, `1_2Finish`, team to beat)
   are 0 outside the career.
 - Lines that need the player's profile statistics (`terminalDamageCount`, `numRaceWins`, …) use
@@ -575,3 +595,66 @@ registered, including the ones that stay constant. An unregistered name would re
 - `terminalDamageCount` (profile) is 0, so `terminalDamRestart` and `terminalDamNoRestart`
   (count > 1) do not play.
 - `newPersonalBest` and `newWorldRecord` (broadcast messages) have no sender in the port.
+
+## 14. The port, part 2 step 3: accidents and AI events
+
+`SLICE` adds CrashesAccidents and AIEvents.
+
+**Registration [O].** The numbered getter families are `AI1…AI20` and `Key1…Key24`:
+- `AIn`: Collision, CollisionDam, Distance, TermDam, TyreBlown, EngBlown, Spun, Roll and
+  ForcedRetire;
+- `Keyn`: Collision, CollisionDam and TermDam.
+
+`AIn` is race entry n − 1 (getters +0xB5AC, +0xB610, +0xB55C, +0xB660 and +0xB674 + 0x14·k).
+
+**Collisions [O].**
+- 0x430F50 sets `AI(i+1)Collision` only for an entry index i above 0 (`jle` at 0x4311E7), so
+  `AI1Collision` is never set.
+- The player is entry 0 in the port, as `playerVehicleID` = 1 implies for the original's single
+  player.
+- 0x424780 runs on entry `counter % entries`, after 0x431200, in this order:
+  - the player's entry while `playerCollision` is set: the player branch (§9), and nothing else;
+  - otherwise the teammate branch;
+  - otherwise the AI branch, which also covers the player's own slot when it has no collision. It
+    runs while the slot's collision flag is set: `CollisionDam` = |Δ total|, and the flag clears
+    below 1.
+- The total is 0x424650's: for cars other than the player's, 0x99EBB0 × 100 plus the mean
+  component × 100. 0x99EBB0 is the RMS displacement over the whole lattice × 5/3, clamped to 1,
+  and 0 while lattice byte +0xA4AD is clear; the four side terms have no such gate.
+
+**0x431200 [O].** For entry `counter % entries` (skipping controller type 3) it sets:
+- `AInDistance` = the entry's lap fraction (vf 0x3C → 0x417860);
+- `AInTermDam` = its status is not 7.
+
+`AInForcedRetire` from race state +0x2E64 == 2 is not ported [I: no writer of state 2 is traced].
+
+**Messages [O] (§9, §10).**
+- `TerminalDamageMessage`: the app sends one when a car's status word (+0xD234) leaves 7. The
+  collector (0x417C10) sets that entry's `AInTermDam`; the key-driver part needs identities
+  (below).
+- `AIChoreographerEvent`: `grid_formats::ai::Event::message_type` holds the parsed type, and the
+  runner (`ai_pacing::Field`, 0x408E50) records an "on" message once in state 3 and an "off"
+  message when the event ends (state 2 or 4) in `Field::messages`. The app keeps the messages of
+  the last 60 ticks with their tick, so that the speech frame, which runs once per rendered frame,
+  sees every one. The collector maps them through 0x417CB0's jump table (0x417D44): 1 → TyreBlown,
+  2 → EngBlown, 3 and 4 → Spun (+ `aiSpin`), 5 → Roll (+ `aiRoll`), 6 → ForcedRetire.
+- [I] When the port's runner replaces an event that has not started (state 1) by another, it sends
+  no message; the original's equivalent path is not traced.
+- The AI tyre, engine and spin lines therefore play with the choreographer on
+  (`--ai choreographer=on`, the career profiles' default). No shipped event has type 5 or 6.
+
+**Reset [O].** 0x452520 always clears the slots' collision, terminal, collision damage and event
+flags, and with p = 1 also their distance and last total.
+
+**Not available in the port's races.**
+- Driver identities:
+  - free races have none;
+  - career races pass names but not driver ids to the race.
+- Without them:
+  - no key-driver number exists, so the `Keyn` values, `keyTeamInRace` and `keyDriversOut` stay 0
+    and `playerCollWithKeyPlayer` stays −1;
+  - every key-driver group stays silent;
+  - the `namedAI` name phrase (§3) cannot be armed. The original builds
+    `speech/<lang>/Names_AI/<driver.pit_speech_filename>.raw` from the entry `userData` − 1
+    (0x437F70 → game interface vf 0xC, 0x430530). The message's own line still plays.
+- `teammateVehicleID` is 0 (no teammate entry).

@@ -393,6 +393,18 @@ struct Running {
     car: usize,
     state: u8,
     elapsed: f32,
+    /// +0xBDC: the "on" message of this event was sent.
+    sent: bool,
+}
+
+/// An `AIChoreographerEvent` (vtable 0xCAFE10) that the runner 0x408E50
+/// broadcasts: +4 the event's `message_type`, +8 the car, +0xC on (the event
+/// became active) or off (it ended).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Message {
+    pub kind: u8,
+    pub car: usize,
+    pub on: bool,
 }
 
 /// Conveyor slot: 1/3 sleeping before forward/backward, 2 forward, 4 backward.
@@ -422,6 +434,8 @@ pub struct Field {
     slots: Vec<Slot>,
     /// Diagnostics of the last tick (events, conveyor changes).
     pub log: Vec<String>,
+    /// The choreographer messages of the last tick.
+    pub messages: Vec<Message>,
 }
 
 fn wrap(delta: f64, length: f64) -> f64 {
@@ -462,6 +476,7 @@ impl Field {
             running: None,
             slots: Vec::new(),
             log: Vec::new(),
+            messages: Vec::new(),
         };
         field.reset(line, positions);
         field
@@ -483,6 +498,7 @@ impl Field {
         self.rng = Mt::new(self.seed);
         self.running = None;
         self.log.clear();
+        self.messages.clear();
         self.records = positions
             .iter()
             .map(|&p| {
@@ -576,6 +592,7 @@ impl Field {
     /// cars (`None` for the human).
     pub fn tick(&mut self, line: &Line, cars: &mut [Car<'_>], dt: f32) -> Vec<Option<Output>> {
         self.log.clear();
+        self.messages.clear();
         for (r, car) in self.records.iter_mut().zip(cars.iter()) {
             if car.racing {
                 let arc = f64::from(line.arc(car.position));
@@ -950,6 +967,19 @@ impl Field {
                 event.name, r.car, chor.triggers[r.trigger].name, r.state
             ));
         }
+        // 0x408E50: an event with a message type sends it "on" once in state 3 and
+        // "off" when it ends (state 2 or 4).
+        if event.message_type != 0 {
+            let on = r.state == 3 && !r.sent;
+            if on || matches!(r.state, 2 | 4) {
+                self.messages.push(Message {
+                    kind: event.message_type,
+                    car: r.car,
+                    on,
+                });
+                r.sent |= on;
+            }
+        }
         match r.state {
             4 => {
                 let ts = &mut self.triggers[r.trigger];
@@ -1008,6 +1038,7 @@ impl Field {
             car,
             state,
             elapsed: 0.,
+            sent: false,
         });
     }
 }
@@ -1166,6 +1197,24 @@ mod tests {
             }
         );
         assert_eq!(lock.min_speed, 30.);
+        // `common.message_type` (0x402830): the events' AIChoreographerEvent types.
+        let types: Vec<(&str, u8)> = chor
+            .events
+            .iter()
+            .map(|e| (e.name.as_str(), e.message_type))
+            .collect();
+        assert_eq!(
+            types,
+            [
+                ("powerout_spin", 4),
+                ("brake_spin", 3),
+                ("blow_tyre_slow", 1),
+                ("blow_tyre_fast", 1),
+                ("blow_engine_slight", 2),
+                ("blow_engine_total", 2),
+                ("brake_lock", 7)
+            ]
+        );
         let s5 = ai::catch_up(
             &binxml::read(&std::fs::read(Path::new(&root).join("ai/catchup.xml")).unwrap())
                 .unwrap(),

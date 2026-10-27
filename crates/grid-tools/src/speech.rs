@@ -15,8 +15,8 @@ use std::{collections::VecDeque, path::Path};
 /// The `.raw` lines are PCM16 mono at 32 kHz (stream setup 0x42BD4B: 32000, AL_FORMAT_MONO16).
 pub const LINE_RATE: u32 = 32_000;
 /// Events evaluated [AUTHORED scope: part 1 the race start, position calls and finish; part 2
-/// the player's damage, performance, strategy and rules lines].
-pub const SLICE: [&str; 6] = ["Position", "EndOfRace", "CarDamage", "Performance", "Strategy", "Rules"];
+/// the player's damage, performance, strategy and rules lines, the accidents and AI events].
+pub const SLICE: [&str; 8] = ["Position", "EndOfRace", "CarDamage", "Performance", "Strategy", "Rules", "CrashesAccidents", "AIEvents"];
 /// An absent condition value or second parameter (0xC61C3C00).
 const UNSET: f32 = -10000.;
 /// The silence base after a line starts: now + 2.5 s (0xCB092C, 0x42FFC0).
@@ -154,11 +154,59 @@ params!(
     TargetDamage = "targetDamage",
     AiSpin = "aiSpin",
     AiRoll = "aiRoll",
+    // Step 3: CrashesAccidents and AIEvents.
+    PlayerVehicleId = "playerVehicleID",
+    TeammateVehicleId = "teammateVehicleID",
+    TeammateCollision = "teammateCollision",
+    PlayerCollWithKeyPlayer = "playerCollWithKeyPlayer",
+    KeyDriversOut = "keyDriversOut",
+    KeyTeamInRace = "keyTeamInRace",
+    IsDrift = "isDrift",
 );
-pub const PARAMS: usize = PARAM_NAMES.len();
+
+/// The numbered getter families of 0x45F590: `AI1…AI20` (race entries 0…19) and `Key1…Key24`
+/// (`driver.audio_key_driver_number`).
+pub const AI_SLOTS: usize = 20;
+pub const KEYS: usize = 24;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiField {
+    Collision,
+    CollisionDam,
+    Distance,
+    TermDam,
+    TyreBlown,
+    EngBlown,
+    Spun,
+    Roll,
+    ForcedRetire,
+}
+const AI_FIELDS: [&str; 9] = ["Collision", "CollisionDam", "Distance", "TermDam", "TyreBlown", "EngBlown", "Spun", "Roll", "ForcedRetire"];
+const KEY_FIELDS: [&str; 3] = ["Collision", "CollisionDam", "TermDam"];
+const NAMED: usize = PARAM_NAMES.len();
+pub const PARAMS: usize = NAMED + AI_SLOTS * AI_FIELDS.len() + KEYS * KEY_FIELDS.len();
+
+/// The value index of `AI<slot + 1><field>`.
+pub fn ai_param(slot: usize, field: AiField) -> usize {
+    NAMED + field as usize * AI_SLOTS + slot
+}
+
+/// The value index of a registered name, or `None`.
+fn known(name: &str) -> Option<usize> {
+    if let Some(i) = PARAM_NAMES.iter().position(|n| *n == name) {
+        return Some(i);
+    }
+    let family = |prefix: &str, fields: &[&str], count: usize, base: usize| {
+        let rest = name.strip_prefix(prefix)?;
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        let n: usize = rest[..digits].parse().ok()?;
+        let f = fields.iter().position(|f| *f == &rest[digits..])?;
+        (1..=count).contains(&n).then_some(base + f * count + n - 1)
+    };
+    family("AI", &AI_FIELDS, AI_SLOTS, NAMED).or_else(|| family("Key", &KEY_FIELDS, KEYS, NAMED + AI_SLOTS * AI_FIELDS.len()))
+}
 
 fn param_index(name: &str) -> usize {
-    PARAM_NAMES.iter().position(|n| *n == name).unwrap_or(0)
+    known(name).unwrap_or(0)
 }
 
 /// The parameter values one evaluation reads.
@@ -183,6 +231,10 @@ impl Params {
     /// The getters' booleans: 1.0 or 0.0.
     pub fn flag(&mut self, p: Param, v: bool) {
         self.set(p, if v { 1. } else { 0. });
+    }
+    /// A value by index ([`ai_param`]).
+    pub fn at(&self, i: usize) -> f32 {
+        self.0[i]
     }
 }
 
@@ -557,7 +609,7 @@ impl Rules {
                 continue;
             }
             for name in [attr(e, "param"), attr(e, "secondParam")].into_iter().flatten() {
-                if !PARAM_NAMES.contains(&name) && !unknown.iter().any(|u| u == name) {
+                if known(name).is_none() && !unknown.iter().any(|u| u == name) {
                     unknown.push(name.to_string());
                 }
             }
@@ -1052,6 +1104,9 @@ pub struct Entry {
     pub ai: bool,
     /// Terminally damaged: the damage status (+0x444, vehicle +0xD234) is not 7 (0x99A720).
     pub terminal: bool,
+    /// The car's total damage percentage of 0x424650: [`Car::total`] for the player's car,
+    /// [`ai_total_percent`] for the others.
+    pub damage: f32,
 }
 
 /// The race kind flags of the race block (0x451A20).
@@ -1143,6 +1198,30 @@ fn body_sides(vehicle: &[u32]) -> [f32; 4] {
     [side(third..nz, 0..nx), side(0..third.max(1), 0..nx), side(0..nz, 0..nx / 2), side(0..nz, nx / 2..nx)]
 }
 
+/// 0x424650 for a car other than the player's: 0x99EBB0 (the RMS lattice displacement over the
+/// whole lattice × 5/3, clamped to 1; 0 unless lattice byte +0xA4AD is set) plus the mean of the
+/// six components, as percentages.
+pub fn ai_total_percent(vehicle: &[u32]) -> f32 {
+    let f = |o: usize| vehicle.get(o / 4).copied().map_or(0., f32::from_bits);
+    let base = 0x2300;
+    let components: f32 = (0..6).map(|i| f(0xcdf0 + 4 * i)).sum();
+    let dim = |i: usize| vehicle.get((base + 0xa414) / 4 + i).copied().unwrap_or(0) as usize;
+    let count = dim(0) * dim(1) * dim(2);
+    let flag = vehicle.get((base + 0xa4ad) / 4).is_some_and(|w| (w >> (8 * ((base + 0xa4ad) % 4))) & 255 != 0);
+    let lattice = if flag && count > 0 {
+        let sum: f32 = (0..count)
+            .map(|k| {
+                let record = base + 0x2590 + k * 0x50;
+                (0..3).map(|a| (f(record - 0x10 + 4 * a) - f(record + 4 * a)).powi(2)).sum::<f32>()
+            })
+            .sum();
+        ((sum / count as f32).sqrt() * 1.666_666_6).clamp(0., 1.)
+    } else {
+        0.
+    };
+    lattice * 100. + components * (1. / 6.) * 100.
+}
+
 /// 0x424650 for the player:
 /// - 100 × the mean of the six component levels (vehicle +0xCDF0);
 /// - plus the largest of the four body-side terms ([`Car::sides`]) as a percentage.
@@ -1205,6 +1284,11 @@ pub struct RaceView {
     pub parts_lost: Vec<u32>,
     /// Car description byte +0xD4 (`isPlayerCarOpenCockpit`), read before the race.
     pub open_cockpit: bool,
+    /// `TerminalDamageMessage`s of this frame (0x9E64E0 → 0x417C10): the entry and its new
+    /// damage status.
+    pub status_changes: Vec<(usize, u32)>,
+    /// The choreographer's `AIChoreographerEvent`s of this frame (0x408E50 → 0x417CB0).
+    pub ai_events: Vec<crate::ai_pacing::Message>,
 }
 
 /// A car record (0x438C10) with the collector's time in position.
@@ -1264,6 +1348,20 @@ struct Lost {
     left_wing: bool,
     right_wing: bool,
     bonnet: bool,
+}
+
+/// One race entry's AI slot of the collector.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Slot {
+    /// +0xB5AC + i, +0xB5C0 + 4i (the last total), +0xB610 + 4i, +0xB55C + 4i, +0xB660 + i.
+    collision: bool,
+    total: f32,
+    damage: f32,
+    distance: f32,
+    terminal: bool,
+    /// +0xB674 + 0x14·k + i, in 0x417CB0's order: engine blown, tyre blown, spun, roll, forced
+    /// retire.
+    events: [bool; 5],
 }
 
 /// `audio_game_info_collector` (0x452810) for the parameters of [`Param`].
@@ -1327,6 +1425,12 @@ pub struct Collector {
     flashback: bool,
     /// +0xB71C `1_2Finish` (career).
     one_two: i32,
+    /// +0xB720 `playerVehicleID`.
+    player_id: u32,
+    slots: [Slot; AI_SLOTS],
+    /// +0xB6D9 `aiSpin`, +0xB6D8 `aiRoll`.
+    ai_spin: bool,
+    ai_roll: bool,
     params: Params,
 }
 impl Default for Collector {
@@ -1376,6 +1480,10 @@ impl Default for Collector {
             open_cockpit: false,
             flashback: false,
             one_two: 0,
+            player_id: 0,
+            slots: [Slot::default(); AI_SLOTS],
+            ai_spin: false,
+            ai_roll: false,
             params: Params::default(),
         }
     }
@@ -1401,6 +1509,12 @@ impl Collector {
     /// 0x452520(`grid`).
     fn reset(&mut self, grid: bool) {
         let was_racing = self.in_race;
+        for slot in &mut self.slots {
+            slot.collision = false;
+            slot.terminal = false;
+            slot.damage = 0.;
+            slot.events = [false; 5];
+        }
         self.no_collision = 0.;
         self.off_track_time = 0.;
         self.clear_events();
@@ -1439,6 +1553,10 @@ impl Collector {
         self.seen_lap = 1.;
         self.restarted = true;
         self.flashback = false;
+        for slot in &mut self.slots {
+            slot.distance = 0.;
+            slot.total = 0.;
+        }
     }
 
     /// 0x417ED0, after every refresh: the one-shot flags.
@@ -1446,6 +1564,8 @@ impl Collector {
         self.car_to_car = false;
         self.hit_car = false;
         self.overtook = 0;
+        self.ai_spin = false;
+        self.ai_roll = false;
     }
 
     /// The Paused mix mode, or no player car: 0x417ED0 and 0x417E40 once.
@@ -1463,6 +1583,34 @@ impl Collector {
 
     /// One collector frame and the refresh after it (0x44C640); returns the parameters.
     pub fn update(&mut self, v: &RaceView, dt: f32) -> &Params {
+        // TerminalDamageMessage (0x41BC70 → 0x417C10): the entry's terminal flag.
+        for &(car, status) in &v.status_changes {
+            if let Some(slot) = self.slots.get_mut(car) {
+                slot.terminal = status != 7;
+            }
+        }
+        // AIChoreographerEvent (0x4457F0 → 0x417CB0): the type picks the slot and the
+        // message's flag sets or clears it. `aiSpin` and `aiRoll` are set either way.
+        for e in &v.ai_events {
+            let k = match e.kind {
+                1 => 1,
+                2 => 0,
+                3 | 4 => {
+                    self.ai_spin = true;
+                    2
+                }
+                5 => {
+                    self.ai_roll = true;
+                    3
+                }
+                6 => 4,
+                _ => continue,
+            };
+            // No teammate in the port's races (§11).
+            if let Some(slot) = self.slots.get_mut(e.car) {
+                slot.events[k] = e.on;
+            }
+        }
         if self.enabled {
             self.frame(v, dt);
         }
@@ -1504,6 +1652,12 @@ impl Collector {
                     self.hit_car = true;
                 }
             }
+            // `AI(i+1)Collision` for an entry index above 0 (0x4311E7: entry 0 never).
+            if c.car > 0
+                && let Some(slot) = self.slots.get_mut(c.car)
+            {
+                slot.collision = true;
+            }
         }
         // 0x417D60: the part callback.
         for &id in &v.parts_lost {
@@ -1524,6 +1678,7 @@ impl Collector {
         self.best = self.best.min(me.position as u32);
         if !self.in_race && self.cars > 0 {
             self.open_cockpit = v.open_cockpit;
+            self.player_id = v.player as u32 + 1;
             // 0x452A42: integer division before × 100.
             self.start_percent = ((self.player.grid + 1) / self.cars) as f32 * 100.;
         }
@@ -1570,20 +1725,9 @@ impl Collector {
                 self.reference = place;
             }
         }
-        // 0x424780 on this frame's car (the player's: 0x424650 and its collision damage).
-        if self.in_race && !self.end_race && self.cars > 0 && self.counter % self.cars == v.player as u32 {
-            let total = v.car.total();
-            self.sides = v.car.sides.map(|s| s * 100.);
-            self.body = self.sides.iter().fold(self.sides[3], |m, &s| if s > m { s } else { m });
-            if self.collision {
-                let change = (total - self.total_damage).abs();
-                self.total_damage = total;
-                self.lap_damage += change;
-                self.last_accident = change;
-                if self.last_accident < 1. {
-                    self.collision = false;
-                }
-            }
+        // 0x431200 and 0x424780 on this frame's car.
+        if self.in_race && !self.end_race && self.cars > 0 {
+            self.car_frame((self.counter % self.cars) as usize, v);
         }
         // 0x452D11: the progress change; `satOnTrackTime` while racing without progress.
         let progress_change = self.player.progress - self.last_progress;
@@ -1605,6 +1749,43 @@ impl Collector {
         // Terminal damage disables the collector.
         if self.player.terminal {
             self.enabled = false;
+        }
+    }
+
+    /// 0x431200 then 0x424780 for entry `i`.
+    fn car_frame(&mut self, i: usize, v: &RaceView) {
+        let Some(e) = v.entries.get(i) else { return };
+        if let Some(slot) = self.slots.get_mut(i) {
+            slot.distance = e.progress.rem_euclid(1.) as f32;
+            slot.terminal = e.terminal;
+            // [I] `AInForcedRetire` from the race state +0x2E64 == 2: its writer is not traced;
+            // the disqualification message sets it (0x417CB0).
+        }
+        // 0x424650: the player's formula (with the four sides) for the player's car.
+        let total = if i == v.player { v.car.total() } else { e.damage };
+        if i == v.player {
+            self.sides = v.car.sides.map(|s| s * 100.);
+            self.body = self.sides.iter().fold(self.sides[3], |m, &s| if s > m { s } else { m });
+            if self.collision {
+                let change = (total - self.total_damage).abs();
+                self.total_damage = total;
+                self.lap_damage += change;
+                self.last_accident = change;
+                if self.last_accident < 1. {
+                    self.collision = false;
+                }
+                return;
+            }
+        }
+        // Not the teammate (none in the port's races): the slot's collision damage.
+        if let Some(slot) = self.slots.get_mut(i)
+            && slot.collision
+        {
+            slot.damage = (total - slot.total).abs();
+            slot.total = total;
+            if slot.damage < 1. {
+                slot.collision = false;
+            }
         }
     }
 
@@ -1708,6 +1889,35 @@ impl Collector {
         // by an objective (career).
         p.set(TargetTime, -1.);
         p.set(TargetSpeed, -1.);
+        // Step 3.
+        p.flag(AiSpin, self.ai_spin);
+        p.flag(AiRoll, self.ai_roll);
+        p.flag(IsDrift, k.drift);
+        p.set(PlayerVehicleId, self.player_id as f32);
+        // No teammate and no key drivers in the port's races: +0xB724, +0xB43D, +0xB558 (−1),
+        // +0xB6E8 and +0xB6EC keep their reset values (§10, §11).
+        p.set(TeammateVehicleId, 0.);
+        p.flag(TeammateCollision, false);
+        p.set(PlayerCollWithKeyPlayer, -1.);
+        p.set(KeyDriversOut, 0.);
+        p.set(KeyTeamInRace, 0.);
+        for (i, slot) in self.slots.iter().enumerate() {
+            let b = |v: bool| if v { 1. } else { 0. };
+            let values = [
+                (AiField::Collision, b(slot.collision)),
+                (AiField::CollisionDam, slot.damage),
+                (AiField::Distance, slot.distance),
+                (AiField::TermDam, b(slot.terminal)),
+                (AiField::EngBlown, b(slot.events[0])),
+                (AiField::TyreBlown, b(slot.events[1])),
+                (AiField::Spun, b(slot.events[2])),
+                (AiField::Roll, b(slot.events[3])),
+                (AiField::ForcedRetire, b(slot.events[4])),
+            ];
+            for (field, value) in values {
+                p.0[ai_param(i, field)] = value;
+            }
+        }
         // 0x418500 before 0x418460.
         p.set(DamageTakenInPrevLap, self.prev_lap_damage);
         let crossed = self.seen_lap < self.player.lap;
@@ -2143,6 +2353,75 @@ mod tests {
     }
 
     #[test]
+    fn numbered_families_resolve() {
+        assert_eq!(param_index("AI3Spun"), ai_param(2, AiField::Spun));
+        assert_eq!(param_index("AI20ForcedRetire"), ai_param(19, AiField::ForcedRetire));
+        assert_eq!(param_index("AI21Spun"), 0);
+        assert!(known("Key24TermDam").is_some() && known("Key25TermDam").is_none());
+        assert!(known("AI1").is_none());
+    }
+
+    #[test]
+    fn ai_slots_follow_collisions_and_distance() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        // Entry 2 hit by entry 1 at 20 %; entry 0 (the player) never gets an AI flag.
+        v.contacts = vec![Contact { car: 2, other: Some(1) }, Contact { car: 0, other: None }];
+        v.entries[2].damage = 20.;
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.at(ai_param(2, AiField::Collision)), 1.);
+        assert_eq!(p.at(ai_param(0, AiField::Collision)), 0.);
+        assert_eq!(p.get(Param::CarToCarCollision), 1.);
+        v.contacts.clear();
+        // Counter 2: entry 2's frame.
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.at(ai_param(2, AiField::CollisionDam)), 20.);
+        assert!((p.at(ai_param(2, AiField::Distance)) - 0.55).abs() < 1e-6);
+        assert_eq!(p.get(Param::CarToCarCollision), 0.);
+        // Its next frame: no change, the flag clears.
+        for _ in 0..4 {
+            c.update(&v, 0.1);
+        }
+        let p = c.params.clone();
+        assert_eq!(p.at(ai_param(2, AiField::Collision)), 0.);
+        assert_eq!(p.at(ai_param(2, AiField::CollisionDam)), 0.);
+        assert_eq!(p.get(Param::PlayerVehicleId), 0.);
+    }
+
+    #[test]
+    fn choreographer_messages_set_and_clear_the_slots() {
+        use crate::ai_pacing::Message;
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        let m = |kind, car, on| Message { kind, car, on };
+        // power_spin, blow_engine, blow_tyre, retired on; brake_lock (7) has no slot.
+        v.ai_events = vec![m(4, 3, true), m(2, 2, true), m(1, 1, true), m(6, 4, true), m(7, 5, true)];
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.at(ai_param(3, AiField::Spun)), 1.);
+        assert_eq!(p.at(ai_param(2, AiField::EngBlown)), 1.);
+        assert_eq!(p.at(ai_param(1, AiField::TyreBlown)), 1.);
+        assert_eq!(p.at(ai_param(4, AiField::ForcedRetire)), 1.);
+        assert_eq!((p.get(Param::AiSpin), p.get(Param::AiRoll)), (1., 0.));
+        v.ai_events.clear();
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::AiSpin), p.get(Param::AiRoll)), (0., 0.));
+        assert_eq!(p.at(ai_param(3, AiField::Spun)), 1.);
+        // The end of the event clears its slot and sets `aiSpin` again.
+        v.ai_events = vec![m(3, 3, false)];
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.at(ai_param(3, AiField::Spun)), 0.);
+        assert_eq!(p.get(Param::AiSpin), 1.);
+        // A status change only sets the terminal flag (0x417C10).
+        v.ai_events.clear();
+        v.status_changes = vec![(2, 3)];
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!(p.at(ai_param(2, AiField::TermDam)), 1.);
+        assert_eq!(p.at(ai_param(2, AiField::Spun)), 0.);
+        c.restart();
+        assert_eq!(c.update(&v, 0.1).at(ai_param(1, AiField::TyreBlown)), 0.);
+    }
+
+    #[test]
     fn start_percentage_uses_integer_division() {
         let view = |grid: usize| RaceView {
             entries: vec![entry(grid + 1, grid, 0.), entry(1, 0, 0.), entry(2, 1, 0.), entry(3, 2, 0.)],
@@ -2238,7 +2517,7 @@ mod tests {
         let bytes = std::fs::read(root.join("audio/eventSpeech.bin")).unwrap();
         assert_eq!(rules.unknown_params(&bytes), Vec::<String>::new());
         let slice: Vec<_> = rules.messages.iter().filter(|m| rules.events[m.event].on).collect();
-        assert_eq!(slice.len(), 252);
+        assert_eq!(slice.len(), 620);
         assert!(slice.iter().all(|m| m.speech.is_some()));
         let m = |n: &str| &rules.messages[rules.message(n).unwrap()];
         assert_eq!(m("keyDriver22Ahead3s").priority, 0);

@@ -9,6 +9,8 @@
 //!   it, leads, and finishes first after three laps of 60 s.
 //! - 50 s after the green light a car-to-car collision: 30 % component damage, the front bumper
 //!   lost. 100–112 s the wrong way at full speed.
+//! - 70 s: entries 3 and 4 collide 2 % of a lap ahead of the player; entry 3 takes 6 % damage,
+//!   entry 4 a terminal wheel (status 3).
 //!
 //! `speech.wav`: mono PCM16 at the lines' 32 kHz, the Codriver group level of the Chase camera
 //! with the Talking mix while a line plays. `lines.txt`: each line with its time.
@@ -77,12 +79,14 @@ fn view(green: Option<f64>) -> RaceView {
                 grid: if k == 0 { CARS - 1 } else { k - 1 },
                 last_lap: (p >= 1.).then_some(LAP),
                 ai: k != 0,
-                terminal: false,
+                terminal: k == 4 && green.is_some() && t >= 70.,
+                damage: if (k == 3 || k == 4) && green.is_some() && t >= 70. { 6. } else { 0. },
             }
         })
         .collect();
     // The collision frame (one vehicle tick).
     let hit = green.is_some() && (t - 50.).abs() < f64::from(DELTA) / 2.;
+    let ahead = green.is_some() && (t - 70.).abs() < f64::from(DELTA) / 2.;
     let damaged = green.is_some() && t >= 50.;
     RaceView {
         clock: t,
@@ -92,7 +96,11 @@ fn view(green: Option<f64>) -> RaceView {
         entries,
         player: 0,
         kind: Kind::default(),
-        contacts: if hit { vec![Contact { car: 0, other: Some(1) }] } else { Vec::new() },
+        contacts: match (hit, ahead) {
+            (true, _) => vec![Contact { car: 0, other: Some(1) }],
+            (_, true) => vec![Contact { car: 3, other: Some(4) }, Contact { car: 4, other: Some(3) }],
+            _ => Vec::new(),
+        },
         car: Car {
             components: if damaged { [0.3; 6] } else { [0.; 6] },
             engine: 0.8,
@@ -104,6 +112,15 @@ fn view(green: Option<f64>) -> RaceView {
         wrong_way: green.is_some() && (100. ..112.).contains(&t),
         parts_lost: if hit { vec![part_id("bumper_fm").unwrap()] } else { Vec::new() },
         open_cockpit: false,
+        status_changes: if ahead { vec![(4, 3)] } else { Vec::new() },
+        // The choreographer, between other lines and with the car ahead of the player on the
+        // same lap (the rules compare lap fractions without wrapping): entry 2 power_spin from
+        // 25 s to 29 s, entry 1 blow_tyre from 160 s to 162 s.
+        ai_events: [(25., 4, 2, true), (29., 4, 2, false), (160., 1, 1, true), (162., 1, 1, false)]
+            .into_iter()
+            .filter(|&(at, ..)| green.is_some() && (t - at).abs() < f64::from(DELTA) / 2.)
+            .map(|(_, kind, car, on)| grid_tools::ai_pacing::Message { kind, car, on })
+            .collect(),
     }
 }
 
