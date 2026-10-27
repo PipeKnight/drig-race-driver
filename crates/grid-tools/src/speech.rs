@@ -1490,6 +1490,10 @@ pub fn part_id(name: &str) -> Option<u32> {
 /// What the app knows about the race this frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RaceView {
+    /// The career race's values (`None` outside the career): §19.
+    pub career: Option<CareerRace>,
+    /// Any HUD damage icon is lit (0x8EF920 → `indicators`), read only with a no-damage objective.
+    pub damage_indicator: bool,
     /// Race clock (s, from the green light).
     pub clock: f64,
     /// The race has started (manager +0x10, set at the green light).
@@ -1521,6 +1525,27 @@ pub struct RaceView {
     /// [`Identities::teammate`] and [`Identities::teammate_number`].
     pub teammate: Option<usize>,
     pub teammate_number: i32,
+}
+
+/// What a career race tells the race block (0x451A20) and 0x452991 (§19).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CareerRace {
+    /// `isFinalRace`: an own event's last race (E vf 0x7C, 0x640800).
+    pub final_race: bool,
+    /// `isFinalCareerEvent`: the head-to-head of an international-rank tier (0x637930, 0x637B10).
+    pub final_event: bool,
+    /// The event's points table and each race entry's points before this race; the best points of
+    /// the event's entrants not in this race. Empty without standings.
+    pub points: Vec<i32>,
+    pub standing: Vec<i32>,
+    pub absent_best: Option<i32>,
+    /// 0x4EF9C0: the player and the teammate are the championship's ranks 0 and 1 over the races
+    /// already run.
+    pub one_two: bool,
+    /// `bonusObjWinPos`: a race driver offer's `objective_finishing_place`, else 0 (0x62A8D0).
+    pub bonus_place: i32,
+    /// `hasNoDamageObj`: a race driver offer with the no-damage objective.
+    pub no_damage: bool,
 }
 
 /// A car record (0x438C10) with the collector's time in position.
@@ -1678,6 +1703,14 @@ pub struct Collector {
     flashback: bool,
     /// +0xB71C `1_2Finish` (career).
     one_two: i32,
+    /// Race block +0x6F `isFinalRace`, +0x72 `isFinalCareerEvent`, +0x48 `wonChampionship`,
+    /// +0x28 `bonusObjWinPos`, +0x7C `hasNoDamageObj` and +0x81 `anyDamageIndOn`.
+    final_race: bool,
+    final_event: bool,
+    won: i32,
+    bonus_place: i32,
+    no_damage: bool,
+    damage_indicator: bool,
     /// +0xB720 `playerVehicleID`.
     player_id: u32,
     slots: [Slot; AI_SLOTS],
@@ -1772,6 +1805,12 @@ impl Default for Collector {
             open_cockpit: false,
             flashback: false,
             one_two: 0,
+            final_race: false,
+            final_event: false,
+            won: -1,
+            bonus_place: 0,
+            no_damage: false,
+            damage_indicator: false,
             player_id: 0,
             slots: [Slot::default(); AI_SLOTS],
             ai_spin: false,
@@ -1868,6 +1907,8 @@ impl Collector {
         }
         self.wrong_way = 0.;
         self.lost = Lost::default();
+        // The block clear 0x468B30: `wonChampionship` starts at −1.
+        self.won = -1;
         if !grid {
             return;
         }
@@ -2081,6 +2122,10 @@ impl Collector {
         let place = self.track.iter().position(|&k| k == v.player);
         self.player.refresh(&me);
         self.player.track = place.map_or(0, |p| p as i32);
+        // 0x452991: once, on the final race's last lap.
+        if self.in_race && self.final_race && self.player.lap == self.track_laps as f32 && self.one_two < 0 {
+            self.one_two = v.career.as_ref().is_some_and(|c| c.one_two) as i32;
+        }
         self.player.off_track = v.off_track;
         self.car = v.car;
         self.best = self.best.min(me.position as u32);
@@ -2270,6 +2315,27 @@ impl Collector {
         }
         self.pace = if count > 0 { sum / count as f32 } else { 0. };
         self.running = running + 1;
+        // Career values (0x451A20). `wonChampionship` (0x451CE8): on the final race once the
+        // race has results, 1 when the player's dense rank is 0 in the standings with this
+        // race (0x6706B0). [I] The results are the current order once a car has finished.
+        let c = v.career.as_ref();
+        self.final_race = c.is_some_and(|c| c.final_race);
+        self.final_event = c.is_some_and(|c| c.final_event);
+        self.bonus_place = c.map_or(0, |c| c.bonus_place);
+        self.no_damage = c.is_some_and(|c| c.no_damage);
+        self.damage_indicator = self.no_damage && v.damage_indicator;
+        if let Some(c) = c
+            && c.final_race
+            && !c.standing.is_empty()
+            && v.entries.iter().any(|e| e.finished)
+        {
+            let total = |k: usize| {
+                let place = v.entries[k].position.saturating_sub(1);
+                c.standing.get(k).copied().unwrap_or(0) + c.points.get(place).copied().unwrap_or(0)
+            };
+            let best = (0..v.entries.len()).filter(|&k| k != v.player).map(total).chain(c.absent_best).max();
+            self.won = best.is_none_or(|b| total(v.player) >= b) as i32;
+        }
     }
 
     /// The refresh 0x44C3C0: every getter into the values, in the map's order (ascending name
@@ -2345,6 +2411,12 @@ impl Collector {
         p.set(SatOnTrackTime, self.sat);
         p.set(SlipStreamTime, self.slipstream);
         p.set(OneTwoFinish, self.one_two as f32);
+        p.flag(IsFinalRace, self.final_race);
+        p.flag(IsFinalCareerEvent, self.final_event);
+        p.set(WonChampionship, self.won as f32);
+        p.set(BonusObjWinPos, self.bonus_place as f32);
+        p.flag(HasNoDamageObj, self.no_damage);
+        p.flag(AnyDamageIndOn, self.damage_indicator);
         p.set(CurrentTrackLaps, self.track_laps as f32);
         p.set(CurrentPaceTime, self.pace);
         p.set(NumRunningCars, self.running as f32);
@@ -3124,6 +3196,40 @@ mod tests {
         v.started = false;
         let p = c.update(&v, 0.1).clone();
         assert_eq!(p.get(Param::CarAheadTerminal), 1.);
+    }
+
+    #[test]
+    fn the_final_race_settles_the_championship() {
+        let mut c = Collector::default();
+        c.restart();
+        // The player on lap 2 of 3.
+        let mut v = racing(1.5);
+        assert_eq!(c.update(&v, 0.1).get(Param::WonChampionship), -1.);
+        // Player 4th; entry 1 leads. Before the race: player 20, entry 1 12, entry 2 18, entry 3 0.
+        v.career = Some(CareerRace {
+            final_race: true,
+            points: vec![10, 8, 6, 4],
+            standing: vec![20, 12, 18, 0],
+            absent_best: Some(23),
+            one_two: true,
+            ..CareerRace::default()
+        });
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::IsFinalRace), p.get(Param::WonChampionship)), (1., -1.));
+        // A car finishes; the player 4th: 20 + 4 = 24 against entry 2's 18 + 8 = 26.
+        v.entries[1].finished = true;
+        assert_eq!(c.update(&v, 0.1).get(Param::WonChampionship), 0.);
+        // The player 1st: 20 + 10 = 30 against 18 + 6 = 24 and the absent 23.
+        for (e, pos) in v.entries.iter_mut().zip([1, 2, 3, 4]) {
+            e.position = pos;
+        }
+        assert_eq!(c.update(&v, 0.1).get(Param::WonChampionship), 1.);
+        // `1_2Finish` is written once, on the last lap.
+        assert_eq!(c.params.get(Param::OneTwoFinish), -1.);
+        v.entries[0].laps = 2;
+        assert_eq!(c.update(&v, 0.1).get(Param::OneTwoFinish), 1.);
+        v.career.as_mut().unwrap().one_two = false;
+        assert_eq!(c.update(&v, 0.1).get(Param::OneTwoFinish), 1.);
     }
 
     #[test]

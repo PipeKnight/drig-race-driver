@@ -15,12 +15,17 @@
 //!   13, 14, 15 and 16, and entry 7 (driver 8, British) is the teammate. The teammate spins
 //!   from 130 s to 134 s.
 //!
+//! - The player's audio name is `M_01`.
+//! - `career` (third argument): the race is the last of an own career event. Before it the player
+//!   has 30 points, the teammate (entry 7) 25 and entry 1 28 (points table 10, 8, 6, …), so
+//!   winning takes the championship and the player and the teammate are 1st and 2nd (§19).
+//!
 //! `speech.wav`: mono PCM16 at the lines' 32 kHz, the Codriver group level of the Chase camera
 //! with the Talking mix while a line plays. `lines.txt`: each line with its time.
 use grid_tools::{
     audio_mix::{self, Camera, ModeMix, Table},
     source_vehicle::DELTA,
-    speech::{Car, Collector, Contact, Entry, Identities, Kind, Manager, RaceView, Rules, part_id},
+    speech::{Car, CareerRace, Collector, Contact, Entry, Identities, Kind, Manager, RaceView, Rules, part_id},
 };
 use std::{fs, io::Write, path::Path, sync::Arc};
 
@@ -64,7 +69,7 @@ fn place(t: f64) -> usize {
 }
 
 /// The race at `t` seconds after the green light (`None`: on the grid).
-fn view(green: Option<f64>, ids: &Identities) -> RaceView {
+fn view(green: Option<f64>, ids: &Identities, career: Option<&CareerRace>) -> RaceView {
     let t = green.unwrap_or(0.);
     let mine = if green.is_some() { place(t) } else { CARS };
     let progress = t / LAP;
@@ -100,6 +105,8 @@ fn view(green: Option<f64>, ids: &Identities) -> RaceView {
     let ahead = green.is_some() && (t - 70.).abs() < f64::from(DELTA) / 2.;
     let damaged = green.is_some() && t >= 50.;
     RaceView {
+        career: career.cloned(),
+        damage_indicator: false,
         clock: t,
         started: green.is_some(),
         over: finished,
@@ -147,11 +154,22 @@ fn view(green: Option<f64>, ids: &Identities) -> RaceView {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-speech-render GAME_ROOT local/NEW_DIRECTORY".into());
+    if !(2..=3).contains(&args.len()) || args.get(2).is_some_and(|a| a != "career") {
+        return Err("usage: grid-speech-render GAME_ROOT local/NEW_DIRECTORY [career]".into());
     }
     let root = Path::new(&args[0]);
     let out = Path::new(&args[1]);
+    let career = (args.len() == 3).then(|| {
+        let mut standing = vec![0; CARS];
+        (standing[0], standing[7], standing[1]) = (30, 25, 28);
+        CareerRace {
+            final_race: true,
+            points: (0..12).map(|k| (10 - 2 * k).max(0)).collect(),
+            standing,
+            one_two: true,
+            ..CareerRace::default()
+        }
+    });
     let local = Path::new("local").canonicalize()?;
     if out.exists() || !out.parent().ok_or("output parent")?.canonicalize()?.starts_with(&local) {
         return Err("new private output required".into());
@@ -204,7 +222,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if !busy {
             mix.release();
         }
-        let params = collector.update(&view(green, &ids), DELTA).clone();
+        let params = collector.update(&view(green, &ids, career.as_ref()), DELTA).clone();
         let frame = manager.frame(DELTA, &params, busy, false, &exists);
         if frame.stop {
             voice = None;

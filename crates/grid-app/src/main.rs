@@ -3142,6 +3142,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     player_slot,
                     speech_identities(&root, &opponent_drivers, profile.teammate),
                     speech_sound::audio_name(&profile),
+                    profile.career_speech.clone().map(|mut c| {
+                        c.points = profile.points.clone().unwrap_or_default();
+                        c
+                    }),
                 )
             {
                 warn!("Speech unavailable; driving continues: {error}");

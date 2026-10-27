@@ -123,6 +123,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [RESET_AND_RESPAWN_RESEARCH.md](RESET_AND_RESPAWN_RESEARCH.md) Reset and respawn: what the original does with stuck and retired cars — Static research, 16 October 2026 (F332).
 - [SERIES.md](SERIES.md) Circuit-race series (Pro Tuned, Touring, GT1, GT2, Le Mans Series) — Item 3 of docs/DISCIPLINES.md §5: the free-race circuit series on our five circuits.
 - [SETTINGS.md](SETTINGS.md) Settings file, install discovery and private parameters (P5) — Step P5 of [PLATFORMS_AND_INPUT_RESEARCH.md](PLATFORMS_AND_INPUT_RESEARCH.md) section 7: portability groundwork for the …
+- [SPEECH_CAREER_PARAMETERS.md](SPEECH_CAREER_PARAMETERS.md) Race engineer speech: the career and profile parameters (research) — Static only.
 - [TIME_TRIAL_EVENT.md](TIME_TRIAL_EVENT.md) Finite Lacetti / Donington time trial — F276 — This is an independently authored single-car event over the existing purchased Donington route_0 start line and ordered …
 - [TOUGE.md](TOUGE.md) Point-to-point routes: Haruna touge and the Yokohama freestyle arenas (F407) — Follow-up of F399 ([TRACK_READERS.md](TRACK_READERS.md) §5).
 

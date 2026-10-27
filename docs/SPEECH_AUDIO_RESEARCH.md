@@ -879,3 +879,68 @@ clears the three flags.
   nothing (the roll is still drawn).
 - `grid-app --speech-files` lists the three `Chief_` files of the profile's audio name, so the APK
   bundle lists carry `Chief_{OK,WD,BL}_M_01`.
+
+## 19. The port, part 3 step 3: the championship and career values [O static]
+
+The full analysis is in [SPEECH_CAREER_PARAMETERS.md](SPEECH_CAREER_PARAMETERS.md).
+
+**Where the values live.** The registration 0x45F590 (`speech_params_register`) pairs 419
+parameter names with getters; each getter reads a collector field. The race block of 0x451A20 is
+collector +0x60. It is refreshed every frame before the race and on four frames of five during it
+(§8). The block clear `race_block_clear` (0x468B30, every reset and the load handler) writes 0
+except −1 at block +0x28, +0x34, +0x38, +0x3C, +0x44 and +0x48.
+
+| Parameter | Getter | Field | Value |
+| --- | --- | --- | --- |
+| driverChampWinPos | 0x4185A0 | player record +0x40 | always 0 (below) |
+| teamDriverChampWinPos | 0x418800 | teammate record +0x40 | always 0 |
+| isFinalRace | 0x418530 | block +0x6F | own career event (not a driver offer) on its last race: E vf 0x7C (`event_on_last_race`, 0x640800), once per reset |
+| isFinalCareerEvent | 0x418560 | block +0x72 | the event is a head-to-head (0x637930) of a tier whose career rank is international (0x637B10 → 0x62C280: rookie, pro, expert, international = 0…3) |
+| wonChampionship | 0x418170 | block +0x48 | −1; on the final race, once its result list is not empty: 1 when the player's dense rank is 0 in the standings including this race (0x6706B0), else 0 |
+| 1_2Finish | 0x418D00 | +0xB71C | −1 (race set-up); once, on the final race's last lap (0x452991): 1 when the player and the teammate are ranks 0 and 1 (`champ_one_two`, 0x4EF9C0) |
+| bonusObjWinPos | 0x418590 | block +0x28 | a race driver offer with a finishing-place objective: its `objective_finishing_place` (0x62A8D0 + 1); else 0 |
+| hasNoDamageObj | 0x418090 | block +0x7C | a race driver offer with the no-damage objective (class 4) |
+| anyDamageIndOn | 0x419010 | block +0x81 | only then: any HUD damage icon lit (0x8EF920 → `indicators`) |
+| numRaceWins | 0x418DA0 | block +0x3C | race history (game +0x22F0) +0x44: career race wins before this race, read once per reset |
+| numEventWins | 0x418DB0 | block +0x58 | race history +0x30: own career events won |
+| racesCurTrack | 0x418DD0 | block +0x5C | race history item of the track: races driven there |
+
+- **`driverChampWinPos` and `teamDriverChampWinPos` are never computed.** The car record refresh
+  0x438C10 calls 0x670470 only while record +0x40 is −1. The record constructor 0x468920 and the
+  clear 0x4689C0 both write 0, and no other writer was found. The lines that need a non-zero value
+  (`DriverChampObj1st`…, `driverChampWin1st`…, `teamNeeds1st`, `teamBehindNeedsToWin`) are dead
+  in the original. [I] The result would also be a 0-based place against the rules' 1-based tests.
+- `FinalRaceNoBonus` and `FinalRaceLapBonus` need `bonusObjWinPos` and `isFinalRace` together,
+  which never happens (offers are not own events): dead.
+- The race history counters (`numRaceWins`, `numEventWins`, `racesCurTrack`; writers 0x6105F0,
+  0x60A960, 0x60F950) have no port counterpart. `Career.races_won` and `layout_races` count
+  differently. They keep the port's defaults: `numRaceWins` 1 [AUTHORED, §7], the others 0.
+- Not established:
+  - the extra race-win condition on game +0x31C;
+  - game modes 2, 3 and 5;
+  - whether every plain race has one part (0x640800);
+  - when the current race's result list fills;
+  - the touge exclusion in the `wonChampionship` test.
+
+**The port.**
+- `RaceView::career` (`CareerRace`) and `damage_indicator`. The collector publishes the values
+  above. `wonChampionship` follows the block clear (−1) outside the career.
+- [I] The original's result list is approximated by the current race order once a car has
+  finished. Each car's total is its points before the race plus the points of its current place,
+  against the best points of the event's entrants who are not in the race.
+- The career screen (`career_screen::speech_lines`) writes `[game] speech_final_race`,
+  `speech_final_event`, `speech_standing`, `speech_standing_absent`, `speech_one_two`,
+  `speech_bonus_place` and `speech_no_damage`. grid-app reads them, with the points table, from
+  `[game] points`.
+- [I] 0x4EF9C0 counts only results already final, so the port computes `1_2Finish` from the
+  races before this one.
+- [I] The standings are written for career-field races of own events with a points table.
+  Head-to-heads, the AUTHORED fields and the Le Mans selection races (class standings, not
+  ported) get the flags without standings, so `wonChampionship` stays −1 there.
+
+**Checks.**
+- Unit test `the_final_race_settles_the_championship`.
+- Career screen tests: `bmw_si_tour_is_offered_planned_and_paid` (race 2's lines after a win)
+  and `the_international_head_to_head_is_the_final_career_event` (78 on, 73 off).
+- Render `local/speech-render/render-10` (`career`): `wonChampionshipFirstTime` at the finish
+  instead of `playerWonTeam4` and `win`.

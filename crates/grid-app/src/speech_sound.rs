@@ -45,6 +45,8 @@ pub(crate) struct SpeechSound {
     player_slot: usize,
     /// The race's drivers (docs/SPEECH_AUDIO_RESEARCH.md §15).
     identities: Identities,
+    /// The career race's values (§19).
+    career: Option<speech::CareerRace>,
     commands: Sender<Command>,
     /// Codriver and 3DSpeech levels in dB.
     group_db: Arc<[AtomicU32; 2]>,
@@ -184,6 +186,7 @@ pub(crate) fn install(
     player_slot: usize,
     identities: Identities,
     audio_name: Option<&str>,
+    career: Option<speech::CareerRace>,
 ) -> Result<(), String> {
     let rules = Arc::new(Rules::load(&root)?);
     app.add_audio_source::<SpeechSource>();
@@ -205,6 +208,12 @@ pub(crate) fn install(
         identities.teammate_number,
         audio_name.unwrap_or("off")
     );
+    if let Some(c) = &career {
+        println!(
+            "speech_audio version=1 event=career final_race={} final_event={} standing={:?} absent={:?} one_two={} bonus_place={} no_damage={}",
+            c.final_race as u8, c.final_event as u8, c.standing, c.absent_best, c.one_two as u8, c.bonus_place, c.no_damage as u8
+        );
+    }
     app.insert_resource(SpeechSound {
         root,
         table,
@@ -212,6 +221,7 @@ pub(crate) fn install(
         collector: Collector::default(),
         player_slot,
         identities,
+        career,
         commands,
         group_db,
         ends: 0.,
@@ -244,6 +254,7 @@ fn view(
     kind: Kind,
     player_slot: usize,
     ids: &Identities,
+    career: Option<&speech::CareerRace>,
 ) -> Option<RaceView> {
     let o = driving.opponents.as_ref()?;
     let standings = &o.standings;
@@ -305,6 +316,10 @@ fn view(
     let vehicle = &player.state.car.owner.vehicle;
     let wheels = grid_tools::tyre_audio::wheel_positions(vehicle, &player.state.car.owner.physical);
     Some(RaceView {
+        career: career.cloned(),
+        // 0x8EF920: any HUD damage icon lit, only read with a no-damage objective.
+        damage_indicator: career.is_some_and(|c| c.no_damage)
+            && grid_tools::source_vehicle::assists::mechanical_damage::indicators(vehicle).is_some_and(|s| s.any),
         clock: clock.unwrap_or(0.),
         started: clock.is_some(),
         over: standings.over(),
@@ -400,7 +415,7 @@ fn tick(
             touge: touge.is_some(),
             derby: derby.is_some(),
         };
-        let Some(mut v) = view(&driving, listening.trial.as_deref(), kind, sound.player_slot, &sound.identities) else { return };
+        let Some(mut v) = view(&driving, listening.trial.as_deref(), kind, sound.player_slot, &sound.identities, sound.career.as_ref()) else { return };
         // The choreographer's messages since the last speech frame (several ticks can pass).
         if let Some(o) = driving.opponents.as_ref() {
             v.ai_events = o

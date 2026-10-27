@@ -270,6 +270,15 @@ pub struct Settings {
     /// `commentary_name_*`), or `off` ("Disable Audio Name"). Default `M_01`
     /// (docs/SPEECH_AUDIO_RESEARCH.md §18).
     pub audio_name: Option<String>,
+    /// The career race's speech values, written by the career screen
+    /// (docs/SPEECH_AUDIO_RESEARCH.md §19): `[game] speech_final_race`,
+    /// `speech_final_event`, `speech_one_two`, `speech_no_damage` (on/off),
+    /// `speech_standing` (each car's points before this race, the player
+    /// first), `speech_standing_absent` (the best points of the event's
+    /// entrants not in this race) and `speech_bonus_place`. The points
+    /// table is `[game] points`. Without any of them the race is not a
+    /// career race for speech.
+    pub career_speech: Option<grid_tools::speech::CareerRace>,
     /// `[game] points`: the event's points table by finishing position
     /// (career races), shown in the results' Points column.
     pub points: Option<Vec<i32>>,
@@ -501,6 +510,22 @@ impl Settings {
                 ("game", "teammate") => {
                     self.teammate =
                         Some(value.parse().map_err(|_| at("[game] teammate needs an opponent number".into()))?)
+                }
+                ("game", key) if key.starts_with("speech_") => {
+                    let c = self.career_speech.get_or_insert_with(Default::default);
+                    let int = |v: &str| v.trim().parse::<i32>().map_err(|_| at(format!("[game] {key} needs a number")));
+                    match key {
+                        "speech_final_race" => c.final_race = on(key, value).map_err(at)?,
+                        "speech_final_event" => c.final_event = on(key, value).map_err(at)?,
+                        "speech_one_two" => c.one_two = on(key, value).map_err(at)?,
+                        "speech_no_damage" => c.no_damage = on(key, value).map_err(at)?,
+                        "speech_standing" => {
+                            c.standing = value.split(',').filter(|v| !v.trim().is_empty()).map(int).collect::<Result<_, _>>()?
+                        }
+                        "speech_standing_absent" => c.absent_best = Some(int(value)?),
+                        "speech_bonus_place" => c.bonus_place = int(value)?,
+                        _ => return Err(at(format!("unknown setting `{key}`"))),
+                    }
                 }
                 ("game", "audio_name") => {
                     let name = value.trim();
