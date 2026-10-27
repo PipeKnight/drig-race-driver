@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F625](F0625.md) | 2026-10-27 | Cockpit: rear-view mirror rendered as the original (512x128 every frame), cost at the phone's resolution |
 | [F624](F0624.md) | 2026-10-27 | Speech part 3 step 3: championship and career values |
 | [F623](F0623.md) | 2026-10-27 | Speech part 3 step 2: the player-name phrases (audio name) |
 | [F622](F0622.md) | 2026-10-27 | Speech part 3 step 1: the lapping lines from the track order |

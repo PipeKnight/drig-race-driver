@@ -3334,6 +3334,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         car_lod::load(&root);
         car_batch::install(&mut app);
         camera::install(&mut app, &root, field.models[0].stem());
+        cockpit::install(&mut app);
         track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
@@ -3799,7 +3800,14 @@ fn setup(
                     damage_parts::Joint::new(&part.joint),
                 ));
                 if interior {
-                    entity.insert((cockpit::InteriorPart, Visibility::Hidden));
+                    entity.insert((
+                        cockpit::InteriorPart,
+                        Visibility::Hidden,
+                        bevy::camera::visibility::RenderLayers::layer(cockpit::LAYER),
+                    ));
+                    if part.material.starts_with("car0/interior/mirror/") {
+                        entity.insert(cockpit::MirrorGlass);
+                    }
                 }
                 if part.material == "car0/Tyre Wall"
                     && let Some(wheel) = part.wheel
@@ -4040,18 +4048,25 @@ fn setup(
             graphics.cascades(),
         ))
         .id();
-    if shadow_bodies_spawned {
-        // The sun also takes casters from the shadow bodies' layer, which no
-        // camera draws.
-        commands.entity(sun).insert(car_batch::sun_layers());
-    }
+    // The sun also takes casters from the cockpit's layer and, with shadow
+    // bodies, theirs, which no camera draws.
+    commands.entity(sun).insert(if shadow_bodies_spawned {
+        car_batch::sun_layers().with(cockpit::LAYER)
+    } else {
+        bevy::camera::visibility::RenderLayers::from_layers(&[0, cockpit::LAYER])
+    });
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 450.0,
         ..default()
     });
     let camera = commands
-        .spawn((Camera3d::default(), camera_transform(&orbit), ViewerCamera))
+        .spawn((
+            Camera3d::default(),
+            camera_transform(&orbit),
+            ViewerCamera,
+            bevy::camera::visibility::RenderLayers::from_layers(&[0, cockpit::LAYER]),
+        ))
         .id();
     graphics::configure(&mut commands, camera, &graphics, &mut scattering_media);
     if driving.is_some() {

@@ -904,7 +904,7 @@ turns it off on Android for comparisons. It changes presentation only.
 | Ground cover | 0.4 × the authored LOD distances | about 0.16 × the sprites |
 | Compute threads | cores − 2, at least 4 (6 on an 8-core phone) | Bevy gives 4 of 8 cores to compute and leaves IO and async threads idle |
 
-**Measurement switches.** `perf_test` keeps the per-part switches. The Auto cycle (14 steps of 8 s)
+**Measurement switches.** `perf_test` keeps the per-part switches. The Auto cycle (15 steps of 8 s since F625's `off:mirror`, the head-cam's rear-view mirror)
 now ends with `mobile:render1080` (full resolution), `mobile:render540` and `mobile:msaa_off`; under
 the preset, the "normal" step is the preset itself. The Auto cycle also runs in the pre-race menu.
 The cycle labels `light_shadows`, `no_small_casters` and `far_props` are for runs without the preset

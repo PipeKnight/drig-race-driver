@@ -367,3 +367,4 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 ## Other
 
 - [CAR_LOD.md](CAR_LOD.md) Car LOD selection and car shadow casters — How the original picks a level of detail for each car and which cars draw into the shadow maps.
+- [COCKPIT.md](COCKPIT.md) Cockpit: mirror, steering wheel, gauges and driver (camera session, 27 October 2026) — The head-cam draws the car's interior file `int_<stem>.pssg` (F618, [CAMERA_VIEWS.md](CAMERA_VIEWS.md) "Own car per …
