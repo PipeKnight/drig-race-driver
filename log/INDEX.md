@@ -493,6 +493,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G303](G0303.md) | 2026-10-27 | Sample one ordinary L4 crowd packet through the linked reader |
 | [G302](G0302.md) | 2026-10-27 | Integrate F587-F590 preserving graphics ownership |
 | [G301](G0301.md) | 2026-10-27 | Compare main-view display transforms for Lacetti paint |
 | [G300](G0300.md) | 2026-10-27 | Integrate F584-F586 preserving player render ownership |

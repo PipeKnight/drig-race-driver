@@ -54,6 +54,8 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G303 (2026-10-27): linked ordinary L4 resource sampler passes195coordinates/49keys with unchanged980key bytes and independent bit reconstruction; shared full gate passes. Crowd clock/pose/rendered arm motion remain open. See CROWD_ANIMATION_RESEARCH.
+- G302 (2026-10-27): pinned F587-F590 integrated, player ownership/opponent batching retained; full1137tests/Clippy/4identities/24soak, combined build and fresh2native BMW smoke controls pass. Selected glass/lens/skid ghosts attenuate; minor wheel rings/Manual/general/default remain open. See TYRE_SMOKE_RESEARCH/PERFORMANCE.
 - G301 (2026-10-27): optional main-view AgX/Reinhard comparison passes460app tests/Clippy/combined-feature build and2native4K captures. Reinhard makes selected Lacetti paint more saturated; AgX default retained. One-component probe residual recorded; no original/moving/default parity claim. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G300 (2026-10-27): pinned F584-F586 integrated with player source ownership retained and opponent batching enabled. New ECS test/full1137tests/Clippy/4identities/24soak/native build and fresh2Istanbul smoke controls pass. Manual/general/default remain open; see PERFORMANCE/TYRE_SMOKE_RESEARCH.
 - G299 (2026-10-27): existing Lacetti Fresnel/current-sort native-DLAA fixture shows cracked glass before scripted R and intact glass/restored body afterward. One early-capture failure retained; corrected run and independent audit pass. Manual/Smashed/general remain open. See LACETTI_GRAPHICS_MATERIALS.

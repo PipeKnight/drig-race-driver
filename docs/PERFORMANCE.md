@@ -1765,3 +1765,5 @@ Donington early by stage, base → fixed: `WorldAdvance` 0.18-0.19 → 0.08; `Ve
   PC's. Memory-bound copies may gain more on the phone; this is not measured there.
 - Left: the vehicle stage itself (wheels, suspension, contact updates; 0.18-0.21 ms on 4 threads),
   `staged_car`'s rollback copy, and in an awake pile the solve of a car group's contacts.
+
+G302 integrates pinned main F587-F590 after the G300 ownership guard. The true three-way car_batch merge preserves player SourcePart car0/no-Opponent exclusion, opponent batching, incoming NoAutoAabb/NotShadowCaster handling and (!shadowless || ours) admission. Exact player ownership ECS test, full1137tests/Clippy/four unchanged identities/24soak, combined feature build and fresh native BMW smoke pair pass. This establishes bounded integration safety, not a new measured FPS gain or actual bumper view. See G302 for source/artifact/capture hashes; incoming F587/F588 measurements keep their original scope.
