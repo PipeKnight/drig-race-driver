@@ -23,6 +23,7 @@ pub enum Mode {
     StaticBillboards,
     OneNeutralActor,
     OneArmPose,
+    OneKeyHypothesis,
 }
 impl Mode {
     pub fn parse(s: &str) -> Result<Self, &'static str> {
@@ -32,8 +33,9 @@ impl Mode {
             "static-billboards" => Ok(Self::StaticBillboards),
             "one-neutral-actor" => Ok(Self::OneNeutralActor),
             "one-arm-pose" => Ok(Self::OneArmPose),
+            "one-key-hypothesis" => Ok(Self::OneKeyHypothesis),
             _ => Err(
-                "--crowd-preview needs off, control, static-billboards, one-neutral-actor or one-arm-pose",
+                "--crowd-preview needs off, control, static-billboards, one-neutral-actor, one-arm-pose or one-key-hypothesis",
             ),
         }
     }
@@ -259,12 +261,17 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
     if rows.is_empty() || rows.len() > 100_000 {
         return Err("crowd preview count absent/exceeds bound".into());
     }
-    if matches!(mode, Mode::OneNeutralActor | Mode::OneArmPose) {
+    if matches!(
+        mode,
+        Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis
+    ) {
         let row = rows.get(4275).ok_or("neutral actor row4275 absent")?;
         if row.sex != 1 || row.cell != 89 || !row.position.is_finite() {
             return Err("neutral female row4275/cell89 differs".into());
         }
-        let actor = if mode == Mode::OneArmPose {
+        let actor = if mode == Mode::OneKeyHypothesis {
+            super::crowd_rig::prepare_key_hypothesis(root)?
+        } else if mode == Mode::OneArmPose {
             super::crowd_rig::prepare_arm_pose(root)?
         } else {
             super::crowd_rig::prepare(root)?
@@ -417,7 +424,10 @@ impl MaterialExtension for Tint {
     }
 }
 pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
-    if !matches!(prepared.mode, Mode::OneNeutralActor | Mode::OneArmPose) {
+    if !matches!(
+        prepared.mode,
+        Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis
+    ) {
         println!(
             "crowd_preview mode={:?} total_source={} selected_grandstand={} variant=0 colour_set=0 scale_fixture_draws=5000,5000 poses=unswayed-static-billboards alpha=Bevy-A2C lighting=PBR source_parity=false shadows=disabled unknown_scalar=opaque rotation_pair=retained-billboard-source-faces-camera",
             prepared.mode,
@@ -427,7 +437,7 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     }
     if !matches!(
         prepared.mode,
-        Mode::StaticBillboards | Mode::OneNeutralActor | Mode::OneArmPose
+        Mode::StaticBillboards | Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis
     ) {
         return Ok(());
     }
@@ -597,11 +607,15 @@ fn spawn(
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, actor.uv.clone());
         mesh.insert_indices(Indices::U16(actor.indices.clone()));
         commands.spawn((
-            Name::new(if actor.pose.is_some() {
-                "crowd-preview/one-authored-arm-female4275"
-            } else {
-                "crowd-preview/one-neutral-female4275"
-            }),
+            Name::new(
+                if actor.pose.as_ref().is_some_and(|p| p.stored_key_hypothesis) {
+                    "crowd-preview/one-key-HYPOTHESIS-female4275"
+                } else if actor.pose.is_some() {
+                    "crowd-preview/one-authored-arm-female4275"
+                } else {
+                    "crowd-preview/one-neutral-female4275"
+                },
+            ),
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(handles[1].clone()),
             Transform {
@@ -611,7 +625,9 @@ fn spawn(
             },
             NotShadowCaster,
         ));
-        let label = if actor.pose.is_some() {
+        let label = if actor.pose.as_ref().is_some_and(|p| p.stored_key_hypothesis) {
+            "crowd_key_hypothesis_spawn"
+        } else if actor.pose.is_some() {
             "crowd_authored_arm_spawn"
         } else {
             "crowd_neutral_spawn"

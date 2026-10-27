@@ -1,6 +1,6 @@
 //! One authored neutral USA actor. No native animation/clock/LOD policy.
 use bevy::prelude::*;
-use grid_formats::{mesh, pssg, scene, texture};
+use grid_formats::{anim_packet, mesh, pssg, scene, texture};
 use std::{collections::BTreeMap, error::Error, path::Path};
 type AnyResult<T> = Result<T, Box<dyn Error>>;
 const IDENTITY: [f32; 16] = [
@@ -12,7 +12,14 @@ struct Node {
     parent: Option<usize>,
     local: [f32; 16],
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PoseInput {
+    Neutral,
+    Authored20,
+    StoredKeyHypothesis,
+}
 pub(crate) struct PoseStats {
+    pub stored_key_hypothesis: bool,
     pub affected_palette: Vec<usize>,
     pub affected_bones: Vec<String>,
     pub affected_nodes: usize,
@@ -143,7 +150,7 @@ fn skin_vertex(
     Ok((q.to_array(), normal.normalize().to_array()))
 }
 // Caller first validates the unchanged saved neutral rig with palettes().
-fn rotated_local(nodes: &[Node], target: usize) -> AnyResult<(Vec<Node>, Vec<bool>)> {
+fn descendants(nodes: &[Node], target: usize) -> AnyResult<Vec<bool>> {
     if target >= nodes.len() || nodes[target].parent.is_none() {
         return Err("authored forearm cannot be a root".into());
     }
@@ -164,6 +171,10 @@ fn rotated_local(nodes: &[Node], target: usize) -> AnyResult<(Vec<Node>, Vec<boo
         }
         affected.push(hit);
     }
+    Ok(affected)
+}
+fn rotated_local(nodes: &[Node], target: usize) -> AnyResult<(Vec<Node>, Vec<bool>)> {
+    let affected = descendants(nodes, target)?;
     let (sin, cos) = 20f32.to_radians().sin_cos();
     let rotation = [
         cos, sin, 0., 0., -sin, cos, 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
@@ -233,6 +244,161 @@ fn pose_vertices(
         normals[i] = n;
     }
     Ok((influenced, moved, maximum))
+}
+// Explicit diagnostic convention, NOT the unresolved original receiver semantics.
+fn quaternion_row(value: [f32; 4]) -> AnyResult<([f32; 16], f32)> {
+    if value.iter().any(|v| !v.is_finite()) {
+        return Err("nonfinite stored quaternion".into());
+    }
+    let norm_squared = value.iter().map(|v| v * v).sum::<f32>();
+    if !norm_squared.is_finite() || (norm_squared - 1.).abs() > 1e-3 {
+        return Err("stored quaternion outside near-unit diagnostic domain".into());
+    }
+    let q = Quat::from_xyzw(value[0], value[1], value[2], value[3]).normalize();
+    let row = Mat4::from_quat(q).to_cols_array();
+    if row.iter().any(|v| !v.is_finite()) {
+        return Err("nonfinite quaternion row".into());
+    }
+    Ok((row, norm_squared))
+}
+fn basis_error(a: &[f32; 16], b: &[f32; 16]) -> f32 {
+    [0, 1, 2, 4, 5, 6, 8, 9, 10]
+        .into_iter()
+        .map(|i| (a[i] - b[i]).abs())
+        .fold(0., f32::max)
+}
+fn replaced_local(
+    nodes: &[Node],
+    target: usize,
+    row: &[f32; 16],
+) -> AnyResult<(Vec<Node>, Vec<bool>)> {
+    let affected = descendants(nodes, target)?;
+    let mut posed = nodes.to_vec();
+    // Replace ONLY 3x3. Saved root, translation and affine-column bits stay untouched.
+    for i in [0, 1, 2, 4, 5, 6, 8, 9, 10] {
+        posed[target].local[i] = row[i];
+    }
+    Ok((posed, affected))
+}
+fn named(tree: &pssg::Tree<'_>, kind: &[u8], id: &[u8]) -> AnyResult<usize> {
+    let matches: Vec<_> = (0..tree.nodes.len())
+        .filter(|&i| tree.name(i) == kind && tree.string(i, b"id").ok() == Some(id))
+        .collect();
+    match matches.as_slice() {
+        [one] => Ok(*one),
+        _ => Err("selected bank ID absent/duplicate".into()),
+    }
+}
+fn stored_forearm_row(root: &Path, rig: &Rig) -> AnyResult<[f32; 16]> {
+    let path = root.join("anims/crowd_anims.pssg");
+    if std::fs::metadata(&path)?.len() != 1_389_508 {
+        return Err("selected crowd bank size differs".into());
+    }
+    let bank = std::fs::read(path)?;
+    if bank.len() != 1_389_508 {
+        return Err("selected crowd bank changed size".into());
+    }
+    let tree = pssg::read_tree(&bank)?;
+    let clip = named(&tree, b"NeAnimClip", b"f_gs_s1_ex_03")?;
+    let refs: Vec<_> = tree.nodes[clip]
+        .children
+        .iter()
+        .copied()
+        .filter(|&i| tree.name(i) == b"NeAnimClipPacketRef")
+        .collect();
+    if refs.len() != 2 || tree.integer(clip, b"packetCount")? != 2 {
+        return Err("selected clip references differ".into());
+    }
+    let refs: Vec<_> = refs
+        .iter()
+        .map(|&i| tree.string(i, b"packet"))
+        .collect::<grid_formats::Result<_>>()?;
+    if refs.iter().filter(|&&r| r == b"#packet234").count() != 1
+        || refs.iter().filter(|&&r| r == b"#packet235").count() != 1
+    {
+        return Err("selected ordinary pair differs".into());
+    }
+    let parent = named(&tree, b"NeAnimPacket_S4", b"packet235")?;
+    let [leaf] = tree.nodes[parent].children.as_slice() else {
+        return Err("selected S4 leaf count differs".into());
+    };
+    let node = &tree.nodes[*leaf];
+    if tree.name(*leaf) != b"NeAnimPacketData_S4"
+        || node.parent != Some(parent)
+        || !node.children.is_empty()
+        || !node.attributes.is_empty()
+    {
+        return Err("selected direct S4 leaf differs".into());
+    }
+    let data = node.data.ok_or("selected S4 payload absent")?;
+    if data.len() != 23451
+        || tree.integer(parent, b"size")? != 22464
+        || tree.integer(parent, b"alignment")? != 16
+    {
+        return Err("selected S4 envelope differs".into());
+    }
+    let packet = anim_packet::read(
+        data,
+        anim_packet::Envelope {
+            parent_type: "NeAnimPacket_S4",
+            leaf_type: "NeAnimPacketData_S4",
+            parent_alignment: 16,
+            native_size: 22464,
+        },
+    )?;
+    if packet.kind != anim_packet::Kind::S4 || packet.channels.len() != 30 {
+        return Err("selected S4 channel domain differs".into());
+    }
+    let forearm = packet.channels.get(16).ok_or("selected channel16 absent")?;
+    if forearm.target != "Bip_01 L Forearm"
+        || forearm.keys.len() != 49
+        || packet
+            .channels
+            .iter()
+            .filter(|c| c.target == forearm.target)
+            .count()
+            != 1
+    {
+        return Err("selected forearm target/count differs".into());
+    }
+    let fingers: Vec<_> = packet
+        .channels
+        .iter()
+        .filter(|c| c.target == "Bip_01 L Finger01")
+        .collect();
+    let [finger] = fingers.as_slice() else {
+        return Err("constant finger control absent/duplicate".into());
+    };
+    if finger.keys.len() != 2 {
+        return Err("constant finger count differs".into());
+    }
+    let key = forearm.keys.first().ok_or("selected first key absent")?;
+    let finger_key = finger.keys.first().ok_or("finger first key absent")?;
+    if key.time != 0. || finger_key.time != 0. {
+        return Err("selected first stored coordinates differ".into());
+    }
+    let (row, norm_squared) = quaternion_row(key.value)?;
+    let (finger_row, finger_norm) = quaternion_row(finger_key.value)?;
+    let saved_finger = rig
+        .nodes
+        .iter()
+        .find(|n| n.name == b"Bip_01 L Finger01")
+        .ok_or("saved finger control absent")?;
+    let finger_error = basis_error(&finger_row, &saved_finger.local);
+    let finger_nonidentity = basis_error(&saved_finger.local, &IDENTITY);
+    if finger_error > 1e-5 || finger_nonidentity < 0.1 {
+        return Err("stored-key lane/convention control differs".into());
+    }
+    println!(
+        "crowd_key_hypothesis clip=f_gs_s1_ex_03 cache_declared_delta=Yes reference_delta=UNRESOLVED packet=235 target_channel=16 target_palette=15 key_index=0 stored_coordinate={} raw_XYZW_bits={:?} raw_norm_squared={} normalization=authored-unit-not-native-policy quaternion_lanes=XYZW interpretation=HYPOTHESIS-absolute-local-3x3-replacement finger_first_basis_error={} finger_saved_nonidentity={} finger_raw_norm_squared={} root_L4_values=not-decoded-or-applied root=saved-neutral clock=NONE source_pose_parity=false",
+        key.time,
+        key.value.map(f32::to_bits),
+        norm_squared,
+        finger_error,
+        finger_nonidentity,
+        finger_norm
+    );
+    Ok(row)
 }
 fn inverse(data: &[u8]) -> AnyResult<([f32; 16], f32)> {
     if data.len() != 64 {
@@ -346,12 +512,15 @@ fn rig(tree: &pssg::Tree<'_>) -> AnyResult<Rig> {
     })
 }
 pub(crate) fn prepare(root: &Path) -> AnyResult<Actor> {
-    prepare_actor(root, false)
+    prepare_actor(root, PoseInput::Neutral)
 }
 pub(crate) fn prepare_arm_pose(root: &Path) -> AnyResult<Actor> {
-    prepare_actor(root, true)
+    prepare_actor(root, PoseInput::Authored20)
 }
-fn prepare_actor(root: &Path, arm_pose: bool) -> AnyResult<Actor> {
+pub(crate) fn prepare_key_hypothesis(root: &Path) -> AnyResult<Actor> {
+    prepare_actor(root, PoseInput::StoredKeyHypothesis)
+}
+fn prepare_actor(root: &Path, input: PoseInput) -> AnyResult<Actor> {
     let path = root.join("anims/cr_female_usa.pssg");
     if std::fs::metadata(&path)?.len() > 16 * 1024 * 1024 {
         return Err("near actor package exceeds bound".into());
@@ -411,7 +580,7 @@ fn prepare_actor(root: &Path, arm_pose: bool) -> AnyResult<Actor> {
     }
     // Placement/yaw/foot offset and bounds above belong to NEUTRAL baseline.
     // Never recompute them from this authored arm pose.
-    let pose = if arm_pose {
+    let pose = if input != PoseInput::Neutral {
         const TARGET: &[u8] = b"Bip_01 L Forearm";
         if rig.names.get(15).map(Vec::as_slice) != Some(TARGET) {
             return Err("selected forearm palette15 differs".into());
@@ -421,7 +590,12 @@ fn prepare_actor(root: &Path, arm_pose: bool) -> AnyResult<Actor> {
             .iter()
             .position(|n| n.name == TARGET)
             .ok_or("selected forearm absent")?;
-        let (posed_nodes, affected_nodes) = rotated_local(&rig.nodes, target)?;
+        let (posed_nodes, affected_nodes) = if input == PoseInput::StoredKeyHypothesis {
+            let row = stored_forearm_row(root, &rig)?;
+            replaced_local(&rig.nodes, target, &row)?
+        } else {
+            rotated_local(&rig.nodes, target)?
+        };
         let (posed_palette, _) = palette_values(&posed_nodes, &rig.names, &rig.inverse, false)?;
         let affected: Vec<_> = rig
             .names
@@ -459,6 +633,7 @@ fn prepare_actor(root: &Path, arm_pose: bool) -> AnyResult<Actor> {
             return Err("authored arm pose produced no observable vertex displacement".into());
         }
         Some(PoseStats {
+            stored_key_hypothesis: input == PoseInput::StoredKeyHypothesis,
             affected_palette,
             affected_bones,
             affected_nodes: affected_nodes.iter().filter(|&&v| v).count(),
@@ -488,18 +663,32 @@ fn prepare_actor(root: &Path, arm_pose: bool) -> AnyResult<Actor> {
         "crowd_neutral_cpu source=female-USA/!C vertices=786 indices=3468 joints=23 position_error={max_position_error} palette_error={max_palette_error} inverse_affine_error={max_inverse_affine_error} neutral_bounds={source_min:?}/{source_max:?} foot_offset={foot_offset:?} hierarchy=saved-neutral weights=preserved pose_clock_parity=false"
     );
     if let Some(pose) = &pose {
-        println!(
-            "crowd_authored_pose local_axis=Z degrees=20 target=left-forearm palette15=true affected_palette={:?} affected_bones={:?} affected_nodes={} influenced_vertices={} moved_vertices={} max_displacement={} neutral_position_error={} neutral_palette_error={} baseline_foot_offset={:?} root=saved-neutral clock=none source_pose_parity=false",
-            pose.affected_palette,
-            pose.affected_bones,
-            pose.affected_nodes,
-            pose.influenced_vertices,
-            pose.moved_vertices,
-            pose.max_displacement,
-            max_position_error,
-            max_palette_error,
-            foot_offset
-        );
+        if pose.stored_key_hypothesis {
+            println!(
+                "crowd_key_hypothesis_skin affected_palette={:?} affected_bones={:?} influenced_vertices={} moved_vertices={} max_displacement={} neutral_position_error={} neutral_palette_error={} baseline_foot_offset={:?} reference_delta=UNRESOLVED root=saved-neutral source_pose_parity=false",
+                pose.affected_palette,
+                pose.affected_bones,
+                pose.influenced_vertices,
+                pose.moved_vertices,
+                pose.max_displacement,
+                max_position_error,
+                max_palette_error,
+                foot_offset
+            );
+        } else {
+            println!(
+                "crowd_authored_pose local_axis=Z degrees=20 target=left-forearm palette15=true affected_palette={:?} affected_bones={:?} affected_nodes={} influenced_vertices={} moved_vertices={} max_displacement={} neutral_position_error={} neutral_palette_error={} baseline_foot_offset={:?} root=saved-neutral clock=none source_pose_parity=false",
+                pose.affected_palette,
+                pose.affected_bones,
+                pose.affected_nodes,
+                pose.influenced_vertices,
+                pose.moved_vertices,
+                pose.max_displacement,
+                max_position_error,
+                max_palette_error,
+                foot_offset
+            );
+        }
     }
     Ok(Actor {
         pose,
@@ -621,6 +810,45 @@ mod tests {
         let (sin, cos) = 20f32.to_radians().sin_cos();
         assert!(
             (Vec3::from_array(positions[0]) - Vec3::new(1.5 + 0.5 * cos, 0.5 * sin, 0.)).length()
+                < 1e-6
+        );
+    }
+    #[test]
+    fn authored_quaternion90z_row_replaces_basis_without_rotating_saved_translation() {
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        let (row, _) = quaternion_row([0., 0., h, h]).unwrap();
+        assert!(
+            (Vec3::from_array(scene::transform_point(&row, [1., 0., 0.])) - Vec3::Y).length()
+                < 1e-6
+        );
+        let nodes = vec![
+            Node {
+                name: b"root".to_vec(),
+                parent: None,
+                local: IDENTITY,
+            },
+            Node {
+                name: b"forearm".to_vec(),
+                parent: Some(0),
+                local: translation(-0., 2., 3.),
+            },
+        ];
+        let (posed, _) = replaced_local(&nodes, 1, &row).unwrap();
+        assert_eq!(posed[0].local, nodes[0].local);
+        assert_eq!(
+            posed[1].local[12..15]
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>(),
+            nodes[1].local[12..15]
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            (Vec3::from_array(scene::transform_point(&posed[1].local, [1., 0., 0.]))
+                - Vec3::new(0., 3., 3.))
+            .length()
                 < 1e-6
         );
     }
