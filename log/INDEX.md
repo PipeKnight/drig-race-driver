@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F627](F0627.md) | 2026-10-27 | Cockpit: steering wheel turned by the interior Steering clip, NeAnim reader |
 | [F626](F0626.md) | 2026-10-27 | Faster pre-push: Clippy first, one lock hold per gate, pass cache, per-circuit race tests |
 | [F625](F0625.md) | 2026-10-27 | Cockpit: rear-view mirror rendered as the original (512x128 every frame), cost at the phone's resolution |
 | [F624](F0624.md) | 2026-10-27 | Speech part 3 step 3: championship and career values |

@@ -108,3 +108,36 @@ Interpretation:
 To measure it on the phone, the Performance test's Auto cycle has a step `off:mirror` (perf_test `mirror`), which stops the mirror's updates. It only shows a difference while driving in the head-cam.
 
 The phone-resolution frame of the mirror is `local/cam/render/phone/head-cam.png` (1539 × 720, fixed-step render after 300 ticks; private: it shows the original's assets).
+
+## Steering wheel
+
+### What the original does [D]
+
+The cockpit's wheel is not turned by a computed angle. It is an animation clip sampled by the steering command.
+
+- Node [V]: `int_<stem>.pssg` Scene Root / steer_master / steering_wheel. Its children are the render node int_steering_wheel and the hand dummies D_Lhand_Dummy and D_Rhand_Dummy. steer_master's local Z is the steering column, tilted 13.4° down in the Lacetti; steering_wheel's bind is a 90° turn about that axis.
+- Clip [V]: set 0 of `int_<stem>_anims.pssg` (Steering, accel, Brake, Clutch, change_up, change_down, HandBrake_on, HandBrake_off). "Steering" lasts 4.0 s, with 121 keys at 1/30 s. It keys rotation and translation of steering_wheel and of both hand dummies; every off-axis quaternion component is 0.
+- The interior controls animator (`incar_interior_controls_ctor` (0x84C5F0)) finds the clip; `incar_interior_find_nodes` (0x85C380) finds the nodes.
+- Every frame `incar_feed_driver_inputs` (0x85F8F0) reads s = −(vehicle +0xE30), so +1 is full right.
+  - For the human driver, `incar_driver_steer_human` (0x858C20) passes s straight to `incar_driver_set_steer` (0x851730), with no smoothing.
+  - The AI path, `incar_driver_steer_ai` (0x858B20), is rate-limited.
+- `incar_interior_set_steer` (0x84CA10) sets the timer to t = (s + 1) · 0.5 · duration.
+- `incar_interior_update` (0x859FC0) samples the clip at t. The key replaces the nodes' local transforms; the slot writer (0xAC67A0) normalises the quaternion.
+- Lacetti, relative to the bind at s = −1, −0.5, 0, +0.5, +1: −90°, −58.1°, −1.52°, +54.4°, +89.95° [V].
+  - The centre key is one frame late (t = 61/30 s), so straight ahead shows −1.52°, as in the original.
+  - Lock to lock is 180° in 31 cockpits; others differ (b05 120°, df3 ±45°, cre −60..+50°; private `local/cam/cockpit/driver/wheel_table.txt`).
+- The exterior car's wheel (part 0x47, "SteeringDummy") is turned by the same clip in the non-cockpit scene indices (0x84C820). Which index each view uses was not traced [I].
+
+### The port
+
+- `grid_formats::neanim` reads NeAnim sets (`NeAnimPacketData_L4_KA` keys shared by channels, interpolated linearly; `B1` one-component Bezier). `pssg::read_tree` keeps `NeAnimPacketData_*` nodes as raw data. Every shipped interior and character animation file decodes [V, test `shipped_animation_files_decode`].
+- `cockpit::append` finds steering_wheel and the "Steering" clip; each cockpit part under the node keeps its frame relative to the node (Lacetti: 6 parts).
+- `turn_wheel`, before `drive_present`: s = −(vehicle +0xE30), t = (s + 1) / 2 · 4 s; the part's rest = anchor · parent world · T(t) R(t) · its frame. The quaternion convention is pinned by the test `shipped_lacetti_steering_clip`: the centre key is the file's bind matrix.
+- Not ported:
+  - the hand dummies (no driver model yet);
+  - the exterior wheel in the other views (left as in F618, so those views stay unchanged);
+  - the AI path.
+
+Image proof (fixed-step renders against F625's):
+- chase_far, bonnet and bumper are 0 px different. chase_close is 0 px on a rerun; its first run differed in one pixel by 6, which the rerun showed to be run-to-run noise.
+- In the head-cam, `--steering 1` (the port's controls: positive to the left) turns the wheel 90° counter-clockwise and `--steering -1` 90° clockwise. Renders: `local/cam/render/wheel`, `wheel_s-1`, `wheel_s1`.

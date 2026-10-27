@@ -28,6 +28,7 @@ pub mod language;
 pub mod livery_numbers;
 pub mod material;
 pub mod mesh;
+pub mod neanim;
 pub mod osd;
 pub mod ornaments;
 pub mod track_environment;

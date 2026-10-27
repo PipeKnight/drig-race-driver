@@ -160,7 +160,8 @@ pub fn read_tree(bytes: &[u8]) -> Result<Tree<'_>> {
                     | b"TEMPLATETRANSFORM"
                     | b"NEANIMKEYS"
                     | b"SHADERPROGRAMCODEBLOCK"
-            );
+            )
+            || name.starts_with(b"NeAnimPacketData_");
         let index = nodes.len();
         nodes.push(Node {
             id,
