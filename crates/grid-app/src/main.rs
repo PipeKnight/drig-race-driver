@@ -2226,7 +2226,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--native-smoke-boundary off|control|late: explicit BMW Don0/Istanbul0 HDR1 scope; all arms share native DLAA/probe3/clean-data/legacy-source-stock guards. Control registers no boundary. --native-smoke-profile image450|manual (default image450); manual uses direct --drive Race Options/Go To Race in the same process and forbids ALL explicit script/capture/clock flags, even neutral values.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
-                println!("--crowd-preview off|control|static-billboards|one-neutral-actor|one-arm-pose|one-key-hypothesis: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture; one-neutral-actor selects USA female!C row4275 saved bind pose with authored yaw/foot alignment and near PBR material; one-arm-pose adds fixed authored20deg localZ left forearm using neutral placement, one-key-hypothesis replaces only forearm3x3 from packet235 firststoredS4 key as absolute-local HYPOTHESIS (cacheDeltaYes/reference unresolved), root/translation/neutralfoot retained (whole bank read; root L4 values not decoded/applied); no timer/animation/flash or source parity.");
+                println!("--crowd-preview off|control|static-billboards|one-neutral-actor|one-arm-pose|one-key-hypothesis|one-key-left|one-key-mid|one-key-right|one-key-sweep: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture; one-neutral-actor selects USA female!C row4275 saved bind pose with authored yaw/foot alignment and near PBR material; one-arm-pose adds fixed authored20deg localZ left forearm using neutral placement, one-key-hypothesis replaces only forearm3x3 from packet235 firststoredS4 key as absolute-local HYPOTHESIS (cacheDeltaYes/reference unresolved), root/translation/neutralfoot retained (whole bank read; root L4 values not decoded/applied); one-key-left/mid/right select only stored forearm keys1/2 raw spherical diagnostic with same unresolved receiver, one-key-sweep runs exactly31 authored Extract-frame steps through the same interval then holdsRight, captures0/15/30 only; no seconds/native timer/animation/flash or source parity.");
                 println!("--motion-phase-map: default absent; exact baseline Derby Isolated|GroundFirst350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--foundation-front off|control|source-front: defaultoff exact Detroit front grandstand sheet only, static route8/sub0 LOD0 reference baseline/native1080/configAA0/actualMSAA4/source sky+track, clean settings, benchmark1..600/no other pilots. SourceFront uses inherited PBR with saved colour/separate-alpha/depth states; existing cull retained, no original shadow/auxiliary/source shader parity. BackingOpaque/fence unchanged.");
@@ -4577,7 +4577,7 @@ fn capture(
     benchmark: Option<Res<graphics_benchmark::Benchmark>>,
     probe: Option<Res<scene_probe::Cube>>,
     graphics: Res<graphics::Settings>,
-    motion: Option<Res<motion_capture::Motion>>,
+    (motion, crowd_sweep): (Option<Res<motion_capture::Motion>>, Option<Res<crowd_preview::Sweep>>),
     motion_phase: Option<Res<skid_phase_ledger::Audit>>,
     smoke_ct: Option<Res<smoke_ct_neutral::Audit>>,
     (smoke_boundary, smoke_boundary_live): (Option<Res<smoke_boundary::Audit>>, Option<Res<smoke_boundary::LiveState>>),
@@ -4588,6 +4588,7 @@ fn capture(
     replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
+    if crowd_sweep.as_ref().is_some_and(|s| s.failed()) { exit.write(AppExit::error()); return; }
     if smoke_boundary.as_ref().is_some_and(|audit| audit.failed())
         || smoke_boundary_live.as_ref().is_some_and(|state| state.failed()) {
         exit.write(AppExit::error()); return;
@@ -4672,6 +4673,7 @@ fn capture(
         return;
     }
     if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
+        && crowd_sweep.as_ref().is_none_or(|s| s.finished())
         && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
         && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
         && motion_phase.as_ref().is_none_or(|audit| audit.ready())

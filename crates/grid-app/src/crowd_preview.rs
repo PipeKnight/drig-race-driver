@@ -24,6 +24,10 @@ pub enum Mode {
     OneNeutralActor,
     OneArmPose,
     OneKeyHypothesis,
+    OneKeyLeft,
+    OneKeyMid,
+    OneKeyRight,
+    OneKeySweep,
 }
 impl Mode {
     pub fn parse(s: &str) -> Result<Self, &'static str> {
@@ -34,8 +38,12 @@ impl Mode {
             "one-neutral-actor" => Ok(Self::OneNeutralActor),
             "one-arm-pose" => Ok(Self::OneArmPose),
             "one-key-hypothesis" => Ok(Self::OneKeyHypothesis),
+            "one-key-left" => Ok(Self::OneKeyLeft),
+            "one-key-mid" => Ok(Self::OneKeyMid),
+            "one-key-right" => Ok(Self::OneKeyRight),
+            "one-key-sweep" => Ok(Self::OneKeySweep),
             _ => Err(
-                "--crowd-preview needs off, control, static-billboards, one-neutral-actor, one-arm-pose or one-key-hypothesis",
+                "--crowd-preview needs off, control, static-billboards, one-neutral-actor, one-arm-pose, one-key-hypothesis or one-key-left/mid/right/sweep",
             ),
         }
     }
@@ -263,13 +271,23 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
     }
     if matches!(
         mode,
-        Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis
+        Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis | Mode::OneKeyLeft | Mode::OneKeyMid | Mode::OneKeyRight | Mode::OneKeySweep
     ) {
         let row = rows.get(4275).ok_or("neutral actor row4275 absent")?;
         if row.sex != 1 || row.cell != 89 || !row.position.is_finite() {
             return Err("neutral female row4275/cell89 differs".into());
         }
-        let actor = if mode == Mode::OneKeyHypothesis {
+        let selector = match mode {
+            Mode::OneKeyLeft => Some(super::crowd_rig::StoredCoordinate::Left),
+            Mode::OneKeyMid => Some(super::crowd_rig::StoredCoordinate::Mid),
+            Mode::OneKeyRight => Some(super::crowd_rig::StoredCoordinate::Right),
+            _ => None,
+        };
+        let actor = if mode == Mode::OneKeySweep {
+            super::crowd_rig::prepare_sweep(root)?
+        } else if let Some(selector) = selector {
+            super::crowd_rig::prepare_stored_coordinate(root, selector)?
+        } else if mode == Mode::OneKeyHypothesis {
             super::crowd_rig::prepare_key_hypothesis(root)?
         } else if mode == Mode::OneArmPose {
             super::crowd_rig::prepare_arm_pose(root)?
@@ -426,7 +444,7 @@ impl MaterialExtension for Tint {
 pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     if !matches!(
         prepared.mode,
-        Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis
+        Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis | Mode::OneKeyLeft | Mode::OneKeyMid | Mode::OneKeyRight | Mode::OneKeySweep
     ) {
         println!(
             "crowd_preview mode={:?} total_source={} selected_grandstand={} variant=0 colour_set=0 scale_fixture_draws=5000,5000 poses=unswayed-static-billboards alpha=Bevy-A2C lighting=PBR source_parity=false shadows=disabled unknown_scalar=opaque rotation_pair=retained-billboard-source-faces-camera",
@@ -437,7 +455,7 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     }
     if !matches!(
         prepared.mode,
-        Mode::StaticBillboards | Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis
+        Mode::StaticBillboards | Mode::OneNeutralActor | Mode::OneArmPose | Mode::OneKeyHypothesis | Mode::OneKeyLeft | Mode::OneKeyMid | Mode::OneKeyRight | Mode::OneKeySweep
     ) {
         return Ok(());
     }
@@ -448,6 +466,12 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
             "grid_crowd_preview.wgsl",
         ),
     )?;
+    if prepared.mode == Mode::OneKeySweep {
+        app.get_sub_app_mut(bevy::render::RenderApp).ok_or("sweep renderer absent")?
+            .add_systems(bevy::render::ExtractSchedule, extract_sweep);
+        app.add_systems(PostUpdate, advance_sweep.before(bevy::camera::visibility::VisibilitySystems::CheckVisibility))
+            .add_systems(Last, request_sweep.before(bevy::diagnostic::update_frame_count));
+    }
     app.insert_resource(prepared)
         .add_plugins(MaterialPlugin::<CrowdMaterial>::default())
         .add_systems(PostStartup, spawn);
@@ -606,7 +630,13 @@ fn spawn(
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, actor.normals.clone());
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, actor.uv.clone());
         mesh.insert_indices(Indices::U16(actor.indices.clone()));
-        commands.spawn((
+        let sweep_bounds = actor.sweep.as_ref().map(|_| {
+            use bevy::camera::primitives::MeshAabb;
+            mesh.compute_aabb().expect("finite sweep initial bounds")
+        });
+        let actor_mesh = meshes.add(mesh);
+        let actor_transform = Transform { translation, rotation: yaw, ..default() };
+        let actor_entity = commands.spawn((
             Name::new(
                 if actor.pose.as_ref().is_some_and(|p| p.stored_key_hypothesis) {
                     "crowd-preview/one-key-HYPOTHESIS-female4275"
@@ -616,15 +646,24 @@ fn spawn(
                     "crowd-preview/one-neutral-female4275"
                 },
             ),
-            Mesh3d(meshes.add(mesh)),
+            Mesh3d(actor_mesh.clone()),
             MeshMaterial3d(handles[1].clone()),
-            Transform {
-                translation,
-                rotation: yaw,
-                ..default()
-            },
+            actor_transform,
             NotShadowCaster,
-        ));
+        )).id();
+        if let Some(data) = &actor.sweep {
+            commands.entity(actor_entity).insert((SweepActor, sweep_bounds.unwrap(), bevy::render::batching::NoAutomaticBatching));
+            commands.insert_resource(Sweep {
+                data: data.clone(), entity: actor_entity, mesh: actor_mesh,
+                material: handles[1].clone(), transform_bits: transform_bits(&actor_transform),
+                base_fingerprint: format!("{:?}",materials.get(&handles[1]).unwrap().base),
+                uv_bits: actor.uv.iter().map(|p|p.map(f32::to_bits)).collect(), indices: actor.indices.clone(),
+                positions: actor.positions.clone(), normals: actor.normals.clone(), step: None, frame: 0,
+                directory: None, ledger: std::sync::Arc::new(std::sync::Mutex::new(SweepLedger {
+                    failed: false, extracted: 0, shots: std::array::from_fn(|_|None),
+                })),
+            });
+        }
         let label = if actor.pose.as_ref().is_some_and(|p| p.stored_key_hypothesis) {
             "crowd_key_hypothesis_spawn"
         } else if actor.pose.is_some() {
@@ -681,6 +720,168 @@ fn spawn(
             ^ r.orientation_pair[1].to_bits()
             ^ r.opaque_scalar.to_bits()
     });
+}
+// One finite Extract-frame diagnostic. No wall-clock or source playback timer.
+#[derive(Component)]
+struct SweepActor;
+#[derive(Component)]
+struct SweepShot(usize);
+struct Shot {
+    entity: Entity,
+    target: Handle<Image>,
+    frame: u32,
+    step: u8,
+    extracted: bool,
+    saved: bool,
+}
+struct SweepLedger { failed: bool, extracted: u8, shots: [Option<Shot>; 3] }
+#[derive(Resource)]
+pub(crate) struct Sweep {
+    data: std::sync::Arc<super::crowd_rig::SweepData>,
+    entity: Entity,
+    mesh: Handle<Mesh>,
+    material: Handle<CrowdMaterial>,
+    transform_bits: [u32;16],
+    base_fingerprint: String,
+    uv_bits: Vec<[u32;2]>,
+    indices: Vec<u16>,
+    positions: Vec<[f32;3]>,
+    normals: Vec<[f32;3]>,
+    step: Option<u8>,
+    frame: u32,
+    directory: Option<std::path::PathBuf>,
+    ledger: std::sync::Arc<std::sync::Mutex<SweepLedger>>,
+}
+impl Sweep {
+    pub(crate) fn failed(&self) -> bool { self.ledger.lock().unwrap().failed }
+    pub(crate) fn finished(&self) -> bool {
+        let l=self.ledger.lock().unwrap();
+        !l.failed && l.extracted==31 && l.shots.iter().all(|s|s.as_ref().is_some_and(|s|s.extracted && s.saved))
+    }
+}
+fn transform_bits(t: &Transform) -> [u32;16] { t.to_matrix().to_cols_array().map(f32::to_bits) }
+fn next_sweep_step(frame: u32, previous: Option<u8>) -> Result<Option<u8>, &'static str> {
+    if frame<180 { return Ok(None); }
+    let step=(frame-180).min(30) as u8;
+    if previous.is_none() && step!=0 || previous.is_some_and(|p| step>p+1 || step<p) {
+        return Err("finite sweep missed or reversed Extract step");
+    }
+    Ok(Some(step))
+}
+fn fail_sweep(s: &Sweep, error: &str) {
+    s.ledger.lock().unwrap().failed=true;
+    error!("crowd_sweep failure={error} preserved=true no_retry=true");
+}
+#[allow(clippy::type_complexity)]
+fn advance_sweep(
+    sweep: Option<ResMut<Sweep>>, frame: Res<bevy::diagnostic::FrameCount>,
+    mut actors: Query<(&Mesh3d,&MeshMaterial3d<CrowdMaterial>,&Transform,&mut bevy::camera::primitives::Aabb),With<SweepActor>>,
+    mut meshes: ResMut<Assets<Mesh>>, materials: Res<Assets<CrowdMaterial>>, mut exit: MessageWriter<AppExit>,
+) {
+    use bevy::{camera::primitives::MeshAabb, mesh::VertexAttributeValues};
+    let Some(mut s)=sweep else { return; };
+    let result=(|| -> AnyResult<()> {
+        if s.failed() { return Err("sweep previously failed".into()); }
+        let expected=frame.0.checked_add(1).ok_or("sweep frame overflow")?;
+        let Some(step)=next_sweep_step(expected,s.step)? else { return Ok(()); };
+        if actors.iter().count()!=1 { return Err("sweep actor count differs".into()); }
+        let (handle,material,transform,mut bounds)=actors.get_mut(s.entity)?;
+        if handle.0.id()!=s.mesh.id() || material.0.id()!=s.material.id() || transform_bits(transform)!=s.transform_bits
+            || format!("{:?}",materials.get(&s.material).ok_or("sweep material lost")?.base)!=s.base_fingerprint {
+            return Err("sweep actor ownership/transform/base material changed".into());
+        }
+        let mesh=meshes.get(&s.mesh).ok_or("sweep mesh lost")?;
+        let Some(VertexAttributeValues::Float32x2(uv))=mesh.attribute(Mesh::ATTRIBUTE_UV_0) else { return Err("sweep UV type changed".into()); };
+        let Some(Indices::U16(indices))=mesh.indices() else { return Err("sweep indices type changed".into()); };
+        let Some(VertexAttributeValues::Float32x3(positions))=mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return Err("sweep positions type changed".into()); };
+        let Some(VertexAttributeValues::Float32x3(normals))=mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else { return Err("sweep normals type changed".into()); };
+        if uv.iter().map(|p|p.map(f32::to_bits)).collect::<Vec<_>>()!=s.uv_bits || indices.as_slice()!=s.indices.as_slice()
+            || positions.iter().map(|p|p.map(f32::to_bits)).collect::<Vec<_>>()!=s.positions.iter().map(|p|p.map(f32::to_bits)).collect::<Vec<_>>()
+            || normals.iter().map(|p|p.map(f32::to_bits)).collect::<Vec<_>>()!=s.normals.iter().map(|p|p.map(f32::to_bits)).collect::<Vec<_>>() {
+            return Err("sweep mesh attributes changed outside owned update".into());
+        }
+        if s.step!=Some(step) {
+            let (positions,normals)=s.data.sample(step)?;
+            let mut mesh=meshes.get_mut(&s.mesh).ok_or("sweep writable mesh lost")?;
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,positions.clone());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL,normals.clone());
+            *bounds=mesh.compute_aabb().ok_or("sweep updated AABB absent")?;
+            if !Vec3::from(bounds.center).is_finite() || !Vec3::from(bounds.half_extents).is_finite() { return Err("sweep AABB nonfinite".into()); }
+            s.positions=positions; s.normals=normals; s.step=Some(step);
+        }
+        s.frame=expected;
+        Ok(())
+    })();
+    if let Err(e)=result { fail_sweep(&s,&e.to_string()); exit.write(AppExit::error()); }
+}
+fn request_sweep(
+    mut commands: Commands, sweep: Option<ResMut<Sweep>>, capture: Res<super::Capture>,
+    frame: Res<bevy::diagnostic::FrameCount>, mut exit: MessageWriter<AppExit>,
+) {
+    let Some(mut s)=sweep else { return; };
+    let Some(step)=s.step else { return; };
+    if s.failed() { return; }
+    let Some(slot)=[0u8,15,30].iter().position(|&n|n==step) else { return; };
+    if s.ledger.lock().unwrap().shots[slot].is_some() { return; }
+    let result=(|| -> AnyResult<()> {
+        if frame.0.checked_add(1)!=Some(s.frame) || s.frame!=180+u32::from(step) { return Err("sweep screenshot phase differs".into()); }
+        if s.directory.is_none() {
+            let stem=capture.path.file_stem().ok_or("sweep capture stem absent")?.to_string_lossy();
+            let directory=capture.path.with_file_name(format!("{stem}-sweep"));
+            std::fs::create_dir(&directory)?; s.directory=Some(directory);
+        }
+        let path=s.directory.as_ref().unwrap().join(format!("{step:02}.png"));
+        if path.exists() { return Err("sweep refuses existing snapshot".into()); }
+        let target=capture.target.as_ref().ok_or("sweep image target not prepared")?.clone();
+        let entity=commands.spawn((bevy::render::view::screenshot::Screenshot::image(target.clone()),SweepShot(slot))).id();
+        s.ledger.lock().unwrap().shots[slot]=Some(Shot { entity,target,frame:s.frame,step,extracted:false,saved:false });
+        println!("crowd_sweep_request step={step} extract_frame={} screenshot_entity={:?} actor_entity={:?} mesh={:?} scheduler=authored-Extract-frame native_clock=false",s.frame,entity,s.entity,s.mesh.id());
+        let ledger=s.ledger.clone();
+        commands.entity(entity).observe(move |event:On<bevy::render::view::screenshot::ScreenshotCaptured>,mut exit:MessageWriter<AppExit>| {
+            let result=(|| -> AnyResult<()> {
+                { let l=ledger.lock().unwrap();let shot=l.shots[slot].as_ref().ok_or("sweep shot record lost")?;
+                  if l.failed || event.entity!=entity || shot.entity!=entity || !shot.extracted || shot.saved { return Err("sweep callback missing real Extract verification".into()); } }
+                if path.exists() { return Err("sweep snapshot appeared before callback".into()); }
+                event.image.clone().try_into_dynamic().map_err(|e|format!("{e:?}"))?.to_rgb8().save(&path)?;
+                ledger.lock().unwrap().shots[slot].as_mut().unwrap().saved=true;
+                println!("crowd_sweep_saved step={step} screenshot_entity={entity:?} path={} extract_verified=true native_pose_parity=false",path.display());
+                Ok(())
+            })();
+            if let Err(e)=result { ledger.lock().unwrap().failed=true;error!("crowd_sweep callback_failure={e}");exit.write(AppExit::error()); }
+        });
+        Ok(())
+    })();
+    if let Err(e)=result { fail_sweep(&s,&e.to_string());exit.write(AppExit::error()); }
+}
+fn extract_sweep(
+    sweep: bevy::render::Extract<Option<Res<Sweep>>>, frame: bevy::render::Extract<Res<bevy::diagnostic::FrameCount>>,
+    actors: bevy::render::Extract<Query<(&Mesh3d,&Transform),With<SweepActor>>>,
+    shots: bevy::render::Extract<Query<(Entity,&SweepShot,&bevy::render::view::screenshot::Screenshot)>>,
+) {
+    let Some(s)=sweep.as_ref() else { return; };
+    let Some(step)=s.step else { return; };
+    let result=(|| -> AnyResult<()> {
+        if s.frame!=frame.0 || s.frame<180 { return Err("sweep actual Extract frame differs from updated mesh stamp".into()); }
+        let (mesh,transform)=actors.get(s.entity)?;
+        if actors.iter().count()!=1 || mesh.0.id()!=s.mesh.id() || transform_bits(transform)!=s.transform_bits { return Err("sweep extracted actor ownership differs".into()); }
+        let mut l=s.ledger.lock().unwrap();
+        if s.frame<=210 {
+            if u32::from(step)!=s.frame-180 || l.extracted!=step { return Err("sweep actual Extract sequence skipped/repeated step".into()); }
+            l.extracted+=1;
+            println!("crowd_sweep_extract step={step} actual_extract_frame={} mesh={:?} actor={:?} observed31_steps_not_GPU_fragments=true",s.frame,s.mesh.id(),s.entity);
+        } else if step!=30 || l.extracted!=31 { return Err("sweep did not hold finalRight after31steps".into()); }
+        for (entity,stamp,screenshot) in &shots {
+            let shot=l.shots.get_mut(stamp.0).and_then(Option::as_mut).ok_or("sweep unknown screenshot stamp")?;
+            if !shot.extracted {
+                let image=match &screenshot.0 { bevy::camera::RenderTarget::Image(image)=>image, _=>return Err("sweep screenshot target not Image".into()) };
+                if shot.entity!=entity || shot.frame!=frame.0 || shot.step!=step || image.handle.id()!=shot.target.id() { return Err("sweep screenshot actual Extract stamp mismatch".into()); }
+                shot.extracted=true;
+                println!("crowd_sweep_shot_extract step={} actual_extract_frame={} screenshot_entity={:?} target_image={:?} actor_entity={:?} mesh={:?} source_extract_verified=true GPU_fragments_proved=false",shot.step,frame.0,entity,shot.target.id(),s.entity,s.mesh.id());
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e)=result { fail_sweep(s,&e.to_string()); }
 }
 #[cfg(test)]
 mod tests {
@@ -978,5 +1179,13 @@ mod tests {
         }
         // prepare also resolves exact source USA dataset/atlas IDs and formats.
         assert!(!p.diffuse.is_empty() && !p.tint.is_empty());
+    }
+    #[test]
+    fn finite_sweep_refuses_skip_and_holds_after31_extract_steps() {
+        assert_eq!(next_sweep_step(179,None),Ok(None));
+        assert_eq!(next_sweep_step(180,None),Ok(Some(0)));
+        assert!(next_sweep_step(182,Some(0)).is_err());
+        assert_eq!(next_sweep_step(210,Some(29)),Ok(Some(30)));
+        assert_eq!(next_sweep_step(211,Some(30)),Ok(Some(30)));
     }
 }

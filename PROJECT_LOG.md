@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G311 (2026-10-27): one finite forearm sweep passes466app tests/Clippy/build,31Extract/3callbacks/5PNGs after preserved compile/lint failures. Coherent bend, exact neutral/final controls; native clock/full animation/default remain open. See CROWD_ANIMATION_RESEARCH.
 - G310 (2026-10-27): same-artifact angular asphalt plus accepted gentle Motion passes2nativeDLAA1800tick controls and strict physical/ledger/motion equivalence; selected frames look continuous. Optional private playable prepared; owner monitor/R/C/multitrack/default acceptance open. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G309 (2026-10-27): default-off angular asphalt F0 trial passes464app tests/Clippy/build and4static controls: restrained lowangle brightening, overhead PNG/RGB exact. Moving/Motion combination and original/default parity remain open. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G308 (2026-10-27): first stored S4 forearm-key hypothesis passes464app tests/Clippy/build and2static views;104vertices deform coherently and neutral PNG equals G307. Native DeltaYes/reference/clock/full animation remain open. See CROWD_ANIMATION_RESEARCH.

@@ -17,6 +17,90 @@ enum PoseInput {
     Neutral,
     Authored20,
     StoredKeyHypothesis,
+    StoredInterval(StoredCoordinate),
+    StoredSweep,
+}
+/// Only three explicit bank coordinates in one selected interval; not a timer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StoredCoordinate {
+    Left,
+    Mid,
+    Right,
+    Step(u8),
+}
+struct StoredSample {
+    raw: [f32; 4],
+    coordinate: f32,
+    fraction: f32,
+    weights: [f32; 2],
+    dot: f32,
+    norm_squared: f32,
+}
+// Bounded source-guided spherical branch only. Host libm is not native CRT parity.
+fn stored_spherical(
+    left: &anim_packet::Key4,
+    right: &anim_packet::Key4,
+    selector: StoredCoordinate,
+) -> AnyResult<StoredSample> {
+    let span = right.time - left.time;
+    if !left.time.is_finite() || !right.time.is_finite() || !span.is_finite() || span <= 0. {
+        return Err("selected S4 interval is not finite strictly increasing".into());
+    }
+    for value in [left.value, right.value] {
+        let norm = value.iter().map(|v| v * v).sum::<f32>();
+        if value.iter().any(|v| !v.is_finite()) || !norm.is_finite() || (norm - 1.).abs() > 1e-3 {
+            return Err("selected S4 endpoints outside near-unit diagnostic domain".into());
+        }
+    }
+    let a = left.value;
+    let b = right.value;
+    // Recovered product/sum order: z+y+w+x, with f32 stores.
+    let zy = a[2] * b[2] + a[1] * b[1];
+    let zyw = zy + a[3] * b[3];
+    let dot = zyw + a[0] * b[0];
+    if !dot.is_finite() || dot <= 0. || dot >= 0.99 || dot >= f32::from_bits(0x3f7fbe77) {
+        return Err("selected S4 interval outside positive safely spherical diagnostic domain".into());
+    }
+    let coordinate = match selector {
+        StoredCoordinate::Left => left.time,
+        StoredCoordinate::Mid => left.time + span * 0.5,
+        StoredCoordinate::Right => right.time,
+        StoredCoordinate::Step(step) if step <= 30 => left.time + span * (f32::from(step) / 30.),
+        StoredCoordinate::Step(_) => return Err("finite sweep step outside0..30".into()),
+    };
+    if !coordinate.is_finite()
+        || (matches!(selector, StoredCoordinate::Mid | StoredCoordinate::Step(1..=29)) && !(left.time < coordinate && coordinate < right.time))
+    {
+        return Err("selected S4 coordinate is not a finite interior midpoint".into());
+    }
+    let fraction = (coordinate - left.time) / span;
+    if !fraction.is_finite() || !(0. ..=1.).contains(&fraction) {
+        return Err("selected S4 interval fraction invalid".into());
+    }
+    // Explicit raw endpoint copy is an AUTHORED control, not source endpoint bit parity.
+    let (raw, weights) = match selector {
+        StoredCoordinate::Left | StoredCoordinate::Step(0) => (a, [1., 0.]),
+        StoredCoordinate::Right | StoredCoordinate::Step(30) => (b, [0., 1.]),
+        StoredCoordinate::Mid | StoredCoordinate::Step(1..=29) => {
+            let theta = (dot as f64).acos() as f32;
+            let sine = (theta as f64).sin() as f32;
+            let inverse = 1. / sine;
+            let angle0 = theta * (1. - fraction);
+            let angle1 = theta * fraction;
+            let w0 = ((angle0 as f64).sin() as f32) * inverse;
+            let w1 = ((angle1 as f64).sin() as f32) * inverse;
+            if [theta, sine, inverse, angle0, angle1, w0, w1].iter().any(|v| !v.is_finite()) || sine <= 0. {
+                return Err("selected S4 spherical intermediates invalid".into());
+            }
+            (std::array::from_fn(|i| a[i] * w0 + b[i] * w1), [w0, w1])
+        }
+        StoredCoordinate::Step(_) => return Err("finite sweep step outside0..30".into()),
+    };
+    let norm_squared = raw.iter().map(|v| v * v).sum::<f32>();
+    if raw.iter().any(|v| !v.is_finite()) || !norm_squared.is_finite() || (norm_squared - 1.).abs() > 1e-3 {
+        return Err("selected S4 output outside near-unit diagnostic domain".into());
+    }
+    Ok(StoredSample { raw, coordinate, fraction, weights, dot, norm_squared })
 }
 pub(crate) struct PoseStats {
     pub stored_key_hypothesis: bool,
@@ -34,6 +118,7 @@ struct Rig {
     affine_error: f32,
 }
 pub(crate) struct Actor {
+    pub sweep: Option<std::sync::Arc<SweepData>>,
     pub pose: Option<PoseStats>,
     pub source_positions: Vec<[f32; 3]>,
     pub source_normals: Vec<[f32; 3]>,
@@ -289,7 +374,7 @@ fn named(tree: &pssg::Tree<'_>, kind: &[u8], id: &[u8]) -> AnyResult<usize> {
         _ => Err("selected bank ID absent/duplicate".into()),
     }
 }
-fn stored_forearm_row(root: &Path, rig: &Rig) -> AnyResult<[f32; 16]> {
+fn stored_forearm_row(root: &Path, rig: &Rig, coordinate: Option<StoredCoordinate>, retained: &mut Option<[anim_packet::Key4; 2]>) -> AnyResult<[f32; 16]> {
     let path = root.join("anims/crowd_anims.pssg");
     if std::fs::metadata(&path)?.len() != 1_389_508 {
         return Err("selected crowd bank size differs".into());
@@ -388,6 +473,22 @@ fn stored_forearm_row(root: &Path, rig: &Rig) -> AnyResult<[f32; 16]> {
     let finger_nonidentity = basis_error(&saved_finger.local, &IDENTITY);
     if finger_error > 1e-5 || finger_nonidentity < 0.1 {
         return Err("stored-key lane/convention control differs".into());
+    }
+    if let Some(selector) = coordinate {
+        let left = &forearm.keys[1];
+        let right = &forearm.keys[2];
+        let sampled = stored_spherical(left, right, selector)?;
+        if matches!(selector, StoredCoordinate::Step(_)) { *retained = Some([*left, *right]); }
+        // Existing downstream matrix conversion normalizes only AFTER raw sampling.
+        let (sample_row, authored_norm) = quaternion_row(sampled.raw)?;
+        println!(
+            "crowd_stored_interval clip=f_gs_s1_ex_03 packet=235 target_channel=16 target_palette=15 indices=1,2 selector={selector:?} left_coordinate_bits={} right_coordinate_bits={} coordinate_bits={} left_raw_XYZW_bits={:?} right_raw_XYZW_bits={:?} sampled_raw_XYZW_bits={:?} raw_dot={} fraction={} sine_weights={:?} raw_norm_squared={} matrix_input_norm_squared={} source_guided_S4_spherical=true endpoint_copy=authored-not-native-bit-parity raw_abs_signflip_clamp_normalization=false downstream_normalization=authored-unit-not-native-policy receiver=HYPOTHESIS-absolute-local-3x3 cache_declared_delta=Yes reference_delta=UNRESOLVED root_L4_values=not-decoded-or-applied root=saved-neutral timer=NONE seconds=false native_execution_parity=false finger_first_basis_error={} finger_saved_nonidentity={} finger_raw_norm_squared={}",
+            left.time.to_bits(), right.time.to_bits(), sampled.coordinate.to_bits(),
+            left.value.map(f32::to_bits), right.value.map(f32::to_bits), sampled.raw.map(f32::to_bits),
+            sampled.dot, sampled.fraction, sampled.weights, sampled.norm_squared, authored_norm,
+            finger_error, finger_nonidentity, finger_norm
+        );
+        return Ok(sample_row);
     }
     println!(
         "crowd_key_hypothesis clip=f_gs_s1_ex_03 cache_declared_delta=Yes reference_delta=UNRESOLVED packet=235 target_channel=16 target_palette=15 key_index=0 stored_coordinate={} raw_XYZW_bits={:?} raw_norm_squared={} normalization=authored-unit-not-native-policy quaternion_lanes=XYZW interpretation=HYPOTHESIS-absolute-local-3x3-replacement finger_first_basis_error={} finger_saved_nonidentity={} finger_raw_norm_squared={} root_L4_values=not-decoded-or-applied root=saved-neutral clock=NONE source_pose_parity=false",
@@ -520,6 +621,12 @@ pub(crate) fn prepare_arm_pose(root: &Path) -> AnyResult<Actor> {
 pub(crate) fn prepare_key_hypothesis(root: &Path) -> AnyResult<Actor> {
     prepare_actor(root, PoseInput::StoredKeyHypothesis)
 }
+pub(crate) fn prepare_stored_coordinate(root: &Path, selector: StoredCoordinate) -> AnyResult<Actor> {
+    prepare_actor(root, PoseInput::StoredInterval(selector))
+}
+pub(crate) fn prepare_sweep(root: &Path) -> AnyResult<Actor> {
+    prepare_actor(root, PoseInput::StoredSweep)
+}
 fn prepare_actor(root: &Path, input: PoseInput) -> AnyResult<Actor> {
     let path = root.join("anims/cr_female_usa.pssg");
     if std::fs::metadata(&path)?.len() > 16 * 1024 * 1024 {
@@ -580,6 +687,8 @@ fn prepare_actor(root: &Path, input: PoseInput) -> AnyResult<Actor> {
     }
     // Placement/yaw/foot offset and bounds above belong to NEUTRAL baseline.
     // Never recompute them from this authored arm pose.
+    let mut sweep = None;
+    let neutral_buffers = (input == PoseInput::StoredSweep).then(|| (positions.clone(), normals.clone()));
     let pose = if input != PoseInput::Neutral {
         const TARGET: &[u8] = b"Bip_01 L Forearm";
         if rig.names.get(15).map(Vec::as_slice) != Some(TARGET) {
@@ -590,8 +699,10 @@ fn prepare_actor(root: &Path, input: PoseInput) -> AnyResult<Actor> {
             .iter()
             .position(|n| n.name == TARGET)
             .ok_or("selected forearm absent")?;
-        let (posed_nodes, affected_nodes) = if input == PoseInput::StoredKeyHypothesis {
-            let row = stored_forearm_row(root, &rig)?;
+        let mut retained_interval = None;
+        let (posed_nodes, affected_nodes) = if matches!(input, PoseInput::StoredKeyHypothesis | PoseInput::StoredInterval(_) | PoseInput::StoredSweep) {
+            let coordinate = if let PoseInput::StoredInterval(selector) = input { Some(selector) } else if input == PoseInput::StoredSweep { Some(StoredCoordinate::Step(0)) } else { None };
+            let row = stored_forearm_row(root, &rig, coordinate, &mut retained_interval)?;
             replaced_local(&rig.nodes, target, &row)?
         } else {
             rotated_local(&rig.nodes, target)?
@@ -632,8 +743,24 @@ fn prepare_actor(root: &Path, input: PoseInput) -> AnyResult<Actor> {
         if moved_vertices == 0 || max_displacement <= 1e-6 {
             return Err("authored arm pose produced no observable vertex displacement".into());
         }
+        if let Some((neutral_positions, neutral_normals)) = neutral_buffers {
+            let interval = retained_interval.ok_or("sweep interval was not retained")?;
+            let mut joint_chains = Vec::new();
+            for name in &rig.names {
+                let mut at = Some(rig.nodes.iter().position(|n| n.name == *name).ok_or("sweep palette node absent")?);
+                let mut chain = Vec::new();
+                while let Some(i) = at { chain.push(i); at = rig.nodes[i].parent; }
+                joint_chains.push(chain);
+            }
+            sweep = Some(std::sync::Arc::new(SweepData {
+                rig, target, affected: affected.clone(), joint_chains,
+                neutral_palette: palette, interval, skin,
+                source_positions: source.positions.clone(), source_normals: source.normals.clone(),
+                neutral_positions, neutral_normals,
+            }));
+        }
         Some(PoseStats {
-            stored_key_hypothesis: input == PoseInput::StoredKeyHypothesis,
+            stored_key_hypothesis: matches!(input, PoseInput::StoredKeyHypothesis | PoseInput::StoredInterval(_) | PoseInput::StoredSweep),
             affected_palette,
             affected_bones,
             affected_nodes: affected_nodes.iter().filter(|&&v| v).count(),
@@ -691,6 +818,7 @@ fn prepare_actor(root: &Path, input: PoseInput) -> AnyResult<Actor> {
         }
     }
     Ok(Actor {
+        sweep,
         pose,
         source_positions: source.positions,
         source_normals: source.normals,
@@ -708,6 +836,49 @@ fn prepare_actor(root: &Path, input: PoseInput) -> AnyResult<Actor> {
         max_inverse_affine_error,
     })
 }
+// Retained once for the one actor. No original resource is read by sample().
+pub(crate) struct SweepData {
+    rig: Rig,
+    target: usize,
+    affected: Vec<bool>,
+    joint_chains: Vec<Vec<usize>>,
+    neutral_palette: Vec<[f32; 16]>,
+    interval: [anim_packet::Key4; 2],
+    skin: mesh::SkinInfluences4,
+    source_positions: Vec<[f32; 3]>,
+    source_normals: Vec<[f32; 3]>,
+    neutral_positions: Vec<[f32; 3]>,
+    neutral_normals: Vec<[f32; 3]>,
+}
+type PosedVertexBuffers = (Vec<[f32; 3]>, Vec<[f32; 3]>);
+impl SweepData {
+    pub(crate) fn sample(&self, step: u8) -> AnyResult<PosedVertexBuffers> {
+        let sample = stored_spherical(&self.interval[0], &self.interval[1], StoredCoordinate::Step(step))?;
+        let (row, _) = quaternion_row(sample.raw)?;
+        let (nodes, _) = replaced_local(&self.rig.nodes, self.target, &row)?;
+        let mut palette = self.neutral_palette.clone();
+        // Recompute ONLY affected palette chains. Saved locals and unaffected
+        // neutral palette are retained; keep original left-associated f32 order.
+        for (j, entry) in palette.iter_mut().enumerate() {
+            if !self.affected[j] { continue; }
+            let mut m = IDENTITY;
+            for &i in &self.joint_chains[j] { m = scene::compose(&m, &nodes[i].local); }
+            *entry = scene::compose(&self.rig.inverse[j], &m);
+            if entry.iter().any(|v| !v.is_finite()) { return Err("nonfinite sweep palette".into()); }
+        }
+        let mut positions = self.neutral_positions.clone();
+        let mut normals = self.neutral_normals.clone();
+        let (influenced, moved, maximum) = pose_vertices(&self.source_positions, &self.source_normals, &self.skin, &palette, &self.affected, &mut positions, &mut normals)?;
+        if influenced != 104 { return Err("sweep influence cohort differs".into()); }
+        for i in 0..positions.len() {
+            let affected = self.skin.weights[i].iter().zip(&self.skin.joints[i]).any(|(&w,&j)| w != 0. && self.affected[j as usize]);
+            if !affected && (positions[i].map(f32::to_bits) != self.neutral_positions[i].map(f32::to_bits) || normals[i].map(f32::to_bits) != self.neutral_normals[i].map(f32::to_bits)) { return Err("sweep changed uninfluenced vertex".into()); }
+        }
+        println!("crowd_sweep_pose step={step} authored_phase={} coordinate_bits={} raw_dot={} fraction={} weights={:?} raw_XYZW_bits={:?} raw_norm_squared={} influenced={influenced} moved={moved} max_displacement={maximum} source_guided_S4_spherical=true endpoint_copy=authored-not-native-bit-parity downstream_normalization=authored receiver=HYPOTHESIS-absolute-local reference_delta=UNRESOLVED root_L4_values=not-decoded-or-applied root_neutral_foot_yaw=unchanged native_clock=false seconds=false",f32::from(step)/30.,sample.coordinate.to_bits(),sample.dot,sample.fraction,sample.weights,sample.raw.map(f32::to_bits),sample.norm_squared);
+        Ok((positions, normals))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -851,5 +1022,26 @@ mod tests {
             .length()
                 < 1e-6
         );
+    }
+    #[test]
+    fn stored_spherical_midpoint45z_retains_raw_endpoint_bits_and_saved_translation() {
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        let left = anim_packet::Key4 { time: 0., value: [-0., 0., 0., 1.] };
+        let right = anim_packet::Key4 { time: 2., value: [0., 0., h, h] };
+        let a = stored_spherical(&left, &right, StoredCoordinate::Left).unwrap();
+        let b = stored_spherical(&left, &right, StoredCoordinate::Right).unwrap();
+        assert_eq!(a.raw.map(f32::to_bits), left.value.map(f32::to_bits));
+        assert_eq!(b.raw.map(f32::to_bits), right.value.map(f32::to_bits));
+        let mid = stored_spherical(&left, &right, StoredCoordinate::Mid).unwrap();
+        assert_eq!(mid.coordinate, 1.);
+        assert_eq!(mid.fraction, 0.5);
+        let (row, _) = quaternion_row(mid.raw).unwrap();
+        let nodes = vec![
+            Node { name: b"root".to_vec(), parent: None, local: IDENTITY },
+            Node { name: b"forearm".to_vec(), parent: Some(0), local: translation(-0., 2., 3.) },
+        ];
+        let (posed, _) = replaced_local(&nodes, 1, &row).unwrap();
+        assert_eq!(posed[1].local[12..15].iter().map(|x| x.to_bits()).collect::<Vec<_>>(), nodes[1].local[12..15].iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        assert!((Vec3::from_array(scene::transform_point(&posed[1].local, [1., 0., 0.])) - Vec3::new(h, 2. + h, 3.)).length() < 1e-6);
     }
 }
