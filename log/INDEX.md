@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F635](F0635.md) | 2026-10-28 | Owner playtest: Shibuya start lane change, keyboard cockpit wheel |
 | [F634](F0634.md) | 2026-10-28 | Playable 33ae510a4984 with F627-F633, portable copy and APKs 127ecf49439f |
 | [F633](F0633.md) | 2026-10-28 | Track scenery levels of detail as in the original (Washington buildings) |
 | [F632](F0632.md) | 2026-10-28 | grid-app compute pool with 64 MiB thread stacks (nested drive_tick overflow in parallel tests) |
