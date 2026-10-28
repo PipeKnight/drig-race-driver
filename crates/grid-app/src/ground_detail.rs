@@ -72,6 +72,40 @@ impl MaterialExtension for CoverFacing {
     }
 }
 
+/// Coverage requires multisampling. Native DLAA shares the existing single-sample
+/// soft/mask choices without changing the ordinary baseline coverage path.
+fn cover_material(
+    image: Handle<Image>,
+    fade_start: f32,
+    graphics: &super::graphics::Settings,
+) -> CoverMaterial {
+    let no_msaa = graphics.enhanced() || graphics.anti_aliasing == 3;
+    let alpha_mode = if no_msaa && graphics.grass_soft_alpha {
+        AlphaMode::Blend
+    } else if no_msaa {
+        AlphaMode::Mask(0.5)
+    } else {
+        AlphaMode::AlphaToCoverage
+    };
+    ExtendedMaterial {
+        base: StandardMaterial {
+            base_color_texture: Some(image),
+            alpha_mode,
+            perceptual_roughness: 1.,
+            reflectance: 0.,
+            double_sided: false,
+            cull_mode: None,
+            ..default()
+        },
+        extension: CoverFacing {
+            view: CoverView {
+                fade: Vec4::new(fade_start, 0., 0., 0.),
+                ..default()
+            },
+        },
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Instance {
     position: Vec3,
@@ -368,33 +402,9 @@ fn start(
         buckets.entry(key).or_default().push(i as u32);
     }
     let mesh = meshes.add(cover_mesh(&[], 1));
-    // Original coverage needs MSAA. With MSAA off, a hard mask loses thin
-    // blades and leaves dark opaque remnants. Enhanced soft alpha is an
-    // authored alternative; mask stays available as an exact control.
-    let alpha_mode = if graphics.enhanced() && graphics.grass_soft_alpha {
-        AlphaMode::Blend
-    } else if graphics.enhanced() {
-        AlphaMode::Mask(0.5)
-    } else {
-        AlphaMode::AlphaToCoverage
-    };
-    let material = materials.add(ExtendedMaterial {
-        base: StandardMaterial {
-            base_color_texture: Some(image),
-            alpha_mode,
-            perceptual_roughness: 1.,
-            reflectance: 0.,
-            double_sided: false,
-            cull_mode: None,
-            ..default()
-        },
-        extension: CoverFacing {
-            view: CoverView {
-                fade: Vec4::new(loaded.distances.fade_start, 0., 0., 0.),
-                ..default()
-            },
-        },
-    });
+    let material = cover_material(image, loaded.distances.fade_start, &graphics);
+    let alpha_mode = material.base.alpha_mode;
+    let material = materials.add(material);
     let entity = commands
         .spawn((
             Name::new("ground cover"),
@@ -675,6 +685,54 @@ fn present(
 mod tests {
     use super::*;
     use grid_formats::ground_cover::Sprite;
+
+    #[test]
+    fn actual_cover_material_uses_soft_alpha_for_native_dlaa_only() {
+        let texture: Handle<Image> = uuid_handle!("8529d0c6-6f05-492a-97af-3c1659e8fd53");
+        for enhanced in [false, true] {
+            for aa in 0..=3 {
+                for soft in [false, true] {
+                    let graphics = super::super::graphics::Settings {
+                        preset: if enhanced {
+                            super::super::graphics::Preset::Enhanced
+                        } else {
+                            super::super::graphics::Preset::Baseline
+                        },
+                        anti_aliasing: aa,
+                        grass_soft_alpha: soft,
+                        ..default()
+                    };
+                    let material = cover_material(texture.clone(), 0.7, &graphics);
+                    let expected = match (enhanced, aa, soft) {
+                        (false, 0..=2, _) => AlphaMode::AlphaToCoverage,
+                        (_, _, true) => AlphaMode::Blend,
+                        _ => AlphaMode::Mask(0.5),
+                    };
+                    assert_eq!(material.base.alpha_mode, expected);
+                    assert_eq!(material.base.base_color_texture, Some(texture.clone()));
+                    assert_eq!(material.base.base_color, Color::WHITE);
+                    assert_eq!(material.base.perceptual_roughness, 1.);
+                    assert_eq!(material.base.reflectance, 0.);
+                    assert!(!material.base.double_sided);
+                    assert_eq!(material.base.cull_mode, None);
+                    assert_eq!(material.extension.view.fade, Vec4::new(0.7, 0., 0., 0.));
+                    assert_eq!(material.extension.view.eye, Vec4::ZERO);
+                    assert_eq!(material.extension.view.right, Vec4::ZERO);
+                    assert_eq!(material.extension.view.up, Vec4::ZERO);
+                    // The actual Bevy specialization follows the same Blend branch
+                    // used by GroundDetail.blended for sorted billboard gathering.
+                    if !enhanced && aa == 3 && soft {
+                        let key = bevy::pbr::alpha_mode_pipeline_key(
+                            material.base.alpha_mode,
+                            &Msaa::Off,
+                        );
+                        assert_eq!(key, bevy::pbr::MeshPipelineKey::BLEND_ALPHA);
+                        assert!(!key.contains(bevy::pbr::MeshPipelineKey::MAY_DISCARD));
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn scatter_density_subsets_and_inside() {
