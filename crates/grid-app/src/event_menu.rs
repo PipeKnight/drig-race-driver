@@ -911,7 +911,7 @@ pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
     while i < args.len() {
         if matches!(
             args[i].as_str(),
-            "--game-root" | "--data-dir" | "--settings"
+            "--game-root" | "--data-dir" | "--settings" | "--aa"
         ) && i + 1 < args.len()
         {
             out.extend_from_slice(&args[i..i + 2]);
@@ -1337,6 +1337,54 @@ fn present(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(not(target_os = "android"))]
+    fn supervised_races_keep_explicit_aa_without_forwarding_event_or_capture_flags() {
+        let args: Vec<String> = [
+            "--menu",
+            "--data-dir",
+            "profile with spaces",
+            "--aa",
+            "smaa",
+            "--render",
+            "capture.png",
+            "--settings",
+            "chosen.ini",
+            "--aa",
+            "dlaa",
+            "--drive-ticks",
+            "60",
+            "--game-root",
+            "purchased game",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let forwarded = passed_on(&args);
+        assert_eq!(
+            forwarded,
+            [
+                "--data-dir",
+                "profile with spaces",
+                "--aa",
+                "smaa",
+                "--settings",
+                "chosen.ini",
+                "--aa",
+                "dlaa",
+                "--game-root",
+                "purchased game",
+            ]
+        );
+        // A menu -> race -> menu cycle retains ordering, including last CLI AA wins.
+        assert_eq!(passed_on(&forwarded), forwarded);
+        assert_eq!(passed_on(&["--aa".into()]), Vec::<String>::new());
+        assert_eq!(
+            passed_on(&["--settings".into(), "chosen.ini".into()]),
+            ["--settings", "chosen.ini"]
+        );
+    }
 
     #[test]
     fn a_newer_bundled_event_ini_sets_the_starting_choice() {

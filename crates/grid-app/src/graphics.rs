@@ -49,7 +49,7 @@ pub struct Settings {
     pub wheel_shutter_seconds: f32,
     /// Bounded read-only spin prediction between physical ticks.
     pub smooth_wheel_motion: bool,
-    /// 0: TAA diagnostic, 1: SMAA Ultra (default), 2: unfiltered diagnostic.
+    /// 0: TAA diagnostic, 1: SMAA Ultra (default), 2: unfiltered, 3: native DLAA.
     pub anti_aliasing: u8,
     /// 0: sky IBL, 1: deferred control, 2: SSR, 3: local HDR scene probe.
     pub reflection_mode: u8,
@@ -409,6 +409,17 @@ pub fn configure(
         }
     );
     if !settings.enhanced() {
+        if settings.anti_aliasing == 3 {
+            // DLAA needs single-sample HDR colour and its own depth/motion inputs;
+            // baseline lighting, exposure and display grading stay on their path.
+            commands.entity(camera).insert((
+                Hdr,
+                Msaa::Off,
+                bevy::core_pipeline::prepass::DepthPrepass,
+                bevy::core_pipeline::prepass::MotionVectorPrepass,
+            ));
+            println!("graphics_aa mode=3 hdr=true msaa=off depth_prepass=true motion_prepass=true scope=main-view baseline_display=preserved");
+        }
         return;
     }
     if let Some(fog) = settings.saved_fog {
@@ -534,6 +545,54 @@ pub fn configure(
 #[cfg(test)]
 mod graphics_settings_tests {
     use super::*;
+
+    #[test]
+    fn baseline_dlaa_prepares_only_main_view_without_enhanced_display_or_lighting() {
+        for aa in [1, 3] {
+            let mut world = World::new();
+            world.insert_resource(GlobalAmbientLight {
+                brightness: 321.,
+                ..default()
+            });
+            world.insert_resource(DirectionalLightShadowMap { size: 1024 });
+            let camera = world.spawn((
+                Camera3d::default(),
+                Exposure { ev100: 9.5 },
+                Tonemapping::Reinhard,
+                ColorGrading {
+                    global: ColorGradingGlobal { post_saturation: 0.73, ..default() },
+                    ..default()
+                },
+                Msaa::Sample4,
+            )).id();
+            let other = world.spawn((Camera3d::default(), Msaa::Sample4)).id();
+            let settings = Settings { anti_aliasing: aa, ..default() };
+            let mut media = Assets::<ScatteringMedium>::default();
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            {
+                let mut commands = Commands::new(&mut queue, &world);
+                configure(&mut commands, camera, &settings, &mut media);
+            }
+            queue.apply(&mut world);
+            let view = world.entity(camera);
+            assert_eq!(view.get::<Exposure>().unwrap().ev100, 9.5);
+            assert_eq!(*view.get::<Tonemapping>().unwrap(), Tonemapping::Reinhard);
+            assert_eq!(view.contains::<Hdr>(), aa == 3);
+            assert_eq!(view.contains::<bevy::core_pipeline::prepass::DepthPrepass>(), aa == 3);
+            assert_eq!(view.contains::<bevy::core_pipeline::prepass::MotionVectorPrepass>(), aa == 3);
+            assert_eq!(*view.get::<Msaa>().unwrap(), if aa == 3 { Msaa::Off } else { Msaa::Sample4 });
+            assert!(!view.contains::<Bloom>());
+            assert_eq!(view.get::<ColorGrading>().unwrap().global.post_saturation, 0.73);
+            assert!(!view.contains::<ScreenSpaceAmbientOcclusion>());
+            assert!(!view.contains::<AtmosphereSettings>());
+            assert!(!world.entity(other).contains::<Hdr>());
+            assert_eq!(*world.entity(other).get::<Msaa>().unwrap(), Msaa::Sample4);
+            assert_eq!(world.resource::<GlobalAmbientLight>().brightness, 321.);
+            assert_eq!(world.resource::<DirectionalLightShadowMap>().size, 1024);
+            assert!(media.is_empty());
+        }
+    }
+
     #[test]
     fn timeout_extension_is_bounded_finite_and_failed_edits_preserve_the_value() {
         let mut settings = Settings::default();

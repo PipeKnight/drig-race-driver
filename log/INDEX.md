@@ -540,6 +540,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G325](G0325.md) | 2026-10-28 | Maintained DLAA menu launcher and scoped manual glass filtering: verified menu launch and current moving-glass delivery |
 | [G324](G0324.md) | 2026-10-28 | Close guarded glass sampling checks and record main playable provenance |
 | [G323](G0323.md) | 2026-10-28 | Repair glass diagnostic setup and conditional shader dependencies |
 | [G322](G0322.md) | 2026-10-28 | Complete the feature-gated material fixture after integration |
