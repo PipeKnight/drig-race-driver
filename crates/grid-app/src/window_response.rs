@@ -97,11 +97,14 @@ impl MaterialExtension for WindowLayer {
         Ok(())
     }
 }
-pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
+pub fn install(app: &mut App, mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
+    // main installs materials before it inserts graphics::Settings. The caller
+    // already owns the validated mode; runtime systems read Settings later.
+    let fragment = fragment_source(include_str!("window_response.wgsl"), mode)?;
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
-        SHADER.id(), Shader::from_wgsl(include_str!("window_response.wgsl"), "grid_window_response.wgsl"),
+        SHADER.id(), Shader::from_wgsl(fragment, "grid_window_response.wgsl"),
     )?;
-    let base_mip = app.world().resource::<super::graphics::Settings>().window_pilot.base_mip();
+    let base_mip = mode.base_mip();
     if base_mip {
         // Clone only after the existing pinned normal/clearcoat repair.
         app.add_systems(Update, prepare_base_mip_library.after(super::clearcoat_prepass::patch_loaded_library));
@@ -111,6 +114,26 @@ pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(PostStartup, attach)
         .add_systems(PostUpdate, sync.before(VisibilitySystems::CheckVisibility));
     Ok(())
+}
+
+// Bevy's ShaderCache resolves every Shader.imports dependency BEFORE pipeline
+// shader defs are applied. An inactive conditional import is still a dependency.
+// Preserve diagnostic source exactly; old modes must never name the new module.
+const CONDITIONAL_PBR_IMPORT: &str = "#ifdef GRID_WINDOW_BASE_MIP_DIAGNOSTIC\n#import grid_window_base_mip_pbr_fragment::pbr_input_from_standard_material\n#else\n#import bevy_pbr::pbr_fragment::pbr_input_from_standard_material\n#endif";
+const STOCK_PBR_FUNCTION_IMPORT: &str = "#import bevy_pbr::pbr_fragment::pbr_input_from_standard_material";
+
+fn fragment_source(source: &str, mode: Mode) -> Result<String, &'static str> {
+    if mode.base_mip() { return Ok(source.to_owned()); }
+    // include_str! preserves repository line endings on Windows.
+    let block = if source.contains("\r\n") {
+        CONDITIONAL_PBR_IMPORT.replace('\n', "\r\n")
+    } else {
+        CONDITIONAL_PBR_IMPORT.to_owned()
+    };
+    if source.matches(block.as_str()).count() != 1 {
+        return Err("window fragment conditional import signature absent or ambiguous");
+    }
+    Ok(source.replacen(block.as_str(), STOCK_PBR_FUNCTION_IMPORT, 1))
 }
 
 // The Bevy0.19.1 library is MIT OR Apache-2.0. Clone its loaded Shader (including
@@ -307,6 +330,55 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_install_precedes_graphics_settings_insertion_without_a_renderer() {
+        for mode in [Mode::Control, Mode::Fresnel, Mode::BaseMipControl, Mode::BaseMipZero] {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+                .init_asset::<Shader>();
+            assert!(!app.world().contains_resource::<super::super::graphics::Settings>());
+            // This is the real main setup ordering, not the fragment helper:
+            // the previous implementation panicked on its first Settings fetch.
+            install(&mut app, mode).unwrap();
+            assert!(!app.world().contains_resource::<super::super::graphics::Settings>());
+            assert!(app.is_plugin_added::<MaterialPlugin<Window>>());
+            assert!(app.world().contains_resource::<Cache>());
+            let shader = app.world().resource::<Assets<Shader>>().get(SHADER.id()).unwrap();
+            let custom = ShaderImport::Custom("grid_window_base_mip_pbr_fragment".into());
+            assert_eq!(shader.imports.contains(&custom), mode.base_mip());
+            // Settings is available when the scheduled runtime systems run;
+            // this fixture deliberately does not initialize or run a GPU.
+            app.insert_resource(super::super::graphics::Settings { window_pilot: mode, ..default() });
+            assert_eq!(app.world().resource::<super::super::graphics::Settings>().window_pilot, mode);
+        }
+    }
+
+    #[test]
+    fn old_window_modes_have_no_eager_custom_module_dependency() {
+        let input = include_str!("window_response.wgsl");
+        let stock = ShaderImport::Custom("bevy_pbr::pbr_fragment".into());
+        let custom = ShaderImport::Custom("grid_window_base_mip_pbr_fragment".into());
+        // Reproduce the actual Shader API behavior: inactive #ifdef imports are
+        // collected before specialization and therefore must be stripped early.
+        let unselected = Shader::from_wgsl(input, "conditional-test.wgsl");
+        assert!(unselected.imports.contains(&stock));
+        assert!(unselected.imports.contains(&custom));
+        for mode in [Mode::Off, Mode::Control, Mode::Environment, Mode::Depth, Mode::Combined, Mode::Fresnel] {
+            for source in [input.replace("\r\n", "\n"), input.replace("\r\n", "\n").replace('\n', "\r\n")] {
+                let selected = fragment_source(&source, mode).unwrap();
+                let shader = Shader::from_wgsl(selected, "old-mode-test.wgsl");
+                assert!(shader.imports.contains(&stock));
+                assert!(!shader.imports.contains(&custom));
+            }
+        }
+        for mode in [Mode::BaseMipControl, Mode::BaseMipZero] {
+            let selected = fragment_source(input, mode).unwrap();
+            assert_eq!(selected.as_bytes(), input.as_bytes());
+            let shader = Shader::from_wgsl(selected, "base-mode-test.wgsl");
+            assert!(shader.imports.contains(&custom));
+        }
+    }
 
     #[test]
     fn scoped_base_mip_shader_preserves_stock_and_unrelated_sampling() {

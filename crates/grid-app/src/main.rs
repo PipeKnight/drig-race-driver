@@ -4300,7 +4300,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         paint_environment::install(&mut app)?;
     }
     if graphics.window_pilot != window_response::Mode::Off {
-        window_response::install(&mut app)?;
+        window_response::install(&mut app, graphics.window_pilot)?;
     }
     perf_timing::install(&mut app);
     asset_counts::install(&mut app);
