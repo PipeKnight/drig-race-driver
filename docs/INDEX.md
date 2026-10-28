@@ -160,7 +160,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [GRAPHICS_INTEGRATION.md](GRAPHICS_INTEGRATION.md) Graphics / engine integration — Owner requested periodic careful merges into main, preservation of the recovered F269 stash branch, and portable …
 - [GRAPHICS_QUALITY_CONTRACT.md](GRAPHICS_QUALITY_CONTRACT.md) Visual quality and future renderer interfaces — Owner direction, 15 October 2026: preserve GRID 2008 atmosphere while improving the actual scene substantially.
 - [GRAPHICS_REMASTER.md](GRAPHICS_REMASTER.md) Lacetti / Donington graphics workstream — Current owner priority (15 October 2026): **image quality first; optimize later**.
-- [GRAPHICS_ROADMAP_RU.md](GRAPHICS_ROADMAP_RU.md) План улучшения графики GRID — Проба углового блеска асфальта G309 даёт более светлый отклик под низким углом, сохраняя побайтно прежний вид сверху.
+- [GRAPHICS_ROADMAP_RU.md](GRAPHICS_ROADMAP_RU.md) План улучшения графики GRID — Готовый графический код и отдельный запуск BMW Smoke уже в `main` (PR2/PR3); основной EXE в C:/Dev/Reassembly пока …
 - [GRASS_RENDERING.md](GRASS_RENDERING.md) Grass cutout/shading diagnosis — 17 October2026, owner-reported black dots/strokes in native4K far-view crops.
 - [GRID_IMAGE_FORMATION.md](GRID_IMAGE_FORMATION.md) Original GRID image formation: Donington research — Purchased inputs are read-only.
 - [GROUND_EFFECTS_RESEARCH.md](GROUND_EFFECTS_RESEARCH.md) Ground effects: skid marks, wheel kick-up and ground cover — Recorded 15 October 2026 (F306).
