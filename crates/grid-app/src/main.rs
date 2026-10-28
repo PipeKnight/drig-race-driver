@@ -1738,6 +1738,21 @@ fn speech_identities(root: &Path, opponents: &[Option<i32>], teammate: Option<us
     }
 }
 
+// Only the explicit zero-bias treatment gets a manual branch. The caller's
+// manual_window_sort cohort already fixes Window/Lacetti/Don0/sub0/LOD0/forward.
+fn manual_base_mip_zero_admitted(
+    manual_window_sort: bool,
+    current_sort: bool,
+    native_dlaa_build: bool,
+    graphics: &graphics::Settings,
+) -> bool {
+    manual_window_sort && current_sort && native_dlaa_build
+        && graphics.window_pilot == window_response::Mode::BaseMipZero
+        && graphics.source_ibl && graphics.anti_aliasing == 3
+        && graphics.width == 1920 && graphics.height == 1080
+        && !graphics.dlaa_reset_every_frame
+}
+
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
     // Settings files first (docs/SETTINGS.md); the flags below override them.
@@ -2592,7 +2607,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
                 );
                 println!(
-                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined|fresnel: static reference or bounded rendered driving experiment. base-mip-control|base-mip-zero: bounded native-DLAA Don0 Lacetti with current window sorting; changes base RGBA filtering only, including filtered border/crack alpha; default off."
+                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined|fresnel: static reference or bounded rendered driving experiment. base-mip-control|base-mip-zero: bounded native1920-DLAA Don0 Lacetti with current window sorting; explicit base-mip-zero also admits ordinary Window driving in that same context. Changes base RGBA filtering, including filtered border/crack alpha; default off, no automatic bias change."
                 );
                 println!(
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
@@ -2682,9 +2697,6 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.motion_shutter > 0. && (!graphics.enhanced() || !drive || collision) {
         return Err("--motion-shutter requires enhanced non-collision driving".into());
-    }
-    if graphics.anti_aliasing == 3 && !graphics.enhanced() {
-        return Err("DLAA is an experimental enhanced-graphics mode".into());
     }
     if paint_response_explicit && (!graphics.enhanced() || !graphics.layered_car) {
         return Err("paint coat controls require enhanced graphics with layered car materials".into());
@@ -2984,17 +2996,23 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--window-phase-audit requires rendered LOD0 reference with --benchmark-frames or bounded --drive-ticks; tick targets require a drive and must not exceed its limit".into());
     }
-    if graphics.window_pilot != window_response::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !player_car.is_default() || (drive && drive_ticks.is_none()) || (!drive && !reference) || collision || output.is_none() || lod != "LOD0_" || route.path() != Route::default().path() || matches!(graphics.reflection_mode, 1 | 2)) {
-        return Err("--glass-pilot requires rendered static reference or bounded --drive-ticks, enhanced forward Donington Lacetti LOD0 with source IBL; interactive driving is not validated".into());
+    let manual_base_mip_zero = manual_base_mip_zero_admitted(
+        manual_window_sort, window_sort_current, cfg!(feature = "dlaa"), &graphics,
+    );
+    if graphics.window_pilot != window_response::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !player_car.is_default()
+        || (drive && drive_ticks.is_none() && !manual_base_mip_zero) || (!drive && !reference)
+        || collision || (output.is_none() && !manual_base_mip_zero) || lod != "LOD0_"
+        || route.path() != Route::default().path() || matches!(graphics.reflection_mode, 1 | 2)) {
+        return Err("--glass-pilot requires rendered reference/bounded enhanced forward Donington Lacetti LOD0/source IBL; only explicit base-mip-zero also admits native1920 DLAA ordinary driving with current window sorting".into());
     }
     if graphics.window_pilot.base_mip() && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3
-        || !drive || drive_ticks.is_none() || output.is_none() || headless || collision
+        || !drive || (!manual_base_mip_zero && (drive_ticks.is_none() || output.is_none())) || headless || collision
         || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl
         || !player_car.is_default() || route.path() != Route::default().path() || route.subroute() != 0
         || lod != "LOD0_" || matches!(graphics.reflection_mode, 1 | 2) || !window_sort_current
         || graphics.width != 1920 || graphics.height != 1080 || graphics.dlaa_reset_every_frame)
     {
-        return Err("glass base-mip diagnostic requires bounded rendered native1920x1080 DLAA enhanced forward Donington route_0/sub0 Lacetti LOD0/source IBL, --window-sort current and normal DLAA history; no ordinary/manual admission".into());
+        return Err("glass base-mip modes require native1920x1080 DLAA enhanced forward Donington route_0/sub0 Lacetti LOD0/source IBL, current window sorting and normal history; control requires bounded rendered drive, explicit zero also allows ordinary Window driving".into());
     }
     if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
         return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
@@ -6508,6 +6526,40 @@ fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGrou
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+
+    #[test]
+    fn only_explicit_zero_can_use_the_narrow_manual_glass_branch() {
+        let settings = graphics::Settings {
+            preset: graphics::Preset::Enhanced,
+            window_pilot: window_response::Mode::BaseMipZero,
+            source_ibl: true,
+            anti_aliasing: 3,
+            width: 1920,
+            height: 1080,
+            ..default()
+        };
+        assert!(manual_base_mip_zero_admitted(true, true, true, &settings));
+        for (manual, sort, native) in [(false, true, true), (true, false, true), (true, true, false)] {
+            assert!(!manual_base_mip_zero_admitted(manual, sort, native, &settings));
+        }
+        for mode in [window_response::Mode::Off, window_response::Mode::Control,
+            window_response::Mode::Environment, window_response::Mode::Depth,
+            window_response::Mode::Combined, window_response::Mode::Fresnel,
+            window_response::Mode::BaseMipControl] {
+            assert!(!manual_base_mip_zero_admitted(true, true, true,
+                &graphics::Settings { window_pilot: mode, ..settings }));
+        }
+        for unsupported in [
+            graphics::Settings { source_ibl: false, ..settings },
+            graphics::Settings { anti_aliasing: 1, ..settings },
+            graphics::Settings { width: 3840, ..settings },
+            graphics::Settings { height: 2160, ..settings },
+            graphics::Settings { dlaa_reset_every_frame: true, ..settings },
+        ] {
+            assert!(!manual_base_mip_zero_admitted(true, true, true, &unsupported));
+        }
+    }
+
     #[test]
     fn start_light_stages_follow_the_shipped_sequence() {
         use grid_tools::time_trial::Phase;
