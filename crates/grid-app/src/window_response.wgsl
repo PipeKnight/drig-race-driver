@@ -1,13 +1,17 @@
 // Independently authored diagnostic layer; no proprietary shader code embedded.
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing, alpha_discard},
     mesh_view_bindings as view_bindings,
     clustered_forward as clustering,
     environment_map::compute_radiances,
     lighting::{LayerLightingInput, perceptualRoughnessToRoughness},
 }
+#ifdef GRID_WINDOW_BASE_MIP_DIAGNOSTIC
+#import grid_window_base_mip_pbr_fragment::pbr_input_from_standard_material
+#else
+#import bevy_pbr::pbr_fragment::pbr_input_from_standard_material
+#endif
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> controls: vec4<f32>;
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOutput {

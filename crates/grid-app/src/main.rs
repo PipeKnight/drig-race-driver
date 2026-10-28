@@ -2335,7 +2335,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 )?);
             }
             "--glass-pilot" => {
-                graphics.window_pilot = window_response::Mode::parse(&args.next().ok_or("--glass-pilot needs off, control, environment, depth or combined")?)?;
+                graphics.window_pilot = window_response::Mode::parse(&args.next().ok_or("--glass-pilot needs off, control, environment, depth, combined, fresnel, base-mip-control or base-mip-zero")?)?;
             }
             "--glass-reflectance" => {
                 graphics.glass_reflectance(&args.next().ok_or("--glass-reflectance needs 0..1")?)?;
@@ -2592,7 +2592,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
                 );
                 println!(
-                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined|fresnel: static reference or bounded rendered driving experiment; keeps source glass textures and borders."
+                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined|fresnel: static reference or bounded rendered driving experiment. base-mip-control|base-mip-zero: bounded native-DLAA Don0 Lacetti with current window sorting; changes base RGBA filtering only, including filtered border/crack alpha; default off."
                 );
                 println!(
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
@@ -2986,6 +2986,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.window_pilot != window_response::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !player_car.is_default() || (drive && drive_ticks.is_none()) || (!drive && !reference) || collision || output.is_none() || lod != "LOD0_" || route.path() != Route::default().path() || matches!(graphics.reflection_mode, 1 | 2)) {
         return Err("--glass-pilot requires rendered static reference or bounded --drive-ticks, enhanced forward Donington Lacetti LOD0 with source IBL; interactive driving is not validated".into());
+    }
+    if graphics.window_pilot.base_mip() && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3
+        || !drive || drive_ticks.is_none() || output.is_none() || headless || collision
+        || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl
+        || !player_car.is_default() || route.path() != Route::default().path() || route.subroute() != 0
+        || lod != "LOD0_" || matches!(graphics.reflection_mode, 1 | 2) || !window_sort_current
+        || graphics.width != 1920 || graphics.height != 1080 || graphics.dlaa_reset_every_frame)
+    {
+        return Err("glass base-mip diagnostic requires bounded rendered native1920x1080 DLAA enhanced forward Donington route_0/sub0 Lacetti LOD0/source IBL, --window-sort current and normal DLAA history; no ordinary/manual admission".into());
     }
     if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
         return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());

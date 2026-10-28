@@ -540,6 +540,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G321](G0321.md) | 2026-10-28 | Add a guarded glass base-texture filtering discriminator |
 | [G320](G0320.md) | 2026-10-28 | Use the current release in the generic graphics launcher |
 | [G319](G0319.md) | 2026-10-28 | Publish graphics delivery and isolate glass history response |
 | [G318](G0318.md) | 2026-10-28 | Verify integrated graphics full gate and accepted BMW smoke runtime |

@@ -7,11 +7,11 @@ use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline},
     prelude::*,
     render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError},
-    shader::ShaderRef,
+    shader::{ShaderImport, ShaderRef, Source},
 };
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Mode {
     #[default]
     Off,
@@ -21,6 +21,10 @@ pub enum Mode {
     Combined,
     /// Authored pane-only dielectric response; one stock PBR evaluation.
     Fresnel,
+    /// Neutral wrapper using the native camera bias for the base RGBA atlas.
+    BaseMipControl,
+    /// Base RGBA atlas alone uses bias0; filtered alpha intentionally changes.
+    BaseMipZero,
 }
 impl Mode {
     pub fn parse(value: &str) -> Result<Self, &'static str> {
@@ -31,8 +35,13 @@ impl Mode {
             "depth" => Ok(Self::Depth),
             "combined" => Ok(Self::Combined),
             "fresnel" => Ok(Self::Fresnel),
-            _ => Err("--glass-pilot needs off, control, environment, depth, combined or fresnel"),
+            "base-mip-control" => Ok(Self::BaseMipControl),
+            "base-mip-zero" => Ok(Self::BaseMipZero),
+            _ => Err("--glass-pilot needs off, control, environment, depth, combined, fresnel, base-mip-control or base-mip-zero"),
         }
+    }
+    pub(crate) fn base_mip(self) -> bool {
+        matches!(self, Self::BaseMipControl | Self::BaseMipZero)
     }
     fn environment(self) -> bool {
         matches!(self, Self::Environment | Self::Combined)
@@ -51,14 +60,18 @@ pub struct WindowLayer {
     #[uniform(100)]
     controls: Vec4,
     write_depth: bool,
+    base_mip: bool,
+    base_mip_zero: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct WindowKey {
     write_depth: bool,
+    base_mip: bool,
+    base_mip_zero: bool,
 }
 impl From<&WindowLayer> for WindowKey {
     fn from(value: &WindowLayer) -> Self {
-        Self { write_depth: value.write_depth }
+        Self { write_depth: value.write_depth, base_mip: value.base_mip, base_mip_zero: value.base_mip_zero }
     }
 }
 impl MaterialExtension for WindowLayer {
@@ -69,6 +82,13 @@ impl MaterialExtension for WindowLayer {
         _: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        if key.bind_group_data.base_mip {
+            let fragment = descriptor.fragment.as_mut().expect("window diagnostic has a fragment shader");
+            fragment.shader_defs.push("GRID_WINDOW_BASE_MIP_DIAGNOSTIC".into());
+            if key.bind_group_data.base_mip_zero {
+                fragment.shader_defs.push("GRID_WINDOW_BASE_MIP_ZERO".into());
+            }
+        }
         if key.bind_group_data.write_depth
             && let Some(depth) = descriptor.depth_stencil.as_mut()
         {
@@ -81,11 +101,65 @@ pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
         SHADER.id(), Shader::from_wgsl(include_str!("window_response.wgsl"), "grid_window_response.wgsl"),
     )?;
+    let base_mip = app.world().resource::<super::graphics::Settings>().window_pilot.base_mip();
+    if base_mip {
+        // Clone only after the existing pinned normal/clearcoat repair.
+        app.add_systems(Update, prepare_base_mip_library.after(super::clearcoat_prepass::patch_loaded_library));
+    }
     app.init_resource::<Cache>()
         .add_plugins(MaterialPlugin::<Window>::default())
         .add_systems(PostStartup, attach)
         .add_systems(PostUpdate, sync.before(VisibilitySystems::CheckVisibility));
     Ok(())
+}
+
+// The Bevy0.19.1 library is MIT OR Apache-2.0. Clone its loaded Shader (including
+// source notices, dependencies and validation metadata), never the global asset.
+// Only a new import name and ONE base-color sampling argument are changed.
+const BASE_MIP_LIBRARY: Handle<Shader> = uuid_handle!("34845318-ed28-426b-8989-a04d686ed836");
+const STOCK_IMPORT: &str = "#define_import_path bevy_pbr::pbr_fragment";
+const BASE_MIP_IMPORT: &str = "#define_import_path grid_window_base_mip_pbr_fragment";
+const BASE_SAMPLE_END: &str = "#else   // MESHLET_MESH_MATERIAL_PASS\n                bias.mip_bias,\n#endif  // MESHLET_MESH_MATERIAL_PASS\n        );\n\n#ifdef ALPHA_TO_COVERAGE";
+const BASE_SAMPLE_ZERO: &str = "#else   // MESHLET_MESH_MATERIAL_PASS\n#ifdef GRID_WINDOW_BASE_MIP_ZERO\n                0.0,\n#else\n                bias.mip_bias,\n#endif\n#endif  // MESHLET_MESH_MATERIAL_PASS\n        );\n\n#ifdef ALPHA_TO_COVERAGE";
+
+fn base_mip_library(stock: &Shader) -> Result<Shader, &'static str> {
+    let Source::Wgsl(source) = &stock.source else { return Err("stock PBR library is not WGSL"); };
+    if stock.import_path != ShaderImport::Custom("bevy_pbr::pbr_fragment".into())
+        || source.matches(STOCK_IMPORT).count() != 1 || source.matches(BASE_SAMPLE_END).count() != 1
+    {
+        return Err("pinned Bevy0.19.1 base RGBA signature absent or ambiguous");
+    }
+    let mut shader = stock.clone();
+    shader.source = Source::Wgsl(source.replacen(STOCK_IMPORT, BASE_MIP_IMPORT, 1)
+        .replacen(BASE_SAMPLE_END, BASE_SAMPLE_ZERO, 1).into());
+    shader.import_path = ShaderImport::Custom("grid_window_base_mip_pbr_fragment".into());
+    shader.path = "grid_window_base_mip_bevy_0_19_1.wgsl".into();
+    Ok(shader)
+}
+
+fn prepare_base_mip_library(
+    mut shaders: ResMut<Assets<Shader>>,
+    settings: Res<super::graphics::Settings>,
+    mut prepared: Local<bool>,
+    mut waiting: Local<bool>,
+) {
+    if *prepared { return; }
+    let targets: Vec<_> = shaders.iter().filter_map(|(id, shader)|
+        (shader.import_path == ShaderImport::Custom("bevy_pbr::pbr_fragment".into())).then_some(id)
+    ).collect();
+    if targets.is_empty() {
+        if !*waiting {
+            println!("window_base_mip library_ready=false reason=stock-shader-pending");
+            *waiting = true;
+        }
+        return;
+    }
+    assert_eq!(targets.len(), 1, "window base-mip diagnostic requires one pinned stock PBR library");
+    let shader = base_mip_library(shaders.get(targets[0]).expect("selected library exists"))
+        .expect("window base-mip diagnostic must fail on an unrecognized Bevy shader");
+    shaders.insert(BASE_MIP_LIBRARY.id(), shader).expect("authored library UUID is valid");
+    *prepared = true;
+    println!("window_base_mip library_ready=true mode={:?} bevy=0.19.1 scoped_module=true base_rgba_only=true other_texture_bias=camera alpha_blend_depth_state=unchanged filtered_alpha_may_change=true gpu_shader_compiled=unproved", settings.window_pilot);
 }
 
 /// Default-off scoped diagnostic: refresh a retained transparent item's world
@@ -149,11 +223,12 @@ struct HiddenSource;
 #[derive(Component)]
 struct Proxy(Entity);
 #[derive(Resource, Default)]
-struct Cache(HashMap<AssetId<StandardMaterial>, Handle<Window>>);
+struct Cache(HashMap<(AssetId<StandardMaterial>, Mode), Handle<Window>>);
 impl Cache {
     fn material(&mut self, original: &Handle<StandardMaterial>, settings: &super::graphics::Settings,
         source: &Assets<StandardMaterial>, materials: &mut Assets<Window>) -> Option<Handle<Window>> {
-        if let Some(handle) = self.0.get(&original.id()) { return Some(handle.clone()); }
+        let key = (original.id(), settings.window_pilot);
+        if let Some(handle) = self.0.get(&key) { return Some(handle.clone()); }
         let base = source.get(original)?.clone();
         let handle = materials.add(Window {
             base,
@@ -170,9 +245,11 @@ impl Cache {
                     if settings.window_pilot == Mode::Fresnel { 255. / 90. } else { 0. },
                 ),
                 write_depth: settings.window_pilot.depth(),
+                base_mip: settings.window_pilot.base_mip(),
+                base_mip_zero: settings.window_pilot == Mode::BaseMipZero,
             },
         });
-        self.0.insert(original.id(), handle.clone());
+        self.0.insert(key, handle.clone());
         Some(handle)
     }
 }
@@ -230,6 +307,52 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scoped_base_mip_shader_preserves_stock_and_unrelated_sampling() {
+        let input = format!("{STOCK_IMPORT}\n#import bevy_pbr::pbr_types\n// upstream notice remains\n{BASE_SAMPLE_END}\nnormal = textureSampleBias(normal_map, normal_sampler, uv, bias.mip_bias);\n");
+        let mut stock = Shader::from_wgsl(input.clone(), "pinned-pbr-test.wgsl");
+        stock.shader_defs.push("UNCHANGED_TEST_DEFINITION".into());
+        stock.file_dependencies.push(uuid_handle!("794d1627-bdb9-4fd6-8261-695dc17c6f81"));
+        let variant = base_mip_library(&stock).unwrap();
+        let Source::Wgsl(original) = &stock.source else { panic!("WGSL expected"); };
+        let Source::Wgsl(changed) = &variant.source else { panic!("WGSL expected"); };
+        assert_eq!(original.as_ref(), input);
+        assert_eq!(changed.matches("0.0,").count(), 1);
+        assert!(changed.contains("normal = textureSampleBias(normal_map, normal_sampler, uv, bias.mip_bias);"));
+        assert_eq!(changed.replace(BASE_MIP_IMPORT, STOCK_IMPORT).replace(BASE_SAMPLE_ZERO, BASE_SAMPLE_END), input);
+        assert_eq!(variant.imports, stock.imports);
+        assert_eq!(variant.shader_defs, stock.shader_defs);
+        assert_eq!(variant.file_dependencies, stock.file_dependencies);
+        assert_eq!(std::mem::discriminant(&variant.validate_shader), std::mem::discriminant(&stock.validate_shader));
+        assert_ne!(variant.import_path, stock.import_path);
+        let duplicate = Shader::from_wgsl(format!("{input}\n{BASE_SAMPLE_END}"), "wrong-version.wgsl");
+        assert!(base_mip_library(&duplicate).is_err());
+        assert!(base_mip_library(&Shader::from_wgsl(STOCK_IMPORT, "missing-base-sample.wgsl")).is_err());
+    }
+
+    #[test]
+    fn base_mip_modes_do_not_alias_the_same_source_material_in_the_cache() {
+        let mut source = Assets::<StandardMaterial>::default();
+        let original = source.add(StandardMaterial { alpha_mode: AlphaMode::Blend, ..default() });
+        let mut materials = Assets::<Window>::default();
+        let mut cache = Cache::default();
+        let mut settings = super::super::graphics::Settings { window_pilot: Mode::BaseMipControl, ..default() };
+        let control = cache.material(&original, &settings, &source, &mut materials).unwrap();
+        settings.window_pilot = Mode::BaseMipZero;
+        let zero = cache.material(&original, &settings, &source, &mut materials).unwrap();
+        assert_ne!(control, zero);
+        let c = &materials.get(&control).unwrap().extension;
+        let z = &materials.get(&zero).unwrap().extension;
+        assert_eq!(c.controls, z.controls);
+        assert!(!c.write_depth && !z.write_depth);
+        assert!(c.base_mip && z.base_mip && !c.base_mip_zero && z.base_mip_zero);
+        assert_ne!(WindowKey::from(c), WindowKey::from(z));
+        assert_eq!(materials.get(&control).unwrap().base.alpha_mode, AlphaMode::Blend);
+        assert_eq!(materials.get(&zero).unwrap().base.alpha_mode, AlphaMode::Blend);
+        settings.window_pilot = Mode::BaseMipControl;
+        assert_eq!(cache.material(&original, &settings, &source, &mut materials).unwrap(), control);
+    }
 
     #[test]
     fn car_sort_tracks_lenses_and_material_reset_without_touching_opaque_or_other_cars() {
@@ -323,7 +446,7 @@ mod tests {
     fn proxy_tracks_crack_reset_mesh_bounds_and_keeps_source_ownership() {
         // The new response must retain the same damage-owned source material,
         // proxy identity and reset cache as the existing combined reference.
-        for mode in [Mode::Combined, Mode::Fresnel] {
+        for mode in [Mode::Combined, Mode::Fresnel, Mode::BaseMipControl, Mode::BaseMipZero] {
             check_proxy_contract(mode);
         }
     }
@@ -367,6 +490,8 @@ mod tests {
         assert_eq!(layer.write_depth, mode == Mode::Combined);
         assert_eq!(layer.controls.x > 0., mode == Mode::Combined);
         assert_eq!(layer.controls.z > 0., mode == Mode::Fresnel);
+        assert_eq!(layer.base_mip, mode.base_mip());
+        assert_eq!(layer.base_mip_zero, mode == Mode::BaseMipZero);
         let cracked = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgba(0.4,0.4,0.4,0.9), ..default() });
         app.world_mut().get_mut::<MeshMaterial3d<StandardMaterial>>(ids[0]).unwrap().0 = cracked;
         let replacement: Handle<Mesh> = uuid_handle!("4b9e28c4-67eb-4adb-83f7-f82ee847e58c");
