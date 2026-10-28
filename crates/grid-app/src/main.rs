@@ -3960,7 +3960,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         render_scale::install(&mut app, profile.video_render_height());
         // Window size from the native surface, optional refresh-rate hint.
         #[cfg(target_os = "android")]
-        android_display::install(&mut app, profile.refresh_hz.flatten());
+        android_display::install(&mut app, profile.video_refresh_hz());
     }
     #[cfg(feature = "dlaa")]
     native_dlaa::install(&mut app);

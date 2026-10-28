@@ -336,6 +336,9 @@ pub struct Settings {
     /// `[video] present_mode`, `refresh_hz` (`Some(None)` = system), `frame_latency`.
     pub present_mode: Option<bevy::window::PresentMode>,
     pub refresh_hz: Option<Option<f32>>,
+    /// `[video] refresh_hz_version`: [`REFRESH_HZ_VERSION`] once the Video
+    /// screen saved the refresh rate.
+    pub refresh_hz_version: Option<u32>,
     pub frame_latency: Option<std::num::NonZero<u32>>,
     /// `[front_end] show`: the Race Options front end before the race
     /// (docs/DRIVER_AIDS.md); default on.
@@ -627,6 +630,13 @@ impl Settings {
                             .map_err(|_| at("`render_height_version` needs a number".into()))?,
                     )
                 }
+                ("video", "refresh_hz_version") => {
+                    self.refresh_hz_version = Some(
+                        value
+                            .parse()
+                            .map_err(|_| at("`refresh_hz_version` needs a number".into()))?,
+                    )
+                }
                 ("osd", "speed_units") => {
                     self.osd_mph = Some(match value.to_ascii_lowercase().as_str() {
                         "kph" | "km/h" => false,
@@ -664,6 +674,23 @@ impl Settings {
             Some(_) if crate::mobile::enabled() && !current => RenderHeight::Auto,
             Some(height) => height,
             None => RenderHeight::platform_default(),
+        }
+    }
+
+    /// The refresh rate in use, also the frame cap on Android. With the
+    /// mobile preset the default is 60 Hz, and `system` saved before the
+    /// default existed (no [`REFRESH_HZ_VERSION`]) reads as 60 Hz too.
+    pub fn video_refresh_hz(&self) -> Option<f32> {
+        self.refresh_hz_for(crate::mobile::enabled())
+    }
+
+    fn refresh_hz_for(&self, mobile: bool) -> Option<f32> {
+        let current = self.refresh_hz_version.unwrap_or(0) >= REFRESH_HZ_VERSION;
+        match self.refresh_hz {
+            Some(Some(hz)) => Some(hz),
+            Some(None) if current || !mobile => None,
+            _ if mobile => Some(MOBILE_REFRESH_HZ),
+            _ => None,
         }
     }
 
@@ -858,6 +885,14 @@ pub fn with_keys(text: &str, section: &str, keys: &[(&str, Option<String>)]) -> 
 /// `[video] render_height_version` the Video screen writes: 2 since F559
 /// added `auto` (older saved heights are migrated once on Android).
 pub const RENDER_HEIGHT_VERSION: u32 = 2;
+
+/// `[video] refresh_hz_version` the Video screen writes: 1 since the 60 Hz
+/// mobile default (an older saved `system` reads as 60 Hz on Android).
+pub const REFRESH_HZ_VERSION: u32 = 1;
+
+/// Default refresh rate and frame cap with the mobile preset (owner, 2026-10-28:
+/// target 60 FPS on the phone and do not go above it). AUTHORED.
+pub const MOBILE_REFRESH_HZ: f32 = 60.;
 
 /// The Video screen's choice (front_end.rs) as settings keys: `[osd] fps`
 /// and `[video] render_height / present_mode / refresh_hz / frame_latency`.
@@ -1252,7 +1287,7 @@ tick_delay_ms = 20
         let new = with_keys(&new, "video", &video.keys());
         assert_eq!(
             new,
-            "# phone\n[osd]\nminimap = off # mine\nfps = off # counter\n[video]\nrender_height = native # cap\npresent_mode = auto_vsync\nrefresh_hz = 120\nrender_height_version = 2\n[assists]\ntcs=on\n"
+            "# phone\n[osd]\nminimap = off # mine\nfps = off # counter\n[video]\nrender_height = native # cap\npresent_mode = auto_vsync\nrefresh_hz = 120\nrender_height_version = 2\nrefresh_hz_version = 1\n[assists]\ntcs=on\n"
         );
         let mut s = Settings::new();
         s.apply(&new, Path::new(".")).unwrap();
@@ -1272,6 +1307,22 @@ tick_delay_ms = 20
         assert_eq!(crate::front_end::Video::from_settings(&s), video);
         assert_eq!(s.osd_minimap, Some(false));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mobile_refresh_defaults_to_60_and_migrates_an_old_system() {
+        let read = |text: &str| {
+            let mut s = Settings::new();
+            s.apply(text, Path::new(".")).unwrap();
+            (s.refresh_hz_for(true), s.refresh_hz_for(false))
+        };
+        assert_eq!(read(""), (Some(60.), None));
+        // `system` saved before the 60 Hz default, then after it.
+        assert_eq!(read("[video]\nrefresh_hz = system\n"), (Some(60.), None));
+        assert_eq!(read("[video]\nrefresh_hz = system\nrefresh_hz_version = 1\n"), (None, None));
+        // A chosen rate stays, old or new.
+        assert_eq!(read("[video]\nrefresh_hz = 120\n"), (Some(120.), Some(120.)));
+        assert_eq!(read("[video]\nrefresh_hz = 90\nrefresh_hz_version = 1\n"), (Some(90.), Some(90.)));
     }
 
     #[test]

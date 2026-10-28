@@ -106,7 +106,8 @@ def max_in_old_state(base):
 # --- entries -----------------------------------------------------------------------------
 
 def read(path):
-    return path.read_bytes().decode("utf-8").replace("\r\n", "\n")
+    # utf-8-sig: Windows PowerShell 5.1 writes a BOM with -Encoding utf8.
+    return path.read_bytes().decode("utf-8-sig").replace("\r\n", "\n")
 
 
 def write(path, text):
@@ -299,7 +300,7 @@ def unmerged():
 
 
 def blob_text(blob):
-    return git("cat-file", "blob", blob).replace("\r\n", "\n")
+    return git("cat-file", "blob", blob).removeprefix("﻿").replace("\r\n", "\n")
 
 
 def in_rebase():

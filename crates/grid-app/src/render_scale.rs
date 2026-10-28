@@ -61,8 +61,9 @@ pub fn present_mode(value: &str) -> Result<bevy::window::PresentMode, String> {
     }
 }
 
-/// `[video] refresh_hz`: `system` (`None`, the default) or 30..240 Hz, a hint
-/// for the display rate (Android `ANativeWindow_setFrameRate`).
+/// `[video] refresh_hz`: `system` (`None`, the desktop default) or 30..240 Hz,
+/// a hint for the display rate (Android `ANativeWindow_setFrameRate`) and the
+/// frame cap on Android (`settings::MOBILE_REFRESH_HZ` by default there).
 pub fn refresh_hz(value: &str) -> Result<Option<f32>, String> {
     if value.eq_ignore_ascii_case("system") {
         return Ok(None);
@@ -71,6 +72,23 @@ pub fn refresh_hz(value: &str) -> Result<Option<f32>, String> {
         Ok(hz) if (30. ..=240.).contains(&hz) => Ok(Some(hz)),
         _ => Err("`refresh_hz` needs system or 30..240".into()),
     }
+}
+
+/// Frame cap at the end of a frame: how long to sleep and when the next frame
+/// is due, from the due time `due` (`None` on the first frame). Frames are
+/// due every `period` on a fixed schedule, so a slightly late frame lets the
+/// next one catch up and the average stays at the cap; a frame more than a
+/// whole period late restarts the schedule. AUTHORED.
+// Used by the Android display system and the tests.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn pace(
+    now: std::time::Instant,
+    due: Option<std::time::Instant>,
+    period: std::time::Duration,
+) -> (std::time::Duration, std::time::Instant) {
+    let due = due.unwrap_or(now);
+    let next = if now > due + period { now + period } else { due + period };
+    (due.saturating_duration_since(now), next)
 }
 
 /// `[video] frame_latency`: 1..3 frames in flight (`None`: wgpu's default 2).
@@ -592,6 +610,22 @@ mod tests {
         assert!(refresh_hz("10").is_err() && refresh_hz("fast").is_err());
         assert_eq!(frame_latency("1").map(|n| n.get()), Ok(1));
         assert!(frame_latency("0").is_err() && frame_latency("4").is_err());
+    }
+
+    #[test]
+    fn pace_keeps_a_fixed_schedule() {
+        use std::time::{Duration, Instant};
+        let ms = Duration::from_millis;
+        let t0 = Instant::now();
+        let period = ms(16);
+        // First frame: no sleep, the next is due a period later.
+        assert_eq!(pace(t0, None, period), (ms(0), t0 + ms(16)));
+        // Early: sleep to the due time.
+        assert_eq!(pace(t0 + ms(10), Some(t0 + ms(16)), period), (ms(6), t0 + ms(32)));
+        // A little late: no sleep, and the next stays on the schedule.
+        assert_eq!(pace(t0 + ms(36), Some(t0 + ms(32)), period), (ms(0), t0 + ms(48)));
+        // More than a period late: the schedule restarts from now.
+        assert_eq!(pace(t0 + ms(70), Some(t0 + ms(48)), period), (ms(0), t0 + ms(86)));
     }
 
     /// Feeds `seconds` of frames of `frame_ms` with `work_ms` of main work.
