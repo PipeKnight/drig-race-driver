@@ -540,6 +540,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G319](G0319.md) | 2026-10-28 | Publish graphics delivery and isolate glass history response |
 | [G318](G0318.md) | 2026-10-28 | Verify integrated graphics full gate and accepted BMW smoke runtime |
 | [G317](G0317.md) | 2026-10-28 | Complete integrated Car test fixtures after actual full-gate compile failure |
 | [G316](G0316.md) | 2026-10-28 | Unify current AgX and Reinhard launcher artifacts after owner session attribution |
