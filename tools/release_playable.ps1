@@ -43,6 +43,8 @@ scripts. Exit code 0 when every step that ran passed.
 #>
 param(
     [switch]$DryRun,
+    # Explicit private SDK/headers/libclang/license JSON; desktop only, default remains ordinary.
+    [string]$DesktopDlaaConfig,
     [switch]$NoMerge,
     [switch]$NoPrototype,
     [switch]$Gate,
@@ -103,7 +105,12 @@ function Invoke-Script([string]$Log, [string]$Script, [string]$Arguments, [strin
     try { return Invoke-CmdLine "`"$ps`" -NoProfile -ExecutionPolicy Bypass -File `"$Script`" $Arguments > `"$Log`" 2>&1" }
     finally { Pop-Location }
 }
-function Get-Sha([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Get-Sha([string]$Path) {
+    $stream=[IO.File]::OpenRead($Path)
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try{return [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-','').ToLowerInvariant()}
+    finally{$hash.Dispose();$stream.Dispose()}
+}
 function Get-RunningFrom([string]$Exe) {
     $full = [IO.Path]::GetFullPath($Exe)
     return @(Get-Process -Name grid-app -ErrorAction SilentlyContinue | Where-Object { $_.Path -and [IO.Path]::GetFullPath($_.Path) -eq $full })
@@ -152,6 +159,16 @@ if (-not $NoPortable -and (Get-RunningFrom (Join-Path $portable 'target\release\
 foreach ($f in @('body-contact-directions.bin', 'body-impact-parameters.bin', 'deformation-parameters.bin', 'ai-driver-characteristics.tsv')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Local $f))) { throw "release: private input $Local\$f is missing" }
 }
+$desktopArguments=''
+if($DesktopDlaaConfig){
+    if($NoPrototype){throw 'release: DLAA opt-in requires a fresh prototype build; do not reuse stale metadata/artifacts'}
+    if($DesktopDlaaConfig -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/?\.][^\\/]*[\\/][^\\/]+(?:[\\/]|$))'){throw 'release: DLAA config must be a fully absolute Windows drive or UNC path'}
+    $DesktopDlaaConfig=[IO.Path]::GetFullPath($DesktopDlaaConfig)
+    $desktopArguments=" -DesktopDlaaConfig `"$DesktopDlaaConfig`""
+    # Read-only prerequisite/command plan; no lock, builds, app or artifact writes.
+    & $ps -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools/update_prototype.ps1') -GameRoot $GameRoot -DesktopDlaaConfig $DesktopDlaaConfig -DryRun
+    if($LASTEXITCODE -ne 0){throw 'release: invalid explicit DLAA build configuration'}
+}
 $plan = @()
 if (-not $NoMerge) { $plan += "merge $upstream $($upRev.Substring(0, 12)) into $($preHead.Substring(0, 12)) ($($newCommits.Count) new commits, $fRange)" }
 if (-not $NoPrototype) { $plan += 'update_prototype' }
@@ -180,7 +197,7 @@ $changedAssets = (Invoke-Git diff --name-only $preHead $head -- settings '*.cmd'
 $build = $null
 if (-not $NoPrototype) {
     Step 'prototype' {
-        $code = Invoke-Script (Join-Path $releaseDir 'update_prototype.log') (Join-Path $root 'tools\update_prototype.ps1') "-GameRoot `"$GameRoot`""
+        $code = Invoke-Script (Join-Path $releaseDir 'update_prototype.log') (Join-Path $root 'tools\update_prototype.ps1') ("-GameRoot `"$GameRoot`""+$desktopArguments)
         if ($code -ne 0) { throw "release: update_prototype failed ($code); see $releaseDir\update_prototype.log" }
         $script:build = Get-Content -LiteralPath (Join-Path $Local 'playtest\current-build.json') -Raw | ConvertFrom-Json
     }
@@ -204,18 +221,40 @@ if ($Gate) {
 $portableLine = 'not refreshed'
 if (-not $NoPortable) {
     Step 'portable' {
+        $desktopNative=$false
+        if($DesktopDlaaConfig){
+            if(-not $build -or @($build.desktop_features).Count -ne 2 -or @($build.desktop_features) -notcontains 'dlaa' -or @($build.desktop_features) -notcontains 'paint-specular' -or $build.executable_sha256 -ne $exeSha){throw 'release: actual feature build metadata does not match portable source'}
+            if($build.desktop_dlaa_config_sha256 -ne (Get-Sha $DesktopDlaaConfig)){throw 'release: DLAA config changed during build'}
+            $runtime=@($build.desktop_runtime)
+            if($runtime.Count -ne 2 -or @($runtime.file) -notcontains 'nvngx_dlss.dll' -or @($runtime.file) -notcontains 'DLSS-LICENSE.txt'){throw 'release: missing actual DLAA runtime inventory'}
+            if(($runtime | Where-Object {$_.file -eq 'nvngx_dlss.dll'}).sha256 -ne '8707e53b26c68c606b98bf31c223485ff30d310a261b1a36d48b2eaabc1507ec'){throw 'release: unpinned DLAA runtime metadata'}
+            foreach($item in $runtime){
+                $runtimeSource=Join-Path (Split-Path -Parent $exe) $item.file
+                if(-not (Test-Path -LiteralPath $runtimeSource) -or (Get-Sha $runtimeSource) -ne $item.sha256){throw 'release: actual DLAA runtime/license changed or missing'}
+            }
+            $desktopNative=$true
+        }
         $dest = Join-Path $portable 'target\release'
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         Copy-Item -LiteralPath $exe -Destination (Join-Path $dest 'grid-app.exe') -Force
         $copied = Get-Sha (Join-Path $dest 'grid-app.exe')
         if ($copied -ne $exeSha) { throw 'release: the portable exe differs from target\release\grid-app.exe after the copy' }
+        if($desktopNative){
+            foreach($item in $runtime){
+                $runtimeSource=Join-Path (Split-Path -Parent $exe) $item.file
+                Copy-Item -LiteralPath $runtimeSource -Destination (Join-Path $dest $item.file) -Force
+                if((Get-Sha (Join-Path $dest $item.file)) -ne $item.sha256){throw 'release: portable runtime/license copy differs'}
+            }
+        }
         $synced = @()
         $sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'settings') -Filter '*.ini' -File | ForEach-Object { @{ Src = $_.FullName; Rel = "settings\$($_.Name)" } })
-        $sources += @(Get-ChildItem -LiteralPath $root -Filter 'Play GRID*.cmd' -File | Where-Object { $_.Name -notlike 'Play GRID Graphics*' } | ForEach-Object { @{ Src = $_.FullName; Rel = $_.Name } })
+        $sources += @(Get-ChildItem -LiteralPath $root -Filter 'Play GRID*.cmd' -File | Where-Object { $_.Name -notlike 'Play GRID Graphics*' -and ($desktopNative -or $_.Name -ne 'Play GRID DLAA.cmd') } | ForEach-Object { @{ Src = $_.FullName; Rel = $_.Name } })
         foreach ($s in $sources) {
             $d = Join-Path $portable $s.Rel
             if (-not (Test-Path -LiteralPath $d) -or (Get-Sha $d) -ne (Get-Sha $s.Src)) { New-Item -ItemType Directory -Force -Path (Split-Path -Parent $d) | Out-Null; Copy-Item -LiteralPath $s.Src -Destination $d -Force; $synced += $s.Rel }
         }
+        $optionalLauncher=Join-Path $portable 'Play GRID DLAA.cmd'
+        if(-not $desktopNative -and (Test-Path -LiteralPath $optionalLauncher)){Remove-Item -LiteralPath $optionalLauncher -ErrorAction Stop}
         $script:portableLine = "exe sha256 $copied; launchers/settings updated: $(if ($synced.Count -gt 8) { "$($synced.Count) files ($(($synced | Select-Object -First 8) -join ', '), ...)" } elseif ($synced.Count) { $synced -join ', ' } else { 'none' })"
     }
 }
@@ -325,6 +364,7 @@ $md.Add("- Main checkout: $($preHead.Substring(0, 12)) + merge of $upstream $($u
 if ($build) { $md.Add("- PC prototype: $($build.display_revision), grid-app.exe sha256 $($build.executable_sha256), $((Get-Item -LiteralPath $exe).Length) bytes; update_prototype source driving and app tests passed; $($build.rustc).") }
 elseif ($exeSha) { $md.Add("- PC prototype not rebuilt; current grid-app.exe sha256 $exeSha.") }
 if ($Gate) { $md.Add("- Build gate: $gateLine.") }
+$md.Add("- Desktop features: $(if($build){@($build.desktop_features) -join ','}else{'not rebuilt'}); native runtime acceptance is separate.")
 $md.Add("- Portable copy: $portableLine.")
 foreach ($a in $apks) { $md.Add("- APK $($a.Name): $($a.Bytes) bytes, sha256 $($a.Sha256), bundle $($a.Bundle.Substring(0, 12)), built in $($a.Seconds) s.") }
 if ($bundleNote) { $md.Add("- $bundleNote.") }
