@@ -3,7 +3,6 @@ setlocal
 pushd "%~dp0"
 if errorlevel 1 exit /b 1
 set "GRID_GRAPHICS_EXE=target\release\grid-app.exe"
-if exist "local\graphics\grid-graphics-app.exe" set "GRID_GRAPHICS_EXE=local\graphics\grid-graphics-app.exe"
 set "GRID_GRAPHICS_ROOT=C:\Program Files (x86)\Steam\steamapps\common\Grid"
 if not "%~1"=="" set "GRID_GRAPHICS_ROOT=%~1"
 set "GRID_GRAPHICS_RESOLUTION=1920x1080"
