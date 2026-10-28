@@ -1469,6 +1469,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut capture_orbit_rate = None;
     let mut window_phase_target = None;
     let mut window_sort_current = false;
+    let mut window_sort_explicit = false;
     let mut car_transparent_sort = false;
     let mut smoke_order = tyre_smoke::SmokeOrder::Groups;
     let mut skid_order = skid_marks::OrderMode::Off;
@@ -1936,6 +1937,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 )?;
             }
             "--window-sort" => {
+                window_sort_explicit = true;
                 window_sort_current = match args.next().as_deref() {
                     Some("off") => false,
                     Some("current") => true,
@@ -2222,7 +2224,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--asphalt-roughness off|0.70|0.65: authored standalone Donington road-lobe comparison; enhanced source layers/source-base mask, no RGB-filter pilot; default off.");
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
                 println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
-                println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
+                println!("--window-sort off|current: automatic current centres for ordinary enhanced forward Donington Lacetti LOD0 driving; explicit off preserves stale-centre control. Bounded rendered diagnostics remain defaultoff; source textures/PBR/alpha/depth unchanged.");
                 println!("--native-smoke-boundary off|control|late: explicit BMW Don0/Istanbul0 HDR1 scope; all arms share native DLAA/probe3/clean-data/legacy-source-stock guards. Control registers no boundary. --native-smoke-profile image450|manual (default image450); manual uses direct --drive Race Options/Go To Race in the same process and forbids ALL explicit script/capture/clock flags, even neutral values.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
@@ -2401,12 +2403,23 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--window-transitions requires bounded rendered Donington Lacetti drive, explicit keyboard/render FPS and events before the first tick limit".into());
     }
+    // Keep bounded diagnostic defaults intact while selecting the existing
+    // current-centre adapter for the ordinary playable Lacetti context.
+    // Explicit off remains an independent stale-centre control.
+    let manual_window_sort = drive && drive_ticks.is_none() && output.is_none() && !reference
+        && graphics.enhanced() && graphics.layered_car && player_car.is_default()
+        && lod == "LOD0_" && route.path() == Route::default().path() && route.subroute() == 0
+        && !collision && !headless && !matches!(graphics.reflection_mode, 1 | 2);
+    if !window_sort_explicit && manual_window_sort {
+        window_sort_current = true;
+    }
     if window_sort_current && (!graphics.enhanced() || !graphics.layered_car
         || !player_car.is_default() || lod != "LOD0_" || route.path() != Route::default().path()
-        || collision || headless || output.is_none() || (!reference && !drive)
-        || (drive && drive_ticks.is_none()) || matches!(graphics.reflection_mode, 1 | 2))
+        || collision || headless || matches!(graphics.reflection_mode, 1 | 2)
+        || (!manual_window_sort && (output.is_none() || (!reference && !drive)
+            || (drive && drive_ticks.is_none()))))
     {
-        return Err("--window-sort current requires enhanced forward Donington Lacetti LOD0 rendered reference or bounded --drive-ticks; interactive driving is not validated".into());
+        return Err("--window-sort current requires enhanced forward Donington Lacetti LOD0 ordinary driving or rendered reference/bounded --drive-ticks".into());
     }
     if smoke_compositor != smoke_compositor::Mode::Off && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"

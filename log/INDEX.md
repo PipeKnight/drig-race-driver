@@ -495,6 +495,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G313](G0313.md) | 2026-10-28 | Deliver current window sort centres to ordinary Lacetti driving |
 | [G312](G0312.md) | 2026-10-27 | Allow the optional Reinhard display mode in ordinary interactive driving |
 | [G311](G0311.md) | 2026-10-27 | Exercise one finite source-guided forearm sweep with real Extract receipts |
 | [G310](G0310.md) | 2026-10-27 | Compare the grazing asphalt pilot with accepted Motion DLAA in motion |
