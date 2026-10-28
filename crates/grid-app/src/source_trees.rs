@@ -369,6 +369,7 @@ mod tests {
         let facing = FacingSource::from_mesh("trees/sheet/test", &mesh)
             .unwrap()
             .placed(Mat4::IDENTITY);
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(Assets::<Mesh>::default())
             .insert_resource(replay)
@@ -411,6 +412,8 @@ mod tests {
             radius: 1.,
             track: true,
             liveries: Vec::new(),
+            low_lods: Vec::new(),
+            ornament_lods: Default::default(),
         };
         append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
         assert_eq!(car.parts.len(), 21);

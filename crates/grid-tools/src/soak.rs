@@ -748,6 +748,14 @@ struct PieceHistory {
     /// The body's xz at its last tick with a supporting contact (see
     /// [`supported`]): where a free fall began.
     contact_xz: Option<[f32; 2]>,
+    /// The body's xz at its last tick with any contact (see [`touching`])
+    /// before its first tick without one since `contact_xz`: where its
+    /// flight began.
+    launch_xz: Option<[f32; 2]>,
+    /// A tick without any contact since `contact_xz`.
+    flown: bool,
+    /// The body's xz at its first tick with a contact after that flight.
+    touched_xz: Option<[f32; 2]>,
 }
 
 /// Contacts farther than this from a body's centre are pool records kept
@@ -768,6 +776,32 @@ fn supported(
         d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < SUPPORT_REACH * SUPPORT_REACH && up > 0.5
     })
 }
+
+/// Whether a body at `centre` has any contact within [`SUPPORT_REACH`]: a
+/// wall, a car or the ground, whatever its normal.
+fn touching(contacts: &[(bool, [f32; 3], [f32; 3])], centre: [f32; 3]) -> bool {
+    contacts.iter().any(|(_, _, p)| {
+        let d = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
+        d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < SUPPORT_REACH * SUPPORT_REACH
+    })
+}
+
+/// A point every [`PATH_STEP`] along the xz segment from `from` to `to`
+/// (both ends included) over which no packed road triangle lies
+/// ([`crate::track::Track::triangles_under`]).
+fn hole_on_path(track: &crate::track::Track, from: [f32; 2], to: [f32; 2]) -> Option<[f32; 2]> {
+    let length = (to[0] - from[0]).hypot(to[1] - from[1]);
+    let steps = (length / PATH_STEP).ceil() as usize;
+    (0..=steps)
+        .map(|k| {
+            let t = if steps == 0 { 0. } else { k as f32 / steps as f32 };
+            [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]
+        })
+        .find(|&xz| track.triangles_under(xz) == 0)
+}
+
+/// Sample spacing of [`hole_on_path`] (AUTHORED, grid-soak only).
+const PATH_STEP: f32 = 1.;
 
 /// The contacts of `body` (index) in a world contact list, as
 /// [`supported`] takes them (normal +0x60, point +0x50).
@@ -1274,15 +1308,27 @@ impl Session {
                     .is_some_and(|h| h.boxed);
                 // (i) also where its free fall began: no road chunk under
                 // its last contact (it drifted over road while falling).
-                let fall_start = self
-                    .piece_history
-                    .borrow()
-                    .get(&(self.resets, i))
-                    .and_then(|h| h.contact_xz);
+                let history = self.piece_history.borrow().get(&(self.resets, i)).copied();
+                let fall_start = history.and_then(|h| h.contact_xz);
+                // (i) over a hole in the collision data on the way: a prop
+                // or detached piece (never a car) that, after its last
+                // support, flew from its last contact, touching nothing,
+                // over a point with no packed triangle at all (F606,
+                // coordinator's approval of 27 October 2026).
+                let flew_over_hole = i >= self.car_count()
+                    && history.is_some_and(|h| {
+                        h.flown
+                            && h.launch_xz.is_some_and(|from| {
+                                let to = h.touched_xz.unwrap_or([position[0], position[2]]);
+                                hole_on_path(car.track(), from, to).is_some()
+                            })
+                    });
                 if matches!(ground, Ok(q) if q.hit.is_none()) {
                     crate::dynamic_props::Pressed::NoGround
                 } else if fall_start.is_some_and(|xz| no_road_at(car.track(), xz)) {
                     crate::dynamic_props::Pressed::NoGroundAtFall
+                } else if flew_over_hole {
+                    crate::dynamic_props::Pressed::NoGroundOnPath
                 } else if in_run {
                     crate::dynamic_props::Pressed::EntityBoxInRun
                 } else if parked_deep {
@@ -1342,21 +1388,31 @@ impl Session {
         for (i, body) in snapshot.bodies.iter().enumerate().skip(snapshot.cars) {
             let p = body_floats(body, 0x200, 3);
             let centre = [p[0], p[1], p[2]];
-            let held = match &self.race {
-                Some(race) => supported(
-                    race.multi
-                        .contacts_with(i)
-                        .into_iter()
-                        .map(|(a, _, n, point, ..)| (a == i, n, point)),
-                    centre,
-                ),
-                None => supported(
-                    contacts_of(&self.runtime.state.world.groups.contacts, i),
-                    centre,
-                ),
+            let contacts: Vec<_> = match &self.race {
+                Some(race) => race
+                    .multi
+                    .contacts_with(i)
+                    .into_iter()
+                    .map(|(a, _, n, point, ..)| (a == i, n, point))
+                    .collect(),
+                None => contacts_of(&self.runtime.state.world.groups.contacts, i),
             };
-            if held {
-                history.entry((self.resets, i)).or_default().contact_xz = Some([p[0], p[2]]);
+            let xz = [p[0], p[2]];
+            if supported(contacts.iter().copied(), centre) {
+                let entry = history.entry((self.resets, i)).or_default();
+                entry.contact_xz = Some(xz);
+                entry.launch_xz = Some(xz);
+                entry.flown = false;
+                entry.touched_xz = None;
+            } else if let Some(entry) = history.get_mut(&(self.resets, i))
+                && entry.contact_xz.is_some()
+            {
+                match (touching(&contacts, centre), entry.flown) {
+                    (true, false) => entry.launch_xz = Some(xz),
+                    (true, true) if entry.touched_xz.is_none() => entry.touched_xz = Some(xz),
+                    (false, _) => entry.flown = true,
+                    _ => {}
+                }
             }
         }
         // Parks and wakes of every prop body (expected loss ParkedDeep).
@@ -2175,6 +2231,32 @@ mod tests {
         let track = crate::track::Track::read(&bytes).unwrap();
         assert!(no_road_at(&track, [590.0, 11.95]));
         assert!(!no_road_at(&track, [604.14, 10.21]));
+    }
+
+    #[test]
+    fn touching_takes_any_near_contact() {
+        let centre = [590., 21.3, 12.];
+        assert!(touching(&[(true, [-0.38, 0., -0.93], [590.3, 21.3, 12.])], centre));
+        assert!(touching(&[(false, [0., 1., 0.], [590., 21.6, 12.])], centre));
+        assert!(!touching(&[(true, [0., 1., 0.], [587., 21., 12.])], [600., -3., 11.]));
+        assert!(!touching(&[], centre));
+    }
+
+    /// Quick seed 15 on F606: piece 19 flies from (569.2, 16.4), beside the road at (572.9, 12.9),
+    /// over a pocket of Istanbul with no packed triangle at all (586.7, -0.1
+    /// to 620.7, -31.5) to the boundary sheet at (628.9, -38.8).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn hole_on_path_finds_the_pocket_a_piece_flew_over() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let route = crate::route::Route::new("tracks/europe/istanbul_park/route_0").unwrap();
+        let bytes = std::fs::read(std::path::Path::new(&root).join(route.file("track.jpk"))).unwrap();
+        let track = crate::track::Track::read(&bytes).unwrap();
+        assert_eq!(track.triangles_under([572.9, 12.9]), 1);
+        assert_eq!(track.triangles_under([600.7, -13.2]), 0);
+        let hole = hole_on_path(&track, [572.9, 12.9], [628.9, -38.8]).unwrap();
+        assert!(hole[0] > 572.9 && hole[0] <= 587., "{hole:?}");
+        assert_eq!(hole_on_path(&track, [572.9, 12.9], [572.9, 12.9]), None);
     }
 
     #[test]

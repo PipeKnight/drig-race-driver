@@ -80,9 +80,9 @@ cause.
 - Launcher `Play GRID Race Spa.cmd` runs `settings/race-spa.ini`: three laps, 11 opponents,
   back of the grid.
 - App tests:
-  - `pause_menu::race_tests::retire_from_race_shows_the_results_on_every_circuit` includes
+  - `pause_menu::race_tests::retire_from_race_shows_the_results_on_*` includes
     Spa;
-  - `flashback::race_tests::a_flashback_resumes_the_race_tick_for_tick_on_every_circuit`
+  - `flashback::race_tests::a_flashback_resumes_the_race_on_*`
     runs over `route::CIRCUITS`.
 - Not checked here: a static render or a windowed race.
 

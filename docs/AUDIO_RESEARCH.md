@@ -1736,4 +1736,4 @@ combo timer, and the port does not show that group.
   events to lines, read by `audio_event_speech_manager` and `cmr6_audio_speech_manager`. That needs
   their formats and the event semantics (position, gaps, teammates, damage, accidents, strategy),
   most of which the port has only in part. A first slice (start race, position, end of race) is
-  medium; the full spotter is several pushes.
+  medium; the full spotter is several pushes. The rule engine and parameters: docs/SPEECH_AUDIO_RESEARCH.md (F594).

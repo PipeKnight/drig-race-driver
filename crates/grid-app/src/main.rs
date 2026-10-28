@@ -41,6 +41,7 @@ mod body_occlusion;
 mod body_specular;
 mod camera;
 mod player_view_visibility;
+mod cockpit;
 mod collision_sound;
 mod car_materials;
 mod lamp_materials;
@@ -53,10 +54,17 @@ mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
 mod damage_hud;
+mod dash;
+mod driver;
 mod damage_parts;
 mod drift_event;
 mod dynamic_props;
 mod engine_sound;
+// Device output on Windows and Android; the pure task builds everywhere.
+#[cfg_attr(not(any(windows, target_os = "android")), allow(dead_code))]
+mod force_feedback;
+#[cfg(any(windows, target_os = "android"))]
+mod ffb;
 mod event_menu;
 mod flashback;
 mod free_look;
@@ -66,6 +74,7 @@ mod graphics;
 mod graphics_benchmark;
 mod perf_test;
 mod perf_timing;
+mod gpu_passes;
 #[cfg(feature = "profile")]
 mod span_profile;
 mod ground_detail;
@@ -93,6 +102,7 @@ mod native_dlaa;
 mod particles;
 mod pause_menu;
 mod post_race;
+mod ornament_lod;
 mod osd_scene;
 mod race_hud;
 mod race_osd;
@@ -105,7 +115,9 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod speech_sound;
 mod car_batch;
+mod car_lod;
 mod static_batch;
 mod stereo;
 mod foliage_mips;
@@ -149,7 +161,7 @@ use bevy::{
     window::ExitCondition,
     winit::WinitPlugin,
 };
-use grid_formats::{collision, entities, jpk, material, mesh, ornaments, pssg, scene, texture};
+use grid_formats::{binxml, collision, entities, jpk, material, mesh, ornaments, pssg, scene, texture};
 use grid_tools::{car::Car as CarModel, route::Route};
 use std::{
     collections::BTreeMap,
@@ -174,6 +186,20 @@ struct Car {
     track: bool,
     /// Opponent livery textures (car k uses entry k-1), keyed like `textures`.
     liveries: Vec<BTreeMap<String, Vec<u8>>>,
+    /// Per field model: the opponents' low-detail levels (docs/CAR_LOD.md).
+    low_lods: Vec<LowLod>,
+    /// Track ornaments' levels of detail (docs/TRACK_LOD.md).
+    ornament_lods: ornament_lod::Levels,
+}
+/// A model's `_lowLOD.pssg` for its opponents.
+#[derive(Default)]
+struct LowLod {
+    /// The shadow mesh: the coarsest level merged in the parts' rest frame
+    /// ("Shadows").
+    shadow: Option<Mesh>,
+    /// Levels 2..5 with their parts, materials prefixed and matrices placed
+    /// like the model's LOD0 parts ("Selection").
+    parts: Vec<(u8, Part)>,
 }
 /// Material/texture key prefix of the field's car model `m` (0 = the
 /// player's model; `Field::models` order).
@@ -265,6 +291,9 @@ struct Opponents {
     throttles: Vec<f32>,
     /// Original race manager: catch-up and choreographer (`--ai`).
     pacing: grid_tools::ai_pacing::Field,
+    /// The choreographer's messages of the last ticks with their segment and tick, for the
+    /// race engineer (speech_sound), which runs once per frame.
+    ai_messages: Vec<(u64, u64, grid_tools::ai_pacing::Message)>,
     /// Each opponent's AI data with its own car's statistics (car k at k-1).
     car_ai: Vec<grid_tools::ai_driver::AiData>,
 }
@@ -611,8 +640,16 @@ fn load_package(
         scene::read_draws(&tree, &sources, lod.as_bytes())?
     };
     let mut bindings = BTreeMap::new();
+    // A route's routesplit.pssg names the track's textures
+    // (`tracksplit.pssg#...`); append_route_split resolves them.
+    let mut shared = std::collections::BTreeSet::new();
     if track {
         for binding in material::read_texture_bindings(&tree)? {
+            if binding.sampler == b"TDiffuseAlphaMap"
+                && binding.container == Some(b"tracksplit.pssg".as_slice())
+            {
+                shared.insert(String::from_utf8(binding.texture.to_vec())?);
+            }
             if binding.sampler == b"TDiffuseAlphaMap"
                 && bindings
                     .insert(
@@ -725,7 +762,7 @@ fn load_package(
             }
             return Err(format!("unresolved diffuse material {:?}", part.material).into());
         };
-        if !textures.contains_key(name) {
+        if !textures.contains_key(name) && !shared.contains(name) {
             return Err(format!("missing diffuse texture: {name}").into());
         }
     }
@@ -746,6 +783,8 @@ fn load_package(
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
         liveries: Vec::new(),
+        low_lods: Vec::new(),
+        ornament_lods: Default::default(),
     };
     if objects {
         append_objects(root, route, &mut car)?;
@@ -788,6 +827,121 @@ fn append_land(
     );
     Ok(())
 }
+/// The route's own pieces (`route_N/routesplit.pssg`, docs/SKY.md section 8):
+/// on the street tracks the layout's road and kerbs (Washington route 0:
+/// 214 draws), on the circuits shadow proxies and a decal. Its diffuse maps
+/// are the track's (`tracksplit.pssg#...`), already in `car`.
+fn append_route_split(
+    root: &Path,
+    route: &Route,
+    model: &CarModel,
+    car: &mut Car,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file = route.file("routesplit.pssg");
+    if !root.join(&file).is_file() {
+        return Ok(());
+    }
+    let split = load_package(root, (route, model), "LOD0_", true, false, &file, false)?;
+    let draws = split.parts.len();
+    for mut part in split.parts {
+        part.name = format!("route/{}", part.name);
+        part.material = format!("route/{}", part.material);
+        car.parts.push(part);
+    }
+    for (name, texture) in split.bindings {
+        let texture = if split.textures.contains_key(&texture) {
+            format!("route/{texture}")
+        } else if car.textures.contains_key(&texture) {
+            texture
+        } else {
+            return Err(format!("{file}: missing shared diffuse texture {texture}").into());
+        };
+        car.bindings.insert(format!("route/{name}"), texture);
+    }
+    for (name, texture) in split.textures {
+        car.textures.insert(format!("route/{name}"), texture);
+    }
+    println!(
+        "source_route_split appended=true draws={draws} source={file} namespace=route physics=unchanged"
+    );
+    Ok(())
+}
+/// The ornament types and instances of a route (docs/TRACK_LOD.md): level
+/// counts from the library, distances from `ornament_attributes.xml`, the
+/// `scenery` category from `ornaments.bin` and each instance's world box.
+fn ornament_types(
+    root: &Path,
+    route: &Route,
+    placement_bytes: &[u8],
+    placements: &ornaments::Ornaments,
+    draws: &[(u8, scene::Draw)],
+) -> Result<ornament_lod::Levels, Box<dyn std::error::Error>> {
+    let mut distances: BTreeMap<String, [f32; 3]> = BTreeMap::new();
+    let path = root.join(route.file("ornament_attributes.xml"));
+    if path.is_file() {
+        let bytes = read(&path)?;
+        let document = binxml::read(&bytes)?;
+        for element in document.elements.iter().filter(|e| e.name == "ornament_attributes") {
+            let field = |key: &str| element.attributes.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+            let Some(name) = field("name") else { continue };
+            let mut d = ornament_lod::DEFAULT_DISTANCES;
+            for (i, value) in d.iter_mut().enumerate() {
+                if let Some(v) = field(&format!("lod_distance_0{i}")) {
+                    *value = v.trim().parse()?;
+                }
+            }
+            distances.insert(name.to_owned(), d);
+        }
+    }
+    let mut levels: BTreeMap<&[u8], u8> = BTreeMap::new();
+    for (level, draw) in draws {
+        if let Some(p) = draw.prototype {
+            let n = levels.entry(p).or_default();
+            *n = (*n).max(level + 1);
+        }
+    }
+    let mut result = ornament_lod::Levels::default();
+    let mut missing = 0;
+    for p in &placements.prototypes {
+        let root_name = [p.name, b" Root".as_slice()].concat();
+        // +44: offset of the category string, 0xFFFFFFFF for none (0x980830).
+        let category = placement_bytes
+            .get(p.opaque_words[0] as usize..)
+            .and_then(|b| b.split(|&c| c == 0).next());
+        let name = String::from_utf8_lossy(p.name);
+        let d = distances.get(name.as_ref()).copied().unwrap_or_else(|| {
+            missing += 1;
+            ornament_lod::DEFAULT_DISTANCES
+        });
+        let kind = result.types.len() as u32;
+        result.types.push(ornament_lod::Type {
+            distances: d,
+            levels: levels.get(root_name.as_slice()).copied().unwrap_or(1),
+            scenery: category == Some(b"scenery".as_slice()),
+        });
+        let [x0, y0, z0, x1, y1, z1] = p.bounds;
+        let (a, b) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
+        let (lo, hi) = (a.min(b), a.max(b));
+        for placement in &p.transforms {
+            let m = Mat4::from_cols_array(placement);
+            let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+            for c in 0..8 {
+                let corner = Vec3::select(BVec3::new(c & 1 != 0, c & 2 != 0, c & 4 != 0), hi, lo);
+                let w = m.transform_point3(corner);
+                min = min.min(w);
+                max = max.max(w);
+            }
+            result.instances.push(ornament_lod::Instance { kind, min, max });
+        }
+    }
+    println!(
+        "ornament_types types={} instances={} scenery={} without_attributes={missing}",
+        result.types.len(),
+        result.instances.len(),
+        result.types.iter().filter(|t| t.scenery).count()
+    );
+    Ok(result)
+}
 fn append_objects(
     root: &Path,
     route: &Route,
@@ -797,10 +951,28 @@ fn append_objects(
     let tree = pssg::read_tree(&bytes)?;
     // Static meshes plus the skinned damage meshes broken pieces draw (F566).
     let sources = mesh::read_object_meshes(&tree)?;
-    let draws = scene::read_object_draws(&tree, &sources)?;
+    let lod = ornament_lod::enabled();
+    let draws: Vec<(u8, scene::Draw)> = if lod {
+        scene::read_object_level_draws(&tree, &sources)?
+    } else {
+        scene::read_object_draws(&tree, &sources)?
+            .into_iter()
+            .map(|d| (0, d))
+            .collect()
+    };
     car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
+    // First instance index of each prototype.
+    let mut lod_first: BTreeMap<String, u32> = BTreeMap::new();
+    if lod {
+        car.ornament_lods = ornament_types(root, route, &placement_bytes, &placements, &draws)?;
+        let mut first = 0u32;
+        for p in &placements.prototypes {
+            lod_first.insert(format!("{} Root", String::from_utf8_lossy(p.name)), first);
+            first += p.transforms.len() as u32;
+        }
+    }
     let transforms: BTreeMap<_, _> = placements
         .prototypes
         .iter()
@@ -847,14 +1019,14 @@ fn append_objects(
             }
         }
     }
-    for draw in draws {
+    for (level, draw) in draws {
         let prototype =
             String::from_utf8(draw.prototype.ok_or("object prototype absent")?.to_vec())?;
         let Some(placements) = transforms.get(&prototype) else {
             unplaced.insert(prototype);
             continue;
         };
-        selected.insert(prototype);
+        selected.insert(prototype.clone());
         if placements.is_empty() {
             continue;
         }
@@ -883,8 +1055,19 @@ fn append_objects(
             .collect::<Vec<_>>();
         draw_count += matrices.len();
         triangles += mesh.count_vertices();
+        let part_name = if lod {
+            let name = format!("ornament/{level}/{}", String::from_utf8_lossy(draw.id));
+            let first = lod_first[&prototype];
+            let instances = (first..first + matrices.len() as u32).collect();
+            if car.ornament_lods.parts.insert(name.clone(), (level, instances)).is_some() {
+                return Err(format!("duplicate ornament level draw {name}").into());
+            }
+            name
+        } else {
+            String::from_utf8(draw.id.to_vec())?
+        };
         car.parts.push(Part {
-            name: String::from_utf8(draw.id.to_vec())?,
+            name: part_name,
             joint: String::new(),
             material: name,
             mesh,
@@ -1185,6 +1368,15 @@ fn main() {
             }
         }
     }
+    // `--speech-files`: the speech lines a bundled APK carries (speech_sound.rs).
+    #[cfg(not(target_os = "android"))]
+    if args.first().is_some_and(|a| a == "--speech-files") {
+        if let Err(error) = speech_sound::list_files(&args[1..]) {
+            eprintln!("grid-app: {error}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
     // `--career`: the career screen and its races (career_screen.rs).
     #[cfg(not(target_os = "android"))]
     if args.first().is_some_and(|a| a == "--career") {
@@ -1304,6 +1496,8 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
         liveries: Vec::new(),
+        low_lods: Vec::new(),
+        ornament_lods: Default::default(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -1357,7 +1551,123 @@ fn append_car(
             .insert(format!("{prefix}{name}"), format!("{prefix}{texture}"));
     }
     car.parts.extend(source.parts);
+    while car.low_lods.len() <= m {
+        car.low_lods.push(LowLod::default());
+    }
+    let low = low_lod(root, model, anchor, &prefix, &car.bindings);
+    println!(
+        "car_lod model={m} low_file={} shadow_triangles={} parts={}",
+        model.file("_lowLOD.pssg"),
+        low.shadow
+            .as_ref()
+            .and_then(|m| m.indices())
+            .map_or(0, |i| i.len() / 3),
+        low.parts.len()
+    );
+    car.low_lods[m] = low;
     Ok(())
+}
+/// A model's low-detail file for its opponents (docs/CAR_LOD.md): levels 2..5
+/// as parts placed like the LOD0 parts (`anchor` times the draw matrix,
+/// materials under `prefix`, only materials the LOD0 parts have), and the
+/// shadow caster as in the original (0x9CB5B0 pass 0x401), the coarsest level
+/// (LOD5 `main_body`) merged into one position mesh. Empty without a low file;
+/// that model keeps LOD0 and its parts' own shadows.
+fn low_lod(
+    root: &Path,
+    model: &CarModel,
+    anchor: Mat4,
+    prefix: &str,
+    bindings: &BTreeMap<String, String>,
+) -> LowLod {
+    let mut low = LowLod::default();
+    let Ok(bytes) = read(&root.join(model.file("_lowLOD.pssg"))) else {
+        return low;
+    };
+    let Ok(tree) = pssg::read_tree(&bytes) else {
+        return low;
+    };
+    let Ok(sources) = mesh::read_meshes(&tree) else {
+        return low;
+    };
+    for level in 2..=5u8 {
+        let Ok(draws) = scene::read_draws(&tree, &sources, format!("LOD{level}_").as_bytes()) else {
+            continue;
+        };
+        let mut positions: Vec<[f32; 3]> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        for draw in &draws {
+            let source = &sources[draw.source];
+            let matrix = anchor * Mat4::from_cols_array(&draw.transform);
+            let base = positions.len() as u32;
+            positions.extend(
+                source.positions[draw.vertices.clone()]
+                    .iter()
+                    .map(|p| matrix.transform_point3(Vec3::from_array(*p)).to_array()),
+            );
+            indices.extend(draw.indices.iter().map(|&i| base + u32::from(i)));
+            let Ok(name) = std::str::from_utf8(draw.material) else {
+                continue;
+            };
+            let material = format!("{prefix}{name}");
+            if !bindings.contains_key(&material) {
+                continue;
+            }
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                source.positions[draw.vertices.clone()].to_vec(),
+            );
+            if !source.texcoords.is_empty() {
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_UV_0,
+                    source.texcoords[draw.vertices.clone()].to_vec(),
+                );
+            }
+            mesh.insert_indices(Indices::U16(draw.indices.clone()));
+            let normals = if source.normals.is_empty() {
+                vec![]
+            } else {
+                source.normals[draw.vertices.clone()].to_vec()
+            };
+            if normals.is_empty() || normals.iter().any(|n| n.iter().any(|v| !v.is_finite())) {
+                mesh.compute_smooth_normals();
+            } else {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            }
+            if name == "Tyre Tread"
+                && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())
+            {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+            }
+            low.parts.push((
+                level,
+                Part {
+                    name: String::from_utf8_lossy(draw.id).into_owned(),
+                    joint: String::from_utf8_lossy(draw.joint).into_owned(),
+                    material,
+                    mesh,
+                    matrices: vec![matrix],
+                    wheel: wheel_joint(draw.joint),
+                },
+            ));
+        }
+        // The coarsest level present casts the shadow.
+        if !indices.is_empty() {
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            mesh.insert_indices(Indices::U32(indices));
+            mesh.compute_smooth_normals();
+            low.shadow = Some(mesh);
+        }
+    }
+    low
 }
 /// Shipped high-detail liveries `livery_00..` of a model (Lacetti 10, BMW 13).
 fn livery_count(root: &Path, model: &CarModel) -> usize {
@@ -1412,6 +1722,22 @@ fn series_seed(profile: Option<u32>) -> u32 {
                 .map_or(0, |d| d.as_millis() as u32)
         })
 }
+/// The race engineer's drivers: entry 0 is the player, entry k opponent k. `teammate` is the
+/// career profile's opponent number (0 none); a career race has it, others do not.
+fn speech_identities(root: &Path, opponents: &[Option<i32>], teammate: Option<usize>) -> grid_tools::speech::Identities {
+    if opponents.iter().all(Option::is_none) {
+        return grid_tools::speech::Identities { teammate_number: if teammate.is_some() { 0 } else { -1 }, ..Default::default() };
+    }
+    let drivers: Vec<Option<i32>> = std::iter::once(None).chain(opponents.iter().copied()).collect();
+    match grid_tools::read_database(root) {
+        Ok(db) => grid_tools::speech::Identities::load(&db, &drivers, teammate.filter(|&t| t > 0), teammate.is_some()),
+        Err(error) => {
+            warn!("Speech drivers unavailable: {error}");
+            grid_tools::speech::Identities { teammate_number: -1, ..Default::default() }
+        }
+    }
+}
+
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
     // Settings files first (docs/SETTINGS.md); the flags below override them.
@@ -1440,6 +1766,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .map(|v| v.iter().map(|&i| Some(i)).collect())
         .unwrap_or_default();
     let opponent_names = profile.opponent_names.clone();
+    // Opponent k's `driver.id` (0 none) for the race engineer: the career field's, or a series
+    // event's (docs/SPEECH_AUDIO_RESEARCH.md §15). Other races have no drivers.
+    let mut opponent_drivers: Vec<Option<i32>> = profile
+        .opponent_drivers
+        .as_ref()
+        .map(|v| v.iter().map(|&d| (d > 0).then_some(d)).collect())
+        .unwrap_or_default();
     let race_points = profile.points.clone();
     // A Le Mans Series race's class name keys by car (results Class column).
     let mut car_classes: Vec<String> = Vec::new();
@@ -2324,6 +2657,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if opponent_cars.is_none() {
             opponent_cars = Some(event.cars());
             series_liveries = event.opponents.iter().map(|e| e.livery_index).collect();
+            opponent_drivers = event.opponents.iter().map(|e| e.driver).collect();
             car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
@@ -2892,6 +3226,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let touch_screen = false;
         let touch = input_settings.touch_active(touch_screen);
         let (actions, pad) = input::load(&root, &input_settings, touch)?;
+        // device=auto with a DirectInput wheel bound: the wheel class.
+        input_settings.apply_wheel(&mut driver_aids, actions.wheel());
         if touch {
             let tilt = input_settings.tilt_settings();
             println!(
@@ -3124,6 +3460,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     after_finish: None,
                     throttles: vec![0.; n],
                     pacing,
+                    ai_messages: Vec::new(),
                     car_ai,
                 })
             })
@@ -3248,6 +3585,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             field.car_model.push(m);
         }
     }
+    if track && !collision {
+        append_route_split(&root, &route, &player_car, &mut car)?;
+    }
     if track && !collision && graphics.enhanced() && graphics.source_land {
         append_land(&root, &route, &player_car, &mut car)?;
     }
@@ -3261,6 +3601,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+    let mut cockpit = None;
     if reference {
         let model = if let Some(driving) = &driving {
             model_offset(&driving.runtime)
@@ -3268,6 +3609,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             anchor.unwrap()
         };
         append_car(&root, &lod, &mut car, model, &player_car, 0)?;
+        // The cockpit of the player only (0x6138D0), when driving.
+        if driving.is_some() {
+            match cockpit::append(&root, player_car.stem(), &mut car, model) {
+                Ok(c) => cockpit = Some(c),
+                Err(error) => eprintln!("cockpit skipped: {error}"),
+            }
+        }
         if let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
             // Other models are placed by the first opponent that drives them.
             for (m, model) in field.models.iter().enumerate().skip(1) {
@@ -3528,6 +3876,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 // A capture's frame counter must not outrun background shader
                 // compilation. Interactive windows keep Bevy's async default.
                 .set(bevy::render::RenderPlugin {
+                    render_creation: texture_upload::render_creation(),
                     synchronous_pipeline_compilation: true,
                     ..default()
                 })
@@ -3567,22 +3916,27 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         app.add_plugins(with_profile(
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: if drive {
-                        "GRID independent driving prototype"
-                    } else {
-                        "GRID independent static resource viewer"
-                    }
-                    .into(),
-                    resolution: (graphics.width, graphics.height).into(),
-                    // [video] present_mode / frame_latency (default Bevy's Fifo, wgpu's 2).
-                    present_mode: profile.present_mode.unwrap_or_default(),
-                    desired_maximum_frame_latency: profile.frame_latency,
+            DefaultPlugins
+                .set(bevy::render::RenderPlugin {
+                    render_creation: texture_upload::render_creation(),
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: if drive {
+                            "GRID independent driving prototype"
+                        } else {
+                            "GRID independent static resource viewer"
+                        }
+                        .into(),
+                        resolution: (graphics.width, graphics.height).into(),
+                        // [video] present_mode / frame_latency (default Bevy's Fifo, wgpu's 2).
+                        present_mode: profile.present_mode.unwrap_or_default(),
+                        desired_maximum_frame_latency: profile.frame_latency,
+                        ..default()
+                    }),
                     ..default()
                 }),
-                ..default()
-            }),
         ));
         if !drive {
             app.add_systems(Update, update_orbit);
@@ -3669,6 +4023,23 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 Ok(bank) => hud_sound::install(&mut app, bank, mix.clone()),
                 Err(error) => warn!("HUD audio unavailable; driving continues: {error}"),
             }
+            // Speech needs a race of the shared world (its standings).
+            if driving.opponents.is_some()
+                && let Err(error) = speech_sound::install(
+                    &mut app,
+                    root.clone(),
+                    mix.clone(),
+                    player_slot,
+                    speech_identities(&root, &opponent_drivers, profile.teammate),
+                    speech_sound::audio_name(&profile),
+                    profile.career_speech.clone().map(|mut c| {
+                        c.points = profile.points.clone().unwrap_or_default();
+                        c
+                    }),
+                )
+            {
+                warn!("Speech unavailable; driving continues: {error}");
+            }
             match grid_tools::tyre_audio::Bank::load(&root) {
                 Ok(bank) => tyre_sound::install(&mut app, bank, mix),
                 Err(error) => warn!("Tyre audio unavailable; driving continues: {error}"),
@@ -3685,6 +4056,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(actions) = drive_input.take() {
+            #[cfg(any(windows, target_os = "android"))]
+            {
+                let status = ffb::install(&mut app, &root, &input_settings, actions.wheel(), field.models[0].stem());
+                println!("drive_force_feedback {status}");
+            }
             // The original's pause menu (docs/PAUSE_MENU.md): Race Day free
             // race for timed events, test drive for free practice.
             let mut menu = pause_menu::PauseMenu::new(
@@ -3843,10 +4219,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         lean_pieces::install(&mut app);
         // Static track parts and intact props drawn as merged meshes (F576).
         static_batch::install(&mut app);
-        // Car parts drawn as one mesh per car and material (F584).
+        // Track ornaments at the original's levels of detail (docs/TRACK_LOD.md).
+        ornament_lod::install(&mut app);
+        // Car parts drawn as one mesh per car and material (F584), opponents
+        // at the original's levels of detail (docs/CAR_LOD.md).
+        car_lod::load(&root);
         car_batch::install(&mut app);
         camera::install(&mut app, &root, field.models[0].stem());
         player_view_visibility::install(&mut app);
+        cockpit::install(&mut app);
         track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
@@ -3903,6 +4284,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     asset_counts::install(&mut app);
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
+    if gpu_passes::enabled() {
+        gpu_passes::install(&mut app);
+    }
     mesh_stream::install(&mut app);
     if let Some(script) = window_transition_script {
         window_transitions::install(&mut app, script);
@@ -4017,6 +4401,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     foundation_front::install(&mut app, foundation_front);
     foundation_front_audit::install(&mut app, foundation_front);
     foundation_backing::install(&mut app, foundation_backing)?;
+    if let Some(cockpit) = cockpit {
+        app.insert_resource(cockpit);
+    }
     let exit = app
         .insert_resource(body_occlusion)
         .insert_resource(field)
@@ -4025,7 +4412,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .insert_resource(InitialOrbit(orbit.clone()))
         .insert_resource(orbit)
         .insert_resource(ClearColor(Color::srgb(0.055, 0.07, 0.095)))
-        .add_systems(PreStartup, texture_upload::configure)
+        // The upload path, then the BC images made while the app was built
+        // (the OSD scene) and any added later on it (F603).
+        .add_systems(
+            PreStartup,
+            (texture_upload::configure, texture_upload::convert_existing).chain(),
+        )
+        .add_systems(Last, texture_upload::convert_added)
         .add_systems(Startup, setup)
         .run();
     // Leaving an event started from the menu (event_menu::leave).
@@ -4173,6 +4566,14 @@ fn setup(
     }
     let decal_materials = car.decal_materials.clone();
     let object_glass_materials = car.object_glass_materials.clone();
+    // Breakable-prop pieces of one library draw share a mesh asset.
+    // Keyed by source mesh, draw and material, plus a hash of the indices;
+    // each key keeps every distinct index list.
+    let mut piece_meshes: std::collections::HashMap<(String, String, u64), Vec<Handle<Mesh>>> =
+        std::collections::HashMap::new();
+    let mut piece_parts = 0;
+    let ornament_levels = std::mem::take(&mut car.ornament_lods);
+    let ornament_shadows = !ornament_levels.parts.is_empty();
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
             && graphics.smooth_tyres
@@ -4204,7 +4605,7 @@ fn setup(
                 let glass = matches!(
                     name,
                     "Window Glass" | "Grills Glass" | "Head Lights Glass" | "Rear Lights Glass"
-                );
+                ) || name.starts_with("interior/glass/");
                 let mut material = StandardMaterial {
                     base_color_texture: bindings
                         .get(&part.material)
@@ -4233,7 +4634,10 @@ fn setup(
                     } else {
                         0.0
                     },
-                    alpha_mode: if name.starts_with("objects/") || name.starts_with("trees/") {
+                    alpha_mode: if name.starts_with("objects/")
+                        || name.starts_with("trees/")
+                        || name.starts_with("interior/alpha/")
+                    {
                         AlphaMode::Mask(0.5)
                     } else if glass {
                         AlphaMode::Blend
@@ -4287,6 +4691,7 @@ fn setup(
             })
             .clone();
         let model = part_model(&part.material);
+        let interior = part.material.starts_with("car0/interior/");
         // Deforming body parts own their mesh per car (any car of the model).
         let deformable = driving.as_ref().is_some_and(|d| {
             d.runtime.deformation_enabled
@@ -4295,7 +4700,8 @@ fn setup(
                     .is_some_and(|o| o.multi.cars.iter().any(|c| c.deformation_enabled))
         }) && model.is_some()
             && part.wheel.is_none()
-            && part.material.split_once('/').map(|x| x.1) != Some("Aerials");
+            && part.material.split_once('/').map(|x| x.1) != Some("Aerials")
+            && !interior;
         // The player's model is drawn on the player; other models only on
         // the opponents that drive them.
         let player_part = model.is_none_or(|m| m == 0);
@@ -4310,10 +4716,36 @@ fn setup(
         }
         let shared = if deformable {
             None
+        } else if let Some(key) = dynamic_props::piece_draw(&part.name) {
+            piece_parts += 1;
+            let indices = {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                if let Some(indices) = part.mesh.indices() {
+                    indices.iter().for_each(|i| i.hash(&mut hasher));
+                }
+                hasher.finish()
+            };
+            let key = (key.to_owned(), part.material.clone(), indices);
+            // The source fixes the vertices; shared only with equal indices.
+            let same = |a: &Mesh| match (a.indices(), part.mesh.indices()) {
+                (Some(x), Some(y)) => x.iter().eq(y.iter()),
+                (x, y) => x.is_none() && y.is_none(),
+            };
+            let candidates = piece_meshes.entry(key).or_default();
+            match candidates.iter().find(|h| meshes.get(*h).is_some_and(same)) {
+                Some(handle) => Some(handle.clone()),
+                None => {
+                    let handle = meshes.add(part.mesh);
+                    candidates.push(handle.clone());
+                    Some(handle)
+                }
+            }
         } else {
             Some(meshes.add(part.mesh))
         };
-        for matrix in part.matrices {
+        let ornament = ornament_levels.parts.get(&part.name);
+        for (index, matrix) in part.matrices.into_iter().enumerate() {
             let mesh = shared
                 .clone()
                 .unwrap_or_else(|| meshes.add(original.as_ref().unwrap().clone()));
@@ -4366,6 +4798,20 @@ fn setup(
             {
                 entity.insert(section);
             }
+            if let Some((level, instances)) = ornament
+                && let Some(entity) = &mut entity
+            {
+                let instance = instances[index];
+                entity.insert((
+                    ornament_lod::OrnamentLevel { instance, level: *level },
+                    Visibility::Hidden,
+                ));
+                if *level == ornament_levels.shadow_level(instance) {
+                    entity.insert(bevy::camera::visibility::RenderLayers::layer(0));
+                } else {
+                    entity.insert(bevy::light::NotShadowCaster);
+                }
+            }
             if moving && let Some(entity) = &mut entity {
                 entity.insert((
                     MovingPart {
@@ -4375,6 +4821,16 @@ fn setup(
                     },
                     damage_parts::Joint::new(&part.joint),
                 ));
+                if interior {
+                    entity.insert((
+                        cockpit::InteriorPart,
+                        Visibility::Hidden,
+                        bevy::camera::visibility::RenderLayers::layer(cockpit::LAYER),
+                    ));
+                    if part.material.starts_with("car0/interior/mirror/") {
+                        entity.insert(cockpit::MirrorGlass);
+                    }
+                }
                 if part.material == "car0/Tyre Wall"
                     && let Some(wheel) = part.wheel
                 {
@@ -4388,7 +4844,10 @@ fn setup(
                     });
                 }
             }
-            if moving && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
+            if moving
+                && !interior
+                && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref())
+            {
                 for car in 1..opponents.multi.cars.len() {
                     if model != Some(field.car_model[car]) {
                         continue;
@@ -4480,6 +4939,95 @@ fn setup(
             }
         }
     }
+    if piece_parts > 0 {
+        println!(
+            "piece_meshes parts={piece_parts} draws={} meshes={}",
+            piece_meshes.len(),
+            piece_meshes.values().map(Vec::len).sum::<usize>()
+        );
+    }
+    // Opponents cast their shadow with their model's coarsest level and draw
+    // its low-detail levels as the original selects them; car_batch poses the
+    // shadow body, merges the levels and shows one per car (docs/CAR_LOD.md).
+    let low_lods = std::mem::take(&mut car.low_lods);
+    let mut shadow_bodies_spawned = false;
+    if car_batch::enabled()
+        && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref())
+    {
+        let shadow_material = materials.add(StandardMaterial::default());
+        for (m, low) in low_lods.into_iter().enumerate() {
+            let cars: Vec<usize> = (1..opponents.multi.cars.len())
+                .filter(|&k| field.car_model[k] == m)
+                .collect();
+            if let Some(shadow) = low.shadow.filter(|_| !cars.is_empty()) {
+                let mesh = meshes.add(shadow);
+                for &k in &cars {
+                    commands.spawn((
+                        Name::new(format!("opponent{k} shadow body")),
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(shadow_material.clone()),
+                        Transform::from_matrix(Mat4::from_cols_array(&opponents.multi.cars[k].pose())),
+                        car_batch::shadow_layer(),
+                        car_batch::ShadowBody { car: k },
+                    ));
+                    shadow_bodies_spawned = true;
+                }
+            }
+            if car_lod::setting().is_none() || cars.is_empty() {
+                continue;
+            }
+            for (level, part) in low.parts {
+                let bounds = part.mesh.compute_aabb().unwrap_or_default();
+                // Body parts deform with the car's field, as its LOD0 parts.
+                let deformable = part.wheel.is_none()
+                    && part.material.split_once('/').map(|x| x.1) != Some("Aerials");
+                let shared = meshes.add(part.mesh.clone());
+                let matrix = part.matrices[0];
+                for &k in &cars {
+                    let runtime = &opponents.multi.cars[k];
+                    let motion = part
+                        .wheel
+                        .map_or(Mat4::IDENTITY, |i| wheel_motion(runtime.wheels()[i]));
+                    // The material the car's LOD0 part of this name wears.
+                    let key = (k, part.material.clone());
+                    let Some(material) = occluded_liveries
+                        .get(&key)
+                        .or_else(|| livery_materials.get(&key))
+                        .or_else(|| material_handles.get(&part.material))
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    let own = deformable && runtime.deformation_enabled;
+                    let mesh = if own { meshes.add(part.mesh.clone()) } else { shared.clone() };
+                    let mut entity = commands.spawn((
+                        Name::new(format!("opponent{k} LOD{level} {}", part.name)),
+                        Mesh3d(mesh),
+                        MeshMaterial3d(material),
+                        Transform::from_matrix(
+                            Mat4::from_cols_array(&runtime.pose()) * motion * matrix,
+                        ),
+                        bounds,
+                        OpponentPart {
+                            car: k,
+                            rest: matrix,
+                            wheel: part.wheel,
+                            lost_with_wheel: lost_with_wheel(&part.joint),
+                        },
+                        car_batch::LodPart { level },
+                        car_batch::hidden_layer(),
+                        bevy::light::NotShadowCaster,
+                    ));
+                    if own {
+                        entity.insert(OpponentDeforming(DeformingPart {
+                            source: part.mesh.clone(),
+                            raw_bind: model_offset(runtime).inverse() * matrix,
+                        }));
+                    }
+                }
+            }
+        }
+    }
     if let Some(material) = material_handles.get("objects/start_lights").cloned()
         && start_light_images.iter().all(Option::is_some)
     {
@@ -4510,23 +5058,40 @@ fn setup(
             Transform::from_xyz(0.0, -0.05, 0.0),
         ));
     }
-    commands.spawn((
-        DirectionalLight {
-            illuminance: graphics.sun_illuminance(),
-            color: graphics.sun_colour(),
-            shadow_maps_enabled: true,
-            ..default()
-        },
-        graphics.sun_transform(),
-        graphics.cascades(),
-    ));
+    let sun = commands
+        .spawn((
+            DirectionalLight {
+                illuminance: graphics.sun_illuminance(),
+                color: graphics.sun_colour(),
+                shadow_maps_enabled: true,
+                ..default()
+            },
+            graphics.sun_transform(),
+            graphics.cascades(),
+        ))
+        .id();
+    if ornament_shadows {
+        commands.insert_resource(ornament_lod::Lods::new(ornament_levels));
+    }
+    // The sun also takes casters from the cockpit's layer and, with shadow
+    // bodies or ornament shadow levels, theirs, which no camera draws.
+    commands.entity(sun).insert(if shadow_bodies_spawned || ornament_shadows {
+        car_batch::sun_layers().with(cockpit::LAYER)
+    } else {
+        bevy::camera::visibility::RenderLayers::from_layers(&[0, cockpit::LAYER])
+    });
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 450.0,
         ..default()
     });
     let camera = commands
-        .spawn((Camera3d::default(), camera_transform(&orbit), ViewerCamera))
+        .spawn((
+            Camera3d::default(),
+            camera_transform(&orbit),
+            ViewerCamera,
+            bevy::camera::visibility::RenderLayers::from_layers(&[0, cockpit::LAYER]),
+        ))
         .id();
     graphics::configure(&mut commands, camera, &graphics, &mut scattering_media);
     if driving.is_some() {
@@ -4937,6 +5502,11 @@ fn drive_tick(
                 &racing,
                 grid_tools::source_vehicle::DELTA,
             );
+            let tick = driving.runtime.ticks + 1;
+            opponents.ai_messages.retain(|&(segment, t, _)| segment == driving.segment && t + 60 > tick);
+            opponents
+                .ai_messages
+                .extend(opponents.pacing.messages.iter().map(|&m| (driving.segment, tick, m)));
             for line in &opponents.pacing.log {
                 log_line!(
                     "drive_ai_event version=1 segment={} tick={} {line}",
@@ -5103,19 +5673,36 @@ fn drive_tick(
                 let speeds = opponents.speeds(&driving.runtime);
                 opponents.standings.finalize(&speeds, time, &[0]);
             }
+            // The autopilot's retire drive stopped the player's car (stuck or
+            // failure, removal request req+0x38): its race ends as on
+            // terminal damage (AUTHORED; the original has no AI-driven
+            // player car).
+            if opponents.autopilot.as_ref().is_some_and(|p| p.removal_requested())
+                && opponents.standings.status(0) == Status::Racing
+            {
+                opponents.standings.retire(0, Out::Wrecked);
+                let speeds = opponents.speeds(&driving.runtime);
+                opponents.standings.finalize(&speeds, time, &[0]);
+                log_line!(
+                    "drive_ai_event version=1 segment={} tick={} car=0 retired=removal",
+                    driving.segment,
+                    driving.runtime.ticks
+                );
+            }
             for i in 1..opponents.standings.len() {
                 if opponents.multi.cars[i].terminal_wheel().is_some()
                     && opponents.standings.status(i) == Status::Racing
                 {
                     opponents.standings.retire(i, Out::Wrecked);
                 }
-                // Stopped by the AI's failure/damage retire drive (AUTHORED).
+                // Stopped by the AI's retire drive: stuck, failure or damage
+                // (AUTHORED).
                 if opponents.drivers[i - 1].removal_requested()
                     && opponents.standings.status(i) == Status::Racing
                 {
                     opponents.standings.retire(i, Out::Wrecked);
                     log_line!(
-                        "drive_ai_event version=1 segment={} tick={} car={i} retired=failure",
+                        "drive_ai_event version=1 segment={} tick={} car={i} retired=removal",
                         driving.segment,
                         driving.runtime.ticks
                     );
@@ -5289,6 +5876,7 @@ fn drive_present(
             Option<&OpponentDeforming>,
             &Mesh3d,
             &mut Aabb,
+            Has<car_batch::Unposed>,
         ),
         (Without<MovingPart>, Without<ViewerCamera>),
     >,
@@ -5422,10 +6010,13 @@ fn drive_present(
                 dirty.push((car, field));
             }
         }
-        for (part, mut transform, deforming, handle, mut bounds) in &mut opponent_parts {
+        for (part, mut transform, deforming, handle, mut bounds, unposed) in &mut opponent_parts {
             let (pose, wheels) = &cars[part.car];
             let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
-            *transform = Transform::from_matrix(*pose * motion * part.rest);
+            // A part car_batch does not draw on its own keeps no pose.
+            if !unposed {
+                *transform = Transform::from_matrix(*pose * motion * part.rest);
+            }
             if let (Some(OpponentDeforming(source)), Some((_, field))) =
                 (deforming, dirty.iter().find(|(car, _)| *car == part.car))
                 && let Ok(mesh) = body_damage::project(&source.source, source.raw_bind, field)
@@ -5446,11 +6037,24 @@ fn drive_present(
         Some(c) => c,
         None => fallback.insert(camera::Cameras::new(camera::Views::fallback(), "", None)),
     };
-    if actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView)) {
-        cameras.change_view();
-        log_line!("drive_camera event=change view={} tick={}", cameras.ident(), driving.runtime.ticks);
-    }
     let sample = camera::Sample::of(&driving.runtime, driving.segment);
+    if actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView)) {
+        // The blend's lift clears the car's collision box (0x7F9CA0).
+        let car = driving
+            .geometry
+            .as_ref()
+            .and_then(|g| g.car_box(&driving.runtime.state.world.groups.bodies[0]).ok());
+        if let Some(t) = cameras.change_view(&sample, car.as_ref()) {
+            log_line!(
+                "drive_camera event=change view={} from={} duration={} lift={} tick={}",
+                cameras.views.0[t.to].ident,
+                cameras.views.0[t.from].ident,
+                t.duration,
+                t.lift,
+                driving.runtime.ticks
+            );
+        }
+    }
     // Look Left/Right/Up/Down (Delete/PageDown, pad right stick) turn the
     // view as in the original (0x8348F0, docs/CAMERA_VIEWS.md "Look input").
     let look = actions.as_ref().map_or_else(camera::Look::default, |a| camera::Look {
@@ -5959,6 +6563,7 @@ mod driving_tests {
         }
         let mut fixed = Time::<Fixed>::from_seconds(0.016);
         fixed.accumulate_overstep(Duration::from_secs_f32(0.008));
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(Assets::<Mesh>::default())
             .insert_resource(fixed)
@@ -6040,6 +6645,57 @@ mod driving_tests {
         assert_ne!(reset, moving);
         app.update();
         assert_eq!(*app.world().get::<Transform>(part).unwrap(), reset);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_route_splits_resolve_on_every_route() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let model = CarModel::default();
+        let mut routes = 0;
+        let mut drawn = BTreeMap::new();
+        for region in ["europe", "japan", "usa"] {
+            for track in std::fs::read_dir(root.join("tracks").join(region)).unwrap() {
+                let track = track.unwrap().file_name().into_string().unwrap();
+                let mut track_car = None;
+                for r in 0..10 {
+                    let route = Route::new(&format!("tracks/{region}/{track}/route_{r}")).unwrap();
+                    if !root.join(route.file("routesplit.pssg")).is_file() {
+                        continue;
+                    }
+                    let car = track_car.get_or_insert_with(|| {
+                        let file = route.track_file("tracksplit.pssg");
+                        load_package(root, (&route, &model), "LOD0_", true, false, &file, false)
+                            .unwrap()
+                    });
+                    let mut car = Car {
+                        parts: Vec::new(),
+                        textures: car.textures.clone(),
+                        bindings: car.bindings.clone(),
+                        center: car.center,
+                        radius: car.radius,
+                        track: true,
+                        liveries: Vec::new(),
+                        low_lods: Vec::new(),
+                        ornament_lods: Default::default(),
+                    };
+                    append_route_split(root, &route, &model, &mut car)
+                        .unwrap_or_else(|e| panic!("{}: {e}", route.path()));
+                    for part in &car.parts {
+                        assert!(car.bindings.contains_key(&part.material), "{}", part.name);
+                    }
+                    drawn.insert(route.path().to_owned(), car.parts.len());
+                    routes += 1;
+                }
+            }
+        }
+        println!("route_split routes={routes} draws={drawn:?}");
+        assert_eq!(routes, 62);
+        // The missing Washington main straight (docs/SKY.md section 8) and a circuit's
+        // decals only (the grid boxes); the shadow proxies stay omitted.
+        assert_eq!(drawn["tracks/usa/washington/route_0"], 185);
+        assert_eq!(drawn["tracks/europe/donington/route_0"], 4);
     }
 
     #[test]
@@ -6258,6 +6914,7 @@ mod driving_tests {
             ));
         }
         assert_eq!(entries.len(), 2);
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(assets)
             .init_resource::<DeformationPresentation>()
@@ -6369,6 +7026,7 @@ mod driving_tests {
                 .unwrap();
         runtime.enable_lap_timing(Path::new(&root)).unwrap();
         let initial = runtime.pose();
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_message::<AppExit>()
             .insert_resource(ButtonInput::<KeyCode>::default())
@@ -6603,6 +7261,7 @@ mod driving_tests {
                 .register_deformation_callbacks(limit, bulk, 1)
                 .unwrap();
         }
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_message::<AppExit>()
             .insert_resource(ButtonInput::<KeyCode>::default())
@@ -6920,6 +7579,7 @@ mod driving_tests {
             grid_tools::audio_mix::Table::load(root).unwrap(),
         ));
         let step = Duration::from_secs_f64(f64::from(DELTA));
+        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))

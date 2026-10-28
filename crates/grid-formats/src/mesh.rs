@@ -22,8 +22,14 @@ pub struct Mesh<'a> {
     /// Further ST streams, in render-stream order; their shader use is separate.
     pub additional_texcoords: Vec<Vec<[f32; 2]>>,
     pub skin_indices: Option<Vec<f32>>,
+    /// The skinned reader's four joints (SKINJOINT positions) and weights
+    /// per vertex, as stored.
+    pub skin_weights: Option<SkinWeights>,
     pub indices: Vec<u16>,
 }
+
+/// Per vertex: four joint numbers and their weights.
+pub type SkinWeights = (Vec<[u8; 4]>, Vec<[f32; 4]>);
 
 fn child(tree: &Tree<'_>, node: usize, name: &[u8]) -> Result<usize> {
     let mut found = tree.nodes[node]
@@ -234,6 +240,7 @@ fn read_meshes_retaining_skin<'a>(
         let mut colors = None;
         let mut texcoords = Vec::new();
         let mut skin_indices = None;
+        let mut skin_weights = None;
         let mut weights: Option<Vec<[f32; 4]>> = None;
         let mut joints: Option<Vec<[u8; 4]>> = None;
         for stream in streams {
@@ -306,7 +313,8 @@ fn read_meshes_retaining_skin<'a>(
                         return fail(tree.nodes[stream].offset, "duplicate skin index stream");
                     }
                 }
-                (b"Vertex", b"float3") => {
+                // Cockpit displays (int_<stem>.pssg) store half4 positions.
+                (b"Vertex", b"float3" | b"half4") => {
                     total_vertices = total_vertices.checked_add(count).ok_or(crate::Error {
                         offset: 0,
                         message: "vertex count overflow",
@@ -317,10 +325,16 @@ fn read_meshes_retaining_skin<'a>(
                             "total vertex inspector limit exceeded",
                         );
                     }
-                    if positions
-                        .replace(floats(data, count, offset, stride, true)?)
-                        .is_some()
-                    {
+                    let values = if format == b"half4" {
+                        let values = halves::<3>(data, count, offset, stride)?;
+                        if values.iter().flatten().any(|v| !v.is_finite()) {
+                            return fail(tree.nodes[stream].offset, "nonfinite half position");
+                        }
+                        values
+                    } else {
+                        floats(data, count, offset, stride, true)?
+                    };
+                    if positions.replace(values).is_some() {
                         return fail(tree.nodes[stream].offset, "duplicate position stream");
                     }
                 }
@@ -413,6 +427,7 @@ fn read_meshes_retaining_skin<'a>(
                         .map(|(w, j)| j[(0..4).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap()] as f32)
                         .collect();
                     skin_indices = Some(main);
+                    skin_weights = Some((joints, weights));
                 }
             }
             (None, None) => {}
@@ -514,6 +529,7 @@ fn read_meshes_retaining_skin<'a>(
             texcoords: texcoords_first,
             additional_texcoords: texcoords,
             skin_indices,
+            skin_weights,
             indices,
         });
     }

@@ -191,14 +191,27 @@ pub fn career_plan(
 
 /// The race profile of a race with the career field: its cars, liveries
 /// and names in grid order (the opponents take the free slots in car
-/// order), the player in `slot`.
-pub fn field_profile(field: &[FieldEntry], race: &Planned) -> String {
+/// order), the player in `slot`. `mate` is the hired team mate's
+/// `driver.id`: with it the profile names the opponents' drivers and the
+/// team mate's car for the race engineer (docs/SPEECH_AUDIO_RESEARCH.md).
+pub fn field_profile(field: &[FieldEntry], race: &Planned, mate: Option<i32>) -> String {
     let player = &field[0];
     let cars: Vec<&FieldEntry> = race.cars.iter().filter_map(|&i| field.get(i)).collect();
     let list = |f: &dyn Fn(&FieldEntry) -> String| cars.iter().map(|c| f(c)).collect::<Vec<_>>().join(",");
+    let driver = |c: &FieldEntry| match c.entrant {
+        Entrant::Ai { driver, .. } => driver.to_string(),
+        Entrant::TeamMate => mate.unwrap_or(0).to_string(),
+        Entrant::Player => "0".into(),
+    };
+    let teammate = cars
+        .iter()
+        .position(|c| c.entrant == Entrant::TeamMate)
+        .filter(|_| mate.is_some())
+        .map_or(0, |k| k + 1);
     format!(
         "# Written by the career screen (docs/CAREER_SCREEN.md) for the next career race.\n\
          [game]\nroute = {}\ncar = {}\nopponent_cars = {}\nopponent_liveries = {}\nopponent_names = {}\n\
+         opponent_drivers = {}\nteammate = {teammate}\n\
          [drive]\nenabled = on\nlaps = {}\nopponents = {}\ngrid_position = {}\n\
          ai_characteristics = ai-driver-characteristics.tsv\n\
          [ai]\ndifficulty = {DIFFICULTY}\ncatchup = on\nchoreographer = on\nmistakes = on\n\
@@ -208,6 +221,7 @@ pub fn field_profile(field: &[FieldEntry], race: &Planned) -> String {
         list(&|c| c.stem.clone()),
         list(&|c| c.livery.to_string()),
         list(&|c| c.name.clone()),
+        list(&driver),
         race.laps,
         cars.len(),
         race.slot + 1,
@@ -952,6 +966,63 @@ impl InProgress {
 /// (40,000), which founds the team.
 pub fn new_career(_cat: &Catalogue) -> Career {
     Career::new()
+}
+
+/// The race engineer's career values for the next race
+/// (docs/SPEECH_AUDIO_RESEARCH.md §19) as `[game] speech_*` lines.
+/// `points` is the own event's points table (none: no standings).
+pub fn speech_lines(cat: &Catalogue, e: &InProgress, next: &Planned, points: Option<&[i32]>) -> String {
+    use grid_tools::career::rules::{self, Entrant};
+    let on = |b: bool| if b { "on" } else { "off" };
+    let own = e.offer.is_none();
+    // isFinalRace (0x640800): an own event's last race.
+    let final_race = own && e.results.len() + 1 == e.races.len();
+    // isFinalCareerEvent (0x637930, 0x637B10): a head-to-head of an international-rank tier.
+    let international = |event: &grid_tools::career::data::Event| {
+        let tier = cat.tiers.iter().find(|t| t.id == event.tier_id);
+        let rank = tier.and_then(|t| cat.ranks.iter().find(|r| r.id == t.rank_id));
+        rank.is_some_and(|r| r.name.ends_with("international"))
+    };
+    let final_event = own && cat.event(e.event_id).is_some_and(|ev| ev.head_to_head && international(ev));
+    let mut lines = format!(
+        "speech_final_race = {}
+speech_final_event = {}
+",
+        on(final_race),
+        on(final_event)
+    );
+    // The standings before this race, by the race's cars (the player first).
+    if let Some(points) = points.filter(|_| !e.field.is_empty()) {
+        let table = rules::standings(points, &e.results);
+        let of = |who: Entrant| table.iter().find(|s| s.entrant == who);
+        let cars: Vec<Entrant> = std::iter::once(Entrant::Player)
+            .chain(next.cars.iter().filter_map(|&i| e.field.get(i)).map(|f| f.entrant))
+            .collect();
+        let standing: Vec<String> = cars.iter().map(|&c| of(c).map_or(0, |s| s.points).to_string()).collect();
+        lines += &format!("speech_standing = {}
+", standing.join(","));
+        if let Some(best) = table.iter().filter(|s| !cars.contains(&s.entrant)).map(|s| s.points).max() {
+            lines += &format!("speech_standing_absent = {best}
+");
+        }
+        // 1_2Finish (0x4EF9C0): the player and the teammate are ranks 0 and 1.
+        let one_two = matches!((of(Entrant::Player), of(Entrant::TeamMate)), (Some(p), Some(t)) if p.rank + t.rank == 1);
+        lines += &format!("speech_one_two = {}
+", on(final_race && one_two));
+    }
+    // A race driver offer's objective (0x62A8D0, 0x451A20 +0x7C).
+    if let Some(offer) = e.offer.and_then(|o| cat.driver_offers.get(&o)) {
+        use grid_tools::career::data::OfferObjective;
+        let place = matches!(offer.objective, OfferObjective::FinishingPlace | OfferObjective::FinishingPlaceLeMans);
+        lines += &format!(
+            "speech_bonus_place = {}
+speech_no_damage = {}
+",
+            if place { offer.objective_finishing_place } else { 0 },
+            on(offer.objective == OfferObjective::NoDamage)
+        );
+    }
+    lines
 }
 
 /// Adds `[game] points` (the event's points table, the results' Points
@@ -2048,11 +2119,15 @@ impl Screen {
         } else if e.field.is_empty() {
             race_profile(&e.car, &e.field_cars, next, self.solo(e))
         } else {
-            field_profile(&e.field, next)
+            field_profile(&e.field, next, self.career.team_mate.as_ref().map(|t| t.driver_id))
         };
-        if let Some(points) = self.event_points(e) {
-            profile = with_points(&profile, &points);
+        let points = self.event_points(e);
+        if let Some(points) = &points {
+            profile = with_points(&profile, points);
         }
+        profile = profile.replacen("[game]
+", &format!("[game]
+{}", speech_lines(&self.cat, e, next, points.as_deref())), 1);
         std::fs::write(self.dir.join(PROFILE), profile).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=go event_id={} race={} route={} laps={} grid={}",
@@ -2709,6 +2784,36 @@ opponent_names = Ann Example,Lee Niven
     }
 
     #[test]
+    #[ignore = "requires the purchased GRID installation (GRID_GAME_ROOT)"]
+    fn the_international_head_to_head_is_the_final_career_event() {
+        let (cat, _, _) = catalogue();
+        let race = Planned { route: String::new(), laps: 1, slot: 0, layout: 0, cars: Vec::new() };
+        let lines = |event_id: i32| {
+            let e = InProgress {
+                offer: None,
+                event_id,
+                car: String::new(),
+                field_cars: Vec::new(),
+                races: vec![race.clone()],
+                field: Vec::new(),
+                results: Vec::new(),
+                settings: None,
+                best_lap: None,
+                top_mph: None,
+                lemans: None,
+            };
+            speech_lines(&cat, &e, &race, None)
+        };
+        // 78 `i_h2h` (international rank); 73 is the United States rookie head-to-head.
+        assert_eq!(lines(78), "speech_final_race = on
+speech_final_event = on
+");
+        assert_eq!(lines(73), "speech_final_race = on
+speech_final_event = off
+");
+    }
+
+    #[test]
     fn thousands_groups_digits() {
         assert_eq!(thousands(0), "0");
         assert_eq!(thousands(30000), "30,000");
@@ -2768,18 +2873,46 @@ opponent_names = Ann Example,Lee Niven
         // bmw_si_tour scores with points table 6 (US_Rookie) [D].
         let points = &cat.points[&cat.event(7).unwrap().points_id];
         assert_eq!(points[..3], [20, 18, 16]);
-        let profile = with_points(&field_profile(&field, &planned[0]), points);
+        let profile = with_points(&field_profile(&field, &planned[0], None), points);
         let mut s = crate::settings::Settings::new();
         s.apply(&profile, Path::new(".")).unwrap();
         assert_eq!(s.points.as_ref(), Some(points));
         assert_eq!((s.opponents, s.grid_position), (Some(19), Some(planned[0].slot + 1)));
         assert_eq!(s.opponent_liveries.as_ref().map(Vec::len), Some(19));
         assert_eq!(s.opponent_names.as_ref().map(Vec::len), Some(19));
+        let drivers = s.opponent_drivers.as_ref().unwrap();
+        assert!(drivers.len() == 19 && drivers.iter().all(|&d| d > 0));
+        assert_eq!(s.teammate, Some(0));
         // A race result maps back to the field's drivers and teams.
         let mut result = out(&(0..20).collect::<Vec<_>>(), false).result;
         to_field(&mut result, &field, &planned[0]);
         let first_ai = &field[planned[0].cars[0]];
         assert_eq!(result.order[1].entrant, first_ai.entrant);
+        // The race engineer's values for race 2, the event's last, after a win in race 1.
+        let e = InProgress {
+            offer: None,
+            event_id: 7,
+            car: "bmw".into(),
+            field_cars: Vec::new(),
+            races: planned.clone(),
+            field: field.clone(),
+            results: vec![result.clone()],
+            settings: None,
+            best_lap: None,
+            top_mph: None,
+            lemans: None,
+        };
+        let lines = speech_lines(&cat, &e, &planned[1], Some(points));
+        let mut s = crate::settings::Settings::new();
+        s.apply(&format!("[game]
+{lines}"), Path::new(".")).unwrap();
+        let speech = s.career_speech.unwrap();
+        assert!(speech.final_race && !speech.final_event && !speech.one_two, "{lines}");
+        // The player won race 1 (20 points); each opponent has the points of its place.
+        assert_eq!(speech.standing.len(), 20);
+        assert_eq!(speech.standing[0], 20);
+        assert_eq!(speech.standing.iter().filter(|&&p| p == 18).count(), 1, "{lines}");
+        assert_eq!((speech.absent_best, speech.bonus_place, speech.no_damage), (None, 0, false));
         let mut c = career.clone();
         let win = out(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], false);
         let p = apply_event(&cat, &mut c, 7, &[win.result.clone(), win.result], &win.settings).unwrap();
@@ -2858,7 +2991,7 @@ opponent_names = Ann Example,Lee Niven
         assert_eq!(planned.len(), 1);
         assert_eq!(planned[0].cars, [1]);
         let mut s = crate::settings::Settings::new();
-        s.apply(&field_profile(&field, &planned[0]), Path::new(".")).unwrap();
+        s.apply(&field_profile(&field, &planned[0], None), Path::new(".")).unwrap();
         assert_eq!((s.opponents, s.points.as_ref()), (Some(1), None));
         // Lost: nothing but sponsor money; won: the prize, no reputation.
         let rival = field[1].entrant;

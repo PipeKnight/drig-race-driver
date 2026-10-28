@@ -8,6 +8,49 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F635](F0635.md) | 2026-10-28 | Owner playtest: Shibuya start lane change, keyboard cockpit wheel |
+| [F634](F0634.md) | 2026-10-28 | Playable 33ae510a4984 with F627-F633, portable copy and APKs 127ecf49439f |
+| [F633](F0633.md) | 2026-10-28 | Track scenery levels of detail as in the original (Washington buildings) |
+| [F632](F0632.md) | 2026-10-28 | grid-app compute pool with 64 MiB thread stacks (nested drive_tick overflow in parallel tests) |
+| [F631](F0631.md) | 2026-10-28 | Cockpit: driver and hands (skinned model, steering poses, two-bone IK) as the original |
+| [F630](F0630.md) | 2026-10-27 | Cockpit: dash gauges (digital readouts, motec bars, shift lights, needles) as the original |
+| [F629](F0629.md) | 2026-10-27 | Speech audio name default Jack (M_46) |
+| [F628](F0628.md) | 2026-10-27 | Playable 6a19dc55687c with F610-F626, portable copy and APKs 081b8353acf7 |
+| [F627](F0627.md) | 2026-10-27 | Cockpit: steering wheel turned by the interior Steering clip, NeAnim reader |
+| [F626](F0626.md) | 2026-10-27 | Faster pre-push: Clippy first, one lock hold per gate, pass cache, per-circuit race tests |
+| [F625](F0625.md) | 2026-10-27 | Cockpit: rear-view mirror rendered as the original (512x128 every frame), cost at the phone's resolution |
+| [F624](F0624.md) | 2026-10-27 | Speech part 3 step 3: championship and career values |
+| [F623](F0623.md) | 2026-10-27 | Speech part 3 step 2: the player-name phrases (audio name) |
+| [F622](F0622.md) | 2026-10-27 | Speech part 3 step 1: the lapping lines from the track order |
+| [F621](F0621.md) | 2026-10-27 | Owner request: PC graphics options as in the original, later |
+| [F620](F0620.md) | 2026-10-27 | AI car wedged against Washington tyre stacks: stuck retire requests removal |
+| [F619](F0619.md) | 2026-10-27 | Camera: every view against the F470 captures with the final code; live captures still needed |
+| [F618](F0618.md) | 2026-10-27 | Camera: the player's cockpit in the head-cam, no car in the bumper views |
+| [F617](F0617.md) | 2026-10-27 | Speech part 2 step 5: the namedAI name phrase |
+| [F616](F0616.md) | 2026-10-27 | Start hitch: prop pieces share meshes; OSD camera without sun cascades; cascade rule checked |
+| [F615](F0615.md) | 2026-10-27 | The Viper race at Washington in every bundled APK: menu entry race_viper, traced data, stage check |
+| [F614](F0614.md) | 2026-10-27 | Speech part 2 step 4: driver identities, key drivers and the teammate |
+| [F613](F0613.md) | 2026-10-27 | Camera: Change View blends as in a race, every view runs every frame |
+| [F612](F0612.md) | 2026-10-27 | Camera: spin hold proven on a deterministic scene, the chase knock, and the original's per-frame clock (camera_fps) |
+| [F611](F0611.md) | 2026-10-27 | Speech part 2 step 3: accidents and AI events by race entry |
+| [F610](F0610.md) | 2026-10-27 | Playable 3f4382d3cc41 with F604-F609, portable copy and APKs f07fcafb0dad |
+| [F609](F0609.md) | 2026-10-27 | Grid start: opponent car levels by distance as in the original |
+| [F608](F0608.md) | 2026-10-27 | Bundled APKs carry every file their event reads: traced file lists, speech lines, a stage check |
+| [F607](F0607.md) | 2026-10-27 | Every route's own road: routesplit.pssg drawn; Washington's missing main straight and Milan's start |
+| [F606](F0606.md) | 2026-10-27 | AI planned offset at the car and the limit clamp's far-side case: Donington |
+| [F605](F0605.md) | 2026-10-27 | Playable f1e871287420 with F593-F603 and portable copy; APKs deferred |
+| [F604](F0604.md) | 2026-10-27 | Android pad rumble and phone vibration from the GameFFB task |
+| [F603](F0603.md) | 2026-10-27 | Phones without BC: OSD textures made before the upload path was chosen are converted; desktop check with BC off the device |
+| [F602](F0602.md) | 2026-10-27 | Force feedback port: GameFFB, DirectInput wheel input and force, XInput rumble |
+| [F601](F0601.md) | 2026-10-27 | AI corner lift only above the brake-line target: Spa La Source |
+| [F600](F0600.md) | 2026-10-27 | Grid start: GPU pass timer and opponent shadow bodies |
+| [F599](F0599.md) | 2026-10-27 | Speech part 2 step 2: the player's damage, performance, strategy and wrong-way lines |
+| [F598](F0598.md) | 2026-10-27 | Force feedback research: the original GameFFB pipeline, snapshot builder and device output |
+| [F597](F0597.md) | 2026-10-27 | Row 90 rechecked on current main: the Le Mans 24 Hours race runs to its end |
+| [F596](F0596.md) | 2026-10-27 | Speech part 2 research: damage, performance, accidents, teammate and key-driver parameters |
+| [F595](F0595.md) | 2026-10-27 | Speech part 1 ported: race start, position calls and finish lines |
+| [F594](F0594.md) | 2026-10-27 | Speech research: triggers, choice and queue of the race engineer's lines |
+| [F593](F0593.md) | 2026-10-27 | Playable b90f145101b3 with F581-F592, portable copy and APKs 3c7a3516e27a |
 | [F592](F0592.md) | 2026-10-27 | Skid marks stream only changed strips |
 | [F591](F0591.md) | 2026-10-27 | Single static parts gather in coarse cells |
 | [F590](F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |

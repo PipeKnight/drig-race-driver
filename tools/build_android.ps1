@@ -38,7 +38,7 @@ param(
     [switch]$Clippy,
     # -Event: the bundled event profile (push_android_data.ps1 -Event); a
     # non-default event adds -<event> to the APK name.
-    [ValidateSet('donington', 'drift-nurburgring')]
+    [ValidateSet('donington', 'drift-nurburgring', 'washington')]
     [string]$Event = 'donington',
     # The private AI characteristics table copied into a drift bundle.
     [string]$Characteristics = (Join-Path $PSScriptRoot '..' | Join-Path -ChildPath 'local' | Join-Path -ChildPath 'ai-driver-characteristics.tsv'),

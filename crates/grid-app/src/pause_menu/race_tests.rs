@@ -120,6 +120,7 @@ pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: 
         after_finish: None,
         throttles: vec![0.; OPPONENTS],
         pacing,
+        ai_messages: Vec::new(),
     };
     let mut trial =
         time_trial::Trial::new(laps, grid_tools::time_trial::Mode::Events, false).unwrap();
@@ -130,6 +131,7 @@ pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: 
         crate::START_SEQUENCE_SECONDS,
     )
     .unwrap();
+    crate::mobile::init_test_pool();
     let mut app = App::new();
     app.add_message::<AppExit>()
         .insert_resource(ButtonInput::<KeyCode>::default())
@@ -419,88 +421,92 @@ fn results(app: &App) -> Vec<crate::post_race::Row> {
     )
 }
 
-#[test]
-#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
-fn retire_from_race_shows_the_results_on_every_circuit() {
+// One test per circuit, so the circuits run in parallel (as one loop: 43 s).
+macro_rules! retire_on {
+    ($($name:ident: $route:ident, $models:expr);* $(;)?) => {$(
+        #[test]
+        #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+        fn $name() {
+            retire_from_race_shows_the_results(grid_tools::route::$route, $models);
+        }
+    )*};
+}
+retire_on!(
+    retire_from_race_shows_the_results_on_donington: DONINGTON, &["lac"];
+    retire_from_race_shows_the_results_on_nurburgring: NURBURGRING, &["bmw"];
+    retire_from_race_shows_the_results_on_istanbul_park: ISTANBUL_PARK, &["lac", "bmw"];
+    // Jarama route 1 finishes at a later gate (docs/JARAMA.md).
+    retire_from_race_shows_the_results_on_jarama: JARAMA, &["lac"];
+    // Yokohama: the first Japanese track, a 2.0 s start (docs/YOKOHAMA.md).
+    retire_from_race_shows_the_results_on_yokohama: YOKOHAMA, &["bmw", "lac"];
+    // Spa: the 7.0 km Grand Prix circuit (docs/SPA.md).
+    retire_from_race_shows_the_results_on_spa: SPA, &["lac"];
+    // The street circuits (docs/STREET_CIRCUITS.md).
+    retire_from_race_shows_the_results_on_milan: MILAN, &["lac"];
+    retire_from_race_shows_the_results_on_shibuya: SHIBUYA, &["bmw"];
+    retire_from_race_shows_the_results_on_san_francisco: SAN_FRANCISCO, &["lac"];
+    // Circuit de la Sarthe: 13.6 km, 20 grid slots (docs/LE_MANS.md).
+    retire_from_race_shows_the_results_on_le_mans: LE_MANS, &["lac"];
+);
+
+fn retire_from_race_shows_the_results(route: &'static str, models: &'static [&'static str]) {
     use crate::post_race::{Cell, Stage};
     use grid_tools::race::{Out, Status};
-    use grid_tools::route::{
-        DONINGTON, ISTANBUL_PARK, JARAMA, LE_MANS, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA,
-        YOKOHAMA,
-    };
-    big_stack(|| {
-        for (route, models) in [
-            (DONINGTON, &["lac"][..]),
-            (NURBURGRING, &["bmw"][..]),
-            (ISTANBUL_PARK, &["lac", "bmw"][..]),
-            // Jarama route 1 finishes at a later gate (docs/JARAMA.md).
-            (JARAMA, &["lac"][..]),
-            // Yokohama: the first Japanese track, a 2.0 s start (docs/YOKOHAMA.md).
-            (YOKOHAMA, &["bmw", "lac"][..]),
-            // Spa: the 7.0 km Grand Prix circuit (docs/SPA.md).
-            (SPA, &["lac"][..]),
-            // The street circuits (docs/STREET_CIRCUITS.md).
-            (MILAN, &["lac"][..]),
-            (SHIBUYA, &["bmw"][..]),
-            (SAN_FRANCISCO, &["lac"][..]),
-            // Circuit de la Sarthe: 13.6 km, 20 grid slots (docs/LE_MANS.md).
-            (LE_MANS, &["lac"][..]),
-        ] {
-            let mut app = race_app_with(route, models, 2, false);
-            keys(&mut app).press(KeyCode::KeyW);
-            while ticks(&app) < 500 {
-                app.update();
-            }
-            keys(&mut app).release(KeyCode::KeyW);
-            tap(&mut app, KeyCode::Escape);
-            // Up wraps to the last button, Retire from Race; Yes by default.
-            tap(&mut app, KeyCode::ArrowUp);
-            tap(&mut app, KeyCode::Enter);
-            tap(&mut app, KeyCode::Enter);
-            assert_eq!(post(&app).stage, Stage::Results, "{route}");
-            assert!(!app.world().resource::<PauseMenu>().open);
-            {
-                let d = app.world().resource::<Driving>();
-                let o = d.opponents.as_ref().unwrap();
-                assert!(o.standings.over(), "{route}");
-                assert_eq!(o.standings.status(0), Status::Out(Out::Retired));
-            }
-            let rows = results(&app);
-            eprintln!("retire_results route={route} rows={rows:?}");
-            assert_eq!(rows.len(), OPPONENTS + 1);
-            assert_eq!(
-                rows.iter().map(|r| r.position).collect::<Vec<_>>(),
-                (1..=OPPONENTS + 1).collect::<Vec<_>>()
-            );
-            let player = rows.iter().find(|r| r.car == 0).unwrap();
-            assert!(matches!(player.time, Cell::Out(Out::Retired, _)));
-            // Every opponent racing on was estimated (the human did not finish).
-            for r in rows.iter().filter(|r| r.car != 0) {
-                assert!(r.estimated || matches!(r.time, Cell::Out(..)), "{route} {r:?}");
-            }
-            let vehicles: Vec<&str> = rows.iter().map(|r| r.vehicle.as_str()).collect();
-            if models.contains(&"bmw") {
-                assert!(vehicles.iter().any(|v| v.contains("BMW")), "{vehicles:?}");
-            }
-            // The race is frozen behind the results.
-            let frozen = digest(&app);
-            for _ in 0..20 {
-                app.update();
-            }
-            assert_eq!(digest(&app), frozen);
-            // Restart Race (the fourth pill) after its confirmation.
-            for _ in 0..3 {
-                tap(&mut app, KeyCode::ArrowRight);
-            }
-            tap(&mut app, KeyCode::Enter);
-            keys(&mut app).press(KeyCode::Enter);
+    big_stack(move || {
+        let mut app = race_app_with(route, models, 2, false);
+        keys(&mut app).press(KeyCode::KeyW);
+        while ticks(&app) < 500 {
             app.update();
-            keys(&mut app).release(KeyCode::Enter);
-            assert_eq!(post(&app).stage, Stage::Hidden);
-            let d = app.world().resource::<Driving>();
-            assert_eq!((d.segment, d.runtime.ticks), (1, 1), "{route}");
-            assert!(!d.opponents.as_ref().unwrap().standings.over());
         }
+        keys(&mut app).release(KeyCode::KeyW);
+        tap(&mut app, KeyCode::Escape);
+        // Up wraps to the last button, Retire from Race; Yes by default.
+        tap(&mut app, KeyCode::ArrowUp);
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(post(&app).stage, Stage::Results, "{route}");
+        assert!(!app.world().resource::<PauseMenu>().open);
+        {
+            let d = app.world().resource::<Driving>();
+            let o = d.opponents.as_ref().unwrap();
+            assert!(o.standings.over(), "{route}");
+            assert_eq!(o.standings.status(0), Status::Out(Out::Retired));
+        }
+        let rows = results(&app);
+        eprintln!("retire_results route={route} rows={rows:?}");
+        assert_eq!(rows.len(), OPPONENTS + 1);
+        assert_eq!(
+            rows.iter().map(|r| r.position).collect::<Vec<_>>(),
+            (1..=OPPONENTS + 1).collect::<Vec<_>>()
+        );
+        let player = rows.iter().find(|r| r.car == 0).unwrap();
+        assert!(matches!(player.time, Cell::Out(Out::Retired, _)));
+        // Every opponent racing on was estimated (the human did not finish).
+        for r in rows.iter().filter(|r| r.car != 0) {
+            assert!(r.estimated || matches!(r.time, Cell::Out(..)), "{route} {r:?}");
+        }
+        let vehicles: Vec<&str> = rows.iter().map(|r| r.vehicle.as_str()).collect();
+        if models.contains(&"bmw") {
+            assert!(vehicles.iter().any(|v| v.contains("BMW")), "{vehicles:?}");
+        }
+        // The race is frozen behind the results.
+        let frozen = digest(&app);
+        for _ in 0..20 {
+            app.update();
+        }
+        assert_eq!(digest(&app), frozen);
+        // Restart Race (the fourth pill) after its confirmation.
+        for _ in 0..3 {
+            tap(&mut app, KeyCode::ArrowRight);
+        }
+        tap(&mut app, KeyCode::Enter);
+        keys(&mut app).press(KeyCode::Enter);
+        app.update();
+        keys(&mut app).release(KeyCode::Enter);
+        assert_eq!(post(&app).stage, Stage::Hidden);
+        let d = app.world().resource::<Driving>();
+        assert_eq!((d.segment, d.runtime.ticks), (1, 1), "{route}");
+        assert!(!d.opponents.as_ref().unwrap().standings.over());
     });
 }
 

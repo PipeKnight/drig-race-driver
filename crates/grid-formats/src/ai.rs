@@ -671,8 +671,23 @@ pub struct Event {
     pub min_speed: f32,
     pub tyre_smoke: bool,
     pub max_active_time: f32,
+    /// `common.message_type` (0x402830): the `AIChoreographerEvent` type the runner
+    /// sends, the [`MESSAGE_TYPES`] index + 1; 0 without one.
+    pub message_type: u8,
     pub kind: EventKind,
 }
+
+/// The `message_type` names in type order (table 0xDA83B0, read by 0x401860):
+/// 1 `blow_tyre` … 7 `brake_lock`. An unknown name is 0.
+pub const MESSAGE_TYPES: [&str; 7] = [
+    "blow_tyre",
+    "blow_engine",
+    "brake_spin",
+    "power_spin",
+    "roll",
+    "retired",
+    "brake_lock",
+];
 
 /// Trigger (0x4067A0) with its event indices and `position` entries.
 #[derive(Debug, Clone, PartialEq)]
@@ -807,11 +822,17 @@ pub fn choreographer(doc: &Document<'_>, discipline: &str) -> Result<Choreograph
     let mut events = Vec::new();
     for ev in named(doc, set, "event")? {
         let e = &doc.elements[ev];
-        let (mut min_speed, mut tyre_smoke) = (0., false);
+        let (mut min_speed, mut tyre_smoke, mut message_type) = (0., false, 0);
         if let [c] = named(doc, ev, "common")?[..] {
             let c = &doc.elements[c];
             min_speed = f(c, "min_speed", 0.)?;
             tyre_smoke = b(c, "tyre_smoke", false)?;
+            if let Some(name) = optional(c, "message_type") {
+                message_type = MESSAGE_TYPES
+                    .iter()
+                    .position(|&n| n == name)
+                    .map_or(0, |i| i as u8 + 1);
+            }
         }
         let kind = match attr(e, "type")? {
             "mistake" => {
@@ -847,6 +868,7 @@ pub fn choreographer(doc: &Document<'_>, discipline: &str) -> Result<Choreograph
             tyre_smoke,
             // Not given in shipped data: built-in 30 s (0xCAFDB8).
             max_active_time: 30.,
+            message_type,
             kind,
         });
     }

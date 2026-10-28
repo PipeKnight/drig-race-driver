@@ -1190,6 +1190,11 @@ pub enum Pressed {
     /// drifted over road while falling (grid-soak's expected loss (i) at the
     /// fall start, coordinator's approval of 26 October 2026).
     NoGroundAtFall,
+    /// Flew, touching nothing, from its last support over a point with no
+    /// packed road triangle at all (a hole in the collision data), and was
+    /// lost (grid-soak's expected loss (i) on the path, coordinator's
+    /// approval of 27 October 2026).
+    NoGroundOnPath,
     /// During the run, a downward route entity box contact in the same or
     /// the previous step as the body's first deep road contact: a body
     /// driven into the ground in one step (grid-soak's separate counter

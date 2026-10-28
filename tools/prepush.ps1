@@ -9,6 +9,7 @@ untracked) and runs the checks of the highest tier any file needs. Windows Power
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\prepush.ps1          # check
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\prepush.ps1 -Plan    # classify only
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\prepush.ps1 -Full    # everything
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\prepush.ps1 -NoCache # ignore recorded passes
 
 Tiers (each also runs the ones above it):
   docs       no cargo. git diff --check (conflict markers fail), relative Markdown links on added
@@ -60,8 +61,18 @@ crate::/super:: references in both directions (a module the reachable code uses,
 that uses reachable code, since it could add impls to reachable types). Only modules outside
 that set (pure presentation readers such as the ETC2 decoder) take the workspace tier.
 
-Logs: -Out (default local\prepush\<time>), one file per step plus summary.md. Every cargo step
-takes the machine-wide build lock (tools\build_lock.ps1). Exit code 0 when every check passed.
+Order and lock: sanity, Clippy, (full: race/soak build, identity), tests, (full: grid-soak quick).
+The cheap checks that fail most come first. The build lock (tools\build_lock.ps1) is taken once
+for the Clippy..tests stretch and given back before grid-soak quick or after a failure.
+
+Pass cache: a gate that passed records its code key in C:\cargo-build\prepush-cache (machine-wide).
+A later run with the same key, i.e. the same content of every non-documentation path, the same
+tier and steps, toolchain and private inputs, runs only sanity and names the run it relies on
+(typically after a rebase onto docs/log-only commits or after log_entry.py check --fix). -NoCache
+runs everything. Details: Get-CodeKey below and docs/TOOLCHAIN.md "Pre-push tiers".
+
+Logs: -Out (default local\prepush\<time>), one file per step plus summary.md. Exit code 0 when
+every check passed (or sanity passed and the cached pass covers the rest).
 #>
 param(
     # Run the full gate whatever changed.
@@ -78,7 +89,9 @@ param(
     [string]$PrivateDir,
     [string]$Out,
     # Run the remaining steps after a failure (default: stop at the first one).
-    [switch]$KeepGoing
+    [switch]$KeepGoing,
+    # Run the cargo steps even when the pass cache has a pass for the same code key.
+    [switch]$NoCache
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'build_lock.ps1')
@@ -166,6 +179,22 @@ function Get-SimReachableFormats {
 }
 
 # ---- classification ---------------------------------------------------------------------------
+# Lines of Rust code that name one of the strings (a test reading a tools/ file); comment lines
+# and Cargo.toml comments do not count (grid-app's Cargo.toml mentions tools/build_android.ps1).
+function Get-RustNaming([string[]]$Strings) {
+    $patterns = @($Strings | Where-Object { $_ })
+    if (-not $patterns.Count) { return @() }
+    # The patterns go through a file: hundreds of -e arguments overflow the command line.
+    $file = Join-Path ([IO.Path]::GetTempPath()) "prepush-patterns-$PID.txt"
+    [IO.File]::WriteAllText($file, (($patterns -join "`n") + "`n"))
+    $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try {
+        $out = @(& git grep -n -F -f $file -- 'crates/*.rs' 2>$null); $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $saved; Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue }
+    if ($code -gt 1) { throw "git grep for tools/ names failed ($code)" }
+    return @($out | Where-Object { $_ -notmatch '^[^:]+:\d+:\s*//' })
+}
+
 $script:formats = $null
 function Get-Class([string]$Path) {
     $p = $Path.Replace('\', '/')
@@ -193,11 +222,7 @@ function Get-Class([string]$Path) {
     if ($p -like 'crates/*') { return New-Class 3 '' 'unknown crate path' }
     if ($p -eq 'tools/identity.tsv') { return New-Class 3 '' 'identity hashes' }
     if ($p -like 'tools/*') {
-        $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-        # Rust code that names the file (a test reading it); comment lines and Cargo.toml
-        # comments do not count (grid-app's Cargo.toml mentions tools/build_android.ps1).
-        $hits = @(& git grep -n -F -e $p -e $leaf -- 'crates/*.rs' 2>$null | Where-Object { $_ -notmatch '^[^:]+:\d+:\s*//' })
-        $ErrorActionPreference = $saved
+        $hits = @(Get-RustNaming @($p, $leaf))
         if ($hits.Count) { return New-Class 2 '' "tool named by crate source ($(($hits[0] -split ':')[0]))" }
         return New-Class 0 '' 'tool script, not used by any crate'
     }
@@ -221,36 +246,6 @@ foreach ($c in $classes) { Write-Host ("  {0,-9} {1}  ({2})" -f $TierNames[$c.Ti
 $tierLine = "prepush: tier $($TierNames[$tier])" + $(if ($tier -eq 1) { " [$($crates -join ', ')]" } else { '' }) + " because $why"
 Write-Host $tierLine
 
-# ---- steps -------------------------------------------------------------------------------------
-$steps = New-Object System.Collections.Generic.List[object]
-function Add-Step([string]$Name, [string]$Kind, [string]$Command) { $steps.Add([pscustomobject]@{ Name = $Name; Kind = $Kind; Command = $Command }) }
-Add-Step 'sanity' 'sanity' 'diff --check, Markdown links, script parse, log tool'
-if ($tier -eq 1) {
-    foreach ($c in $crates) {
-        switch ($c) {
-            'grid-app' { Add-Step 'test-grid-app' 'cargo' 'test --release -p grid-app --no-fail-fast -- --include-ignored' }
-            'grid-tools' { Add-Step 'test-grid-tools-bins' 'cargo' 'test --release -p grid-tools --bins --no-fail-fast -- --include-ignored' }
-            'grid-formats' { Add-Step 'test-grid-formats' 'cargo' 'test --release -p grid-formats --lib --test * --no-fail-fast -- --include-ignored' }
-        }
-    }
-    Add-Step 'clippy-crates' 'cargo' ("clippy --release " + (($crates | ForEach-Object { "-p $_" }) -join ' ') + ' --all-targets -- -D warnings')
-}
-if ($tier -ge 2) {
-    Add-Step 'test-workspace' 'cargo' 'test --workspace --release --lib --test * --bin grid-app --no-fail-fast -- --include-ignored'
-    Add-Step 'clippy-workspace' 'cargo' 'clippy --release --workspace --all-targets -- -D warnings'
-}
-if ($tier -ge 3) {
-    Add-Step 'build-race-soak' 'cargo' 'build --release -p grid-tools --bin grid-opponent-race --bin grid-soak'
-    Add-Step 'identity' 'identity' 'grid-opponent-race solo, 12-car, 12-car DF+AI vs tools/identity.tsv'
-    Add-Step 'soak-quick' 'soak' 'grid-soak quick'
-}
-foreach ($s in $steps) { Write-Host ("  step {0,-20} {1}" -f $s.Name, $s.Command) }
-if ($Plan) { exit 0 }
-
-# ---- environment -------------------------------------------------------------------------------
-if (-not $Out) { $Out = Join-Path $repo ('local\prepush\' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
-$Out = [IO.Path]::GetFullPath($Out)
-New-Item -ItemType Directory -Force -Path $Out | Out-Null
 if (-not $PrivateDir) {
     $PrivateDir = Join-Path $repo 'local'
     if (-not (Test-Path -LiteralPath (Join-Path $PrivateDir 'body-contact-directions.bin'))) {
@@ -266,6 +261,111 @@ $private = [ordered]@{
     GRID_DEFORMATION_PARAMETERS = Join-Path $PrivateDir 'deformation-parameters.bin'
 }
 $characteristics = Join-Path $PrivateDir 'ai-driver-characteristics.tsv'
+
+# ---- steps -------------------------------------------------------------------------------------
+# Cheap, often-failing checks first: Clippy (half of the failures, about 1 min) before the tests
+# (7-12 min); in the full tier the identity check (about 1.5 min) before the tests too. Steps
+# with Lock run under one hold of the build lock (taken at the first, released before the first
+# step without it), so a gate does not queue again between its own steps.
+$steps = New-Object System.Collections.Generic.List[object]
+function Add-Step([string]$Name, [string]$Kind, [string]$Command, [bool]$Lock = $true) { $steps.Add([pscustomobject]@{ Name = $Name; Kind = $Kind; Command = $Command; Lock = $Lock }) }
+Add-Step 'sanity' 'sanity' 'diff --check, Markdown links, script parse, log tool' $false
+if ($tier -eq 1) {
+    Add-Step 'clippy-crates' 'cargo' ("clippy --release " + (($crates | ForEach-Object { "-p $_" }) -join ' ') + ' --all-targets -- -D warnings')
+    foreach ($c in $crates) {
+        switch ($c) {
+            'grid-app' { Add-Step 'test-grid-app' 'cargo' 'test --release -p grid-app --no-fail-fast -- --include-ignored' }
+            'grid-tools' { Add-Step 'test-grid-tools-bins' 'cargo' 'test --release -p grid-tools --bins --no-fail-fast -- --include-ignored' }
+            'grid-formats' { Add-Step 'test-grid-formats' 'cargo' 'test --release -p grid-formats --lib --test * --no-fail-fast -- --include-ignored' }
+        }
+    }
+}
+if ($tier -ge 2) { Add-Step 'clippy-workspace' 'cargo' 'clippy --release --workspace --all-targets -- -D warnings' }
+if ($tier -ge 3) {
+    Add-Step 'build-race-soak' 'cargo' 'build --release -p grid-tools --bin grid-opponent-race --bin grid-soak'
+    Add-Step 'identity' 'identity' 'grid-opponent-race solo, 12-car, 12-car DF+AI vs tools/identity.tsv'
+}
+if ($tier -ge 2) { Add-Step 'test-workspace' 'cargo' 'test --workspace --release --lib --test * --bin grid-app --no-fail-fast -- --include-ignored' }
+# grid-soak quick builds nothing and runs for minutes: outside the lock.
+if ($tier -ge 3) { Add-Step 'soak-quick' 'soak' 'grid-soak quick' $false }
+
+# ---- pass cache --------------------------------------------------------------------------------
+# A gate that passed records the key of everything its cargo steps depend on; a later run with the
+# same key (typically after a rebase onto docs- or log-only commits, or after log_entry.py check
+# --fix renumbered an entry) runs only the sanity step. The key covers the content of every path
+# outside documentation (all of crates/, settings, Cargo.*, toolchain, .cargo, tools/identity.tsv
+# and tools files Rust code names, any unknown path) in the working tree, not just the diff, so a
+# pass never carries over to different upstream code; plus the tier, the step commands, this
+# script, rustc -vV, ~/.cargo/config.toml and the private inputs (path, size, time). Machine-wide
+# (C:\cargo-build\prepush-cache), so a pass in one checkout covers the same code in another.
+$CacheRoot = 'C:\cargo-build\prepush-cache'
+function Test-KeyPath([string]$p, [hashtable]$NamedTools) {
+    if ($p -like 'crates/*' -or $p -like 'settings/*' -or $p -eq 'android/app/src/main/assets/grid-import/settings.ini') { return $true }
+    if ($p -like 'tools/*') { return ($p -eq 'tools/identity.tsv' -or $NamedTools.ContainsKey($p)) }
+    if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like 'android/*' -or $p -like '*.md' -or $p -like '*.cmd' -or $p -in @('LICENSE', '.gitignore')) { return $false }
+    return $true
+}
+function Get-CodeKey {
+    # The working tree (tracked, modified and untracked files) as a tree object, through a copy
+    # of the index so the real one is untouched.
+    $index = [IO.Path]::GetFullPath((Invoke-Git rev-parse --git-path index | Select-Object -First 1).Trim())
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "prepush-index-$PID"
+    Copy-Item -LiteralPath $index -Destination $tmp -Force
+    $env:GIT_INDEX_FILE = $tmp
+    try { $null = Invoke-Git add -A; $tree = (Invoke-Git write-tree | Select-Object -First 1).Trim() }
+    finally { Remove-Item Env:\GIT_INDEX_FILE -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $tmp, "$tmp.lock" -Force -ErrorAction SilentlyContinue }
+    $entries = @(Invoke-Git ls-tree -r --full-tree $tree)
+    $tools = @($entries | ForEach-Object { ($_ -split "`t", 2)[1] } | Where-Object { $_ -like 'tools/*' })
+    $named = @{}
+    $hitText = (@(Get-RustNaming @($tools + @($tools | ForEach-Object { Split-Path -Leaf $_ }) | Sort-Object -Unique)) -join "`n")
+    foreach ($t in $tools) { if ($hitText.Contains($t) -or $hitText.Contains((Split-Path -Leaf $t))) { $named[$t] = $true } }
+    $text = New-Object System.Text.StringBuilder
+    [void]$text.AppendLine("prepush-key 1")
+    [void]$text.AppendLine("tier $($TierNames[$tier]) [$($crates -join ',')]")
+    foreach ($s in $steps) { [void]$text.AppendLine("step $($s.Name) $($s.Command)") }
+    [void]$text.AppendLine("script $((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash)")
+    $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    [void]$text.AppendLine("rustc $((& rustc -vV 2>$null) -join ' ')")
+    $ErrorActionPreference = $saved
+    $config = Join-Path $env:USERPROFILE '.cargo\config.toml'
+    if (Test-Path -LiteralPath $config) { [void]$text.AppendLine("cargo-config $((Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash)") }
+    foreach ($k in $private.Keys) { [void]$text.AppendLine("env $k=$($private[$k])") }
+    foreach ($f in @($private.GRID_CONTACT_DIRECTIONS, $private.GRID_BODY_EVENT_PARAMETERS, $private.GRID_DEFORMATION_PARAMETERS, $characteristics)) {
+        $i = Get-Item -LiteralPath $f -ErrorAction SilentlyContinue
+        [void]$text.AppendLine("private $f $(if ($i) { "$($i.Length) $($i.LastWriteTimeUtc.Ticks)" } else { 'missing' })")
+    }
+    $kept = 0
+    foreach ($e in $entries) {
+        if (Test-KeyPath ($e -split "`t", 2)[1] $named) { [void]$text.AppendLine($e); $kept++ }
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text.ToString())) | ForEach-Object { $_.ToString('x2') })
+    return [pscustomobject]@{ Key = $hash; Paths = $kept; Tree = $tree }
+}
+function Get-CachedPass([string]$Key) {
+    $file = Join-Path $CacheRoot "$Key.json"
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    try { $r = Get-Content -Raw -LiteralPath $file | ConvertFrom-Json } catch { return $null }
+    if ($r.key -ne $Key -or $r.tier -ne $TierNames[$tier]) { return $null }
+    return $r
+}
+
+foreach ($s in $steps) { Write-Host ("  step {0,-20} {1}" -f $s.Name, $s.Command) }
+
+$codeKey = $null; $cached = $null
+if ($tier -ge 1) {
+    $k0 = Get-Date
+    $codeKey = Get-CodeKey
+    if (-not $NoCache) { $cached = Get-CachedPass $codeKey.Key }
+    Write-Host ("prepush: code key {0} ({1} paths, {2:N1} s){3}" -f $codeKey.Key.Substring(0, 16), $codeKey.Paths, ((Get-Date) - $k0).TotalSeconds,
+        $(if ($cached) { "; passed tier $($cached.tier) at $($cached.finished_local) in $($cached.out) (HEAD $($cached.head.Substring(0, 12))): cargo steps will be skipped" } elseif ($NoCache) { '; -NoCache' } else { '; no recorded pass' }))
+}
+if ($Plan) { exit 0 }
+
+# ---- environment -------------------------------------------------------------------------------
+if (-not $Out) { $Out = Join-Path $repo ('local\prepush\' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
+$Out = [IO.Path]::GetFullPath($Out)
+New-Item -ItemType Directory -Force -Path $Out | Out-Null
 if ($tier -ge 1) {
     foreach ($k in $private.Keys) {
         if (-not (Test-Path -LiteralPath $private[$k])) { throw "prepush: $k input $($private[$k]) is missing (-PrivateDir, -GameRoot)" }
@@ -413,19 +513,24 @@ $started = Get-Date
 $cargo = (Get-Command cargo).Source
 $failedAny = $false
 $n = 0
+$gateLock = $null
+$cachedNote = if ($cached) { "cached: tier $($cached.tier) passed with the same code key at $($cached.finished_local), run $($cached.out)" } else { $null }
+try {
 foreach ($s in $steps) {
     $n++
     $log = Join-Path $Out ('{0:D2}-{1}.log' -f $n, $s.Name)
+    if ($cached -and $s.Kind -ne 'sanity') { $results.Add([pscustomobject]@{ Name = $s.Name; Status = 'skipped (cached pass)'; Seconds = 0; Waited = 0 }); continue }
     if ($failedAny -and -not $KeepGoing) { $results.Add([pscustomobject]@{ Name = $s.Name; Status = 'skipped'; Seconds = 0; Waited = 0 }); continue }
-    Write-Host "prepush: $($s.Name) ..."
     $t0 = Get-Date; $waited = 0; $code = 1
+    if ($gateLock -and -not $s.Lock) { Exit-BuildLock $gateLock; $gateLock = $null }
+    if ($s.Lock -and -not $gateLock) {
+        $gateLock = Enter-BuildLock -Purpose "prepush $($TierNames[$tier]) ($(@($steps | Where-Object { $_.Lock } | ForEach-Object { $_.Name }) -join ', '))"
+        $waited = [int]($gateLock.Acquired - $t0).TotalSeconds
+    }
+    Write-Host "prepush: $($s.Name) ..."
     switch ($s.Kind) {
         'sanity' { $code = Invoke-Sanity $log }
-        'cargo' {
-            $lock = Enter-BuildLock -Purpose "prepush $($s.Name)"
-            $waited = [int]($lock.Acquired - $t0).TotalSeconds
-            try { $code = Invoke-Logged $log $cargo $s.Command } finally { Exit-BuildLock $lock }
-        }
+        'cargo' { $code = Invoke-Logged $log $cargo $s.Command }
         'identity' { $code = Invoke-Identity $log }
         'soak' {
             $env:GRID_AI_CHARACTERISTICS = $characteristics
@@ -455,18 +560,48 @@ foreach ($s in $steps) {
     }
     $results.Add([pscustomobject]@{ Name = $s.Name; Status = $status; Seconds = $secs; Waited = $waited })
     Write-Host ("prepush: {0} {1} in {2} s{3}" -f $s.Name, $status, $secs, $(if ($waited) { " ($waited s waiting for the build lock)" } else { '' }))
+    # A failed gate gives the lock back at once (the remaining steps are skipped).
+    if ($failedAny -and -not $KeepGoing -and $gateLock) { Exit-BuildLock $gateLock; $gateLock = $null }
 }
+} finally { if ($gateLock) { Exit-BuildLock $gateLock; $gateLock = $null } }
 $total = [int]((Get-Date) - $started).TotalSeconds
+if ($cachedNote) { Write-Host "prepush: cargo steps skipped, $cachedNote" }
+# Record the pass, unless files changed while the checks ran (the key is taken again).
+$recorded = $null
+if ($codeKey -and -not $failedAny -and -not $cached) {
+    $again = Get-CodeKey
+    if ($again.Key -eq $codeKey.Key) {
+        New-Item -ItemType Directory -Force -Path $CacheRoot | Out-Null
+        $record = [ordered]@{
+            key = $codeKey.Key; tier = $TierNames[$tier]; crates = @($crates); tree = $codeKey.Tree
+            head = $head; merge_base = $mergeBase; base = $Base; base_head = $baseHead
+            worktree = $repo; out = $Out; total_s = $total
+            finished_local = (Get-Date -Format 'yyyy-MM-dd HH:mm'); finished_utc = [DateTime]::UtcNow.ToString('o')
+            steps = @($results | ForEach-Object { "$($_.Name) $($_.Status) $($_.Seconds) s" })
+        }
+        $file = Join-Path $CacheRoot "$($codeKey.Key).json"
+        [IO.File]::WriteAllText("$file.$PID.tmp", ($record | ConvertTo-Json -Depth 4))
+        Move-Item -LiteralPath "$file.$PID.tmp" -Destination $file -Force
+        $recorded = $file
+        # Records are small; drop those older than 30 days.
+        Get-ChildItem -LiteralPath $CacheRoot -Filter '*.json' -File | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Force -ErrorAction SilentlyContinue
+    } else { Write-Host 'prepush: files changed while the checks ran; pass not recorded' }
+}
 $md = New-Object System.Collections.Generic.List[string]
 $md.Add("# prepush $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
 $md.Add('')
 $md.Add("- HEAD $head, merge base $mergeBase, $Base $baseHead")
 $md.Add("- $tierLine")
 $md.Add("- total $total s")
+if ($codeKey) { $md.Add("- code key $($codeKey.Key) ($($codeKey.Paths) paths)" + $(if ($recorded) { ", pass recorded in $recorded" } else { '' })) }
+if ($cachedNote) {
+    $md.Add("- cargo steps not run: the same code key passed tier $($cached.tier) at $($cached.finished_local) in $($cached.out)")
+    $md.Add("  (HEAD $($cached.head), $($cached.base) $($cached.base_head)); only sanity ran here")
+}
 $md.Add('')
 $md.Add('| step | status | seconds | lock wait |'); $md.Add('|---|---|---|---|')
 foreach ($r in $results) { $md.Add("| $($r.Name) | $($r.Status) | $($r.Seconds) | $($r.Waited) |") }
 $md.Add(''); $md.Add('Changed paths:'); foreach ($c in $classes) { $md.Add("- $($TierNames[$c.Tier]) ``$($c.Path)`` ($($c.Reason))") }
 $md | Set-Content -LiteralPath (Join-Path $Out 'summary.md') -Encoding utf8
-Write-Host "prepush: $(if ($failedAny) { 'FAILED' } else { 'passed' }), tier $($TierNames[$tier]), $total s; logs in $Out"
+Write-Host "prepush: $(if ($failedAny) { 'FAILED' } elseif ($cached) { 'passed (sanity; cargo steps by the cached pass)' } else { 'passed' }), tier $($TierNames[$tier]), $total s; logs in $Out"
 exit $(if ($failedAny) { 1 } else { 0 })

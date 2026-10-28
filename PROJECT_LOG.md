@@ -100,7 +100,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - Android P9–P12: code-only APK importing the user's own GRID folder (F405), bundled event APKs
   (F418), touch/tilt/pad controls (P11, F404), per-system profiling (F395); docs/ANDROID.md.
 - Open: the a11cddf7de27 APKs are not tested on the phone; CPU-bound at about 30–34 FPS (row 85);
-  no force feedback or wheel layer on any platform (row 22).
+  pad rumble and phone vibration are not felt on the phone yet (row 22).
 
 ### Tooling and process
 - Build gate `tools/build_gate.ps1` and nightly soak (F524); shared seed build and rust-lld (F467);
@@ -115,7 +115,7 @@ The full list is [docs/FIDELITY_BACKLOG.md](docs/FIDELITY_BACKLOG.md) (rows 1–
 impact" at its head). The most visible now:
 1. AI first-corner pile-ups (rows 30, 31).
 2. Missing sounds and the artificial engine (rows 70–72).
-3. No force feedback, wheel layer or rumble (row 22).
+3. Force feedback, wheel input and pad rumble on Windows (F602), pad and phone vibration on Android (F604) need the owner's wheel test (row 22).
 4. Le Mans body-contact blow-up (row 90).
 5. Drift Battle stand-in cars and low AI drift scores (rows 36, 52).
 Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG.md](docs/CAPTURE_BACKLOG.md).
@@ -148,6 +148,49 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F635](log/F0635.md) | 2026-10-28 | Owner playtest: Shibuya start lane change, keyboard cockpit wheel |
+| [F634](log/F0634.md) | 2026-10-28 | Playable 33ae510a4984 with F627-F633, portable copy and APKs 127ecf49439f |
+| [F633](log/F0633.md) | 2026-10-28 | Track scenery levels of detail as in the original (Washington buildings) |
+| [F632](log/F0632.md) | 2026-10-28 | grid-app compute pool with 64 MiB thread stacks (nested drive_tick overflow in parallel tests) |
+| [F631](log/F0631.md) | 2026-10-28 | Cockpit: driver and hands (skinned model, steering poses, two-bone IK) as the original |
+| [F630](log/F0630.md) | 2026-10-27 | Cockpit: dash gauges (digital readouts, motec bars, shift lights, needles) as the original |
+| [F629](log/F0629.md) | 2026-10-27 | Speech audio name default Jack (M_46) |
+| [F628](log/F0628.md) | 2026-10-27 | Playable 6a19dc55687c with F610-F626, portable copy and APKs 081b8353acf7 |
+| [F627](log/F0627.md) | 2026-10-27 | Cockpit: steering wheel turned by the interior Steering clip, NeAnim reader |
+| [F626](log/F0626.md) | 2026-10-27 | Faster pre-push: Clippy first, one lock hold per gate, pass cache, per-circuit race tests |
+| [F625](log/F0625.md) | 2026-10-27 | Cockpit: rear-view mirror rendered as the original (512x128 every frame), cost at the phone's resolution |
+| [F624](log/F0624.md) | 2026-10-27 | Speech part 3 step 3: championship and career values |
+| [F623](log/F0623.md) | 2026-10-27 | Speech part 3 step 2: the player-name phrases (audio name) |
+| [F622](log/F0622.md) | 2026-10-27 | Speech part 3 step 1: the lapping lines from the track order |
+| [F621](log/F0621.md) | 2026-10-27 | Owner request: PC graphics options as in the original, later |
+| [F620](log/F0620.md) | 2026-10-27 | AI car wedged against Washington tyre stacks: stuck retire requests removal |
+| [F619](log/F0619.md) | 2026-10-27 | Camera: every view against the F470 captures with the final code; live captures still needed |
+| [F618](log/F0618.md) | 2026-10-27 | Camera: the player's cockpit in the head-cam, no car in the bumper views |
+| [F617](log/F0617.md) | 2026-10-27 | Speech part 2 step 5: the namedAI name phrase |
+| [F616](log/F0616.md) | 2026-10-27 | Start hitch: prop pieces share meshes; OSD camera without sun cascades; cascade rule checked |
+| [F615](log/F0615.md) | 2026-10-27 | The Viper race at Washington in every bundled APK: menu entry race_viper, traced data, stage check |
+| [F614](log/F0614.md) | 2026-10-27 | Speech part 2 step 4: driver identities, key drivers and the teammate |
+| [F613](log/F0613.md) | 2026-10-27 | Camera: Change View blends as in a race, every view runs every frame |
+| [F612](log/F0612.md) | 2026-10-27 | Camera: spin hold proven on a deterministic scene, the chase knock, and the original's per-frame clock (camera_fps) |
+| [F611](log/F0611.md) | 2026-10-27 | Speech part 2 step 3: accidents and AI events by race entry |
+| [F610](log/F0610.md) | 2026-10-27 | Playable 3f4382d3cc41 with F604-F609, portable copy and APKs f07fcafb0dad |
+| [F609](log/F0609.md) | 2026-10-27 | Grid start: opponent car levels by distance as in the original |
+| [F608](log/F0608.md) | 2026-10-27 | Bundled APKs carry every file their event reads: traced file lists, speech lines, a stage check |
+| [F607](log/F0607.md) | 2026-10-27 | Every route's own road: routesplit.pssg drawn; Washington's missing main straight and Milan's start |
+| [F606](log/F0606.md) | 2026-10-27 | AI planned offset at the car and the limit clamp's far-side case: Donington |
+| [F605](log/F0605.md) | 2026-10-27 | Playable f1e871287420 with F593-F603 and portable copy; APKs deferred |
+| [F604](log/F0604.md) | 2026-10-27 | Android pad rumble and phone vibration from the GameFFB task |
+| [F603](log/F0603.md) | 2026-10-27 | Phones without BC: OSD textures made before the upload path was chosen are converted; desktop check with BC off the device |
+| [F602](log/F0602.md) | 2026-10-27 | Force feedback port: GameFFB, DirectInput wheel input and force, XInput rumble |
+| [F601](log/F0601.md) | 2026-10-27 | AI corner lift only above the brake-line target: Spa La Source |
+| [F600](log/F0600.md) | 2026-10-27 | Grid start: GPU pass timer and opponent shadow bodies |
+| [F599](log/F0599.md) | 2026-10-27 | Speech part 2 step 2: the player's damage, performance, strategy and wrong-way lines |
+| [F598](log/F0598.md) | 2026-10-27 | Force feedback research: the original GameFFB pipeline, snapshot builder and device output |
+| [F597](log/F0597.md) | 2026-10-27 | Row 90 rechecked on current main: the Le Mans 24 Hours race runs to its end |
+| [F596](log/F0596.md) | 2026-10-27 | Speech part 2 research: damage, performance, accidents, teammate and key-driver parameters |
+| [F595](log/F0595.md) | 2026-10-27 | Speech part 1 ported: race start, position calls and finish lines |
+| [F594](log/F0594.md) | 2026-10-27 | Speech research: triggers, choice and queue of the race engineer's lines |
+| [F593](log/F0593.md) | 2026-10-27 | Playable b90f145101b3 with F581-F592, portable copy and APKs 3c7a3516e27a |
 | [F592](log/F0592.md) | 2026-10-27 | Skid marks stream only changed strips |
 | [F591](log/F0591.md) | 2026-10-27 | Single static parts gather in coarse cells |
 | [F590](log/F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |
@@ -165,49 +208,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F578](log/F0578.md) | 2026-10-26 | Engine audio: the gear whine ported (GearPreset loop per gear, envelope, upshift wobble) |
 | [F577](log/F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
 | [F576](log/F0576.md) | 2026-10-26 | Static world batching |
-| [F575](log/F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
-| [F574](log/F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
-| [F573](log/F0573.md) | 2026-10-26 | Desktop Auto render height and compute threads on the desktop |
-| [F572](log/F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |
-| [F571](log/F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |
-| [F570](log/F0570.md) | 2026-10-25 | Disk cleanup: obsolete APKs, idle sessions' build dirs, uncited behavior captures |
-| [F569](log/F0569.md) | 2026-10-24 | Playable 9c1bfe65e68f with F567-F568, portable copy and APKs 3cdbf523a7f0 |
-| [F568](log/F0568.md) | 2026-10-24 | Derby frame rate measured against F561; debris contacts and lift_sunk on the compute pool, bit-identical |
-| [F567](log/F0567.md) | 2026-10-24 | Playable 7360a4865f54 with F563-F566, portable copy and APKs a2b4991d6817 |
-| [F566](log/F0566.md) | 2026-10-24 | Every broken piece on the phone tracks gets a draw: bundle roots, skinned damage meshes, suffixed names |
-| [F565](log/F0565.md) | 2026-10-24 | Detached panels are world bodies: 9EC9B0 part decisions in the simulation, cars collide with the panels |
-| [F564](log/F0564.md) | 2026-10-24 | Broken tyres drawn on their bodies and lifted out of the road |
-| [F563](log/F0563.md) | 2026-10-23 | Detached panels settle lying flat: rigid box with the original's detached-part body parameters |
-| [F562](log/F0562.md) | 2026-10-23 | Playable 14696d47fe1e with no mid-air parking (F561), portable copy and APKs 99fef6aca274 |
-| [F561](log/F0561.md) | 2026-10-23 | No body parks in the air: far islands rest for turnOffTime before they stop; detached parts land on the track |
-| [F560](log/F0560.md) | 2026-10-23 | Playable 67dbeb3a5158 with Render height Auto (F559), portable copy and APKs f2af457cca2c |
-| [F559](log/F0559.md) | 2026-10-23 | Render height Auto (dynamic 480-720) on the Video screen, simulation-only CPU check, Auto cycle row removed |
-| [F558](log/F0558.md) | 2026-10-22 | Playable fc0ff3aa7868 with resolution-only dynamic preset (F555-F556) and the tyre-stack chain fix (F557), portable copy and APKs 94e06d136784 |
-| [F557](log/F0557.md) | 2026-10-22 | Pieces no longer break tyre stacks: the original's car-only break pairing (0x7C46A0) |
-| [F556](log/F0556.md) | 2026-10-22 | Dynamic render height 480-720 rows on Android; UI, HUD and OSD drawn at the window's resolution |
-| [F555](log/F0555.md) | 2026-10-22 | Mobile preset reduced to the render resolution (720 rows) and compute threads; phone Auto cycle table |
-| [F554](log/F0554.md) | 2026-10-22 | Playable b89b4be10d30 with the phone menu fixes (F553), portable copy and APKs 9ac27f9a958a |
-| [F553](log/F0553.md) | 2026-10-22 | Phone UI: Performance test shows all rows with Auto cycle first; full Fira Mono as the UI font so Nürburgring renders on Android |
-| [F552](log/F0552.md) | 2026-10-22 | Playable 01f22b4c80d3 with the tyre-pile fix (F551), portable copy and APKs f883be0507f0 |
-| [F551](log/F0551.md) | 2026-10-22 | Tyre piles sleep: original cylinder pair contacts and shell masses |
-| [F550](log/F0550.md) | 2026-10-22 | Playable 3bc513002bff with the mobile preset (F549), portable copy and APKs 32a08aa8e4a4 |
-| [F549](log/F0549.md) | 2026-10-22 | Mobile preset: Android default for 60 FPS (720 rows, one shadow cascade, small props culled, shorter ground cover, more compute threads); perf_test … |
-| [F548](log/F0548.md) | 2026-10-22 | Floating tyre report: not reproduced, diagnostics |
-| [F547](log/F0547.md) | 2026-10-21 | Playable 945575e57651 with the cheaper tick and parking (F546), portable copy and APKs 6087fbcafa30 |
-| [F546](log/F0546.md) | 2026-10-21 | Physics tick cost and parking |
-| [F545](log/F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
-| [F544](log/F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
-| [F543](log/F0543.md) | 2026-10-21 | Physics steps per rendered frame: original one step of the frame delta, port catch-up, no port |
-| [F542](log/F0542.md) | 2026-10-21 | Playable c4b2673f4cfc with body sleeping (F541), portable copy and APKs ee1880b472d2 |
-| [F541](log/F0541.md) | 2026-10-21 | Rigid-body sleeping for prop pieces and lost wheels |
-| [F540](log/F0540.md) | 2026-10-21 | APKs 239583f319e3: drift and drift-profile builds share one bundle |
-| [F539](log/F0539.md) | 2026-10-21 | Bundled APK races start: Donington bundle carries the database; profile APK on the drift bundle |
-| [F538](log/F0538.md) | 2026-10-21 | grid-app --headless: a full event at CPU speed, bit-identical to the window; tick time by stage and world size |
-| [F537](log/F0537.md) | 2026-10-21 | A held lost wheel no longer teleports the pieces of a later break (row 90) |
-| [F536](log/F0536.md) | 2026-10-21 | Android seed reuse: build_android.ps1 drops MSYSTEM/CYGWIN so cargo-ndk paths match the seed |
-| [F535](log/F0535.md) | 2026-10-21 | Indexes of every tool and document: tools/README.md and docs/INDEX.md, generated by tools/index_files.py |
-| [F534](log/F0534.md) | 2026-10-21 | Pre-push tiers, machine-wide build lock and the release script |
-| [F533](log/F0533.md) | 2026-10-21 | Shared reverse-engineering base: docs/re/symbols.tsv, tools/re, one master Ghidra project |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

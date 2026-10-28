@@ -37,7 +37,7 @@ Grammar:
 | | `body_events` | `derive`, a BP01 path, or `off` | `--body-events PATH\|derive` |
 | | `deformation` | `derive`, a DF01 path, or `off` | `--deformation PATH\|derive` |
 | `[assists]` | `tcs`, `stability`, `braking`, `gearbox`, `input` | as `--assists`; `tcs` and `braking` also `0`/`25`/`50`/`100` (25/50 % are AUTHORED graded aids, [DRIVER_AIDS.md](DRIVER_AIDS.md)). The front end's Driver Aids screen saves `tcs`, `stability`, `braking`, `gearbox` here in `<data dir>/settings.ini` | `--assists`, `--assists-file` |
-| `[input]` | `device`, `*_deadzone`, `*_saturation`; phone controls `touch`, `tilt`, `tilt_max_angle`, `tilt_neutral`, `tilt_smoothing` ([ANDROID.md](ANDROID.md) "Controls") | as `--input` | `--input` |
+| `[input]` | `device`, `*_deadzone`, `*_saturation`; phone controls `touch`, `tilt`, `tilt_max_angle`, `tilt_neutral`, `tilt_smoothing` ([ANDROID.md](ANDROID.md) "Controls"); force feedback `force_feedback`, `feedback_force`, `feedback_friction`, `feedback_effects` and the generic wheel preset's `wheel_*` keys ([FORCE_FEEDBACK.md](FORCE_FEEDBACK.md) §7.1) | as `--input` | `--input` |
 | `[ai]` | `difficulty` (0..1 or `normal`), `catchup` (`on` = `rd_{star+1}_star` of the difficulty, `touge` = its `_touge` variant, an explicit `rd_N_star`, `off`), `choreographer`, `mistakes` (`on`/`off`) | 0.606, `on` (`rd_2_star`), on, on (AI_DRIVER_PORT.md, "Mistakes, failures and race pacing") | `--ai` |
 | `[sound]` | `effects` | 0..100, percent (default 100): the pause menu's Effects Volume, engine and tyre sound | none |
 | | `speech`, `music` | 0..100, percent (default 100): the pause menu's Speech and Music Volume, saved for later (the port plays no speech or music yet) | none |
@@ -59,11 +59,12 @@ Grammar:
 | | `look_back` | `on`/`off` | `GRID_LOOK_BACK` |
 | | `damage_zones` | `on`/`off` | `GRID_DAMAGE_ZONES` |
 | | `damage_camera` | `car,x,y,z` | `GRID_DAMAGE_CAMERA` |
-| | `texture_fallback` | `etc2`: private ETC2 cache; `rgba8` or `on`: CPU BC decode; `off`: automatic (BC, ETC2, RGBA8 by GPU support) (P8) | `GRID_TEXTURE_FALLBACK=1`, `rgba8` or `etc2` |
+| | `texture_fallback` | `etc2`: private ETC2 cache; `rgba8` or `on`: CPU BC decode; `off`: automatic (BC, ETC2, RGBA8 by GPU support) (P8). A forced value also leaves `TEXTURE_COMPRESSION_BC` off the device, so the desktop rejects any BC texture as a phone without BC does (F603) | `GRID_TEXTURE_FALLBACK=1`, `rgba8` or `etc2` |
 | | `replay_capture` | seconds: after a scripted drive (`--drive-ticks`), play an Instant Replay and delay `--render` until it has run this long (docs/REPLAY.md) | `GRID_REPLAY_CAPTURE=S` |
 | | `flashback_capture` | seconds: in that Instant Replay, Jump In (Flashback) once it has run this long; the drive continues from the jump-in frame (docs/FLASHBACK.md). Use a value below `replay_capture` | `GRID_FLASHBACK_CAPTURE=S` |
 | | `max_ticks_per_frame` | interactive window only: at most this many 16 ms ticks per rendered frame, default 4; `0` restores Bevy's 250 ms clamp, for comparisons (docs/FRAME_STEPPING.md) | `GRID_MAX_TICKS_PER_FRAME=N` |
 | | `tick_delay_ms` | milliseconds slept in every vehicle tick: a forced slow tick for frame-rate checks (docs/FRAME_STEPPING.md) | `GRID_TICK_DELAY_MS=MS` |
+| | `camera_fps` | frames per second of race time: the in-race views step by the original's per-frame rules at this rate (head-cam springs, look smoothing, follow damp, spin hold), for comparisons with the original at 60 or 165 fps; unset, one step per 16 ms tick (docs/CAMERA_VIEWS.md §3 "Camera clock") | `GRID_CAMERA_FPS=F` |
 
 Notes:
 

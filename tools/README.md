@@ -155,7 +155,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [prepare_surface_edge_candidate.py](prepare_surface_edge_candidate.py) | Prepare an audited curb/asphalt RGB transition; source alpha stays separate. | [CURB_SURFACE_SEAMS](../docs/CURB_SURFACE_SEAMS.md) |
 | [prepare_texture_candidate.py](prepare_texture_candidate.py) | Package an opaque diffuse upscale privately, preserving mean linear colour. | [TEXTURE_OVERRIDES](../docs/TEXTURE_OVERRIDES.md) |
 | [re/GhidraMaster.ps1](re/GhidraMaster.ps1) | Dot-source from tools/run_ghidra_*.ps1: runs Ghidra headless scripts on the shared master project (<main checkout>/local/ghidra-master, program grid-unpacked.exe) … | [re/README](../docs/re/README.md) |
-| [re/grid_re.py](re/grid_re.py) | Address helpers for the unpacked GRID executable (local/compatibility/grid-unpacked.exe). | [re/README](../docs/re/README.md) |
+| [re/grid_re.py](re/grid_re.py) | Address helpers for the unpacked GRID executable (local/compatibility/grid-unpacked.exe). | [AUDIO_RESEARCH](../docs/AUDIO_RESEARCH.md) |
 | [re/harvest_projects.py](re/harvest_projects.py) | Export user names/comments from every Ghidra project under local/ (main checkout and worktrees). | [re/README](../docs/re/README.md) |
 | [re/master.py](re/master.py) | Manage the shared master Ghidra project in <main checkout>/local/ghidra-master. | [re/README](../docs/re/README.md) |
 | [re/merge_symbols.py](re/merge_symbols.py) | Merge names/comments exported by tools/ghidra/ExportSymbols.java into docs/re/symbols.tsv. | [re/README](../docs/re/README.md) |
@@ -564,6 +564,7 @@ description is the first header found. Rows with a single file are validators wi
 | source_boundary_plans | Scheduled source driving regressions; no whole-original-frame oracle. | [validate_source_boundary_plans.py](validate_source_boundary_plans.py) | [SCHEDULED_DONINGTON_CONTACTS](../docs/SCHEDULED_DONINGTON_CONTACTS.md) |
 | source_drive | Source-only startup, retained original world and independent driving semantics. | [validate_source_drive.py](validate_source_drive.py) |  |
 | test_temporal_audit | Synthetic reverse-Z visibility controls for analyze_temporal_audit history classification. | [test_temporal_audit.py](test_temporal_audit.py) | [TEMPORAL_COLOUR_AUDIT](../docs/TEMPORAL_COLOUR_AUDIT.md) |
+| trace_bundle_files | Lists the GRID files grid-app reads for one bundled Android event (F608, docs/ANDROID.md "Bundle file list"): a desktop run of the event menu and the race, set up as the … | [trace_bundle_files.ps1](trace_bundle_files.ps1) | [ANDROID](../docs/ANDROID.md) |
 
 ## Candidates to retire
 

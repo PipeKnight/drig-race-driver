@@ -35,6 +35,8 @@ pub struct Switches {
     pub far_props: bool,
     /// The 3D camera renders without MSAA.
     pub msaa_off: bool,
+    /// The cockpit's rear-view mirror stops updating (head-cam only).
+    pub mirror: bool,
 }
 
 impl Switches {
@@ -51,6 +53,7 @@ impl Switches {
         small_casters: false,
         far_props: false,
         msaa_off: false,
+        mirror: false,
     };
     pub const ALL_OFF: Self = Self {
         shadows: true,
@@ -72,6 +75,7 @@ impl Switches {
             (self.hud, "hud"),
             (self.samples, "samples"),
             (self.empty, "empty_scene"),
+            (self.mirror, "mirror"),
         ];
         let off: Vec<&str> = names.iter().filter(|(on, _)| *on).map(|(_, n)| *n).collect();
         let mut cheaper: Vec<String> = Vec::new();
@@ -103,7 +107,7 @@ impl Switches {
 /// alone, then the resolution and anti-aliasing variants (`mobile:`). With
 /// the mobile preset the normal frame is the preset's, so `render1080` is
 /// the phone's full resolution.
-pub const CYCLE: [Switches; 14] = {
+pub const CYCLE: [Switches; 15] = {
     const N: Switches = Switches::NORMAL;
     [
         N,
@@ -113,6 +117,7 @@ pub const CYCLE: [Switches; 14] = {
         Switches { effects: true, ..N },
         Switches { hud: true, ..N },
         Switches { samples: true, ..N },
+        Switches { mirror: true, ..N },
         Switches::ALL_OFF,
         Switches { empty: true, ..Switches::ALL_OFF },
         N,
@@ -173,6 +178,7 @@ pub fn install(app: &mut App) {
                 "no_small_casters" => s.small_casters = true,
                 "far_props" => s.far_props = true,
                 "msaa_off" => s.msaa_off = true,
+                "mirror" => s.mirror = true,
                 rows if rows.starts_with("render") => {
                     s.render_rows = rows[6..].parse().unwrap_or(0);
                 }

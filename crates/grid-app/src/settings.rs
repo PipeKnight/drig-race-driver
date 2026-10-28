@@ -95,6 +95,10 @@ pub struct Diagnostics {
     /// Catch-up cap of the interactive app: at most this many fixed ticks per
     /// rendered frame; 0 restores Bevy's 250 ms clamp (docs/FRAME_STEPPING.md).
     pub max_ticks_per_frame: Option<u32>,
+    /// Frames per second of simulation time: the cameras step by the
+    /// original's per-frame rules at this rate instead of once per tick
+    /// (docs/CAMERA_VIEWS.md §3).
+    pub camera_fps: Option<f32>,
 }
 
 impl Default for Diagnostics {
@@ -116,6 +120,7 @@ impl Default for Diagnostics {
             results_continue: None,
             tick_delay_ms: None,
             max_ticks_per_frame: None,
+            camera_fps: None,
         }
     }
 }
@@ -144,6 +149,7 @@ impl Diagnostics {
             results_continue: text("GRID_RESULTS_CONTINUE").and_then(|v| v.parse().ok()),
             tick_delay_ms: text("GRID_TICK_DELAY_MS").and_then(|v| v.parse().ok()),
             max_ticks_per_frame: text("GRID_MAX_TICKS_PER_FRAME").and_then(|v| v.parse().ok()),
+            camera_fps: text("GRID_CAMERA_FPS").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -176,6 +182,7 @@ impl Diagnostics {
             "max_ticks_per_frame" => {
                 self.max_ticks_per_frame = Some(value.parse().map_err(|_| number(key))?)
             }
+            "camera_fps" => self.camera_fps = Some(value.parse().map_err(|_| number(key))?),
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
@@ -254,6 +261,26 @@ pub struct Settings {
     /// `[game] opponent_names`: each opponent's name on the HUD and the
     /// results, comma separated, in car order (the career field).
     pub opponent_names: Option<Vec<String>>,
+    /// `[game] opponent_drivers`: each opponent's `driver.id` in car order,
+    /// 0 for none (the career field), and `[game] teammate`: the team
+    /// mate's opponent number from 1, 0 for none. The race engineer reads
+    /// them (docs/SPEECH_AUDIO_RESEARCH.md); older profiles have neither.
+    pub opponent_drivers: Option<Vec<i32>>,
+    pub teammate: Option<usize>,
+    /// `[game] audio_name`: the profile's audio name the race engineer says,
+    /// `M_01`…`M_100`, `F_01`…`F_55` or `N_01`…`N_42` (language ids
+    /// `commentary_name_*`), or `off` ("Disable Audio Name"). Default `M_46`
+    /// (Jack, docs/SPEECH_AUDIO_RESEARCH.md §18).
+    pub audio_name: Option<String>,
+    /// The career race's speech values, written by the career screen
+    /// (docs/SPEECH_AUDIO_RESEARCH.md §19): `[game] speech_final_race`,
+    /// `speech_final_event`, `speech_one_two`, `speech_no_damage` (on/off),
+    /// `speech_standing` (each car's points before this race, the player
+    /// first), `speech_standing_absent` (the best points of the event's
+    /// entrants not in this race) and `speech_bonus_place`. The points
+    /// table is `[game] points`. Without any of them the race is not a
+    /// career race for speech.
+    pub career_speech: Option<grid_tools::speech::CareerRace>,
     /// `[game] points`: the event's points table by finishing position
     /// (career races), shown in the results' Points column.
     pub points: Option<Vec<i32>>,
@@ -471,6 +498,47 @@ impl Settings {
                 }
                 ("game", "opponent_names") => {
                     self.opponent_names = Some(value.split(',').map(|v| v.trim().to_owned()).collect())
+                }
+                ("game", "opponent_drivers") => {
+                    self.opponent_drivers = Some(
+                        value
+                            .split(',')
+                            .filter(|v| !v.trim().is_empty())
+                            .map(|v| v.trim().parse::<i32>())
+                            .collect::<Result<_, _>>()
+                            .map_err(|_| at("[game] opponent_drivers needs numbers".into()))?,
+                    )
+                }
+                ("game", "teammate") => {
+                    self.teammate =
+                        Some(value.parse().map_err(|_| at("[game] teammate needs an opponent number".into()))?)
+                }
+                ("game", key) if key.starts_with("speech_") => {
+                    let c = self.career_speech.get_or_insert_with(Default::default);
+                    let int = |v: &str| v.trim().parse::<i32>().map_err(|_| at(format!("[game] {key} needs a number")));
+                    match key {
+                        "speech_final_race" => c.final_race = on(key, value).map_err(at)?,
+                        "speech_final_event" => c.final_event = on(key, value).map_err(at)?,
+                        "speech_one_two" => c.one_two = on(key, value).map_err(at)?,
+                        "speech_no_damage" => c.no_damage = on(key, value).map_err(at)?,
+                        "speech_standing" => {
+                            c.standing = value.split(',').filter(|v| !v.trim().is_empty()).map(int).collect::<Result<_, _>>()?
+                        }
+                        "speech_standing_absent" => c.absent_best = Some(int(value)?),
+                        "speech_bonus_place" => c.bonus_place = int(value)?,
+                        _ => return Err(at(format!("unknown setting `{key}`"))),
+                    }
+                }
+                ("game", "audio_name") => {
+                    let name = value.trim();
+                    let valid = name == "off"
+                        || name.split_once('_').is_some_and(|(kind, n)| {
+                            matches!(kind, "M" | "F" | "N") && n.len() >= 2 && n.bytes().all(|b| b.is_ascii_digit())
+                        });
+                    if !valid {
+                        return Err(at("[game] audio_name needs M_nn, F_nn, N_nn or off".into()));
+                    }
+                    self.audio_name = Some(name.to_owned());
                 }
                 ("game", "series") => {
                     let name = value.to_ascii_lowercase();

@@ -225,8 +225,9 @@ driver's characteristic list (+0x30F4).
 8. **Limit clamp** 0x7878F0/0x788030 with 0x782FE0/0x782D20 [V static,
    F455]: a positive planned offset stops at the right limit line, a negative
    one at the left, each moved inward by view+0x60 = car half width
-   (car state +0x110, copied by 0x79C1F0); a limit on the far side of the line
-   does not move it. Without limit lines: ±tgOffsetMaxNoLimits.
+   (car state +0x110, copied by 0x79C1F0). **Correction (F606):** when that moved-in
+   limit lies on the far side of the racing line, 0x782D20 sets the planned offset to 0
+   (the line), it does not leave it. Without limit lines: ±tgOffsetMaxNoLimits.
 9. **race_start** (score 0x78A6D0, activate 0x78A8F0, deactivate 0x776730,
    drive 0x78A740, side 0x776740) [V static, F455]:
    - score 22 while wait_for_start fires or the launch delay +0x30 runs,
@@ -295,7 +296,8 @@ car's **brake** statistics table (grip = car state +0x144):
   e > 1 → 0. Approach `cur + clamp(dt·thTargetMoveSpeed(4)·(goal−cur), ±|goal−cur|)`.
 - Follow 0x77A630 (thFollow*), slide lift 0x77A880 (|slip| 0.2→0.6 rad →
   1→0.4 above 5 m/s), corner lift 0x77A940 (|κ| 0.01→0.03 rad/m → 1→
-  thCornerLiftMin 0.2), request cap +0x7C = throttle_confidence (live 0.9606),
+  thCornerLiftMin 0.2, only while the speed is above controller +0x8, the brake line's target
+  that 0x7886C0 writes and the governor reads; FIRST_CORNER_LIVE §10), request cap +0x7C = throttle_confidence (live 0.9606),
   traction control 0x77AA10 (tc* vehicle params), start stall/rev 0x775BF0.
 
 ### 4.4 Brake (0x78E8A0 = max of sources, capped by request+0xA0)

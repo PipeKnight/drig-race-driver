@@ -132,8 +132,21 @@ pub(crate) struct Source {
     textures: BTreeMap<String, Vec<u8>>,
 }
 
+/// The track's tracksplit plus the route's routesplit (main.rs
+/// `append_route_split`), whose materials name the tracksplit's textures.
 fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error::Error>> {
-    read_package(root, route, "tracksplit.pssg")
+    let file = route.track_file("tracksplit.pssg");
+    let bytes = super::read(&root.join(&file))?;
+    let tree = pssg::read_tree(&bytes)?;
+    let mut source = read_surfaces(&tree, &tree).map_err(|e| format!("{file}: {e}"))?;
+    let split = route.file("routesplit.pssg");
+    if root.join(&split).is_file() {
+        let bytes = super::read(&root.join(&split))?;
+        let split_tree = pssg::read_tree(&bytes)?;
+        let part = read_surfaces(&split_tree, &tree).map_err(|e| format!("{split}: {e}"))?;
+        merge(&mut source, part, "route", false);
+    }
+    Ok(source)
 }
 
 fn read_package(
@@ -145,9 +158,44 @@ fn read_package(
     read_bytes(&super::read(&root.join(&file))?).map_err(|e| format!("{file}: {e}").into())
 }
 
+/// Adds `other`'s materials and draws under `namespace/`, as main.rs names
+/// them; its textures too when they are its own.
+fn merge(source: &mut Source, other: Source, namespace: &str, own_textures: bool) {
+    let texture = |name: String| {
+        if own_textures {
+            format!("{namespace}/{name}")
+        } else {
+            name
+        }
+    };
+    for (name, mut definition) in other.definitions {
+        for t in &mut definition.textures {
+            *t = texture(std::mem::take(t));
+        }
+        source
+            .definitions
+            .insert(format!("{namespace}/{name}"), definition);
+    }
+    for (name, mut draw) in other.draws {
+        draw.material = format!("{namespace}/{}", draw.material);
+        source.draws.insert(format!("{namespace}/{name}"), draw);
+    }
+    for (name, dds) in other.textures {
+        source.textures.insert(texture(name), dds);
+    }
+}
+
 fn read_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error>> {
     let tree = pssg::read_tree(bytes)?;
-    let bindings = material::read_texture_bindings(&tree)?;
+    read_surfaces(&tree, &tree)
+}
+
+/// Surfaces of `tree` with their textures taken from `textures`.
+fn read_surfaces(
+    tree: &pssg::Tree,
+    textures_from: &pssg::Tree,
+) -> Result<Source, Box<dyn std::error::Error>> {
+    let bindings = material::read_texture_bindings(tree)?;
     let mut definitions = BTreeMap::new();
     for i in 0..tree.nodes.len() {
         if tree.name(i) != b"SHADERINSTANCE" {
@@ -270,9 +318,9 @@ fn read_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error>> {
         };
         definitions.insert(String::from_utf8(id.to_vec())?, definition);
     }
-    let sources = mesh::read_meshes(&tree)?;
+    let sources = mesh::read_meshes(tree)?;
     let mut draws = BTreeMap::new();
-    for draw in scene::read_static_draws(&tree, &sources)? {
+    for draw in scene::read_static_draws(tree, &sources)? {
         let material = String::from_utf8(draw.material.to_vec())?;
         if !definitions.contains_key(&material) {
             continue;
@@ -309,7 +357,7 @@ fn read_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error>> {
         }
     }
     let mut textures = BTreeMap::new();
-    for t in texture::read_textures(&tree)? {
+    for t in texture::read_textures(textures_from)? {
         let name = String::from_utf8(t.id.to_vec())?;
         if definitions.values().any(|d| d.textures.contains(&name)) {
             textures.insert(name, t.validated_dds().0);
@@ -343,21 +391,7 @@ pub fn install(
     let mut source = read_source(root, route)?;
     if land {
         let land = read_package(root, route, "land.pssg")?;
-        for (name, mut definition) in land.definitions {
-            for texture in &mut definition.textures {
-                *texture = format!("land/{texture}");
-            }
-            source
-                .definitions
-                .insert(format!("land/{name}"), definition);
-        }
-        for (name, mut draw) in land.draws {
-            draw.material = format!("land/{}", draw.material);
-            source.draws.insert(format!("land/{name}"), draw);
-        }
-        for (name, texture) in land.textures {
-            source.textures.insert(format!("land/{name}"), texture);
-        }
+        merge(&mut source, land, "land", true);
     }
     if let Some(manifest) = rgb_overrides {
         let used = source
@@ -748,6 +782,22 @@ mod tests {
             assert!(source.draws.values().all(|d| d.uv.len() == d.masks.len()));
             if track == "japan/haruna" {
                 assert_eq!(world_mapped, 36);
+            }
+            // Every route's own road (routesplit.pssg, docs/SKY.md section 8) on the track's
+            // textures.
+            for r in 1..10 {
+                let route = Route::new(&format!("tracks/{track}/route_{r}")).unwrap();
+                if !root.join(route.file("routesplit.pssg")).is_file() {
+                    continue;
+                }
+                let source = read_source(root, &route).unwrap();
+                let split = source.draws.keys().filter(|k| k.starts_with("route/")).count();
+                println!("surface {} route_draws={split}", route.path());
+            }
+            let split = source.draws.keys().filter(|k| k.starts_with("route/")).count();
+            println!("surface {track}/route_0 route_draws={split}");
+            if track == "usa/washington" {
+                assert_eq!(split, 180);
             }
         }
     }

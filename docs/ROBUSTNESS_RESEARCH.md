@@ -390,6 +390,19 @@ instrumentation, removed).
   under the body's xz at its last supported tick (a contact within 2 m pushing it up). It
   catches quick seed 15's lost wheel, which rolls off Istanbul Park's packed road and
   drifts 14 m over road while falling, and nothing else in quick 1..56 (SOAK_TESTING.md).
+- **(i) on the flight path** (F606, coordinator's approval of 27 October 2026, harness only):
+  `Pressed::NoGroundOnPath`, an expected loss, for a prop or detached piece (never a car) when
+  the straight xz segment of its flight crosses a point with **no packed triangle at all**
+  (`grid-road-hole`'s brute-force test, `Track::triangles_under`, sampled every 1 m). The flight
+  starts at its last contact of any kind after its last support and ends at its first contact
+  after a tick with none (or at the failure point). A touch from another piece at takeoff does
+  not count as support. Justification [V], quick seed 15 on F606
+  (Istanbul Park): at tick 1687 prop piece 19 rests on the road (shape 182) as the player's car
+  hits it; at 1688 it touches piece 24 side-on at (569.18, 16.42); ticks 1689–1947 it has no
+  contact at all while it flies at about 27 m/s over a pocket with 0 triangles (586.7, −0.1 to
+  620.7, −31.5); at 1948 it hits the boundary sheet at (628.9, −38.8), 42 m below the road, and
+  fails at (625, −42, −44), where grass lies above it. Quick 1..56: it catches only that body;
+  every other expected loss (seeds 18, 37, 47 ×2, 48 ×2, 53) stays `NoGround`.
 
 ## 10. Sarthe: "invalid contact material inputs" (F458)
 

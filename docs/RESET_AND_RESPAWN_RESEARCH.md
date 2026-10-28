@@ -37,7 +37,7 @@ From docs/AI_AVOID_RECOVERY_RESEARCH.md (F301), re-read for this question:
 | T-bone or head-on contact | recover_tbone (18): 1 s straight reverse | ported |
 | Recovery timeout | `rcRecoveryTimeOut` 10 s → req+0xB0 reset **only if rcResetAllowed** (false) | not needed |
 | Still stuck | retire stuck timer 0x77E3B0: 20 s within 5 m, no racing record (state 0) within 100 m | ported |
-| Retired | drive 0x79C6E0: terminal damage or stuck → force brake + no-steer; below rtStoppedSpeed 0.5 m/s, req+0x38 = 1 | ported (force brake + no-steer) |
+| Retired | drive 0x79C6E0: terminal damage or stuck → force brake + no-steer; below rtStoppedSpeed 0.5 m/s, req+0x38 = 1 | ported (force brake + no-steer; the removal request since F620, section 8) |
 
 New details [V]:
 - req+0x38 belongs to the request's first 0x3C bytes. They form a message object: vtable
@@ -228,7 +228,8 @@ solo car reaches 32.9 m/s in 4 s.
 
 1. The tracker's own line and target choice (3.2, section 6), and what ResetLines'
    0x20-byte elements hold. The fade timing and the collision switch during it.
-3. The target of vehicle+0x2C90 vfunc +0x38; the reader of req+0x38; the handler
+3. The target of vehicle+0x2C90 vfunc +0x38; the reader of req+0x38 (still unknown after F620's
+   look, section 8); the handler
    0x9E64E0(6, 0); and the `ResetCarToTrack`, `VehicleDisqualified` and `EnableAIControl`
    messages (handler 0x401380 → AI 0x79E240).
 4. The record state of a retired car in the retire-stuck 100 m test. The port treats a
@@ -237,3 +238,61 @@ solo car reaches 32.9 m/s in 4 s.
 5. The car-side bytes +0xDE4/+0xDFC that vehicle_driver_prepare rejects (labelled
    "respawn" in docs/RUNTIME_LIMITS_AUDIT.md). The reset path above does not write them.
    Their meaning stays open.
+
+## 8. A car wedged against tyre stacks (Washington, F620)
+
+Owner report (2026-10-27): in a 12-car Viper race at Washington (`GRID_AUTOPILOT=1`, 26 000
+ticks) the AI-driven player car stopped at the hairpin tyre stacks and never drove off.
+Evidence: the playtest log, race.ini and replay spool (private, `local/stuck/` and the
+reporting session's `app-05/evidence`).
+
+What happened [V from the log, the spool and a headless repro]:
+- Tick 13 786: the car stops against the stacks the field broke at 13 308–13 310 (954, 956,
+  959). Recovery reverses (gear 9, throttle 1, full lock) from 13 799. The car moves 3.4 m,
+  breaks stack 957 (tick 14 482) and wedges its rear against the standing tyre columns at
+  the barrier. From about 14 850 the position stays within millimetres.
+- The block is physical. The contacts are car–piece only (20–40 per tick, normals pushing
+  the car forward). The pieces are awake, not parked, 38–107 kg and do not move. There are
+  no static body contacts.
+- Damage is not the cause (scope item b): handling status 7 (running), power +3A4 and
+  driveshaft +3A8 at 1.0, no terminal wheel, wheel levels at most 0.48. The rear wheels spin
+  (slip 5.6 m/s). An undamaged Viper in the repro sticks the same way.
+- 15 733: the retire test fires (20 s within 5 m, no racing car within 100 m). Force brake,
+  no-steer, handbrake. 21 056–23 311: cars come within 100 m, retire drops, and recovery
+  reverses again. Then retire again.
+
+The original does the same up to this point [V]:
+- 0x4022F0 counts a dynamic body only above 700 kg (body +0x3F0, A69370) and below 2 m/s.
+  Tyre pieces never toggle recovery to forward.
+- Mode 5 reverses until 80° < |a| < 90° or |b| < 5°, which a car that cannot move never
+  reaches. `rcResetAllowed` is false, and the player's auto-reset (3.1) needs the car on its
+  side or roof.
+- The retire behaviour's vfuncs (vtable around 0xCF8FA8: score 0x78B300, activate 0x77D570,
+  empty deactivate 0x776CA0, drive 0x79C6E0) never read the `rtRetirementResetTimer` value
+  that activate stores at +0x34.
+
+What the port lacked [V]: drive 0x79C6E0 sets the removal request req+0x38 in its
+**terminal/stuck** branch (force brake, no-steer, speed below rtStoppedSpeed 0.5). The
+port set the request only in the failure branch's retire point. Since F620
+`Behaviour::Retire` sets it as well.
+
+grid-app (AUTHORED, as before for opponents):
+- An opponent's request retires it in the standings (`drive_ai_event … retired=removal`,
+  formerly `retired=failure`, plus the notice).
+- The autopilot's request now ends the player car's race as terminal damage does (retired,
+  standings finalized, `car=0 retired=removal`).
+- The car stays in the world. The reader of req+0x38 in the original is still unknown (§7
+  item 3).
+
+Repro: `multi::tests::a_car_wedged_against_tyre_stacks_retires_and_requests_removal`
+(ignored, needs game data):
+- breaks stacks 954/956/959;
+- places the Viper at the playtest pose of tick 13 790;
+- replays the recorded input to tick 14 700 (35 changes);
+- hands the car to the AI for 1 800 ticks.
+
+Recovery, then retire. The car moves 1.5 m and requests removal.
+
+The headless run of the same race.ini (current main, and the evidence's own source rebuilt)
+does not reach this state. Opponent contacts differ from tick 814 (a rebuilt binary, not
+the playtest's), so the race diverges.

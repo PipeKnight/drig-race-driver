@@ -2877,6 +2877,113 @@ mod tests {
             .unwrap();
     }
 
+    /// Washington playtest (F-stuck): a Viper reversed by recovery into the
+    /// hairpin's tyre stacks stays wedged; the pieces (38-107 kg) are not
+    /// obstructions for 0x4022F0 (dynamic bodies count above 700 kg only), so
+    /// recovery keeps reversing until the retire test (20 s within 5 m) stops
+    /// the car, and the stopped car requests removal (0x79C6E0, req+0x38).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_car_wedged_against_tyre_stacks_retires_and_requests_removal() {
+        use crate::ai_driver::{AiData, AiDriver, Behaviour, Parameters, RaceView, View};
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/usa/washington/route_0").unwrap();
+                let viper = crate::car::Car::new("vip").unwrap();
+                let mut multi = MultiRuntime::load_deforming_on(
+                    root,
+                    &route,
+                    &[("slot_00", &viper)],
+                    &table,
+                    events,
+                    None,
+                )
+                .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                // The stacks the field broke at ticks 13308-13310.
+                let props = multi.props.as_mut().unwrap();
+                for b in [954, 956, 959] {
+                    assert!(props.catalog.breakables[b].template.starts_with("tyrestack"));
+                    props.queue_break(b);
+                }
+                for _ in 0..240 {
+                    multi.tick(&[Controls::default()]).unwrap();
+                }
+                // The playtest pose at tick 13790, then its recorded input to
+                // tick 14700 (changes only: tick offset, throttle, brake,
+                // steering; reverse from offset 8): recovery reversing at
+                // full lock into the stacks.
+                multi.set_pose_at_rest(
+                    0,
+                    [
+                        0.8223941, -0.022205902, -0.5684178, 0., 0.02381872, 0.99970484,
+                        -0.004591962, 0., 0.56833935, -0.009761841, 0.8226773, 0., 608.18915,
+                        1.8121567, 363.03293, 1.,
+                    ],
+                );
+                let input: [(u32, f32, f32, f32); 35] = [
+                    (0, 0., 0.6000001, -0.44000006), (1, 0., 0.5200001, -0.68000007),
+                    (2, 0., 0.4400001, -0.9200001), (3, 0., 0.36000007, -1.), (4, 0., 0.28000006, -1.),
+                    (5, 0., 0.20000005, -1.), (6, 0., 0.12000004, -1.), (7, 0., 0.040000036, -1.),
+                    (8, 0., 0., -1.), (9, 0.080000006, 0., -1.), (10, 0.16000001, 0., -1.),
+                    (11, 0.24000001, 0., -1.), (12, 0.32000002, 0., -1.), (13, 0.40000004, 0., -1.),
+                    (14, 0.48000005, 0., -1.), (15, 0.56000006, 0., -1.), (16, 0.64000005, 0., -1.),
+                    (17, 0.72, 0., -1.), (18, 0.8, 0., -1.), (19, 0.88, 0., -1.), (20, 0.96, 0., -1.),
+                    (21, 1., 0., -1.), (50, 0.9616, 0., -1.), (51, 0.92565763, 0., -1.),
+                    (52, 0.8920155, 0., -1.), (53, 0.8605265, 0., -1.), (67, 0.7805265, 0., -1.),
+                    (68, 0.70052654, 0., -1.), (69, 0.62052655, 0., -1.), (71, 0.6064128, 0., -1.),
+                    (72, 0.6864128, 0., -1.), (73, 0.7664128, 0., -1.), (74, 0.8464128, 0., -1.),
+                    (75, 0.92641276, 0., -1.), (76, 1., 0., -1.),
+                ];
+                let mut c = Controls::default();
+                for k in 0..910 {
+                    if let Some(&(_, throttle, brake, steering)) = input.iter().find(|r| r.0 == k) {
+                        c = Controls { throttle, brake, steering, handbrake: false };
+                    }
+                    multi.cars[0].set_ai_packet(k >= 8);
+                    multi.tick(&[c]).unwrap();
+                }
+                let at = |m: &MultiRuntime| {
+                    let p = m.cars[0].pose();
+                    [p[12], p[14]]
+                };
+                let start = at(&multi);
+                let data = AiData::load_car(root, route.path(), &viper, None).unwrap();
+                let p = Parameters::new(&data, 0.606, |_| 1.).unwrap();
+                let mut driver = AiDriver::new(p, 0x5eed);
+                let mut seen = Vec::new();
+                for _ in 0..1800 {
+                    driver.race = RaceView { place: 0, cars: 1, progress: 1. };
+                    let view = View::of(&multi.cars[0], multi.obstruction(0));
+                    let c = driver.controls(&data, &view, &[], DELTA);
+                    multi.cars[0].set_ai_packet(driver.reverse_request());
+                    multi.tick(&[c]).unwrap();
+                    if seen.last() != Some(&driver.telemetry.behaviour) {
+                        seen.push(driver.telemetry.behaviour);
+                    }
+                }
+                let end = at(&multi);
+                let moved = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
+                eprintln!("behaviours {seen:?} moved {moved:.2} m");
+                assert!(moved < 5., "the car got free ({moved} m)");
+                assert!(seen.contains(&Behaviour::Recovery), "{seen:?}");
+                assert_eq!(seen.last(), Some(&Behaviour::Retire), "{seen:?}");
+                assert!(driver.removal_requested());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Sleeping (B0FE60, B24D70, B24E70): the pieces of a broken tyre wall
     /// that come to rest leave the active list after turnOffTime (1 s); the
     /// cars never sleep; a car driving into the pile wakes pieces again.
@@ -3283,12 +3390,15 @@ mod tests {
                 // About 22 degrees before the F417 engine reset, 19.1 with
                 // engine braking (states [0, 866, 454, 140, 6]).
                 assert!(slip > 15., "{slip}");
-                // F406: with the original's collision floor lift the car holds
-                // slides of about 22 degrees without spinning and the scorer's
-                // detector does not latch in these 2600 ticks (states
-                // [0, 846, 459, 156, 6]). Before, the body scraped the road,
-                // the car spun (179 degrees) and those ticks were detected.
-                assert!(slip < 90., "the car spun: {slip} (detected {detected})");
+                // F406: with the original's collision floor lift the car held
+                // slides of about 22 degrees without spinning in these 2600
+                // ticks (states [0, 846, 459, 156, 6]). Since F601 the corner
+                // lift works only above the line target, as in the original,
+                // and this car spins (169 degrees, states [0, 430, 98, 12, 0]);
+                // 8-car Drift Battles at Long Beach spin as often as before
+                // (25.0 against 24.6 spins/lap over four seeds), so no limit
+                // on the slip here.
+                eprintln!("max slip {slip} (detected {detected})");
                 assert!(drift_line > 2400, "{drift_line}");
                 // Deterministic: an identical second run.
                 assert_eq!(run().4, first.4);

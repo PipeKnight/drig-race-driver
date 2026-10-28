@@ -66,13 +66,16 @@ fn mesh_report(world: &World, frame: u32) {
         Has<crate::MovingPart>,
         Has<crate::OpponentPart>,
         &'static ViewVisibility,
+        &'static Mesh3d,
     );
     let Some(mut query) = world.try_query_filtered::<Kinds, (With<Mesh3d>, Allow<Disabled>)>() else {
         return;
     };
     let names = ["batch", "car_batch", "intact", "piece", "foliage", "player", "opponent", "track", "other"];
     let mut counts = [[0usize; 3]; 9];
-    for (disabled, batch, car_batch, track, intact, piece, foliage, player, opponent, seen) in query.iter(world) {
+    // Distinct mesh assets per kind, and all that some entity draws.
+    let mut assets: [std::collections::HashSet<AssetId<Mesh>>; 9] = Default::default();
+    for (disabled, batch, car_batch, track, intact, piece, foliage, player, opponent, seen, mesh) in query.iter(world) {
         let kind = [batch, car_batch, intact, piece, foliage, player, opponent, track]
             .iter()
             .position(|&k| k)
@@ -80,15 +83,20 @@ fn mesh_report(world: &World, frame: u32) {
         counts[kind][0] += 1;
         counts[kind][1] += usize::from(disabled);
         counts[kind][2] += usize::from(!disabled && seen.get());
+        assets[kind].insert(mesh.id());
     }
+    let used: std::collections::HashSet<_> = assets.iter().flatten().collect();
     let fields: Vec<String> = names
         .iter()
         .zip(counts)
-        .map(|(n, [all, off, seen])| format!("{n}={all}/{off}/{seen}"))
+        .zip(&assets)
+        .map(|((n, [all, off, seen]), meshes)| format!("{n}={all}/{off}/{seen}/{}", meshes.len()))
         .collect();
     println!(
-        "mesh_entities frame={frame} kind=all/disabled/drawn {}",
-        fields.join(" ")
+        "mesh_entities frame={frame} kind=all/disabled/drawn/meshes {} meshes_on_entities={} meshes_without_entity={}",
+        fields.join(" "),
+        used.len(),
+        len::<Mesh>(world).saturating_sub(used.len()),
     );
 }
 

@@ -141,6 +141,24 @@ impl Track {
     pub fn triangle_count(&self) -> usize {
         self.triangle_count
     }
+    /// How many packed road triangles, over every chunk, cover `xz` in
+    /// their xz projection (vertical triangles excluded): the brute-force
+    /// test of `grid-road-hole`. 0 is a hole in the collision data.
+    pub fn triangles_under(&self, xz: [f32; 2]) -> usize {
+        let [x, z] = xz;
+        let side = |p: [f32; 3], q: [f32; 3]| (q[0] - p[0]) * (z - p[2]) - (q[2] - p[2]) * (x - p[0]);
+        self.chunks
+            .iter()
+            .flat_map(|c| c.triangles.iter().map(move |t| t.map(|i| c.positions[i as usize])))
+            .filter(|&[a, b, c]| {
+                let s = [side(a, b), side(b, c), side(c, a)];
+                let u = [b[0] - a[0], b[2] - a[2]];
+                let v = [c[0] - a[0], c[2] - a[2]];
+                (s.iter().all(|v| *v >= 0.) || s.iter().all(|v| *v <= 0.))
+                    && (u[1] * v[0] - u[0] * v[1]).abs() >= 1e-6
+            })
+            .count()
+    }
     /// Union of the packed road chunk bounds: min x, y, z, max x, y, z.
     pub fn bounds(&self) -> [f32; 6] {
         self.chunks.iter().fold(

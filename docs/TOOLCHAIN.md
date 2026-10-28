@@ -99,9 +99,76 @@ the `cfg(target_os = "android")` code) and the real app (`tools\build_gate.ps1`)
 | nothing to compile, `-Full` | full | — | tests 608 s (grid-app 425 s, grid-tools 173 s, the rest 8 s), identity 74 s, soak 274 s |
 | first run in a seeded worktree | full | — | tests 998 s (our four crates compiled), Clippy 56 s, build 53 s |
 
-grid-app's own asset tests (425 s with nothing to compile) dominate the grid-app tier, so that tier is
-about 2.4x faster than the full gate, not more. Speeding up those tests is engine work and outside
-this tooling.
+grid-app's own asset tests (425 s with nothing to compile) dominated the grid-app tier, so that
+tier was about 2.4x faster than the full gate, not more (21 October; for 27 October see
+the table below).
+
+**Measured, F626** (27 October, release, this worktree's `local/prepush-speed/runs/`; "before" is
+origin/main's prepush.ps1 and tests, "after" this change; same base 016d333c except B1/B2 on
+c4a2fe2f; lock wait is other sessions' builds):
+
+| Case | Before | After |
+|---|---|---|
+| a comment in grid-app/src/camera.rs (crate) | 372 s, of it 169 s lock wait (tests 181 s, Clippy 16 s) | 145 s, no wait (Clippy 22 s, tests 120 s) |
+| a Clippy error in grid-app (crate) | failed after 291 s (110 s wait; tests 169 s first, then Clippy) | failed after 356 s, of which 344 s waiting for one lock; Clippy itself 10 s |
+| a comment in grid-world/src/lib.rs (full) | 355 s: tests 218, Clippy 30 (9 s wait), build 37 (12 s wait), identity 18, soak 49 | 340 s: Clippy 62 (37 s wait), build 29, identity 17, tests 181, soak 48 |
+| the same two commits rebased onto a docs-only commit | (as above) | 2 s each: sanity only, the cached pass named |
+
+So on a quiet PC the gate's own work is about 2.5 min (crate) and 5 min (full); the coordinator's
+averages of 10.8 and 24.5 min were mostly lock waits and a loaded PC, which the single hold and
+the cache cut directly.
+
+### Order, one lock hold and the pass cache (F626)
+
+The coordinator's count of 81 prepush runs over 21–27 October: full tier 40 runs, 24.5 min on
+average of which 14.5 min waiting for the build lock; crate tier 34 runs, 10.8 min of which
+6.4 min waiting; 20 of 74 failed, half of them in Clippy, which ran after 7–12 min of tests.
+Three changes, none of which drops a check:
+
+- **Cheap checks first.** Steps run sanity, Clippy, (full: race/soak build and the identity
+  check), the tests, (full: `grid-soak quick`). A Clippy error now fails in about 20 s instead of
+  after the tests.
+- **One lock hold per gate.** prepush takes the build lock once, before Clippy, and keeps it
+  through the tests; it gives it back before `grid-soak quick` (no build, minutes of run time) or
+  as soon as a step fails. Before, it queued again for every cargo step, so a gate could wait
+  behind other sessions three times (B3 above: 0 + 9 + 12 s; in the coordinator's runs up to
+  40 min). The queue stays first come first served, so each gate counts as one job.
+- **Pass cache.** A gate that passes writes a record to `C:\cargo-build\prepush-cache\<key>.json`
+  (machine-wide). The key is a SHA-256 over: the tier and its crates, the step commands,
+  prepush.ps1 itself, `rustc -vV`, `~/.cargo/config.toml`, the GRID_* paths and the size and time
+  of the private inputs, and the git tree entry (mode, blob, path) of every working-tree file
+  (tracked, modified, untracked) outside documentation. "Documentation" is `docs/`, `log/`,
+  `*.md` outside `crates/`, `android/` except grid-import's settings.ini, `*.cmd`, LICENSE,
+  .gitignore and the `tools/` files that no Rust code outside comments names; everything else
+  is in the key: all of `crates/` (including its Markdown), `settings/`, Cargo.*,
+  rust-toolchain, `.cargo/`, .gitattributes, `tools/identity.tsv`, unknown paths. The key covers
+  the whole tree, not the diff, so a pass never carries over to other upstream code. A later run
+  with the same key (after a rebase onto docs- or log-only commits, after `log_entry.py check
+  --fix` renumbered an entry, or in another checkout of the same code) runs only sanity; its
+  summary names the run it relies on (time, `local/prepush/…` folder, HEAD and base). The key is
+  taken again at the end and the pass is not recorded when files changed during the run.
+  `-NoCache` runs everything; `-Plan` shows the key and whether a pass exists (1.4 s for 600
+  paths). Records older than 30 days are deleted.
+
+grid-app's slow tests: on 27 October (nothing to compile, the PC otherwise idle; per-test times
+from libtest's `--report-time` in this worktree's `local/prepush-speed/timings/`) the 297 grid-app
+tests took 100 s wall but 438 s of summed test time: the run was as long as its longest test,
+`a_flashback_resumes_the_race_tick_for_tick_on_every_circuit` (93–99 s, a loop over the 11
+circuits). The whole workspace took 159 s (grid-app 94, grid-tools 50 with 504 s summed over 20
+threads, everything else 15). The three per-circuit loops (flashback on 11 circuits, retire on
+10, replay frames on 4) are now one test per circuit (a macro per file; a compile-time assert
+makes a new entry in `route::CIRCUITS` fail until the flashback test gets one): grid-app 70.5 s
+wall instead of 100.3 s, peak memory 3.6 instead of 2.8 GiB, all 319 tests pass. Running side by
+side, the race tests slow each other (summed test time 1065 s), so the gain is 30 %, not the 3x
+the longest test suggested. Every tier, the build gate and update_prototype run the full set as
+before.
+
+Not done: mapping the grid-app tier to the tests of the changed modules. Every slow test builds a
+race through `pause_menu::race_tests::race_app_with` and the root module's `drive_tick`, and
+main.rs names all of grid-app's modules, so a module-level map sends every change to all slow
+tests; a finer map needs a call graph of main.rs (5,400 lines, Bevy systems, inherent impls in
+other modules) that regex parsing cannot give safely. With the split it could save at most about
+60 s of the crate tier.
 
 ### Build lock
 
@@ -111,7 +178,7 @@ the duration of a build; Windows closes the handle when the holder dies, so a cr
 a stuck lock (a leftover file of a dead pid is reported as stale and taken over). Waiters queue
 in `C:\cargo-build\build-lock\queue\` first come first served (entries of dead pids are
 dropped) and print their queue position and the holder (pid, purpose, checkout, minutes).
-prepush.ps1 takes it per cargo step, update_prototype.ps1 for its tests and build,
+prepush.ps1 takes it once per gate, from Clippy through the tests (F626), update_prototype.ps1 for its tests and build,
 build_android.ps1 around cargo ndk and Gradle, release_playable.ps1 around each APK build, and
 build_gate.ps1 for the perf phase (so locked builds wait instead of disturbing the CPU timing;
 after `-PerfWaitMinutes` perf runs without it and a case over budget is `noisy`). A child script

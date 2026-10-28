@@ -67,7 +67,7 @@ route 1's at (248.6, -74.0) heading -z. Both have 68 gates over 3903 m and the r
   `[game] route = tracks/europe/jarama/route_1`; three laps, 11 opponents, back of the grid).
 - App tests: `pause_menu::race_tests::a_race_finishing_at_a_later_gate_is_classified` (one
   autopilot lap at Jarama with 3 opponents, through the stats to the classified results;
-  finished at tick 6078, P3, best 90.512 s). `retire_from_race_shows_the_results_on_every_circuit`
+  finished at tick 6078, P3, best 90.512 s). `retire_from_race_shows_the_results_on_*`
   now includes Jarama.
 
 ## 4. Headless behaviour [V]

@@ -327,6 +327,11 @@ path = "src/bin/grid-damage-audio.rs"
 test = false
 
 [[bin]]
+name = "grid-speech-render"
+path = "src/bin/grid-speech-render.rs"
+test = false
+
+[[bin]]
 name = "grid-entities"
 path = "src/bin/grid-entities.rs"
 test = false

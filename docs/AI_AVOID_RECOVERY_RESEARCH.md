@@ -515,7 +515,9 @@ obstruction contact) or something higher wins.
   - score is 10 for failures or damage, 23 for terminal damage or stuck (or behaviour
     +0x60);
   - drive 0x79C6E0: for terminal or stuck → force brake + no-steer; below rtStoppedSpeed
-    (cfg+0x4F0, 0.5) → req+0x38 = 1 (removal request [I]);
+    (cfg+0x4F0, 0.5) → req+0x38 = 1 (removal request [I]; the port sets it here since
+    F620, docs/RESET_AND_RESPAWN_RESEARCH.md §8). No retire vfunc reads the +0x34 timer;
+    the behaviour's deactivate 0x776CA0 is empty [V];
   - for failures/damage → 0x79A090 drives to a retire point at req+0x84 = rtRetirementSpeed
     with the stopping brake 0x788A90.
 - **race_damaged** (9, retire test +0xE): req+0x84 = 50, req+0x7C = 0.6, merge

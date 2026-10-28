@@ -61,23 +61,64 @@ pub fn compute_threads(cores: usize) -> usize {
     cores.saturating_sub(2).max(4).min(cores.max(1))
 }
 
+/// Stack of the compute pool's threads. The simulation's per-car stages
+/// (`grid_tools::parallel::map`) wait inside a scope on this pool, and a
+/// waiting thread runs other queued tasks on its own stack, so stacks nest:
+/// one `drive_tick` needs 0.5–0.75 MB, and the grid-app tests overflowed
+/// Bevy's default 2 MB when parallel tests' ticks nested. 64 MiB as
+/// `grid_tools::parallel::pool`; a thread stack is reserved address space,
+/// committed only as it is used (Windows and Android arm64 alike).
+pub const COMPUTE_STACK: usize = 64 * 1024 * 1024;
+
+/// The compute threads Bevy's task pool plugin gives `cores` cores by
+/// default (`TaskPoolOptions::default`): what is left after a quarter, at
+/// least 1 and at most 4, for IO and a quarter for async compute.
+pub fn bevy_compute_threads(cores: usize) -> usize {
+    let quarter = |remaining: usize| {
+        let proportion = cores as f32 * 0.25;
+        let mut desired = proportion as usize;
+        if proportion - desired as f32 >= 0.5 {
+            desired += 1;
+        }
+        desired.min(remaining).clamp(1, 4)
+    };
+    let mut remaining = cores;
+    remaining = remaining.saturating_sub(quarter(remaining));
+    remaining = remaining.saturating_sub(quarter(remaining));
+    remaining.max(1)
+}
+
 /// Creates Bevy's compute pool before the app does (its task pool plugin
-/// keeps a pool that exists). Called first thing in `main`; with the preset,
-/// or on the desktop with `GRID_COMPUTE_SPLIT=preset` (F573 measurement).
+/// keeps a pool that exists), with [`COMPUTE_STACK`]. Called first thing in
+/// `main`. Bevy's thread count, or with the preset, or on the desktop with
+/// `GRID_COMPUTE_SPLIT=preset` (F573 measurement), [`compute_threads`].
 pub fn init_threads() {
     let requested = std::env::var("GRID_COMPUTE_SPLIT").is_ok_and(|v| v == "preset");
-    if !enabled() && !requested {
-        return;
-    }
+    let split = enabled() || requested;
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    let threads = compute_threads(cores);
+    let threads = if split { compute_threads(cores) } else { bevy_compute_threads(cores) };
+    init_compute_pool(threads);
+    if split {
+        log_line!("mobile_threads version=1 cores={cores} compute={threads}");
+    }
+}
+
+fn init_compute_pool(threads: usize) {
     bevy::tasks::ComputeTaskPool::get_or_init(|| {
         bevy::tasks::TaskPoolBuilder::new()
             .num_threads(threads)
             .thread_name("Compute Task Pool".into())
+            .stack_size(COMPUTE_STACK)
             .build()
     });
-    log_line!("mobile_threads version=1 cores={cores} compute={threads}");
+}
+
+/// The tests' compute pool: the thread count an App's executor would
+/// create (`TaskPool::default`, every core) with [`COMPUTE_STACK`]. Called
+/// before each test App; the first pool of the process stays.
+#[cfg(test)]
+pub fn init_test_pool() {
+    init_compute_pool(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get));
 }
 
 pub fn install(_app: &mut App) {
@@ -90,6 +131,16 @@ pub fn install(_app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bevy_compute_threads_match_the_task_pool_plugin() {
+        // 25 % each for IO and async compute (1..=4), the rest compute.
+        assert_eq!(bevy_compute_threads(1), 1);
+        assert_eq!(bevy_compute_threads(4), 2);
+        assert_eq!(bevy_compute_threads(8), 4);
+        assert_eq!(bevy_compute_threads(20), 12);
+        assert_eq!(bevy_compute_threads(32), 24);
+    }
 
     #[test]
     fn compute_threads_leave_two_cores_but_keep_four() {

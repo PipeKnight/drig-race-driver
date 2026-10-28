@@ -38,12 +38,48 @@ const IDENTITY: [f32; 16] = [
 
 /// Whole-source static instances, separate from the car palette subset.
 pub fn read_static_draws<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>]) -> Result<Vec<Draw<'a>>> {
-    read_scene_draws(tree, meshes, false, None)
+    read_scene_draws(tree, meshes, Subset::Static, None)
 }
 /// Object-library closest LOD: direct children of LODVISIBLERENDERNODE only.
 /// Lower LOD lists and physics/damage branches remain unselected.
 pub fn read_object_draws<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>]) -> Result<Vec<Draw<'a>>> {
-    read_scene_draws(tree, meshes, true, None)
+    read_scene_draws(tree, meshes, Subset::Closest, None)
+}
+/// Every object-library level with its number (docs/TRACK_LOD.md): level 0 is
+/// the direct children of LODVISIBLERENDERNODE, levels 1 and 2 the
+/// LODRENDERINSTANCELISTs of its LODRENDERINSTANCES in file order. Physics and
+/// damage branches remain unselected.
+pub fn read_object_level_draws<'a>(
+    tree: &Tree<'a>,
+    meshes: &[Mesh<'a>],
+) -> Result<Vec<(u8, Draw<'a>)>> {
+    let context = Context::new(tree, meshes)?;
+    let mut result = Vec::new();
+    for i in 0..tree.nodes.len() {
+        if tree.name(i) != b"RENDERSTREAMINSTANCE" {
+            continue;
+        }
+        let Some(draw) = instance_draw(tree, meshes, &context, i, Subset::Levels, None)? else {
+            continue;
+        };
+        let parent = tree.nodes[i].parent.expect("checked by instance_draw");
+        let level = if tree.name(parent) == b"LODRENDERINSTANCELIST" {
+            let lists = tree.nodes[parent].parent.expect("list parent checked");
+            1 + tree.nodes[lists]
+                .children
+                .iter()
+                .filter(|&&c| tree.name(c) == b"LODRENDERINSTANCELIST")
+                .position(|&c| c == parent)
+                .expect("list among its parent's children") as u8
+        } else {
+            0
+        };
+        result.push((level, draw));
+    }
+    if result.is_empty() {
+        return fail(0, "no supported static draws");
+    }
+    Ok(result)
 }
 /// Ordinary draws under an exact renderable NODE; exclude other template states.
 pub fn read_renderable_draws<'a>(
@@ -138,7 +174,7 @@ impl<'t, 'a> Renderables<'t, 'a> {
                 self.meshes,
                 &self.context,
                 i,
-                false,
+                Subset::Static,
                 Some(selected),
             )? {
                 result.push(draw);
@@ -187,7 +223,7 @@ impl<'t, 'a> Renderables<'t, 'a> {
         let mut result = Vec::new();
         for i in instances {
             if let Some(draw) =
-                instance_draw(self.tree, self.meshes, &self.context, i, false, Some(root))?
+                instance_draw(self.tree, self.meshes, &self.context, i, Subset::Static, Some(root))?
             {
                 result.push(draw);
             }
@@ -338,10 +374,21 @@ impl<'a> Context<'a> {
     }
 }
 
+/// Which RENDERSTREAMINSTANCEs a scene read takes.
+#[derive(Clone, Copy, PartialEq)]
+enum Subset {
+    /// Under RENDERNODEs (track, renderables).
+    Static,
+    /// The object library's closest level.
+    Closest,
+    /// Every object-library level.
+    Levels,
+}
+
 fn read_scene_draws<'a>(
     tree: &Tree<'a>,
     meshes: &[Mesh<'a>],
-    object_subset: bool,
+    subset: Subset,
     selected: Option<usize>,
 ) -> Result<Vec<Draw<'a>>> {
     let context = Context::new(tree, meshes)?;
@@ -350,7 +397,7 @@ fn read_scene_draws<'a>(
         if tree.name(i) != b"RENDERSTREAMINSTANCE" {
             continue;
         }
-        if let Some(draw) = instance_draw(tree, meshes, &context, i, object_subset, selected)? {
+        if let Some(draw) = instance_draw(tree, meshes, &context, i, subset, selected)? {
             result.push(draw);
         }
     }
@@ -367,7 +414,7 @@ fn instance_draw<'a>(
     meshes: &[Mesh<'a>],
     context: &Context<'a>,
     i: usize,
-    object_subset: bool,
+    subset: Subset,
     selected: Option<usize>,
 ) -> Result<Option<Draw<'a>>> {
     let Context { sources, shaders } = context;
@@ -377,7 +424,12 @@ fn instance_draw<'a>(
             offset: tree.nodes[i].offset,
             message: "static draw parent absent",
         })?;
-        if object_subset && tree.name(parent) != b"LODVISIBLERENDERNODE" {
+        let lod_list = tree.name(parent) == b"LODRENDERINSTANCELIST";
+        let object_subset = subset != Subset::Static;
+        if object_subset
+            && tree.name(parent) != b"LODVISIBLERENDERNODE"
+            && !(subset == Subset::Levels && lod_list)
+        {
             return Ok(None);
         }
         if !object_subset && tree.name(parent) != b"RENDERNODE" {
@@ -431,6 +483,8 @@ fn instance_draw<'a>(
                     }
                 }
                 b"LIBRARY" | b"PSSGDATABASE" | b"ROOT" => {}
+                // A lower level's lists carry no transform.
+                b"LODRENDERINSTANCES" | b"LODRENDERINSTANCELIST" if lod_list => {}
                 _ => {
                     return fail(
                         tree.nodes[a].offset,
@@ -452,7 +506,18 @@ fn instance_draw<'a>(
         }
         Ok(Some(Draw {
             id: tree.string(i, b"id")?,
-            joint: tree.string(parent, b"id")?,
+            // A lower level's draws name their LODVISIBLERENDERNODE.
+            joint: tree.string(
+                if lod_list {
+                    tree.nodes[parent]
+                        .parent
+                        .and_then(|l| tree.nodes[l].parent)
+                        .unwrap_or(parent)
+                } else {
+                    parent
+                },
+                b"id",
+            )?,
             material,
             source,
             prototype,
@@ -495,6 +560,68 @@ fn decode_bind_matrix(data: &[u8], offset: usize) -> Result<[f32; 16]> {
     }
     [m[3], m[7], m[11], m[15]] = [0., 0., 0., 1.];
     Ok(m)
+}
+/// A SKINNODE drawn with its joints (`characters/models/driver_model.pssg`).
+pub struct Skin<'a> {
+    /// The SKINJOINTs' JOINTNODEs, in skin order (a vertex's joint numbers
+    /// index this list).
+    pub joints: Vec<usize>,
+    /// Each joint's INVERSEBINDMATRIX: bind space to the joint.
+    pub inverse_bind: Vec<[f32; 16]>,
+    /// The `skinTransformLocal` instances: id, shader id and mesh source.
+    pub instances: Vec<(&'a [u8], &'a [u8], usize)>,
+}
+
+/// The SKINNODE `id` of `tree`, with `meshes` from
+/// [`crate::mesh::read_object_meshes`]; every instance needs its joints and
+/// weights.
+pub fn read_skin<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>], id: &[u8]) -> Result<Skin<'a>> {
+    let named = |kind: &[u8], id: &[u8]| {
+        (0..tree.nodes.len()).find(|&i| tree.name(i) == kind && tree.string(i, b"id").ok() == Some(id))
+    };
+    let Some(skin) = named(b"SKINNODE", id) else {
+        return fail(0, "skin node absent");
+    };
+    let skeleton = tree.string(skin, b"skeleton")?.strip_prefix(b"#").unwrap_or_default();
+    let Some(skeleton) = named(b"SKELETON", skeleton) else {
+        return fail(tree.nodes[skin].offset, "unresolved skin skeleton");
+    };
+    let inverse_bind: Vec<[f32; 16]> = (tree.nodes[skeleton].children.iter())
+        .filter(|&&c| tree.name(c) == b"INVERSEBINDMATRIX")
+        .map(|&c| decode_bind_matrix(tree.nodes[c].data.unwrap_or_default(), tree.nodes[c].offset))
+        .collect::<Result<_>>()?;
+    let mut joints = Vec::new();
+    let mut instances = Vec::new();
+    for &c in &tree.nodes[skin].children {
+        match tree.name(c) {
+            b"SKINJOINT" => {
+                let joint = tree.string(c, b"joint")?.strip_prefix(b"#").unwrap_or_default();
+                let Some(joint) = named(b"JOINTNODE", joint) else {
+                    return fail(tree.nodes[c].offset, "unresolved skin joint");
+                };
+                joints.push(joint);
+            }
+            b"MODIFIERNETWORKINSTANCE" if tree.string(c, b"network")?.ends_with(b"#skinTransformLocal") => {
+                let reference = tree.string(c, b"indices")?.strip_prefix(b"#").unwrap_or_default();
+                let Some(source) = meshes.iter().position(|m| m.id == reference) else {
+                    return fail(tree.nodes[c].offset, "unresolved skin source");
+                };
+                let Some((bound, _)) = &meshes[source].skin_weights else {
+                    return fail(tree.nodes[c].offset, "skinned source without joints");
+                };
+                if bound.iter().flatten().any(|&j| j as usize >= inverse_bind.len()) {
+                    return fail(tree.nodes[c].offset, "skin joint number out of range");
+                }
+                let shader = tree.string(c, b"shader")?.strip_prefix(b"#").unwrap_or_default();
+                instances.push((tree.string(c, b"id")?, shader, source));
+            }
+            _ => {}
+        }
+    }
+    if joints.len() != inverse_bind.len() || joints.len() != tree.integer(skin, b"jointCount")? as usize {
+        return fail(tree.nodes[skin].offset, "skin joint and bind matrix counts differ");
+    }
+    Ok(Skin { joints, inverse_bind, instances })
 }
 pub fn decode_matrix(data: &[u8], offset: usize) -> Result<[f32; 16]> {
     if data.len() != 64 {
@@ -723,7 +850,7 @@ mod renderables_tests {
             }
             if found
                 && let Some(draw) =
-                    instance_draw(tree, meshes, &context, i, false, Some(selected[0]))?
+                    instance_draw(tree, meshes, &context, i, Subset::Static, Some(selected[0]))?
             {
                 result.push(draw);
             }

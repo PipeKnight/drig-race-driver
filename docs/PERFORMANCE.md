@@ -904,7 +904,7 @@ turns it off on Android for comparisons. It changes presentation only.
 | Ground cover | 0.4 × the authored LOD distances | about 0.16 × the sprites |
 | Compute threads | cores − 2, at least 4 (6 on an 8-core phone) | Bevy gives 4 of 8 cores to compute and leaves IO and async threads idle |
 
-**Measurement switches.** `perf_test` keeps the per-part switches. The Auto cycle (14 steps of 8 s)
+**Measurement switches.** `perf_test` keeps the per-part switches. The Auto cycle (15 steps of 8 s since F625's `off:mirror`, the head-cam's rear-view mirror)
 now ends with `mobile:render1080` (full resolution), `mobile:render540` and `mobile:msaa_off`; under
 the preset, the "normal" step is the preset itself. The Auto cycle also runs in the pre-race menu.
 The cycle labels `light_shadows`, `no_small_casters` and `far_props` are for runs without the preset
@@ -1511,6 +1511,202 @@ regathers dominate. Phone [I]: about 0.4 ms less on the main thread.
 
 Left: ground cover writes all its billboards on each regather. Stable slots for the billboards
 would let it write only the ones that enter or leave; not done here.
+
+## Grid start: GPU passes and opponent shadow bodies (F600)
+
+Owner report, APK 3c7a3516: 30-50 FPS in the race, but below 30 FPS at the very start, where the
+render height drops. Phone logs (local/phone-start/, Adreno 740) [O]:
+- Nürburgring, cars waiting on the grid (16-38 s): a steady 35.4 ms frame (max 37). The render
+  thread waits 11-13 ms per frame in `present_frames`, and both threads are under 21 ms, so the
+  GPU sets the frame.
+- `render_dynamic` drops to 672 rows, gains about 2 ms (probe 2.12 ms against 4.56 ms if the
+  frame scaled with pixels) and returns to 720 rows as "ineffective" a second later: that is the
+  dip the owner sees. About half the GPU frame does not scale with pixels.
+- After the start the frame falls to 30-33 ms, and to 22-25 ms as the field spreads.
+
+Tool: `gpu_passes` (on in the profile build, or `GRID_GPU_PASSES=1`) logs per render pass the GPU
+time from timestamp queries, with primitives and shader invocations where the device has pipeline
+statistics (the Adreno 740 has both), and the triangles each view submits by owner from the
+visibility lists (`view_triangles`). Bevy does not time its shadow passes; their triangles show
+their size.
+
+PC, desktop phone view (mobile preset, 1539x720), Donington, 12 cars, frozen at tick 1 [O]:
+
+| view | before | F600 |
+|---|---|---|
+| camera | 806,139 (opponent cars 268,699) | 806,139 (268,699) |
+| cascades 0-3 | 124,843 + 248,016 + 442,119 + 645,647 = 1,460,625 (opponent cars 747,022) | 81,778 + 114,497 + 193,398 + 396,926 = 786,599 (opponent shadow bodies 988 + 2,964 + 5,434 + 5,434 = 14,820) |
+| total | 2,266,764 | 1,592,738 (-30 %) |
+
+During the first 66 s of the race (3-s windows, player at the back) the camera draws 0.35-1.4 M
+triangles and the cascades 0.86-1.39 M, opponent cars 0.25-0.27 M and 0.47-0.78 M of those. The
+grid is the worst case because all eleven opponents stand close together inside the first
+cascades.
+
+The original draws opponents into cascades 1 and 2 with the model's coarsest level only (LOD5
+`main_body`, 494 triangles on the BMW; docs/CAR_LOD.md "Shadows"). Change: each opponent gets
+that mesh as a shadow body on a layer only the sun takes casters from, posed by car_batch; the
+opponent's parts and batches cast no shadow. Picture, fixed step, desktop 1600x900, against
+`GRID_CAR_BATCH=0` (no bodies; it also unbatches, which alone flips 0.09-0.21 % of samples, F584):
+ticks 300 / 2400 / 6000 differ in 0.20 / 0.24 / 0.17 % of pixels: the outline of the opponents'
+ground shadows, no rear-wing shadow on their boot lid, and the player car's batching speckle. The
+grid frame in the phone view against main at F595 with the timer: 0.25 %, the same places
+(local/gridstart/crop-grid-s1*.png). Timing was not taken: the owner was playing on the PC.
+Phone [I]: the shadow passes lose about 0.67 M of 2.27 M triangles at the start; with about half
+the 35 ms GPU frame not scaling with pixels, a few ms less.
+
+Mesh allocation at the start: `allocate_and_free_meshes` 3.46 ms per frame in the first window
+(242 frames) is about 840 ms in total, the 0.8-1.1 s first two frames after loading (22,488 mesh
+entities uploaded); it does not appear in later windows. Not changed here.
+
+## Grid start: opponent car levels (F609)
+
+The original draws opponents with the low file's levels 2..5, chosen per frame by FOV-scaled
+distance under per-level caps (docs/CAR_LOD.md "Selection", "Port"). Change: car_batch selects a
+level per opponent each frame and shows that level's batches and loose parts; the others sit on a
+hidden layer. Hidden batches and loose parts are not posed (`car_batch::Unposed`); a level's loose
+parts are posed one frame before the level is shown.
+
+PC, desktop phone view (mobile preset, 1539x720), Donington, 12 cars, frozen at tick 1 [O]
+(local/gridstart/grid-s2.log):
+
+| view | F600 | F609 |
+|---|---|---|
+| camera | 806,139 (opponent cars 268,699) | 591,256 (opponent cars 53,816) |
+| cascades 0-3 | 786,599 | 786,599 (shadow bodies as in F600) |
+| total | 1,592,738 | 1,377,855 (-39 % against 2,266,764 before F600) |
+
+Over a 3,600-frame race in the phone view the opponents spend about 80 % of car-frames at levels
+2-5 (`level_car_frames=[17409,0,4421,5988,7469,29513]`); 108 level changes.
+
+CPU, the same race, release build on the PC, three alternating rounds, `perf_timing` mean ms per
+frame (wall time is capped at 60 Hz) [O]:
+
+| round | `GRID_CAR_LOD=0` Main / Render | LOD on Main / Render |
+|---|---|---|
+| 1 | 5.94 / 12.00 | 5.99 / 10.91 |
+| 2 | 4.79 / 9.73 | 5.29 / 9.52 |
+| 3 | 5.51 / 9.84 | 4.73 / 8.53 |
+
+The main schedule is within run-to-run noise; the render schedule is 0.2-1.3 ms lower with LOD on.
+The level selection and visibility switch add about 0.15 ms per frame (`refresh_ms`) and the extra
+posing about 0.07 ms per frame.
+
+Picture, fixed step, desktop 1600x900, against `GRID_CAR_LOD=0`: ticks 300 / 2400 / 6000 differ in
+0.83 / 0.12 / 0.03 % of pixels (coarser silhouettes of the cars further down the grid); the grid
+frame in the phone view against F600 differs in 1.53 %. Liveries and numbers stay on the low
+levels (local/gridstart/crop-grid-s2*.png, crop-2400-s2.png).
+
+Phone [I]: the camera loses about 0.21 M triangles more at the start, so the grid frame loses
+about 1.39 M of the original 2.27 M triangles in total. A profile APK shows it directly:
+`gpu_pass` lines (main opaque pass GPU ms and primitives) and `view_triangles` per view in the
+first windows, compared with the same lines in 3c7a3516's logs.
+
+The start mesh-allocation hitch (F600) is unchanged.
+
+## Start hitch: shared prop-piece meshes, OSD camera cascades (F616)
+
+Phone (APK 3c7a3516, Nürburgring) [O]: the first two frames after loading take 787 and 1,109 ms
+(`frame_stats frames=2`); `allocate_and_free_meshes` averages 3.46 ms per frame over the first
+`profile_window` (242 frames), about 840 ms in all. The cars then wait on the grid for about 20 s,
+so the hitch is the moment the grid first appears.
+
+Cause, PC, phone view (Donington, 12 cars, `GRID_ASSET_COUNTS=1`) [O]: 19,888 mesh assets for 22,898
+entities. 14,706 of the entities are the hidden pieces of the 1,021 breakable props
+(`dynamic_props`), and 14,706 of the meshes were theirs: each piece draw got its own mesh holding
+its source's whole vertex arrays. Bevy uploads every mesh asset, drawn or not, in the first frames.
+
+Change: `setup` gives pieces with the same source mesh, draw, material and index list one mesh asset
+(`dynamic_props::piece_draw`; the piece name now carries the source index). `draw_mesh` builds a
+piece's mesh from its source and indices only, so equal keys give equal meshes. `piece_meshes
+parts=14706 draws=63 meshes=63`: 63 meshes for all pieces; 5,245 mesh assets in all. The
+`mesh_entities` line of `GRID_ASSET_COUNTS` now also gives distinct meshes per kind.
+
+| first frames after loading, PC profile build | before | after |
+|---|---|---|
+| `allocate_and_free_meshes` | 570 + 570 + 82 = 1,222 ms | 321 ms |
+| `extract_render_asset<RenderMesh>` | 253 + 5 = 258 ms | 69 ms |
+| `prepare_assets<RenderMesh>` | 114 + 7 ms | below the list |
+| mesh assets | 19,888 | 5,245 |
+
+`setup` is unchanged (147 against 140 ms). Remaining mesh assets: 3,080 opponent meshes (deforming
+parts own a mesh per car), 990 static batches, 383 car batches, 376 track parts, 258 others.
+
+OSD camera: Bevy builds the sun's four cascades for every active camera, also for the OSD dial
+camera (`osd_scene`, order -20). The render world never draws the sun for that view (its layer is not
+the sun's), so those cascades only cost main-world frusta and caster visibility. `osd_scene` now
+drops them after Bevy builds them. `check_dir_light_mesh_visibility` 0.38 ms per frame (mean of 42
+two-second windows) → about 0.07-0.11 ms (below the profile list in all but one window).
+
+Picture: fixed step, desktop 1600x900, against the build before: Donington ticks 300 and 6000 (one
+prop broken) and the demolition derby at tick 2,700: 0 pixels differ.
+
+Phone [I]: the first frames lose roughly three quarters of their mesh work, about 0.6 s of the 1.9 s
+the two frames take, and the main thread about 1 ms per frame of caster visibility if the phone is
+3-4x slower than the PC. Check in the owner's log: the first `frame_stats frames=2` line (avg_ms),
+`allocate_and_free_meshes` and `check_dir_light_mesh_visibility` in the first and later
+`profile_window`s, and `asset_counts ... meshes=`.
+
+Cascades 1 and 2 (the coordinator's item): the original's caster callback skips cascade 0 for every
+world caster, not only opponents (docs/CAR_LOD.md "Cascades (F616)"), so the port's rule is already
+the equivalent one. Not changed.
+
+## Track scenery levels of detail (F633)
+
+The owner saw frame drops at Washington and asked whether its tall buildings are simplified with
+distance. They were not: grid-app drew every placed ornament at level 0 at any distance. The
+original selects each ornament's level per frame from the route's `ornament_attributes.xml`
+distances and culls it beyond the last one (docs/TRACK_LOD.md). `ornament_lod.rs` ports that rule;
+`GRID_ORNAMENT_LOD=0` gives the old picture.
+
+- Level entities: every level of every placed ornament draw is an entity; a per-frame system shows
+  one level per instance and hides the rest (no index rewrites, no uploads when a level changes).
+  They are not merged by `static_batch`. Washington: 7,008 track entities instead of 1,381 plus
+  740 fewer static batches (`mesh_entities` at frame 3,600); the drawn track entities stay near 100.
+- Shadows: every ornament casts with its level 1, as in the original (pass 0x401).
+
+Washington Viper race, 12 cars, PC, `--benchmark-frames 3600` after 240 warm-up frames, two runs
+each, under the build lock (no build alongside), means over the 5 s GPU windows [O]:
+
+| | phone view 1539x720, mobile preset | desktop 1920x1080 |
+|---|---|---|
+| camera triangles, off / on | 558k, 546k / 330k, 332k | 526k, 511k / 319k, 316k |
+| triangles in the 4 shadow cascades | 494k, 479k / 361k, 363k | 450k, 448k / 340k, 339k |
+| `main_opaque_pass_3d` GPU ms | 0.42, 0.53 / 0.37, 0.43 | 0.59, 0.62 / 0.65, 0.57 |
+| frame interval mean / p95 / p99 ms | 17.8, 18.2 / 17.8, 17.6; p95 23.6, 27.1 / 23.7, 22.4; p99 40.3, 39.7 / 39.9, 38.4 | 17.8, 18.4 / 17.8, 18.4 |
+| MainSchedule / RenderSchedule ms | 8.4, 9.4 / 8.8, 8.0; 14.8, 14.3 / 14.2, 13.5 | 8.0, 9.4 / 8.4, 9.1; 13.0, 14.4 / 13.8, 14.5 |
+
+On the PC the frame is CPU-bound and the GPU is far from busy, so the frame rate does not move; the
+CPU cost of the extra hidden entities is within the run-to-run noise. Shadows were measured
+separately on the Donington phone view (a GPU span around both shadow passes, PC): 2.0 ms GPU
+against 1.3 ms for the main opaque pass, the largest pass. That span hung the app at exit with GPU
+timing on and was not kept.
+
+Picture: fixed step, 1600x900, off against on: Washington tick 300 7.1 % and tick 3,000 6.5 % of
+pixels differ, Donington tick 300 5.6 % and 6,000 1.1 %. Almost all of it is shadow detail (level 1
+casters: e.g. less self-shadow under overhangs); near geometry is the same. Distant ornaments draw
+their coarser levels and vanish past `lod_distance_02`. The original cross-fades scenery over 20 m;
+the port switches in the middle of that overlap. The owner approved the change for desktop and
+phone (28 October: "everywhere, as in the original"), an exception to the identical-desktop rule.
+
+Washington spikes: the frames over 45 ms fall at the same benchmark frames with the levels off and
+on (about frames 480 and 550, then single frames), so scenery does not cause them. The 10 s window
+that holds the first ones has 36.9 mesh modifications per second (`asset_churn`: `car_batch` and
+opponent LOD meshes, the pack's contacts after the start) against 1.5-6.5 in later windows [I: the
+car-batch rebuilds and deformation uploads after the first contacts are the cause; not traced
+further]. Backlog.
+
+Phone [I]: about 40 % fewer camera triangles and 25 % fewer shadow-cascade triangles at Washington.
+The phone's frame was GPU-bound at the grid (F555), so some of that should show as GPU time. Check
+in the owner's log: `view_triangles view=camera0` total and the cascade lines, `gpu_pass ...
+main_opaque_pass_3d`, and `perf_timing` MainSchedule / RenderSchedule (the hidden level entities
+are main-world work).
+
+Not done (backlog after the slow-down of 27 October): per-route-block `world_cull_dist`, the
+instance caps, the scenery cross-fade; shadow caster culling and static shadow caching; the car
+mesh rebuilds behind the Washington spikes; ground cover partial writes (F592); per-island
+`WorldAdvance` (F568); the car-group contact solve and asleep pieces (F579); the vehicle stage
+(round 2).
 
 ## Demolition derby frame rate and parallel debris (F568)
 

@@ -297,3 +297,77 @@ grid slots 2–6, 5–9 s after the go (Race Day, Touring Cars, Donington GP, gr
 the original's min-space move pushes a car past the racing limit at the car as the port's
 does. Breakpoint logging at 0x799630 entry (ECX test object, view = [arg+0x18]: +0xE0,
 +0x1A0, +0x220..+0x234) and 0x795C00 return, read-only.
+
+## 10. La Source: the corner lift works only above the line target
+
+2026-10-27, Claude Code (drift-battle-ai). Static; the original was not run. Evidence (ignored,
+this worktree `local/corners2/`): `live.sh` (the §9 12-car runs with the prepush
+characteristics), `run.sh` and `matrix*.sh` (the §9 24-start matrix, with characteristics),
+`lead2.py`, port runs `base-s*`, `gate*-s*`, `m-*-s*`, logs `matrix.log`, `matrix2.log`.
+
+**Observation [V]:** Spa01 leader (live car 1) against the port's car 0, seed 0: both brake from
+54–55 m/s at the same place, with the same pedal (0.58 → 0.91), to 23.5 / 22.6 m/s. After the
+release the original's throttle is 0.6–1.0 through the hairpin (21–24.7 m/s). The port's sits
+at 0.2, `thCornerLiftMin`, and the car slows to 16.9 m/s without braking.
+
+**Static [V]:** 0x77A940 starts with `comiss [car state +0xD0], [ecx+8]; jbe → return 1`: the
+corner lift applies only while the speed is above controller +0x8. The governor 0x77A4C0 reads
+the same field as the active line's target (it subtracts `thBrakeLineSpeedDrop` from it), and
+0x7886C0 writes it from the request line's target (`[ebp+0x20]`) whenever the class data is
+valid. That is the port's `lines.target`. The port applied the lift at any speed; now only above
+the target.
+
+**Measured** (12-car Donington / Milan / Spa as §9, seeds 0–2, cars stalled within 30 s of the
+go; and the §9 matrix, 24 starts × seeds 0–5, now with `GRID_AI_CHARACTERISTICS`):
+
+| variant | live tracks, stalls in 3 seeds (Spa) | matrix lost cars | in 12-car starts | contacts |
+|---|---|---|---|---|
+| before (main 0947dd94) | 17 (13) | 220 | 83 | 178k |
+| corner-lift gate | 4 (0) | 203 | 80 | 172k |
+
+Spa leader at La Source: 22.0 m/s in seed 0 (original 20.9; before 16.4–16.6). The four stalls
+left are Donington (slot 4 in seeds 0–2, see the next section) and Milan car 10 at 27.6 s.
+
+## 11. Donington: the car-link planned offset and the limit clamp
+
+2026-10-27, Claude Code (drift-battle-ai). Static; the original was not run, and §9's proposed
+x32dbg capture is not needed for this. Evidence as §10, plus `off-s2/` (offset trace of seed 2).
+
+**Observation [V port]:** in Alongside, with a car on its right inside minSpace, slot 4's request
+is its own look-ahead offset minus minSpace (0x799630, ported faithfully in §9), so the planned
+offset walks left every tick: −0.0 → −4.1 m in 1 s at 56–59 m/s before Redgate. The left racing
+limit there is 0.5–1.0 m from the line (look-ahead and car), so limit + half width lies right of
+the line, and the port's clamp let the offset pass. The car leaves the road and goes into
+Recovery.
+
+**Static [V]:**
+- 0x782D20 (called by both 0x7878F0 and 0x788030) measures the signed lateral `s` of the limit
+  point moved inward by the half width (0x782FE0 with ∓view+0x60). If `s` lies between the line
+  and the offset, the offset becomes `s` (0x779CB0 writes block +0x50 and the planned point).
+  Otherwise, with the offset on the left (right) and `s` on the far side, right (left) of the
+  line, `s` is cleared and the offset becomes 0. AI_DRIVER_RESEARCH §3 item 8 had "does not move
+  it" for the second case, and the port followed it.
+- 0x788030 moves the car-link block's planned offset +0x1A0 toward request +0x98 at request
+  +0x9C, like 0x7878F0 does +0xE0, and stops it at the limit links of the car's block
+  (+0x210/+0x214, 0x782D20). The lateral PID 0x7892E0 measures its error from +0x190 (line point
+  + lateral × +0x1A0), and 0x797190 computes the room at the car (+0x220/+0x224) from it. The port
+  kept only +0xE0 and used it for both.
+
+**Port:** `stop_at_limits` with the far-side case, for both offsets; a second planned offset
+`offset_here` that moves with the same request and rate, is stopped at the limits at the car
+(racing, or track when the request selects track limits), feeds the PID error and the
+squeeze's room at the car, and is reset and shifted with `offset`.
+
+**Measured** (as §10; the first row is §10's gate, now on main):
+
+| variant | live tracks, stalls in 3 seeds | matrix lost cars | in 12-car starts | contacts |
+|---|---|---|---|---|
+| corner-lift gate (F601) | 4 | 203 | 80 | 172k |
+| + car-link offset only | 2 | 243 | 83 | 153k |
+| + clamp correction only | 1 | 137 | 50 | 168k |
+| + both (adopted) | 1 | 109 | 47 | 146k |
+
+Per seed (adopted): 13 8 21 30 30 7; gate only 19 37 57 26 27 37. Donington slot 4 no longer
+runs off in seeds 0–2; the one stall left on the live tracks is Milan car 10 at 27.7 s, after
+the first corner. Against old main (F585, characteristics set, 220) the matrix loses half as many
+cars.

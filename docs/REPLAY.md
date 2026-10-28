@@ -269,7 +269,7 @@ The replay camera set is separate from the race cameras (F349):
 - Asset (`--include-ignored`):
   - `grid_formats::replay_cameras::shipped_route_0_directors`: the four circuits' camera
     configurations;
-  - `replay::race_tests::recorded_frames_equal_the_live_race_on_every_circuit`: Donington,
+  - `replay::race_tests::recorded_frames_equal_the_live_race_on_*`: Donington,
     Nürburgring, Istanbul Park and Long Beach. Lacetti and BMW share the field, with 3 AI cars, and
     the AI drives the player's car, for 1600 ticks. Every recorded frame decodes to the live pose
     and velocity bit for bit, and the replayed body × wheel matrices equal the live

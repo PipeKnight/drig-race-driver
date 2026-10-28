@@ -189,7 +189,7 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
   - every label and column id is in the English table.
 - `race_hud::tests`: dial ratios and ranges, wrong-way intervals, lap group, minimap mapping.
 - `pause_menu::race_tests` (asset and private CD01/BP01/DF01, 3 AI opponents):
-  - `retire_from_race_shows_the_results_on_every_circuit`, run three times:
+  - `retire_from_race_shows_the_results_on_*`, run three times:
     - Donington with a Lacetti field;
     - Nürburgring with a BMW field;
     - Istanbul Park with a mixed field.

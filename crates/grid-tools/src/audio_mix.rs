@@ -58,6 +58,7 @@ pub const MODE_NAMES: [&str; 10] = [
     "PlatformModifier",
 ];
 pub const NORMAL: usize = 0;
+pub const TALKING: usize = 1;
 pub const CRASHED: usize = 2;
 pub const PAUSED: usize = 3;
 pub const START_LINE: usize = 4;
@@ -235,6 +236,8 @@ pub struct ModeMix {
     back: usize,
     /// +C18: how long a transient mode holds.
     hold: f32,
+    /// +C28: the mode is tied to a playing voice (0x411D40) instead of a duration.
+    tied: bool,
 }
 impl Default for ModeMix {
     fn default() -> Self {
@@ -248,6 +251,7 @@ impl Default for ModeMix {
             persistent: true,
             back: NORMAL,
             hold: 0.,
+            tied: false,
         }
     }
 }
@@ -275,6 +279,29 @@ impl ModeMix {
         let attack = table.attack.get(self.back).copied().unwrap_or(0.);
         self.change(mode, seconds, attack)
     }
+    /// 0x411D40: a transient `mode` that lasts while a voice plays (Talking for a speech line).
+    /// Refused while paused, in a pause replay or a transition, or when the mode is already
+    /// current. The mode it interrupts is remembered as for a timed one; [`ModeMix::release`]
+    /// returns to it when the voice stops.
+    pub fn set_tied(&mut self, mode: usize) -> bool {
+        if matches!(self.mode, PAUSED | PAUSED_REPLAY | TRANSITION) || mode == self.mode || mode >= PLATFORM {
+            return false;
+        }
+        // +C18 = 0 and +C21 = 0 (a voice pointer was given).
+        self.change(mode, 0., 0.);
+        self.persistent = false;
+        self.tied = true;
+        true
+    }
+    /// 427ED0's voice check: once the tied voice has stopped, the remembered mode is set
+    /// again. Returns whether it was.
+    pub fn release(&mut self) -> bool {
+        if self.persistent || !self.tied {
+            return false;
+        }
+        self.set(self.back);
+        true
+    }
     /// The common part of 411C10. The extra fade time of CB092C (2.5 s,
     /// Transition to Paused) and CB0BC4 (1.5 s, EndOfRace to StartLine)
     /// depends on the mode the previous fade left.
@@ -292,6 +319,9 @@ impl ModeMix {
             self.back = self.mode;
         }
         self.persistent = seconds == 0.;
+        // A mode set with a duration or none drops the voice tie (+C28 = the new caller's
+        // argument) [I: 411C10 writes +C28 = 0].
+        self.tied = false;
         self.from = self.mode;
         self.mode = mode;
         self.elapsed = 0.;
@@ -313,7 +343,7 @@ impl ModeMix {
     fn frame(&mut self, table: &Table) {
         // A transient mode past its hold sets the remembered mode again; the
         // groups keep their levels this frame.
-        if !self.persistent && self.elapsed > self.hold {
+        if !self.persistent && !self.tied && self.elapsed > self.hold {
             self.set(self.back);
             return;
         }
@@ -510,6 +540,36 @@ mod tests {
         let before = mix.clone();
         mix.set(NORMAL);
         assert_eq!(mix, before);
+    }
+
+    #[test]
+    fn talking_lasts_while_the_voice_plays() {
+        let t = Table {
+            master: 0.,
+            modes: [[0.; GROUPS]; 10],
+            attack: [0.15, 0.2, 0.01, 0.5, 1.5, 0.5, 1., 1., 1., 0.],
+            cameras: [[0.; GROUPS]; 6],
+        };
+        let mut mix = ModeMix::default();
+        mix.set(START_LINE);
+        assert!(mix.set_tied(TALKING));
+        // No duration: it holds however long the line plays.
+        mix.advance(&t, 10.);
+        assert_eq!(mix.mode(), TALKING);
+        assert!(!mix.set_tied(TALKING));
+        assert!(mix.release());
+        assert_eq!(mix.mode(), START_LINE);
+        assert!(!mix.release());
+        // Refused while paused.
+        mix.set(PAUSED);
+        assert!(!mix.set_tied(TALKING));
+        // A timed mode replaces the tie.
+        mix.set(NORMAL);
+        assert!(mix.set_tied(TALKING));
+        assert!(mix.set_for(&t, CRASHED, CRASH_SECONDS));
+        assert!(!mix.release());
+        mix.advance(&t, 1.);
+        assert_eq!(mix.mode(), NORMAL);
     }
 
     #[test]
