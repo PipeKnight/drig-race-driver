@@ -538,6 +538,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G315](G0315.md) | 2026-10-28 | Integrate pinned F635 and deliver the scoped BMW smoke entrypoint |
 | [G313](G0313.md) | 2026-10-28 | Deliver current window sort centres to ordinary Lacetti driving |
 | [G312](G0312.md) | 2026-10-27 | Allow the optional Reinhard display mode in ordinary interactive driving |
 | [G311](G0311.md) | 2026-10-27 | Exercise one finite source-guided forearm sweep with real Extract receipts |

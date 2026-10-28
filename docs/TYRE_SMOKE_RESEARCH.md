@@ -992,8 +992,8 @@ first-Extract and first-Window experiments are retained, including the observer'
 initial merged-order failure. Neither errors nor skipped stages are relabelled
 successful draws.
 
-Play GRID BMW Smoke.cmd uses a separate baseline executable and isolated manual
-profile. The accepted enhanced Motion/Lacetti launchers and executables remain
+The historical G293 version of Play GRID BMW Smoke.cmd used a separate baseline
+executable and isolated manual profile. The accepted enhanced Motion/Lacetti launchers and executables remain
 unchanged. NativeDLAA/HDR, other cars/routes/opponents/damage and dark wheel
 rings remain separate work. Private evidence: local/graphics/bmw-boundary-live01/
 with source06/build06, dense450-run03, window-cr-run02, window-final-audit01 and
@@ -1026,6 +1026,19 @@ enhanced admission is enabled. The accepted G293 owner build/log remain unchange
 The refactor and freshly integrated F571 pass the grid-app crate gate: 443 tests,
 strict Clippy and documentation sanity. No native HDR rendering is claimed.
 Evidence: ignored local/graphics/native-late-pipe-cpu01/gate02 and source02.json.
+
+### Maintained baseline smoke entrypoint
+
+`Play GRID BMW Smoke.cmd` now selects the ordinary checkout's
+`target/release/grid-app.exe`, rather than an absent ignored trial binary.
+It keeps the explicit G293 baseline BMW/Istanbul0 keyboard profile and creates
+fresh private data, log and exit-code files per session, after clearing inherited
+GRID/WGPU research switches. An optional first argument supplies a quoted game
+root. No SDK/DLAA, automatic inputs or existing owner settings are required or
+changed. Normal Play GRID launchers/defaults remain unchanged; this does not
+admit other cars, Derby, opponents or damage. The maintained command still needs
+the integrated artifact's checks and actual runtime evidence; the historical
+owner acceptance is not automatically a new-binary or general-profile pass.
 
 ### G296: native DLAA late smoke replay (in progress)
 
