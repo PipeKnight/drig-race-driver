@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G318 (2026-10-28): integrated770ec ordinary artifact passes full1254tests/Clippy/four identities/24soak, fresh BMW Off/Live autopilot and real Window exit0. Fresh main260cc integrated and full1256-test gate/identities/24soak pass; main publication pending. Owner confirms gross glass contour gone on c833; fine overlap shimmer remains open. See TYRE_SMOKE_RESEARCH/LACETTI_GRAPHICS_MATERIALS.
 - G316 (2026-10-28): latest contour feedback came from old AgX3503/no current-sort; both AgX/Reinhard now share checkedc833 and print build ID. Full contour acceptance stays open; no inward-pane hiding. Main integration gate is in progress separately. See LACETTI_GRAPHICS_MATERIALS.
 - G313/G314 (2026-10-28): black rear-through-front contour traced to missing playable current sorting;4matched sun/sort controls show421..425m stale centres versus0error. Scoped manual automatic fix passes466tests/Clippy/release and actual Window; Reinhard launcher updated. C/R/all-angle feedback and main delivery remain open. See LACETTI_GRAPHICS_MATERIALS.
 - G312 (2026-10-27): ordinary Reinhard admission corrected after actual exit1;466app tests/Clippy/release and independent package checks pass. Same private launcher updated; owner driving session exits0. Separate black windshield contour still open. AgX/default/.9saturation preserved. See ASPHALT_PAINT_REFLECTION_CHECK.
