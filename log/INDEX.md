@@ -495,6 +495,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G316](G0316.md) | 2026-10-28 | Unify current AgX and Reinhard launcher artifacts after owner session attribution |
 | [G314](G0314.md) | 2026-10-28 | Verify ordinary window fix delivery and main integration preparation |
 | [G313](G0313.md) | 2026-10-28 | Deliver current window sort centres to ordinary Lacetti driving |
 | [G312](G0312.md) | 2026-10-27 | Allow the optional Reinhard display mode in ordinary interactive driving |
