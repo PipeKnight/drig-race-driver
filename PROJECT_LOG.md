@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G313/G314 (2026-10-28): black rear-through-front contour traced to missing playable current sorting;4matched sun/sort controls show421..425m stale centres versus0error. Scoped manual automatic fix passes466tests/Clippy/release and actual Window; Reinhard launcher updated. C/R/all-angle feedback and main delivery remain open. See LACETTI_GRAPHICS_MATERIALS.
 - G312 (2026-10-27): ordinary Reinhard admission corrected after actual exit1;466app tests/Clippy/release and independent package checks pass. Same private launcher updated; owner driving session exits0. Separate black windshield contour still open. AgX/default/.9saturation preserved. See ASPHALT_PAINT_REFLECTION_CHECK.
 - G311 (2026-10-27): one finite forearm sweep passes466app tests/Clippy/build,31Extract/3callbacks/5PNGs after preserved compile/lint failures. Coherent bend, exact neutral/final controls; native clock/full animation/default remain open. See CROWD_ANIMATION_RESEARCH.
 - G310 (2026-10-27): same-artifact angular asphalt plus accepted gentle Motion passes2nativeDLAA1800tick controls and strict physical/ledger/motion equivalence; selected frames look continuous. Owner accepts moving road quality; antenna doubling remains open. R/C/multitrack/default acceptance open. See ASPHALT_PAINT_REFLECTION_CHECK.
