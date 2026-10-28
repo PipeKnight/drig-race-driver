@@ -404,6 +404,8 @@ mod tests {
             parts: Vec::new(),
             textures: Default::default(),
             bindings: Default::default(),
+            decal_materials: Default::default(),
+            object_glass_materials: Default::default(),
             center: Vec3::ZERO,
             radius: 0.,
             track: false,

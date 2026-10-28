@@ -538,6 +538,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G317](G0317.md) | 2026-10-28 | Complete integrated Car test fixtures after actual full-gate compile failure |
 | [G315](G0315.md) | 2026-10-28 | Integrate pinned F635 and deliver the scoped BMW smoke entrypoint |
 | [G314](G0314.md) | 2026-10-28 | Verify ordinary window fix delivery and main integration preparation |
 | [G313](G0313.md) | 2026-10-28 | Deliver current window sort centres to ordinary Lacetti driving |

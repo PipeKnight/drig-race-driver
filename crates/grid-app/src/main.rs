@@ -6686,6 +6686,8 @@ mod driving_tests {
                         parts: Vec::new(),
                         textures: car.textures.clone(),
                         bindings: car.bindings.clone(),
+                        decal_materials: Default::default(),
+                        object_glass_materials: Default::default(),
                         center: car.center,
                         radius: car.radius,
                         track: true,
