@@ -125,6 +125,8 @@ mod tests {
         };
         let mut car = super::super::Car {
             parts: vec![],
+            low_lods: Vec::new(),
+            ornament_lods: Default::default(),
             textures: BTreeMap::from([("car0/lac_main_m1.tga".into(), source([255; 3]))]),
             bindings: BTreeMap::new(),
             decal_materials: Default::default(),

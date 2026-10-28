@@ -19,7 +19,7 @@ pub fn install(app: &mut App) {
     app.add_systems(Update, patch_loaded_library);
 }
 
-fn patch_loaded_library(
+pub(crate) fn patch_loaded_library(
     mut shaders: ResMut<Assets<Shader>>,
     mut reported: Local<bool>,
     views: Query<

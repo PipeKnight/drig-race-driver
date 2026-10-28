@@ -540,6 +540,11 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G324](G0324.md) | 2026-10-28 | Close guarded glass sampling checks and record main playable provenance |
+| [G323](G0323.md) | 2026-10-28 | Repair glass diagnostic setup and conditional shader dependencies |
+| [G322](G0322.md) | 2026-10-28 | Complete the feature-gated material fixture after integration |
+| [G321](G0321.md) | 2026-10-28 | Add a guarded glass base-texture filtering discriminator |
+| [G320](G0320.md) | 2026-10-28 | Use the current release in the generic graphics launcher |
 | [G319](G0319.md) | 2026-10-28 | Publish graphics delivery and isolate glass history response |
 | [G318](G0318.md) | 2026-10-28 | Verify integrated graphics full gate and accepted BMW smoke runtime |
 | [G317](G0317.md) | 2026-10-28 | Complete integrated Car test fixtures after actual full-gate compile failure |
