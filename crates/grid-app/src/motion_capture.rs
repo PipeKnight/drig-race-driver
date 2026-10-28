@@ -25,11 +25,23 @@ impl Config {
         }
         Ok(Self { start, frames })
     }
+    pub(crate) fn skid_phase_window(self) -> bool { self.start == 350 && self.frames == 120 }
+    /// Called only with the selected typed diagnostic profile's exact constants.
+    pub(crate) fn exact_phase_window(self, start: u64, frames: u32, fps: u32, stop: u64) -> bool {
+        self.start == start && self.frames == frames && self.check(fps, stop).is_ok()
+    }
+    fn required_ticks(self, fps: u32) -> u64 {
+        (f64::from(self.frames) / f64::from(fps) / f64::from(grid_tools::source_vehicle::DELTA)).ceil() as u64
+    }
+    /// Narrow fence pilot only; general motion capture admission is unchanged.
+    pub(crate) fn check_fence_window(self, fps: Option<u32>, ticks: Option<u64>) -> bool {
+        let (Some(fps), Some(ticks)) = (fps, ticks) else { return false; };
+        if !(30..=60).contains(&self.frames) || !(30..=60).contains(&fps) || !(1..=600).contains(&ticks) || self.check(fps,ticks).is_err() { return false; }
+        let required = self.required_ticks(fps);
+        self.start.checked_add(required + 8).is_some_and(|end| end <= ticks)
+    }
     fn check(self, fps: u32, ticks: u64) -> Result<(), &'static str> {
-        let required = (f64::from(self.frames)
-            / f64::from(fps)
-            / f64::from(grid_tools::source_vehicle::DELTA))
-        .ceil() as u64;
+        let required = self.required_ticks(fps);
         if !(30..=300).contains(&fps)
             || self
                 .start
@@ -93,6 +105,7 @@ pub fn install(
     .add_systems(Last, request);
     Ok(())
 }
+#[allow(clippy::too_many_arguments)] // Existing ECS request plus optional bounded diagnostic.
 fn request(
     mut commands: Commands,
     mut motion: ResMut<Motion>,
@@ -100,6 +113,7 @@ fn request(
     driving: Res<super::Driving>,
     clocks: (Res<Time<Fixed>>, Res<Time<Real>>),
     graphics: Res<super::graphics::Settings>,
+    phase_audit: Option<Res<super::skid_phase_ledger::Audit>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if motion.failed
@@ -135,9 +149,21 @@ fn request(
     motion.records.push(format!("frame={index} tick={} fixed_remainder={} frame_seconds={} phases={phases:?} spins={spins:?}",driving.runtime.ticks,clock.overstep().as_secs_f32(),real.delta_secs()));
     motion.requested += 1;
     let path = motion.directory.join(format!("{index:04}.png"));
-    commands.spawn(Screenshot::image(target.clone())).observe(move |event: On<ScreenshotCaptured>, mut motion: ResMut<Motion>, mut exit: MessageWriter<AppExit>| {
+    let entity = commands.spawn(Screenshot::image(target.clone())).id();
+    let phase_audit = phase_audit.map(|a| (*a).clone());
+    if let Some(audit) = &phase_audit {
+        let Some(stamp) = audit.stamp(index, entity, driving.runtime.ticks, target) else {
+            motion.failed=true; exit.write(AppExit::error()); return;
+        };
+        commands.entity(entity).insert(stamp);
+    }
+    commands.entity(entity).observe(move |event: On<ScreenshotCaptured>, mut motion: ResMut<Motion>, mut exit: MessageWriter<AppExit>| {
+        if phase_audit.as_ref().is_some_and(|a| !a.readback(index, entity, event.entity)) {
+            motion.failed=true; exit.write(AppExit::error()); return;
+        }
         let result=event.image.clone().try_into_dynamic().map_err(|e|format!("{e:?}")).and_then(|image|image.to_rgb8().save(&path).map_err(|e|e.to_string()));
         if let Err(error)=result { motion.failed=true; error!("motion capture: {error}"); exit.write(AppExit::error()); return; }
+        if let Some(audit)=&phase_audit { audit.png(index,entity); }
         motion.completed+=1;
         if motion.finished() {
             let result=(|| -> std::io::Result<()> { let mut f=std::fs::OpenOptions::new().create_new(true).write(true).open(motion.directory.join("frames.txt"))?; writeln!(f,"# request-frame metadata; asynchronous GPU readback; virtual clock, not monitor FPS")?; for record in &motion.records { writeln!(f,"{record}")?; } Ok(()) })();
@@ -166,5 +192,21 @@ mod tests {
         ] {
             assert!(Config::parse(text).and_then(|c| c.check(30, 400)).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod fence_window_tests {
+    use super::*;
+    #[test]
+    fn real_capture_config_requires_requested_frames_fps_bound_and_extra_headroom() {
+        let c=Config::parse("80,60").unwrap();
+        assert!(c.check_fence_window(Some(30),Some(220)));
+        assert!(!c.check_fence_window(None,Some(220)));
+        assert!(!c.check_fence_window(Some(30),None));
+        assert!(!c.check_fence_window(Some(30),Some(212)));
+        assert!(!c.check_fence_window(Some(61),Some(220)));
+        assert!(!c.check_fence_window(Some(30),Some(601)));
+        for text in ["80,29","80,61","18446744073709551615,60"] { assert!(!Config::parse(text).unwrap().check_fence_window(Some(30),Some(220))); }
     }
 }

@@ -27,7 +27,7 @@ use std::{
 
 const EV: f32 = 13.;
 #[derive(Component, Clone, Copy, ExtractComponent)]
-struct ProbeCamera(usize);
+pub(super) struct ProbeCamera(usize);
 #[derive(Component)]
 struct SceneProbe;
 #[derive(Component, Default)]
@@ -58,9 +58,12 @@ struct CalibrationPosition(Vec3);
 
 /// Explicit diagnostic only: a polished sphere makes off-screen scene content
 /// recognizable without changing the Lacetti's authored paint parameters.
-pub fn install_calibration(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let center = super::grid_slot(root, &super::Route::default(), "slot_00")?
-        .transform_point3(Vec3::new(0., 1.3, 0.))
+pub fn install_calibration(
+    app: &mut App,
+    root: &Path,
+    route: &super::Route,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let center = super::grid_slot(root, route, "slot_00")?.transform_point3(Vec3::new(0., 1.3, 0.))
         + Vec3::new(-3., 0., 0.);
     app.insert_resource(CalibrationPosition(center))
         .add_systems(PostStartup, calibration);
@@ -104,8 +107,12 @@ fn calibration(
     );
 }
 
-pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let slot = super::grid_slot(root, &super::Route::default(), "slot_00")?;
+pub fn install(
+    app: &mut App,
+    root: &Path,
+    route: &super::Route,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let slot = super::grid_slot(root, route, "slot_00")?;
     let center = slot.transform_point3(Vec3::new(0., 1.3, 0.));
     app.insert_resource(Position(center))
         .add_plugins((
@@ -352,12 +359,17 @@ fn follow(
         return;
     }
     // A replay presents snapshot poses while the live runtime is paused.
-    let pose = replay.as_deref()
+    let pose = replay
+        .as_deref()
         .and_then(|r| r.session.as_ref())
         .and_then(|s| s.shown.as_ref())
         .and_then(|s| s.cars.first())
         .map(|car| car.pose.to_mat4())
-        .or_else(|| driving.as_deref().map(|d| Mat4::from_cols_array(&d.runtime.pose())));
+        .or_else(|| {
+            driving
+                .as_deref()
+                .map(|d| Mat4::from_cols_array(&d.runtime.pose()))
+        });
     if let Some(pose) = pose {
         cube.capture_center = pose.transform_point3(Vec3::new(0., 1.3, 0.));
     }
@@ -389,13 +401,18 @@ fn exit_report(
         return;
     }
     if let Some(cube) = cube {
-        if let Some(snapshot) = replay.as_deref()
+        if let Some(snapshot) = replay
+            .as_deref()
             .and_then(|r| r.session.as_ref())
             .and_then(|s| s.shown.as_ref())
             && let Some(car) = snapshot.cars.first()
         {
-            println!("scene_probe replay_exit shown_tick={} shown_center={:?} capture_center={:?} scope=shown-snapshot-not-runtime",
-                snapshot.tick, car.pose.to_mat4().transform_point3(Vec3::new(0., 1.3, 0.)), cube.capture_center);
+            println!(
+                "scene_probe replay_exit shown_tick={} shown_center={:?} capture_center={:?} scope=shown-snapshot-not-runtime",
+                snapshot.tick,
+                car.pose.to_mat4().transform_point3(Vec3::new(0., 1.3, 0.)),
+                cube.capture_center
+            );
         }
         println!(
             "scene_probe exit moving={} copies={} last_capture_center={:?} ready={}",
@@ -748,7 +765,8 @@ mod tests {
         // paused elsewhere. The capture must follow the displayed player.
         use crate::replay::{self, frame, stream};
         let replay_pose = frame::Pose::from_mat4(Mat4::from_rotation_translation(
-            Quat::from_rotation_z(0.2), Vec3::new(20., 4., 30.),
+            Quat::from_rotation_z(0.2),
+            Vec3::new(20., 4., 30.),
         ));
         let mut snapshot = frame::Snapshot {
             tick: 0,
@@ -757,11 +775,13 @@ mod tests {
                 velocity: Vec3::X * 10.,
                 wheels: [frame::Wheel::default(); 4],
                 geometry: [frame::WheelGeometry {
-                    anchor: [0.; 3], axis: [0., 1., 0.],
+                    anchor: [0.; 3],
+                    axis: [0., 1., 0.],
                     deformation_translation: [0.; 3],
                     deformation_orientation: Mat4::IDENTITY.to_cols_array_2d(),
                 }; 4],
-                deformation: None, lost: [None; 4],
+                deformation: None,
+                lost: [None; 4],
             }],
             props: None,
         };
@@ -772,25 +792,64 @@ mod tests {
             stream.push(tick, &encoder.encode(&snapshot, number as u32));
         }
         let mut replay = replay::Replay::new(stream, None);
-        assert!(replay.start(replay::Kind::Full, replay::Origin::PauseMenu, false,
-            &crate::camera::Views::fallback()));
+        assert!(replay.start(
+            replay::Kind::Full,
+            replay::Origin::PauseMenu,
+            false,
+            &crate::camera::Views::fallback()
+        ));
         replay.session.as_mut().unwrap().shown = Some(snapshot);
         app.insert_resource(replay);
         app.world_mut().resource_mut::<crate::Driving>().paused = true;
         app.update();
-        let replay_center = replay_pose.to_mat4().transform_point3(Vec3::new(0., 1.3, 0.));
+        let replay_center = replay_pose
+            .to_mat4()
+            .transform_point3(Vec3::new(0., 1.3, 0.));
         assert_eq!(app.world().resource::<Cube>().capture_center, replay_center);
         for (face, &entity) in cameras.iter().enumerate() {
-            assert_eq!(*app.world().get::<Transform>(entity).unwrap(), face_transform(face, replay_center));
+            assert_eq!(
+                *app.world().get::<Transform>(entity).unwrap(),
+                face_transform(face, replay_center)
+            );
         }
         // The probe box still belongs to the submitted image until publication.
-        assert_eq!(app.world().get::<Transform>(probe).unwrap().translation, initial);
-        *app.world().resource::<Cube>().captured_center.lock().unwrap() = replay_center;
+        assert_eq!(
+            app.world().get::<Transform>(probe).unwrap().translation,
+            initial
+        );
+        *app.world()
+            .resource::<Cube>()
+            .captured_center
+            .lock()
+            .unwrap() = replay_center;
         app.update();
-        assert_eq!(app.world().get::<Transform>(probe).unwrap().translation, replay_center);
-        assert_eq!(app.world().resource::<crate::Driving>().runtime.state.car.owner.vehicle, before);
-        assert_eq!(app.world().resource::<replay::Replay>().session.as_ref().unwrap()
-            .shown.as_ref().unwrap().cars[0].pose, replay_pose);
+        assert_eq!(
+            app.world().get::<Transform>(probe).unwrap().translation,
+            replay_center
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle,
+            before
+        );
+        assert_eq!(
+            app.world()
+                .resource::<replay::Replay>()
+                .session
+                .as_ref()
+                .unwrap()
+                .shown
+                .as_ref()
+                .unwrap()
+                .cars[0]
+                .pose,
+            replay_pose
+        );
         app.world_mut().resource_mut::<replay::Replay>().finish();
         app.update();
         assert_eq!(app.world().resource::<Cube>().capture_center, initial);
@@ -815,5 +874,68 @@ mod tests {
         assert_eq!(half(0x4000), 2.);
         assert_eq!(half(0xbc00), -1.);
         assert!(half(0x7c00).is_infinite());
+    }
+}
+
+#[cfg(test)]
+mod selected_route_asset_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn istanbul_probe_install_uses_selected_slot_not_default_or_physical_pose() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let route = crate::Route::new(grid_tools::route::ISTANBUL_PARK).unwrap();
+        let donington = crate::Route::default();
+        let local_height = Vec3::new(0., 1.3, 0.);
+        let selected = crate::grid_slot(root, &route, "slot_00")
+            .unwrap()
+            .transform_point3(local_height);
+        let old_default = crate::grid_slot(root, &donington, "slot_00")
+            .unwrap()
+            .transform_point3(local_height);
+        assert!(selected.is_finite() && old_default.is_finite());
+        assert!(
+            selected.distance(old_default) > 300.,
+            "fixture must distinguish route centers"
+        );
+
+        // Invoke the actual installer and inspect its input resource without
+        // Update/Render, a RenderDevice, copied assets or a synthetic marker.
+        let mut app = App::new();
+        install(&mut app, root, &route).unwrap();
+        assert_eq!(app.world().resource::<Position>().0, selected);
+        install_calibration(&mut app, root, &route).unwrap();
+        assert_eq!(
+            app.world().resource::<CalibrationPosition>().0,
+            selected + Vec3::new(-3., 0., 0.)
+        );
+
+        // Physical placement front-aligns the BMW and samples track contact;
+        // it is deliberately NOT substituted for the historical slot preview.
+        let bmw = grid_tools::car::Car::new(grid_tools::car::BMW).unwrap();
+        let runtime =
+            grid_tools::source_vehicle::Runtime::load(root, &route, &bmw, "slot_00", 200679)
+                .unwrap();
+        let runtime_center = Mat4::from_cols_array(&runtime.pose()).transform_point3(local_height);
+        assert!(runtime_center.is_finite());
+        assert!(
+            selected.distance(runtime_center) < 20.,
+            "selected slot must be in the real spawn area"
+        );
+        assert!(
+            old_default.distance(runtime_center) > 300.,
+            "old default is hundreds of meters away"
+        );
+        assert!(
+            selected.distance(runtime_center) > 0.01,
+            "fixture must distinguish preview from physical placement"
+        );
+
+        // Passing the default route preserves the previously accepted center.
+        let mut control = App::new();
+        install(&mut control, root, &donington).unwrap();
+        assert_eq!(control.world().resource::<Position>().0, old_default);
     }
 }

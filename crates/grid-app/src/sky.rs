@@ -44,9 +44,10 @@ impl Material for SkyMaterial {
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }
-    // Draw first among transparencies so glass can still appear in front of sky.
+    // Bevy sorts view-space Z plus depth_bias ascending: negative draws first.
+    // Keep the background ahead of transparent geometry, including depth-writing flashes.
     fn depth_bias(&self) -> f32 {
-        1.0e8
+        -1.0e8
     }
     fn enable_prepass() -> bool {
         false
@@ -377,6 +378,51 @@ fn follow_camera(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sky_precedes_near_transparencies_in_bevy_sort_keys() {
+        use bevy::{
+            core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d},
+            math::{Affine3A, FloatOrd},
+            render::render_phase::{SortedPhaseItem, ViewRangefinder3d},
+        };
+        let material = SkyMaterial {
+            first: Handle::default(),
+            second: Handle::default(),
+            tone: Vec4::ONE,
+        };
+        assert_eq!(material.alpha_mode(), AlphaMode::Blend);
+        assert!(!SkyMaterial::enable_prepass());
+        assert!(!SkyMaterial::enable_shadows());
+        let camera = Vec3::new(120., 40., -75.);
+        let rangefinder =
+            ViewRangefinder3d::from_world_from_view(&Affine3A::from_translation(camera));
+        // Use the actual Transparent3d associated sort-key type and Bevy's
+        // distance calculation; reversing the sky bias must break this ordering.
+        let key = |center, bias| -> <Transparent3d as SortedPhaseItem>::SortKey {
+            FloatOrd(
+                TransparentSortingInfo3d::Sorted {
+                    mesh_center: center,
+                    depth_bias: bias,
+                }
+                .sort_distance(&rangefinder),
+            )
+        };
+        let mut items = [
+            (key(camera + Vec3::new(0., 0., -2.), 0.), "near-glass"),
+            (key(camera, material.depth_bias()), "sky"),
+            (key(camera + Vec3::new(0., 0., -10_000.), 0.), "far-glass"),
+            (
+                key(camera + Vec3::new(1., 1., -12.), 0.),
+                "depth-writing-flash",
+            ),
+        ];
+        items.sort_by_key(|(key, _)| *key);
+        assert_eq!(
+            items.map(|(_, name)| name),
+            ["sky", "far-glass", "depth-writing-flash", "near-glass"]
+        );
+    }
 
     const ROOT: &str = r"C:\Program Files (x86)\Steam\steamapps\common\Grid";
 

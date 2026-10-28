@@ -142,6 +142,32 @@ fn color_words(data: &[u8], count: usize, offset: usize, stride: usize) -> Resul
         .collect())
 }
 
+/// All four saved weights and palette indices, in their original lane order.
+/// No normalization, hierarchy, pose or palette resolution is applied here.
+#[derive(Debug)]
+pub struct SkinInfluences4 {
+    pub weights: Vec<[f32; 4]>,
+    pub joints: Vec<[u8; 4]>,
+}
+
+/// One explicitly selected weighted source, separate from rigid object meshes.
+#[derive(Debug)]
+pub struct FourWeightMesh<'a> {
+    /// Original geometry; `skin_indices` is None rather than a dominant joint.
+    pub mesh: Mesh<'a>,
+    pub influences: SkinInfluences4,
+}
+
+/// Read one exact source through the shared mesh validation, retaining all influences.
+/// Does not choose runtime LOD, bind the palette or evaluate animation.
+pub fn read_four_weight_mesh<'a>(tree: &Tree<'a>, source_id: &[u8]) -> Result<FourWeightMesh<'a>> {
+    let mut retained = None;
+    let mut meshes = read_meshes_retaining_skin(tree, Skinned::Rigid, Some(source_id), Some(&mut retained))?;
+    let mesh = meshes.pop().ok_or(crate::Error { offset: 0, message: "selected four-weight source absent" })?;
+    let influences = retained.ok_or(crate::Error { offset: 0, message: "selected source has no four-weight skin" })?;
+    Ok(FourWeightMesh { mesh, influences })
+}
+
 pub fn read_meshes<'a>(tree: &Tree<'a>) -> Result<Vec<Mesh<'a>>> {
     read_meshes_impl(tree, Skinned::Reject)
 }
@@ -166,6 +192,14 @@ enum Skinned {
     Rigid,
 }
 fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a>>> {
+    read_meshes_retaining_skin(tree, skinned, None, None)
+}
+fn read_meshes_retaining_skin<'a>(
+    tree: &Tree<'a>,
+    skinned: Skinned,
+    selected: Option<&[u8]>,
+    mut retained: Option<&mut Option<SkinInfluences4>>,
+) -> Result<Vec<Mesh<'a>>> {
     let skip_skinned = skinned == Skinned::Skip;
     let mut blocks = BTreeMap::new();
     for i in 0..tree.nodes.len() {
@@ -184,6 +218,12 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a
             continue;
         }
         let id = tree.string(source, b"id")?;
+        if let Some(wanted) = selected {
+            if id != wanted { continue; }
+            if !result.is_empty() {
+                return fail(tree.nodes[source].offset, "duplicate selected four-weight source ID");
+            }
+        }
         let streams: Vec<_> = tree.nodes[source]
             .children
             .iter()
@@ -377,11 +417,18 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a
         };
         match (weights, joints) {
             (Some(weights), Some(joints)) if weights.len() == positions.len() && joints.len() == positions.len() => {
-                let main = (weights.iter().zip(&joints))
-                    .map(|(w, j)| j[(0..4).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap()] as f32)
-                    .collect();
-                skin_indices = Some(main);
-                skin_weights = Some((joints, weights));
+                if let Some(output) = retained.as_deref_mut() {
+                    if skin_indices.is_some() {
+                        return fail(tree.nodes[source].offset, "mixed rigid and four-weight skin indices");
+                    }
+                    *output = Some(SkinInfluences4 { weights, joints });
+                } else {
+                    let main = (weights.iter().zip(&joints))
+                        .map(|(w, j)| j[(0..4).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap()] as f32)
+                        .collect();
+                    skin_indices = Some(main);
+                    skin_weights = Some((joints, weights));
+                }
             }
             (None, None) => {}
             _ => return fail(tree.nodes[source].offset, "skin weight and index streams differ"),

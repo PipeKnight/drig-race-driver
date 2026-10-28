@@ -18,6 +18,8 @@ name = "grid_android"
 crate-type = ["cdylib"]
 
 [features]
+# Optional Windows/Linux Vulkan/RTX SDK path; ordinary and phone builds stay independent.
+dlaa = ["bevy/dlss"]
 # Optional material experiment; keep additional sampler bindings out of phone/default builds.
 paint-specular = ["bevy/pbr_specular_textures"]
 # Per-system Chrome trace of a run (docs/PERFORMANCE.md): build with

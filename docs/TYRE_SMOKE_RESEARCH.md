@@ -330,8 +330,10 @@ original) until F319.
 ## 5. Open
 
 - wheel+0x148 meaning; car+0x64/+0x65; drift object at mgr+0x90.
-- Exact renderer use of the per-particle frac; pfx_half_smoke blending, lighting sample
-  (TEXCOORD1 via mgr+0x3880), half-resolution buffer, sorting and near-fade distances.
+- Exact renderer use of the per-particle frac and lighting sample (TEXCOORD1 via
+  mgr+0x3880), queue classification, selected reduced-target configuration, shader
+  sampling and near-fade distances. Section 7 narrows saved blend states, depth
+  substitution, resource creation and frame composition; live parity remains open.
 - Whether the inherit velocity is refreshed every frame for emitters already created
   (the driver writes it per frame).
 - No runtime trace of the original confirms any of this; the live game was not touched.
@@ -345,3 +347,800 @@ original) until F319.
 disassembly dumps, `scripts/` (pe.py, calls.py, decomp.ps1). `kickup-driver/ghidra-copy/`
 is a read-only copy of the Ghidra project made while the shared one was locked; it can be
 deleted.
+
+
+## 7. Reduced smoke pass and composition (23 October 2026)
+
+This extends the earlier particle-runtime research with static renderer control-flow
+and selected saved shader states. It reuses the same hash-identified analysis PE and
+read-only shared Ghidra master/cache. Four additional functions were decompiled across
+bounded follow-ups: `0x737D20`, `0x738920`, `0x738E80` and `0x62E350`; other links below
+come from existing cached evidence or bounded disassembly. No original live GPU trace
+or selected-path comparison was obtained. Function names proposed below are inferred
+labels, not original symbols. This section contains independently written structural
+descriptions; purchased shader programs and decompiler output remain private.
+
+### 7.1 Saved render states [D]
+
+The selected metadata comes from the purchased `shaderpack/shaderpack.pssg`, SHA-256
+`b6b29b80397d12def9c90f5afcff9ea8f335d07da3dc81e293273b468c9029a6`.
+Numeric zero booleans are disabled, rather than absent attributes.
+
+| Saved group / pass mask | Colour source / destination factors | Depth test / write | Other saved state |
+|---|---|---|---|
+| `carglass` / 1 | `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` | LEQUAL / on | `car_glass` layer |
+| `car_light_glass` / 1 | `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` | LEQUAL / on | `decals` layer |
+| `car_light_pod` / 1 | blending off | LEQUAL / on | `car_layer2`, distinct from the lens cover |
+| `pfx_half_smoke` / 1 and 16 | `ONE / ONE_MINUS_SRC_ALPHA` | off / off | separate alpha `ZERO / ONE_MINUS_SRC_ALPHA` |
+| `pfx_compose` / 1 | `ONE / SRC_ALPHA` | off / off | separate alpha `ONE / ZERO` |
+| `pfx_compose_no_alpha` / 1 | `ONE / SRC_ALPHA` | off / off | alpha writes disabled |
+| `skidmarks` / 1 | `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` | LEQUAL / off | skips velocity/depth, environment and shadow passes |
+
+`smokeHalf` maps to `pfx_half_smoke` with a lit particle stream in shipped config.
+Its layer flags include `halfSizePFXBuffer` and skipping ordinary Colour. Burnout_circles
+instead uses `basicDepthAlphaBlendHalf`; the smoke-only state is not established for
+all ground effects. The two saved half-smoke variants link the half-edge and half
+fragment-program families and accept `depthmap`. Saved glass/lens depth writes also
+exist in other pass masks, but this does not establish their active intact/damaged
+variant, depth target or execution position.
+
+With zero RGB/unit alpha initialization, half-smoke's separate alpha factors would
+accumulate transmittance and compose's colour factors would implement
+`smoke_rgb + transmittance * scene_rgb` [I]. This interpretation has strong supporting
+clear arguments below, but backend clear semantics and shader arithmetic remain open.
+Saved priorities (`0x70000000` for glass/cover, `0x80000000` for half smoke/compose)
+are not enough to reconstruct the queue classifier or comparator.
+
+### 7.2 Resources and dimensions [V; API format meanings open]
+
+`0x737D20` is a particle resource/configuration callback, not the per-frame renderer.
+Its config branch creates reduced colour (`+0x90`), alpha (`+0x94`), depth (`+0x98`),
+temporary blur (`+0xA8`) targets and a reduced render node (`+0xAC`, copied to `+0x108`).
+Shader handles at `+0xBC/+0xC0` select depth 2x/4x reduction; `+0xD0/+0xD4` select
+compose/compose_no_alpha. The half-size layer handle is stored at `+0xE8`.
+
+The callback reads configured width/height (defaults 1280/720), shifts both right by
+TWO, and passes these quarter-axis dimensions to at least the first reduced-colour
+target creator. The name `halfSizePFXBuffer` therefore does not establish half width
+and half height. Other creator arguments reuse recovered stack temporaries; universal
+per-target dimensions and active quality selection remain unverified. Creator format
+enums `0xC` and `0x19` have not been mapped to backend formats.
+
+Setup also binds separate colour/alpha/temp inputs to horizontal/vertical blur shader
+families. Resource binding proves that path exists; it does not prove every frame
+uses the blur branch.
+
+### 7.3 Depth substitution and reduced accumulation [V]
+
+`0x738920` reduces scene depth. Stage zero resolves `VelocityDepthPlugin`, obtains its
+source texture through the object at plugin `+0x7C`, virtual accessor `+0x18`, and uses
+the 4x shader (`+0xC0`). Later stages use the previous reduced texture with the 2x
+shader (`+0xBC`). The configured default count `+0xA4=1` supports one first 4x stage;
+it is not a claim about every original quality path. Sampler0 and dimension inputs
+are bound before the fullscreen submission.
+
+`0x728040` binds the final reduced-depth texture as `depthmap` for three shader entries,
+including the half-smoke entry. `0x738C00` restores a full-source texture through the
+same plugin object's virtual accessor `+0x14`. The distinct accessors have not been
+proved equivalent resolved/unresolved depth, and the producer's contents—including
+vehicle glass/lens inclusion—remain untraced.
+
+`0x738D60` binds reduced colour at MRT slot0 and reduced alpha at slot1, sets the
+viewport, passes float tuple `(0,0,0,1)` to renderer virtual `+0xA4`, then calls virtual
+`+0x34` with 1. It substitutes reduced depth, submits the particle tree with mask
+`0x10`, restores full depth and unbinds the two targets. This is concrete zero-RGB /
+unit-alpha initialization evidence, qualified by the unresolved backend meaning of
+those virtual clear calls and MRT channel handling.
+
+`0x738E80` performs reduced-pass preparation: downsample first, conditional accumulation,
+then edge-related or blur-related work under manager options. `0x728170` is edge work,
+not final composition; `0x738C00` is depth restoration, not composition. Option names
+are not inferred from field offsets alone.
+
+### 7.4 Final composition and world groups [V; material classification open]
+
+`0x72E7D0` binds reduced colour to sampler0 of its supplied shader and draws it.
+`0x7390F0` is the separate composition/debug entry. Its ordinary composition branch
+passes `+0xD4`, the saved **compose_no_alpha** variant, when manager option `+0x388`
+is enabled. The alpha-writing `+0xD0` state must not be silently substituted for that
+variant. The function also has debug-target display branches; their presence does
+not mean the original was running a debug mode.
+
+World constructor `0x5C8080` calls common layer-owner base `0x64BE80`, then installs
+primary vtable `0xCE088C`. The base resolves `car_glass` into `+0xDC` but is not proved
+vehicle-specific. `0xCE0880` is the secondary interface at object `+0x130`, not this
+primary vtable. The frame dispatch is:
+
+- `0x5C8370` supplies the world `+0x450` descriptor to `0x63A300`.
+- That path runs preparation (`0x5C85D0`), builds a node table (`0x62E220`), performs
+  additional partitioning (`0x62E350`) and enters camera/render wrapper `0x6430A0`.
+- `0x63AEB0` invokes the reduced-particle preparation hook (`0x5C8570` to `0x738E80`)
+  before main colour-target setup, then world-colour traversal `0x5C8A10`.
+
+The builder maps descriptor groups `+0xB8/+0xC8/+0xD0/+0xD8` to node-table fields
+`+0x40/+0x44/+0x48/+0x4C`. Producer/partition evidence narrows their meaning:
+
+| Node-table field | Established contribution or use | Not established |
+|---|---|---|
+| `+0x40` | preparation passes descriptor `+0xB8` to `FERenderPlugin` | exclusive contents; car-glass membership |
+| `+0x44` | preparation passes descriptor `+0xC8` to `SkidmarksPlugin` | that every item is a tyre skid |
+| `+0x4C` | `0x62E350` passes its address to particle hook `0x728500`; option `+0x386` extracts the half-size layer into particle `+0xEC` | that the source or remainder contains only smoke |
+
+`0x62E350` does not read the base car-glass handle `+0xDC`; it is not the missing
+car-glass classifier. In `0x5C8A10`, exact compose calls at `0x5C8F1A` and `0x5C8FAA`
+have two conditional orders: `+0x4C remainder -> compose -> +0x40`, or
+`+0x40 -> +0x4C remainder -> compose`. Earlier scene submissions also occur. These
+orders are real, but neither branch proves which side contains car glass or lens
+covers. Startup/update plugin order in `renderPriority.xml` is not draw-pass order.
+
+### 7.5 Limits and next separating evidence
+
+The original has an explicit reduced smoke/depth/composition path; generic OIT or
+forcing every smoke draw last would be authored alternatives, not recovered parity.
+The following remain open:
+
+1. Active selected-material/quality overrides for the static BMW collector route in
+   section 7.6, including actual glass/cover membership in a live composed frame.
+2. `VelocityDepthPlugin` production and the meaning/content of its two accessors,
+   including vehicle transparent-depth contributions.
+3. Backend MRT clear semantics, actual target formats/dimensions and active quality
+   options; exact half-edge/compose shader sampling and near fade.
+4. A live original trace/reference for the selected BMW smoke scenario and damaged /
+   inside-camera variants. Static saved states are not runtime overrides.
+
+Private source evidence is indexed in
+`local/handoff/smoke-source-pass-order.md` and `drafts/smoke-source-order/` beside it;
+selected purchased-state metadata is in `smoke-source-pass-order-shadergroups.json`.
+Shared pseudocode caches for the four new decompiles are under the main checkout's
+`local/re-cache/`. None of that proprietary raw evidence belongs in public source.
+
+
+### 7.6 BMW material-to-collector bridge (static follow-up, 23 October 2026)
+
+The property and paired-queue part of section 7.5(1) is now traced statically. This
+follow-up used one further shared-master read-only decompile, `0x9CB5B0`, and bounded
+assembly/type/property checks. No original live render trace was obtained. Names
+assigned to recovered routines remain inferred; raw pseudocode stays private.
+
+**Collector contexts.** `0x9CB5B0` collects car/model scene entries, beyond the
+previously documented dangling-bumper branch. It creates five-word contexts: a
+view-related pointer, two output-list pointers, an excluded-node array and its count.
+For the observed `0x5B6E00` world call, the selected index uses descriptor lists
+`+0x58/+0xF8`, other indices use `+0x40/+0xE0`, and a special nonselected path uses
+`+0x130/+0xE0`. Selection compares incoming indices with manager `+0x1EA8`, with a
+fallback active-slot search; it is not independently identified here as the player.
+The special path checks per-object `+0x3A34`; other model/damage branches also exist.
+
+Entry helper `0xA17430` reads `[[entry+0x3C]+0x3C]+0x4C`: nonzero selects context
+`+0x08`, zero selects `+0x04`. `0xA17550` uses the same selector while filtering
+subtrees/excluded entries. The collector is passed implicitly in ECX; reconstructed
+call syntax can omit it, so assembly was used to verify the output pointers.
+
+**The property owner is now identified.** Static type/property evidence establishes
+this registered reference chain:
+
+`render instance +0x3C -> SHADERINSTANCE +0x3C -> SHADERGROUP +0x4C`
+
+| Link | Concrete static evidence |
+|---|---|
+| Render-instance shader reference | Attribute schema maps `shader` to ID storage `0xF5F674`; `0xBA3980` links it into instance `+0x3C` through `0xB85520`, whose reference type is SHADERINSTANCE. |
+| Shader-instance group reference | Registration names SHADERINSTANCE/type `0xF5F298`; schema maps `shaderGroup` to `0xF5F294`; reader at `0xB9CFA0` links it into `+0x3C` through `0xB9D430`, whose reference type is SHADERGROUP. |
+| Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs reader `0xBA2250` and writer `0xBA1770`. |
+| Sorting attribute | Schema row `0xE547BC` binds `instancesRequireSorting` to ID storage `0xF5F5B0`; reader `0xBA2250` normalizes that numeric value and stores byte `+0x4C`. The writer emits the reverse mapping. |
+| Priority attribute | Schema `0xE547C8` binds `defaultRenderSortPriority` to `0xF5F5AC`; the same reader stores its saved value at group `+0x50`. |
+
+Thus this byte requests **instance sorting**; it must not be renamed a universal
+alpha-blend flag. Saved `skidmarks`, for example, blends alpha but has this flag zero.
+
+**The distinct template fields have a real copy bridge.** The `<nefx>` loader
+`0x901740` parses `requiresSorting` into template byte `+0x114` and shifts its priority
+integer left 28 bits into `+0x118`. Inside `0x900940`, instructions
+`0x90132B..0x901340` copy those values into a typed SHADERGROUP target's `+0x4C/+0x50`.
+The target comes from typed group lookup/cast, not an assumed matching offset. This
+proves the translation exists; it does not prove that this template path runs last,
+or at all, for every saved group in the selected original frame.
+
+**Saved BMW families and group values.** A bounded read-only survey of purchased
+`cars/bmw/bmw_highLOD.pssg` and `bmw_livery.pssg` finds these exact instance references:
+
+| BMW instance ID | Saved shaderGroup reference | Corresponding family name |
+|---|---|---|
+| Window Glass | `#carglass.fx` | `carglass` |
+| Head Lights Glass | `#car_light_glass.fx` | `car_light_glass` |
+| Rear Lights Glass | `#car_light_glass.fx` | `car_light_glass` |
+
+The last column removes the literal `.fx` suffix for comparison; it is not a live
+compiler alias/variant trace. Independently, the already recorded purchased
+shaderpack metadata saves:
+
+| Group | instancesRequireSorting | defaultRenderSortPriority |
+|---|---:|---:|
+| carglass | 1 | `0x70000000` |
+| car_light_glass | 1 | `0x70000000` |
+| pfx_half_smoke | 1 | `0x80000000` |
+| skidmarks | 0 | `0x80000000` |
+
+These are saved binary attributes, separate from the NEFX integer-shift/copy path.
+The BMW instances also save `renderSortPriority` as raw `00000000` (numeric zero).
+That word is not absence; its inheritance/override meaning was not recovered here.
+Do not silently substitute the group priority for that per-instance value.
+
+**Position relative to smoke.** A sorting-enabled car entry takes the second queue
+in its context. For the world call above this is `+0xF8` (selected) or `+0xE0`
+(other/special), mapped by `0x62E220` to node-table `+0x54/+0x58`. Both families are
+submitted in `0x5C8A10` before either final particle-compose call. Descriptor `+0x40`
+and node-table `+0x40` are different structures and must not be conflated with the
+front-end contribution discussed in section 7.4.
+
+This supplies a static material/property/queue route consistent with the BMW glass
+and lens families being shaded before reduced-smoke composition. Actual loaded
+instances, later property/layer overrides, material/damage/quality selection and the
+original GPU frame remain unobserved. `VelocityDepthPlugin` contents, backend MRT
+clear semantics and exact compose/edge shader sampling remain separate open issues.
+The result guides a source-motivated staged smoke experiment; it is not verified
+pixel parity or justification to force all transparency into one global order.
+
+Private evidence: `local/handoff/smoke-classifier-next.md`,
+`local/handoff/smoke-material-bridge.md` and their adjacent draft/evidence folders.
+The single additional decompile is cached as `local/re-cache/009CB5B0.c` in the main
+checkout; no proprietary code or raw asset payload is included in this document.
+
+
+## Skid material whitening control (G262, 24 October 2026)
+
+Three matched new-build Derby sequences isolate the authored skid material's reflectance: absent, explicit 0.5 and zero. All 120 frame/tick manifests, sampled simulation/emission traces and recorded queue/raster state match. The absent/0.5 control is exactly equal in 117 frames and the final image; the other three frames differ at six pixels total. Those sparse residuals are reported rather than converted into a universal determinism threshold.
+
+Native frames 70–74 now reproduce a bright white crossing of tyre strips over dark smoke. Zero reflectance removes that white component while retaining dark sharp strips. The earlier frame90 alone understated this material contribution. This demonstrates an additional authored PBR whitening cause; it does not identify every remaining contrast/ordering defect or restore the source smoke compositor.
+
+The complete selected saved ordinary skid fragment has diffuse/normal, sun/backlight, shadow/AO and fog operations, without a direct F0/view-half-vector specular BRDF term. Its vertex eye-position input drives fog distance. This follows the selected program's arithmetic, rather than inferring absence from parameter names. A single targeted disassembly agrees with the existing cache. This is selected saved-pass evidence; live variants and upstream shadow-channel contents remain separate.
+
+The G262 diagnostic keeps the old default and is bounded to the existing Isolated sort0/raster50 rendered baseline domain. Removal of the additional default PBR reflectance requires separate ordinary-path validation. Setting one scalar does not reproduce source normal crossfade, lighting, fog or reduced smoke composition. Private results and exact provenance are in `local/graphics/smoke-next03/` and `local/handoff/drafts/smoke-next03/visual-source-review.md`.
+
+
+## Ordinary skid whitening correction (G264)
+
+The base lit skid material now explicitly sets reflectance to zero, removing the extra authored dielectric specular lobe. Texture, alpha blending, roughness, fog, mesh, sort and raster bias remain unchanged. The historical 0.5 value remains available only in the bounded Isolated diagnostic. This removes additional whitening without claiming a complete port of the selected original shader.
+
+A fresh full gate passes 964 tests, workspace Clippy, four unchanged simulation identities and 24 quick-soak scenarios. Two new ordinary Off sequences, neither supplying the diagnostic scalar, complete successfully with 120 PNGs each. Their actual frame/tick manifests, normalized physical/emission traces, camera and sampled phase state agree. Native frame74 confirms removal of the bright crossed strips; frame90 and the final image still show sharp dark strips through smoke. The remaining order/composition defect is open.
+
+The recorded tick602 phase snapshot does not identify the rendering frame of each earlier PNG. The next diagnostic must join the screenshot entity through Extract, sorted phase and readback completion; request indices or callback times alone cannot establish that relationship. These captures are material evidence, not per-fragment order proof, a performance benchmark or all-track smoke acceptance. Private exact source/executable provenance and root visual review are in `local/graphics/skid-whitening01/`.
+
+
+## Actual screenshot-to-phase association (G266, 24 October 2026)
+
+The default-absent `--motion-phase-map` now admits one exact baseline Derby Isolated120-frame pilot. It records the same screenshot entity from request through first Extract FrameCount/current tick, the sorted main-view transparent phase and asynchronous readback/PNG acknowledgment. Strict bounded completion rejects missing, duplicate or nonmonotonic associations; asynchronous callbacks may complete out of order. The final capture waits for the complete flushed sidecar. No material, mesh, shader or sort treatment is added.
+
+A fresh crate gate passes329 app tests and Clippy, followed by a baseline executable build. Two same-build sequences complete with matching physical/emission traces, camera and request manifests. The mapped case provides120 unique screenshot/Extract/phase/PNG links, actual Extract frames170..289 and ticks352..599. The global skid draw precedes all queued smoke in58 frames and follows at least one smoke draw in62. In PNG0074 it follows all five smoke groups; in PNG0090 it precedes them yet sharp marks remain. This supports a bounded priority experiment, not an ordering-only diagnosis of every visible defect.
+
+Some empty smoke groups still queue degenerate origin quads. Queue membership alone does not establish positive fragment coverage. The CPU phase is recorded before batching, not as a GPU fragment trace or proof of the original reduced compositor.
+
+The original pair has115/120 exactly equal decoded frames plus an exact final image; five frames differ at eight pixels total. One additional uninstrumented repeat reproduces seven of those eight mapped pixel values; frame0027's remaining point is not reproduced in that repeat. All raw values remain recorded without a universal tolerance or strict image-identity claim. Root reviewed native0074 and0090; the diagnostic does not fix their dark marks. Exact provenance, real failure attempts and the separate root admission remain private in `local/graphics/skid-phase-ledger01/`.
+
+
+## Guarded ground-priority experiment (G267, 24 October 2026)
+
+The explicit `ground-first` mode is confined to the mapped baseline Derby pilot. It changes the skid sort bias from zero to -1024, preserving raster bias50, reflectance0, alpha, shaders, geometry and emission. Every captured PNG must prove a finite strictly positive key margin and a skid rank before every queued smoke item. Ties, overflow or a failed rank reject the diagnostic; the value is not automatically retuned. Defaults are unchanged.
+
+The crate gate passes331 tests and Clippy, followed by a baseline build and two successful same-build mapped120-frame sequences. Physical/emission traces, camera and request manifests match. Both ledgers have120 complete screenshot/Extract/phase/readback/PNG joins. GroundFirst precedes every queued smoke item in all120 rows, with minimum key margins ranging980.39453125..1083.275634765625. The control precedes all smoke in58 rows and is late in62.
+
+All62 late-control frames change. Native0074 loses the sharp dark protruding strips while retaining the cloud. Native0090, whose skid draw already preceded smoke, is exactly equal and still contains dark wheel-adjacent rings. Of the58 already-before frames,56 are decoded-RGBA exact;0092 and0116 each differ at one pixel, maximum channel differences20 and13 respectively. These are retained as unexplained residuals, not automatically accepted as noise. The final image changes too; both native final images were reviewed.
+
+This is a useful bounded falsification of an ordering-only explanation: order accounts for some visible strips, but cannot fix every remaining defect. The treatment also changes skid order relative to other transparent items. It neither restores the original saved ground/reduced-smoke composition nor proves positive smoke fragment coverage, all-car correctness or performance. No playable launcher or ordinary default is promoted. Exact source/executable provenance and both raw ledgers remain in `local/graphics/skid-ground-first01/`.
+
+
+## Neutral colour/transmittance composition foundation (G271)
+
+The default-off `--smoke-ct neutral` is confined to the existing mapped GroundFirst Derby pilot. It clears a full-resolution RGBA16Float layer to colour0/transmittance1 and composes RGB as C+T*scene after the ordinary main transparent pass, retaining the original RGBA8Srgb/MSAA4 target and destination alpha. All existing smoke draws remain in their main phase. Absent mode installs no extra resources, nodes or images; a small optional readiness lookup remains in capture handling.
+
+A distinct four-pixel RGBA16Float GPU fixture checks identity, opaque colour, nontrivial half-transmittance and quarter-transmittance against exact binary16 RGB and preserved alpha. All16 words pass on the actual GPU. An additional120-row ledger joins each screenshot entity and Extract frame/tick to actual compose submission. Both original PNG ledgers remain complete. This prevents an unavailable or skipped node from passing solely because its output looks unchanged; submission evidence is still not an arbitrary-fragment trace.
+
+The required crate gate passes336 tests and Clippy; a new baseline executable and both mapped controls complete successfully. Actual120-frame associations, physical/emission traces, camera/request metadata, relevant source membership, ranks, float32 geometry/keys and material/raster state agree. Opaque allocator IDs legitimately differ after the added probe entity; identity consistency is checked within each run rather than falsely requiring cross-process IDs to match.
+
+The pair has116/120 exactly equal decoded images plus an exact final image. Five pixels across four frames differ. One additional absent repeat reproduces four of the five neutral alternative values; frame0056 at(1391,821) remains unreproduced. No universal noise tolerance or strict scene-image neutrality is established. Native0074,0090 and final were reviewed and are exact within the original pair; the existing dark wheel regions remain. Raw values and exact provenance are preserved in `local/graphics/smoke-ct-neutral01/`.
+
+This accepts a bounded composition/probe/stage-association foundation only. It does not move particles, restore the original reduced-resolution compositor, identify every dark region, improve FPS or change ordinary playable settings. Active accumulation requires a separately reviewed phase/depth/format path; a second smoke camera without the main opaque depth would not be equivalent.
+
+
+## Grouped-direct smoke boundary (G274; recorded here during G276)
+
+The default-off `--smoke-boundary grouped-direct` replays the same five prepared
+smoke groups after ordinary main transparency, into the same colour/depth/MSAA
+attachments. A prebatch draw-command barrier keeps selected batch spans separate;
+postbatch validation rejects mixed spans. Original phase ranges are temporarily
+masked and restored unconditionally, including failure. A marker follows actual
+DrawMaterial success; phase.render returning Ok alone cannot count as a draw.
+No material, shader, mesh, emission, simulation or new smoke layer is introduced.
+
+The original exact Derby/GroundFirst120/CTOff pilot passes357app tests and Clippy,
+a fresh build and two same-build GPU processes. Every120screenshot/Extract/phase/
+readback/PNG association and candidate120stage/restoration chain completes. Actual
+one to four successful heads cover five logical groups; tail ranges may be nonzero
+because render_range skips an entire head span. This proves encoded draw-command
+coverage and restoration, not positive fragments or GPU completion.
+
+Physical/emission/input/camera/projected geometry, sort/rank/raster and membership
+controls agree.51of120sequence images are exact. Native0065 changes9434pixels
+(maximum82): the bright driver safety net attenuates strongly through smoke.
+Native0074and0090are exact, and the dark wheel-adjacent rings remain in0090.
+The final image changes405pixels, maximum RGB40/41/42 with alphaexact; most belong
+to a rear-window/C-pillar cluster, without per-pixel mesh attribution. No automatic
+noise tolerance or claim that all changed pixels are explained is made.
+
+The bounded transaction and observed local net improvement are accepted, while
+BMW, damaged-car coverage, active colour/transmittance accumulation, original
+half-resolution parity, performance and default/playable promotion remain open.
+Exact provenance, failures and native/raw comparisons are private under
+`local/graphics/smoke-boundary01/`; [G274](../log/G0274.md) records the full gate.
+
+## Separately guarded BMW phase profile (G276)
+
+An explicit separately guarded BMW/Istanbul0 solo practice profile adds90per-PNG
+phase associations to the existing grouped-direct experiment. Derby's120denominator,
+guard and boundary transaction remain unchanged. Each BMW shot must prove actual
+native1920/MSAA4/sRGB/fullviewport/nooverride target state, five owned smoke meshes
+and6window/3head-lens/8rear-lens source entities with stable selected material and
+geometry/sort metadata. Missing, changed, culled or unready entities refuse capture.
+Damage/contact/opponents must be inactive; this does not cover the owner's damaged
+Shibuya drift-battle report. The required app gate passes373tests and Clippy; a fresh baseline build and
+actual same-executable BMW pair complete successfully. This is a bounded diagnostic,
+not a general BMW or original-compositor claim.
+
+
+Each BMW arm completes90unique screenshot/Extract/phase/readback/PNG associations,
+90actualview-attachment checks and1530cover records (540window/270head/720rear).
+Physical/input/emission/camera/phase/geometry and selected material controls match.
+The treatment completes90five-group replay/restoration chains: one prepared head
+in14frames, two in65and three in11. This is encoded-command coverage, not measured
+positive fragments or GPU completion. Phase ticks191..377 correspond to Extract
+frames93..182 in these actual runs.
+
+All90sequenceimages change with alphaexact. Root native0001/0053/final comparisons
+show the sharp rear-glass/lens/skid ghosts attenuated; dense0053cloud completely
+hides them. Thinner0001/final cloud retains the body while reducing overly sharp
+cover contrast. A dark wheel swirl remains visible in0001. The worst changed
+frame0001has73463pixels/max152;0053has59732/max148;the final has59590/max133.
+No pixel tolerance or all-smoke/original half-resolution/FPS claim is introduced.
+
+A separate same-executable implicit-default Derby regression retains120phase/PNG
+links and120complete grouped transactions, with matched state/phase controls.
+52of120sequenceimages match exactly, maximum82. Native0065retains the safety-net
+improvement, while0090still contains the prior dark wheel rings. Missing Detroit
+ground-cover and gamepad-mapping warnings are recorded rather than suppressed.
+Playable defaults remain unchanged.
+
+The first BMW renderer succeeded but its inherited private parser incorrectly
+required deformation traces in the intentionally damage-off profile. Its result0,
+wrapperfailure and sidecars remain intact. The corrected parser instead explicitly
+requires empty deformation and present remaining trace families;40CPUcontrols and
+a separate read-only reparse pass before the fresh pair. Two machine-idle preflights
+also refused other checkout's active runs before starting an arm; none was stopped.
+Source/build/reader/resource/command pins and every failure remain private under
+`local/graphics/bmw-smoke-boundary01/` and `local/graphics/bmw-derby-regression01/`.
+
+## Wheel-ring material-family distinction (G276 audit, no visual fix)
+
+The shipped Burnout_circles/Wheel_spin emitter selects
+`basicDepthAlphaBlendHalf`, mapped by config to `pfx_unlit_half_depth` with a standard
+stream. Other cloud emitters select `smokeHalf`/`pfx_half_smoke` with a lit stream.
+The current adapter retains texture and horizon alignment but drops this type/layer
+identity and assigns all five texture groups the same scene-lit StandardMaterial.
+This is a concrete adaptation mismatch. Existing Wheel_spin atlas observations are
+near-white RGB with alpha shape; a filename such as SM33_dark is not evidence of
+black source texels. The grouped boundary also preserves intra-smoke group ordering.
+These facts provide a targeted next check, not pixel attribution of0090rings or a
+proved remedy. The cached smokeHalf colour/transmittance contract must not be
+silently assigned to the distinct unlit-half-depth family.
+
+## G277: combined F568 regression (24 October 2026)
+
+- Independent offline comparison actual-compare01/comparison.json003e6af5bda3709c07506fe1126bf37289f04dce3184beb8a4061bf34f0b8968 reparses all90/120 phases, surfaces and restoration transactions. Across G276→G277 all recorded requests/traces/camera/semantic phase+cover fields/actual Extract stamps/views and same-arm inputs/argv match. Raw pixels are not completely identical: BMW Off89/90sequence exact plus one final pixel/max9; grouped89/90+final exact(one sequence pixel/max1). Derby Off114/120+finalexact(7sequence pixels/max43), grouped113/120+finalexact(10pixels/max21). Alpha exact throughout. These unresolved differences remain evidence, not automatically noise or strict rendering equivalence. New within-build treatment has0/90 BMW exact and50/120 Derby exact/max82, retaining intended cover attenuation.
+- Fresh fetch finds F5698cceee2b changes only release-state docs/log/index since compiled F5683cdbf523. Merge these docs separately without rebuilding unchanged production; all21 frozen source SHA still match after validation. Root post-validation-source-proof.json records this boundary. No old/new performance improvement asserted. Completed-capture dedup BMW0 and Derby50files/0.09GiB/errors0.
+
+The combined baseline artifact is private `local/graphics/f568-graphics01/grid-bmw-smoke-boundary.exe` (SHA7b876cb1d673921184f75c567dee756203971001bf53ef304eeca6033a3e5233). Both paired renderers finish0 with separate exact BMW90 and implicit Derby120 guards. This validates the bounded experiment after integration; damaged/general vehicles, original half-resolution compositor and dark wheel rings remain open. Ordinary launchers were not changed.
+
+## Capture-channel correction (25 October 2026)
+
+The final and motion screenshot writers explicitly convert captured images to
+RGB8 before saving PNG. Pinned Bevy0.19.1 save_to_disk does the same. Historical
+helpers often converted those PNGs back to RGBA for comparison; their opaque255
+fourth lane is CPU padding, not measured render-attachment alpha. Consequently
+PNG-derived alphaexact/alpha_changed=0 statements in G271/G275/G276 do not prove
+alpha preservation or coverage. The sampled files in those stages and G279 are
+nativeRGB without transparency metadata. Existing RGB equality, changed-pixel
+counts and maximum-channel differences remain valid. Four-lane padded mean error
+is3/4 of nativeRGB mean only when both inputs have RGB plus an identical synthetic
+zero-difference alpha lane; the old metrics are retained with that qualification.
+
+This does not invalidate G271's separately recorded exact16-word binary16 GPU
+probe: its four genuine alpha words were read and verified directly. Likewise,
+.rgba16f cube data and typed temporal-colour sidecars retain real fourth storage
+lanes, whose shader/stage semantics still need identification; they are not
+implicitly opacity. The motion-depth sidecar's fourth value is authored1 and is
+not alpha. Future reports record native channels and alpha_observed explicitly,
+use null/unobserved for absent alpha, and reserve attachment/per-sample alpha
+claims for the corresponding typed readback. No historical captures are rewritten
+and no screenshot equality is promoted into source-pass alpha proof.
+
+## G281: owned ground-skid pass before ordinary transparency
+
+`--ground-skid-pass off|control|before-transparent` is a separate default-off
+pilot. It targets the typed global persistent skid presenter, with no route/car
+whitelist. Control and treatment keep stable NoAutomaticBatching on that entity;
+Off installs nothing. Treatment draws its current prepared singleton before ALL
+ordinary transparency, preserving native phase keys/order/ranges/extra indices.
+A conditional ordinary wrapper skips only after the matching terminal stock
+DrawMesh command succeeds; otherwise ordinary drawing remains. The original draw
+ID is restored after rendering. Current GPU inputs, mesh/material identity,
+ready pipeline and native MSAA attachments are checked every frame. Unsupported
+views fall back. Positive fragments and per-PNG stage joins are not established
+by the command receipts.
+
+Admission is ordinary baseline driving/Groups/native RGBA8sRGB+Depth32Float4x,
+GPU instance building, sky reflections, other phase policies off. Enhanced/DLAA,
+HDR/OIT/CPU building/custom viewports and source reduced-pass parity remain open.
+This changes skid order relative to foreign transparency as well as smoke; it is
+not a car/lens/net or Wheel_spin fix.
+
+The required crate gate passes407tests and Clippy. Nine serial native GPU runs
+cover Detroit/STK12cars, solo BMW/Istanbul and Lacetti/Donington with five camera
+changes plus reset. Physical/input/handling/deformation traces match within each
+three-arm profile. Control/treatment first become ready at frame3 after two cold
+pipeline fallbacks. Observed treatment terminal/restoration receipts are358/358
+for Derby,218/218 for BMW and358/358 for the bounded Lacetti window. Late command
+Skip is covered by CPU fixtures, not observed in these GPU runs.
+
+Native RGB Off/Control equality is117/121 images in Derby (seven pixels across
+four images, global max20),91/91 BMW,284/301 Lacetti (at most2pixels/image,
+global max12). These residuals remain unresolved; no tolerance or noise
+attribution is accepted. Treatment attenuates sharp ground curves beneath smoke
+in viewed Derby/BMW pairs. Rear-window/lens/net ghosts remain unchanged. Lacetti
+state receipts follow chase_close/far/bumper/bonnet/head-cam/close and reset to
+segment1/tick0; no stale successful suppression or restoration failure appears
+in the observed interval. This is a bounded pilot, not a default/playable or
+whole-smoke fix. Private evidence is ground-skid-pass01, with source/executable,
+current resource receipts, every raw PNG/log, native-channel metrics and failures
+retained. Source material/raster/emission/simulation settings are unchanged.
+
+### G282: real baseline window check
+
+The existing G281 executable also passes two real Windows-target baseline BMW
+runs with asynchronous pipeline compilation. Control and treatment reach120
+scripted physics ticks and actual current GPU singleton readiness on native
+RGBA8sRGB/MSAA4/depth4. Treatment records322 successful terminal/restoration
+transactions,80 after script completion. Each owned window is closed through
+CloseMainWindow only after evidence is present; both actual processes exit0.
+The tick limit stops simulation but does not close the window automatically.
+View fallback during window teardown is retained. No forced termination,
+screenshot, live pixel/perceptual, wholetrace timing, audio-audition or FPS proof
+is claimed. Enhanced/DLAA and the unresolved offscreen foreign-pixel residuals
+still prevent calling this a general default promotion. No source changed for
+this check; private evidence is skid-live01 and ground-skid-pass01/live-window-first01.
+
+### G287: public native transparency composition feasibility
+
+The next enhanced skid-replay draft has a real ordering gap: Bevy's atmosphere
+pass can change scene radiance between opaque and transparent rendering, while
+the draft early-skid system occupies that same interval without a dependency.
+A public `try_skid.pipe(main_transparent_pass_3d)` can retain the native type-set
+and its predecessor dependencies, but its first stage must return normally on
+unsupported views. An actual `ViewQuery` validation skip propagates through
+Pipe and prevents the native second stage from running.
+
+Four actual CPU fixtures pass against pinned Bevy 0.19.1. They initialize the
+real public native function's graph without executing its renderer; verify
+exact typed membership/removal/re-addition, the actual private-equivalent
+system-to-native-set dependency edge before and after replacement, an
+adversarial graph without that edge, and refusal of missing/uninitialized/
+zero/duplicate membership. Executed CPU continuation tests cover supported,
+missing-resource, missing-view, unsupported and stale-entity cases. A real
+ViewQuery-Skip negative control suppresses the second stage as expected.
+Strict Clippy also passes. The prior production source prefix is byte-exact;
+only a cfg(test) module was added.
+
+These are feasibility results, not actual atmosphere, RenderContext submission,
+native-DLAA or smoke-rendering validation. Production replacement still needs
+reviewed render-world installation, preserved native constraints and a loud
+failure path after mutation; AppExit alone is not a same-frame render barrier.
+The accepted Motion configuration and the G281 baseline renderer remain intact.
+Private evidence: `local/graphics/skid-native-pipe01/`.
+
+### G288: first-frame native HDR replay integration (work in progress)
+
+The explicit experimental native-DLAA profile uses the current HDR main colour
+attachment directly at one sample, with no resolve, and requires matching
+colour/depth extents, real depth/motion prepasses, native-resolution override,
+main-view identity and a ready original skid pipeline. Baseline MSAA4 remains a
+separate profile. Default Off installs no adapter. The native A stage uses
+optional lookups and normal unit returns so unsupported views retain actual
+native transparency B; retained skid masking still requires command success.
+
+The proposed installer runs once in a dedicated single-threaded schedule before
+Render, preserving the public native function's typed dependencies. A panic
+inside Bevy's multithreaded Render schedule can allow dependents to proceed;
+therefore it cannot serve as the postmutation failure barrier. Ordinary refusal
+before mutation leaves the native function intact.
+
+Actual first compilation exposed three API errors, corrected explicitly. The
+next compile succeeded but two graph tests failed (23 passed): Schedule.initialize
+moves systems AND conditions into executable storage. Reading empty/drained
+conditions afterward cannot establish absence of a run condition. The corrected
+proposal inspects first-frame graph systems/conditions before that move,
+refuses already-built schedules, traverses typed hierarchy for membership and
+uses the executable's public keyed iterator after building. Native and opaque
+conditions, including ancestor sets, must both be absent. The corrected tests
+use the actual Core3d base schedule and include already-built refusal.
+
+Corrected baseline tests (26), native-DLAA feature tests (27), all 433 app
+tests and strict baseline/feature Clippy now pass. Actual GPU submission,
+atmosphere and smoke controls remain pending. No successful native HDR rendering or
+playable/default promotion is claimed. Private evidence:
+local/graphics/skid-native-hdr01 and the immutable native-hdr-composition01
+packets under local/handoff/drafts/smoke-wheel-family02.
+
+### G290: native HDR runtime and selected smoke attenuation
+
+The guarded native adapter now runs on the actual DLAA renderer. A release
+artifact from913de6c0 (`dlaa` feature only) passed three Lacetti/Donington GPU
+cases and one same-Off repeat. Each exited0, saved300 native1080p frames plus
+a final image, executed five camera changes and a reset, and produced identical
+canonical physics/input/handling/deformation traces. Active cases installed one
+native pipe retaining three original type-set edges. The actual ready skid
+pipeline and current main/depth attachments used one sample and
+Rgba16Float/Depth32Float. Treatment recorded359 terminal successes and restored
+keys in its bounded360-call reporting window; Control recorded no replays.
+The initial pipeline-cold fallback remained ordinary rendering.
+
+Stored native RGB comparisons retain all differences:
+
+| Pair | Exact pairs /301 | Global channel maximum | Largest changed-pixel count |
+|---|---:|---:|---:|
+| Off / Control |215|51|157617 at0066, local max18|
+| Control / Treatment |165|116 at0048|204201 at0066, local max20|
+| Off / same-Off repeat |215|51|157617 at0066|
+| Repeat / Control |246|27 at0265|70235 at0267, local max14|
+
+The same-Off repeat exactly reproduces Control in31 of the86 formerly differing
+frames;215 already matched. The remaining55 Repeat/Control pairs still contain
+1922785 changed pixels. Aggregate count subtraction cannot measure that
+residual, and neither noise nor full image neutrality is established.
+
+Native0049 and0054 are locally clean controls: Off, Control and Repeat PNGs are
+byte-exact there. Root inspection of Control/Treatment0049 shows the two lower
+tyre strips attenuating through smoke in Treatment;0054 corroborates the bounded
+observation. This is useful selected visual evidence, not general car/lens or
+original-compositor acceptance. The recipe deliberately omits the optional
+paint material feature, so full accepted Motion material parity is still open.
+Native readiness receipts are not direct NGX dispatch, atmosphere-fragment or
+attachment-alpha measurement. Defaults and accepted Motion remain unchanged.
+
+Private evidence: `local/graphics/skid-native-hdr01/`, its frozen source/build
+records, four native case folders and complete RGB analyses. Executable SHA256:
+`eade66da816bacbee4b0d4e85272ffd21c246e42b895e4148e07fbab98f23667`.
+
+### G291–G292: material compatibility and the actual BMW glass/lens defect
+
+The combined-feature c93d504b artifact (dlaa,paint-specular) built successfully
+and passed strict combined-feature Clippy. Three accepted-Motion material runs
+retain the canonical800tick camera/reset state and actual20-part paint bindings.
+Selected0049/0054 Off/Control remain byte-exact while Treatment attenuates tyre
+strips. Broad pixel residuals remain recorded and unresolved; this does not
+establish global neutrality. The dedicated optional Lacetti launcher preserves
+Motion. The owner correctly notes that Lacetti emits insufficient smoke for
+acceptance, so subsequent checks use BMW.
+
+Three current-artifact BMW/Istanbul450tick cases (Off, Control, early ground
+replay) pass90native1080p shots each, exact canonical state and Treatment218
+successful/restored draw receipts. Native0053 removes black ground curves but
+leaves the rear window/frame and left rear lens floating visibly in the dense
+cloud. The owner supplied this exact image and requested work on glass/lenses.
+Further nativeBMW/DLAA scope expansion is deferred.
+
+A fresh same-artifact mappedBMW90 pair then rechecks the EXISTING five-group
+late smoke boundary with ground-skid-pass off in both arms. Both processes
+exit0; all90actual PNG/Extract/phase links and Treatment90replay/restoration rows
+pass. All1530cover records per arm retain paired properties, depth/ranks and
+centres for17window/head/rear surfaces. Root native0053 inspection confirms
+that grouped-direct hides the conspicuous window and lens; absent reproduces
+the defect. Thinner0001/final retain a coherent visible car. Dark wheel rings
+remain open. No material, light, alpha or mesh modifications are required for
+this bounded observation. Actual ordinary-driving, damaged, other camera and
+nativeDLAA admission remain separate work; the strict diagnostic is not yet a
+playable fix.
+
+Private evidence: local/graphics/skid-native-hdr01/accepted-motion/,
+local/graphics/skid-native-hdr-motion01/,
+local/graphics/bmw-smoke-current01/run01/ and
+local/graphics/bmw-boundary-current01/run01/.
+Current combined executable SHA256:
+20e63f172f1ffdd384e4ace7967bc333de5c0b3ea594c6a1aa7c4d5dd4cc940a.
+
+### G293: opt-in ordinary BMW boundary bridge
+
+The new grouped-live option reuses the unchanged five-group transaction during
+ordinary BMW/Istanbul0 baseline driving. The existing grouped-direct90/120
+ledger and default Off remain intact. There is no screenshot-count readiness
+requirement for the new Window/Image mode. Materials, light, alpha, geometry,
+physics and emission are unchanged; this is an authored draw-order adaptation,
+not the original half-resolution compositor.
+
+Before masking, current main-view target/extent/MSAA/depth, five-group ownership,
+prepared batches and graphics/native dependencies must be ready. The bridge
+checks the actual view bind groups, simple public mesh/material prerequisites
+and Bevy0.19.1 GPU preprocessing predicate (2/15 compute IDs by support mode).
+Unsupported/cold frames restore ordinary draw IDs before native drawing. There
+is no timer or forced synchronous Window shader compilation. Postmask failure
+still requires restoration and a loud persistent error; AppExit cannot undo an
+already submitted frame. First-frame shared State is inserted eagerly in both
+worlds, avoiding deferred-resource installation during Extract.
+
+Final source06 passes five focused lifecycle/installer controls, all438 app
+tests and strict Clippy. Two fresh Image processes exit0 with90native1080p PNGs
+plus final each. Native0053 hides the floating glass/lens; thinner0001/final
+retain a coherent car. All197 recorded rows match exactly within six ordered
+families, and all90 request metadata rows are byte-exact. Global inter-family
+stdout order differs and remains recorded. The observer now compares typed
+ordered families without sorting/deduplicating/deleting values; it also rejects
+immediate fatal replay diagnostics even after an earlier success. This is not
+per-PNG GPU-stage association, whole-image neutrality or positive fragment proof.
+
+The actual Window first defers unready compute pipelines before masking, then
+reports successful terminal/restoration. A change from chase_close to chase_far,
+one restart, two450tick segments and normal own-window closure are observed
+without errors. Full five-view cycling and minimize/resize remain open; the
+periodic334replays atcalls360 is not a lifetime count. All failed compile/test,
+first-Extract and first-Window experiments are retained, including the observer's
+initial merged-order failure. Neither errors nor skipped stages are relabelled
+successful draws.
+
+The historical G293 version of Play GRID BMW Smoke.cmd used a separate baseline
+executable and isolated manual profile. The accepted enhanced Motion/Lacetti launchers and executables remain
+unchanged. NativeDLAA/HDR, other cars/routes/opponents/damage and dark wheel
+rings remain separate work. Private evidence: local/graphics/bmw-boundary-live01/
+with source06/build06, dense450-run03, window-cr-run02, window-final-audit01 and
+retained failed runs. Executable SHA256:
+8f45f35adf3b4e9e8e71e4934080e05268a111d8efe661083b52187bb22ff9e9.
+
+The owner then accepted the manual BMW trial: no remaining critical smoke
+problems; minor unnatural appearance is deferred. The complete owner log
+manual-bmw-smoke-15099-25937.log (318187bytes,
+SHA668c5a2d934d63a84c646cdba53ca481c18a2b4c3813eb7439ac63444051e454)
+is retained both at its original path and in
+local/graphics/bmw-boundary-live01/owner-session01/, alongside exact launcher,
+build/source metadata and camera profile copies plus a SHA manifest. No binary
+was copied into that evidence folder. Keep this folder in full. Logs and settings
+are a future comparison baseline, not a recorded video or full camera timeline.
+No C/R coverage beyond the actual logs is inferred from the owner's feedback.
+
+### G294: reverse native scheduling proof
+
+CPU graph tests now cover the actual native transparency function followed by a
+late callback, retaining its typed set, a private Atmosphere-style predecessor and
+the real MainPass-to-EarlyPostProcess boundary. A missing native ViewQuery skips
+the pipe; the real five-group core then restores exact state and refuses a success
+receipt. These are CPU scheduling and failure-path observations, not DLAA images.
+
+The existing early-pass installer delegates to a private shared transaction, so
+reverse tests exercise the same mutation checks instead of mirroring them.
+Production still installs only the existing early pipe; no late HDR profile or BMW
+enhanced admission is enabled. The accepted G293 owner build/log remain unchanged.
+The refactor and freshly integrated F571 pass the grid-app crate gate: 443 tests,
+strict Clippy and documentation sanity. No native HDR rendering is claimed.
+Evidence: ignored local/graphics/native-late-pipe-cpu01/gate02 and source02.json.
+
+### Maintained baseline smoke entrypoint
+
+`Play GRID BMW Smoke.cmd` now selects the ordinary checkout's
+`target/release/grid-app.exe`, rather than an absent ignored trial binary.
+It keeps the explicit G293 baseline BMW/Istanbul0 keyboard profile and creates
+fresh private data, log and exit-code files per session, after clearing inherited
+GRID/WGPU research switches. An optional first argument supplies a quoted game
+root. No SDK/DLAA, automatic inputs or existing owner settings are required or
+changed. Normal Play GRID launchers/defaults remain unchanged; this does not
+admit other cars, Derby, opponents or damage. The maintained command still needs
+the integrated artifact's checks and actual runtime evidence; the historical
+owner acceptance is not automatically a new-binary or general-profile pass.
+
+### G296: native DLAA late smoke replay (in progress)
+
+The opt-in BMW/Donington native1080 Image profile now executes the same five-group
+smoke transaction after native transparency and before EarlyPostProcess/DLAA.
+All selected Off/Control/Late arms share strict source-context validation;
+Control retains ordinary transparency and is not a neutral late-reorder control.
+The new HDR1 path validates current target/depth and actual depth/motion prepass
+textures, and retains mandatory restoration/failure reporting. Defaults and the
+owner-accepted baseline BMW playable remain unchanged.
+
+Source02 passes450 no-feature tests (before declaration-order cleanup), strict
+Clippy in both variants,30 feature smoke tests and a release build. Nine actual
+CLI refusals pass. The three native GPU runs exit0 with90PNG+final each and197
+ordered-family rows plus request ledgers matching across arms. Late records the
+first current HDR1 terminal/restored view at frame3/tick4 and periodic238 replays
+in240 calls with errorNone. Request metadata is not a PNG/render-stage join.
+
+The first observer rejected the normal50MiB HDR scene-probe readback after an
+otherwise successful Off run. Its failure and files remain intact; a separately
+reviewed observer revalidated all original Off files and continued only the two
+missing arms. This is an observer correction, with no source/executable change.
+
+Every full RGB pair differs, including Off/Control (max55); residuals remain
+unresolved and are not labelled noise. Root's selected partial-cloud0001 window
+ROI changes strongly under Late, while the final car remains coherent. The
+scenario stops near the pit wall and smoke decays, so this does not establish
+heavy-smoke/Window/general/source-compositor parity. A global late layer can
+also attenuate a transparent surface geometrically in front of smoke; general
+promotion requires foreground/background controls.
+
+Evidence: ignored local/graphics/bmw-native-boundary01, source02/check02,
+negative-cli-run01, dense450-run01/resume03-result.json, full RGB/ROI analyses,
+and the independent runtime03 audit. Executable SHA256
+3a569b745b5f82a1d2d5edd0b90ebfb1ab097d6116dc92d00e98e55677638412.
+Selected-route Istanbul and manual Window admission are the next unverified
+continuation; the source02 results cannot be attributed to that future code.
+
+The selected-route/manual continuation is applied as source03/source04. It passes
+456 baseline app tests, including real Istanbul probe installation/calibration
+and the source-sky CPU cube bake. That bake is six 256x256 sRGB faces, not an HDR
+GPU validation. Baseline Clippy then rejected four iterator-style expressions
+inside the new sky test; source04 changes only those test iterators. The original
+failure is retained. Source04/check05 now passes34native smoke tests and three Istanbul tests,
+including both actual-resource cases and the existing smoke restart regression.
+Both strict Clippy variants and the native release build pass. The new executable
+SHA256 is437afa47b978884b6082609b8302c2b8e5882892354b9865e3678ffac5148025.
+Fresh Istanbul GPU and actual manual Window/camera/restart checks are pending;
+no new playable or broader compatibility is claimed yet.
+
+
+Current Istanbul RGB controls also retain unresolved residuals: all91 Off/Control
+pairs differ, maximum channel24, with36457changed pixels at the largest-count
+frame0083. In native0053, the preselected rear-glass rectangle has ordinary
+max5 versus Control/Late max94, and the lamp rectangle max1 versus max67. These
+are rectangles, not semantic masks; no noise or whole-image neutrality claim.
+Exact per-frame counts/histograms/hashes and bundled-tool provenance are saved
+under istanbul450-run01/rgb-analysis01/ (result SHAd28cf39555049b0ff6bbd014cdb9706bc2ea0ed91c97c50a51092efadcfaf4f4).
+
+Actual Manual cold Window reaches native prepared1920 and first HDR1 restoration
+at frame13/tick0, with errorNone summaries. Automated menu keys were not consumed;
+no GoToRace/C/R was recorded. Its predetermined600s harness timeout killed only
+the owned child; manual01-result is exit1 and retained. C/R and clean manual exit
+are unverified, not a rendering success. One dedicated private EXE/DLL candidate
+is preserved with NOT_WINDOW_CR_VALIDATED provenance and no enabled launcher.
+Future main integration must use fresh source/build/runtime evidence.
+
+### G297: integrated main with streaming skids
+
+F573-F583 are merged while retaining reflectance0 and explicit skid ownership.
+The combined573-source snapshot passes the full1124-test gate, workspace Clippy,
+four unchanged physics identities,24quick-soak scenarios,34native smoke tests,
+six skid tests, feature Clippy and release. New EXE11c8f0cb44bb4ad9b349f1121d3d9f7f320d16c456553d15c3bb9cc8a119fa90.
+
+A fresh Off/Late Istanbul pair completes0 with90native1080 PNGs+final per arm,
+exact197ordered-family rows and90request ledgers. Late first restores HDR1 at
+frame3/tick4, with summary240/238/errorNone. Root's actual0053 inspection finds
+visible curved tyre strips, glass and lamp ghosts in Off attenuated by Late;
+0001/final keep a coherent car. The32eligible wheel-input samples are not a
+laid counter; visible pixels supply a separate, limited observation. No old
+G296 cube/image proof is substituted. New captures/readbacks and independent
+audit are under local/graphics/main-f583-smoke01 and
+local/handoff/drafts/main-f583-pair-actual-audit01/.
+
+Manual C/R is still open. An explicit private human-input test uses the same
+merged binary and clean unforced Manual arguments, preserving raw log/exit code
+without a timeout. It is labelled MANUAL_INPUT_TEST_ONLY; accepted launchers and
+the guarded validated-release template remain unchanged. This test's existence
+is not evidence that C/R or general playability passed.
+
+## G300 pinned F586 integration smoke control (27 October 2026)
+
+The F584-F586 integration conservatively retains player SourcePart roots outside new car batching while leaving explicitly marked opponents enabled. This protects existing bumper/probe ownership policies; it does not establish that the five-handle native smoke routing was universally broken. An actual ECS mesh test, full1137tests/Clippy/four incoming identities/24quick-soak and native-feature Clippy/build pass. New executable75ccb3ba... has two fresh Istanbul Off/Late controls:197ordered-family rows and90request records match, while raw inter-family order differs and is retained.182native PNGs are preserved, with actual current setup/copy observations rather than an old cube hash.
+
+Root's selected dense0053 view shows glass/lamp/tyre curves attenuating with the car; thin0001/final remain coherent. Actual HDR1 terminal/restoration and five groups are logged; full hashes/step times/independent audit/visual review and cleanup receipts are in G300. This is limited Image proof, not whole-image old/new equality, per-PNG GPU-stage joins, SDK dispatch, a laid-skid counter, real bumper/Manual C/R, every car/damage state or a default/playable promotion. G299's separate scripted damaged-window reset retains its original source/artifact scope. Owner baseline smoke and Motion packages remain unchanged.
+
+## Fresh F590 integration controls (G302, 27 October 2026)
+
+The pinned F587-F590 integration retains the player ownership guard alongside opponent batching/bounds/shadow optimizations. On the new combined dlaa,paint-specular executable, both existing native Istanbul Off/Late cases pass, with197ordered family records and90request-metadata rows equal. Root native inspection again sees selected rear-glass/lens and tyre-curve ghosts attenuate in dense smoke. Early/final partial-cloud views remain coherent; minor dark wheel rings are deferred. This is a fresh-build regression, not a new smoke algorithm or default promotion. Full1137tests/Clippy/four identities/24soak pass. Manual C/R, all damage/cars, per-PNG terminal joins, SDK dispatch and wholeimage neutrality remain unverified. Actual executable, independent audit, visual proof and full private captures are recorded in G302.
+
+G304 fresh F591/F592 regression: native Istanbul Off/Late on the new partial-strip-upload/static-batch executable passes the same two-arm protocol. Root can see actual laid curves in Off0053; Late0053 attenuates them with the glass/lens ghosts through the dense cloud. Early/final partial-cloud views remain coherent, minor wheel rings deferred. This closes that selected new-build regression only, not every queued strip/cold allocator delivery, Manual C/R, allcar/damage, exact image neutrality or default promotion. Full1139tests/Clippy/four identities/24soak and actual receipts are recorded in G304.
+
+## Integrated ordinary BMW entrypoint (G315/G317/G318, 28 October 2026)
+
+The maintained Play GRID BMW Smoke.cmd uses this checkout target/release/grid-app.exe with fresh private settings/logs and explicit baseline BMW/Istanbul grouped-live flags. The integrated default-feature770ec artifact passes the full1254-test gate, four identities and24quick-soak cases, plus two fresh90-frame Off/Live autopilot controls. Selected dense smoke attenuates glass/lens/skid ghosts; the same artifact also logs a real Window terminal replay and exits0 through the maintained launcher. Full private source/artifact/runtime evidence is in G318. This does not enable the policy for ordinary Derby, all cars/damage or native DLAA; those remain distinct contexts.

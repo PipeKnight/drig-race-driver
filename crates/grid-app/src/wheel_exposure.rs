@@ -46,10 +46,22 @@ impl MaterialExtension for Exposure {
     }
 }
 #[derive(Component)]
-struct Hull {
-    source: Entity,
+pub(crate) struct Hull {
+    pub(crate) source: Entity,
     wheel: usize,
     bind: Mat4,
+}
+
+#[cfg(test)]
+impl Hull {
+    // Owner-link CPU fixture only, without installing renderer resources.
+    pub(crate) fn visibility_fixture(source: Entity) -> Self {
+        Self {
+            source,
+            wheel: 0,
+            bind: Mat4::IDENTITY,
+        }
+    }
 }
 
 pub fn install(app: &mut App) {

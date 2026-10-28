@@ -66,3 +66,35 @@ Second wave performed: primary main and graphics fast-forwarded31ba353 and pushe
 Second17October wave: primarya2c61b2->aefbbd8 guardedFF, current source486e7ebcd5ed/SHAbcf548936860bdcb97dde0a7a26a23a64f3046635d68f2fd86b391e8b1d79846 atomically promoted to inactive target/backups/manifests. 520release tests, Clippy18.49s, exactsolo,20/20soak and same-viewBC/RGBA4K/default1200/moving30 captures verified. General rectangular mips restored for the narrowly validated zero-tail subset; original pixels unchanged. Source forest has improved authored thin-leaf lighting but remains explicit/off by default. OwnerresearchSHA c4d52b9e... preserved. Private promotion-mips.json.
 
 17 October grass/foliage update: primaryd967f35 -> b783147 guarded FF, owner AI report unchanged. Source917ca5f94d5e / executable785488a18bd7039bfd0d2beee85281c16185be5f8e83cbc793a985766c413275 promoted atomically to inactive main target/backups/four manifests. Enhanced grass soft-alpha default, preferred leaf coverage in explicit trees/Atmosphere modes. 525release tests, workspaceClippy37.75s, exactsolo, unchanged-headless20/20soak, full native4Klap89.955257484 and nativeBC offtrack/motion captures passed. Initial capture timeout retained as failed, retry uses bounded900s; no quality reduction. No manual windowed lap or phone proof. Promotion-grass.json and GRASS_RENDERING.md record limits.
+
+
+### 20 October2026: bounded surface/history diagnostics
+
+G199 adds --surface-mip-bias off|view, defaultOff, in4964eef0. Merge track_surface.rs and track_surface.wgsl together: the optional sampling control has a matching Vec4 uniform at material binding113. No new texture upload or dependency was introduced; shared texture_upload paths remain in use. Forward desktop DLAA/SMAA controls pass, but this new layout has not been rendered on phone hardware. Disabled mode retains the shader binding; default workspaceClippy is not mobile GPU acceptance. Existing matched SMAA full frame equals9abb921.
+
+G200 adds --dlaa-history normal|reset-every-frame, defaultNormal, with explicit guards requiring enhanced nativeDLAA scripted drive ticks plus --render. Keep this as a diagnostic: it removes the observed road detail band but gives up history accumulation. NativeDLAA render-world validation checks forced reset survives extraction. Do not add forced reset to owner launchers or treat it as a finished temporal-AA fix. New graphics Settings booleans both defaultfalse; preserve peer additions when resolving settings/main merges. Existing ordinary, DLAA, Reflections, Lamps and Signals launchers/executables remain preserved; owner accepted Signals brightness.
+
+Neither stage updates dependencies or rebases main. When integrating newer main, perform its requested seed_build_dir.ps1 -Reseed once **after** that merge/rebase with the updated script, before Cargo; no reseed was attempted against this older script. Keep private diagnostic binaries/captures/original-derived research ignored. Exact checks, scope, failures and raw evidence are in PROJECT_LOG.md/G199–G200 and ASPHALT_TEMPORAL_DETAIL.md. Colour raw before DLAA is still not captured; the motion/depth audit protocol remains unchanged.
+
+## 25 October 2026: obsolete integration checkout removed
+
+The owner requested removal of the obsolete 16 October integration checkout.
+Its 54 ignored local evidence files (50,443,131 bytes) are preserved with per-file
+SHA-256 verification under
+`local/archives/grid-graphics-integration-20261025/evidence/local/` in the active
+graphics worktree. Historical integration evidence references map from the old
+checkout's `local/` prefix to this preserved prefix; preservation.json records
+exact files, hashes, branch and 18eac2c1 source revision. The obsolete dedicated
+build cache was removed after exact path/active-main exclusion checks.
+
+The managed archiver initially refused removal because another active task still
+used the checkout. The available thread listing did not identify that task, so
+no manual override of its ownership guard was attempted.
+
+The owner subsequently removed the old checkout. Verification confirms both its
+filesystem directory and Git worktree registration are absent; all 54 preserved
+private files still match SHA-256. Tracked 18eac2c1 history also has a verified
+local-only `integration-source.bundle` in the same archive folder. This legacy
+history is recovery-only and must not be merged or pushed. An old app attachment
+may remain as stale metadata; it is not a live Git checkout. No internal app
+metadata was edited. Removal is complete; active graphics work continues.

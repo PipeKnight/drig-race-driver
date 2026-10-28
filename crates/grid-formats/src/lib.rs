@@ -3,6 +3,7 @@
 
 pub mod action_map;
 pub mod ai;
+pub mod anim_packet;
 pub mod audio_car_setup;
 pub mod audio_dictionary;
 pub mod binxml;
@@ -10,6 +11,7 @@ pub mod car_collision;
 pub mod car_decals;
 pub mod collision;
 pub mod cqtc;
+pub mod crowd_placements;
 pub mod damage_boxes;
 pub mod database;
 pub mod daynight;

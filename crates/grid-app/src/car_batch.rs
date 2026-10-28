@@ -188,6 +188,7 @@ type Candidate = (
     &'static MeshMaterial3d<StandardMaterial>,
     Option<&'static crate::OpponentPart>,
     Option<&'static crate::MovingPart>,
+    Option<&'static crate::track_surface::SourcePart>,
     Option<&'static LodPart>,
     (
         Has<RenderLayers>,
@@ -508,7 +509,12 @@ fn register(
     extras: &mut Vec<(usize, u8, Entity)>,
 ) -> bool {
     let before = groups.iter().map(|g| g.members.len()).sum::<usize>();
-    for (entity, mesh, material, opponent, moving, lod, special) in added {
+    for (entity, mesh, material, opponent, moving, source, lod, special) in added {
+        // Player-only view/probe policies retain these exact source entities.
+        // A model prefix alone does not identify an opponent as the player.
+        if opponent.is_none() && source.is_some_and(|p| p.0.starts_with("car0/")) {
+            continue;
+        }
         let (car, rest, wheel) = match (opponent, moving) {
             (Some(o), _) => (o.car, o.rest, o.wheel),
             (_, Some(m)) => (0, m.rest, m.wheel),
@@ -817,5 +823,81 @@ mod tests {
         assert!(!in_place(open, pose * rest));
         let dropped = Mat4::from_translation(Vec3::new(0., -0.002, 0.)) * pose * rest;
         assert!(!in_place(dropped, pose * rest));
+    }
+
+    #[test]
+    fn player_sources_stay_owned_while_opponent_parts_batch() {
+        use bevy::{asset::RenderAssetUsages, mesh::Indices};
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<CarBatches>()
+            .add_message::<AssetEvent<Mesh>>()
+            // Exercise the actual register/refresh/rebuild path, without an
+            // environment-dependent install gate or a renderer/GPU fixture.
+            .add_systems(PostUpdate, refresh);
+        let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(
+            Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION,
+                    vec![[0., 0., 0.], [1., 0., 0.], [0., 0., 1.]])
+                .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 1., 0.]; 3])
+                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0,
+                    vec![[0., 0.], [1., 0.], [0., 1.]])
+                .with_inserted_indices(Indices::U16(vec![0, 2, 1])),
+        );
+        let material = app.world_mut().resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        let mut players = Vec::new();
+        let mut opponents = Vec::new();
+        for opponent in [false, true] {
+            for part in 0..2 {
+                let rest = Mat4::from_translation(Vec3::new(part as f32 * 2., 0., 0.));
+                let mut entity = app.world_mut().spawn((
+                    Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()),
+                    Transform::from_matrix(rest), Visibility::Inherited,
+                    Aabb::from_min_max(Vec3::ZERO, Vec3::ONE),
+                    // Even a shared model prefix must not disable opponents.
+                    crate::track_surface::SourcePart("car0/Car Body Paint".into()),
+                ));
+                if opponent {
+                    entity.insert(crate::OpponentPart {
+                        car: 1, rest, wheel: None, lost_with_wheel: false,
+                    });
+                    opponents.push(entity.id());
+                } else {
+                    entity.insert(crate::MovingPart {
+                        rest, wheel: None, lost_with_wheel: false,
+                    });
+                    players.push(entity.id());
+                }
+            }
+        }
+        // First update registers, second builds, third exercises stable reuse.
+        for _ in 0..3 { app.update(); }
+        for entity in players {
+            let source = app.world().entity(entity);
+            assert_eq!(source.get::<crate::track_surface::SourcePart>().unwrap().0,
+                "car0/Car Body Paint");
+            assert!(source.contains::<crate::MovingPart>());
+            assert!(!source.contains::<Batchable>());
+            assert!(source.get::<RenderLayers>().is_none());
+            assert_eq!(*source.get::<Visibility>().unwrap(), Visibility::Inherited);
+            assert_eq!(source.get::<Mesh3d>().unwrap().0, mesh);
+            assert_eq!(source.get::<MeshMaterial3d<StandardMaterial>>().unwrap().0, material);
+        }
+        for entity in opponents {
+            let source = app.world().entity(entity);
+            assert!(source.contains::<Batchable>());
+            assert_eq!(source.get::<RenderLayers>(), Some(&RenderLayers::layer(HIDDEN_LAYER)));
+        }
+        let state = app.world().resource::<CarBatches>();
+        assert_eq!(state.groups.len(), 1);
+        assert_eq!(state.groups[0].car, 1);
+        assert_eq!(state.groups[0].members.len(), 2);
+        assert_eq!(state.groups[0].batches.len(), 1);
+        let batch = state.groups[0].batches[0];
+        let rendered = app.world().get::<Mesh3d>(batch).unwrap();
+        assert_eq!(app.world().resource::<Assets<Mesh>>()
+            .get(&rendered.0).unwrap().count_vertices(), 6);
     }
 }

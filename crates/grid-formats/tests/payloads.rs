@@ -1160,3 +1160,119 @@ fn purchased_distant_forest_keeps_all_mips_and_only_drops_zero_tail() {
     let padding = &t.remaining_data[699088-t.base_blocks.len()..];
     assert_eq!(padding.len(), 2032); assert!(padding.iter().all(|&v| v==0));
 }
+
+// Entirely authored interleaved skin streams, not purchased game records.
+fn four_influence_fixture() -> Vec<u8> {
+    let rows = [
+        (
+            [1.0f32, 0., 0.],
+            [0.5f32, 0.25, 0.125, 0.125],
+            [0u8, 1, 2, 3],
+        ),
+        ([0., 1., 0.], [-0.0, 1., 0., 0.], [3, 1, 0, 2]),
+        ([0., 0., 1.], [0.75, 0.5, 0., 0.], [2, 0, 1, 3]),
+    ];
+    let mut raw = Vec::new();
+    for (position, weights, joints) in rows {
+        for value in position.into_iter().chain(weights) {
+            raw.extend(value.to_be_bytes());
+        }
+        raw.extend(joints);
+    }
+    let mut block = Vec::new();
+    for (kind, format, offset) in [
+        ("SkinnableVertex", "float3", 0),
+        ("SkinWeights", "float4", 12),
+        ("SkinIndices", "uchar4", 28),
+    ] {
+        block.extend(node(
+            "DATABLOCKSTREAM",
+            &[
+                ("renderType", text(kind)),
+                ("dataType", text(format)),
+                ("offset", u(offset)),
+                ("stride", u(32)),
+            ],
+            vec![],
+        ));
+    }
+    block.extend(node("DATABLOCKDATA", &[], raw));
+    let mut payload = node(
+        "DATABLOCK",
+        &[
+            ("id", text("elbow-points")),
+            ("streamCount", u(3)),
+            ("size", u(96)),
+            ("elementCount", u(3)),
+        ],
+        block,
+    );
+    let mut source = node(
+        "RENDERINDEXSOURCE",
+        &[
+            ("primitive", text("triangles")),
+            ("format", text("ushort")),
+            ("count", u(3)),
+            ("maximumIndex", u(2)),
+        ],
+        node("INDEXSOURCEDATA", &[], vec![0, 0, 0, 1, 0, 2]),
+    );
+    for index in 0..3 {
+        source.extend(node(
+            "RENDERSTREAM",
+            &[
+                ("dataBlock", text("#elbow-points")),
+                ("subStream", u(index)),
+            ],
+            vec![],
+        ));
+    }
+    payload.extend(node(
+        "RENDERDATASOURCE",
+        &[("id", text("elbow")), ("streamCount", u(3))],
+        source,
+    ));
+    file(payload)
+}
+
+#[test]
+fn preserves_non_dominant_elbow_influences_without_changing_rigid_or_static_modes() {
+    let bytes = four_influence_fixture();
+    let tree = pssg::read_tree(&bytes).unwrap();
+    let weighted = mesh::read_four_weight_mesh(&tree, b"elbow").unwrap();
+    assert!(weighted.mesh.skin_indices.is_none());
+    assert_eq!(weighted.mesh.positions[0], [1., 0., 0.]);
+    let skin = weighted.influences;
+    assert_eq!(skin.joints, vec![[0, 1, 2, 3], [3, 1, 0, 2], [2, 0, 1, 3]]);
+    assert_eq!(
+        skin.weights[0].map(f32::to_bits),
+        [0.5f32, 0.25, 0.125, 0.125].map(f32::to_bits)
+    );
+    assert_eq!(skin.weights[1][0].to_bits(), (-0.0f32).to_bits());
+    // Resource preservation must not silently normalize a non-unit sum.
+    assert_eq!(skin.weights[2].map(f32::to_bits), [0.75f32, 0.5, 0., 0.].map(f32::to_bits));
+    assert_eq!(skin.weights[2].iter().sum::<f32>(), 1.25);
+    // Authored elbow: four joints translate by 0,4,8,16 on X. Keeping only
+    // the dominant joint leaves X=1; the preserved blend moves it to X=5.
+    let offsets = [0.0f32, 4., 8., 16.];
+    let blended = 1.0
+        + skin.weights[0]
+            .iter()
+            .zip(skin.joints[0])
+            .map(|(weight, joint)| weight * offsets[joint as usize])
+            .sum::<f32>();
+    assert_eq!(blended, 5.0);
+    assert!(mesh::read_meshes(&tree).is_err());
+    assert!(mesh::read_static_meshes(&tree).unwrap().is_empty());
+    let rigid = mesh::read_object_meshes(&tree).unwrap();
+    assert_eq!(
+        rigid[0].skin_indices.as_deref(),
+        Some(&[0.0f32, 1., 2.][..])
+    );
+    assert_eq!(rigid[0].positions[0], [1., 0., 0.]);
+    assert_ne!(
+        blended,
+        1.0 + offsets[rigid[0].skin_indices.as_ref().unwrap()[0] as usize]
+    );
+    assert!(mesh::read_four_weight_mesh(&tree, b"missing").is_err());
+}

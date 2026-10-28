@@ -265,3 +265,82 @@ mod tests {
         assert_eq!(bc1_pixel(&tex, 3, 0), [85, 170, 0]);
     }
 }
+
+#[cfg(test)]
+mod istanbul_source_asset_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn istanbul_source_sky_bakes_real_nonempty_srgb_cube_without_renderer() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = std::path::Path::new(&root);
+        let route = crate::Route::new(grid_tools::route::ISTANBUL_PARK).unwrap();
+        let file = crate::sky::sky_file(root, &route);
+        assert_eq!(file, route.track_file("sky.pssg"));
+        let bytes = crate::read(&root.join(&file)).unwrap();
+        let tree = grid_formats::pssg::read_tree(&bytes).unwrap();
+        let sky = grid_formats::sky::read(&tree).unwrap();
+        let environment = grid_tools::environment::Environment::for_route(root, &route).unwrap();
+        assert_eq!(environment.lighting_file, route.track_file("lighting.xml"));
+        assert_eq!(environment.mode(), grid_tools::time_of_day::Mode::None);
+        assert_eq!(sky.slots.len(), 1, "static Istanbul first-slot fixture");
+        let tone = [
+            environment.lighting.scalar("skyscale").unwrap(),
+            environment.lighting.scalar("skygamma").unwrap(),
+        ];
+        assert!(tone.iter().all(|value| value.is_finite()));
+        assert!((tone[0] - 0.8).abs() < 1e-6 && (tone[1] - 0.9).abs() < 1e-6);
+        assert!(
+            sky.positions
+                .iter()
+                .flatten()
+                .chain(sky.texcoords.iter().flatten())
+                .all(|v| v.is_finite())
+        );
+        let texture = sky.texture(0);
+        assert_eq!(texture.format, Format::Bc1);
+        // This invokes the exact production CPU projector, including its
+        // upper-hemisphere hole limit. It does not rerender synthetic geometry.
+        let image = bake(&sky.positions, &sky.texcoords, &sky.indices, texture, tone).unwrap();
+        assert_eq!(
+            image.texture_descriptor.size,
+            Extent3d {
+                width: 256,
+                height: 256,
+                depth_or_array_layers: 6,
+            }
+        );
+        assert_eq!(
+            image.texture_descriptor.format,
+            TextureFormat::Rgba8UnormSrgb
+        );
+        assert_eq!(image.texture_descriptor.dimension, TextureDimension::D2);
+        assert_eq!(
+            image.texture_view_descriptor.as_ref().unwrap().dimension,
+            Some(TextureViewDimension::Cube)
+        );
+        let pixels = image
+            .data
+            .as_ref()
+            .expect("CPU bake must retain its real pixels");
+        assert_eq!(pixels.len(), 256 * 256 * 6 * 4);
+        assert!(pixels.as_chunks::<4>().0.iter().all(|rgba| rgba[3] == 255));
+        for (face, pixels) in pixels.as_chunks::<{ 256 * 256 * 4 }>().0.iter().enumerate() {
+            assert!(
+                pixels
+                    .as_chunks::<4>().0.iter()
+                    .any(|rgba| rgba[..3].iter().any(|&v| v != 0)),
+                "empty face {face}"
+            );
+        }
+        // +Y cannot consist solely of the authored lower-ground fallback.
+        // Require actual source-sky structure, not merely allocated black bytes.
+        let upper = &pixels[2 * 256 * 256 * 4..3 * 256 * 256 * 4];
+        let first = &upper[..3];
+        assert!(
+            upper.as_chunks::<4>().0.iter().any(|rgba| &rgba[..3] != first),
+            "upper source sky lost all variation"
+        );
+    }
+}

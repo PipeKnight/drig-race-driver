@@ -1,4 +1,5 @@
 //! Static closest-LOD source forest. No wind, collision or original shader claim.
+mod visibility_census;
 use super::mesh_stream::{MeshStream, VertexLayout, put};
 use super::{Car, Part, read};
 use bevy::mesh::VertexAttributeValues;
@@ -405,6 +406,8 @@ mod tests {
             parts: Vec::new(),
             textures: BTreeMap::new(),
             bindings: BTreeMap::new(),
+            decal_materials: Default::default(),
+            object_glass_materials: Default::default(),
             center: Vec3::ZERO,
             radius: 1.,
             track: true,
@@ -608,6 +611,7 @@ fn sheet_expanded(
     expanded(center, offset, right, Vec3::Y, inverse, scale)
 }
 pub fn install(app: &mut App) {
+    visibility_census::install(app);
     app.init_resource::<MeshStream>().add_systems(
         Update,
         present
@@ -615,23 +619,273 @@ pub fn install(app: &mut App) {
             .after(super::replay::frame_camera),
     );
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FacingKey {
+    Sphere([u32; 6]),
+    Cylinder([u32; 2]),
+}
+fn facing_keys(right: Vec3, up: Vec3, eye: Vec3) -> [Option<FacingKey>; 2] {
+    let sphere = [right.x, right.y, right.z, up.x, up.y, up.z];
+    let cylinder = [eye.x, eye.z];
+    [
+        sphere.iter().all(|v| v.is_finite()).then(|| FacingKey::Sphere(sphere.map(f32::to_bits))),
+        cylinder.iter().all(|v| v.is_finite()).then(|| FacingKey::Cylinder(cylinder.map(f32::to_bits))),
+    ]
+}
+#[derive(Debug, PartialEq, Eq)]
+enum FacingGate { Cold, ChangedComponent, ChangedMesh, ChangedKey, Equal, Nonfinite }
+fn facing_gate(previous: Option<&FacingSeen>, frame: u32, component_changed: bool,
+    mesh: bevy::asset::AssetId<Mesh>, key: Option<FacingKey>) -> FacingGate {
+    let Some(key) = key else { return FacingGate::Nonfinite; };
+    let Some(previous) = previous else { return FacingGate::Cold; };
+    if previous.frame.checked_add(1) != Some(frame) { FacingGate::Cold }
+    else if component_changed { FacingGate::ChangedComponent }
+    else if previous.mesh != mesh { FacingGate::ChangedMesh }
+    else if previous.key != key { FacingGate::ChangedKey }
+    else { FacingGate::Equal }
+}
+fn facing_census_config(value: &str) -> Option<(bool, u32)> {
+    let (mode, frames) = value.split_once(':')?;
+    let keys = match mode { "timing" => false, "keys" => true, _ => return None };
+    let budget: u32 = frames.parse().ok()?;
+    (1..=3600).contains(&budget).then_some((keys, budget))
+}
+#[derive(Default, Debug)]
+struct FacingCounts {
+    instances: u64,
+    vertices: u64,
+    bytes: u64,
+    equal_keys: u64,
+    equal_vertices: u64,
+    cold: u64,
+    changed_component: u64,
+    changed_mesh: u64,
+    changed_key: u64,
+    nonfinite: u64,
+    untracked: u64,
+}
+struct FacingSeen {
+    key: FacingKey,
+    mesh: bevy::asset::AssetId<Mesh>,
+    frame: u32,
+}
+struct FacingCensusRun {
+    keys: bool,
+    budget: u32,
+    frames: u32,
+    no_camera: u32,
+    no_position: u64,
+    ns: u128,
+    max_ns: u128,
+    counts: [FacingCounts; 2],
+    seen: BTreeMap<Entity, FacingSeen>,
+}
+#[derive(Default)]
+struct FacingCensus(Option<FacingCensusRun>);
+impl FacingCensus {
+    fn from_env() -> Self {
+        let Ok(value) = std::env::var("GRID_FACING_CENSUS") else {
+            return Self::default();
+        };
+        let Some((keys, budget)) = facing_census_config(&value) else {
+            eprintln!("facing_census disabled=invalid_config expected=timing:N_or_keys:N budget=1..3600");
+            return Self::default();
+        };
+        Self::configured(keys, budget)
+    }
+    fn configured(keys: bool, budget: u32) -> Self {
+        println!("facing_census version=1 enabled=true keys={keys} budget={budget} cap=16384");
+        Self(Some(FacingCensusRun {
+            keys, budget, frames: 0, no_camera: 0, no_position: 0,
+            ns: 0, max_ns: 0, counts: Default::default(), seen: BTreeMap::new(),
+        }))
+    }
+    fn begin(&mut self) -> Option<std::time::Instant> {
+        let run = self.0.as_mut()?;
+        if run.frames == run.budget { return None; }
+        run.frames += 1;
+        Some(std::time::Instant::now())
+    }
+    fn keys_active(&self) -> bool {
+        self.0.as_ref().is_some_and(|r| r.keys && r.frames <= r.budget && r.frames > 0)
+    }
+    fn observe(&mut self, entity: Entity, facing: &Ref<Facing>, mesh: bevy::asset::AssetId<Mesh>,
+        keys: [Option<FacingKey>; 2]) {
+        let Some(r) = self.0.as_mut() else { return; };
+        let index = usize::from(facing.source.cylindrical);
+        let c = &mut r.counts[index];
+        c.instances += 1;
+        let vertices = facing.source.centers.len().min(facing.source.offsets.len()) as u64;
+        c.vertices += vertices;
+        c.bytes += facing.vertices.len() as u64;
+        let key = keys[index];
+        match facing_gate(r.seen.get(&entity), r.frames, facing.is_changed(), mesh, key) {
+            FacingGate::Cold => c.cold += 1,
+            FacingGate::ChangedComponent => c.changed_component += 1,
+            FacingGate::ChangedMesh => c.changed_mesh += 1,
+            FacingGate::ChangedKey => c.changed_key += 1,
+            FacingGate::Equal => { c.equal_keys += 1; c.equal_vertices += vertices; }
+            FacingGate::Nonfinite => { c.nonfinite += 1; }
+        }
+        let Some(key) = key else { r.seen.remove(&entity); return; };
+        if r.seen.len() < 16384 || r.seen.contains_key(&entity) {
+            r.seen.insert(entity, FacingSeen { key, mesh, frame: r.frames });
+        } else { c.untracked += 1; }
+    }
+    fn finish(&mut self, start: Option<std::time::Instant>, camera: bool) {
+        let Some(start) = start else { return; };
+        // Stop before reporting; this is the inclusive present CPU span, not GPU/FPS.
+        let elapsed = start.elapsed().as_nanos();
+        let r = self.0.as_mut().unwrap();
+        r.ns += elapsed;
+        r.max_ns = r.max_ns.max(elapsed);
+        r.no_camera += u32::from(!camera);
+        if r.frames == 240 || r.frames.is_multiple_of(600) || r.frames == r.budget {
+            println!("facing_census version=1 frames={} budget_exhausted={} keys={} present_work_ns={} max_work_ns={} no_camera={} no_position={} tracked={} sphere={:?} cylinder={:?}",
+                r.frames, r.frames == r.budget, r.keys, r.ns, r.max_ns,
+                r.no_camera, r.no_position, r.seen.len(), r.counts[0], r.counts[1]);
+        }
+        if r.frames == r.budget { self.0 = None; }
+    }
+}
+
+#[cfg(test)]
+mod census_tests {
+    use super::*;
+
+    fn mesh() -> Mesh {
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0., 1., 0.]]);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![[1., 2.]]);
+        mesh
+    }
+    fn facing() -> Facing {
+        FacingSource::from_mesh("trees/facing/census", &mesh()).unwrap().placed(Mat4::IDENTITY)
+    }
+    fn mesh_ids() -> [bevy::asset::AssetId<Mesh>; 2] {
+        let mut assets = Assets::<Mesh>::default();
+        [assets.add(mesh()).id(), assets.add(mesh()).id()]
+    }
+    #[test]
+    fn keys_follow_only_actual_expansion_dependencies() {
+        let first = facing_keys(Vec3::X, Vec3::Y, Vec3::new(1., 2., 3.));
+        let translated = facing_keys(Vec3::X, Vec3::Y, Vec3::new(4., 5., 6.));
+        assert_eq!(first[0], translated[0]);
+        assert_ne!(first[1], translated[1]);
+        let orbit_and_height = facing_keys(Vec3::Z, Vec3::Y, Vec3::new(1., 99., 3.));
+        assert_ne!(first[0], orbit_and_height[0]);
+        assert_eq!(first[1], orbit_and_height[1]);
+    }
+    #[test]
+    fn signed_zero_and_nonfinite_keys_are_not_hidden_by_float_equality() {
+        let positive = facing_keys(Vec3::X, Vec3::Y, Vec3::ZERO);
+        let negative = facing_keys(Vec3::new(1., -0., 0.), Vec3::Y, Vec3::new(-0., 0., 0.));
+        assert_ne!(positive[0], negative[0]);
+        assert_ne!(positive[1], negative[1]);
+        let bad_sphere = facing_keys(Vec3::splat(f32::NAN), Vec3::Y, Vec3::ZERO);
+        assert!(bad_sphere[0].is_none());
+        assert!(bad_sphere[1].is_some());
+        let bad_cylinder = facing_keys(Vec3::X, Vec3::Y, Vec3::new(f32::INFINITY, 0., 0.));
+        assert!(bad_cylinder[0].is_some());
+        assert!(bad_cylinder[1].is_none());
+    }
+    #[test]
+    fn a_new_or_reentered_entity_is_cold_not_an_equal_key_sample() {
+        let [mesh, _] = mesh_ids();
+        let key = facing_keys(Vec3::X, Vec3::Y, Vec3::ZERO)[0].unwrap();
+        let previous = FacingSeen { key, mesh, frame: 4 };
+        assert_eq!(facing_gate(None, 5, false, mesh, Some(key)), FacingGate::Cold);
+        assert_eq!(facing_gate(Some(&previous), 6, false, mesh, Some(key)), FacingGate::Cold);
+        assert_eq!(facing_gate(Some(&previous), 5, false, mesh, Some(key)), FacingGate::Equal);
+    }
+    #[test]
+    fn replacements_and_changed_dependencies_prevent_potential_hits() {
+        let [mesh, replacement] = mesh_ids();
+        assert_ne!(mesh, replacement);
+        let key = facing_keys(Vec3::X, Vec3::Y, Vec3::ZERO)[0].unwrap();
+        let previous = FacingSeen { key, mesh, frame: 4 };
+        assert_eq!(facing_gate(Some(&previous), 5, true, mesh, Some(key)), FacingGate::ChangedComponent);
+        assert_eq!(facing_gate(Some(&previous), 5, false, replacement, Some(key)), FacingGate::ChangedMesh);
+        let other = facing_keys(Vec3::Z, Vec3::Y, Vec3::ZERO)[0];
+        assert_eq!(facing_gate(Some(&previous), 5, false, mesh, other), FacingGate::ChangedKey);
+        assert_eq!(facing_gate(Some(&previous), 5, false, mesh, None), FacingGate::Nonfinite);
+    }
+    #[test]
+    fn bevy_ref_detects_insert_and_replacement_but_not_an_unchanged_component() {
+        #[derive(Resource, Default)]
+        struct Changes(Vec<bool>);
+        fn record(query: Query<Ref<Facing>>, mut changes: ResMut<Changes>) {
+            changes.0.push(query.single().unwrap().is_changed());
+        }
+        let mut app = App::new();
+        app.init_resource::<Changes>().add_systems(Update, record);
+        let entity = app.world_mut().spawn(facing()).id();
+        app.update();
+        app.update();
+        app.world_mut().entity_mut(entity).insert(facing());
+        app.update();
+        assert_eq!(app.world().resource::<Changes>().0, [true, false, true]);
+    }
+    #[test]
+    fn config_rejects_unbounded_or_ambiguous_requests() {
+        for text in ["", "keys", "keys:0", "keys:3601", "keys:1:2", "other:30"] {
+            assert!(facing_census_config(text).is_none(), "{text}");
+        }
+        assert_eq!(facing_census_config("timing:1"), Some((false, 1)));
+        assert_eq!(facing_census_config("keys:3600"), Some((true, 3600)));
+    }
+    #[test]
+    fn budget_stops_sampling_after_360_calls_without_assuming_usable_samples() {
+        let mut census = FacingCensus::configured(true, 360);
+        for frame in 1..=360 {
+            let start = census.begin();
+            assert!(start.is_some());
+            assert_eq!(census.0.as_ref().unwrap().frames, frame);
+            census.finish(start, true);
+        }
+        // Even zero observed instances can exhaust the budget: that is NOT usable evidence.
+        assert!(census.0.is_none());
+        assert!(census.begin().is_none());
+        assert!(!census.keys_active());
+        assert!(FacingCensus::default().begin().is_none());
+    }
+}
+
 /// Re-faces every billboard toward the camera each frame. The vertex bytes are
 /// written over the mesh's GPU allocation (mesh_stream); the asset keeps its
 /// source vertices, so Bevy does not reallocate and repack it every frame.
 fn present(
     camera: Query<&Transform, With<super::ViewerCamera>>,
-    foliage: Query<(&Facing, &Mesh3d)>,
+    foliage: Query<(Entity, Ref<Facing>, Ref<Mesh3d>)>,
     stream: Res<MeshStream>,
+    mut census: Local<Option<FacingCensus>>,
+    mut visibility: Option<ResMut<visibility_census::Census>>,
+    frame: Option<Res<bevy::diagnostic::FrameCount>>,
+    mesh_events: Option<Res<Messages<bevy::asset::AssetEvent<Mesh>>>>,
 ) {
+    let census = census.get_or_insert_with(FacingCensus::from_env);
+    let started = census.begin();
+    if let Some(visibility) = visibility.as_deref_mut() {
+        visibility.begin(frame.as_deref().map(|f| f.0), mesh_events.as_deref());
+    }
     let Ok(camera) = camera.single() else {
+        if let Some(visibility) = visibility.as_deref_mut() { visibility.finish(); }
+        census.finish(started, false);
         return;
     };
+    if let Some(visibility) = visibility.as_deref_mut() { visibility.camera(camera); }
     let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
-    for (facing, handle) in &foliage {
+    let keys = census.keys_active().then(|| facing_keys(right, up, camera.translation));
+    for (entity, facing, handle) in &foliage {
         let source = &facing.source;
         let Some(at) = source.layout.offset(Mesh::ATTRIBUTE_POSITION) else {
+            if keys.is_some() { census.0.as_mut().unwrap().no_position += 1; }
+            if let Some(visibility) = visibility.as_deref_mut() { visibility.no_position(source.cylindrical); }
             continue;
         };
+        if let Some(keys) = keys {
+            census.observe(entity, &facing, handle.id(), keys);
+        }
         stream.write(handle.id(), |bytes| {
             let start = bytes.len();
             bytes.extend_from_slice(&facing.vertices);
@@ -659,7 +913,10 @@ fn present(
                 put(vertices, i * source.layout.stride + at, point.to_array());
             }
         });
+        if let Some(visibility) = visibility.as_deref_mut() { visibility.produced(entity, &facing, &handle); }
     }
+    if let Some(visibility) = visibility.as_deref_mut() { visibility.finish(); }
+    census.finish(started, true);
 }
 
 /// Authored PBR adaptation, not the original wrapped-normal/backlight shader.

@@ -1,3 +1,16 @@
+mod object_materials;
+#[cfg(not(target_os = "android"))]
+mod coverage_probe;
+#[cfg(not(target_os = "android"))]
+mod coverage_probe_entry;
+mod foundation_front;
+mod foundation_front_audit;
+mod foundation_backing;
+mod foundation_backing_audit;
+mod crowd_preview;
+mod crowd_rig;
+mod flash_fixture;
+mod flash_preview;
 // Source reference viewer and serial driving prototype. A plain comment, not
 // `//!`: src/lib.rs includes this file for the Android library (P9).
 
@@ -27,9 +40,16 @@ mod body_occlusion;
 #[cfg(feature = "paint-specular")]
 mod body_specular;
 mod camera;
+mod player_view_visibility;
 mod cockpit;
 mod collision_sound;
 mod car_materials;
+mod lamp_materials;
+mod lamp_signals;
+mod paint_environment;
+mod window_response;
+mod window_phase_audit;
+mod window_transitions;
 mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
@@ -64,6 +84,21 @@ mod lean_pieces;
 mod mesh_stream;
 mod mobile;
 mod motion_capture;
+mod skid_phase_ledger;
+mod smoke_ct_neutral;
+mod smoke_boundary_core;
+mod smoke_boundary;
+use smoke_boundary::native_diagnostic as native_smoke;
+mod ground_skid_pass;
+mod ground_skid_pass_core;
+mod smoke_pilot;
+mod temporal_audit;
+#[cfg(feature = "dlaa")]
+mod temporal_colour;
+#[cfg(feature = "dlaa")]
+mod thin_motion;
+#[cfg(feature = "dlaa")]
+mod native_dlaa;
 mod particles;
 mod pause_menu;
 mod post_race;
@@ -93,6 +128,7 @@ mod touge_event;
 mod demolition_event;
 mod le_mans_event;
 mod texture_overrides;
+mod surface_rgb;
 mod texture_upload;
 mod tilt;
 mod time_trial;
@@ -100,7 +136,10 @@ mod touch_controls;
 mod track_environment;
 mod track_grade;
 mod track_surface;
+mod track_decals;
 mod tyre_smoke;
+mod smoke_compositor;
+mod oit_capacity_audit;
 mod tyre_sound;
 mod tyre_visual;
 mod ui_font;
@@ -140,6 +179,8 @@ struct Car {
     parts: Vec<Part>,
     textures: BTreeMap<String, Vec<u8>>,
     bindings: BTreeMap<String, String>,
+    decal_materials: std::collections::BTreeSet<String>,
+    object_glass_materials: std::collections::BTreeSet<String>,
     center: Vec3,
     radius: f32,
     track: bool,
@@ -621,6 +662,7 @@ fn load_package(
             }
         }
     }
+    let decal_materials = if track { track_decals::materials(&tree)? } else { Default::default() };
     let mut parts = Vec::new();
     let mut bounds = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     let mut triangle_count = 0;
@@ -654,6 +696,13 @@ fn load_package(
                 source.texcoords[draw.vertices.clone()].to_vec(),
             );
         }
+        if track
+            && decal_materials.contains(std::str::from_utf8(draw.material)?)
+            && !source.colors_argb.is_empty()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,
+                track_decals::colours(&source.colors_argb[draw.vertices.clone()]));
+        }
         triangle_count += draw.indices.len() / 3;
         mesh.insert_indices(Indices::U16(draw.indices));
         if normals.is_empty() || normals.iter().any(|n| n.iter().any(|v| !v.is_finite())) {
@@ -664,7 +713,7 @@ fn load_package(
         }
         if !track
             && lod == "LOD0_"
-            && draw.material == b"Tyre Tread"
+            && matches!(draw.material, b"Tyre Tread" | b"Head Lights Pod" | b"Rear Lights Pod" | b"Head Lights Glass" | b"Rear Lights Glass")
             && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())
         {
             mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
@@ -728,6 +777,8 @@ fn load_package(
         parts,
         textures,
         bindings,
+        decal_materials,
+        object_glass_materials: Default::default(),
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
@@ -760,6 +811,9 @@ fn append_land(
         part.name = format!("land/{}", part.name);
         part.material = format!("land/{}", part.material);
         car.parts.push(part);
+    }
+    for name in land.decal_materials {
+        car.decal_materials.insert(format!("land/{name}"));
     }
     for (name, texture) in land.bindings {
         car.bindings
@@ -906,6 +960,7 @@ fn append_objects(
             .map(|d| (0, d))
             .collect()
     };
+    car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     // First instance index of each prototype.
@@ -1289,6 +1344,18 @@ fn main() {
     // No command line on Android: the event menu, or the race it chose.
     #[cfg(target_os = "android")]
     let args = event_menu::android_args();
+    if let Err(error)=native_smoke::validate_entry_args(&args) {
+        eprintln!("grid-app: {error}");std::process::exit(1);
+    }
+    // Isolated sample probe branches before menu/settings/game-root discovery.
+    #[cfg(not(target_os = "android"))]
+    if args.iter().any(|arg| arg == "--coverage-sample-probe") {
+        if let Err(error) = coverage_probe_entry::run(&args) {
+            eprintln!("grid-app coverage probe: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     // `--menu`: the event menu and the races it starts, each its own
     // process (event_menu.rs).
     #[cfg(not(target_os = "android"))]
@@ -1423,6 +1490,8 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         parts,
         textures: BTreeMap::new(),
         bindings: BTreeMap::new(),
+        decal_materials: Default::default(),
+        object_glass_materials: Default::default(),
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
@@ -1731,8 +1800,37 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut headless = false;
     let mut render_fps = None;
     let mut capture_orbit_rate = None;
+    let mut window_phase_target = None;
+    let mut window_sort_current = false;
+    let mut window_sort_explicit = false;
+    let mut car_transparent_sort = false;
+    let mut smoke_order = tyre_smoke::SmokeOrder::Groups;
+    let mut skid_order = skid_marks::OrderMode::Off;
+    let mut ground_skid_pass = ground_skid_pass::Mode::Off;
+    let mut skid_reflectance = None;
+    let mut motion_phase_map = false;
+    let mut motion_phase_profile = None;
+    let mut smoke_ct = smoke_ct_neutral::Mode::Off;
+    let mut smoke_boundary = smoke_boundary::Mode::Off;
+    let mut native_smoke_arm: Option<native_smoke::Arm> = None;
+    let mut native_smoke_data_dir_explicit = false;
+    let mut native_smoke_capture_profile = None;
+    let mut native_smoke_script_flags = native_smoke::ScriptFlags::default();
+    let mut crowd_preview = crowd_preview::Mode::Off;
+    let mut crowd_flash_preview = flash_preview::Mode::Off;
+    let mut foundation_front = foundation_front::Mode::Off;
+    let mut foundation_backing = foundation_backing::Mode::Off;
+    let mut smoke_compositor = smoke_compositor::Mode::Off;
+    let mut oit_capacity_target = None;
+    let mut window_transition_script = None;
     let mut motion_sequence = None;
+    let mut temporal_audit_tick = None;
+    let mut temporal_colour_tick = None;
+    let mut temporal_centre = None;
     let mut texture_override_path = None;
+    let mut surface_rgb_override = None;
+    let mut surface_specular_explicit = false;
+    let mut paint_response_explicit = false;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut body_contacts = profile.body_contacts.clone();
@@ -1747,9 +1845,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut handbrake_from = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
+        native_smoke_script_flags.note_arg(&arg);
         match arg.as_str() {
             // Already read by settings::load.
             "--settings" | "--data-dir" => {
+                if arg == "--data-dir" { native_smoke_data_dir_explicit = true; }
                 args.next();
             }
             "--drive" => drive = true,
@@ -1957,6 +2057,27 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("missing private texture manifest")?,
                 ))
             }
+            "--temporal-colour-audit" => {
+                let tick: u64 = args.next().ok_or("--temporal-colour-audit needs a positive tick")?.parse()?;
+                if !(1..=1_000_000).contains(&tick) { return Err("temporal colour tick must be 1..1000000".into()); }
+                temporal_colour_tick = Some(tick);
+            }
+            "--temporal-centre" => {
+                let value = args.next().ok_or("--temporal-centre needs X,Y")?;
+                let (x, y) = value.split_once(',').ok_or("--temporal-centre needs X,Y")?;
+                let pixel = Vec2::new(x.parse()?, y.parse()?);
+                if !pixel.is_finite() || pixel.min_element() < 0. {
+                    return Err("invalid temporal centre".into());
+                }
+                temporal_centre = Some(pixel);
+            }
+            "--temporal-audit" => {
+                let tick: u64 = args.next().ok_or("--temporal-audit needs a positive tick")?.parse()?;
+                if !(1..=1_000_000).contains(&tick) {
+                    return Err("temporal audit tick must be 1..1000000".into());
+                }
+                temporal_audit_tick = Some(tick);
+            }
             "--motion-capture" => {
                 motion_sequence = Some(motion_capture::Config::parse(
                     &args.next().ok_or("missing motion capture window")?,
@@ -2016,7 +2137,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     Some("taa") => 0,
                     Some("smaa") => 1,
                     Some("off") => 2,
-                    _ => return Err("--aa needs taa, smaa or off".into()),
+                    Some("dlaa") if cfg!(feature = "dlaa") => 3,
+                    Some("dlaa") => return Err("DLAA needs an optional --features dlaa native SDK build".into()),
+                    _ => return Err("--aa needs taa, smaa, dlaa or off".into()),
                 };
             }
             "--wheel-motion" => {
@@ -2093,11 +2216,140 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--race-number" => {
                 graphics.race_number(&args.next().ok_or("--race-number needs 0..999")?)?;
             }
+            "--lamp-signals" => {
+                graphics.lamp_signals = lamp_signals::Mode::parse(&args.next().ok_or("--lamp-signals needs a mode")?)?;
+            }
+            "--lamp-lenses" => {
+                graphics.lamp_lenses = lamp_materials::Mode::parse(&args.next().ok_or("--lamp-lenses needs off, pbr, normals or combined")?)
+                    .map_err(|_| "--lamp-lenses needs off, pbr, normals or combined")?;
+            }
+            "--lamp-reflectors" => {
+                graphics.lamp_reflectors = lamp_materials::Mode::parse(&args.next().ok_or("--lamp-reflectors needs off, pbr, normals or combined")?)?;
+            }
+            "--paint-environment" => {
+                let value: f32 = args.next().ok_or("--paint-environment needs 0..1")?.parse()?;
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err("--paint-environment needs finite 0..1".into());
+                }
+                graphics.paint_environment = value;
+            }
+            "--paint-clearcoat" => {
+                graphics.paint_clearcoat(&args.next().ok_or("--paint-clearcoat needs 0..1")?)?;
+                paint_response_explicit = true;
+            }
+            "--paint-coat-roughness" => {
+                graphics.paint_coat_roughness(&args.next().ok_or("--paint-coat-roughness needs 0.04..1")?)?;
+                paint_response_explicit = true;
+            }
+            "--window-transitions" => {
+                window_transition_script = Some(window_transitions::Script::parse(
+                    &args.next().ok_or("--window-transitions needs FRAME:C,FRAME:R,...")?,
+                )?);
+            }
+            "--crowd-preview" => {
+                crowd_preview = crowd_preview::Mode::parse(&args.next().ok_or("--crowd-preview needs a mode")?)?;
+            }
+            "--crowd-flash-preview" => {
+                crowd_flash_preview = flash_preview::Mode::parse(&args.next().ok_or("--crowd-flash-preview needs off, control or frozen-pulse")?)?;
+            }
+            "--foundation-backing" => {
+                foundation_backing=foundation_backing::Mode::parse(&args.next().ok_or("--foundation-backing needs off, control or raw-a2c")?)?;
+            }
+            "--foundation-front" => {
+                foundation_front = foundation_front::Mode::parse(&args.next().ok_or("--foundation-front needs off, control or source-front")?)?;
+            }
+            "--fence-wire-scale" => {
+                graphics.double_fence_wire = match args.next().as_deref() {
+                    Some("1") => false, Some("2") => true,
+                    _ => return Err("--fence-wire-scale needs 1 or 2".into()),
+                };
+            }
+            "--object-coverage" => {
+                graphics.object_coverage = object_materials::CoverageMode::parse(
+                    &args.next().ok_or("--object-coverage needs off, control, a2c or mask35")?,
+                )?;
+            }
+            "--window-sort" => {
+                window_sort_explicit = true;
+                window_sort_current = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("current") => true,
+                    _ => return Err("--window-sort needs off or current".into()),
+                };
+            }
+            "--oit-capacity-audit" => {
+                oit_capacity_target = Some(window_phase_audit::Target::parse(
+                    &args.next().ok_or("--oit-capacity-audit needs tick:N or frame:N")?
+                ).map_err(|e| e.replace("--window-phase-audit", "--oit-capacity-audit"))?);
+            }
+            "--smoke-compositor" => {
+                smoke_compositor = smoke_compositor::Mode::parse(&args.next().ok_or("--smoke-compositor needs a mode")?)?;
+            }
+            "--skid-reflectance" => {
+                skid_reflectance = Some(skid_marks::parse_reflectance(
+                    &args.next().ok_or("--skid-reflectance needs 0.5 or 0")?)?);
+            }
+            "--ground-skid-pass" => {
+                ground_skid_pass = ground_skid_pass::Mode::parse(&args.next().ok_or("--ground-skid-pass needs off, control or before-transparent")?)?;
+            }
+            "--skid-order" => {
+                skid_order = skid_marks::OrderMode::parse(
+                    &args.next().ok_or("--skid-order needs off, control, isolated or ground-first")?,
+                )?;
+            }
+            "--smoke-order" => {
+                smoke_order = match args.next().as_deref() {
+                    Some("groups") => tyre_smoke::SmokeOrder::Groups,
+                    Some("sprites") => tyre_smoke::SmokeOrder::Sprites,
+                    _ => return Err("--smoke-order needs groups or sprites".into()),
+                };
+            }
+            "--car-transparent-sort" => {
+                car_transparent_sort = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("current") => true,
+                    _ => return Err("--car-transparent-sort needs off or current".into()),
+                };
+            }
+            "--motion-phase-map" => motion_phase_map = true,
+            "--motion-phase-profile" => {
+                motion_phase_profile = Some(smoke_pilot::Profile::parse(&args.next().ok_or("--motion-phase-profile needs an exact profile")?)?);
+            }
+            "--native-smoke-profile" => {
+                let selected=native_smoke::CaptureProfile::parse(&args.next().ok_or("--native-smoke-profile needs image450 or manual")?)?;
+                if native_smoke_capture_profile.replace(selected).is_some(){return Err("--native-smoke-profile must occur once".into());}
+            }
+            "--native-smoke-boundary" => {
+                let selected = native_smoke::Arm::parse(&args.next().ok_or("--native-smoke-boundary needs off, control or late")?)?;
+                if native_smoke_arm.replace(selected).is_some() { return Err("--native-smoke-boundary must occur once".into()); }
+            }
+            "--smoke-boundary" => {
+                smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off, grouped-direct or grouped-live")?)?;
+            }
+            "--smoke-ct" => {
+                smoke_ct = smoke_ct_neutral::Mode::parse(&args.next().ok_or("--smoke-ct needs off or neutral")?)?;
+            }
+            "--window-phase-audit" => {
+                window_phase_target = Some(window_phase_audit::Target::parse(
+                    &args.next().ok_or("--window-phase-audit needs tick:N or frame:N")?,
+                )?);
+            }
+            "--glass-pilot" => {
+                graphics.window_pilot = window_response::Mode::parse(&args.next().ok_or("--glass-pilot needs off, control, environment, depth or combined")?)?;
+            }
             "--glass-reflectance" => {
                 graphics.glass_reflectance(&args.next().ok_or("--glass-reflectance needs 0..1")?)?;
             }
             "--glass-roughness" => {
                 graphics.glass_roughness(&args.next().ok_or("--glass-roughness needs 0.04..1")?)?;
+            }
+            "--tone-map" => {
+                graphics.tone_map(&args.next().ok_or("--tone-map needs agx or reinhard")?)?;
+            }
+            "--post-saturation" => {
+                let value: f32 = args.next().ok_or("--post-saturation needs 0..2")?.parse()?;
+                if !value.is_finite() || !(0.0..=2.0).contains(&value) { return Err("post saturation must be finite 0..2".into()); }
+                graphics.post_saturation_override = Some(value);
             }
             "--exposure" => {
                 graphics.exposure(&args.next().ok_or("--exposure needs EV100")?)?;
@@ -2164,6 +2416,79 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--reflections needs sky, deferred, ssr or probe".into()),
                 };
             }
+            "--surface-rgb-overrides" => {
+                surface_rgb_override = Some(PathBuf::from(args.next().ok_or("--surface-rgb-overrides needs a private manifest")?));
+            }
+            "--thin-motion" => {
+                graphics.thin_motion_antenna = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("antenna") => true,
+                    _ => return Err("--thin-motion needs off or antenna".into()),
+                };
+            }
+            "--ground-edges" => {
+                graphics.ground_edge_pilot = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("atlas-pilot") => true,
+                    _ => return Err("--ground-edges needs off or atlas-pilot".into()),
+                };
+            }
+            "--dlaa-history" => {
+                graphics.dlaa_reset_every_frame = match args.next().as_deref() {
+                    Some("normal") => false,
+                    Some("reset-every-frame") => true,
+                    _ => return Err("--dlaa-history needs normal or reset-every-frame".into()),
+                };
+            }
+            "--asphalt-soften" => {
+                let value: f32 = args.next().ok_or("--asphalt-soften needs 0..4")?.parse()?;
+                if !value.is_finite() || !(0.0..=4.0).contains(&value) {
+                    return Err("asphalt softness must be finite 0..4".into());
+                }
+                graphics.asphalt_soften = value;
+            }
+            "--motion-shutter" => {
+                let value: f32 = args.next().ok_or("--motion-shutter needs 0..0.5")?.parse()?;
+                if !value.is_finite() || !(0.0..=0.5).contains(&value) {
+                    return Err("motion shutter must be finite 0..0.5".into());
+                }
+                graphics.motion_shutter = value;
+            }
+            "--asphalt-grazing" => {
+                graphics.asphalt_grazing_gain = match args.next().as_deref() {
+                    Some("off") => None,
+                    Some("gain2") => Some(2.),
+                    _ => return Err("--asphalt-grazing needs off or gain2".into()),
+                };
+            }
+            "--asphalt-roughness" => {
+                graphics.asphalt_roughness = match args.next().as_deref() {
+                    Some("off") => None,
+                    Some("0.70") => Some(0.70),
+                    Some("0.65") => Some(0.65),
+                    _ => return Err("--asphalt-roughness needs off, 0.70 or 0.65".into()),
+                };
+            }
+            "--asphalt-filter-strength" => {
+                let value: f32 = args.next().ok_or("--asphalt-filter-strength needs 0..1")?.parse()?;
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err("asphalt filter strength must be finite 0..1".into());
+                }
+                graphics.asphalt_filter_strength = value;
+            }
+            "--surface-mip-bias" => {
+                graphics.surface_view_mip_bias = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("view") => true,
+                    _ => return Err("--surface-mip-bias needs off or view".into()),
+                };
+            }
+            "--surface-specular" => {
+                graphics.surface_specular = track_surface::Specular::parse(
+                    &args.next().ok_or("--surface-specular needs off, source-base or white-control")?,
+                )?;
+                surface_specular_explicit = true;
+            }
             "--track-materials" => {
                 graphics.layered_track = match args.next().as_deref() {
                     Some("source") => true,
@@ -2213,8 +2538,46 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--help" => {
+                println!("--lamp-signals off|live|brake|reverse|headlights: default-off player section emission pilot; authored Bevy radiometry, daytime live controls.");
+                println!("--lamp-lenses off|pbr|normals|combined: independent default-off authored Lacetti cover pilot; source alpha/emission unchanged.");
+                println!("--lamp-reflectors off|pbr|normals|combined: default-off authored Lacetti inner-reflector pilot; covers/matt unchanged.");
                 #[cfg(feature = "paint-specular")]
+                println!("--paint-environment 0..1: default-off authored environment-only player-paint layer, requires enhanced forward/source IBL/source body mask; not original shader parity.");
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
+                println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
+                println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
+                println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
+                println!("--post-saturation 0..2: optional single-variable authored-grade diagnostic; enhanced only, temperature/tint unchanged, not combinable with track grade.");
+                println!("--tone-map agx|reinhard: enhanced main-view display diagnostic; absent/AgX preserve the current mode; Reinhard requires authored-grade rendered reference/bounded driving or ordinary interactive driving. Not original GRID grading.");
+                println!("--temporal-centre X,Y: bounded diagnostic ROI centre; default tracks the car, requires a temporal audit.");
+                println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
+                println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
+                println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
+                println!("--asphalt-grazing off|gain2: default-off authored view-dependent F0 gain on standalone Donington SourceBase road only; NdotV0.10..0.35, inherited roughness, no independent physical F90 or original parity.");
+                println!("--asphalt-roughness off|0.70|0.65: authored standalone Donington road-lobe comparison; enhanced source layers/source-base mask, no RGB-filter pilot; default off.");
+                println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
+                println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
+                println!("--window-sort off|current: automatic current centres for ordinary enhanced forward Donington Lacetti LOD0 driving; explicit off preserves stale-centre control. Bounded rendered diagnostics remain defaultoff; source textures/PBR/alpha/depth unchanged.");
+                println!("--native-smoke-boundary off|control|late: explicit BMW Don0/Istanbul0 HDR1 scope; all arms share native DLAA/probe3/clean-data/legacy-source-stock guards. Control registers no boundary. --native-smoke-profile image450|manual (default image450); manual uses direct --drive Race Options/Go To Race in the same process and forbids ALL explicit script/capture/clock flags, even neutral values.");
+                println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
+                println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
+                println!("--crowd-preview off|control|static-billboards|one-neutral-actor|one-arm-pose|one-key-hypothesis|one-key-left|one-key-mid|one-key-right|one-key-sweep: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture; one-neutral-actor selects USA female!C row4275 saved bind pose with authored yaw/foot alignment and near PBR material; one-arm-pose adds fixed authored20deg localZ left forearm using neutral placement, one-key-hypothesis replaces only forearm3x3 from packet235 firststoredS4 key as absolute-local HYPOTHESIS (cacheDeltaYes/reference unresolved), root/translation/neutralfoot retained (whole bank read; root L4 values not decoded/applied); one-key-left/mid/right select only stored forearm keys1/2 raw spherical diagnostic with same unresolved receiver, one-key-sweep runs exactly31 authored Extract-frame steps through the same interval then holdsRight, captures0/15/30 only; no seconds/native timer/animation/flash or source parity.");
+                println!("--motion-phase-map: default absent; exact baseline Derby Isolated|GroundFirst350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
+                println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
+                println!("--foundation-front off|control|source-front: defaultoff exact Detroit front grandstand sheet only, static route8/sub0 LOD0 reference baseline/native1080/configAA0/actualMSAA4/source sky+track, clean settings, benchmark1..600/no other pilots. SourceFront uses inherited PBR with saved colour/separate-alpha/depth states; existing cull retained, no original shadow/auxiliary/source shader parity. BackingOpaque/fence unchanged.");
+                println!("--foundation-backing off|control|raw-a2c: defaultOff exact Detroit backing sheet; static baseline MSAA4, requires same SourceFront composite; matched NoAuto/NoShadow Control, raw GT0 hardwareA2C. Not source level2/shadow/cull parity.");
+                println!("--fence-wire-scale 1|2: default1; approximately double the exact Detroit wire alpha, static baseline trial only. Atlas RGB, rails and concrete preserved.");
+                println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
+                println!("--ground-skid-pass off|control|before-transparent: default-off experimental skid-only pass before ALL transparency. Profiles: ordinary baseline AA0/sky/MSAA4, or enhanced native --aa dlaa --reflections probe with HDR/sample1 and equal native resolution. Groups/ground and other phase policies off; current typed main-view readiness required, unsupported views use ordinary fallback. Off installs nothing; Control isolates owned-skid NoAutomaticBatching. Not source compositor parity.");
+                println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
+                println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
+                println!("--smoke-boundary grouped-live: opt-in solo baseline AA0/sky BMW Istanbul route_0 keyboard fix using existing five smoke groups after transparency; interactive Window or bounded --render, no screenshot ledger/native DLAA/general-car admission. Cold/empty/unsupported frames retain ordinary draws; unexpected post-mask skip is a reported failure.");
+                println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
+                println!("--crowd-flash-preview off|control|frozen-pulse: default-off authored three-anchor static Detroit crowd flash diagnostic; requires --crowd-preview static-billboards, baseline MSAA4, --reflections sky and bounded rendered reference. No source clock or scene lights.");
+                println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
+                println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
+                println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
+                println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
                     "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
@@ -2229,7 +2592,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
                 );
                 println!(
-                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
+                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined|fresnel: static reference or bounded rendered driving experiment; keeps source glass textures and borders."
                 );
                 println!(
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
@@ -2243,6 +2606,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--car STEM: purchased car folder cars/STEM for the player and the car scene (default lac; bmw is the other Touring_cars model). --opponent-cars STEM[,STEM...]: opponent models, cycled over the field (default: the player's car; bmw,lac alternates as in the euro_touring 6+6 roster)."
                 );
+                println!("--thin-motion off|antenna: optional conservative antenna motion pass; native DLAA driving only.\n--aa taa|smaa|dlaa|off: SMAA default; experimental native DLAA requires optional dlaa SDK feature and Vulkan RTX, otherwise runtime SMAA fallback. No sharpening added.");
+                println!("--temporal-audit TICK: bounded raw main-view motion/depth plus frozen matrices; live enhanced offscreen --drive/--render-fps only; evidence under ignored local/.");
                 println!("{}", settings::HELP);
                 println!("{}", assists::HELP);
                 println!("{}", input::HELP);
@@ -2299,6 +2664,345 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("{}", event.log_line());
     }
+    let bounded_tone_scene = if drive { drive_ticks.is_some() } else { reference };
+    let rendered_tone_scene = output.is_some() && bounded_tone_scene;
+    // Admit ordinary Window driving; other input/capture/clock validation
+    // remains independent.
+    let manual_tone_scene = drive && output.is_none() && drive_ticks.is_none() && !headless;
+    let nondefault_tone_map = graphics.tone_map_override.is_some_and(|tone|
+        tone != bevy::core_pipeline::tonemapping::Tonemapping::AgX);
+    if (graphics.tone_map_override.is_some() && !graphics.enhanced())
+        || (nondefault_tone_map && (graphics.track_grade || collision
+            || !(rendered_tone_scene || manual_tone_scene)))
+    {
+        return Err("--tone-map requires enhanced graphics; nondefault modes require authored-grade rendered reference/bounded driving or ordinary interactive driving".into());
+    }
+    if graphics.post_saturation_override.is_some() && (!graphics.enhanced() || graphics.track_grade) {
+        return Err("--post-saturation requires enhanced authored grade; do not combine with --grade track".into());
+    }
+    if graphics.motion_shutter > 0. && (!graphics.enhanced() || !drive || collision) {
+        return Err("--motion-shutter requires enhanced non-collision driving".into());
+    }
+    if graphics.anti_aliasing == 3 && !graphics.enhanced() {
+        return Err("DLAA is an experimental enhanced-graphics mode".into());
+    }
+    if paint_response_explicit && (!graphics.enhanced() || !graphics.layered_car) {
+        return Err("paint coat controls require enhanced graphics with layered car materials".into());
+    }
+    // Only eligible enhanced source-layer track scenes adopt the verified mask.
+    // An explicit off/white-control always survives, irrespective of flag order.
+    if !surface_specular_explicit
+        && graphics.enhanced()
+        && graphics.layered_track
+        && (track || drive)
+        && !collision
+    {
+        graphics.surface_specular = track_surface::Specular::SourceBase;
+    }
+    graphics.surface_specular.validate_context(graphics.layered_track, track || drive, collision)?;
+    if graphics.asphalt_grazing_gain.is_some()
+        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive)
+            || collision || headless || route.path() != "tracks/europe/donington/route_0"
+            || route.subroute() != 0
+            || graphics.surface_specular != track_surface::Specular::SourceBase
+            || graphics.surface_view_mip_bias || graphics.asphalt_soften != 0.
+            || graphics.asphalt_filter_strength != 1. || graphics.asphalt_roughness.is_some()
+            || graphics.ground_edge_pilot || surface_rgb_override.is_some())
+    {
+        return Err("--asphalt-grazing requires rendered enhanced Donington route_0/subroute0 standalone source-base road with roughness/RGB/mip/ground pilots off".into());
+    }
+    if graphics.asphalt_roughness.is_some()
+        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive)
+            || collision || headless || route.path() != "tracks/europe/donington/route_0"
+            || route.subroute() != 0
+            || graphics.surface_specular != track_surface::Specular::SourceBase
+            || graphics.surface_view_mip_bias || graphics.asphalt_soften != 0.
+            || graphics.asphalt_filter_strength != 1.)
+    {
+        return Err("--asphalt-roughness requires rendered enhanced Donington route_0/subroute0 source track layers with source-base specular and the RGB/mip filter pilots off".into());
+    }
+    if (surface_rgb_override.is_some() || graphics.ground_edge_pilot || graphics.surface_view_mip_bias || graphics.asphalt_soften > 0. || graphics.asphalt_filter_strength != 1.)
+        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
+    {
+        return Err("surface controls (--surface-rgb-overrides/--ground-edges/--surface-mip-bias/--asphalt-soften/--asphalt-filter-strength) require an enhanced non-collision track scene with --track-materials source".into());
+    }
+    if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
+        return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());
+    }
+    if let Some(script) = window_transition_script.as_ref()
+        && (!drive || drive_ticks.is_none() || render_fps.is_none() || output.is_none()
+            || headless || collision || !player_car.is_default() || route.path() != Route::default().path()
+            || input_settings.device != input::Device::Keyboard
+            || !script.fits(drive_ticks.unwrap_or(0), render_fps.unwrap_or(0)))
+    {
+        return Err("--window-transitions requires bounded rendered Donington Lacetti drive, explicit keyboard/render FPS and events before the first tick limit".into());
+    }
+    // Keep bounded diagnostic defaults intact while selecting the existing
+    // current-centre adapter for the ordinary playable Lacetti context.
+    // Explicit off remains an independent stale-centre control.
+    let manual_window_sort = drive && drive_ticks.is_none() && output.is_none() && !reference
+        && graphics.enhanced() && graphics.layered_car && player_car.is_default()
+        && lod == "LOD0_" && route.path() == Route::default().path() && route.subroute() == 0
+        && !collision && !headless && !matches!(graphics.reflection_mode, 1 | 2);
+    if !window_sort_explicit && manual_window_sort {
+        window_sort_current = true;
+    }
+    if window_sort_current && (!graphics.enhanced() || !graphics.layered_car
+        || !player_car.is_default() || lod != "LOD0_" || route.path() != Route::default().path()
+        || collision || headless || matches!(graphics.reflection_mode, 1 | 2)
+        || (!manual_window_sort && (output.is_none() || (!reference && !drive)
+            || (drive && drive_ticks.is_none()))))
+    {
+        return Err("--window-sort current requires enhanced forward Donington Lacetti LOD0 ordinary driving or rendered reference/bounded --drive-ticks".into());
+    }
+    if smoke_compositor != smoke_compositor::Mode::Off && (graphics.enhanced() || !drive
+        || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
+        || graphics.width != 640 || graphics.height != 360)
+    {
+        return Err("--smoke-compositor requires bounded rendered baseline LOD0 drive at640x360; finite-capacity diagnostic only".into());
+    }
+    if let Some(target) = oit_capacity_target
+        && (!matches!(smoke_compositor, smoke_compositor::Mode::Oit16 | smoke_compositor::Mode::Oit32 | smoke_compositor::Mode::Oit32Pruned)
+            || target.tick().is_some_and(|tick| drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))))
+    {
+        return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
+    }
+    crowd_preview.validate(
+        !graphics.enhanced(),
+        reference && !drive && !headless && !collision && !from_menu
+            && smoke_compositor == smoke_compositor::Mode::Off
+            && graphics.object_coverage == object_materials::CoverageMode::Off,
+        route.path() == "tracks/usa/detroit/route_8" && route.subroute() == 0,
+        lod == "LOD0_", output.is_some(), graphics.benchmark_frames,
+        std::env::var_os("GRID_PERF_TEST").is_none(),
+    )?;
+    // Baseline camera retains Bevy's MSAA4; startup asserts the actual component.
+    // Existing crowd admission above enforces exact route/static/render/frame scope.
+    crowd_flash_preview.validate(crowd_preview, graphics.benchmark_frames,
+        !graphics.enhanced() && graphics.anti_aliasing == 0, graphics.reflection_mode == 0)?;
+    if crowd_flash_preview != flash_preview::Mode::Off && capture_orbit_rate.is_some() {
+        return Err("--crowd-flash-preview frozen fixture rejects scripted camera orbit".into());
+    }
+    let foundation_context = foundation_front::Context {
+        enhanced:graphics.enhanced(), aa:graphics.anti_aliasing, drive, reference, collision, headless,
+        render:output.is_some(), route8:route.path()=="tracks/usa/detroit/route_8" && route.subroute()==0,
+        lod0:lod=="LOD0_", clean_settings:profile.loaded_file_count==0,
+        source_sky:graphics.source_sky, source_track:graphics.layered_track,
+        sky_reflections:graphics.reflection_mode==0,
+        native1080:graphics.width==1920 && graphics.height==1080,
+        other_pilots_off:*settings::diagnostics()==settings::Diagnostics::default()
+            && graphics.object_coverage==object_materials::CoverageMode::Off
+            && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
+            && smoke_compositor==smoke_compositor::Mode::Off && skid_order==skid_marks::OrderMode::Off
+            && graphics.window_pilot==window_response::Mode::Off && !window_sort_current && !car_transparent_sort
+            && window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none() && temporal_colour_tick.is_none()
+            && window_transition_script.is_none() && texture_override_path.is_none() && surface_rgb_override.is_none()
+            && !graphics.dlaa_reset_every_frame && !graphics.thin_motion_antenna
+            && geometry_pixel.is_none() && !audio_check && !reflection_calibration && !render_fixed_step
+            && motion_sequence.is_none() && body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
+        no_perf:std::env::var_os("GRID_PERF_TEST").is_none() && std::env::var_os("GRID_PERF_TIMING").is_none(),
+        no_orbit:capture_orbit_rate.is_none(), no_menu:!from_menu, frames:graphics.benchmark_frames,
+    };
+    foundation_front.validate(foundation_context)?;
+    foundation_backing.validate(foundation_context, foundation_front)?;
+    if foundation_backing!=foundation_backing::Mode::Off && (ground_skid_pass!=ground_skid_pass::Mode::Off || smoke_ct!=smoke_ct_neutral::Mode::Off || smoke_boundary!=smoke_boundary::Mode::Off || motion_phase_map) {
+        return Err("foundation backing composite rejects ground/skid/smoke audit passes".into());
+    }
+    let coverage_context = object_materials::CoverageContext {
+        enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
+        render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
+        lod0: lod == "LOD0_", perf: std::env::var_os("GRID_PERF_TEST").is_some(),
+        compositor: smoke_compositor != smoke_compositor::Mode::Off,
+        frames: graphics.benchmark_frames,
+    };
+    if graphics.double_fence_wire {
+        object_materials::CoverageMode::Control.validate(coverage_context)?;
+        if graphics.object_coverage != object_materials::CoverageMode::Off {
+            return Err("fence thickness trial requires unchanged object coverage".into());
+        }
+    }
+    if graphics.object_coverage != object_materials::CoverageMode::Off && drive {
+        graphics.object_coverage.validate_moving(object_materials::MovingCoverageContext {
+            base:coverage_context,
+            exact_route_and_car:car_chosen && route.path()=="tracks/usa/detroit/route_8" && route.subroute()==0 && player_car.is_default(),
+            clean_settings:profile.loaded_file_count==0,
+            solo:opponents.is_none() && opponent_cars.is_none() && series.is_none() && discipline.is_none() && trial_laps.is_none() && profile.time_limit.is_none() && grid_position.is_none(),
+            no_menu:!from_menu,
+            no_extra_diagnostics:*settings::diagnostics()==settings::Diagnostics::default()
+                && std::env::var_os("GRID_PERF_TIMING").is_none()
+                && window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none() && temporal_colour_tick.is_none()
+                && window_transition_script.is_none() && !window_sort_current && !car_transparent_sort && smoke_order==tyre_smoke::SmokeOrder::Groups && skid_order==skid_marks::OrderMode::Off
+                && texture_override_path.is_none() && surface_rgb_override.is_none() && !graphics.dlaa_reset_every_frame && !graphics.thin_motion_antenna
+                && geometry_pixel.is_none() && !audio_check && !reflection_calibration
+                && input_settings.device==input::Device::Keyboard
+                && body_contacts.is_none() && body_events.is_none() && deformation.is_none()
+                && graphics.window_pilot==window_response::Mode::Off && !render_fixed_step && capture_orbit_rate.is_none() && eye.is_none() && target.is_none(),
+            native_resolution_land_off:graphics.width==1920 && graphics.height==1080 && !graphics.source_land,
+            capture_fits:motion_sequence.is_some_and(|c| c.check_fence_window(render_fps,drive_ticks)),
+        })?;
+    } else {
+        graphics.object_coverage.validate(coverage_context)?;
+    }
+    let validated_coverage_dlaa = graphics.enhanced()
+        && graphics.object_coverage.supports_dlaa(graphics.anti_aliasing);
+
+    let ground_skid_profile = ground_skid_pass.validate(ground_skid_pass::Context {
+        native_dlaa: cfg!(feature="dlaa") && graphics.enhanced() && graphics.anti_aliasing==3, probe:graphics.reflection_mode==3,
+        baseline: !graphics.enhanced(), drive, headless, collision,
+        aa0: graphics.anti_aliasing == 0, groups: smoke_order == tyre_smoke::SmokeOrder::Groups,
+        ground: ground_effect_assets::enabled(), skid_off: skid_order == skid_marks::OrderMode::Off && skid_reflectance.is_none(),
+        composition_off: smoke_compositor == smoke_compositor::Mode::Off && smoke_ct == smoke_ct_neutral::Mode::Off && smoke_boundary == smoke_boundary::Mode::Off,
+        other_policy_off: !motion_phase_map && !window_sort_current && !car_transparent_sort && window_phase_target.is_none() && oit_capacity_target.is_none()
+            && graphics.window_pilot == window_response::Mode::Off && foundation_front == foundation_front::Mode::Off,
+        sky: graphics.reflection_mode == 0,
+    })?;
+    if skid_order != skid_marks::OrderMode::Off && (graphics.enhanced() || !drive
+        || drive_ticks.is_none() || output.is_none() || headless || collision || lod != "LOD0_"
+        || !ground_effect_assets::enabled() || smoke_compositor != smoke_compositor::Mode::Off
+        || std::env::var_os("GRID_PERF_TEST").is_some())
+    {
+        return Err("--skid-order requires bounded rendered baseline LOD0 drive with ground effects, compositor off and no GRID_PERF_TEST".into());
+    }
+    // Isolated has already passed the unchanged G248 baseline/bounded guards.
+    if skid_reflectance.is_some() && (skid_order != skid_marks::OrderMode::Isolated
+        || std::env::var_os("GRID_PERF_TIMING").is_some()) {
+        return Err("--skid-reflectance requires --skid-order isolated and its bounded rendered baseline ground-effects/noPERF/compositorOff domain; no GRID_PERF_TIMING".into());
+    }
+    if motion_phase_profile.is_some() && !motion_phase_map {
+        return Err("--motion-phase-profile requires --motion-phase-map".into());
+    }
+    let motion_phase_profile = motion_phase_profile.unwrap_or_default();
+    if skid_order == skid_marks::OrderMode::GroundFirst && !motion_phase_map {
+        return Err("--skid-order ground-first requires the exact bounded Derby --motion-phase-map pilot".into());
+    }
+    if smoke_ct != smoke_ct_neutral::Mode::Off
+        && (motion_phase_profile != smoke_pilot::Profile::Derby120 || !motion_phase_map || skid_order != skid_marks::OrderMode::GroundFirst)
+    {
+        return Err("--smoke-ct neutral requires the exact bounded --motion-phase-map GroundFirst pilot; smoke remains in its existing phase".into());
+    }
+    if smoke_boundary == smoke_boundary::Mode::GroupedLive {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false;
+        if graphics.enhanced() || graphics.anti_aliasing != 0 || graphics.reflection_mode != 0
+            || !drive || headless || collision || from_menu || lod != "LOD0_"
+            || player_car.stem() != grid_tools::car::BMW
+            || route.path() != "tracks/europe/istanbul_park/route_0" || route.subroute() != 0
+            || opponents.is_some() || opponent_cars.is_some() || series.is_some() || discipline.is_some()
+            || trial_laps.is_some() || profile.time_limit.is_some() || grid_position.is_some()
+            || smoke_order != tyre_smoke::SmokeOrder::Groups || skid_order != skid_marks::OrderMode::Off
+            || ground_skid_pass != ground_skid_pass::Mode::Off || skid_reflectance.is_some()
+            || !ground_effect_assets::enabled()
+            || body_contacts.is_some() || body_events.is_some() || deformation.is_some()
+            || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
+            || smoke_ct != smoke_ct_neutral::Mode::Off || smoke_compositor != smoke_compositor::Mode::Off
+            || motion_phase_map || motion_phase_profile != smoke_pilot::Profile::Derby120
+            || graphics.window_pilot != window_response::Mode::Off || window_sort_current || car_transparent_sort
+            || foundation_front != foundation_front::Mode::Off || foundation_backing != foundation_backing::Mode::Off
+            || graphics.object_coverage != object_materials::CoverageMode::Off || graphics.double_fence_wire
+            || crowd_preview != crowd_preview::Mode::Off || crowd_flash_preview != flash_preview::Mode::Off
+            || window_phase_target.is_some() || oit_capacity_target.is_some()
+            || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
+            || texture_override_path.is_some() || surface_rgb_override.is_some()
+            || input_settings.device != input::Device::Keyboard
+            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || diagnostics != settings::Diagnostics::default()
+            || (output.is_some() && drive_ticks.is_none())
+        {
+            return Err("--smoke-boundary grouped-live requires solo undamaged baseline AA0/sky BMW Istanbul route_0/sub0 LOD0 keyboard driving, Groups/ground effects, ground-skid-pass/skid-order/compositors/audits/custom camera controls off; captures need --drive-ticks, interactive windows have no screenshot ledger".into());
+        }
+    }
+    if smoke_boundary == smoke_boundary::Mode::GroupedDirect
+        && (!motion_phase_map || !motion_phase_profile.boundary_order(skid_order)
+            || smoke_ct != smoke_ct_neutral::Mode::Off)
+    {
+        return Err("--smoke-boundary grouped-direct requires the selected exact bounded --motion-phase-map profile/order and --smoke-ct off".into());
+    }
+    if motion_phase_map && motion_phase_profile == smoke_pilot::Profile::Derby120 {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false; // Existing CPU trace is permitted; no timing claims.
+        if graphics.enhanced() || !drive || drive_ticks != Some(900) || render_fps != Some(30)
+            || !motion_sequence.is_some_and(|c| c.skid_phase_window())
+            || output.is_none() || headless || collision || from_menu || lod != "LOD0_"
+            || route.path() != "tracks/usa/detroit/route_8" || route.subroute() != 0
+            || player_car.stem() != "stk" || discipline.as_deref() != Some("demolition_derby")
+            || !matches!(skid_order, skid_marks::OrderMode::Isolated | skid_marks::OrderMode::GroundFirst) || skid_reflectance.is_some()
+            || smoke_order != tyre_smoke::SmokeOrder::Groups || smoke_compositor != smoke_compositor::Mode::Off
+            || window_phase_target.is_some() || oit_capacity_target.is_some()
+            || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
+            || window_sort_current || car_transparent_sort || graphics.window_pilot != window_response::Mode::Off
+            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || diagnostics != settings::Diagnostics::default() || !ground_effect_assets::enabled()
+            || input_settings.device != input::Device::Keyboard
+            || !scripted.throttle.is_finite() || !scripted.steering.is_finite()
+            || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
+            || graphics.width != 1920 || graphics.height != 1080
+        { return Err("--motion-phase-map requires the bounded native baseline Derby stk/Isolated|GroundFirst350,120/fps30/900ticks Groups pilot, no other captures/audits/controls/PERF".into()); }
+    }
+    if motion_phase_map && motion_phase_profile == smoke_pilot::Profile::BmwIstanbul90 {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false;
+        let fixture = smoke_pilot::BmwFixture {
+            route:route.path(), subroute:route.subroute(), car:player_car.stem(),
+            solo:opponents.is_none() && opponent_cars.is_none() && series.is_none()
+                && discipline.is_none() && trial_laps.is_none() && profile.time_limit.is_none() && grid_position.is_none(),
+            damage_inputs_off:body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
+            handbrake_from, throttle:scripted.throttle, steering:scripted.steering,
+        };
+        if !motion_phase_profile.bmw_fixture(fixture)
+            || !motion_phase_profile.check_capture(motion_sequence,render_fps,drive_ticks)
+            || graphics.enhanced() || !drive || output.is_none() || headless || collision || from_menu || lod != "LOD0_"
+            || skid_order != skid_marks::OrderMode::Off || skid_reflectance.is_some()
+            || smoke_order != tyre_smoke::SmokeOrder::Groups || smoke_compositor != smoke_compositor::Mode::Off
+            || smoke_ct != smoke_ct_neutral::Mode::Off || graphics.benchmark_frames.is_some()
+            || window_phase_target.is_some() || oit_capacity_target.is_some()
+            || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
+            || window_sort_current || car_transparent_sort || graphics.window_pilot != window_response::Mode::Off
+            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || diagnostics != settings::Diagnostics::default() || !ground_effect_assets::enabled()
+            || input_settings.device != input::Device::Keyboard
+            || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
+            || graphics.width != 1920 || graphics.height != 1080
+        { return Err("BMW phase profile requires exact native baseline BMW/Istanbul0 solo practice,450ticks/HB190/motion190,90/fps30/Groups/skidOff/CTOff and no competing audits/controls/PERF".into()); }
+    }
+    if smoke_order == tyre_smoke::SmokeOrder::Sprites && (graphics.enhanced() || !drive
+        || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
+        || smoke_compositor != smoke_compositor::Mode::Off
+        || !ground_effect_assets::enabled() || std::env::var_os("GRID_PERF_TEST").is_some())
+    {
+        return Err("--smoke-order sprites requires bounded rendered baseline LOD0 drive, ground effects enabled, smoke compositor off and no GRID_PERF_TEST".into());
+    }
+    if car_transparent_sort && (!drive || drive_ticks.is_none() || headless || collision
+        || output.is_none() || lod != "LOD0_" || graphics.window_pilot != window_response::Mode::Off)
+    {
+        return Err("--car-transparent-sort requires bounded rendered LOD0 drive with --glass-pilot off".into());
+    }
+    if let Some(target) = window_phase_target
+        && (lod != "LOD0_" || collision || headless || output.is_none() || (!reference && !drive)
+            || (drive && drive_ticks.is_none())
+            || (!drive && graphics.benchmark_frames.is_none())
+            || target.tick().is_some_and(|tick| !drive || drive_ticks.is_none_or(|end| tick > end)))
+    {
+        return Err("--window-phase-audit requires rendered LOD0 reference with --benchmark-frames or bounded --drive-ticks; tick targets require a drive and must not exceed its limit".into());
+    }
+    if graphics.window_pilot != window_response::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !player_car.is_default() || (drive && drive_ticks.is_none()) || (!drive && !reference) || collision || output.is_none() || lod != "LOD0_" || route.path() != Route::default().path() || matches!(graphics.reflection_mode, 1 | 2)) {
+        return Err("--glass-pilot requires rendered static reference or bounded --drive-ticks, enhanced forward Donington Lacetti LOD0 with source IBL; interactive driving is not validated".into());
+    }
+    if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
+        return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
+    }
+    if graphics.dlaa_reset_every_frame && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive || drive_ticks.is_none() || output.is_none()) {
+        return Err("--dlaa-history reset-every-frame requires enhanced native DLAA scripted driving with --drive-ticks and --render".into());
+    }
+    if graphics.thin_motion_antenna && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive) {
+        return Err("--thin-motion antenna requires enhanced driving with native --aa dlaa".into());
+    }
+    if graphics.ground_edge_pilot {
+        println!("graphics_ground_edges mode=atlas-pilot authored=true terrain_u=0.60..0.70 scope=four-audited-atlases default=false");
+    }
+    if graphics.enhanced() && graphics.layered_car {
+        println!("graphics_paint clearcoat={} coat_roughness={} scope=player-paint base_mask=independent authored=true",
+            graphics.paint_clearcoat, graphics.paint_coat_roughness);
+    }
     // Le Mans 24 Hours: a time-limited race (race type 3) of `time_limit`
     // real seconds (720 in the career [D]) running 24 h of day [V 0x669700];
     // the career events' 8 laps only cap the lap count (docs/LE_MANS.md).
@@ -2318,7 +3022,58 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let start_sequence = StartSequence::load(&root, &route)?;
-    if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
+    // Narrow route exception only after the complete object diagnostic guard passed.
+    // This does not enable enhanced Detroit play or arbitrary AA modes.
+    let object_coverage_dlaa = validated_coverage_dlaa;
+    // This token validates ALL explicitly selected arms, INCLUDING Off. It is
+    // source-context admission only; actual native-view readiness remains required.
+    if native_smoke_capture_profile.is_some() && native_smoke_arm.is_none() {return Err("--native-smoke-profile requires explicit --native-smoke-boundary".into());}
+    let native_smoke_context = native_smoke_arm.map(|arm| {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false; // Existing CPU evidence only, no timing exemption.
+        arm.validate(native_smoke::Context {
+            feature_dlaa: cfg!(feature="dlaa"), graphics:&graphics,
+            explicit_car:car_chosen, car:player_car.stem(), route:route.path(), subroute:route.subroute(),
+            scene:native_smoke::Scene {
+                drive, track:track || drive, headless, collision, menu:from_menu, lod:&lod,
+                solo:opponents.is_none() && opponent_cars.is_none() && series.is_none() && discipline.is_none()
+                    && trial_laps.is_none() && profile.time_limit.is_none() && grid_position.is_none() && career_result.is_none(),
+                undamaged:body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
+                keyboard:input_settings.device==input::Device::Keyboard,
+            },
+            clean:native_smoke::Clean {
+                explicit_data_dir:native_smoke_data_dir_explicit, loaded_files:profile.loaded_file_count,
+                diagnostics_clean:diagnostics==settings::Diagnostics::default(),
+                no_perf:std::env::var_os("GRID_PERF_TEST").is_none() && std::env::var_os("GRID_PERF_TIMING").is_none(),
+            },
+            capture_profile:native_smoke_capture_profile.unwrap_or_default(),
+            capture:native_smoke::Capture {
+                image:output.is_some(),native_window:matches!(profile.video_render_height(),render_scale::RenderHeight::Native) && !mobile::enabled(),motion:motion_sequence.is_some(),script_flags:native_smoke_script_flags,ticks:drive_ticks,fps:render_fps,
+                exact_window:motion_sequence.is_some_and(|c| c.exact_phase_window(190,90,30,450)),
+                handbrake:handbrake_from,throttle:scripted.throttle,steering:scripted.steering,
+            },
+            exclusions:native_smoke::Exclusions {
+                phases_off:ground_skid_pass==ground_skid_pass::Mode::Off && smoke_boundary==smoke_boundary::Mode::Off
+                    && skid_order==skid_marks::OrderMode::Off && skid_reflectance.is_none()
+                    && smoke_compositor==smoke_compositor::Mode::Off && smoke_ct==smoke_ct_neutral::Mode::Off
+                    && !motion_phase_map && motion_phase_profile==smoke_pilot::Profile::Derby120,
+                scene_pilots_off:foundation_front==foundation_front::Mode::Off && foundation_backing==foundation_backing::Mode::Off
+                    && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
+                    && graphics.object_coverage==object_materials::CoverageMode::Off && !graphics.double_fence_wire
+                    && !source_haze && !reflection_calibration && !include_batches && !audio_check
+                    && !nondefault_tone_map && graphics.asphalt_grazing_gain.is_none(),
+                camera_off:!render_fixed_step && capture_orbit_rate.is_none() && eye.is_none() && target.is_none(),
+                groups_ground:smoke_order==tyre_smoke::SmokeOrder::Groups && ground_effect_assets::enabled(),
+                overrides_off:window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none()
+                    && temporal_colour_tick.is_none() && temporal_centre.is_none() && window_transition_script.is_none()
+                    && !window_sort_current && !car_transparent_sort && texture_override_path.is_none()
+                    && surface_rgb_override.is_none() && geometry_pixel.is_none(),
+            },
+            paint_response_explicit,surface_specular_explicit,
+        })
+    }).transpose()?;
+    let native_smoke_route_admitted=native_smoke_context.is_some_and(|c|c.matches_route(route.path(),route.subroute()));
+    if graphics.enhanced() && ((!route.is_default() && !object_coverage_dlaa && !native_smoke_route_admitted) || (!player_car.is_default() && !native_smoke_route_admitted)) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
     }
     if profile.grid_back && grid_position.is_none() {
@@ -3010,6 +3765,33 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if render_fixed_step && render_fps.is_some() {
         return Err("choose --render-fixed-step or --render-fps, not both".into());
     }
+    if let Some(pixel) = temporal_centre
+        && ((temporal_audit_tick.is_none() && temporal_colour_tick.is_none())
+            || pixel.x >= graphics.width as f32 || pixel.y >= graphics.height as f32)
+    {
+        return Err("--temporal-centre requires an audit and a pixel inside the render resolution".into());
+    }
+    let temporal_audit_directory = if let Some(tick) = temporal_audit_tick {
+        if !drive || !graphics.enhanced() || output.is_none() || render_fps.is_none()
+            || drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))
+            || settings::diagnostics().replay_capture.is_some()
+            || settings::diagnostics().flashback_capture.is_some()
+        {
+            return Err("temporal audit needs enhanced live --drive, --render-fps, --render and eight ticks of headroom".into());
+        }
+        let path = output.as_ref().unwrap();
+        Some(path.with_file_name(format!("{}-temporal", path.file_stem().ok_or("audit output stem absent")?.to_string_lossy())))
+    } else { None };
+    let temporal_colour_directory = if let Some(tick) = temporal_colour_tick {
+        if !cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !drive || !graphics.enhanced() || output.is_none() || render_fps.is_none() || collision
+            || drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))
+            || settings::diagnostics().replay_capture.is_some() || settings::diagnostics().flashback_capture.is_some()
+        { return Err("temporal colour audit needs enhanced native DLAA live --drive, --render-fps, --render and eight ticks of headroom".into()); }
+        let path=output.as_ref().unwrap();
+        Some(path.with_file_name(format!("{}-colour",path.file_stem().ok_or("colour output stem absent")?.to_string_lossy())))
+    } else {None};
+    #[cfg(not(feature = "dlaa"))]
+    let _ = temporal_colour_directory;
     let mut app = App::new();
     app.insert_resource(start_sequence.clone());
     if let Some(keys) = texture_override_keys { app.insert_resource(texture_overrides::Active(keys)); }
@@ -3180,6 +3962,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.video_refresh_hz());
     }
+    #[cfg(feature = "dlaa")]
+    native_dlaa::install(&mut app);
+    if let (Some(tick), Some(directory)) = (temporal_audit_tick, temporal_audit_directory) {
+        temporal_audit::install(&mut app, tick, &directory, temporal_centre)?;
+    }
+    #[cfg(feature = "dlaa")]
+    if let (Some(tick), Some(directory)) = (temporal_colour_tick, temporal_colour_directory) {
+        temporal_colour::install(&mut app, tick, &directory, temporal_centre)?;
+    }
     // The full Fira Mono instead of Bevy's ASCII subset ("Nürburgring").
     ui_font::install(&mut app);
     if let Some(mut driving) = driving {
@@ -3267,10 +4058,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => warn!("Tyre audio unavailable; driving continues: {error}"),
             }
         }
-        tyre_smoke::install(&mut app, &root);
+        tyre_smoke::install(&mut app, &root, smoke_order);
         if ground_effect_assets::enabled() {
             wheel_ground::install(&mut app);
-            if let Err(error) = skid_marks::install(&mut app, &root) {
+            if let Err(error) = skid_marks::install(&mut app, &root, skid_order, skid_reflectance) {
                 warn!("Skid marks unavailable; driving continues: {error}");
             }
             if let Err(error) = wheel_debris::install(&mut app, &root) {
@@ -3448,6 +4239,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         car_lod::load(&root);
         car_batch::install(&mut app);
         camera::install(&mut app, &root, field.models[0].stem());
+        player_view_visibility::install(&mut app);
         cockpit::install(&mut app);
         track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);
@@ -3459,6 +4251,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if track && graphics.source_trees {
         source_trees::install(&mut app);
     }
+    #[cfg(feature = "dlaa")]
+    if graphics.thin_motion_antenna {
+        thin_motion::install(&mut app)?;
+    }
+
     if track
         && !collision
         && ground_effect_assets::enabled()
@@ -3478,6 +4275,24 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
     }
+    if graphics.lamp_signals != lamp_signals::Mode::Off {
+        if !(reference || drive) || route.path() != Route::default().path() {
+            return Err("--lamp-signals pilot requires a daytime Donington reference/drive scene".into());
+        }
+        lamp_signals::validate(&car)?;
+        lamp_signals::install(&mut app);
+    }
+    lamp_materials::prepare_frames(&mut car, graphics.lamp_reflectors, graphics.lamp_lenses)?;
+    lamp_materials::validate(&car, graphics.lamp_reflectors, graphics.lamp_lenses)?;
+    if graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off {
+        lamp_materials::install(&mut app);
+    }
+    if graphics.paint_environment > 0. {
+        paint_environment::install(&mut app)?;
+    }
+    if graphics.window_pilot != window_response::Mode::Off {
+        window_response::install(&mut app)?;
+    }
     perf_timing::install(&mut app);
     asset_counts::install(&mut app);
     #[cfg(feature = "profile")]
@@ -3486,6 +4301,41 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         gpu_passes::install(&mut app);
     }
     mesh_stream::install(&mut app);
+    if let Some(script) = window_transition_script {
+        window_transitions::install(&mut app, script);
+    }
+    if window_sort_current {
+        window_response::install_current_sort(&mut app);
+    }
+    smoke_compositor::install(&mut app, smoke_compositor);
+    ground_skid_pass::install_profile(&mut app, ground_skid_pass, ground_skid_profile)?;
+    if let Some(target) = oit_capacity_target {
+        let directory = app.world().resource::<Capture>().path.with_file_name("oit-capacity");
+        oit_capacity_audit::install(&mut app, target, &directory)?;
+    }
+    if car_transparent_sort {
+        window_response::install_current_car_sort(&mut app);
+    }
+    if motion_phase_map {
+        let path = app.world().resource::<Capture>().path.clone();
+        skid_phase_ledger::install(&mut app, &path, skid_order, motion_phase_profile)?;
+    }
+    if smoke_ct != smoke_ct_neutral::Mode::Off {
+        let path = app.world().resource::<Capture>().path.clone();
+        smoke_ct_neutral::install(&mut app, smoke_ct, Some(&path))?;
+    }
+    if smoke_boundary != smoke_boundary::Mode::Off {
+        let path = (smoke_boundary == smoke_boundary::Mode::GroupedDirect)
+            .then(|| app.world().resource::<Capture>().path.clone());
+        smoke_boundary::install(&mut app, smoke_boundary, path.as_deref(), motion_phase_profile)?;
+    }
+    if let Some(context) = native_smoke_context {
+        smoke_boundary::install_native_diagnostic(&mut app, context)?;
+    }
+    if let Some(target) = window_phase_target {
+        let path = app.world().resource::<Capture>().path.clone();
+        window_phase_audit::install(&mut app, target, &path)?;
+    }
     if graphics.track_grade {
         track_grade::install(&mut app);
     }
@@ -3499,7 +4349,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     // land.pssg is appended in enhanced only.
     if graphics.layered_track && track && !collision {
         let land = graphics.enhanced() && graphics.source_land;
-        track_surface::install(&mut app, &root, &route, land)?;
+        track_surface::install(&mut app, &root, &route, land, surface_rgb_override.as_deref())?;
     }
     if graphics.reflection_mode == 3 {
         if !graphics.enhanced()
@@ -3507,10 +4357,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             || !track
             || collision
             || !(reference || drive)
+            || (!route.is_default() && !native_smoke_route_admitted)
         {
-            return Err("--reflections probe requires enhanced source IBL and a Donington reference/drive scene".into());
+            return Err("--reflections probe requires enhanced source IBL and default Donington or the exact validated native BMW route".into());
         }
-        scene_probe::install(&mut app, &root)?;
+        scene_probe::install(&mut app, &root, &route)?;
     }
     if graphics.moving_probe && graphics.reflection_mode != 3 {
         return Err("--probe-update moving requires --reflections probe".into());
@@ -3519,7 +4370,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if !track || collision || !(reference || drive) {
             return Err("reflection calibration requires Donington reference/drive".into());
         }
-        scene_probe::install_calibration(&mut app, &root)?;
+        scene_probe::install_calibration(&mut app, &root, &route)?;
     }
     if graphics.enhanced() && graphics.clearcoat_prepass_fix {
         clearcoat_prepass::install(&mut app);
@@ -3547,6 +4398,22 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Update, career_screen::track_top_speed)
             .add_systems(Last, career_screen::write_result);
     }
+    if graphics.object_coverage != object_materials::CoverageMode::Off {
+        println!("object_coverage mode={:?} target={} mapping=Bevy-A2c-remap-or-Mask35-authored-thickness source_parity=false samples_required={} aa={}", graphics.object_coverage, object_materials::COVERAGE_TARGET, if graphics.enhanced() { 1 } else { 4 }, graphics.anti_aliasing);
+        app.add_systems(PostStartup, object_materials::assert_coverage_msaa);
+    }
+    if crowd_preview != crowd_preview::Mode::Off {
+        let prepared = crowd_preview::prepare(&root, &route, crowd_preview)?;
+        let flash = if crowd_flash_preview != flash_preview::Mode::Off {
+            let anchors = crowd_preview::flash_fixture_anchors(&root, &prepared)?;
+            Some(flash_preview::prepare(&root, crowd_flash_preview, &anchors)?)
+        } else { None };
+        crowd_preview::install(&mut app, prepared)?;
+        if let Some(flash) = flash { flash_preview::install(&mut app, flash)?; }
+    }
+    foundation_front::install(&mut app, foundation_front);
+    foundation_front_audit::install(&mut app, foundation_front);
+    foundation_backing::install(&mut app, foundation_backing)?;
     if let Some(cockpit) = cockpit {
         app.insert_resource(cockpit);
     }
@@ -3686,6 +4553,11 @@ fn setup(
     } else {
         None
     };
+    let lamp_normal = lamp_materials::upload_normal(&car, graphics.lamp_reflectors, graphics.lamp_lenses, &mut images, graphics.sampler(false));
+    commands.insert_resource(lamp_materials::Prepared(lamp_normal));
+    if graphics.lamp_signals != lamp_signals::Mode::Off {
+        commands.insert_resource(lamp_signals::Atlas(lamp_signals::upload(&car, &mut images, graphics.sampler(false))));
+    }
     let liveries = std::mem::take(&mut car.liveries);
     let mut livery_images: BTreeMap<(usize, String), Handle<Image>> = BTreeMap::new();
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
@@ -3701,6 +4573,12 @@ fn setup(
                 .cloned()
         })
         .collect();
+    if graphics.object_coverage != object_materials::CoverageMode::Off {
+        assert!(car.parts.iter().any(|part| part.material == object_materials::COVERAGE_TARGET),
+            "object coverage target absent: refusing misleading control/candidate");
+    }
+    let decal_materials = car.decal_materials.clone();
+    let object_glass_materials = car.object_glass_materials.clone();
     // Breakable-prop pieces of one library draw share a mesh asset.
     // Keyed by source mesh, draw and material, plus a hash of the indices;
     // each key keeps every distinct index list.
@@ -3793,12 +4671,27 @@ fn setup(
                     #[cfg(feature = "paint-specular")]
                     body_specular::apply(&mut material, body_specular_handles.get(&0));
                 }
+                if decal_materials.contains(&part.material) {
+                    track_decals::configure(&mut material);
+                }
+                if graphics.double_fence_wire && name == object_materials::COVERAGE_TARGET {
+                    let original = material.base_color_texture.as_ref().expect("fence diffuse required");
+                    let mut image = images.get(original).expect("loaded fence image").clone();
+                    object_materials::double_wire(&mut image).expect("audited fence atlas");
+                    material.base_color_texture = Some(images.add(image));
+                }
+                object_materials::configure(name, &object_glass_materials, &mut material);
+                object_materials::configure_coverage(graphics.object_coverage, name, &mut material);
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
                     && graphics.layered_car
                     && (!track || part.material.starts_with("car0/"))
                 {
                     car_materials::apply(name, &mut material);
+                    if name == "Car Body Paint" {
+                        material.clearcoat = graphics.paint_clearcoat;
+                        material.clearcoat_perceptual_roughness = graphics.paint_coat_roughness;
+                    }
                     if name == "Window Glass" {
                         material.perceptual_roughness = graphics.window_roughness;
                         material.reflectance = graphics.window_reflectance;
@@ -3904,8 +4797,19 @@ fn setup(
             {
                 entity.insert(source.placed(matrix));
             }
+            if decal_materials.contains(&part.material)
+                && let Some(entity) = &mut entity
+            {
+                entity.insert(bevy::light::NotShadowCaster);
+            }
             if track && let Some(entity) = &mut entity {
                 entity.insert(track_surface::SourcePart(part.material.clone()));
+            }
+            if graphics.lamp_signals != lamp_signals::Mode::Off
+                && let Some(entity) = &mut entity
+                && let Some(section) = lamp_signals::section(&part.material, &part.joint)
+            {
+                entity.insert(section);
             }
             if let Some((level, instances)) = ornament
                 && let Some(entity) = &mut entity
@@ -4255,10 +5159,22 @@ fn capture(
     benchmark: Option<Res<graphics_benchmark::Benchmark>>,
     probe: Option<Res<scene_probe::Cube>>,
     graphics: Res<graphics::Settings>,
-    motion: Option<Res<motion_capture::Motion>>,
+    (motion, crowd_sweep): (Option<Res<motion_capture::Motion>>, Option<Res<crowd_preview::Sweep>>),
+    motion_phase: Option<Res<skid_phase_ledger::Audit>>,
+    smoke_ct: Option<Res<smoke_ct_neutral::Audit>>,
+    (smoke_boundary, smoke_boundary_live): (Option<Res<smoke_boundary::Audit>>, Option<Res<smoke_boundary::LiveState>>),
+    temporal: Option<Res<temporal_audit::Audit>>,
+    oit_capacity: Option<Res<oit_capacity_audit::Audit>>,
+    #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
+    #[cfg(feature = "dlaa")] colour: Option<Res<temporal_colour::Audit>>,
     replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
+    if crowd_sweep.as_ref().is_some_and(|s| s.failed()) { exit.write(AppExit::error()); return; }
+    if smoke_boundary.as_ref().is_some_and(|audit| audit.failed())
+        || smoke_boundary_live.as_ref().is_some_and(|state| state.failed()) {
+        exit.write(AppExit::error()); return;
+    }
     // Diagnostics replay_capture: the replay plays first.
     if replay.is_some_and(|r| r.capture_pending()) {
         return;
@@ -4283,6 +5199,31 @@ fn capture(
     }
     if capture.started.elapsed() > Duration::from_secs_f64(limit) {
         error!("render capture timed out");
+        exit.write(AppExit::error());
+        return;
+    }
+    #[cfg(feature = "dlaa")]
+    if native.as_ref().is_some_and(|state| state.failed()) {
+        exit.write(AppExit::error());
+        return;
+    }
+    #[cfg(feature = "dlaa")]
+    if native.as_ref().is_some_and(|state| !state.ready()) {
+        return;
+    }
+    #[cfg(feature = "dlaa")]
+    if colour.as_ref().is_some_and(|audit| audit.failed()) { exit.write(AppExit::error()); return; }
+    #[cfg(feature = "dlaa")]
+    let colour_ready = colour.as_ref().is_none_or(|audit| audit.ready());
+    #[cfg(not(feature = "dlaa"))]
+    let colour_ready = true;
+    if smoke_ct.as_ref().is_some_and(|audit| audit.failed()) {
+        exit.write(AppExit::error()); return;
+    }
+    if oit_capacity.as_ref().is_some_and(|audit| audit.failed()) {
+        exit.write(AppExit::error()); return;
+    }
+    if temporal.as_ref().is_some_and(|audit| audit.failed()) {
         exit.write(AppExit::error());
         return;
     }
@@ -4313,7 +5254,14 @@ fn capture(
     if benchmark.as_ref().is_some_and(|b| !b.finished) {
         return;
     }
-    if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished()) {
+    if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
+        && crowd_sweep.as_ref().is_none_or(|s| s.finished())
+        && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
+        && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
+        && motion_phase.as_ref().is_none_or(|audit| audit.ready())
+        && smoke_ct.as_ref().is_none_or(|audit| audit.ready())
+        && smoke_boundary.as_ref().is_none_or(|audit| audit.ready())
+    {
         capture.requested = true;
         let path = capture.path.clone();
         commands
@@ -5538,6 +6486,8 @@ fn headless_exit(
 }
 
 fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGroupBuilder {
+    #[cfg(feature = "dlaa")]
+    let plugins = native_dlaa::plugins(plugins);
     #[cfg(feature = "profile")]
     let plugins = plugins.set(bevy::log::LogPlugin {
         custom_layer: |_| Some(Box::new(span_profile::SpanProfile)),
@@ -5736,6 +6686,8 @@ mod driving_tests {
                         parts: Vec::new(),
                         textures: car.textures.clone(),
                         bindings: car.bindings.clone(),
+                        decal_materials: Default::default(),
+                        object_glass_materials: Default::default(),
                         center: car.center,
                         radius: car.radius,
                         track: true,

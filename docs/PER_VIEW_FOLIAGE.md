@@ -1,0 +1,30 @@
+# Per-view foliage in shadows, reflections and temporal inputs
+
+19October2026. Research following source lighting/material/reflection work; not a new camera-controls task. No renderer change or runtime acceptance claimed here. Current native/ordinary builds remain separate and available.
+
+## Observed source path
+
+In Bevy0.19.1/current source_trees.rs, FacingSource retains source centres and signed UV1 offsets. FacingSource::placed computes camera-independent normals (world-up for cylindrical sheets, radial local normal for nearer facing foliage) and caches packed bytes. present runs after the displayed replay/live camera, expands positions for that main camera, and mesh_stream overwrites the mesh GPU allocation. That allocation is subsequently reused in the main, shadow and cubemap views. Distant sheets orient about worldY toward main-camera position; nearer facing foliage uses its inverse-view right/up. This is an explicit approximation, not proof trees are omitted from reflection layers.
+
+main.rs already creates an independent mesh per facing placement and expands culling bounds by source radius. scene_probe captures layer0, excludes only player car0 into layer1 and retains other source trees. Probe centre is the fixed reference slot in static scenes, independent of the main look direction. Current CPU placement therefore gives a concrete hypothesis for view-dependent reflected foliage, distinct from source-tree population/texture coverage.
+
+## Controlled measurement
+
+Use archived7569901, unmodified default material settings, static512HDR probe, same position/sun/sky, mainAAoff. Keep the main eye and probe centre fixed; rotate only the main look direction90degrees. For each coverage/off tree mode take A1,A2 identical repeats and B rotated. Record actual adapter, capture centre, clean completion, raw cube path/size and per-face finite RGB differences. Compare A1/B against repeat A1/A2 and the trees-off pair. Results belong under private local/graphics/reflection-view-input01/. Changes alone are not sole-cause proof: shadow preparation and raster scheduling may also vary, and raw cube invariance is not filtered-material quality. At this checkpoint the measurement is queued behind current merged-core GPU validation.
+
+## Correct implementation boundary
+
+A future default-off per-view pilot should retain source-centre vertices/UV1offsets and valid authored source normals, then expand in each actual view's vertex stage. Keep current CPU presentation available as a control; never run both CPU and GPU expansion on the same mesh. Existing private texture upload/coverage mips/material alpha policy stay unchanged. No new texture/sampler and no inverse inference from foliage RGB.
+
+MaterialExtension in installed Bevy exposes separate vertex_shader,prepass_vertex_shader anddeferred_vertex_shader hooks. Forward-only expansion is insufficient: depth, shadows and velocity must see the same current geometry. The current prepass uses current positions with previous rigid transforms; it cannot reconstruct previous camera-facing deformation by itself. For the custom prepass, recompute the prior expanded position using source centre/offsets, previous model transform and previous camera orientation/eye. Its PreviousViewUniforms exposes view_from_world,clip_from_world,clip_from_view,world_from_clip,view_from_clip, not world_from_view. A rigid camera inverse can reconstruct basis/eye from view_from_world; validate conventions against actual rendered vectors rather than silently using current basis for both frames.
+
+Spherical leaf expansion uses actual view right/up times source uniform instance scale. Cylindrical sheets use per-centre horizontal eye direction/worldY; directional-shadow views need a consistent directional basis, not a naive near-orthographic eye-point approximation. Keep source normal choice/culling/placement transforms intact and verify all four shadow cascades. Normal/tangent/UV/alpha outputs must retain stock PBR semantics. Morph/skinned geometry is outside this narrow material scope.
+
+## Acceptance before promotion
+
+Actual purchased instance/UV/normal invariants and main-view geometry parity, fixed-centre repeat/rotated cube controls, visible/valid shadow coverage, raw moving-foliage velocity/depth,30/300virtualFPS and native4K motion, replay/camera cuts/restarts, and shared RGBA/phone fallback compatibility. Preserve simulation bytes and source assets. Passing a body/road temporal audit does not validate this foliage deformation. The work is visual correctness; performance evaluation remains the other workstream.
+
+
+Initial measurement completed on756: identical-view repeats are byte-identical for both tree modes. Rotating main view changes34121raw HDRpixels with trees and31308without, at a fixed probe centre. Therefore tree removal alone is not a sufficient negative control; ground_detail.rs also rebuilds grass camera-facing quads using main right/up. Face4 difference visualization puts the common residual on ground cover and the added tree-mode residual on vegetation. This is an attribution clue, not sole-cause proof. A second six-case control with GRID_GROUND_EFFECTS=0 is running under reflection-view-input03/; preserve02 evidence. The first01attempt failed its private data-dir output guard before GPU and remains a failed control.
+
+Completed no-grass control03 at unchanged756 runtime: GRID_GROUND_EFFECTS=0, fixed512HDRcube centre and main eye, only main-view rotation changes90degrees. With both trees and grass disabled, all six faces are byte-identical across repeats AND rotation (0changedpixels). With trees enabled and grass disabled, identical-view repeats remain byte-identical, but rotation changes2813pixels, mean absolute linear RGB0.000486154167, maximum2.4257965. This isolates a tree-facing dependency in this setup; earlier02common residual is consistent with separately camera-facing ground detail. It does not quantify filtered car reflections, all routes or complete shadow correctness. No new foliage implementation. Private reflection-view-input03/validation01.json plus six logs/raw cases retained.

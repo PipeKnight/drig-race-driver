@@ -13,6 +13,41 @@ use grid_formats::{material, mesh, pssg, scene, texture};
 use grid_tools::route::Route;
 use std::{collections::BTreeMap, path::Path};
 
+/// Optional authored GGX base-F0 weighting; not the source Phong model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Specular {
+    #[default]
+    Off,
+    SourceBase,
+    WhiteControl,
+}
+impl Specular {
+    pub fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "off" => Ok(Self::Off),
+            "source-base" => Ok(Self::SourceBase),
+            "white-control" => Ok(Self::WhiteControl),
+            _ => Err("--surface-specular needs off, source-base or white-control"),
+        }
+    }
+    /// Surface-only diagnostic: independent of the enhanced lighting preset.
+    /// Off must preserve all previously valid scenes, including car/collision.
+    pub fn validate_context(self, layered_track: bool, track_scene: bool, collision: bool) -> Result<(), &'static str> {
+        if self != Self::Off && (!layered_track || !track_scene || collision) {
+            Err("--surface-specular requires a non-collision track scene with --track-materials source")
+        } else {
+            Ok(())
+        }
+    }
+    fn control(self) -> f32 {
+        match self {
+            Self::Off => 0.,
+            Self::SourceBase => 1.,
+            Self::WhiteControl => 2.,
+        }
+    }
+}
+
 /// Groups whose pixel programs blend TDiffuseAlphaMap/TDiffuseAlphaMap2 by
 /// mask red, TMacroColour (UV1) by mask green; `true`: also the skid layers.
 /// `track_infield_wsm` takes its diffuse UVs from the world position.
@@ -56,6 +91,18 @@ pub struct Surface {
     skid_colour: Vec4,
     #[uniform(111)]
     skid_colour2: Vec4,
+    // Per-layer response codes:0road,1standalone terrain,2optional U-band.
+    // Z/W are authored roughness/reflectance, not recovered source values.
+    #[uniform(112)]
+    dry_ground: Vec4,
+    // Camera mip bias opt-in, specular mode, speed low-pass bias, asphalt layer bits.
+    // controls.w remains the source world-projected UV scale.
+    #[uniform(113)]
+    sampling: Vec4,
+    // X: RGB mixture; Y: standalone-road authored grazing F0 gain or0; ZW reserved.
+    // Alpha stays on original taps.
+    #[uniform(114)]
+    rgb_filter: Vec4,
 }
 impl MaterialExtension for Surface {
     fn fragment_shader() -> ShaderRef {
@@ -67,6 +114,7 @@ impl MaterialExtension for Surface {
 }
 
 struct Definition {
+    dry_ground: Vec4,
     textures: [String; 4],
     scales: Vec4,
     controls: Vec4,
@@ -225,6 +273,12 @@ fn read_surfaces(
         let macro_map = macro_map.unwrap_or_else(|| first.clone());
         let skids = texture_name(b"TSkidsMap");
         let definition = Definition {
+            dry_ground: Vec4::new(
+                dry_ground_layer(&first, !skidded),
+                dry_ground_layer(&second, !skidded),
+                1.,   // authored dry-ground perceptual roughness
+                0.25, // dielectric normal-incidence F0 = 0.16 * 0.25^2 = 1%
+            ),
             textures: [
                 first,
                 second,
@@ -332,11 +386,24 @@ pub fn install(
     root: &Path,
     route: &Route,
     land: bool,
+    rgb_overrides: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut source = read_source(root, route)?;
     if land {
         let land = read_package(root, route, "land.pssg")?;
         merge(&mut source, land, "land", true);
+    }
+    if let Some(manifest) = rgb_overrides {
+        let used = source
+            .draws
+            .values()
+            .flat_map(|draw| {
+                source.definitions[&draw.material].textures[..2]
+                    .iter()
+                    .cloned()
+            })
+            .collect();
+        super::surface_rgb::apply(manifest, &mut source.textures, &used)?;
     }
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
         SHADER.id(),
@@ -347,8 +414,86 @@ pub fn install(
     )?;
     app.insert_resource(source)
         .add_plugins(MaterialPlugin::<SurfaceMaterial>::default())
-        .add_systems(PostStartup, attach);
+        .add_systems(PostStartup, attach)
+        .add_systems(FixedUpdate, update_asphalt_softness.after(super::drive_tick));
     Ok(())
+}
+
+// Select only known standalone terrain layers. Mixed road-edge atlases are not
+// classified wholesale: that would also dull their asphalt/paint texels.
+fn dry_ground_layer(texture: &str, infield_shader: bool) -> f32 {
+    let texture = texture.strip_prefix("land/").unwrap_or(texture);
+    f32::from(
+        infield_shader
+            || matches!(
+                texture,
+                "don_infield1_d.tga"
+                    | "don_infield2_d.tga"
+                    | "don_infield2_varb_d.tga"
+                    | "don_infield3_d.tga"
+                    | "don_infield4_d.tga"
+                    | "don_infield5_d.tga"
+                    | "don_outfield_terrain_01_d.tga"
+                    | "don_outfield_terrain_02_d.tga"
+            ),
+    )
+}
+
+// Code2 requests an authored U-band, not a whole-atlas terrain classification.
+// Native source atlas review puts ground/gravel left of the white road line.
+fn edge_ground_layer(texture: &str, standalone: f32, enabled: bool) -> f32 {
+    let texture = texture.strip_prefix("land/").unwrap_or(texture);
+    if enabled
+        && standalone < 0.5
+        && matches!(
+            texture,
+            "don_edge1to1_d.tga"
+                | "don_edge1to1varb_d.tga"
+                | "don_edge2to2_d.tga"
+                | "don_edge3to1_d.tga"
+        )
+    {
+        2.
+    } else {
+        standalone
+    }
+}
+
+// Exact audited standalone layers only; edge/paint atlases must never be blurred.
+fn asphalt_layer(name: &str) -> bool {
+    matches!(name, "don_track1_d.tga" | "don_track2_d.tga" | "don_track3_d.tga" | "don_track4_d.tga")
+}
+
+// Narrow host-only lighting experiment: both layers must be audited pure road.
+// Keep mixed atlases and every infield-family definition on their existing response.
+fn standalone_asphalt(definition: &Definition) -> bool {
+    definition.dry_ground.x == 0.
+        && definition.dry_ground.y == 0.
+        && asphalt_layer(&definition.textures[0])
+        && asphalt_layer(&definition.textures[1])
+}
+
+// A direct function of physical speed, not render delta or displacement per frame.
+// Fade in between 18 and108 km/h; reverse gets the same filtering at equal speed.
+fn asphalt_bias(velocity: [f32; 4], maximum: f32) -> f32 {
+    let speed = velocity[..3].iter().map(|v| v * v).sum::<f32>().sqrt();
+    if !speed.is_finite() { return 0.; }
+    let t = ((speed - 5.) / 25.).clamp(0., 1.);
+    maximum * t * t * (3. - 2. * t)
+}
+
+fn update_asphalt_softness(
+    driving: Option<Res<super::Driving>>,
+    settings: Res<super::graphics::Settings>,
+    mut materials: ResMut<Assets<SurfaceMaterial>>,
+) {
+    if settings.asphalt_soften == 0. { return; }
+    let bias = driving.as_ref().map_or(0., |d| asphalt_bias(d.runtime.velocity(), settings.asphalt_soften));
+    for (_, material) in materials.iter_mut() {
+        if material.extension.sampling.w > 0. {
+            material.extension.sampling.z = bias;
+        }
+    }
 }
 
 // uint_color_argb is stored A,R,G,B. It is a linear control, not sRGB albedo.
@@ -375,6 +520,16 @@ pub(crate) fn attach(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<SurfaceMaterial>>,
 ) {
+    // Refuse a no-target comparison before mutating meshes, images or materials.
+    if settings.asphalt_roughness.is_some() || settings.asphalt_grazing_gain.is_some() {
+        let eligible = query.iter().any(|(_, name, identity, mesh, _)| {
+            let Some(draw) = source.draws.get(name.as_str()) else { return false; };
+            draw.material == identity.0
+                && standalone_asphalt(&source.definitions[&draw.material])
+                && meshes.get(&mesh.0).is_some_and(|mesh| mesh.count_vertices() == draw.uv.len())
+        });
+        assert!(eligible, "asphalt material pilot has no eligible attached standalone road draw");
+    }
     let textures: BTreeMap<_, _> = source
         .textures
         .iter()
@@ -409,6 +564,10 @@ pub(crate) fn attach(
     let mut handles = BTreeMap::new();
     let mut attached = 0;
     let mut mismatched = 0;
+    let mut roughness_draws = 0;
+    let mut roughness_materials = 0;
+    let mut grazing_draws = 0;
+    let mut grazing_materials = 0;
     for (entity, name, identity, mesh, base) in &query {
         let Some(draw) = source.draws.get(name.as_str()) else {
             continue;
@@ -425,16 +584,25 @@ pub(crate) fn attach(
         }
         target.insert_attribute(Mesh::ATTRIBUTE_UV_1, draw.uv.clone());
         target.insert_attribute(Mesh::ATTRIBUTE_COLOR, draw.masks.clone());
+        let d = &source.definitions[&draw.material];
+        let roughness = settings.asphalt_roughness.filter(|_| standalone_asphalt(d));
+        let grazing_gain = settings.asphalt_grazing_gain.filter(|_| standalone_asphalt(d));
+        if grazing_gain.is_some() { grazing_draws += 1; }
+        if roughness.is_some() { roughness_draws += 1; }
         let handle = handles
             .entry(draw.material.clone())
             .or_insert_with(|| {
-                let d = &source.definitions[&draw.material];
                 let mut base = standard
                     .get(&base.0)
                     .expect("source base material ready")
                     .clone();
                 // The extension composes albedo explicitly; never tint by mask colors.
                 base.base_color_texture = None;
+                if let Some(roughness) = roughness {
+                    base.perceptual_roughness = roughness;
+                    roughness_materials += 1;
+                }
+                if grazing_gain.is_some() { grazing_materials += 1; }
                 materials.add(ExtendedMaterial {
                     base,
                     extension: Surface {
@@ -443,9 +611,33 @@ pub(crate) fn attach(
                         macro_map: textures[&d.textures[2]].clone(),
                         skids: skid_textures[&d.textures[3]].clone(),
                         scales: d.scales,
+                        sampling: Vec4::new(
+                            if settings.surface_view_mip_bias { 1. } else { 0. },
+                            settings.surface_specular.control(),
+                            0.,
+                            if settings.asphalt_soften > 0. {
+                                f32::from(asphalt_layer(&d.textures[0]))
+                                    + 2. * f32::from(asphalt_layer(&d.textures[1]))
+                            } else { 0. },
+                        ),
+                        rgb_filter: Vec4::new(settings.asphalt_filter_strength, grazing_gain.unwrap_or(0.), 0., 0.),
                         controls: d.controls,
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
+                        dry_ground: Vec4::new(
+                            edge_ground_layer(
+                                &d.textures[0],
+                                d.dry_ground.x,
+                                settings.ground_edge_pilot,
+                            ),
+                            edge_ground_layer(
+                                &d.textures[1],
+                                d.dry_ground.y,
+                                settings.ground_edge_pilot,
+                            ),
+                            d.dry_ground.z,
+                            d.dry_ground.w,
+                        ),
                     },
                 })
             })
@@ -456,10 +648,20 @@ pub(crate) fn attach(
             .insert(MeshMaterial3d(handle));
         attached += 1;
     }
+    println!("asphalt_soften maximum={} scope=don_track1-4-rgb-only speed_mps=5..30 default=off alpha_macro_skids=preserved", settings.asphalt_soften);
+    println!("asphalt_filter_strength value={} scope=rgb-only alpha_macro_skids=preserved", settings.asphalt_filter_strength);
+    if let Some(value) = settings.asphalt_roughness {
+        println!("asphalt_roughness value={value} source_materials={roughness_materials} source_draws={roughness_draws} before_static_batch=true scope=standalone-don-track1-4-both-layers authored=true default=off masks_rgb_ground_motion=unchanged");
+    }
+    if let Some(gain) = settings.asphalt_grazing_gain {
+        println!("asphalt_grazing gain={gain} ndotv_full=0.10 ndotv_off=0.35 source_materials={grazing_materials} source_draws={grazing_draws} before_static_batch=true scope=standalone-don-track1-4-both-layers-source-base authored_view_dependent_F0=true independent_physical_F90=false default=off alpha_rgb_macro_skids_ground_roughness_motion=unchanged");
+    }
+    println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(
-        "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} uv1=true masks=linear-ARGB-to-RGBA",
+        "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} specular={:?} uv1=true masks=linear-ARGB-to-RGBA",
         source.draws.len(),
-        handles.len()
+        handles.len(),
+        settings.surface_specular
     );
     if attached != source.draws.len() {
         warn!(
@@ -473,6 +675,49 @@ pub(crate) fn attach(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn specular_diagnostic_eligibility_preserves_off_and_requires_source_track() {
+        for layered in [false, true] {
+            for track_scene in [false, true] {
+                for collision in [false, true] {
+                    assert!(Specular::Off.validate_context(layered, track_scene, collision).is_ok());
+                    for mode in [Specular::SourceBase, Specular::WhiteControl] {
+                        assert_eq!(mode.validate_context(layered, track_scene, collision).is_ok(),
+                                   layered && track_scene && !collision);
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn specular_parser_accepts_only_explicit_modes_and_keeps_off_default() {
+        assert_eq!(Specular::default(), Specular::Off);
+        assert_eq!(Specular::parse("off"), Ok(Specular::Off));
+        assert_eq!(Specular::parse("source-base"), Ok(Specular::SourceBase));
+        assert_eq!(Specular::parse("white-control"), Ok(Specular::WhiteControl));
+        for invalid in ["", "source", "on", "SourceBase", "source-base "] {
+            assert!(Specular::parse(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn asphalt_softness_protects_mixed_atlases_and_unrelated_routes() {
+        for name in ["don_track1_d.tga", "don_track2_d.tga", "don_track3_d.tga", "don_track4_d.tga"] {
+            assert!(asphalt_layer(name));
+        }
+        for name in ["don_edge1to1_d.tga", "don_decals_01_d.tga", "don_rumble_strip_03_d.tga", "don_infield1_d.tga", "land/don_track1_d.tga", "other_track1_d.tga"] {
+            assert!(!asphalt_layer(name));
+        }
+        assert_eq!(asphalt_bias([0.; 4], 4.), 0.);
+        assert_eq!(asphalt_bias([5., 0., 0., 0.], 4.), 0.);
+        assert_eq!(asphalt_bias([60., 0., 0., 0.], 4.), 4.);
+        assert_eq!(asphalt_bias([-60., 0., 0., 0.], 4.), 4.);
+        assert_eq!(asphalt_bias([f32::NAN, 0., 0., 0.], 4.), 0.);
+        let samples: Vec<_> = (0..=120).map(|v| asphalt_bias([v as f32, 0., 0., 0.], 4.)).collect();
+        assert!(samples.windows(2).all(|p| p[0] <= p[1]));
+        assert!(samples.iter().all(|v| (0.0..=4.0).contains(v)));
+    }
+
     #[test]
     #[ignore = "requires owner's purchased GRID installation"]
     fn purchased_surfaces_resolve_both_uv_sets_and_all_layers() {

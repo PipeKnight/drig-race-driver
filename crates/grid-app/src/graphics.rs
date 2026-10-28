@@ -13,7 +13,7 @@ use bevy::{
         light_consts::lux,
     },
     pbr::{AtmosphereSettings, DistanceFog, FogFalloff, ScreenSpaceAmbientOcclusion, ScreenSpaceReflections},
-    post_process::bloom::Bloom,
+    post_process::{bloom::Bloom, motion_blur::MotionBlur},
     prelude::*,
     render::view::{ColorGrading, ColorGradingGlobal},
 };
@@ -57,6 +57,24 @@ pub struct Settings {
     pub moving_probe: bool,
     pub ssr_thickness: f32,
     pub layered_track: bool,
+    /// Source blended-alpha base-F0 adaptation; CLI resolves eligible track defaults.
+    pub surface_specular: super::track_surface::Specular,
+    /// Default-off diagnostic: match stock PBR view mip bias on source surface samples.
+    pub surface_view_mip_bias: bool,
+    /// Default-off RGB-only low-pass pilot for audited Donington asphalt layers.
+    pub asphalt_soften: f32,
+    /// Blend original and filtered road RGB;1 preserves the existing mip pilot.
+    pub asphalt_filter_strength: f32,
+    /// Optional authored roughness for audited standalone Donington asphalt only.
+    pub asphalt_roughness: Option<f32>,
+    /// Default-off authored view-dependent F0 gain; not independent physical F90.
+    pub asphalt_grazing_gain: Option<f32>,
+    /// Optional Bevy directional blur; fraction of the rendered frame, not milliseconds.
+    pub motion_shutter: f32,
+    /// Bounded scripted DLAA diagnostic only; never a playable default.
+    pub dlaa_reset_every_frame: bool,
+    pub thin_motion_antenna: bool,
+    pub ground_edge_pilot: bool,
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
     pub source_trees: bool,
@@ -70,9 +88,29 @@ pub struct Settings {
     pub white_body_specular: bool,
     /// Fixed photographic exposure; +1EV halves scene light before tonemapping.
     pub exposure_ev100: f32,
+    /// Optional single-variable authored-grade diagnostic; default preserves current look.
+    pub post_saturation_override: Option<f32>,
+    /// Optional rendered authored-grade diagnostic; absent preserves AgX.
+    pub tone_map_override: Option<Tonemapping>,
     /// Window-only material control; light lenses are a separate material.
     pub window_roughness: f32,
     pub window_reflectance: f32,
+    /// Bounded diagnostic: no change to accepted interactive driving materials.
+    pub window_pilot: super::window_response::Mode,
+    pub object_coverage: super::object_materials::CoverageMode,
+    /// Opt-in approximately doubled wire alpha in the exact Detroit fence atlas.
+    pub double_fence_wire: bool,
+    /// Authored player-paint coat controls, independent of base mask and glass.
+    pub paint_clearcoat: f32,
+    /// Default-off authored environment-only paint layer; not original shader parity.
+    pub paint_environment: f32,
+    /// Default-off authored Lacetti reflector pilot; covers and matt remain separate.
+    pub lamp_reflectors: super::lamp_materials::Mode,
+    /// Independent default-off clear-cover normal/PBR experiment.
+    pub lamp_lenses: super::lamp_materials::Mode,
+    /// Independent default-off section emission adaptation.
+    pub lamp_signals: super::lamp_signals::Mode,
+    pub paint_coat_roughness: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
     /// Diagnostic isolation of ambient occlusion and grass shadow reception.
@@ -123,6 +161,16 @@ impl Default for Settings {
             moving_probe: false,
             ssr_thickness: 0.05,
             layered_track: true,
+            surface_specular: super::track_surface::Specular::Off,
+            surface_view_mip_bias: false,
+            asphalt_soften: 0.,
+            asphalt_filter_strength: 1.,
+            asphalt_roughness: None,
+            asphalt_grazing_gain: None,
+            motion_shutter: 0.,
+            dlaa_reset_every_frame: false,
+            thin_motion_antenna: false,
+            ground_edge_pilot: false,
             source_land: true,
             source_trees: false,
             player_race_number: None,
@@ -131,8 +179,19 @@ impl Default for Settings {
             source_body_specular: false,
             white_body_specular: false,
             exposure_ev100: 13.,
+            post_saturation_override: None,
+            tone_map_override: None,
             window_roughness: 0.08,
             window_reflectance: 0.5,
+            window_pilot: super::window_response::Mode::Off,
+            object_coverage: super::object_materials::CoverageMode::Off,
+            double_fence_wire: false,
+            paint_clearcoat: 0.35,
+            paint_environment: 0.,
+            lamp_reflectors: super::lamp_materials::Mode::Off,
+            lamp_lenses: super::lamp_materials::Mode::Off,
+            lamp_signals: super::lamp_signals::Mode::Off,
+            paint_coat_roughness: 0.18,
             tree_sheet_colours: false,
             ambient_occlusion: true,
             grass_receive_shadows: true,
@@ -163,6 +222,16 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn tone_map(&mut self, value: &str) -> Result<(), &'static str> {
+        let mode = match value {
+            "agx" => Tonemapping::AgX,
+            "reinhard" => Tonemapping::Reinhard,
+            _ => return Err("--tone-map needs agx or reinhard"),
+        };
+        self.tone_map_override = Some(mode);
+        Ok(())
+    }
+
     pub fn race_number(&mut self, value: &str) -> Result<(), &'static str> {
         let number = grid_formats::car_decals::Number::parse(value).map_err(|_| "race number needs 1..3 decimal digits")?;
         self.player_race_number = Some(number);
@@ -183,6 +252,24 @@ impl Settings {
             return Err("glass roughness must be finite and 0.04..1");
         }
         self.window_roughness = roughness;
+        Ok(())
+    }
+
+    pub fn paint_clearcoat(&mut self, value: &str) -> Result<(), &'static str> {
+        let strength = value.parse::<f32>().map_err(|_| "invalid paint clearcoat")?;
+        if !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
+            return Err("paint clearcoat must be finite and 0..1");
+        }
+        self.paint_clearcoat = strength;
+        Ok(())
+    }
+
+    pub fn paint_coat_roughness(&mut self, value: &str) -> Result<(), &'static str> {
+        let roughness = value.parse::<f32>().map_err(|_| "invalid paint coat roughness")?;
+        if !roughness.is_finite() || !(0.04..=1.0).contains(&roughness) {
+            return Err("paint coat roughness must be finite and 0.04..1");
+        }
+        self.paint_coat_roughness = roughness;
         Ok(())
     }
 
@@ -304,6 +391,7 @@ pub fn configure(
     settings: &Settings,
     media: &mut Assets<ScatteringMedium>,
 ) {
+    let tone_map = settings.tone_map_override.unwrap_or(Tonemapping::AgX);
     println!(
         "graphics preset={:?} resolution={}x{} shadow_size={} anisotropy={} sky_ibl={} ssao={} taa={} tonemapping={}",
         settings.preset,
@@ -315,9 +403,9 @@ pub fn configure(
         settings.enhanced() && settings.ambient_occlusion,
         settings.enhanced() && settings.anti_aliasing == 0,
         if settings.enhanced() {
-            "AgX"
+            format!("{tone_map:?}")
         } else {
-            "Bevy-default"
+            "Bevy-default".to_owned()
         }
     );
     if !settings.enhanced() {
@@ -337,7 +425,9 @@ pub fn configure(
             fog.distance, fog.density_cap, fog.colour, fog.brightness, fog.base_height, fog.top_height);
     }
     println!("graphics_shadow_range metres={} cascades=4 first=18 map_size=4096 mapping=authored", settings.shadow_distance_metres);
-    println!("graphics_exposure ev100={} mode=fixed tonemapping=AgX", settings.exposure_ev100);
+    println!("graphics_exposure ev100={} mode=fixed tonemapping={tone_map:?}", settings.exposure_ev100);
+    println!("graphics_tone_map value={tone_map:?} override={} scope=main-view-authored-display-diagnostic exposure_grade_materials_probe_hdr=unchanged", settings.tone_map_override.is_some());
+    println!("graphics_post_saturation value={} override={} scope=authored-camera-grade temperature_tint=unchanged", settings.post_saturation_override.unwrap_or(if settings.track_grade { 1.0 } else { 0.9 }), settings.post_saturation_override.is_some());
     commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight::NONE);
     commands.spawn(Atmosphere::earth(
@@ -346,13 +436,13 @@ pub fn configure(
     commands.entity(camera).insert((
         Hdr,
         Exposure { ev100: settings.exposure_ev100 },
-        Tonemapping::AgX,
+        tone_map,
         // Authored restrained warm grade; original GRID's LUT is not recovered.
         ColorGrading {
             global: ColorGradingGlobal {
                 temperature: if settings.track_grade { 0.0 } else { 0.012 },
                 tint: if settings.track_grade { 0.0 } else { -0.003 },
-                post_saturation: if settings.track_grade { 1.0 } else { 0.9 },
+                post_saturation: settings.post_saturation_override.unwrap_or(if settings.track_grade { 1.0 } else { 0.9 }),
                 ..default()
             },
             ..default()
@@ -367,6 +457,13 @@ pub fn configure(
         bevy::core_pipeline::prepass::MotionVectorPrepass,
         ShadowFilteringMethod::Gaussian,
     ));
+    if settings.motion_shutter > 0. {
+        commands.entity(camera).insert(MotionBlur {
+            shutter_angle: settings.motion_shutter,
+            samples: 8,
+        });
+    }
+    println!("graphics_motion_blur enabled={} shutter_angle={} samples=8 units=fraction-of-rendered-frame scope=main-view default=off", settings.motion_shutter > 0., settings.motion_shutter);
     if settings.ambient_occlusion {
         commands.entity(camera).insert(ScreenSpaceAmbientOcclusion::default());
     }
@@ -479,6 +576,27 @@ mod graphics_settings_tests {
             assert_eq!(settings.window_roughness, 0.2);
         }
     }
+    #[test]
+    fn paint_coat_controls_preserve_defaults_and_reject_nonfinite_values() {
+        let mut settings = Settings::default();
+        assert_eq!((settings.paint_clearcoat, settings.paint_coat_roughness), (0.35, 0.18));
+        for value in ["0", "0.35", "1"] {
+            settings.paint_clearcoat(value).unwrap();
+        }
+        for value in ["0.04", "0.12", "1"] {
+            settings.paint_coat_roughness(value).unwrap();
+        }
+        for value in ["", "NaN", "inf", "-inf", "-0.01", "1.01"] {
+            assert!(settings.paint_clearcoat(value).is_err());
+            assert_eq!(settings.paint_clearcoat, 1.);
+        }
+        for value in ["", "NaN", "inf", "-inf", "0", "0.039", "1.01"] {
+            assert!(settings.paint_coat_roughness(value).is_err());
+            assert_eq!(settings.paint_coat_roughness, 1.);
+        }
+        assert_eq!((settings.window_reflectance, settings.window_roughness), (0.5, 0.08));
+    }
+
     #[test]
     fn exposure_is_bounded_and_invalid_values_preserve_previous_setting() {
         let mut settings = Settings::default();

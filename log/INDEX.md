@@ -540,6 +540,195 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G318](G0318.md) | 2026-10-28 | Verify integrated graphics full gate and accepted BMW smoke runtime |
+| [G317](G0317.md) | 2026-10-28 | Complete integrated Car test fixtures after actual full-gate compile failure |
+| [G316](G0316.md) | 2026-10-28 | Unify current AgX and Reinhard launcher artifacts after owner session attribution |
+| [G315](G0315.md) | 2026-10-28 | Integrate pinned F635 and deliver the scoped BMW smoke entrypoint |
+| [G314](G0314.md) | 2026-10-28 | Verify ordinary window fix delivery and main integration preparation |
+| [G313](G0313.md) | 2026-10-28 | Deliver current window sort centres to ordinary Lacetti driving |
+| [G312](G0312.md) | 2026-10-27 | Allow the optional Reinhard display mode in ordinary interactive driving |
+| [G311](G0311.md) | 2026-10-27 | Exercise one finite source-guided forearm sweep with real Extract receipts |
+| [G310](G0310.md) | 2026-10-27 | Compare the grazing asphalt pilot with accepted Motion DLAA in motion |
+| [G309](G0309.md) | 2026-10-27 | Test a bounded grazing-angle asphalt reflection gain |
+| [G308](G0308.md) | 2026-10-27 | Test one stored S4 forearm key as an explicit interpretation hypothesis |
+| [G307](G0307.md) | 2026-10-27 | Add one authored fixed forearm pose to the crowd preview |
+| [G306](G0306.md) | 2026-10-27 | Render one bounded neutral USA crowd actor |
+| [G305](G0305.md) | 2026-10-27 | Preserve all four authored skin influence lanes |
+| [G304](G0304.md) | 2026-10-27 | Integrate F591-F592 static and skid streaming optimizations |
+| [G303](G0303.md) | 2026-10-27 | Sample one ordinary L4 crowd packet through the linked reader |
+| [G302](G0302.md) | 2026-10-27 | Integrate F587-F590 preserving graphics ownership |
+| [G301](G0301.md) | 2026-10-27 | Compare main-view display transforms for Lacetti paint |
+| [G300](G0300.md) | 2026-10-27 | Integrate F584-F586 preserving player render ownership |
+| [G299](G0299.md) | 2026-10-27 | Verify rendered cracked-window reset lifecycle |
+| [G298](G0298.md) | 2026-10-27 | Bounded authored asphalt roughness comparison |
+| [G297](G0297.md) | 2026-10-26 | Integrate F573-F583 while preserving native smoke and skid ownership |
+| [G296](G0296.md) | 2026-10-26 | Add a bounded native DLAA late smoke profile for BMW |
+| [G295](G0295.md) | 2026-10-26 | Integrate the current engine-audio main into the graphics branch |
+| [G294](G0294.md) | 2026-10-26 | Verify the native late-smoke scheduling boundary before DLAA admission |
+| [G293](G0293.md) | 2026-10-26 | Add an opt-in BMW glass and lamp smoke boundary |
+| [G292](G0292.md) | 2026-10-26 | Recheck dense BMW smoke using the current replay artifact |
+| [G291](G0291.md) | 2026-10-26 | Verify native HDR skid replay with accepted Motion materials |
+| [G290](G0290.md) | 2026-10-26 | Exercise native HDR skid replay with DLAA camera and reset controls |
+| [G289](G0289.md) | 2026-10-26 | Recover source crowd flash cell selection and validate a bounded CPU kernel |
+| [G288](G0288.md) | 2026-10-26 | Integrate explicit native HDR skid replay after atmospheric rendering |
+| [G287](G0287.md) | 2026-10-26 | Validate public native transparency composition before enhanced smoke replay |
+| [G286](G0286.md) | 2026-10-25 | Try doubled foreground fence wire thickness |
+| [G285](G0285.md) | 2026-10-25 | Check fence visibility at matched near and far camera distances |
+| [G284](G0284.md) | 2026-10-25 | Archive the obsolete graphics integration worktree |
+| [G283](G0283.md) | 2026-10-25 | Test raw multisample coverage on the stadium backing sheet |
+| [G282](G0282.md) | 2026-10-25 | Validate the skid pass in a real baseline window |
+| [G281](G0281.md) | 2026-10-25 | Pilot an owned skid pass before ordinary transparency |
+| [G280](G0280.md) | 2026-10-25 | Measure raw and sharpened MSAA sample coverage in an isolated GPU fixture |
+| [G279](G0279.md) | 2026-10-25 | Validate separately scoped Detroit front-sheet alpha and depth experiment |
+| [G278](G0278.md) | 2026-10-25 | Clean archived graphics artifacts and integrate F570 records |
+| [G277](G0277.md) | 2026-10-24 | Integrate F568 main and verify the combined graphics tree |
+| [G276](G0276.md) | 2026-10-24 | Validate grouped smoke boundary on separately guarded BMW glass and lamps |
+| [G275](G0275.md) | 2026-10-24 | Measure current foliage eligibility across camera and shadow views without skipping draws |
+| [G274](G0274.md) | 2026-10-24 | Validate bounded direct smoke boundary before colour-transmittance accumulation |
+| [G273](G0273.md) | 2026-10-24 | Audit current all-view tree eligibility without changing rendering |
+| [G272](G0272.md) | 2026-10-24 | Validate bounded frozen camera flashes at source crowd anchors |
+| [G271](G0271.md) | 2026-10-24 | Validate bounded neutral colour-transmittance composition plumbing |
+| [G270](G0270.md) | 2026-10-24 | Reject duplicate-input tree expansion remap on actual Donington sources |
+| [G269](G0269.md) | 2026-10-24 | Admit exact observed animation packet leaves in PSSG trees |
+| [G268](G0268.md) | 2026-10-24 | Measure practical foliage key reuse during actual driving |
+| [G267](G0267.md) | 2026-10-24 | Test bounded ground priority before smoke with captured-frame proof |
+| [G266](G0266.md) | 2026-10-24 | Join bounded skid and smoke phase rows to actual captured frames |
+| [G265](G0265.md) | 2026-10-24 | Measure bounded foliage presentation dependencies without caching |
+| [G264](G0264.md) | 2026-10-24 | Remove authored PBR whitening from tyre skid material |
+| [G263](G0263.md) | 2026-10-24 | Read bounded ordinary L4 and S4 animation payloads |
+| [G262](G0262.md) | 2026-10-24 | Isolate skid material reflectance under Derby smoke |
+| [G261](G0261.md) | 2026-10-24 | Narrow paint parameter storage resolver without changing appearance |
+| [G260](G0260.md) | 2026-10-24 | Add bounded Detroit USA static crowd preview |
+| [G259](G0259.md) | 2026-10-24 | Trace source crowd animation timer and evaluation entry |
+| [G258](G0258.md) | 2026-10-24 | Bounded moving native DLAA fence coverage comparison |
+| [G257](G0257.md) | 2026-10-24 | Source spectator descriptors and flash selection |
+| [G256](G0256.md) | 2026-10-24 | Evaluate modest Detroit fence thickness and reject universal default |
+| [G255](G0255.md) | 2026-10-24 | Source spectator placements, USA assets and flash material contract |
+| [G254](G0254.md) | 2026-10-23 | Modest fence thickness control with preserved openings |
+| [G253](G0253.md) | 2026-10-23 | Bounded fence coverage control after live original comparison |
+| [G252](G0252.md) | 2026-10-23 | Remove residual stippled alpha from the front grandstand panel |
+| [G251](G0251.md) | 2026-10-23 | Restore source glass coverage on Detroit grandstand panels |
+| [G250](G0250.md) | 2026-10-23 | Derby owner report: bright skid curves through smoke and stadium ground controls |
+| [G249](G0249.md) | 2026-10-23 | Trace BMW material sorting properties into pre-compose queues |
+| [G248](G0248.md) | 2026-10-23 | Separate skid queue ordering from raster depth bias |
+| [G247](G0247.md) | 2026-10-23 | Reduced source smoke pass and world composition research |
+| [G246](G0246.md) | 2026-10-23 | Per-sprite smoke transparency ordering diagnostic |
+| [G245](G0245.md) | 2026-10-23 | Finite-capacity per-fragment smoke compositing experiment |
+| [G244](G0244.md) | 2026-10-23 | Bounded cross-route source surface specular diagnostic |
+| [G243](G0243.md) | 2026-10-23 | Cross-route smoke transparency diagnostic and owner defect triage |
+| [G242](G0242.md) | 2026-10-23 | Measure conservative grass bucket rejection |
+| [G241](G0241.md) | 2026-10-23 | Record crowd animation resource and evaluator research |
+| [G240](G0240.md) | 2026-10-23 | Restore source bumper model visibility policy |
+| [G239](G0239.md) | 2026-10-23 | Validate window ordering across heading and real camera/reset inputs |
+| [G238](G0238.md) | 2026-10-23 | Refresh moving player window sort centres without changing glass materials |
+| [G237](G0237.md) | 2026-10-23 | Audit actual transparent queue for rear glass contour |
+| [G236](G0236.md) | 2026-10-23 | Isolate rear contour from DLAA and other transparent ground cover |
+| [G235](G0235.md) | 2026-10-23 | Independent graphics backlog drafts from three parallel audits |
+| [G234](G0234.md) | 2026-10-23 | Bound rear outline depth changes against repeated stock rendering |
+| [G233](G0233.md) | 2026-10-23 | Pane-only Fresnel glass candidate without raw radiance overlay |
+| [G232](G0232.md) | 2026-10-23 | Refocus rear window outline on stock reflection baseline |
+| [G231](G0231.md) | 2026-10-23 | Owner rejects uniform glass haze; audit response assumptions |
+| [G230](G0230.md) | 2026-10-23 | Compare glass reflections under cloudy and mostly clear source skies |
+| [G229](G0229.md) | 2026-10-23 | Temporary awake lease and independent graphics research delegation |
+| [G228](G0228.md) | 2026-10-22 | Validate window response in bounded driving |
+| [G227](G0227.md) | 2026-10-22 | Preserve window damage material ownership with a render proxy |
+| [G226](G0226.md) | 2026-10-22 | Validate window response in native 4K and DLAA |
+| [G225](G0225.md) | 2026-10-22 | Isolate window environment response and transparent depth writes |
+| [G224](G0224.md) | 2026-10-22 | Investigate Lacetti windscreen outline through rear glass |
+| [G223](G0223.md) | 2026-10-22 | Record owner approval of Motion DLAA road continuity and car clarity |
+| [G222](G0222.md) | 2026-10-22 | Isolate directional motion blur from asphalt texture filtering |
+| [G221](G0221.md) | 2026-10-22 | Check partial road filtering at native4K and virtual300 |
+| [G220](G0220.md) | 2026-10-22 | Separate road RGB filter blend strength from its mip offset |
+| [G219](G0219.md) | 2026-10-22 | Evaluate L detail retention with modest RGB footprint filtering |
+| [G218](G0218.md) | 2026-10-22 | Publish decal comparison and validate the complete Donington lap |
+| [G217](G0217.md) | 2026-10-22 | Restore saved track decal alpha and remove opaque decal shadows |
+| [G216](G0216.md) | 2026-10-22 | Locate the owner's floating-strip screenshot from its matching play log |
+| [G215](G0215.md) | 2026-10-22 | Make depth-classified HDR contrast analysis reproducible |
+| [G214](G0214.md) | 2026-10-22 | Compare DLAA automatic and unity exposure on identical HDR inputs |
+| [G213](G0213.md) | 2026-10-22 | Integrate main F558 before further DLAA controls |
+| [G212](G0212.md) | 2026-10-22 | Optional DLSS frame-time diagnostic |
+| [G211](G0211.md) | 2026-10-22 | Depth-aware history classification around the moving car |
+| [G210](G0210.md) | 2026-10-22 | Owner rejects asphalt blur; return to temporal boundary diagnosis |
+| [G209](G0209.md) | 2026-10-22 | Identify final-hairpin floating road strips from source geometry |
+| [G208](G0208.md) | 2026-10-21 | Native4K asphalt pilot review and separate playable comparison |
+| [G207](G0207.md) | 2026-10-21 | Speed-based asphalt RGB filtering pilot with protected masks and markings |
+| [G206](G0206.md) | 2026-10-21 | Graphics worktree migration and shared surface parameter integration |
+| [G205](G0205.md) | 2026-10-20 | Tone-map contribution to paint colour |
+| [G204](G0204.md) | 2026-10-20 | Single-variable post-saturation paint control |
+| [G203](G0203.md) | 2026-10-20 | Isolated supported DLAA preset hints |
+| [G202](G0202.md) | 2026-10-20 | DLSS input contract and stationary convergence |
+| [G201](G0201.md) | 2026-10-20 | Paired pre/post DLAA HDR colour evidence |
+| [G200](G0200.md) | 2026-10-20 | Bounded DLAA history reset control |
+| [G199](G0199.md) | 2026-10-20 | Ordinary material-binding boundary and surface mip-bias controls |
+| [G198](G0198.md) | 2026-10-20 | Separate XML overrides from saved Lacetti material |
+| [G197](G0197.md) | 2026-10-20 | Original material fallback loader/packing and owner lamp acceptance |
+| [G196](G0196.md) | 2026-10-20 | Isolate red-body colour contributors |
+| [G195](G0195.md) | 2026-10-20 | Validate and separately deliver lamp section signals |
+| [G194](G0194.md) | 2026-10-20 | Opt-in lamp section rendering pilot |
+| [G193](G0193.md) | 2026-10-20 | Confirm constructor lamp caps and static emissive binding |
+| [G192](G0192.md) | 2026-10-20 | Execute original lamp fades on owned controls |
+| [G191](G0191.md) | 2026-10-20 | Join saved lamp part IDs to selected vertex-state lookup |
+| [G190](G0190.md) | 2026-10-20 | Dedicated lamp-group state and cracked-map linkage |
+| [G189](G0189.md) | 2026-10-20 | validation — Cover comparison stays experimental |
+| [G188](G0188.md) | 2026-10-20 | Preserve owner's smoke-compositing report for future effects stage |
+| [G187](G0187.md) | 2026-10-20 | Trace rear cover layers and narrow source-control assumptions |
+| [G186](G0186.md) | 2026-10-20 | Validate and separately deliver reflector pilot |
+| [G185](G0185.md) | 2026-10-19 | Implement isolated Lacetti reflector material pilot |
+| [G184](G0184.md) | 2026-10-19 | Reproduce owner asphalt patch and isolate temporal dependency |
+| [G183](G0183.md) | 2026-10-19 | Small lamp research before new road report |
+| [G182](G0182.md) | 2026-10-19 | Owner approves reflection direction; deliver separate comparison build |
+| [G181](G0181.md) | 2026-10-19 | Recovered build runs; 30FPS raw parity and bounded Fresnel linkage |
+| [G180](G0180.md) | 2026-10-19 | Recover after owner-reported Windows bugcheck/reboot |
+| [G179](G0179.md) | 2026-10-19 | Combined resource checks pass; repair driving CLI gate and qualify repeat parity |
+| [G178](G0178.md) | 2026-10-19 | Native paint-layer controls pass; preserve visual damage across material types |
+| [G177](G0177.md) | 2026-10-19 | Keep animated stands/grading deferred; isolate paint environment lobe |
+| [G176](G0176.md) | 2026-10-19 | Owner reflection report: separate missing local input from paint response |
+| [G175](G0175.md) | 2026-10-19 | Pending one-time cache reseed after next upstream integration |
+| [G174](G0174.md) | 2026-10-19 | Make the graphics task index explicit |
+| [G173](G0173.md) | 2026-10-19 | Localize antenna trail; source-correct motion-only pilot |
+| [G172](G0172.md) | 2026-10-19 | Owner accepts native DLAA clarity |
+| [G171](G0171.md) | 2026-10-19 | Integrate F455/F456 without touching primary checkout |
+| [G170](G0170.md) | 2026-10-19 | Mixed-edge pilot passes GPU/parity/full lap, stays optional |
+| [G169](G0169.md) | 2026-10-19 | DLAA full lap verified; mixed-edge dry material pilot starts |
+| [G168](G0168.md) | 2026-10-19 | Separate playable DLAA build delivered;4K and300FPS controls pass |
+| [G167](G0167.md) | 2026-10-19 | Native DLAA executes; merged core and raw velocity checks pass |
+| [G166](G0166.md) | 2026-10-19 | Optional native DLAA source integration checks pass |
+| [G165](G0165.md) | 2026-10-19 | Wire opt-in raw temporal input capture |
+| [G164](G0164.md) | 2026-10-19 | Integrate upstream F454 into the graphics worktree |
+| [G163](G0163.md) | 2026-10-19 | Road/paint material update delivered; DLAA next |
+| [G162](G0162.md) | 2026-10-19 | Final material runtime matches selected native controls |
+| [G161](G0161.md) | 2026-10-19 | Selected-coat movement and shared RGBA path pass |
+| [G160](G0160.md) | 2026-10-19 | Select moderate paint coat from native controlled views |
+| [G159](G0159.md) | 2026-10-19 | Candidate native legacy/default parity and CLI guards pass |
+| [G158](G0158.md) | 2026-10-19 | Road-mask full lap and moving samples pass |
+| [G157](G0157.md) | 2026-10-19 | Road lap and exact-source lacquer comparisons running |
+| [G156](G0156.md) | 2026-10-19 | Bounded lacquer controls for one-variable comparisons |
+| [G155](G0155.md) | 2026-10-19 | Prepare track-only road-mask default |
+| [G154](G0154.md) | 2026-10-19 | Check asphalt/paint balance against source evidence |
+| [G153](G0153.md) | 2026-10-19 | Matte-ground graphics build delivered |
+| [G152](G0152.md) | 2026-10-19 | Ground candidate accepted; DLAA native bindings compile |
+| [G151](G0151.md) | 2026-10-19 | Matte ground GPU/drive validation; private DLAA SDK prepared |
+| [G150](G0150.md) | 2026-10-19 | Ground repro and bounded F438 validation |
+| [G149](G0149.md) | 2026-10-19 | Owner driving feedback: dry ground first, AA next |
+| [G148](G0148.md) | 2026-10-19 | Integrate bounded F438 source without delaying verified prototype |
+| [G147](G0147.md) | 2026-10-19 | Verified F427 graphics prototype delivered |
+| [G146](G0146.md) | 2026-10-19 | F427 graphics runtime accepted, delivery next |
+| [G145](G0145.md) | 2026-10-19 | Combined F427 source checks pass; executable acceptance pending |
+| [G144](G0144.md) | 2026-10-19 | Optional curb comparison launcher, guarded and tested |
+| [G143](G0143.md) | 2026-10-19 | Preserve remote F416–F427 in isolated graphics source |
+| [G142](G0142.md) | 2026-10-19 | Surface pipeline checkpoint ready for branch publication |
+| [G141](G0141.md) | 2026-10-19 | Reproducible edge preparation and driving/fallback validation |
+| [G140](G0140.md) | 2026-10-19 | Diagnose curb seam and test a local RGB transition |
+| [G139](G0139.md) | 2026-10-18 | CSP/PP research and reflection status |
+| [G138](G0138.md) | 2026-10-18 | Locate actual curb surface for matched native captures |
+| [G137](G0137.md) | 2026-10-18 | Preserve concurrent F414/F415 event-menu and pad work |
+| [G136](G0136.md) | 2026-10-18 | Explicit surface RGB contract passes CPU checks, GPU acceptance pending |
+| [G135](G0135.md) | 2026-10-18 | Verified stamped graphics delivered; F413 source checks complete |
+| [G134](G0134.md) | 2026-10-18 | Stamped image controls match; diagnose variable-clock full-lap comparison |
+| [G133](G0133.md) | 2026-10-18 | Preserve F405–F413 beside the bounded graphics pilot |
+| [G132](G0132.md) | 2026-10-18 | Completed surface checks; correct missing build label before delivery |
+| [G131](G0131.md) | 2026-10-18 | Surface pilot passes native4K, movement and a complete lap |
+| [G130](G0130.md) | 2026-10-18 | Optional source-alpha road F0 pilot, not delivered |
 | [G129](G0129.md) | 2026-10-18 | Verified graphics source published to main |
 | [G128](G0128.md) | 2026-10-18 | Latest source checks and packed road-lighting audit |
 | [G127](G0127.md) | 2026-10-18 | Combined paint build installed; preserve incoming Android/robustness work |

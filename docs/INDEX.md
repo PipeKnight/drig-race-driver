@@ -154,15 +154,17 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [CAR_LIVERY_DECALS.md](CAR_LIVERY_DECALS.md) Source car livery decals and missing race number — Owner noticed the Lacetti roof differs from the original-game recording: the prototype has a conspicuous empty white …
 - [CAR_SHADER_MASKS.md](CAR_SHADER_MASKS.md) Original car normal and scratch masks — Original program bytecode/disassembly and metadata remain in ignored `local/graphics/`; source code in `tools/` is …
 - [CLEARCOAT_PREPASS.md](CLEARCOAT_PREPASS.md) Clearcoat normal-prepass investigation — 19.1 pinned.
+- [CSP_GRAPHICS_RESEARCH_RU.md](CSP_GRAPHICS_RESEARCH_RU.md) CSP и PP-фильтры: ориентир для графики GRID — Исследовано 18 октября 2026.
 - [DYNAMIC_PROPS_RESEARCH.md](DYNAMIC_PROPS_RESEARCH.md) Dynamic and breakable trackside props (research) — Static research only: purchased Donington data (`route_0/objects.ens`, `objecttypes.pssg`, …
 - [GRAPHICS_DEFECTS.md](GRAPHICS_DEFECTS.md) Graphics defects and acceptance checks — Owner observations are evidence of defects, not proof of their cause.
 - [GRAPHICS_INTEGRATION.md](GRAPHICS_INTEGRATION.md) Graphics / engine integration — Owner requested periodic careful merges into main, preservation of the recovered F269 stash branch, and portable …
 - [GRAPHICS_QUALITY_CONTRACT.md](GRAPHICS_QUALITY_CONTRACT.md) Visual quality and future renderer interfaces — Owner direction, 15 October 2026: preserve GRID 2008 atmosphere while improving the actual scene substantially.
 - [GRAPHICS_REMASTER.md](GRAPHICS_REMASTER.md) Lacetti / Donington graphics workstream — Current owner priority (15 October 2026): **image quality first; optimize later**.
-- [GRAPHICS_ROADMAP_RU.md](GRAPHICS_ROADMAP_RU.md) План улучшения графики GRID — Обновлено 18 октября 2026 по указанию владельца: **сначала красивая картинка, оптимизация позже**.
+- [GRAPHICS_ROADMAP_RU.md](GRAPHICS_ROADMAP_RU.md) План улучшения графики GRID — Проба углового блеска асфальта G309 даёт более светлый отклик под низким углом, сохраняя побайтно прежний вид сверху.
 - [GRASS_RENDERING.md](GRASS_RENDERING.md) Grass cutout/shading diagnosis — 17 October2026, owner-reported black dots/strokes in native4K far-view crops.
 - [GRID_IMAGE_FORMATION.md](GRID_IMAGE_FORMATION.md) Original GRID image formation: Donington research — Purchased inputs are read-only.
 - [GROUND_EFFECTS_RESEARCH.md](GROUND_EFFECTS_RESEARCH.md) Ground effects: skid marks, wheel kick-up and ground cover — Recorded 15 October 2026 (F306).
+- [LACETTI_CLEARCOAT_STUDY.md](LACETTI_CLEARCOAT_STUDY.md) Lacetti clearcoat and road-mask follow-through — Owner requests continued graphics work.
 - [LACETTI_GRAPHICS_MATERIALS.md](LACETTI_GRAPHICS_MATERIALS.md) Lacetti material response — 19.1.
 - [LOCAL_REFLECTIONS.md](LOCAL_REFLECTIONS.md) Local reflection experiment — Existing source sky IBL remains the verified default.
 - [SCENE_HDR_PROBE.md](SCENE_HDR_PROBE.md) Static HDR scene reflection probe — Static scene capture, HDR readback and recognizable offscreen reflection are verified below.
@@ -249,6 +251,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [CQTC_BOUNDARY_CONTACTS.md](CQTC_BOUNDARY_CONTACTS.md) Donington boundary contacts in the driving prototype — F240, 12 October 2026.
 - [CQTC_BOUNDARY_GEOMETRY.md](CQTC_BOUNDARY_GEOMETRY.md) Donington CQTC boundary geometry (F239) — F240 subsequently validates contact generation and joins this layer to the optional driving mode: [boundary …
 - [DONINGTON_BODY_CONTACTS.md](DONINGTON_BODY_CONTACTS.md) Experimental packed-track body contacts — This records the F237/F238 packed-only milestone.
+- [DRY_GROUND_AND_AA.md](DRY_GROUND_AND_AA.md) Dry ground and anti-aliasing follow-up — log.
 - [FRESH_PACKED_CONTACTS.md](FRESH_PACKED_CONTACTS.md) Fresh Rust packed body-contact generation (F234) — `packed_contacts::calculate` now composes source moving-mesh bounds and packed candidate traversal with fresh …
 - [GEOMETRIC_CONTACT_HANDOFF.md](GEOMETRIC_CONTACT_HANDOFF.md) Geometric contacts into physical solving (F220) — F221 extends this handoff to actual Lacetti/Donington packed-track contacts: [packed mesh …
 - [GRID_POPULATION.md](GRID_POPULATION.md) Source chunk-name grid population (F092) — `grid-world::grid_population` reconstructs grid cell identities from canonical chunk names and their supplied order.
@@ -314,6 +317,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [CAR_JOB.md](CAR_JOB.md) Registered car-job integration — F194 encloses this job in the original single-car manager, including real direct dispatch/completion wait, basis repair …
 - [CAR_MANAGER.md](CAR_MANAGER.md) Single-car manager and frame ordering — F195 extends this inactive-producer checkpoint with verified [active wheel contact …
 - [COUPLED_TYRE_STEP.md](COUPLED_TYRE_STEP.md) Coupled active tyre response (F101) — The new `tyre_response::apply` consumes state after normal-contact processing, per-wheel tyre inputs/normal impulses, …
+- [CURB_SURFACE_SEAMS.md](CURB_SURFACE_SEAMS.md) Donington curb/asphalt seam investigation — Current graphics-roadmap surface task.
 - [FORCE_FEEDBACK.md](FORCE_FEEDBACK.md) Force feedback and rumble (GameFFB) — How the original GRID drives wheel force feedback and XInput pad rumble, and how DRIG ports it (backlog row 22).
 - [FORCE_MECHANICS.md](FORCE_MECHANICS.md) Production surface mechanics inputs (F104) — Recorded 8 October 2026.
 - [FORCE_VIEW.md](FORCE_VIEW.md) Temporary vehicle force view — Recorded 8 October 2026 (F114).
@@ -367,5 +371,19 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 
 ## Other
 
+- [ANTENNA_TEMPORAL.md](ANTENNA_TEMPORAL.md) Thin antenna temporal reconstruction — 19October2026.
+- [ASPHALT_PAINT_REFLECTION_CHECK.md](ASPHALT_PAINT_REFLECTION_CHECK.md) Asphalt and Lacetti reflection balance — Owner asks to verify whether asphalt is too mirrorlike and the car needs stronger reflections, rather than tune solely …
+- [ASPHALT_TEMPORAL_DETAIL.md](ASPHALT_TEMPORAL_DETAIL.md) Moving-asphalt detail discontinuity with DLAA — 19 October2026.
 - [CAR_LOD.md](CAR_LOD.md) Car LOD selection and car shadow casters — How the original picks a level of detail for each car and which cars draw into the shadow maps.
+- [CAR_REFLECTION_COMPARISON.md](CAR_REFLECTION_COMPARISON.md) Car reflection comparison — owner report, 19 October 2026 — Owner supplied a stationary damaged Lacetti near tyres/gravel and reports flat pink paint, no recognizable …
 - [COCKPIT.md](COCKPIT.md) Cockpit: mirror, steering wheel, gauges and driver (camera session, 27 October 2026) — The head-cam draws the car's interior file `int_<stem>.pssg` (F618, [CAMERA_VIEWS.md](CAMERA_VIEWS.md) "Own car per …
+- [CROWD_ANIMATION_RESEARCH.md](CROWD_ANIMATION_RESEARCH.md) Crowd animation resources and packet evaluation — Crowd animation is researched at the resource, local timer and ordinary packet-dispatch level; the ordinary playable …
+- [DLAA_INPUT_CONTRACT.md](DLAA_INPUT_CONTRACT.md) DLAA input contract follow-up — G202, 20 October2026.
+- [DLAA_PRESET_RESEARCH.md](DLAA_PRESET_RESEARCH.md) Supported DLAA preset hint experiment — G203, 20 October2026.
+- [EDGE_ATLAS_DRY_RESPONSE.md](EDGE_ATLAS_DRY_RESPONSE.md) Optional dry response in mixed edge atlases — 19October2026.
+- [LAMP_REFLECTOR_RESEARCH.md](LAMP_REFLECTOR_RESEARCH.md) Lamp reflector material research — Initial19 October2026 static purchased-resource observations.
+- [NATIVE_DLAA.md](NATIVE_DLAA.md) Optional native-resolution DLAA — 19 October2026.
+- [PER_VIEW_FOLIAGE.md](PER_VIEW_FOLIAGE.md) Per-view foliage in shadows, reflections and temporal inputs — 19October2026.
+- [STATIC_OBJECT_MATERIALS.md](STATIC_OBJECT_MATERIALS.md) Static object material coverage — Static objects retain a material-instance to source shader-family association when loaded from `objects.pssg`.
+- [TEMPORAL_AA_DIAGNOSTICS.md](TEMPORAL_AA_DIAGNOSTICS.md) Temporal-AA input audit (implementation design, not a completed fix) — 19 October2026.
+- [TEMPORAL_COLOUR_AUDIT.md](TEMPORAL_COLOUR_AUDIT.md) Paired HDR temporal-colour audit — G201, 20 October 2026.

@@ -193,7 +193,33 @@ contact sheets `local/sky/sheet-horizon.png`, `sheet-lemans-day.png`, `pair-*.pn
 - `land.pssg` is drawn only in enhanced, which stays limited to Donington.
 - Normal/reflection maps of the track_surface, track_surface_reflective and dxt5nm groups.
 
-## 8. The route's own road: `routesplit.pssg` (F607)
+
+## 8. Background ordering with transparent depth writers (G272)
+
+The independently authored source-sky material must draw before other transparent
+geometry. Installed Bevy0.19.1 sorts `Transparent3d` ascending by view-space Z plus
+material depth bias. The previous positive1e8 bias contradicted that intent. Frozen
+crowd flash cards, which retain source depth writing even at zero alpha, exposed
+black rectangles: the late sky at reverse depth0 could not pass their written depth.
+The bias is now negative1e8. Sky texture/tone/fragment depth and flash blending/depth
+remain unchanged. A regression uses the actual material and Bevy sort-key calculation.
+
+The corrected bounded Detroit baseline three-arm render has exact Off/Control RGBA;
+all10,952 changed Frozen pixels only brighten RGB, with no alpha changes. Native
+review confirms the sky holes disappear. This demonstrates the diagnosed ordering
+interaction in one view. It does not establish enhanced scene-probe compatibility,
+all-track smoke behavior or source renderer parity. The separate baseline Lacetti
+glass regression and private failures are recorded in G272.
+
+G272 baseline glass follow-up: historical G271835613... and corrected84d84... both
+render the same authored Donington Lacetti side view successfully,120samples each;
+decoded1920x1080 RGBA matches exactly. Root native review finds no new glass/sky
+edge defect. This is a qualified different-build comparison with new flash paths
+defaultOff, not enhanced/DLAA/scene-probe validation. The first attempted old-exe
+comparison refused a changed hardlink archive hash before GPU; that failure is
+preserved and the lost archive is not represented as the original binary.
+
+## 9. The route's own road: `routesplit.pssg` (F607)
 
 The owner's Washington route 0 screenshot (2026-10-27) showed the main straight partly as the
 background colour. Cause [V]: every route folder ships `route_N/routesplit.pssg` (62 files) beside the

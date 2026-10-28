@@ -190,6 +190,8 @@ mod tests {
             parts: vec![],
             textures: BTreeMap::from([("car0/lac_main_m1.tga".to_owned(), source())]),
             bindings: BTreeMap::new(),
+            decal_materials: Default::default(),
+            object_glass_materials: Default::default(),
             center: Vec3::ZERO,
             radius: 1.,
             track: true,

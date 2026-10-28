@@ -52,3 +52,103 @@ There is no TNormalMap binding among these94 materials and no normal sampler in 
 Private materials-livery01/track-surface-alpha-audit01.py/.json and track-surface-alpha-atlas01.png retain hashes, exact per-texture alpha statistics, bindings and inspected RGB/alpha contact sheet. The script uses the existing independent PSSG survey and Pillow12.3.0 decoder; no assets copied into public source. Base-only statistics do not validate all mip contents or original sampler state. Existing packed masks must survive any future RGB upscale; the opaque body packager correctly rejects these images and must not be used to erase alpha.
 
 Next bounded implementation: an explicit opt-in source-alpha surface reflectance adaptation, using the existing samplers and mixed alpha, with white-control/off image parity, native4K road/curb comparisons, RGBA fallback and moving/full-lap validation before changing launchers. Keep the original Phong/Fresnel/direct-light algebra separate from the authored Bevy response; no invented height map, wet-road sheen or roughness-from-colour shortcut.
+
+
+### Off-by-default surface F0 control
+
+`--surface-specular off|source-base|white-control` is a worktree pilot; defaults stay off and no launcher selects it. It requires an enhanced track scene and source layers. Existing material controls.w carries the mode without new textures/samplers or mobile binding pressure. Source-base multiplies the material reflectance by sqrt(clamp(mixed diffuse alpha,0,1)) AFTER sampling and blending, so authored GGX dielectric F0 is weighted by that alpha. White-control uses1 through the same shader branch, requiring rendered parity with off. Unlike the paint texture pilot this path needs no KHR texture half-factor compensation because it edits the already-decoded material reflectance directly. Colours, roughness, opacity, macro/skid composition and geometry stay unchanged; all uploads still use texture_upload::image/image_linear.
+
+Both examined source programs weight direct Phong specular by mixed alpha. Our GGX adaptation also changes the base environment response and does not reproduce that original light separation, Fresnel or saved SpecScale. This distinction must be judged with matched native4K images; CPU compilation alone does not establish shader validity or visual quality. The198 application tests pass (surface-specular-tests01.log); the final validation guard was edited while that compilation was active, so subsequent Clippy/build and negative CLI checks must cover the exact committed source. GPU validation and source-stamped candidate build pending; current installed graphics binary remains6aec3a9.
+
+
+### Native/moving pilot acceptance at5b5d408
+
+Release4m20s/SHA1f858a1bfdb91445da1097ebcd37bcae25c1cf1e73c9d0543afb334f2de2ae24. All4 native3840x2160 captures are nonblank/error-free. Off and white-control equal each other AND accepted6aec3a9 source-base paint image bytes exactly. Source-alpha changes mean4.396164byte/max84 versus white, chiefly visible as less uniform pale road sheen; do not attribute every changed pixel without a material-ID mask. ForcedRGBA uploads0BC and559images, full-image mean0.104973byte/max150 versus BC, not pixel parity/phone validation. Comparison sheet inspected; no source texture replacement or artificial normal map.
+
+Motion1200ticks/one opponent has30unique1080p virtual30FPSframes, request clock error2.05ns, all4physical exit records equal6aec control. First/last frames inspected. Native4K6500tick run completes1valid89.955257484second lap; final4physical/handling/deformation/lap records equal6aec control exactly except wallclock. Finalimage inspected. Exact committed-source negative CLI checks reject unknown mode, baseline and single-layer usage. Full675workspace tests/12harnesses0failed0ignored and all-target feature Clippy3.01s/default25.35s pass. Private surface-specular-* captures/logs/validation JSONs; no original shader/asset distribution.
+
+A separate `Play GRID Graphics Surfaces.cmd` comparison wrapper is being prepared; normal graphics remains off. Actual extracted CMD checks pass3cases: old executable omits unsupported flag, new opt-in selects it, new default omits it. Delivery/source publication still pending completed pre-push stress validation.
+
+Next texture work must extend the contract deliberately: existing override V1 accepts opaque RGB candidates and scopes used keys to objects/cars; it rejects road keys rather than silently replacing layered surfaces. The surface extension owns a separate CPU texture map re-read from the purchased package. Road RGB overrides will require an explicit alpha-preserving version and routing through that extension, retaining shared post-device uploads and atomic exact-source checks. Do not relax V1's opaque-alpha validation or mistake a general scene texture replacement for layered-surface delivery. The existing asphalt x4plus pilot was already rejected for smoothing; this audit does not reverse that decision.
+
+
+### Preserve source alpha while replacing RGB
+
+Offline curb03 proof produces a1024x2048 BGRA carrier/full12mips from256x512 BC3/full10mips. Candidate levels2..11 copy the corresponding authored alpha mip exactly; levels0/1 use deterministic periodic integer bilinear of the original base alpha. Candidate RGB bytes do not change during this attachment. The original DDS is immutable; constant/wrapping-edge invariants and all10mip byte comparisons pass. This is private preparation, not an engine-ready override or a recovered normal/height map. Neural RGB crack/grain changes are still an aesthetic candidate only.
+
+Next implementation should expose an explicit surface-RGB-only override contract with purchased-source exact-byte guards, per-bound-diffuse key checks, bounded atomic staging and source alpha restored by the runtime; existing opaque V1 stays strict. The layered extension owns its own CPU bytes and must consume that validated replacement before shared post-device upload. Do not add extra GPU mask samplers merely to preserve data already present in the source packed diffuse.
+
+
+### Experimental runtime surface-RGB contract
+
+`--surface-rgb-overrides PRIVATE.tsv` accepts `GRID_SURFACE_RGB_OVERRIDES_V1` followed by key, exact purchased-reference DDS and opaque RGB-carrier DDS, separated by tabs; paths resolve relative to the private manifest. It requires enhanced non-collision source track layers. Only first/second diffuse keys actually used by selected source draws are eligible; macro/skid maps and car/object overrides keep their existing paths. RGB carriers must be complete BGRA8 at exactly2x/4x matching aspect, within existing private file/batch bounds.
+
+The runtime replaces carrier alpha with its canonical decoded source BC3 alpha for every aligned authored mip; two or one larger levels use periodic integer bilinear, any absent small tail is explicitly derived. Candidate RGB/header bytes stay unchanged. This preserves source data according to the shared CPU decoder, not a claim of exact compressed-GPU interpolation or a new source-authored high-resolution mask. All rows stage before mutation, including transformation failures; existing opaque V1 validation stays strict. No extra GPU texture/sampler bindings or pre-device image creation.
+
+Four focused CPU tests pass, including the purchased curb and atomic late-row failure; existing V1 regression passes. First filesystem test failed on a missing default profile directory in crate cwd; corrected by an explicit canonical test root under ignored local/, preserving the failed log. Runtime GPU/native4K/motion validation remains pending. Prepared neural curb RGB is only a candidate; inferred cracks/lost grain were not accepted as a default quality upgrade.
+
+
+## Cross-route portability boundary (Detroit audit, diagnostic pending)
+
+The source-layer extension now dispatches six families: `track_surface_simple`,
+`track_surface`, `track_surface_reflective`, `track_infield`,
+`track_infield_dxt5nm` and `track_infield_wsm`. It attaches on baseline as well as
+enhanced source-layer track scenes. This reconstructs layer composition; it does
+not establish that every route has the accepted Donington material response.
+
+The source-alpha base-F0 adaptation defaults on only for eligible enhanced scenes.
+Baseline defaults to `off`; the enhanced preset is currently restricted to Lacetti
+and Donington route_0. Therefore ordinary other-track runs do not automatically
+inherit that specular correction. A default-off explicit diagnostic now
+separates `--surface-specular` eligibility from the enhanced-only surface pilots;
+it has no accepted cross-route GPU result or default promotion at this audit.
+Keep the enhanced restriction for unrelated systems rather than unlocking the
+entire preset to test one material input.
+
+The authored dry-ground response (roughness1, reflectance0.25) applies to the
+selected infield shader families and eight exact Donington terrain texture names.
+Those names bridge terrain layers used under road-surface shaders. They do not
+classify Detroit textures. Ground-edge U bands and speed-dependent RGB filtering
+also remain separate optional Donington-atlas pilots, not portable surface fixes.
+Land geometry is still appended only by enhanced scenes.
+
+A read-only inventory of the purchased Detroit shared `tracksplit.pssg` finds102
+`track_surface_simple`,14 `track_surface`,34 `track_infield`,5 `decal` and1
+`batched_track` saved material instances. Thus150 of156 package instances belong
+to accepted layer families. These are **package instance counts**, not selected
+route8/9 draw counts or visible screen coverage. Actual attachment logs must show
+available/attached/mismatched draws, since material identity and vertex-count
+checks can retain generic materials. Detroit `land.pssg` separately contains5
+infield instances and1 water instance; baseline does not append it.
+
+Detroit source diffuse alpha is far below white: base-level means are2.200569/255
+for `det_track1_d.tga` and1.825226/255 for `det_track2_d.tga`. Under baseline `off`
+that control does not weight dielectric F0. This identifies a plausible sheen
+source, not a measured per-pixel correction: actual filtered alpha, vertex blend,
+light and macro occlusion still matter. The adaptation also changes environment
+response and is not the original direct Phong implementation.
+
+`det_infield1_d` through `det_infield5_d` each occur under both infield and simple
+surface families. Current dry classification therefore differs by family even for
+the same saved diffuse texture. However Detroit infield instances also bind road
+and rumble-strip textures: shader names do not prove all texels are grass/earth.
+Do not broaden dry classification to every surface or mixed edge atlas without
+reviewing texture content and the actual draw. All14 Detroit `track_surface`
+instances save normal-map bindings that this extension does not reconstruct.
+Saved PhongPower/SpecScale vary between5/3 and10/1; they do not uniquely establish
+GGX roughness or recovered runtime uniform packing.
+
+The smallest next comparison keeps baseline, route8/stk, source layers, camera,
+lighting, sky and all other settings fixed: explicit `off` versus `white-control`
+must match; then compare `white-control` versus `source-base`. The route's source
+sky and saved sky tone are supported on baseline; this does not enable source IBL.
+Validate roads, standalone ground and mixed edges separately before extending
+classification or promoting any cross-route default. No global roughness,
+exposure, grading, metallic or grass-density change is justified by this audit.
+
+Private evidence: `local/handoff/surface-portability.md` and
+`local/handoff/drafts/surface-portability/detroit-inventory.json` (source hashes,
+bindings and base alpha statistics). No asset or shader binary is public.
+
+
+Known shared Detroit grass-layer follow-up (G244): a CPU-picked Grass_track patch and matched baseline1080 Off/White/Source captures establish a small mask response on actual textured terrain. Off/White images are exact; central confirmed-terrain rectangle mean absolute Source difference1.744RGBbytes,max8. It already receives the dry-ground roughness adaptation, so this does not establish a complete shiny-ground fix. Equivalent diffuse textures under track_surface_simple can miss the Donington-only standalone dry classifier; masks and classification are separate mechanisms. The remote test patch is outside authored grass-cover placements and far from the Derby stadium, so neither grass density nor the owner's exact location is validated. All3runs share a missing Detroit ground_cover.pssg warning; no original fallback or missing-asset repair inferred.

@@ -1260,6 +1260,127 @@ Tyre smoke was already streamed in place (F392/F394), and source foliage is opt-
   frame (`ground_detail::present`, log `log-20261026-125712.txt`). Main thread about 1.5–2.5 ms
   faster, render thread about 1–1.5 ms. Not measured on the phone.
 
+## Dedicated graphics rendering work (G242, 23 October 2026)
+
+The graphics worktree now has a dedicated grass/rendering-performance agent, with a separate static-environment audit. Physics/tick/AI and generic mesh streaming remain outside this task. Current mesh/material sharing and F392 buffer reuse are already implemented; they must not be presented as new savings. Entity/source draw-record counts are not measured GPU draw calls.
+
+First candidate: [conservative grass bucket rejection](GRASS_RENDERING.md#g242-conservative-cpu-bucket-evaluation-23-october-2026), preserving the existing quality profile. Build/test and six paired timing runs completed: the candidate increased median CPU grass cost in all three pairs and was rejected. Production grass source is restored exactly; no FPS improvement is claimed. A second unapplied candidate shares immutable tree source arrays to reduce duplicate allocation, with no promised frame-time gain. Source forest sheets, shadow range/resolution, grass density and reflection update cadence are retained. More ambitious LOD/batching/per-view changes require separate source/visibility/temporal evidence and measured bottlenecks.
+
+
+## Bounded tree-facing dependency census (G265, 24 October 2026)
+
+An opt-in `GRID_FACING_CENSUS=timing:N|keys:N` samples 1..3600 calls of tree-facing presentation. It retains every existing vertex expansion, stream copy and upload; no position cache, visibility reduction or quality change is implemented. With the variable absent, the census is disabled. Invalid values print an explicit disabled message. An exhausted budget is not evidence of a usable scene sample.
+
+Timing records an inclusive wall CPU span from the camera query through the final stream write, including diagnostic work and any stream-lock wait. It is neither GPU time nor display FPS. Key mode adds a bounded 16,384-entity metadata map. Spherical keys use the exact six float32 words of camera right/up; cylindrical keys use eye X/Z. Signed zero is distinct. Nonfinite inputs, reentry, changed components and replaced mesh IDs cannot count as equal-key samples. Counts include presented objects that may later be culled, rather than visible GPU draws.
+
+Reports at call240, multiples of600 and the final budget retain cumulative counts and time. A budget360 with benchmark120 covers its 240 warmup calls and following120 calls; subtract cumulative boundaries for the later interval. A short run without the final report is incomplete. Equal keys indicate potential reuse eligibility, not a cache hit or measured saving. Camera jitter can eliminate practical repeats, so a static result alone cannot justify a driving optimization.
+
+The default path gains a Local lookup and query metadata; diagnostic key bookkeeping also costs CPU. Compare uninstrumented parent, instrumented Off, Timing and Keys with repeat controls before attributing timings. Existing shadow/reflection geometry must still be uploaded even when future keys repeat; first allocation and replacement cannot use unexpanded source positions. The current ordinary main-camera adaptation is also not original per-pass billboard parity. Initial compilation and rendered controls are recorded separately in G265; no performance improvement is claimed here.
+
+
+G265 validation passes 323 app tests and Clippy, followed by a fresh baseline-feature build. Eight common-profile static controls compare parent / Off / Timing / Keys / Keys / Timing / Off / parent. The shared fixture explicitly removes the old optional paint, lamp and glass pilots and uses unfiltered1280x800 with the same source lighting, covered trees, static probe and authored camera. It is a CPU fixture, not a replacement DLAA quality profile.
+
+All eight final decoded images match exactly. Actual later120-call counts give 577 spherical and three cylindrical instances per call, with100% potential equal-key eligibility and no invalid samples. Timing-only inclusive CPU work averages0.978/0.981ms; Keys averages1.044/1.038ms. Main wall interval means are16.961..17.008ms, not GPU timestamps or display FPS. These are observations of the unchanged work, not savings. Driving key reuse and an actual cache remain unverified.
+
+A preceding identical cohort also passed image neutrality, but its timing was rejected: a private PowerShell7 build-lock wrapper consumed CPU while mishandling a parsed DateTime queue record. Its original results remain intact. The confirmed loop was stopped, the standalone job completed using documented Windows PowerShell5, and the eight controls above were repeated afterwards. No shared build-lock tool or engine behavior was changed to repair that private setup. Exact source/executable pins, both cohorts and separate root admissions are retained privately in `local/graphics/facing-census01/`.
+
+
+## Moving tree-facing key control (G268)
+
+Two controls use the pinned published G265 executable and immutable source objects, not the later working source. Both use the same new1280x800 unfiltered driving fixture, explicit autopilot and source lighting, with census absent versus Keys360. Both processes finish successfully, actual sampled simulation/ground traces and request metadata agree, and all60 motion PNGs plus the final decoded image are exactly equal. Root reviewed the native first/final views. This is not native DLAA quality acceptance.
+
+Reports240 and360 are bracketed by actual ticks497..498 and747..748. The sampled car moves147.212m between endpoints, with speeds33.128..57.298m/s and no disabled/terminal state. These are log tick brackets, not screenshot Extract/readback timestamps. In the later120 calls, all69,240 spherical and360 cylindrical instance visits change their exact keys. None repeat; there are no nonfinite, cold, changed-component/mesh or untracked samples. The observed stream work represents15,020,640 spherical and701,280 cylindrical vertices, not visible GPU draw counts.
+
+The stationary100% potential reuse from G265 therefore does not justify an exact-key cache for this moving interval. No cache or performance improvement is implemented. Future work should reduce expansion/upload work while preserving geometry, rather than quantizing keys or reducing quality without evidence. The controls are not a timing benchmark.
+
+The first Off renderer also completed successfully, but its private parser incorrectly expected the adjacent float32 reciprocal rather than the actual Duration-to-Bevy serialized timestep. That failure remains intact. A one-line exact-token correction passes23 CPU/read-only controls before the fresh pair above; no tolerance was introduced. Private provenance and both attempts remain in `local/graphics/facing-driving01/`.
+
+
+G270 separately checks a possible exact-input remap against the four actual Donington spherical sources. All844 complete centre.xyz/UV1.xy raw-float-bit tuples are distinct. Weighted577 placements require125,172 expansions per call, agreeing with the census. Centres repeat, but offsets distinguish the full inputs; placements also have different inverse transforms/scales. This remap would eliminate no expansion in this fixture, so it is not implemented. The existing survey/stream readers are reused and game bytes stay private. No new render, performance measurement or all-track claim follows.
+
+### Current all-view eligibility audit (G273)
+
+The existing tree producer runs in `Update`, before Bevy0.19.1 computes current
+visibility. Reading `ViewVisibility` there could use a previous-frame or initial
+hidden bit and miss geometry when it returns to view. A main-camera frustum alone
+also omits reflection views and shadow-only casters. Trees keep their expanded
+bounds and cast shadows in the current app.
+
+A current all-view signal is available later in `PostUpdate`, after
+`VisibilitySystems::MarkNewlyHiddenEntitiesInvisible`: camera checks and deferred
+light/shadow marking precede that final step. Per-camera `VisibleEntities`,
+`CascadesVisibleEntities` and point/spot visibility lists can explain membership.
+This is conservative render eligibility, not measured draws or fragment coverage;
+`NoCpuCulling` can make it broader still. Moving the producer or skipping its
+writes has not been implemented or validated.
+
+The scene-reflection probe retains six active layer0 cameras in moving mode.
+After initial readiness, its six-face copy batch is submitted each render
+invocation; the first/every120 log frequency is not update cadence. Initial
+60-frame/pipeline/image copy guards do not pause the cameras. Static mode removes
+capture cameras after the first copied cube; sky-only mode does not install them.
+Active cameras indicate scheduling eligibility, not proof of completed views or
+draw counts. Their broad union may leave little tree work to exclude.
+
+The next useful check would be a bounded observer-only census after final
+visibility, retaining every existing expansion/write and counting main, probe,
+shadow-only, hidden and newly visible trees. First-visible/replaced meshes must
+still receive current full bytes through F392 streaming; an absent GPU allocation
+cannot be treated as initialized. No runtime visibility census, safe skip
+population or performance gain is established. Cached source LOD distances exist,
+but original shadow/environment LOD or exclusion policy remains unproven; see
+[per-view foliage](PER_VIEW_FOLIAGE.md). No quality or probe-cadence reduction is
+proposed.
+
+
+## Current all-view foliage observer (G275, 24 October 2026)
+
+`GRID_FACING_VISIBILITY=1..360` enables a bounded observer after final current-frame
+camera and shadow visibility. The producer retains every original expansion and
+stream write. It joins entity, mesh handle, component change ticks, asset-event
+epoch, producer/frame/camera state and current main/probe/other/shadow membership.
+Missing, contradictory, changed or incomplete observations are explicitly unknown.
+A main-world asset-event epoch does not establish GPU allocation or upload success.
+The metadata allocations and visibility-list scans cost diagnostic CPU work; the
+feature is disabled when the variable is absent or invalid and removes its resource
+at the final budget. No culling, caching, camera or quality change is implemented.
+
+The required app gate passes365tests and Clippy; a fresh baseline build succeeds.
+In a same-executable moving Off/On pair, both render processes complete successfully
+and actual simulation/ground traces, environment, assists, camera state, source-tree
+inventory and150request-state rows agree.150of151decodedimage pairs match exactly,
+including the final image; frame0016 differs at eight distant pit-building pixels
+(maximum channel difference7, alphaexact). Native first/0016/final views were reviewed.
+Strict image-neutrality remains unproven; the raw nonzero validator result is retained.
+
+At reports240/360, actual active main/probe/other/nocpu counts are[1,6,1,0]. The private
+validator had incorrectly required other0 and therefore refuses admission. The extra
+camera is consistent with the enabled source OSD's Camera3d, separate target and render
+layer23, corroborated by its load log and visible HUD; this identifies a source-backed
+explanation, not a new live camera-entity stamp. Other-camera foliage membership is0.
+
+The later120calls contain69240spherical and360cylindrical instance visits, with no
+unknown/invalid joins and zero hidden visits in the observed current CPU union. All
+visits belong to probe visibility. Main membership is2010spherical/127cylindrical,
+and shadow membership44184/360; overlapping counts must not be summed as distinct
+objects. The stream represents15020640+701280expanded vertices, not completed GPU
+views/draws/uploads. Reports bracket actual driving ticks497..748,147.212m endpoint
+displacement and33.128..57.298m/s sampled speed. Generic motion request ticks are not
+pixel Extract/readback timestamps. No timing benchmark or performance gain is claimed.
+A policy that skips every non-main-visible tree would discard observed probe/shadow
+members in this fixture; reducing probe cadence or quality remains a separate decision.
+
+The first attempt completed its Off renderer but stopped before On when the owner's
+main game appeared; it was left running. After the owner closed it and actual process
+absence was checked, the pair above used a fresh output directory. Both attempts and
+all raw failures remain in ignored `local/graphics/visibility-census01/`.
+
+The completed Off from the interrupted first attempt also has identical canonical
+arguments, source/executable/input pins and trace/request/runtime metadata. All151of
+its decoded images equal the second Off exactly; comparing it against On reproduces
+the same eight pixels. Existing repeat evidence therefore does not establish noise.
+The diagnostic remains default-off with unresolved strict image-neutrality, and the
+original failed admission is preserved. No additional renderer or tolerance was used.
 ## Car part batching (F584)
 
 Before, every car part was its own entity: at Donington 107 player parts and 1,177 opponent parts,
@@ -1801,6 +1922,10 @@ names are the nearest public symbols, so call paths are approximate; the leaf
 Evidence (machine-local): worktree `local/tick-growth/` (`runs.txt` lists every run with its start
 time and the lock state).
 
+### G300 integration ownership guard (27 October 2026)
+
+F584's reported measurements remain historical evidence for its exact build. During graphics integration on pinned F586, player source entities carrying car0/ and no OpponentPart are conservatively excluded from new car batching: existing main-view bumper suppression and probe ownership use those source roots. Opponent batching remains enabled, including the same model prefix on explicitly marked opponents. Layered/probe/glass exclusions already protect several paths, so this is a precise ownership guard rather than a claim that every batch broke rendering. The actual ECS fixture passes with retained player originals and constructed opponent geometry; the full1137-test gate, four incoming identities,24quick-soak cases and fresh native BMW/Istanbul smoke controls also pass (G300). Actual bumper/Manual/general rendering remains outside that bounded GPU proof. No new FPS gain is claimed for the adjusted graphics build.
+
 ## Early-race tick cost: whole-record copies (round 2)
 
 Coordinator's task (26 October 2026): after F579 the phone still pays about 2.8 ms per tick early
@@ -1889,3 +2014,7 @@ Donington early by stage, base → fixed: `WorldAdvance` 0.18-0.19 → 0.08; `Ve
   PC's. Memory-bound copies may gain more on the phone; this is not measured there.
 - Left: the vehicle stage itself (wheels, suspension, contact updates; 0.18-0.21 ms on 4 threads),
   `staged_car`'s rollback copy, and in an awake pile the solve of a car group's contacts.
+
+G302 integrates pinned main F587-F590 after the G300 ownership guard. The true three-way car_batch merge preserves player SourcePart car0/no-Opponent exclusion, opponent batching, incoming NoAutoAabb/NotShadowCaster handling and (!shadowless || ours) admission. Exact player ownership ECS test, full1137tests/Clippy/four unchanged identities/24soak, combined feature build and fresh native BMW smoke pair pass. This establishes bounded integration safety, not a new measured FPS gain or actual bumper view. See G302 for source/artifact/capture hashes; incoming F587/F588 measurements keep their original scope.
+
+G304 integrates pinned F591/F592 into the graphics branch, retaining player ownership and native ground-skid identity. Full1139tests/Clippy/four unchanged identities/24soak and a fresh combined-feature native Istanbul pair pass. Root sees actual laid curves in Off and their attenuation in Late; no additional FPS gain or exhaustive strip-delivery claim. Last-queued snapshots still precede upload acknowledgment, so the conditional missing-allocator cold-drop limit remains explicitly open. Upstream measurements retain their scope. Source/artifact/visual and cleanup evidence is in G304.
