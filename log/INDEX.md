@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F637](F0637.md) | 2026-10-28 | Playable 83566e33e135 and APKs 8cfd3c3a4b7d with the phone 60 FPS cap |
 | [F636](F0636.md) | 2026-10-28 | Phone: 60 FPS cap and 60 Hz refresh by default |
 | [F635](F0635.md) | 2026-10-28 | Owner playtest: Shibuya start lane change, keyboard cockpit wheel |
 | [F634](F0634.md) | 2026-10-28 | Playable 33ae510a4984 with F627-F633, portable copy and APKs 127ecf49439f |
