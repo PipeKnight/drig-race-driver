@@ -1,4 +1,4 @@
-//! Android window and display (F378, docs/ANDROID.md "Frame rate").
+//! Android window, display and frame cap (F378, docs/ANDROID.md "Frame rate").
 //!
 //! Bevy's `Window` starts with the requested 1280 x 800 and scale factor 1;
 //! on Android winit ignores the request, and the first phone log
@@ -86,11 +86,29 @@ fn update(mut display: ResMut<Display>, mut windows: Query<&mut Window, With<Pri
     }
 }
 
+/// Frame cap at `refresh_hz` (60 Hz by default): the display may run faster
+/// than the hint asks (a 120 Hz panel), and Fifo alone would then present at
+/// the panel's rate. Sleeps at the end of the main schedule; System has no cap.
+fn cap(display: Res<Display>, mut due: Local<Option<std::time::Instant>>) {
+    let Some(hz) = display.refresh_hz else {
+        *due = None;
+        return;
+    };
+    let period = std::time::Duration::from_secs_f32(1. / hz);
+    let (sleep, next) = crate::render_scale::pace(std::time::Instant::now(), *due, period);
+    if !sleep.is_zero() {
+        std::thread::sleep(sleep);
+    }
+    *due = Some(next);
+}
+
 pub fn install(app: &mut App, refresh_hz: Option<f32>) {
+    println!("android_frame_cap hz={refresh_hz:?}");
     app.insert_resource(Display {
         refresh_hz,
         hinted: None,
         sent: false,
     })
-    .add_systems(PreUpdate, update);
+    .add_systems(PreUpdate, update)
+    .add_systems(Last, cap);
 }

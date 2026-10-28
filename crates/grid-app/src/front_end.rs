@@ -203,7 +203,7 @@ impl Video {
             fps: s.osd_fps.unwrap_or(cfg!(target_os = "android")),
             render_height: s.video_render_height(),
             present_mode: s.present_mode.unwrap_or_default(),
-            refresh_hz: s.refresh_hz.flatten(),
+            refresh_hz: s.video_refresh_hz(),
             frame_latency: s.frame_latency.map(|n| n.get()),
         }
     }
@@ -231,6 +231,10 @@ impl Video {
             (
                 "render_height_version",
                 Some(crate::settings::RENDER_HEIGHT_VERSION.to_string()),
+            ),
+            (
+                "refresh_hz_version",
+                Some(crate::settings::REFRESH_HZ_VERSION.to_string()),
             ),
         ]
     }

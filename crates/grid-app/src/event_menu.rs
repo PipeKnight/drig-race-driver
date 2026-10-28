@@ -1089,7 +1089,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     })));
     crate::ui_font::install(&mut app);
     #[cfg(target_os = "android")]
-    crate::android_display::install(&mut app, profile.refresh_hz.flatten());
+    crate::android_display::install(&mut app, profile.video_refresh_hz());
     crate::input::install(&mut app, actions);
     #[cfg(target_os = "android")]
     crate::android_pad::install(&mut app);
