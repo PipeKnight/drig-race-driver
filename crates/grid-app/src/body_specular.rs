@@ -131,6 +131,7 @@ mod tests {
             bindings: BTreeMap::new(),
             decal_materials: Default::default(),
             object_glass_materials: Default::default(),
+            object_two_sided_materials: Default::default(),
             center: Vec3::ZERO,
             radius: 1.,
             track: true,

@@ -181,6 +181,7 @@ struct Car {
     bindings: BTreeMap<String, String>,
     decal_materials: std::collections::BTreeSet<String>,
     object_glass_materials: std::collections::BTreeSet<String>,
+    object_two_sided_materials: std::collections::BTreeSet<String>,
     center: Vec3,
     radius: f32,
     track: bool,
@@ -779,6 +780,7 @@ fn load_package(
         bindings,
         decal_materials,
         object_glass_materials: Default::default(),
+        object_two_sided_materials: Default::default(),
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
@@ -961,6 +963,7 @@ fn append_objects(
             .collect()
     };
     car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
+    car.object_two_sided_materials.extend(object_materials::two_sided_materials(&tree)?);
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     // First instance index of each prototype.
@@ -1492,6 +1495,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         bindings: BTreeMap::new(),
         decal_materials: Default::default(),
         object_glass_materials: Default::default(),
+        object_two_sided_materials: Default::default(),
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
@@ -4671,6 +4675,7 @@ fn setup(
     }
     let decal_materials = car.decal_materials.clone();
     let object_glass_materials = car.object_glass_materials.clone();
+    let object_two_sided_materials = car.object_two_sided_materials.clone();
     // Breakable-prop pieces of one library draw share a mesh asset.
     // Keyed by source mesh, draw and material, plus a hash of the indices;
     // each key keeps every distinct index list.
@@ -4773,6 +4778,7 @@ fn setup(
                     material.base_color_texture = Some(images.add(image));
                 }
                 object_materials::configure(name, &object_glass_materials, &mut material);
+                object_materials::configure_sidedness(name, &object_two_sided_materials, &mut material);
                 object_materials::configure_coverage(graphics.object_coverage, name, &mut material);
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
@@ -6862,6 +6868,7 @@ mod driving_tests {
                         bindings: car.bindings.clone(),
                         decal_materials: Default::default(),
                         object_glass_materials: Default::default(),
+                        object_two_sided_materials: Default::default(),
                         center: car.center,
                         radius: car.radius,
                         track: true,

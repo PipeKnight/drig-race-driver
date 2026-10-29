@@ -19,6 +19,32 @@ pub(crate) fn glass_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTr
     Ok(result)
 }
 
+/// Saved object_simple_mesh normal, velocity/depth, shadow and cheap passes
+/// all specify cullFaceType=NONE. Match the material's source family, not names.
+/// Other families retain their existing culling policy.
+pub(crate) fn two_sided_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeSet<String>> {
+    let mut result = BTreeSet::new();
+    for i in 0..tree.nodes.len() {
+        if tree.name(i) == b"SHADERINSTANCE"
+            && tree.string(i, b"shaderGroup")? == b"#object_simple_mesh.fx"
+        {
+            let id = String::from_utf8_lossy(tree.string(i, b"id")?);
+            result.insert(format!("objects/{id}"));
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn configure_sidedness(name: &str, two_sided: &BTreeSet<String>, material: &mut StandardMaterial) {
+    if two_sided.contains(name) {
+        material.cull_mode = None;
+        // Preserve current front lighting and face the newly visible back normal
+        // toward the camera. Source vFace also changes normal sign, but exact
+        // D3D/front-winding and source lighting parity remain unverified.
+        material.double_sided = true;
+    }
+}
+
 pub(crate) fn configure(name: &str, glass: &BTreeSet<String>, material: &mut StandardMaterial) {
     if matches!(name,
         "objects/building_grandstand_01_j_01" | "objects/gg_building_grandstand_01_j_04") {
@@ -277,4 +303,96 @@ pub(crate) fn double_wire(image: &mut Image) -> Result<(), &'static str> {
     }
     println!("fence_wire scale=2 authored=true atlas=512x512 wire_roi=0,0,512,384 radius=1 nominal_median_texels=5_to_9 rgb=source other_materials=source rails_concrete=source");
     Ok(())
+}
+
+#[cfg(test)]
+mod sidedness_tests {
+    use super::*;
+    use bevy::render::render_resource::Face;
+
+    #[test]
+    fn source_family_classification_is_exact_and_material_names_are_irrelevant() {
+        let inputs: &[(&str, &str)] = &[
+            ("arbitrary_panel", "#object_simple_mesh.fx"),
+            ("closed_building", "#object_simple_mesh.fx"),
+            ("fence_named_but_other_family", "#object_simple.fx"),
+            ("glass", "#glass_simple.fx"),
+            ("skin_variant", "#object_simple_mesh_skin.fx"),
+            ("suffix", "#object_simple_mesh.fx_extra"),
+            ("missing_hash", "object_simple_mesh.fx"),
+        ];
+        let encoded: Vec<_> = inputs.iter().flat_map(|(id, group)| [*id, *group])
+            .map(|s| { let mut b = (s.len() as u32).to_be_bytes().to_vec(); b.extend_from_slice(s.as_bytes()); b }).collect();
+        let tree = pssg::Tree {
+            framing: pssg::Pssg {
+                declared_size: 0, attribute_count: 2, root_id: 1,
+                root_offset: 0, root_attributes: vec![], root_payload: 0..0,
+                schema: vec![pssg::ElementDefinition { id: 1, name: b"SHADERINSTANCE",
+                    attributes: vec![pssg::AttributeDefinition { id: 1, name: b"id" },
+                        pssg::AttributeDefinition { id: 2, name: b"shaderGroup" }] }],
+            },
+            nodes: encoded.as_chunks::<2>().0.iter().map(|pair| pssg::Node {
+                id: 1, offset: 0, parent: None, children: vec![], data: None,
+                attributes: vec![pssg::Attribute { id: 1, value: &pair[0] },
+                    pssg::Attribute { id: 2, value: &pair[1] }],
+            }).collect(),
+        };
+        let materials = two_sided_materials(&tree).unwrap();
+        assert_eq!(materials, BTreeSet::from(["objects/arbitrary_panel".into(), "objects/closed_building".into()]));
+        assert_eq!(glass_materials(&tree).unwrap(), BTreeSet::from(["objects/glass".into()]));
+    }
+
+    #[test]
+    fn sidedness_only_changes_selected_culling_and_normal_policy() {
+        let selected = BTreeSet::from(["objects/arbitrary_panel".into()]);
+        let original = StandardMaterial { alpha_mode: AlphaMode::Mask(0.5),
+            cull_mode: Some(Face::Back), double_sided: false,
+            perceptual_roughness: 0.71, metallic: 0.23, ..default() };
+        let mut m = original.clone();
+        configure_sidedness("objects/arbitrary_panel", &selected, &mut m);
+        assert_eq!(m.cull_mode, None);
+        assert!(m.double_sided);
+        m.cull_mode = original.cull_mode;
+        m.double_sided = original.double_sided;
+        assert_eq!(format!("{m:?}"), format!("{original:?}"));
+        for name in ["objects/closed_body_other_family", "Car Body Paint", "trees/leaf", "objects/arbitrary_panel!0"] {
+            let mut m = original.clone();
+            configure_sidedness(name, &selected, &mut m);
+            assert_eq!(format!("{m:?}"), format!("{original:?}"));
+        }
+        let tree_material = StandardMaterial { cull_mode: None, double_sided: false, ..original.clone() };
+        let mut m = tree_material.clone();
+        configure_sidedness("trees/leaf", &selected, &mut m);
+        assert_eq!(format!("{m:?}"), format!("{tree_material:?}"));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_detroit_and_donington_use_family_culling_without_global_disable() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"));
+        for (track, selected, other) in [
+            ("usa/detroit", "concrete_fence_white_end_01", ""),
+            ("europe/donington", "building_grandstand_01_g_01", "building_m_01"),
+        ] {
+            let bytes = std::fs::read(root.join("tracks").join(track).join("objects.pssg")).unwrap();
+            let tree = pssg::read_tree(&bytes).unwrap();
+            let materials = two_sided_materials(&tree).unwrap();
+            assert!(materials.contains(&format!("objects/{selected}")), "{track}");
+            if track == "usa/detroit" {
+                assert_eq!(materials.len(), 22);
+                assert!(materials.contains("objects/building_grandstand_01_j_01"));
+            }
+            let mut m = StandardMaterial { cull_mode: Some(Face::Back), double_sided: false, ..default() };
+            configure_sidedness(&format!("objects/{selected}"), &materials, &mut m);
+            assert_eq!(m.cull_mode, None);
+            assert!(m.double_sided);
+            if !other.is_empty() {
+                assert!(!materials.contains(&format!("objects/{other}")));
+                let mut m = StandardMaterial { cull_mode: Some(Face::Back), double_sided: false, ..default() };
+                configure_sidedness(&format!("objects/{other}"), &materials, &mut m);
+                assert_eq!(m.cull_mode, Some(Face::Back));
+                assert!(!m.double_sided);
+            }
+        }
+    }
 }
