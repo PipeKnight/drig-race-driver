@@ -154,6 +154,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F643](log/F0643.md) | 2026-10-30 | Tyre smoke rendering cost measured (SMOKE_RENDER_COST.md) |
 | [F642](log/F0642.md) | 2026-10-29 | Dynamic resolution: high-DPI 1440-row ceiling, frame-time steps, inconclusive probes |
 | [F641](log/F0641.md) | 2026-10-29 | Le Mans barrier collision report recorded (backlog row 99) |
 | [F640](log/F0640.md) | 2026-10-29 | macOS smoke FPS drops and Retina native render: owner logs recorded |
@@ -213,7 +214,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F586](log/F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
 | [F585](log/F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
 | [F584](log/F0584.md) | 2026-10-26 | Car part batching |
-| [F583](log/F0583.md) | 2026-10-26 | Engine audio: the handbrake ported (hbrakeon/hbrakeoff on the player's handbrake edges); wind is never started |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

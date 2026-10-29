@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F643](F0643.md) | 2026-10-30 | Tyre smoke rendering cost measured (SMOKE_RENDER_COST.md) |
 | [F642](F0642.md) | 2026-10-29 | Dynamic resolution: high-DPI 1440-row ceiling, frame-time steps, inconclusive probes |
 | [F641](F0641.md) | 2026-10-29 | Le Mans barrier collision report recorded (backlog row 99) |
 | [F640](F0640.md) | 2026-10-29 | macOS smoke FPS drops and Retina native render: owner logs recorded |
