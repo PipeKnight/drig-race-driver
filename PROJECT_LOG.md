@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F639](log/F0639.md) | 2026-10-29 | Backlog rows 95-96 (wreck sound loop, lost-wheel hub) and the owner's game unmuted |
 | [F638](log/F0638.md) | 2026-10-29 | Playable f48d1dc27f6a with DLAA and APKs f48d1dc27f6a |
 | [F637](log/F0637.md) | 2026-10-28 | Playable 83566e33e135 and APKs 8cfd3c3a4b7d with the phone 60 FPS cap |
 | [F636](log/F0636.md) | 2026-10-28 | Phone: 60 FPS cap and 60 Hz refresh by default |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F582](log/F0582.md) | 2026-10-26 | Engine audio: opponents' backfire and gear whine; the original's 120-voice pool |
 | [F581](log/F0581.md) | 2026-10-26 | Playable 975c018e7e2c with F569-F580, portable copy and APKs a2fc9b444690 |
 | [F580](log/F0580.md) | 2026-10-26 | Ground cover faces the camera in the vertex shader; skid marks stream in place |
-| [F579](log/F0579.md) | 2026-10-26 | Physics cost growth over a race: per-contact copies in car groups cut |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
