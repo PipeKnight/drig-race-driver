@@ -213,3 +213,24 @@ Actual G286 captures complete in four successful native processes. Original-scal
 The owner found the Detroit fence visible only from the track side. Saved `object_simple_mesh` shader-group passes (normal, velocity/depth, CSM depth and cheap variants) all specify `cullFaceType=NONE`. The port had assigned Back culling to ordinary objects. Material-instance membership in exactly `#object_simple_mesh.fx` now carries that source policy into shared object material construction, across tracks. Other families keep their previous culling; this is independent of alpha coverage and wire thickness.
 
 The family includes22 Detroit materials, including closed buildings and stand backing. Face-aware Bevy normals preserve current front lighting and flip newly visible back normals; source pixel shader uses vFace too, but exact original winding/sign and lighting equivalence remain unverified. Default547 and combined DLAA/paint555 tests plus strict Clippy pass. Matching native opposite-face captures restore the reverse wire; a420000-pixel front-wire ROI is unchanged. Other newly visible family backfaces and shadows do change the full image. An ordinary12-car Detroit run completes600ticks with default ornament LOD and automatic smoke replay. Static comparison temporarily disables ornament LOD because a separately identified static-reference lifecycle defect leaves its levels hidden; this override is not used by the shipped culling fix. All-track/device, exact source lighting, native-DLAA fence runtime and performance parity remain unverified. Private source evidence and the proposed capture poses are in `local/graphics/fence-sidedness01/`.
+
+## Windowed original Detroit reference (G335)
+
+A fresh original research-copy session reached Demolition Derby, Detroit
+Demolition Stadium Long, with Jupiter Eagleray MK5. Temporary fullscreen=false
+retained the owner's 1280x1024, medium quality and 2x MSAA settings. Instant
+Replay provides an oblique track-side view of occupied stands: the dark
+under-stand surface contains visible vertical/diagonal framing and apparent
+openings; it is not visually equivalent to our flat opaque fallback. A separate
+diamond-wire fence and its posts sit in front of that structure. This supports
+restoring structural coverage while keeping foreground fence coverage a separate
+problem. It does not prove the exact blend/depth/A2C implementation, establish a
+matched-camera pixel comparison, or validate the original fence from its reverse
+side. The two ordinary opaque grandstand exceptions remain in the port; G283's
+SourceFront+RawA2c remains diagnostic rather than a delivered general solution.
+
+Private original captures: `local/graphics/original-stadium02/windowed01/`
+`original-replay-foundation01.png` and `original-replay-foundation02.png`.
+The game closed normally, and the sole temporary hardware-settings change was
+restored with the original SHA-256. Steam installation and profile saves were
+not modified by the comparison tools.

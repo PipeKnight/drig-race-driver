@@ -546,6 +546,9 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G335](G0335.md) | 2026-10-30 | Windowed Detroit original reference and live crowd receiver identity |
+| [G334](G0334.md) | 2026-10-29 | Original reference navigation and capture failure |
+| [G333](G0333.md) | 2026-10-29 | Run ornament visibility selection in static reference scenes |
 | [G332](G0332.md) | 2026-10-29 | Recover shared screen-lighting mask producer contracts |
 | [G331](G0331.md) | 2026-10-29 | Restore source object material two-sided policy |
 | [G330](G0330.md) | 2026-10-29 | Trace shared source-lighting coefficients and correct the sun-angle interpretation |
