@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F640](F0640.md) | 2026-10-29 | macOS smoke FPS drops and Retina native render: owner logs recorded |
 | [F639](F0639.md) | 2026-10-29 | Backlog rows 95-96 (wreck sound loop, lost-wheel hub) and the owner's game unmuted |
 | [F638](F0638.md) | 2026-10-29 | Playable f48d1dc27f6a with DLAA and APKs f48d1dc27f6a |
 | [F637](F0637.md) | 2026-10-28 | Playable 83566e33e135 and APKs 8cfd3c3a4b7d with the phone 60 FPS cap |
