@@ -1,6 +1,7 @@
-//! Opt-in BMW baseline live bridge; shares the existing five-group transaction.
-//! No screenshot ledger, source shader/material/physics changes or native-AA admission.
+//! Shared strict diagnostic and automatic main-view five-group smoke transaction.
+//! Automatic attachment capabilities do not require DLAA, enhanced lighting or a route whitelist.
 use super::{Audit, core};
+use super::attachments::Capability;
 use crate::ground_skid_pass::{self as native_pipe, Profile};
 use bevy::{
     camera::{MainPassResolutionOverride, NormalizedRenderTarget, RenderTarget},
@@ -43,6 +44,7 @@ struct Counters {
     replayed: u64,
     first_reported: bool,
     native_deferral_reported: bool,
+    last_unsupported_capability: Option<String>,
     error: Option<&'static str>,
 }
 #[derive(Resource, Clone, Default, ExtractResource)]
@@ -64,6 +66,13 @@ impl State {
     fn fallback(&self, index: usize) {
         self.lock().fallback[index] += 1;
     }
+    fn unsupported_capability(&self,snapshot:&Snapshot,actual:String) {
+        let mut stats=self.lock();
+        if stats.last_unsupported_capability.as_ref()!=Some(&actual) {
+            println!("smoke_boundary_live event=unsupported_capability mode=automatic frame={} segment={} tick={} masked=false ordinary_fallback=true reason=view-attachment-or-phase-unavailable actual={actual}",snapshot.frame,snapshot.segment,snapshot.tick);
+            stats.last_unsupported_capability=Some(actual);
+        }
+    }
     fn native_deferral(&self, reason: &'static str, snapshot: &Snapshot) {
         let mut stats = self.lock();
         if !stats.native_deferral_reported {
@@ -77,8 +86,14 @@ impl State {
 }
 #[derive(Resource)]
 pub(crate) struct NativeLatePolicy;
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum LiveKind { Strict(Profile), Automatic }
+impl LiveKind {
+    fn piped(self)->bool {self!=Self::Strict(Profile::Baseline4)}
+    fn native(self)->bool {self==Self::Strict(Profile::NativeDlaaHdr1)}
+}
 #[derive(Resource, Clone, Copy)]
-struct LiveProfile(Profile);
+struct LiveProfile(LiveKind);
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 struct NativeLateInstall;
 #[derive(Resource, Debug)]
@@ -121,10 +136,11 @@ struct Routing {
     clock: Option<(u32, u64, u64)>,
     prepared: bool,
     size: Option<UVec2>,
+    capability: Option<Capability>,
 }
 impl Routing {
     fn clean(&self) -> bool {
-        self.view.is_none() && self.clock.is_none() && !self.prepared && self.frame.clean()
+        self.view.is_none() && self.clock.is_none() && self.capability.is_none() && !self.prepared && self.frame.clean()
     }
 }
 fn stamp(snapshot: &Snapshot) -> (u32, u64, u64) {
@@ -133,11 +149,23 @@ fn stamp(snapshot: &Snapshot) -> (u32, u64, u64) {
 pub(super) fn install(app: &mut App) -> std::io::Result<()> {
     install_profile(app, Profile::Baseline4)
 }
-// No new CLI admission: current public caller still selects Baseline4.
-// Future diagnostic context must validate Off/Control/Treatment identically.
+// Both explicit ordinary live scopes reuse Baseline4.
+// Native admission remains separate and validates its own context.
+pub(super) fn install_derby(app: &mut App) -> std::io::Result<()> {
+    install_labeled(app, Profile::Baseline4, "stk-detroit8-11ai-damage-baseline")
+}
 pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Result<()> {
-    if profile == Profile::NativeDlaaHdr1 {
-        if !cfg!(feature = "dlaa") {
+    install_labeled(app, profile, "bmw-istanbul0-baseline")
+}
+pub(super) fn install_automatic(app:&mut App)->std::io::Result<()> {
+    install_kind(app,LiveKind::Automatic,"automatic-all-driving-views")
+}
+fn install_labeled(app:&mut App,profile:Profile,scope:&'static str)->std::io::Result<()> {
+    install_kind(app,LiveKind::Strict(profile),scope)
+}
+fn install_kind(app:&mut App,kind:LiveKind,scope:&'static str)->std::io::Result<()> {
+    if kind.piped() {
+        if kind.native() && !cfg!(feature = "dlaa") {
             return Err(std::io::Error::other(
                 "native live boundary requires dlaa feature",
             ));
@@ -174,7 +202,7 @@ pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Resul
     if app.world().contains_resource::<State>() || app.world().contains_resource::<Audit>() {
         return Err(std::io::Error::other("boundary already installed"));
     }
-    if profile == Profile::NativeDlaaHdr1 {
+    if kind.piped() {
         app.insert_resource(NativeLatePolicy);
     }
     let Some((_, ids)) = core::register(app, true)? else {
@@ -193,7 +221,7 @@ pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Resul
     render
         .insert_resource(state)
         .insert_resource(Ids(ids))
-        .insert_resource(LiveProfile(profile))
+        .insert_resource(LiveProfile(kind))
         .init_resource::<Snapshot>()
         .init_resource::<Routing>()
         .add_systems(ExtractSchedule, extract)
@@ -215,7 +243,7 @@ pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Resul
                 .after(RenderSystems::Render)
                 .before(RenderSystems::Cleanup),
         );
-    if profile == Profile::Baseline4 {
+    if kind==LiveKind::Strict(Profile::Baseline4) {
         render.add_systems(
             Core3d,
             replay
@@ -223,7 +251,7 @@ pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Resul
                 .in_set(Core3dSystems::MainPass),
         );
         println!(
-            "smoke_boundary mode=grouped-live scope=bmw-istanbul0-baseline groups=5 screenshot_ledger=false native_aa=false positive_fragments=unknown"
+            "smoke_boundary mode=grouped-live scope={scope} groups=5 screenshot_ledger=false native_aa=false positive_fragments=unknown"
         );
     } else {
         let mut install = Schedule::new(NativeLateInstall);
@@ -236,9 +264,13 @@ pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Resul
             .world_mut()
             .resource_mut::<RenderScheduleOrder>()
             .insert_before(Render, NativeLateInstall);
+        if kind==LiveKind::Automatic {
+            println!("smoke_boundary mode=automatic groups=5 screenshot_ledger=false attachment_selection=actual-view native_aa=not-required positive_fragments=unknown");
+        } else {
         println!(
             "smoke_boundary mode=grouped-live profile=NativeDlaaHdr1 groups=5 screenshot_ledger=false native_aa=true admission=internal_only positive_fragments=unknown"
         );
+        }
     }
     Ok(())
 }
@@ -478,6 +510,35 @@ fn source_pipeline(profile: Profile, cache: &PipelineCache, item: &Transparent3d
                     .is_some_and(|t| t.format == profile_format(profile))
         })
 }
+fn live_install_ready(kind:LiveKind,installed:Option<&NativeLateState>)->bool {
+    match kind {LiveKind::Strict(p)=>native_install_ready(p,installed),
+        LiveKind::Automatic=>matches!(installed,Some(NativeLateState::Installed))}
+}
+#[allow(clippy::too_many_arguments)]
+fn live_view(kind:LiveKind,native:bool,snapshot:&Snapshot,view:&ExtractedView,camera:&ExtractedCamera,
+    target:&ViewTarget,depth:&ViewDepthTexture,msaa:&Msaa,resolution:Option<&MainPassResolutionOverride>)->Option<Capability> {
+    if let LiveKind::Strict(profile)=kind {
+        return valid_view(profile,native,snapshot,view,camera,target,depth,msaa,resolution)
+            .then(||camera.physical_target_size.map(|size|Capability::strict(profile_format(profile),profile_samples(profile),size))).flatten();
+    }
+    let entity=snapshot.camera?;let size=camera.physical_target_size?;
+    if view.retained_view_entity!=RetainedViewEntity::new(entity.into(),None,0)
+        ||camera.target!=snapshot.target||camera.schedule!=Core3d.intern()
+        ||!matches!(camera.target,Some(NormalizedRenderTarget::Window(_)|NormalizedRenderTarget::Image(_)))
+        ||camera.viewport.is_some()||camera.physical_viewport_size!=Some(size)
+        ||view.viewport!=UVec4::new(0,0,size.x,size.y)
+        ||resolution.is_some_and(|r|r.0!=size) {return None;}
+    Capability::read(target,depth,camera.hdr,msaa.samples(),size)
+}
+fn live_source_pipeline(kind:LiveKind,capability:Option<Capability>,cache:&PipelineCache,item:&Transparent3d)->bool {
+    if let LiveKind::Strict(profile)=kind {return source_pipeline(profile,cache,item);}
+    let Some(cap)=capability else{return false;};
+    if cache.get_render_pipeline(item.pipeline).is_none(){return false;}
+    let d=cache.get_render_pipeline_descriptor(item.pipeline);
+    d.multisample.count==cap.samples&&!d.multisample.alpha_to_coverage_enabled
+        &&d.depth_stencil.as_ref().is_some_and(|d|d.format==TextureFormat::Depth32Float&&d.depth_write_enabled==Some(false))
+        &&d.fragment.as_ref().is_some_and(|f|f.targets.len()==1&&f.targets[0].as_ref().is_some_and(|t|t.format==cap.format))
+}
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn barrier(
     snapshot: Res<Snapshot>,
@@ -494,7 +555,7 @@ fn barrier(
     mut route: ResMut<Routing>,
 ) {
     state.lock().calls += 1;
-    if !native_install_ready(profile.0, installed.as_deref()) {
+    if !live_install_ready(profile.0, installed.as_deref()) {
         state.fallback(1);
         return;
     }
@@ -519,10 +580,9 @@ fn barrier(
         state.fallback(1);
         return;
     };
-    if matched.next().is_some()
-        || !valid_view(
+    let capability=live_view(
             profile.0,
-            profile.0 == Profile::Baseline4
+            !profile.0.native()
                 || late_query_native(render_entity, &native_views, camera.physical_target_size),
             &snapshot,
             view,
@@ -531,11 +591,19 @@ fn barrier(
             depth,
             msaa,
             resolution,
-        )
-        || (profile.0 == Profile::NativeDlaaHdr1 && oit)
+        );
+    if matched.next().is_some() || capability.is_none()
+        || (profile.0.piped() && oit)
         || !opaque.contains_key(&view.retained_view_entity)
         || !alpha.contains_key(&view.retained_view_entity)
     {
+        if profile.0==LiveKind::Automatic {
+            state.unsupported_capability(&snapshot,format!("view={:?} target={:?} physical={:?} hdr={} format={:?} main_samples={} msaa={} depth_format={:?} depth_samples={} depth_extent={:?} viewport={:?} override={:?} oit={} opaque={} alpha={}",
+                view.retained_view_entity,camera.target,camera.physical_target_size,camera.hdr,
+                target.main_texture_format(),target.main_texture().sample_count(),msaa.samples(),
+                depth.texture.format(),depth.texture.sample_count(),depth.texture.size(),camera.viewport,
+                resolution.map(|r|r.0),oit,opaque.contains_key(&view.retained_view_entity),alpha.contains_key(&view.retained_view_entity)));
+        }
         state.fallback(1);
         return;
     }
@@ -567,7 +635,7 @@ fn barrier(
     if selected.iter().any(|i| {
         i.draw_function != ids.0.standard
             || !i.distance.is_finite()
-            || !source_pipeline(profile.0, &cache, i)
+            || !live_source_pipeline(profile.0,capability,&cache,i)
     }) {
         state.fallback(3);
         return;
@@ -575,6 +643,7 @@ fn barrier(
     route.view = Some(view.retained_view_entity);
     route.clock = Some(stamp(&snapshot));
     route.size = camera.physical_target_size;
+    route.capability=capability;
     if core::barrier(phase, &snapshot.groups, ids.0, &mut route.frame).is_err() {
         state.fail("live validated barrier unexpectedly failed");
     }
@@ -789,7 +858,7 @@ fn prepare(
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     mut route: ResMut<Routing>,
 ) {
-    if state.failed() || !native_install_ready(profile.0, installed.as_deref()) {
+    if state.failed() || !live_install_ready(profile.0, installed.as_deref()) {
         cancel_before_mask(&mut phases, &mut route, &proof, &state);
         return;
     }
@@ -805,9 +874,9 @@ fn prepare(
         .iter()
         .find(|(_, (v, ..))| v.retained_view_entity == retained);
     let supported = found.is_some_and(|(entity, (v, c, t, d, m, r, _, oit))| {
-        valid_view(
+        live_view(
             profile.0,
-            profile.0 == Profile::Baseline4
+            !profile.0.native()
                 || late_query_native(entity, &native_views, c.physical_target_size),
             &snapshot,
             v,
@@ -816,7 +885,7 @@ fn prepare(
             d,
             m,
             r,
-        ) && !(profile.0 == Profile::NativeDlaaHdr1 && oit)
+        ).is_some_and(|cap|Some(cap)==route.capability) && !(profile.0.piped() && oit)
             && opaque.contains_key(&retained)
             && alpha.contains_key(&retained)
     });
@@ -837,7 +906,7 @@ fn prepare(
         .map(|i| {
             let selected = snapshot.groups.contains(&i.main_entity());
             if selected
-                && (i.draw_function != ids.0.marked || !source_pipeline(profile.0, &cache, i))
+                && (i.draw_function != ids.0.marked || !live_source_pipeline(profile.0,route.capability,&cache,i))
             {
                 ready = false;
             }
@@ -885,7 +954,7 @@ fn replay(
         entity,
         view.into_inner(),
         context,
-        Profile::Baseline4,
+        LiveKind::Strict(Profile::Baseline4),
         &snapshot,
         &state,
         &route,
@@ -933,9 +1002,7 @@ fn try_native_replay(
     else {
         return;
     };
-    if !profile.is_some_and(|p| p.0 == Profile::NativeDlaaHdr1) {
-        return;
-    }
+    let Some(kind)=profile.as_ref().map(|p|p.0).filter(|p|p.piped()) else {return;};
     let Ok(input) = views.get(current.0) else {
         return;
     };
@@ -944,7 +1011,7 @@ fn try_native_replay(
         current.0,
         input,
         context,
-        Profile::NativeDlaaHdr1,
+        kind,
         &snapshot,
         &state,
         &route,
@@ -959,7 +1026,7 @@ fn replay_current<'w>(
     entity: Entity,
     input: ROQueryItem<'w, '_, Inputs>,
     mut context: RenderContext<'w, '_>,
-    profile: Profile,
+    profile: LiveKind,
     snapshot: &Snapshot,
     state: &State,
     route: &Routing,
@@ -974,11 +1041,14 @@ fn replay_current<'w>(
     if Some(v.retained_view_entity) != route.view {
         return;
     }
+    let Some(capability)=route.capability else {
+        state.fail("live post-mask attachment stamp absent");return;
+    };
     if state.failed()
         || route.clock != Some(stamp(snapshot))
-        || !valid_view(
+        || live_view(
             profile,
-            profile == Profile::Baseline4
+            !profile.native()
                 || late_world_native(world, entity, c.physical_target_size),
             snapshot,
             v,
@@ -987,8 +1057,8 @@ fn replay_current<'w>(
             d,
             m,
             r,
-        )
-        || (profile == Profile::NativeDlaaHdr1 && oit)
+        ) != route.capability || route.capability.is_none()
+        || (profile.piped() && oit)
         || !opaque.contains_key(&v.retained_view_entity)
         || !alpha.contains_key(&v.retained_view_entity)
     {
@@ -996,10 +1066,10 @@ fn replay_current<'w>(
         return;
     }
     let result = match profile {
-        Profile::Baseline4 => {
+        LiveKind::Strict(Profile::Baseline4) => {
             core::draw_into_scene(&mut context, world, entity, t, d, &route.frame, proof)
         }
-        Profile::NativeDlaaHdr1 => {
+        LiveKind::Strict(Profile::NativeDlaaHdr1) => {
             #[cfg(feature = "dlaa")]
             {
                 core::draw_into_scene_native_hdr1(
@@ -1017,6 +1087,8 @@ fn replay_current<'w>(
                 Err("native boundary feature absent")
             }
         }
+        LiveKind::Automatic => core::draw_into_scene_automatic(&mut context,world,entity,t,d,&route.frame,proof,
+            capability),
     };
     if result.is_err() {
         let (heads, groups) = proof.successful_counts();
@@ -1076,12 +1148,16 @@ fn finalize(
         state.fail("live finalizer left owned/saved transaction");
     }
     let size = route.size;
+    let capability=route.capability;
     *route = Routing::default();
     if success {
         let mut stats = state.lock();
         stats.replayed += 1;
+        stats.last_unsupported_capability=None;
         if !stats.first_reported {
-            if profile.0 == Profile::Baseline4 {
+            if profile.0==LiveKind::Automatic {
+                println!("smoke_boundary_live event=first_replayed frame={} segment={} tick={} groups=5 restored=true terminal=true positive_fragments=unknown screenshot_ledger=false mode=automatic capability={capability:?}",snapshot.frame,snapshot.segment,snapshot.tick);
+            } else if profile.0 == LiveKind::Strict(Profile::Baseline4) {
                 println!(
                     "smoke_boundary_live event=first_replayed frame={} segment={} tick={} groups=5 restored=true terminal=true positive_fragments=unknown screenshot_ledger=false size={size:?} target={:?} samples=4 format=Rgba8UnormSrgb depth=Depth32Float",
                     snapshot.frame, snapshot.segment, snapshot.tick, snapshot.target
@@ -1107,7 +1183,7 @@ fn install_native_late(world: &mut World) {
     }
     if !world
         .get_resource::<LiveProfile>()
-        .is_some_and(|p| p.0 == Profile::NativeDlaaHdr1)
+        .is_some_and(|p|p.0.piped())
     {
         return;
     }
@@ -1121,14 +1197,22 @@ fn install_native_late(world: &mut World) {
     match result {
         Ok(()) => {
             world.insert_resource(NativeLateState::Installed);
+            if world.resource::<LiveProfile>().0==LiveKind::Automatic {
+                println!("smoke_boundary_live event=automatic_pipe_installed typed_main_transparency=true before_earlypostprocess=true native_algorithm_required=false GPU=unobserved");
+            } else {
             println!(
                 "smoke_boundary_live event=native_pipe_installed typed_native=true before_earlypostprocess=true GPU=unobserved"
             );
+            }
         }
         Err((false, reason)) => {
+            if world.resource::<LiveProfile>().0==LiveKind::Automatic {
+                println!("smoke_boundary_live event=automatic_pipe_refused ordinary_fallback=true reason={reason}");
+            } else {
             println!(
                 "smoke_boundary_live event=native_pipe_refused ordinary_fallback=true reason={reason}"
             );
+            }
             world.insert_resource(NativeLateState::Refused(reason));
         }
         Err((true, reason)) => {
@@ -1188,6 +1272,22 @@ mod tests {
         ) -> Result<(), DrawError> {
             Ok(())
         }
+    }
+    #[test]
+    fn automatic_installer_registers_piped_transaction_without_native_feature_or_dlss() {
+        let mut app=App::new();let mut render=bevy::app::SubApp::new();
+        render.init_resource::<DrawFunctions<Transparent3d>>();
+        render.world().resource::<DrawFunctions<Transparent3d>>().write().add_with::<bevy::pbr::DrawMaterial,_>(Noop);
+        render.insert_resource(RenderScheduleOrder {labels:vec![Render.intern()]});
+        app.insert_sub_app(RenderApp,render);
+        install_automatic(&mut app).unwrap();
+        assert!(app.world().contains_resource::<NativeLatePolicy>());
+        let render=app.sub_app(RenderApp);
+        assert_eq!(render.world().resource::<LiveProfile>().0,LiveKind::Automatic);
+        assert!(matches!(render.world().resource::<NativeLateState>(),NativeLateState::Pending));
+        assert!(!live_install_ready(LiveKind::Automatic,None));
+        assert!(live_install_ready(LiveKind::Automatic,Some(&NativeLateState::Installed)));
+        assert!(install_automatic(&mut app).is_err());
     }
     #[test]
     fn actual_installer_shares_state_before_first_extraction_without_gpu() {
@@ -1357,7 +1457,7 @@ mod tests {
     }
     #[test]
     fn late_replay_absence_actual_finalizer_restores_all_ranges_and_reports_failure() {
-        for profile in [Profile::Baseline4, Profile::NativeDlaaHdr1] {
+        for profile in [LiveKind::Strict(Profile::Baseline4),LiveKind::Strict(Profile::NativeDlaaHdr1),LiveKind::Automatic] {
             let (mut world, mut phases, mut route, ids, snapshot) = fixture();
             let view = route.view.unwrap();
             let proof = core::Proof::default();
@@ -1503,7 +1603,7 @@ mod native_late_profile_tests01 {
         use bevy::core_pipeline::core_3d::main_opaque_pass_3d;
         use bevy::ecs::schedule::IntoSystemSet;
         let mut world = World::new();
-        world.insert_resource(LiveProfile(Profile::NativeDlaaHdr1));
+        world.insert_resource(LiveProfile(LiveKind::Strict(Profile::NativeDlaaHdr1)));
         world.insert_resource(NativeLateState::Pending);
         let mut schedule = Core3d::base_schedule();
         schedule.add_systems(
@@ -1542,13 +1642,14 @@ mod native_late_profile_tests01 {
             );
         });
     }
-    #[cfg(feature = "dlaa")]
     #[test]
-    fn actual_native_late_installer_initializes_exact_callback_pipe_without_running_renderer() {
+    fn actual_piped_installer_initializes_automatic_and_feature_native_without_running_renderer() {
         use bevy::core_pipeline::core_3d::main_opaque_pass_3d;
         use bevy::ecs::schedule::IntoSystemSet;
+        for kind in std::iter::once(LiveKind::Automatic).chain(cfg!(feature="dlaa")
+            .then_some(LiveKind::Strict(Profile::NativeDlaaHdr1))) {
         let mut world = World::new();
-        world.insert_resource(LiveProfile(Profile::NativeDlaaHdr1));
+        world.insert_resource(LiveProfile(kind));
         world.insert_resource(NativeLateState::Pending);
         let mut schedule = Core3d::base_schedule();
         schedule.add_systems(
@@ -1574,5 +1675,6 @@ mod native_late_profile_tests01 {
         });
         // No renderer schedule/native callback is RUN. This proves installation,
         // not HDR attachment, target resources, native BMW admission or a GPU draw.
+        }
     }
 }

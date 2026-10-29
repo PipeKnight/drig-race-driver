@@ -2,6 +2,7 @@
 //! Moves existing prepared draws only. No material, pipeline, simulation or sample changes.
 use super::smoke_boundary_core as core;
 mod live;
+pub(crate) mod attachments;
 pub(crate) mod native_diagnostic;
 use super::smoke_pilot::Profile;
 use bevy::{
@@ -40,6 +41,7 @@ pub(crate) enum Mode {
     Off,
     GroupedDirect,
     GroupedLive,
+    GroupedLiveDerby,
 }
 impl Mode {
     pub(crate) fn parse(text: &str) -> Result<Self, &'static str> {
@@ -47,10 +49,49 @@ impl Mode {
             "off" => Ok(Self::Off),
             "grouped-direct" => Ok(Self::GroupedDirect),
             "grouped-live" => Ok(Self::GroupedLive),
-            _ => Err("--smoke-boundary needs off, grouped-direct or grouped-live"),
+            "grouped-live-derby" => Ok(Self::GroupedLiveDerby),
+            _ => Err("--smoke-boundary needs off, grouped-direct, grouped-live or grouped-live-derby"),
         }
     }
 }
+/// Explicit Derby identity and capture scope; it reuses the Baseline4 renderer.
+#[derive(Clone, Copy)]
+pub(crate) struct DerbyFixture<'a> {
+    pub route: &'a str,
+    pub subroute: u8,
+    pub car: &'a str,
+    pub opponents: Option<usize>,
+    pub opponent_models_stk: bool,
+    pub discipline: Option<&'a str>,
+    pub laps: Option<u32>,
+    pub back_grid: bool,
+    pub damage_enabled: bool,
+    pub output: bool,
+    pub ticks: Option<u64>,
+    pub fps: Option<u32>,
+    pub motion: Option<crate::motion_capture::Config>,
+    pub handbrake: Option<u64>,
+    pub throttle: f32,
+    pub steering: f32,
+}
+impl DerbyFixture<'_> {
+    pub(crate) fn admitted(self) -> bool {
+        let identity = self.route == "tracks/usa/detroit/route_8" && self.subroute == 0
+            && self.car == "stk" && self.opponents == Some(11) && self.opponent_models_stk
+            && self.discipline == Some("demolition_derby") && self.laps == Some(6)
+            && self.back_grid && self.damage_enabled;
+        let capture = if self.output {
+            self.ticks == Some(900) && self.fps == Some(30)
+                && self.motion.is_some_and(|m| m.exact_phase_window(350, 120, 30, 900))
+                && self.handbrake == Some(500) && self.throttle == 1. && self.steering == 1.
+        } else {
+            self.ticks.is_none() && self.fps.is_none() && self.motion.is_none()
+                && self.handbrake.is_none() && self.throttle == 0. && self.steering == 0.
+        };
+        identity && capture
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Ticket {
     entity: u64,
@@ -212,6 +253,19 @@ impl Routing {
         self.ranges.clear();
     }
 }
+/// Raw selector presence, including explicit Off, isolates historical diagnostic controls.
+pub(crate) fn explicit_policy_arg(arg:&str)->bool {
+    matches!(arg,"--smoke-boundary"|"--native-smoke-boundary"|"--native-smoke-profile"|"--smoke-ct"
+        |"--smoke-compositor"|"--ground-skid-pass"|"--skid-order"|"--skid-reflectance"
+        |"--smoke-order"|"--motion-phase-map"|"--motion-phase-profile"
+        |"--window-phase-audit"|"--oit-capacity-audit"|"--temporal-audit"|"--temporal-colour-audit")
+}
+/// Absence of an explicit render-policy selector is the ordinary shipping path.
+pub(crate) fn automatic_selected(driving:bool,rendered:bool,ground:bool,groups:bool,explicit:bool)->bool {
+    driving&&rendered&&ground&&groups&&!explicit
+}
+pub(crate) fn install_automatic(app:&mut App)->std::io::Result<()> {live::install_automatic(app)}
+
 /// Off does not install resources, hooks, files or render commands.
 pub(crate) fn install(
     app: &mut App,
@@ -224,6 +278,9 @@ pub(crate) fn install(
     }
     if mode == Mode::GroupedLive {
         return live::install(app);
+    }
+    if mode == Mode::GroupedLiveDerby {
+        return live::install_derby(app);
     }
     if app.world().contains_resource::<Audit>() {
         return Err(std::io::Error::other("duplicate boundary install"));
@@ -798,6 +855,38 @@ pub(crate) fn install_native_diagnostic(app: &mut App, context: native_diagnosti
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_derby_live_scope_rejects_crossed_identity_and_capture() {
+        let valid = DerbyFixture {
+            route: "tracks/usa/detroit/route_8", subroute: 0, car: "stk", opponents: Some(11),
+            opponent_models_stk: true, discipline: Some("demolition_derby"), laps: Some(6),
+            back_grid: true, damage_enabled: true, output: true, ticks: Some(900), fps: Some(30),
+            motion: Some(crate::motion_capture::Config::parse("350,120").unwrap()),
+            handbrake: Some(500), throttle: 1., steering: 1.,
+        };
+        assert!(valid.admitted());
+        for wrong in [
+            DerbyFixture { route: "tracks/europe/istanbul_park/route_0", ..valid },
+            DerbyFixture { subroute: 1, ..valid }, DerbyFixture { car: "bmw", ..valid },
+            DerbyFixture { opponents: Some(10), ..valid }, DerbyFixture { opponent_models_stk: false, ..valid },
+            DerbyFixture { discipline: None, ..valid }, DerbyFixture { laps: Some(3), ..valid },
+            DerbyFixture { back_grid: false, ..valid }, DerbyFixture { damage_enabled: false, ..valid },
+            DerbyFixture { ticks: Some(450), ..valid }, DerbyFixture { fps: Some(60), ..valid },
+            DerbyFixture { motion: Some(crate::motion_capture::Config::parse("190,90").unwrap()), ..valid },
+            DerbyFixture { handbrake: Some(190), ..valid }, DerbyFixture { throttle: f32::NAN, ..valid },
+            DerbyFixture { steering: f32::INFINITY, ..valid }, DerbyFixture { output: false, ..valid },
+        ] { assert!(!wrong.admitted()); }
+        let manual = DerbyFixture { output: false, ticks: None, fps: None, motion: None,
+            handbrake: None, throttle: 0., steering: 0., ..valid };
+        assert!(manual.admitted());
+        assert!(!DerbyFixture { ticks: Some(900), ..manual }.admitted());
+        assert!(!DerbyFixture { fps: Some(30), ..manual }.admitted());
+        assert_eq!(Mode::parse("grouped-live-derby").unwrap(), Mode::GroupedLiveDerby);
+        assert_eq!(Mode::parse("grouped-live").unwrap(), Mode::GroupedLive);
+        assert_eq!(Mode::default(), Mode::Off);
+        assert!(Mode::parse("derby").is_err());
+    }
+
     fn t(i: u32) -> Ticket {
         Ticket {
             entity: 100 + u64::from(i),
@@ -910,5 +999,26 @@ mod tests {
                 .is_err()
         );
         assert!(!s.complete());
+    }
+}
+
+#[cfg(test)]
+mod automatic_arbitration_tests {
+    use super::*;
+    #[test]
+    fn actual_parser_presence_keeps_explicit_off_controls_out_of_automatic_installation() {
+        let ordinary=["--drive","--settings","event.ini","--aa","dlaa","--glass-pilot","base-mip-zero","--window-sort","current","--car-transparent-sort","current"];
+        let explicit=ordinary.iter().any(|a|explicit_policy_arg(a));
+        assert!(automatic_selected(true,true,true,true,explicit));
+        for args in [["--smoke-boundary","off"],["--native-smoke-boundary","off"],
+            ["--smoke-ct","off"],["--smoke-compositor","off"],["--ground-skid-pass","off"],
+            ["--skid-order","off"],["--smoke-order","groups"]] {
+            let explicit=args.iter().any(|a|explicit_policy_arg(a));
+            assert!(!automatic_selected(true,true,true,true,explicit));
+        }
+        assert!(!automatic_selected(false,true,true,true,false));
+        assert!(!automatic_selected(true,false,true,true,false));
+        assert!(!automatic_selected(true,true,false,true,false));
+        assert!(!automatic_selected(true,true,true,false,false));
     }
 }
