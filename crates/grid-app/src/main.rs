@@ -4321,8 +4321,6 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         lean_pieces::install(&mut app);
         // Static track parts and intact props drawn as merged meshes (F576).
         static_batch::install(&mut app);
-        // Track ornaments at the original's levels of detail (docs/TRACK_LOD.md).
-        ornament_lod::install(&mut app);
         // Car parts drawn as one mesh per car and material (F584), opponents
         // at the original's levels of detail (docs/CAR_LOD.md).
         car_lod::load(&root);
@@ -4337,6 +4335,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             flashback::install(&mut app, ai_settings.difficulty);
         }
     }
+    // Static references also spawn Hidden ornament levels; select them in every
+    // scene. The system already skips apps without an ornament Lods resource.
+    ornament_lod::install(&mut app);
     if track && graphics.source_trees {
         source_trees::install(&mut app);
     }

@@ -281,4 +281,48 @@ mod tests {
         assert_eq!(range(&single, 0), [0., 1., 0.]);
         assert_eq!(shadow_level(&single), 0);
     }
+
+    #[test]
+    fn installed_selector_handles_static_scene_lifecycle_without_driving() {
+        // Exercise actual registration and PostUpdate selection, with no Driving
+        // resource or renderer. GlobalTransform is supplied as it is after the
+        // production transform-propagation boundary.
+        let mut app = App::new();
+        install(&mut app);
+        let camera = app.world_mut().spawn((
+            crate::ViewerCamera,
+            GlobalTransform::from_translation(Vec3::new(-10., 0.5, 0.5)),
+            Projection::Perspective(PerspectiveProjection {
+                fov: REFERENCE_HALF_FOV * 2., ..default()
+            }),
+        )).id();
+        let part = app.world_mut().spawn((
+            OrnamentLevel { instance: 0, level: 0 },
+            Visibility::Hidden,
+        )).id();
+
+        // Shared registration is safe before setup creates Lods (and in scenes
+        // which never create one): resource_exists must prevent ResMut failure.
+        app.world_mut().run_schedule(PostUpdate);
+        assert_eq!(*app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+
+        app.insert_resource(Lods::new(Levels {
+            types: vec![building()],
+            instances: vec![Instance { kind: 0, min: Vec3::ZERO, max: Vec3::ONE }],
+            parts: HashMap::new(),
+        }));
+        app.world_mut().run_schedule(PostUpdate);
+        assert_eq!(*app.world().get::<Visibility>(part).unwrap(), Visibility::Inherited);
+
+        // A real camera change must cull the same entity outside its stored D.
+        *app.world_mut().get_mut::<GlobalTransform>(camera).unwrap() =
+            GlobalTransform::from_translation(Vec3::new(-701., 0.5, 0.5));
+        app.world_mut().run_schedule(PostUpdate);
+        assert_eq!(*app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+
+        // Removing a scene's Lods also leaves the shared selector safe.
+        let _ = app.world_mut().remove_resource::<Lods>();
+        app.world_mut().run_schedule(PostUpdate);
+        assert_eq!(*app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+    }
 }

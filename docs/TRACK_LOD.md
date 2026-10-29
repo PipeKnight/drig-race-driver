@@ -401,3 +401,7 @@ plain), beyond track_cull nothing. Caller and the meaning of the two weights not
   00951740, 00951940, 0096EC80, 0096FBC0, 00965790, 00979430, 00979590, 005C8080, 005C88D0,
   005C85D0, 005C8570, 005C8A10, 005C8370, 005BCC40, 0064BCD0, 00643BC0, 005B6E00, 005C04C0.
   0x62EBF0 is not a function in the master analysis (decompile miss); read from disassembly.
+
+## Static reference visibility lifecycle (G333)
+
+Static track references create hidden ornament levels and their Lods resource just as driving does. The selector must therefore install in shared application setup, not only when Driving exists. Registration now occurs once for all scenes; the existing resource guard safely skips scenes without Lods. Level distances, shadow levels and selection math are unchanged. An ECS lifecycle regression covers absent resources and real near/far camera changes. Initial548tests and post-main551tests, combined-feature Clippy/release and both pre/post-main three-run windowless GPU controls pass. Opposite-face static references now show the fence/stands with default LOD; an ordinary twelve-car600tick control retains all ordered player/input/handling/deformation records and the exact final PNG from G331. G331's earlier LOD0-isolated fence proof remains a separate experiment. Private evidence: local/graphics/fence-sidedness01/gpu05-default-lod01/. All-track/device/performance parity remains unverified.
