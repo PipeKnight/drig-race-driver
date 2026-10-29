@@ -38,9 +38,11 @@ impl RenderHeight {
         }
     }
 
-    /// The mobile preset (Android): auto; desktop: native.
+    /// The mobile preset (Android) and macOS: auto; other desktops: native.
+    /// A Mac's built-in display is high-DPI, where native is 4K-class and
+    /// `Auto` starts at [`HIDPI_CEILING_ROWS`] (owner, 2026-10-29, F642).
     pub fn platform_default() -> Self {
-        if crate::mobile::enabled() {
+        if crate::mobile::enabled() || cfg!(target_os = "macos") {
             Self::Auto
         } else {
             Self::Native
@@ -118,8 +120,11 @@ pub fn scaled_size(physical: UVec2, height: RenderHeight) -> Option<UVec2> {
 
 /// Dynamic render height (`render_height = auto`, F556/F559): between `floor`
 /// and the ceiling `mobile::RENDER_ROWS`, driven by the frame time against
-/// 60 FPS. Lowered by [`DOWN_ROWS`] at most every [`DOWN_SECONDS`] while
-/// frames run late and the simulation is not the reason; raised by [`UP_ROWS`] after
+/// 60 FPS. Lowered at most every [`DOWN_SECONDS`] while frames run late and
+/// the simulation is not the reason, by the rows a pixel-bound frame would need
+/// to be on time, at least [`DOWN_ROWS`] and at most [`MAX_DOWN_SHARE`] of the
+/// height (F642: 48-row steps were 2.5 % of the pixels at 1890 rows, lost in
+/// the noise of a 68 ms smoke frame); raised by [`UP_ROWS`] after
 /// [`UP_SECONDS`] of frames on time, never back to a height that ran late in
 /// the last [`BLOCK_SECONDS`], so the sharpness does not "breathe".
 ///
@@ -128,7 +133,10 @@ pub fn scaled_size(physical: UVec2, height: RenderHeight) -> Option<UVec2> {
 /// pixel count would gain. Otherwise the rows were not what made it late
 /// (the phone's race, F571: 41 -> 36 ms from 720 to 480 rows while the CPU
 /// work holds it near 26 ms), so the height returns to the ceiling and
-/// stays there for [`HOLD_SECONDS`] before the next probe.
+/// stays there for [`HOLD_SECONDS`] before the next probe. A frame that got
+/// slower by more than the expected gain says the scene changed, not that the
+/// pixels do not matter (F642: −46 ms against 2 ms as smoke thickened): the
+/// probe is inconclusive and the lower height stays.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dynamic {
     pub floor: u32,
@@ -164,7 +172,13 @@ pub const LATE_MS: f32 = 18.;
 /// On time: below this (60 FPS with vsync jitter).
 pub const ON_TIME_MS: f32 = 17.2;
 pub const DOWN_ROWS: u32 = 48;
+/// The largest step down, as a share of the height (56 % of the pixels).
+pub const MAX_DOWN_SHARE: f32 = 0.25;
 pub const UP_ROWS: u32 = 24;
+/// The desktop `Auto` ceiling on a high-DPI window (scale factor above 1):
+/// 1440 rows (2K) upscaled instead of a 4K-class native height (owner,
+/// 2026-10-29, F642: a Retina MacBook rendered 3024x1890).
+pub const HIDPI_CEILING_ROWS: u32 = 1440;
 pub const DOWN_SECONDS: f32 = 0.5;
 pub const UP_SECONDS: f32 = 3.;
 pub const BLOCK_SECONDS: f32 = 15.;
@@ -183,8 +197,9 @@ pub const HOLD_SECONDS: f32 = 60.;
 /// A step down waits for this many late frames, so that a sudden load is
 /// probed against a settled frame time (88 % of the change).
 pub const LATE_FRAMES: u32 = 20;
-/// Frames longer than this (loading, a pause) are ignored.
-const HITCH_MS: f32 = 100.;
+/// Frames longer than this (loading, a pause) are ignored. F642: dense smoke
+/// on a MacBook held 87-102 ms frames for seconds, which 100 ms ignored.
+const HITCH_MS: f32 = 250.;
 const SMOOTHING: f32 = 0.1;
 /// A probe second at 80 ms frames is 13 frames: the slow smoothing would
 /// still be settling (F573).
@@ -227,6 +242,15 @@ impl Dynamic {
         true
     }
 
+    /// The height for the next step down: where a pixel-bound frame would
+    /// take [`TARGET_MS`], in whole [`UP_ROWS`], within the step limits.
+    fn step_down(&self) -> u32 {
+        let wanted = self.rows as f32 * (TARGET_MS / self.frame_ms).sqrt();
+        let step = (self.rows as f32 - wanted).min(self.rows as f32 * MAX_DOWN_SHARE);
+        let step = (step as u32 / UP_ROWS * UP_ROWS).max(DOWN_ROWS);
+        self.rows.saturating_sub(step).max(self.floor)
+    }
+
     /// One frame of `frame_ms` with `work_ms` of simulation; returns the
     /// reason when `rows` changed (`ineffective`: back to the ceiling after a
     /// probe), or `cpu_bound` every [`CPU_REPORT_SECONDS`] of late frames it
@@ -262,7 +286,9 @@ impl Dynamic {
             self.probe = None;
             let pixels = (to as f32 / from as f32).powi(2);
             self.gain = (before - self.recent_ms, before * (1. - pixels));
-            if self.gain.0 < GPU_SHARE * self.gain.1 {
+            // Slower by more than the step could gain: inconclusive, it stays.
+            let inconclusive = self.gain.0 < -self.gain.1;
+            if !inconclusive && self.gain.0 < GPU_SHARE * self.gain.1 {
                 self.rows = ceiling;
                 self.blocked = None;
                 self.held = HOLD_SECONDS;
@@ -281,9 +307,10 @@ impl Dynamic {
             && self.since_change >= DOWN_SECONDS
             && self.rows > self.floor
         {
-            self.probe = Some((self.rows, self.rows.saturating_sub(DOWN_ROWS).max(self.floor), self.recent_ms));
+            let to = self.step_down();
+            self.probe = Some((self.rows, to, self.recent_ms));
             self.blocked = Some((self.rows, BLOCK_SECONDS));
-            self.rows = self.rows.saturating_sub(DOWN_ROWS).max(self.floor);
+            self.rows = to;
             self.since_change = 0.;
             self.good_for = 0.;
             return Some("late");
@@ -315,6 +342,8 @@ pub struct RenderScale {
     pub height: RenderHeight,
     /// Window size in physical pixels.
     pub screen: UVec2,
+    /// The window's scale factor (above 1 on a high-DPI display).
+    pub scale_factor: f32,
     /// Size the 3D view renders at (equal to `screen` when native).
     pub render: UVec2,
     /// The dynamic height, while the setting is `Auto`.
@@ -350,15 +379,18 @@ impl RenderScale {
     }
 }
 
-/// The `Auto` range for a window `rows` high: with the mobile preset 480-720
-/// rows (owner, 2026-10-22); on the desktop native down to half of it,
-/// rounded up to [`UP_ROWS`] (owner, 2026-10-26). Native is the desktop
-/// default; `Auto` is chosen on the Video screen.
-pub fn auto_range(rows: u32) -> (u32, u32) {
+/// The `Auto` range for a window `rows` high at `scale_factor`: with the
+/// mobile preset 480-720 rows (owner, 2026-10-22); on the desktop native
+/// down to half of it, rounded up to [`UP_ROWS`] (owner, 2026-10-26), with
+/// the ceiling at most [`HIDPI_CEILING_ROWS`] on a high-DPI window (F642).
+/// Native is the default on other desktops; `Auto` is chosen on the Video
+/// screen.
+pub fn auto_range(rows: u32, scale_factor: f32) -> (u32, u32) {
     if crate::mobile::enabled() {
         (crate::mobile::DYNAMIC_FLOOR_ROWS, crate::mobile::RENDER_ROWS)
     } else {
-        ((rows / 2).div_ceil(UP_ROWS) * UP_ROWS, rows)
+        let ceiling = if scale_factor > 1. { rows.min(HIDPI_CEILING_ROWS) } else { rows };
+        ((ceiling / 2).div_ceil(UP_ROWS) * UP_ROWS, ceiling)
     }
 }
 
@@ -366,7 +398,7 @@ pub fn auto_range(rows: u32) -> (u32, u32) {
 fn auto_dynamic(height: RenderHeight) -> Option<Dynamic> {
     let off = std::env::var("GRID_DYNAMIC_RES").is_ok_and(|v| v == "0");
     // The desktop range waits for the window size (`adjust_height`).
-    let (floor, ceiling) = if crate::mobile::enabled() { auto_range(0) } else { (0, 0) };
+    let (floor, ceiling) = if crate::mobile::enabled() { auto_range(0, 1.) } else { (0, 0) };
     (height == RenderHeight::Auto && !off).then(|| Dynamic::new(floor, ceiling))
 }
 
@@ -392,6 +424,9 @@ fn apply(
         return;
     };
     let screen = UVec2::new(w.physical_width(), w.physical_height());
+    if scale.scale_factor != w.scale_factor() {
+        scale.scale_factor = w.scale_factor();
+    }
     let wanted = scaled_size(screen, scale.effective());
     if screen == scale.screen && wanted.unwrap_or(screen) == scale.render {
         return;
@@ -533,17 +568,20 @@ fn adjust_height(mut scale: ResMut<RenderScale>, mut work: ResMut<Work>, time: R
     if scale.height != RenderHeight::Auto || scale.hold || scale.screen.y == 0 {
         return;
     }
-    let (floor, ceiling) = auto_range(scale.screen.y);
+    let scale_factor = scale.scale_factor;
+    let (floor, ceiling) = auto_range(scale.screen.y, scale_factor);
     let Some(d) = scale.dynamic.as_mut() else {
         return;
     };
     if d.set_range(floor, ceiling) {
-        println!("render_dynamic version=2 event=range floor={floor} ceiling={ceiling}");
+        println!(
+            "render_dynamic version=3 event=range floor={floor} ceiling={ceiling} scale_factor={scale_factor}"
+        );
     }
     let from = d.rows;
     if let Some(reason) = d.update(time.delta_secs() * 1000., work_ms, ceiling) {
         println!(
-            "render_dynamic version=2 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} probe_gain_ms={:.2} pixel_gain_ms={:.2} floor={} ceiling={ceiling}",
+            "render_dynamic version=3 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} probe_gain_ms={:.2} pixel_gain_ms={:.2} floor={} ceiling={ceiling}",
             d.rows, d.frame_ms, d.work_ms, d.gain.0, d.gain.1, d.floor
         );
     }
@@ -554,13 +592,14 @@ pub fn install(app: &mut App, height: RenderHeight) {
     let dynamic = auto_dynamic(height);
     if let Some(d) = &dynamic {
         println!(
-            "render_dynamic version=2 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}/{DOWN_SECONDS}s up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS} probe_s={PROBE_SECONDS} gpu_share={GPU_SHARE} hold_s={HOLD_SECONDS}",
+            "render_dynamic version=3 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}..{MAX_DOWN_SHARE}/{DOWN_SECONDS}s hidpi_ceiling={HIDPI_CEILING_ROWS} hitch_ms={HITCH_MS} up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS} probe_s={PROBE_SECONDS} gpu_share={GPU_SHARE} hold_s={HOLD_SECONDS}",
             d.floor, d.rows
         );
     }
     app.insert_resource(RenderScale {
         height,
         screen: UVec2::ZERO,
+        scale_factor: 1.,
         render: UVec2::ZERO,
         dynamic,
         hold: false,
@@ -668,13 +707,14 @@ mod tests {
         let mut d = Dynamic::new(480, 720);
         // Warm-up: no change in the first seconds.
         assert!(run_with(&mut d, 2.5, pixel_bound(45.), 5.).is_empty());
-        // Frames bound by the pixel count (45 ms at 720 rows): down 48 rows
-        // per probe second to the floor; each step gains what it should.
+        // Frames bound by the pixel count (45 ms at 720 rows): a quarter of
+        // the height in whole 24-row units (168 rows), then to the floor;
+        // each step gains what it should.
         let down = run_with(&mut d, 6., pixel_bound(45.), 5.);
-        assert_eq!(down, vec![672, 624, 576, 528, 480]);
-        // On time: up 24 rows after 3 s, but not back to 528 (late 1 s ago)
+        assert_eq!(down, vec![552, 480]);
+        // On time: up 24 rows every 3 s, but not back to 552 (late 1 s ago)
         // until its block ends.
-        assert_eq!(run(&mut d, 10., 16.7, 5.), vec![504]);
+        assert_eq!(run(&mut d, 10., 16.7, 5.), vec![504, 528]);
         // Then up 24 rows every 3 s to the ceiling.
         let later = run(&mut d, 60., 16.7, 5.);
         assert!(later.windows(2).all(|w| w[1] == w[0] + 24), "{later:?}");
@@ -693,12 +733,12 @@ mod tests {
         assert_eq!(d.rows, 720);
         // Late with a light simulation and pixel-bound frames: the height
         // drops.
-        assert_eq!(run_with(&mut d, 2., pixel_bound(30.), 4.), vec![672, 624]);
+        assert_eq!(run_with(&mut d, 2., pixel_bound(30.), 4.), vec![552]);
         // Loading hitches are ignored too.
         assert!(run(&mut d, 10., 500., 1.).is_empty());
         // A lower ceiling (the Video screen) applies at once.
-        assert_eq!(d.update(16.7, 1., 600), Some("ceiling"));
-        assert_eq!(d.rows, 600);
+        assert_eq!(d.update(16.7, 1., 504), Some("ceiling"));
+        assert_eq!(d.rows, 504);
     }
 
     /// F571: the phone's race (36-41 ms frames, a light fixed step) went
@@ -709,16 +749,16 @@ mod tests {
         let mut d = Dynamic::new(480, 720);
         assert!(run(&mut d, 2.9, 37., 1.5).is_empty());
         // CPU-bound: 37 ms whatever the rows. One probe, then back.
-        assert_eq!(run(&mut d, 2., 37., 1.5), vec![672, 720]);
+        assert_eq!(run(&mut d, 2., 37., 1.5), vec![552, 720]);
         assert!(d.gain.0.abs() < 0.5 && d.gain.1 > 4.5, "{:?}", d.gain);
         // Held at the ceiling for HOLD_SECONDS, then one more probe.
         assert!(run(&mut d, 58., 37., 1.5).is_empty());
-        assert_eq!(run(&mut d, 4., 37., 1.5), vec![672, 720]);
+        assert_eq!(run(&mut d, 4., 37., 1.5), vec![552, 720]);
         // Mostly CPU-bound (a quarter of the frame scales with the pixels):
         // still back.
         let mostly_cpu = |rows: u32| 28. + 9. * (rows as f32 / 720.).powi(2);
         assert!(run_with(&mut d, 57., mostly_cpu, 1.5).is_empty());
-        assert_eq!(run_with(&mut d, 4., mostly_cpu, 1.5), vec![672, 720]);
+        assert_eq!(run_with(&mut d, 4., mostly_cpu, 1.5), vec![552, 720]);
         assert_eq!(d.rows, 720);
     }
 
@@ -743,6 +783,66 @@ mod tests {
         // A resized window starts again at its native height.
         assert!(d.set_range(540, 1080));
         assert_eq!(d.rows, 1080);
+    }
+
+    /// F642: a Retina MacBook (3024 × 1890, scale factor 2) rendered 1890
+    /// rows under Auto; a high-DPI window now tops out at 1440.
+    #[test]
+    fn dynamic_height_hidpi_range() {
+        assert_eq!(auto_range(1890, 2.), (720, 1440));
+        assert_eq!(auto_range(1890, 1.), (960, 1890));
+        assert_eq!(auto_range(1080, 1.5), (552, 1080));
+        assert_eq!(
+            scaled_size(UVec2::new(3024, 1890), RenderHeight::Rows(1440)),
+            Some(UVec2::new(2304, 1440))
+        );
+    }
+
+    /// F642: 48-row steps were 2.5 % of the pixels at 1890 rows. A step now
+    /// aims at an on-time pixel-bound frame, at most a quarter of the height.
+    #[test]
+    fn dynamic_height_steps_by_the_frame_time() {
+        let mut d = Dynamic::new(0, 0);
+        d.set_range(720, 1440);
+        assert!(run_with_ceiling(&mut d, 2.9, |_| 7., 1., 1440).is_empty());
+        // Dense smoke: 68 ms at 1440 rows, bound by the pixels.
+        let frame = |rows: u32| 68. * (rows as f32 / 1440.).powi(2);
+        let down = run_with_ceiling(&mut d, 5., frame, 2., 1440);
+        assert_eq!(down, vec![1080, 816, 720]);
+        // Slightly late at the ceiling: still the smallest step.
+        let mut d = Dynamic::new(480, 720);
+        let down = run_with(&mut d, 6., pixel_bound(19.), 1.);
+        assert_eq!(down.first(), Some(&672), "{down:?}");
+        // Frames of 100-250 ms count; longer ones are hitches.
+        let mut d = Dynamic::new(480, 720);
+        assert_eq!(run(&mut d, 8., 120., 1.).first(), Some(&552));
+        let mut d = Dynamic::new(480, 720);
+        assert!(run(&mut d, 10., 300., 1.).is_empty());
+    }
+
+    /// F642: as smoke thickened, a probe measured −46 ms against 2 ms
+    /// expected and went back to native. A frame slower by more than the
+    /// expected gain is inconclusive: the step stays.
+    #[test]
+    fn dynamic_height_keeps_a_step_when_the_scene_gets_slower() {
+        let mut d = Dynamic::new(480, 720);
+        assert!(run(&mut d, 2.9, 30., 1.).is_empty());
+        let mut reasons = Vec::new();
+        let mut t = 0.;
+        while t < 3000. {
+            // 30 ms frames until the first step, then a heavier scene: 60 ms
+            // at 540 rows, still bound by the pixels.
+            let ms = if d.rows == 720 { 30. } else { 60. * (d.rows as f32 / 540.).powi(2) };
+            t += ms;
+            if let Some(reason) = d.update(ms, 1., 720) {
+                reasons.push((reason, d.rows));
+            }
+        }
+        assert_eq!(reasons.first(), Some(&("late", 552)), "{reasons:?}");
+        assert!(reasons.iter().all(|(r, _)| *r != "ineffective"), "{reasons:?}");
+        // The next step, to the floor, gained what the pixels promised.
+        assert_eq!(d.rows, 480, "{reasons:?}");
+        assert!(d.gain.0 > GPU_SHARE * d.gain.1, "{:?}", d.gain);
     }
 
     #[test]

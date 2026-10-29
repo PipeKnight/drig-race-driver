@@ -1076,6 +1076,26 @@ The desktop never runs late, so no dynamic change was exercised live; the phone 
     keep the slow average.
 - Test `desktop_auto_range_starts_native_and_stays_there_on_time`.
 
+**High-DPI windows and larger steps (F642):** the owner's MacBook log (Apple M4, 3024 × 1890,
+Detroit Derby, F640) showed three faults with dense tyre smoke:
+- Native and the `Auto` ceiling were 1890 rows (5.7 MP). On a window with a scale factor above 1
+  the desktop `Auto` ceiling is now at most `HIDPI_CEILING_ROWS` = 1440 (2304 × 1440 there, 58 % of
+  the pixels), the floor half of that. macOS defaults to `auto`, since a Mac's built-in display is
+  high-DPI; other desktops keep `native`. A Windows display scaled above 100 % gets the same cap
+  under `Auto`.
+- A step was 48 rows, 2.5 % of the pixels at 1890 rows: a 68 ms frame cannot show that gain above
+  its noise. A step now goes to the height where a pixel-bound frame would take 16.7 ms
+  (rows × √(16.7 / frame ms)), in whole 24-row units, at least 48 rows and at most a quarter of the
+  height (`MAX_DOWN_SHARE`). From 1440 rows at 68 ms that is 1080, then 816, then the 720 floor.
+- The probe from 1818 to 1770 rows measured −46 ms (smoke thickening) against 2.1 ms expected,
+  was called `ineffective` and returned to native for 60 s. A frame slower by more than the
+  expected gain is now inconclusive: the lower height stays and later steps can continue. A frame
+  gaining little but not slower (CPU bound, F571) still returns to the ceiling.
+- Frames up to 250 ms count (was 100 ms): the smoke held 87–102 ms frames for seconds.
+- Logs are `render_dynamic version=3`; `event=range` adds `scale_factor`.
+- Not verified on a Mac: unit tests only (`dynamic_height_hidpi_range`,
+  `dynamic_height_steps_by_the_frame_time`, `dynamic_height_keeps_a_step_when_the_scene_gets_slower`).
+
 ### Compute threads on the desktop (F573)
 
 `mobile::compute_threads` (cores − 2, at least 4) against Bevy's default split (compute gets 12 of
