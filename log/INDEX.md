@@ -542,6 +542,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G329](G0329.md) | 2026-10-29 | General automatic main-view smoke composition without vehicle or track whitelists |
 | [G328](G0328.md) | 2026-10-29 | Scoped Derby live-smoke admission and selected twelve-car receipts |
 | [G327](G0327.md) | 2026-10-29 | Explicit desktop DLAA release configuration and guarded portable packaging |
 | [G326](G0326.md) | 2026-10-28 | Baseline DLAA ground-cover transparency after an actual matched display comparison |

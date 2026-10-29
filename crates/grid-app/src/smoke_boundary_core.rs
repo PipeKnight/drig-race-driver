@@ -488,6 +488,21 @@ pub(crate) fn draw_into_scene_native_hdr1<'w>(
     )
 }
 
+/// Automatic main-view entry: capability was stamped before masking and is rechecked now.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_into_scene_automatic<'w>(
+    context:&'w mut RenderContext,world:&'w World,view:Entity,target:&'w ViewTarget,
+    depth:&'w ViewDepthTexture,frame:&'w Frame,proof:&Proof,
+    capability:super::smoke_boundary::attachments::Capability,
+)->Result<(), &'static str> {
+    if !capability.matches(target,depth) {
+        proof.fail("automatic smoke attachment changed after masking");
+        return Err("automatic smoke attachment changed after masking");
+    }
+    draw_into_scene_format(context,world,view,target,depth,frame,proof,capability.format,
+        "grouped-automatic same scene/depth")
+}
+
 // Private expected format, never an unrestricted public rendering profile.
 // Baseline guard/label/order/body unchanged apart from this extraction.
 #[allow(clippy::too_many_arguments)]

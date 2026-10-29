@@ -1827,6 +1827,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut motion_phase_profile = None;
     let mut smoke_ct = smoke_ct_neutral::Mode::Off;
     let mut smoke_boundary = smoke_boundary::Mode::Off;
+    let mut smoke_policy_explicit=false;
     let mut native_smoke_arm: Option<native_smoke::Arm> = None;
     let mut native_smoke_data_dir_explicit = false;
     let mut native_smoke_capture_profile = None;
@@ -1861,6 +1862,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         native_smoke_script_flags.note_arg(&arg);
+        smoke_policy_explicit |= smoke_boundary::explicit_policy_arg(&arg);
         match arg.as_str() {
             // Already read by settings::load.
             "--settings" | "--data-dir" => {
@@ -4414,6 +4416,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(context) = native_smoke_context {
         smoke_boundary::install_native_diagnostic(&mut app, context)?;
+    }
+    if smoke_boundary::automatic_selected(drive,!headless,ground_effect_assets::enabled(),
+        smoke_order==tyre_smoke::SmokeOrder::Groups,smoke_policy_explicit) {
+        smoke_boundary::install_automatic(&mut app)?;
+    } else if drive {
+        println!("smoke_boundary mode=ordinary_existing explicit_policy={} ground_effects={} groups={} rendered={} automatic_not_installed=true",
+            smoke_policy_explicit,ground_effect_assets::enabled(),smoke_order==tyre_smoke::SmokeOrder::Groups,!headless);
     }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();

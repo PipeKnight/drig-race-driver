@@ -2,6 +2,7 @@
 //! Moves existing prepared draws only. No material, pipeline, simulation or sample changes.
 use super::smoke_boundary_core as core;
 mod live;
+pub(crate) mod attachments;
 pub(crate) mod native_diagnostic;
 use super::smoke_pilot::Profile;
 use bevy::{
@@ -252,6 +253,19 @@ impl Routing {
         self.ranges.clear();
     }
 }
+/// Raw selector presence, including explicit Off, isolates historical diagnostic controls.
+pub(crate) fn explicit_policy_arg(arg:&str)->bool {
+    matches!(arg,"--smoke-boundary"|"--native-smoke-boundary"|"--native-smoke-profile"|"--smoke-ct"
+        |"--smoke-compositor"|"--ground-skid-pass"|"--skid-order"|"--skid-reflectance"
+        |"--smoke-order"|"--motion-phase-map"|"--motion-phase-profile"
+        |"--window-phase-audit"|"--oit-capacity-audit"|"--temporal-audit"|"--temporal-colour-audit")
+}
+/// Absence of an explicit render-policy selector is the ordinary shipping path.
+pub(crate) fn automatic_selected(driving:bool,rendered:bool,ground:bool,groups:bool,explicit:bool)->bool {
+    driving&&rendered&&ground&&groups&&!explicit
+}
+pub(crate) fn install_automatic(app:&mut App)->std::io::Result<()> {live::install_automatic(app)}
+
 /// Off does not install resources, hooks, files or render commands.
 pub(crate) fn install(
     app: &mut App,
@@ -985,5 +999,26 @@ mod tests {
                 .is_err()
         );
         assert!(!s.complete());
+    }
+}
+
+#[cfg(test)]
+mod automatic_arbitration_tests {
+    use super::*;
+    #[test]
+    fn actual_parser_presence_keeps_explicit_off_controls_out_of_automatic_installation() {
+        let ordinary=["--drive","--settings","event.ini","--aa","dlaa","--glass-pilot","base-mip-zero","--window-sort","current","--car-transparent-sort","current"];
+        let explicit=ordinary.iter().any(|a|explicit_policy_arg(a));
+        assert!(automatic_selected(true,true,true,true,explicit));
+        for args in [["--smoke-boundary","off"],["--native-smoke-boundary","off"],
+            ["--smoke-ct","off"],["--smoke-compositor","off"],["--ground-skid-pass","off"],
+            ["--skid-order","off"],["--smoke-order","groups"]] {
+            let explicit=args.iter().any(|a|explicit_policy_arg(a));
+            assert!(!automatic_selected(true,true,true,true,explicit));
+        }
+        assert!(!automatic_selected(false,true,true,true,false));
+        assert!(!automatic_selected(true,false,true,true,false));
+        assert!(!automatic_selected(true,true,false,true,false));
+        assert!(!automatic_selected(true,true,true,false,false));
     }
 }
