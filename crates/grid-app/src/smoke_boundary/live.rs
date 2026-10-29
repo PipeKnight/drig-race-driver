@@ -133,9 +133,15 @@ fn stamp(snapshot: &Snapshot) -> (u32, u64, u64) {
 pub(super) fn install(app: &mut App) -> std::io::Result<()> {
     install_profile(app, Profile::Baseline4)
 }
-// No new CLI admission: current public caller still selects Baseline4.
-// Future diagnostic context must validate Off/Control/Treatment identically.
+// Both explicit ordinary live scopes reuse Baseline4.
+// Native admission remains separate and validates its own context.
+pub(super) fn install_derby(app: &mut App) -> std::io::Result<()> {
+    install_labeled(app, Profile::Baseline4, "stk-detroit8-11ai-damage-baseline")
+}
 pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Result<()> {
+    install_labeled(app, profile, "bmw-istanbul0-baseline")
+}
+fn install_labeled(app: &mut App, profile: Profile, scope: &'static str) -> std::io::Result<()> {
     if profile == Profile::NativeDlaaHdr1 {
         if !cfg!(feature = "dlaa") {
             return Err(std::io::Error::other(
@@ -223,7 +229,7 @@ pub(super) fn install_profile(app: &mut App, profile: Profile) -> std::io::Resul
                 .in_set(Core3dSystems::MainPass),
         );
         println!(
-            "smoke_boundary mode=grouped-live scope=bmw-istanbul0-baseline groups=5 screenshot_ledger=false native_aa=false positive_fragments=unknown"
+            "smoke_boundary mode=grouped-live scope={scope} groups=5 screenshot_ledger=false native_aa=false positive_fragments=unknown"
         );
     } else {
         let mut install = Schedule::new(NativeLateInstall);

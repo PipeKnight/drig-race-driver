@@ -2339,7 +2339,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 if native_smoke_arm.replace(selected).is_some() { return Err("--native-smoke-boundary must occur once".into()); }
             }
             "--smoke-boundary" => {
-                smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off, grouped-direct or grouped-live")?)?;
+                smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off, grouped-direct, grouped-live or grouped-live-derby")?)?;
             }
             "--smoke-ct" => {
                 smoke_ct = smoke_ct_neutral::Mode::parse(&args.next().ok_or("--smoke-ct needs off or neutral")?)?;
@@ -2587,6 +2587,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
                 println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
                 println!("--smoke-boundary grouped-live: opt-in solo baseline AA0/sky BMW Istanbul route_0 keyboard fix using existing five smoke groups after transparency; interactive Window or bounded --render, no screenshot ledger/native DLAA/general-car admission. Cold/empty/unsupported frames retain ordinary draws; unexpected post-mask skip is a reported failure.");
+                println!("--smoke-boundary grouped-live-derby: explicit baseline AA1/MSAA4 STK Detroit route_8/sub0 11AI/six laps/back-grid/damage only; ordinary Window or exact900/30/350x120 image fixture, SkidOff, other pilots off; no default promotion/native-AA/menu admission.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--crowd-flash-preview off|control|frozen-pulse: default-off authored three-anchor static Detroit crowd flash diagnostic; requires --crowd-preview static-billboards, baseline MSAA4, --reflections sky and bounded rendered reference. No source clock or scene lights.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
@@ -2922,6 +2923,50 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         {
             return Err("--smoke-boundary grouped-live requires solo undamaged baseline AA0/sky BMW Istanbul route_0/sub0 LOD0 keyboard driving, Groups/ground effects, ground-skid-pass/skid-order/compositors/audits/custom camera controls off; captures need --drive-ticks, interactive windows have no screenshot ledger".into());
         }
+    }
+    let derby_fixture = smoke_boundary::DerbyFixture {
+        route: route.path(), subroute: route.subroute(), car: player_car.stem(), opponents,
+        opponent_models_stk: opponent_cars.as_ref().is_none_or(|models|
+            !models.is_empty() && models.iter().all(|m| m.stem() == "stk")),
+        discipline: discipline.as_deref(), laps: trial_laps,
+        back_grid: grid_position == Some(12) || (grid_position.is_none() && profile.grid_back),
+        damage_enabled: body_contacts.is_some() && body_events.is_some() && deformation.is_some(),
+        output: output.is_some(), ticks: drive_ticks, fps: render_fps, motion: motion_sequence,
+        handbrake: handbrake_from, throttle: scripted.throttle, steering: scripted.steering,
+    };
+    // Endpoint observations for the exact finite Off/Live Derby fixture only.
+    // This marker never arms a render policy or asserts complete world/RNG parity.
+    let derby_endpoint = output.is_some() && derby_fixture.admitted()
+        && matches!(smoke_boundary, smoke_boundary::Mode::Off | smoke_boundary::Mode::GroupedLiveDerby)
+        && !graphics.enhanced() && graphics.anti_aliasing == 1
+        && drive && !headless && !collision && !from_menu && lod == "LOD0_"
+        && smoke_order == tyre_smoke::SmokeOrder::Groups
+        && skid_order == skid_marks::OrderMode::Off
+        && ground_skid_pass == ground_skid_pass::Mode::Off;
+    if smoke_boundary == smoke_boundary::Mode::GroupedLiveDerby {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false;
+        if !derby_fixture.admitted() || graphics.enhanced() || graphics.anti_aliasing != 1 || graphics.reflection_mode != 0
+            || (output.is_some() && (graphics.width != 1920 || graphics.height != 1080))
+            || !drive || headless || collision || from_menu || lod != "LOD0_"
+            || series.is_some() || career_result.is_some() || profile.time_limit.is_some()
+            || smoke_order != tyre_smoke::SmokeOrder::Groups || skid_order != skid_marks::OrderMode::Off
+            || ground_skid_pass != ground_skid_pass::Mode::Off || skid_reflectance.is_some()
+            || !ground_effect_assets::enabled() || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
+            || smoke_ct != smoke_ct_neutral::Mode::Off || smoke_compositor != smoke_compositor::Mode::Off
+            || motion_phase_map || motion_phase_profile != smoke_pilot::Profile::Derby120
+            || graphics.window_pilot != window_response::Mode::Off || window_sort_current || car_transparent_sort
+            || foundation_front != foundation_front::Mode::Off || foundation_backing != foundation_backing::Mode::Off
+            || graphics.object_coverage != object_materials::CoverageMode::Off || graphics.double_fence_wire
+            || crowd_preview != crowd_preview::Mode::Off || crowd_flash_preview != flash_preview::Mode::Off
+            || window_phase_target.is_some() || oit_capacity_target.is_some()
+            || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
+            || texture_override_path.is_some() || surface_rgb_override.is_some()
+            || (input_settings.device != input::Device::Keyboard
+                && (output.is_some() || input_settings.device != input::Device::Auto))
+            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || diagnostics != settings::Diagnostics::default()
+        { return Err("--smoke-boundary grouped-live-derby requires baseline AA1/MSAA4/sky STK Detroit8/sub0 six-lap back-grid 11-STK-AI damage keyboard driving; ordinary SkidOff/Groups and other pilots off; bounded image fixture900/30/350x120/HB500 or unforced ordinary Window only".into()); }
     }
     if smoke_boundary == smoke_boundary::Mode::GroupedDirect
         && (!motion_phase_map || !motion_phase_profile.boundary_order(skid_order)
@@ -3508,6 +3553,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             Ok((runtime, geometry, opponents))
         };
         let (runtime, geometry, opponents) = build_race(&route, player_slot)?;
+        if smoke_boundary == smoke_boundary::Mode::GroupedLiveDerby {
+            let valid_runtime = |r: &grid_tools::source_vehicle::Runtime| r.car().stem() == "stk"
+                && r.route().path() == "tracks/usa/detroit/route_8" && r.route().subroute() == 0
+                && r.body_events.is_some() && r.deformation_enabled && r.deformation_registration.is_some();
+            if player_slot != 11 || geometry.is_none() || !valid_runtime(&runtime)
+                || opponents.as_ref().is_none_or(|o| o.drivers.len() != 11
+                    || o.multi.cars.len() != 12 || !o.multi.cars.iter().all(valid_runtime))
+            { return Err("Derby live actual 12-STK/11-driver/back-grid/damage runtime cohort differs".into()); }
+            println!("smoke_boundary_derby cohort=12 all_stk=true ai_drivers=11 player_slot=11 damage=true ai_seed_base=0x5eed renderer=Baseline4 full_world_state_proof=false");
+        }
         // A Pro Touge's second run: the reverse subroute, the slots swapped
         // [I] (docs/TOUGE.md §7).
         if pro_touge {
@@ -3820,6 +3875,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(feature = "dlaa"))]
     let _ = temporal_colour_directory;
     let mut app = App::new();
+    if derby_endpoint { app.insert_resource(DerbyEndpointReceipt); }
     app.insert_resource(start_sequence.clone());
     if let Some(keys) = texture_override_keys { app.insert_resource(texture_overrides::Active(keys)); }
     if let Some(rate) = capture_orbit_rate {
@@ -5891,9 +5947,57 @@ fn restart(driving: &mut Driving, trial: Option<&mut time_trial::Trial>) {
         trial.reset();
     }
 }
-fn drive_exit_log(driving: Res<Driving>, mut exits: MessageReader<AppExit>) {
+#[derive(Resource)]
+struct DerbyEndpointReceipt;
+
+/// Selected public state only: not a complete simulation/AI/particle RNG digest.
+fn report_derby_car_endpoint(
+    segment: u64,
+    car: usize,
+    runtime: &grid_tools::source_vehicle::Runtime,
+    retirement: Option<&grid_tools::source_vehicle::multi::Retirement>,
+) {
+    let vehicle = &runtime.state.car.owner.vehicle;
+    // Same established damage/status words as Driving::report, retained as raw bits.
+    let damage_words = [0, 4, 8, 0x10, 0x14, 0x28, 0x2c, 0x30, 0x34]
+        .map(|offset| vehicle[(0xcdf0 + offset) / 4]);
+    let deformation = runtime.deformation_registration.as_ref()
+        .map(|d| (d.bulk_calls, d.records, d.random_seed, d.owner_toggle));
+    let retirement = retirement.map(|r| (r.tick, &r.error.0));
+    log_line!(
+        "derby_endpoint version=1 segment={segment} car={car} tick={} pose_bits={:?} velocity_bits={:?} angular_bits={:?} damage_words={damage_words:?} handling_status_word={} terminal_wheel={:?} disqualified={} damage_rng={:?} deformation={deformation:?} retirement={retirement:?} complete_rng_proof=false",
+        runtime.ticks,
+        runtime.pose().map(f32::to_bits),
+        runtime.velocity().map(f32::to_bits),
+        runtime.angular_velocity().map(f32::to_bits),
+        vehicle[0xd234 / 4],
+        runtime.terminal_wheel(),
+        runtime.disqualified(),
+        runtime.state.car.owner.damage_random_state,
+    );
+}
+
+fn drive_exit_log(
+    driving: Res<Driving>,
+    mut exits: MessageReader<AppExit>,
+    derby: Option<Res<DerbyEndpointReceipt>>,
+) {
     if exits.read().next().is_some() {
         driving.report("exit", driving.last_controls.unwrap_or_default());
+        if derby.is_some() {
+            // Car0 is held outside MultiRuntime between ticks; its slot is a placeholder.
+            let opponents = driving.opponents.as_ref();
+            let count = 1 + opponents.map_or(0, |o| o.multi.cars.len().saturating_sub(1));
+            log_line!("derby_endpoint_header version=1 segment={} tick={} cars={count} expected_cars=12 scope=selected-public-state complete_world_proof=false ai_rng=unavailable particle_rng=unavailable", driving.segment, driving.runtime.ticks);
+            report_derby_car_endpoint(driving.segment, 0, &driving.runtime,
+                opponents.and_then(|o| o.multi.retirement(0)));
+            if let Some(opponents) = opponents {
+                for (car, runtime) in opponents.multi.cars.iter().enumerate().skip(1) {
+                    report_derby_car_endpoint(driving.segment, car, runtime,
+                        opponents.multi.retirement(car));
+                }
+            }
+        }
     }
 }
 #[allow(clippy::type_complexity, clippy::too_many_arguments)] // Explicit Bevy resource/component ownership.
