@@ -116,3 +116,22 @@ The calculation routine0x730F90 reconstructs packed back/ambient only on its lig
 The master-known XML reader0x0072BB40 (`lighting_xml_parameter_reader`, extent0x72BB40..0x72C45E) calls0x00726A50 (`lighting_xml_control_defaults`) before parsing. Bounded aligned reads find no direct+0xBD/+0xBC access in that reader or short initializer; indirect helper/alias writes remain possible. A cached different zero-record initializer0x742DC0 clears a word covering+0xBD in its own record, but its owner has not been connected to this lighting object and must not replace the traced default.
 
 Shared lookups preceded all new-address reads. No new Ghidra project/decompile or original execution was needed. Private BD_BRANCH07.md, bd07-lookup-receipt.txt and bd07-hashes.json under local/handoff/drafts/shibuya-sky-source-audit01/ retain the exact provenance; original instruction listings stay private. This closes the default-writer gap, not every live override or the source-to-Bevy radiometric/display boundary.
+
+## Shared screen-space lighting mask (G332, static recovery)
+
+[D, selected static paths] The source target is connected by pointer identity, not only by matching names: resource `shadow_mask` is stored at renderer+0x708 and at CSM-owner+0x648, then bound to material instances as `TShadowMask`. Setup0x605CB0/0x005BA1D0 establishes that identity; binding0x005FB180 submits it. The CSM owner is renderer+0xC0.
+
+| Selected producer | Final RGBA meaning | Selected surface consumer |
+|---|---|---|
+| CSM visibility and smoothing | `(V, 0, 0, 0)` | Direct factor is `1 + shadow_strength * (V - 1)`; this branch adds no projected RGB. |
+| NightLights full, quick or BSP | `(1, L.r, L.g, L.b)` | Direct factor is1; GBA adds a separate projected-light RGB contribution. |
+
+The selected CSM stage0x005CD5F0 draws into intermediate owner+0x644, then smooths into final owner+0x648. Its smoothing fragment samples four interpolated UV pairs, each offset by half the inverse texture dimensions, and averages their R values with equal1/4 weights. It explicitly zeros GBA. There is no scene-depth sampler or unequal/Gaussian weighting in that fragment. Vertex-generated coordinates and sampler state still determine the effective footprint; this does not establish a four-pixel radius or physical penumbra.
+
+The three selected NightLights fragments saturate accumulated projected texture contributions, multiply the result by `lightColour.rgb`, then pack RGB into GBA. Shared-input binding0x0072E170 connects `headlightMap` and `screenDepthMap` to these shaders. Wrapper0x0073CA10 draws into the same final mask target.
+
+Selector0x0062E0F0 returns after its selected NightLights branch, before the alternative CSM branch. Camera wrapper0x006430A0 completes mask work before colour dispatch0x0063AEB0. Saved NightLights blending is disabled; the observed dataflow therefore does not support inventing an additive NightLights-plus-CSM compositor.
+
+The selector checks a generic pass byte+0x53 and a float at NightLights+0x10BC4 against zero. Their named meanings and live Shibuya values remain unknown. These findings establish neither a day/night classifier nor a global shadow-disable rule. A general renderer adaptation must preserve the producer, consumer and branch-state relationships, then validate live route/weather cases. Source colour space, physical units, backend state overrides and visual parity remain open.
+
+Provenance: six selected shader fragments only; purchased shaderpack SHA256 `b6b29b80397d12def9c90f5afcff9ea8f335d07da3dc81e293273b468c9029a6` unchanged before/after, installed D3DDisassemble DLL10.0.26100.9606 and Python3.14.4. Shared lookups preceded address reads; existing master/cache reused. Private `local/handoff/drafts/shadow-mask-cache08/` retains CHAIN11.md, SMOOTH12.md, FINAL-lookups.txt, PROVENANCE09.json and FINAL-MANIFEST.json. No original execution, UI, GPU, new decompile or renderer change was needed. Proprietary instructions and binary fragments remain private.
