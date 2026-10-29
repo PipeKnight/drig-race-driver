@@ -71,9 +71,13 @@ One preset per track, plus per-route presets on Haruna:
 Notes:
 
 - `headlights` is 0 in every file. The three front-end garages have presets too.
-- Sun height 90° puts the sun at the horizon in the original's convention: heights of 131°–158° are
-  daytime suns. The night presets have `skyscale` 0 or 0.03 (a black sky), black fog and a horizon
-  sun [D values; I meaning].
+- Do not interpret saved sun height as a day/night classifier. In the recovered selected-path
+  basis, `direction_to_light.y = sin(height)`: 90° points along +Y (zenith), not the horizon.
+  The cached synthetic original matrix and `track_lighting` cardinal tests agree; see
+  [source direction evidence](SOURCE_SKY_LIGHTING.md#source-sun-vector-traced--18-october-2026).
+  Night-labelled presets have `skyscale` 0 or 0.03 and dark fog, but those data do not prove a
+  horizon sun or the live runtime weather/light state. The previous horizon interpretation
+  was incorrect (G330).
 - "Sky rain layer" means `sky_rain_scale_u` = 20 and `sky_rain_map_speed_u` = 0.1: a scrolling
   cloud or overcast layer of the sky shader (`skyRain*` constants), not rain. The executable's
   `sky_main` and `sky_env` shaders are the graphics side's (docs/SOURCE_SKY_LIGHTING.md).

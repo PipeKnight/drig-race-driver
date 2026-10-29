@@ -77,3 +77,42 @@ Colour GPU pilot accepted for opt-in testing: source96dddba54905, release1m39s. 
 
 
 P11 integrated warm static control (233c19b versus96dddba) differs in exactly2pixels at native coordinates2579,628 and2585,635; maximum37byte/mean4.98e-6byte over the whole image. Reported as measured rather than identity; no broad colour change is implied, and its cause was not isolated. The side-driving physical exits remain exact. F370 changes only settings whitespace parsing plus journal; seven focused settings/profile tests pass on the subsequent merge, broader602suite applies to the preceding P11 graphics base.
+
+
+## Lighting-unit integration boundaries (G330, 29 October 2026)
+
+The saved sun height90 is +Y in the recovered selected-path basis, not a horizon marker. The existing synthetic original matrix has third column approximately(0,1,-4.37e-8); `Sun::direction_to_light` and its cardinal test agree. Shibuya93.6 therefore maps near vertical in this path. This corrects the old environment-document inference; it does not establish a live night/weather light or justify changing the angle conversion.
+
+A general lighting adaptation needs an explicit unit and colour-space contract. Current baseline uses authored white18000lux and ambient450 while the route environment resource mainly retains/logs source values. Its inherited photographic exposure/tone mapping differs from enhancedEV13/AgX. Custom sky outputs recovered multiply/power RGB without Bevy photographic exposure; PBR applies view exposure. Source sky sampler sRGB state and original live exposure remain unverified, so a global EV or sky-scale tweak cannot be assumed to repair their relationship. Gaussian is already the baseline default; inserting it is a no-op.
+
+Cached selected source consumers provide the following boundaries (static evidence, not a new original runtime):
+
+| Stage | Observed operation | Integration limit |
+|---|---|---|
+| Surface direct/back/ambient | Direct uses saturate(N·L); complementary backlight uses(1-N·L)/2; ambient is added separately, with material/screen AO and fog elsewhere. | A single white directional light plus ambient does not represent all three terms; source colour packing and scale bindings still need tracing. |
+| Shadow contrast | Direct shadow factor includes1+w·(shadow.r-1). | XML `shadow_strength`→the uniform W component is now statically connected below; it is dimensionless contrast, not filter size or lux. |
+| Specular | Independent specular direction/colour drives a Phong lobe. | Diffuse direction alone is not the source specular policy or Bevy PBR roughness. |
+| Sky environment | Recovered tone RGB is multiplied by HDRRange and common-max RGB/alpha packed. | HDRRange participates in encoding; it is not directly a lux or EV value. |
+| Display | A selected tone-map path scales scene RGB by key/(sampled luminance+.001). | Live coefficients, weather/profile selection and adaptation remain unknown. |
+
+Private shader inventory and hashes are in local/handoff/drafts/shibuya-sky-source-audit01/CONSUMER_INVENTORY05.md; the original cached angle check is preserved in local/graphics/lighting-units01/source-math-audit01.json. Continue the shared binding audit before any renderer change. Original reference observation remains deferred because the owner has denied computer use while the computer is occupied. No per-track brightening constant, global haze or new night classifier is admitted by these findings.
+
+
+### XML-to-uniform bindings on the selected path
+
+[V static; G330] Cached parser/dispatcher records connect `shadow_strength` at0x00CF2364 to the scalar destination at0x0072BD02 (`lighting_xml_shadow_strength_destination`): the XML reader writes lighting-object+0xAC. The already verified context builder carries that same owner pointer as context+0xC. Dispatcher0x743220 reads+0xAC and diffuseRGB+0x1B0, packs the strength intoW, and submits `backlightSunColour`. The selected track shader usesW in1+W*(shadow.r-1). This closes the XML coefficient binding without assuming that equal strings imply equal dataflow. Its additional interior-ambient consumer is separate; it is not a Gaussian radius or a physical light unit.
+
+The XML completion path also uses the same HDR colour normalizer0x742B00 for sun, back and ambient. Back completion at0x0072C277 (`lighting_xml_pack_back_colour`) readsRGB+0x1C0/scale+0x308 and stores packed+0x2FC. Ambient completion at0x0072C299 (`lighting_xml_pack_ambient_colour`) readsRGB+0x1D0/scale+0x30C and stores packed+0x300. The shared max(1,R,G,B) normalization/8bit packing replaces the stored scale: do not multiply raw saved HDR RGB by the derived peak a second time. The calculated/unpacked RGB and raw XML remain different provenance layers.
+
+Dispatcher labels0x00743550 (`lighting_uniform_back_colour`) and0x0074369C (`lighting_uniform_ambient_colour`) read the same owner backRGB/ambientRGB; backW comes from+0xB0 while ambientW is1. [D] Pinned PE string reads additionally identify0x00CF354C (`lighting_key_back_colour`) as `backlight_backcolour` and0x00CF3048 (`lighting_uniform_name_back_colour`) as `backlightColour`;0x00CF2364 (`lighting_key_shadow_strength`) is `shadow_strength`. These names are indexed with the selected static dataflow in docs/re/symbols.tsv.
+
+The calculation routine0x730F90 reconstructs packed back/ambient only on its lighting+0xBD nonzero branch; the zero branch writes other values. Its constructor initialization is now traced below; the original named meaning and later override writers remain open. These bindings therefore do not prove every mode/weather produces the raw XML RGB or establish original runtime exposure. Existing master/cache lookups preceded this analysis; no duplicate decompile or new Ghidra project was used. Private BINDINGS06.md and binding06-string-proof.json under local/handoff/drafts/shibuya-sky-source-audit01/ retain the exact cached-file and pinned original-PE provenance.
+
+
+### Back/ambient branch initialization
+
+[V static; G330] The cached lighting constructor0x741520 first calls0x007411E0 (`lighting_initialize_defaults`) on the same owner. The aligned initializer sets a group of bytes+0xBC..+0xC4 to1; at0x007412A8 (`lighting_default_back_ambient_reconstruction`) it writes+0xBD=1. The constructor default therefore selects the packed back/ambient reconstruction branch above, unless a later writer changes the byte. This does not identify it as an XML-key-presence, night, weather or LOD flag.
+
+The master-known XML reader0x0072BB40 (`lighting_xml_parameter_reader`, extent0x72BB40..0x72C45E) calls0x00726A50 (`lighting_xml_control_defaults`) before parsing. Bounded aligned reads find no direct+0xBD/+0xBC access in that reader or short initializer; indirect helper/alias writes remain possible. A cached different zero-record initializer0x742DC0 clears a word covering+0xBD in its own record, but its owner has not been connected to this lighting object and must not replace the traced default.
+
+Shared lookups preceded all new-address reads. No new Ghidra project/decompile or original execution was needed. Private BD_BRANCH07.md, bd07-lookup-receipt.txt and bd07-hashes.json under local/handoff/drafts/shibuya-sky-source-audit01/ retain the exact provenance; original instruction listings stay private. This closes the default-writer gap, not every live override or the source-to-Bevy radiometric/display boundary.
