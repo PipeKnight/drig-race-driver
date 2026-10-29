@@ -543,6 +543,9 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G332](G0332.md) | 2026-10-29 | Recover shared screen-lighting mask producer contracts |
+| [G331](G0331.md) | 2026-10-29 | Restore source object material two-sided policy |
+| [G330](G0330.md) | 2026-10-29 | Trace shared source-lighting coefficients and correct the sun-angle interpretation |
 | [G329](G0329.md) | 2026-10-29 | General automatic main-view smoke composition without vehicle or track whitelists |
 | [G328](G0328.md) | 2026-10-29 | Scoped Derby live-smoke admission and selected twelve-car receipts |
 | [G327](G0327.md) | 2026-10-29 | Explicit desktop DLAA release configuration and guarded portable packaging |
