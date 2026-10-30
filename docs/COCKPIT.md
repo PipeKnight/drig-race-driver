@@ -212,6 +212,36 @@ The interior (0x859FC0, before the driver):
   - `driver::tests::every_cockpit_reaches_its_levers`: all 42 cockpits with a row. A hand holding a lever is within 1 µm of its dummy, except nsx and sup (H-pattern, gear 2): the knob is 0.533–0.535 m from the shoulder with a 0.532 m arm, so the solver straightens the arm 2–5 mm short, as the original's does.
   - Renders: the other views and the head-cam at rest are 0 px; at full throttle the right hand leaves the rim about 0.4 s after the 1→2 shift and returns (the lever is below the head-cam's view).
 
+## Lean
+
+Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/lean.txt` (with `lean_anchor.txt`, `lean_clips.txt`, `lean_sim.txt`, `dis_857F20.txt`, `dis_860100.txt`). This corrects findings §2.5: the lean reads no car word.
+
+### What the original does [D]
+
+- `incar_driver_glean` (0x857F20, driver LOD < 2) tracks two points rigid with the driver model frame (x left, y up, z forward):
+  - the low point (x, 0.75, 0), where x is the interior's D_Lhand_Dummy x (post-init 0x860100);
+  - the high point 0.35 m above it.
+- Each point's world velocity, by finite differences (0x840710), drives a head-cam spring (Spring S, 0x83E6D0; docs/CAMERA_VIEWS.md):
+  - high: damping 13, inertia 10, centering 10, max 1;
+  - low: damping 20, inertia 1, centering 3, max 1, no vertical freedom.
+  - The constants are in code (0x84E9A0, 0x860100); no file carries them.
+- Each offset / max is scaled (high (2, 2, 0.5), low (1, ·, 0.5)), clamped to ±1 and squared with its sign. Each sign of each axis sets one weight directly every frame (0x851CA0, 0x851DC0, 0x851EE0): no crossfade, no rate limit.
+- `incar_driver_blend_lean` (0x852660) adds driver clips 5..16 (`d_control_expose_low_*` / `_high_*`, additive static poses) at t = 0 with those weights, in every state.
+  - Braking moves clips 8 and 14 (head up to 10 cm forward); throttle 7 and 13; a left turn 5 and 11; a right turn 6 and 12.
+  - The high spring moves from about 0.13 g of point acceleration and gives a lateral weight of about 0.06–0.15 at 1 g. The low spring needs about 2 g (kerbs, landings, hits).
+- A low-spring magnitude of 0.9 or more starts the blink clip (0x84B4D0). It only blends at LOD < 1, which the head-cam (headless `_x2` body) never shows.
+
+### The port (`lean.rs`)
+
+- `Lean::update` steps both springs once per physics tick with the camera's `spring_step`, as the head-cam (F320). The input is each point's rigid-body velocity v + ω × r, from the runtime's body velocity and angular velocity, interpolated across the frame's ticks. The original finite-differences the points once per rendered frame; this gives no spike on an auto-reset teleport.
+- `Driver::pose` adds the twelve clips with weight > 0.01 after the steering, reach and handbrake poses.
+- Deviations: the original's post-init seeds the springs' last input with the anchor position, a possible start-up jolt; the port starts from the first velocity (lean.txt §2.5). The blink is not ported (not visible in the head-cam).
+- [I]: whether the original reads this frame's or last frame's driver matrix; the respawn reset (vehicle +0x8C) is replaced by the camera's reset rule (new segment or fewer ticks).
+- Checks:
+  - `lean::tests::lean_clips_follow_the_acceleration`: nothing at rest; braking weights the forward clips (14, and 8 past 2 g); a 1 g left turn weights clip 11 but not the low spring's clip 5; clips 9 and 10 never weigh.
+  - `driver::tests::lacetti_hands_reach_the_wheel_dummies`: the anchor x is 0.4846 (lean.txt); full weight on clip 8 moves the head 0.102 m forward, and the hands stay on the wheel.
+  - Renders: the other views, the head-cam at rest and at full throttle (tick 200, about 0.4 g, weights under 0.01) are 0 px against the reach build. Full throttle with full left lock (tick 300, about 70 km/h) moves the right shoulder and forearm a little (`local/cam/render/r_lean_turn/pair.png`).
+
 ## Gauges
 
 ### What the original does [D]
@@ -325,7 +355,7 @@ Not verified: the digit orientation against the original's screen (font strip or
   - the legs, then the arms, are solved (`ik::reach`) with this frame's FK;
   - the joints are written as children of the body part.
 - Not ported:
-  - the g-force lean (0x857F20), breathing and face clips;
+  - breathing and face clips;
   - the suit tint (TTintColourMask, tintColour1..3);
   - the drivers seen through the windows in the other views and in the opponents' cars (slots 0, 2..5 and 0x862300).
 

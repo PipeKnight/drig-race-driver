@@ -58,6 +58,7 @@ mod damage_hud;
 mod dash;
 mod driver;
 mod interior_anim;
+mod lean;
 mod reach;
 mod damage_parts;
 mod drift_event;

@@ -46,6 +46,10 @@ pub struct Driver {
     limbs: Vec<Limb>,
     /// The gear and handbrake reaches, when the car has them.
     reaches: Option<Reaches>,
+    /// The lean clips 5..16 (`crate::lean`), and the lean's low point x:
+    /// the interior's D_Lhand_Dummy x (0x860100), 0 without it.
+    lean: [Anim; 12],
+    lean_anchor: f32,
 }
 
 /// The car's gear and handbrake clips of its character set and the lever
@@ -288,7 +292,13 @@ pub fn append(
         }),
         None => None,
     };
+    let lean_anchor = match crate::cockpit::named(interior, b"NODE", b"D_Lhand_Dummy") {
+        Some(n) => scene::node_matrix(interior, n)?[12],
+        None => 0.,
+    };
     let driver = Driver {
+        lean: std::array::from_fn(|k| anim(5 + k)).map(Result::ok).map(Option::unwrap_or_default),
+        lean_anchor,
         reaches,
         neutral: pose(neutral),
         steer: [pose(&clips[1]), pose(&clips[2]), pose(&clips[3]), pose(&clips[4])],
@@ -326,10 +336,20 @@ impl Driver {
         self.reaches.as_ref().map(|r| r.lengths)
     }
 
+    /// The model frame in the car frame.
+    pub fn root(&self) -> Mat4 {
+        self.root
+    }
+
+    /// The lean's low point x (`crate::lean`).
+    pub fn lean_anchor(&self) -> f32 {
+        self.lean_anchor
+    }
+
     /// The joints' model-frame transforms for the steering command `s`
     /// (+1 = full right) and the reach state `reach`, the hands and feet
     /// reaching for this frame's `interior` nodes.
-    fn pose(&self, s: f32, interior: &[Mat4], reach: Option<&crate::reach::State>) -> Vec<Mat4> {
+    fn pose(&self, s: f32, interior: &[Mat4], reach: Option<&crate::reach::State>, lean: &[f32; 12]) -> Vec<Mat4> {
         let (left, right) = ((-s).max(0.), s.max(0.));
         // 0x851730 → 0x852030: to-left, left, to-right, right, all scaled
         // by the state crossfade's steering weight.
@@ -363,6 +383,10 @@ impl Driver {
             if state.blend[2] > STEER_MIN {
                 add(&mut sums, &r.handbrake_on, state.handbrake_on.clip_time(), state.blend[2]);
             }
+        }
+        // The lean (0x852660): in every state, without the state crossfade.
+        for (anim, &w) in self.lean.iter().zip(lean).filter(|(_, w)| **w > STEER_MIN) {
+            add(&mut sums, anim, 0., w);
         }
         let mut locals: Vec<Mat4> = Vec::with_capacity(self.joints.len());
         for (joint, &(q, t)) in self.joints.iter().zip(&sums) {
@@ -486,6 +510,7 @@ fn pose(
     cockpit: Option<Res<crate::cockpit::Cockpit>>,
     interior: Res<crate::cockpit::InteriorPose>,
     reaching: Res<crate::reach::Reaching>,
+    leaning: Res<crate::lean::Leaning>,
     mut joints: Query<(&DriverJoint, &mut Transform)>,
 ) {
     let (Some(driving), Some(cockpit)) = (driving, cockpit) else {
@@ -496,7 +521,8 @@ fn pose(
     };
     let vehicle = &driving.runtime.state.car.owner.vehicle;
     let s = crate::cockpit::steering(vehicle);
-    let world = driver.pose(s, &interior.0, reaching.0.as_ref().filter(|_| cockpit.reach.is_some()));
+    let lean = leaning.lean.as_ref().map_or([0.; 12], |l| l.weights);
+    let world = driver.pose(s, &interior.0, reaching.0.as_ref().filter(|_| cockpit.reach.is_some()), &lean);
     for (DriverJoint(j), mut transform) in &mut joints {
         *transform = Transform::from_matrix(world[*j]);
     }
@@ -621,7 +647,7 @@ mod tests {
         let hands = [clips.node("D_Lhand_Dummy").unwrap(), clips.node("D_Rhand_Dummy").unwrap()];
         for s in [-1., -0.5, 0., 0.5, 1.] {
             let interior = clips.worlds(&[(steering, (s + 1.) * 0.5 * clips.duration(steering), 1.)]);
-            let world = driver.pose(s, &interior, None);
+            let world = driver.pose(s, &interior, None, &[0.; 12]);
             for (limb, hand) in driver.limbs[..2].iter().zip(hands.map(|h| interior[h])) {
                 let got = driver.root * world[limb.end];
                 let gap = got.w_axis.distance(hand.w_axis);
@@ -630,6 +656,22 @@ mod tests {
                 assert!(turn < 1e-3, "s={s}: hand rotation off by {turn} rad");
             }
             assert!(world.iter().all(|m| m.is_finite()));
+        }
+        // The lean: the low point's x is D_Lhand_Dummy's; full weight on
+        // the braking clip 8 (lean id 3) moves the head forward (+z in the
+        // driver frame) and keeps the hands on the wheel.
+        assert!((driver.lean_anchor - 0.4846).abs() < 1e-3, "{}", driver.lean_anchor);
+        let interior = clips.worlds(&[(steering, 0.5 * clips.duration(steering), 1.)]);
+        let head = driver.joints.iter().position(|j| j.name == "Bip01 Head").unwrap();
+        let upright = driver.pose(0., &interior, None, &[0.; 12]);
+        let mut braking = [0.; 12];
+        braking[3] = 1.;
+        let leaning = driver.pose(0., &interior, None, &braking);
+        let forward = leaning[head].w_axis.z - upright[head].w_axis.z;
+        println!("lean: braking clip moves the head {forward} m forward");
+        assert!(forward > 0.05);
+        for (limb, hand) in driver.limbs[..2].iter().zip(hands.map(|h| interior[h])) {
+            assert!((driver.root * leaning[limb.end]).w_axis.distance(hand.w_axis) < 1e-3);
         }
         // The pedals: full throttle and full brake press their pedal, and
         // the right foot follows D_Rfoot_Dummy.
@@ -648,7 +690,7 @@ mod tests {
             let turned = interior[n].to_scale_rotation_translation().1.angle_between(rest[n].to_scale_rotation_translation().1);
             println!("pedal {pedal}: moved {moved} m, turned {turned} rad");
             assert!(moved > 1e-3 || turned > 1e-2, "{pedal} did not move");
-            let world = driver.pose(0., &interior, None);
+            let world = driver.pose(0., &interior, None, &[0.; 12]);
             let gap = (driver.root * world[driver.limbs[3].end]).w_axis.distance(interior[foot].w_axis);
             assert!(gap < 1e-3, "right foot {gap} m from its dummy");
         }
@@ -703,7 +745,7 @@ mod tests {
         let gap = |state: &State, hand: usize, target: Target| {
             let (lever, knob) = state.lever_play(&reach);
             let worlds = interior.worlds_with(&lever, knob);
-            let world = driver.pose(0., &worlds, Some(state));
+            let world = driver.pose(0., &worlds, Some(state), &[0.; 12]);
             assert!(world.iter().all(|m| m.is_finite()));
             (driver.root * world[driver.limbs[hand].end]).w_axis.distance(target.world(&worlds).w_axis)
         };
@@ -793,7 +835,7 @@ mod tests {
                     state.update(&reach, &vehicle(gear, handbrake), 1. / 60.);
                     let (lever, knob) = state.lever_play(&reach);
                     let worlds = interior.worlds_with(&lever, knob);
-                    let world = driver.pose(0., &worlds, Some(&state));
+                    let world = driver.pose(0., &worlds, Some(&state), &[0.; 12]);
                     assert!(world.iter().all(|m| m.is_finite()), "{stem}: pose not finite in state {}", state.state);
                     let gap = |arm: usize, target: Target| (driver.root * world[driver.limbs[arm].end]).w_axis.distance(target.world(&worlds).w_axis);
                     if state.arms[gear_arm].w[crate::reach::GEAR] == 1. {

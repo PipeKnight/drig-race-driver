@@ -120,7 +120,11 @@ pub fn install(app: &mut App) {
         .add_systems(Update, (create_mirror, place_mirror).chain().after(crate::drive_present))
         .init_resource::<InteriorPose>()
         .init_resource::<crate::reach::Reaching>()
-        .add_systems(Update, (attach_animated, crate::reach::update, animate_interior).chain().before(crate::drive_present))
+        .init_resource::<crate::lean::Leaning>()
+        .add_systems(
+            Update,
+            (attach_animated, crate::reach::update, crate::lean::update, animate_interior).chain().before(crate::drive_present),
+        )
         .add_systems(
             PostUpdate,
             (
