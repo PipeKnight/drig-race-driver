@@ -1783,7 +1783,8 @@ in the profile APK, `drive_present` and `allocate_and_free_meshes`.
 
 Left: the batch rebuild itself still re-uploads the whole merged mesh of a dented car and material;
 writing only the changed member's vertex range needs partial mesh uploads, which Bevy does not
-offer. Physics per tick rises in the pack's contacts (collision-sweep's area).
+offer. The physics rise in the pack that the profile build suggested (`drive_tick` 5.5 → 9.5 ms
+per tick) was span overhead and machine load, not contact work: F655 below.
 
 ## Washington pack tick profile (F655)
 
@@ -1829,6 +1830,36 @@ Candidates (not done, each must keep every identity bit-exact):
    cannot change a result (or an ordered replay of it), then a serial-against-parallel twin test.
 2. Piece contacts per piece on the compute pool, merged in order like the body contacts.
 3. Smaller: `lift_sunk` already has a parallel path; its 0.08 ms is the casts of awake pieces.
+
+**Follow-up: the two candidates (F658).** The coordinator chose candidate 2 first, then candidate 1
+only with a proof.
+
+- Candidate 2 is already in place: since F568 `PropWorld::contacts` generates each piece's contacts
+  on the compute pool and joins them in piece order (falling back to the serial pass near pool
+  exhaustion). Same race at `GRID_THREADS` 1, 4 and 8, two rounds each, under the build lock
+  (`local/pack/threads.sh`; identical race in all six, final `crt_seed` cae1df84), ms per tick in
+  the broken-props windows [O]:
+
+  | threads | PieceContacts | FramePlain | LiftSunk |
+  |---|---:|---:|---:|
+  | 1 | 0.73-1.03 | 0.35-0.55 | 0.09-0.12 |
+  | 4 | 0.22-0.32 | 0.35-0.55 | 0.08-0.11 |
+  | 8 | 0.22-0.31 | 0.37-0.52 | 0.08-0.10 |
+
+  3.3-3.8x at 4 threads and no further gain at 8: little left to win there. (The machine ran about
+  1.5x slower than in the F655 rounds; compare within the table.)
+- Candidate 1 stopped [V]. In the expensive windows there is about one island without a car per
+  tick (1.0-1.2 per tick, 0.31-0.36 ms each: the one awake pile), so islands in parallel have
+  nothing to overlap; splitting one island's solve would reorder an order-dependent iterative
+  solver. The carried solver state is also not a pure cache: `contact_rows::mixed` skips material
+  fields 6-10 for frictionless pairs and keeps the previous pair's values there, and the row
+  builder keeps words of the previous island's rows (the tests
+  `restitution_group_rows_negative_zero_and_opaque_response_survive` and
+  `body_change_flushes_previous_batch_only` show words 16-31 and 45 surviving). A parallel
+  scheme would need a read-set check per island against the serial carry, for no gain here.
+- What remains of the pile's cost is the single island's frame (`FramePlain` 0.35-0.55 ms in this
+  table) and its contacts. A result-preserving cut would have to come from copies inside that
+  frame (as F579 found for car groups), not from threads; not profiled yet.
 
 ## Demolition derby frame rate and parallel debris (F568)
 
