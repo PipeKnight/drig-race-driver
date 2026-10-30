@@ -2078,3 +2078,89 @@ supports the observer's operation and sampled neutrality, not all-context or
 GPU-execution equivalence, a measured speedup or absence of other bottlenecks.
 Receipts and the independent counter audit are private under
 `local/graphics/object-submissions01/runtime01/`.
+
+## Sun shadow cost (F652)
+
+Task: the shadow passes looked like the largest GPU pass (F633: a span "around both shadow passes",
+2.0 ms against 1.3 ms for `main_opaque_pass_3d`, Donington phone view on the PC), and the phone was
+GPU-bound at the grid (F555). The original's cascades: docs/SUN_SHADOWS.md (three maps of the
+option's size, 1024 on medium and 2048 on high; world casters only in cascades 1 and 2).
+
+**Measuring.** F633's span opened a timestamp span in one system and closed it in another. Bevy's
+recorder closes the span opened on the calling thread, so the close found none and panicked the
+renderer (`bevy_render diagnostic/internal.rs:404`); that is the hang at exit. On the render thread
+(both systems `NonSendMarker`) the device was lost instead, most likely because the closing timestamp
+was submitted after the frame's query resolve, which waits for it [I]. `gpu_passes` now replaces
+Bevy's early shadow pass system with the same pass plus one pass span per cascade
+(`gpu_pass ... name=shadow_cam0_c0..3`), as Bevy times its main passes; only with GPU timing on
+(`GRID_GPU_PASSES=1`, profile build). Runs exit normally.
+
+**Result: the shadow passes are not the PC's largest pass.** All four cascades take 0.13-0.34 ms
+GPU at the RTX 4070's normal clocks, against 0.39-0.70 ms for the main opaque pass. With the GPU in
+a lower clock state (after the PC's reboot of 30 October, every run held the 60 Hz cap) all passes
+take about three times as long: shadows 0.3-1.2 ms, opaque 0.4-2.0 ms. F633's 2.0 ms span covered
+more than the shadow passes, in a profile build.
+
+**Change: casters culled per cascade by receiver** (`crates/grid-app/src/shadow_cull.rs`,
+`GRID_SHADOW_CULL=0` for the old lists). Bevy keeps a caster in a cascade when its box meets the
+cascade's light-space square, which is fitted to the slice's diagonal and so also takes casters beside
+and behind the camera. Cascade `i` is sampled only for fragments between `0.8 * far(i-1)` and
+`far(i)`, so a caster whose box lies wholly outside one face of that camera slice (a face whose normal
+does not point along the light; margin 10 cascade texels) cannot shade a sampled fragment and is
+dropped from that cascade's list after Bevy's caster visibility. The rule is exact apart from the
+margin, so the picture is bit-identical: fixed-step renders 1600x900, Donington ticks 300, 2,400 and
+6,000, Washington ticks 300 and 3,000, and Donington 2,400 / Washington 3,000 with the mobile preset,
+`base` (origin/main 4b450407) against culling on: 0 pixels differ in all seven, the PNG files are
+byte-identical.
+
+Triangles in the four cascades, PC, `--benchmark-frames 3600` after 240 warm-up frames, means over the
+5 s windows, three alternating rounds (release build a8f338051339 with the timed shadow pass) [O]:
+
+| view | off | on | cascades 0 / 1 / 2 / 3, on against off |
+|---|---|---|---|
+| Donington phone view 1539x720 (mobile preset) | 430k, 411k, 411k | 298k, 291k, 290k (-30 %) | -3 / -28 / -32 / -36 % |
+| Donington desktop 1920x1080 | 370k, 372k, 376k | 276k, 270k, 274k (-27 %) | -3 / -28 / -31 / -32 % |
+| Washington phone view | 346k, 360k, 361k | 248k, 256k, 256k (-29 %) | -3 / -29 / -33 / -37 % |
+| Washington desktop | 326k, 340k, 339k | 240k, 245k, 244k (-28 %) | -2 / -29 / -32 / -36 % |
+
+GPU ms per frame, shadow cascades / main opaque, in the same three rounds (round 1 normal clocks,
+rounds 2 and 3 the lower clock state; compare within a round) [O]:
+
+| view | round 1 off / on | round 2 off / on | round 3 off / on |
+|---|---|---|---|
+| Donington phone view | 0.19 / 0.42, 0.13 / 0.39 | 0.31 / 0.44, 0.13 / 0.31 | 0.34 / 0.43, 0.32 / 0.58 |
+| Donington desktop | 0.18 / 0.59, 0.15 / 0.61 | 0.16 / 0.47, 0.24 / 1.15 | 0.31 / 1.06, 0.35 / 1.25 |
+| Washington phone view | 0.34 / 0.49, 0.30 / 0.43 | 0.80 / 0.99, 0.98 / 1.49 | 1.21 / 1.49, 0.99 / 1.51 |
+| Washington desktop | 0.29 / 0.70, 0.31 / 0.64 | 1.12 / 1.92, 0.96 / 1.97 | 1.12 / 1.96, 0.97 / 1.99 |
+
+Where the opaque pass shows the same clock state (Washington rounds 2 and 3, Donington phone view
+round 1) the shadow passes lose 13-32 %; the other pairs ran at different clocks. On this GPU the
+cascades seem to cost more in fill and clear (four 2048x2048 depth maps) than per triangle [I].
+
+Frame interval mean / p50, ms: round 1 (the owner at the PC) off/on Donington phone view 21.9/21.3,
+20.2/19.6; Donington desktop 17.5/17.2, 18.7/18.3; Washington phone view 21.6/20.6, 21.3/20.1;
+Washington desktop 22.2/21.0, 21.5/20.2. Rounds 2 and 3: 17.0-17.9 mean, 17.0 p50 in every run (the
+60 Hz cap), so the wall frame shows no difference.
+
+CPU, profile build (feature `profile`), ms per frame off / on. Round 2, the PC quiet (all runs at
+the 60 Hz cap): render app Washington phone view 8.29 / 8.09, desktop 8.03 / 7.96; Donington phone
+view 7.62 / 7.64, desktop 7.37 / 7.25. Within it at Washington the shadow instance buffers
+(`write_binned_instance_buffers<Shadow>`) 0.40 / 0.32 and 0.37 / 0.31, `unpack_bins` 0.29 / 0.26 and
+0.28 / 0.26, `prepare_preprocess_bind_groups` 0.49 / 0.45 and 0.47 / 0.44, the shadow pass encoding
+0.45 / 0.44 and 0.47 / 0.45: about 0.15-0.2 ms less. Round 1 ran while the PC was busy (the owner
+and other sessions): every figure about 2.7 times higher (render app 22.6 / 21.4 ms at Washington),
+the same items about 0.7 ms less. The cull system itself is below the table (top 60 spans, under
+about 0.1 ms).
+
+Phone [I]: about 30 % fewer shadow triangles in cascades 1-3 and fewer shadow draws. On a tiled GPU
+the depth-only cascades cost bandwidth per map more than per triangle, so the gain is likely smaller
+than 30 % of the shadow time; the render thread loses the same shadow batching work as on the PC.
+Check in the owner's profile log: `gpu_pass ... name=shadow_cam0_c*` (now timed),
+`view_triangles view=camera0_cascade*` and `perf_timing`.
+
+Not done: static shadow caching. Bevy re-fits each cascade every frame (texel-snapped, but the centre
+and the depth range move with the camera), so cached static casters would have to be scrolled and
+depth-remapped per frame, and a racing camera moves the near cascades completely within a fraction of
+a second. With the passes at 0.1-0.3 ms on the PC and fill-bound, not pursued. The faithful layout
+(two world cascades and the car's own map, docs/SUN_SHADOWS.md section 3) would roughly halve the
+passes on every device but changes the picture; it needs the owner's decision.

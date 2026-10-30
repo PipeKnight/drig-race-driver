@@ -10,9 +10,10 @@
 //! gpu_pass rank=1 gpu_ms=6.10 primitives=812345 vertices=1201234 fragments=2101234 name=main_opaque_pass_3d
 //! ```
 //!
-//! Bevy times the main passes but not the shadow passes, so each window also
-//! logs the triangles each view submits (the camera and every shadow
-//! cascade), by owner, from the visibility lists and the meshes' GPU sizes:
+//! Bevy times the main passes but not the shadow passes; `shadow_span` adds
+//! one pass per sun cascade (`shadow_cam0_c0..3`). Each window also logs the
+//! triangles each view submits (the camera and every shadow cascade), by
+//! owner, from the visibility lists and the meshes' GPU sizes:
 //!
 //! ```text
 //! view_triangles view=camera total=812345 opponent=401234 car_batch=... player=... batch=... track=... other=...
@@ -78,6 +79,7 @@ pub fn install(app: &mut App) {
             .add_systems(Last, (report, view_triangles));
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.add_systems(Render, mesh_triangles.after(RenderSystems::Cleanup));
+            shadow_span::install(render);
         }
     }
     if let Some(budget) = submissions::budget() {
@@ -241,6 +243,86 @@ fn report(
             mean(p, 2),
             mean(p, 3)
         );
+    }
+}
+
+/// GPU time of each sun cascade: Bevy times its main passes but not the
+/// shadow passes. Bevy's early shadow pass system is replaced by the same pass
+/// with a pass span around each cascade (`shadow_camN_cI`), as Bevy times its
+/// main passes. A span must open and close on one thread and before the
+/// frame's query resolve: a span opened before Bevy's pass and closed after it
+/// in another system first panicked the renderer (two pool threads, the F633
+/// hang at exit), then, on the render thread, lost the device. The late shadow
+/// pass only runs with occlusion culling, which grid-app does not use.
+mod shadow_span {
+    use bevy::core_pipeline::mip_generation::experimental::depth::early_downsample_depth;
+    use bevy::core_pipeline::schedule::Core3d;
+    use bevy::ecs::schedule::ScheduleCleanupPolicy;
+    use bevy::pbr::{
+        EARLY_SHADOW_PASS, LATE_SHADOW_PASS, Shadow, ShadowView, ViewLightEntities,
+        early_prepass_build_indirect_parameters, per_view_shadow_pass,
+    };
+    use bevy::prelude::*;
+    use bevy::render::camera::ExtractedCamera;
+    use bevy::render::diagnostic::RecordDiagnostics;
+    use bevy::render::render_phase::ViewBinnedRenderPhases;
+    use bevy::render::render_resource::{RenderPassDescriptor, StoreOp};
+    use bevy::render::renderer::{RenderContext, ViewQuery};
+    use bevy::render::view::ExtractedView;
+
+    pub fn install(render: &mut SubApp) {
+        let removed = render.remove_systems_in_set(
+            Core3d,
+            per_view_shadow_pass::<EARLY_SHADOW_PASS>,
+            ScheduleCleanupPolicy::RemoveSystemsOnly,
+        );
+        if !matches!(removed, Ok(1)) {
+            log_line!("gpu_shadow_span installed=false removed={removed:?}");
+            return;
+        }
+        render.add_systems(
+            Core3d,
+            timed_shadow_pass
+                .after(early_prepass_build_indirect_parameters)
+                .before(early_downsample_depth)
+                .before(per_view_shadow_pass::<LATE_SHADOW_PASS>),
+        );
+    }
+
+    /// Bevy's `per_view_shadow_pass::<EARLY_SHADOW_PASS>` with a pass span.
+    fn timed_shadow_pass(
+        world: &World,
+        view: ViewQuery<(&ViewLightEntities, &ExtractedCamera)>,
+        view_lights: Query<(&ShadowView, &ExtractedView)>,
+        phases: Res<ViewBinnedRenderPhases<Shadow>>,
+        mut ctx: RenderContext,
+    ) {
+        let (lights, camera) = view.into_inner();
+        let diagnostics = ctx.diagnostic_recorder();
+        let diagnostics = diagnostics.as_deref();
+        for (i, &light) in lights.lights.iter().enumerate() {
+            let Ok((shadow_view, extracted)) = view_lights.get(light) else {
+                continue;
+            };
+            let Some(phase) = phases.get(&extracted.retained_view_entity) else {
+                continue;
+            };
+            let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
+                label: Some(&shadow_view.pass_name),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(
+                    shadow_view.depth_attachment.get_attachment(StoreOp::Store),
+                ),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            let span = diagnostics.pass_span(&mut pass, format!("shadow_cam{}_c{i}", camera.order));
+            if let Err(err) = phase.render(&mut pass, world, light) {
+                error!("Error encountered while rendering the shadow phase {err:?}");
+            }
+            span.end(&mut pass);
+        }
     }
 }
 

@@ -520,6 +520,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005A0CC0		func	not ported	docs/DISCIPLINES.md:658		[D]		the other drift formats. `drift_gp_info.round/track_type/track_name` (0x5A0CC0) and the rival
 0x005A2840		func	not ported	docs/TOUGE.md:66				not a function entry in the master analysis; Meaning of `+4`.** `+4` in {2, 3} selects the Haruna drift intro and results scenes (`haruna_drift_intro_reveal`, `drift_results_intro_haruna`, 0x5A2840/0x5A...
 0x005B0000		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:372				The setter's caller was not found in 0x401000–0x40C000 or 0x5B0000–0x5D0000.
+0x005B43E0	csm_set_map_size	func	not ported	docs/SUN_SHADOWS.md:8		[O]		[O] Map size: `<shadows size=...>` from the hardware settings, clamped to 128..8192, 1024 when the key is missing (0x601B30 -> 0x5B43E0). The shipped options...
 0x005B4C10	entity_manager_construct	func	not ported	docs/BODY_SLEEPING.md:162	F548	[D]		5C6B90 is slot 1 of the EntityManager service (vtable CDFA28; constructor **5B4C10** names it
 0x005B4D40		func	not ported	docs/GRID_POPULATION.md:11				78/78 datasets / 706,149/706,149 output words exact in debug and release**, covering1,177paths. All245installed Donington chunks, single paths at every depth...
 0x005B51A0		func	not ported	docs/TRACK_LOD.md:291				cull far +0x48, min object size +0x4C; the generic setter 0x5B51A0 writes (+0x40, +0x44, +0x48).
@@ -530,7 +531,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005B71A0		func	not ported	docs/TRACK_LOD.md:281				not a function entry in the master analysis; 6. Push: main scene task interface (+0x5A4, slot 1 = 0x5B71A0) gets (world cull, world clip);
 0x005B9680		func	not ported	docs/AUTOSAVE_INPUT.md:29				At `0x005b9680` and `0x005b9750`, disassembly confirms a call through IAT `0x00c8936c` with folder argument **5 (Documents)**. Referenced path components app...
 0x005B9750		func	not ported	docs/AUTOSAVE_INPUT.md:29				At `0x005b9680` and `0x005b9750`, disassembly confirms a call through IAT `0x00c8936c` with folder argument **5 (Documents)**. Referenced path components app...
-0x005BA1D0	csm_bind_depth_and_mask_resources	func	not ported	docs/SOURCE_SKY_LIGHTING.md		[D]		Stores final shadow_mask argument3 at CSM+0x648; caller sets CSM=renderer+0xC0, so renderer+0x708 is the same final mask.
+0x005BA1D0	csm_bind_depth_and_mask_resources	func	not ported	docs/SOURCE_SKY_LIGHTING.md ; docs/SUN_SHADOWS.md:23		[D]		Stores final shadow_mask argument3 at CSM+0x648; caller sets CSM=renderer+0xC0, so renderer+0x708 is the same final mask.
+0x005BA280		label	not ported	docs/SUN_SHADOWS.md:23				inside 0x005BA1D0; `hardware_settings_read_graphics` reads `shadows size` into renderer +0xF48 and clamps it to 128..8192 (0x602137..0x602154); a missing key gives 0x400. (The ...
 0x005BB180		func	crates/grid-tools/src/drift.rs:349 grid-tools::drift::split_contacts	docs/DISCIPLINES.md:504 ; docs/GRID_POPULATION.md:5	F386	[V]		loader 0x5BB180 [V]: touching the road, kerbs or verges is no
 0x005BB5C0		func	not ported	docs/DYNAMIC_PROPS_RESEARCH.md:181	F317	[V]		if nothing frees enough the break is skipped and the entity stays intact. `0x5BB5C0`
 0x005BBDC0		func	crates/grid-formats/src/kickup.rs:3 grid-formats::kickup	docs/TYRE_SMOKE_RESEARCH.md:115 ; docs/GROUND_EFFECTS_RESEARCH.md:234				(binary XML). Only the dry block is read, like the original parser 5BBDC0.
@@ -539,8 +541,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005BCEA0		func	not ported	docs/TRACK_LOD.md:189				other passes 0x5BCEA0, 0x5EA6A0, 0x5EC880) -> 0x979430 (static instances) / 0x979590 (second
 0x005BDF10	lemans_grid	func	crates/grid-tools/src/series.rs:583 grid-tools::series::lemans_grid ; crates/grid-app/src/career_screen.rs:554 grid-app::career_screen::LeMansRun	docs/SERIES.md:198 ; docs/CAREER_SCREEN.md:132 ; docs/LE_MANS.md:128	F507 F409 F406	[V]		race builds (`series::Event::prepare_on_grid`: 0x663860, 0x5BDF10) and
 0x005BE470	grid_slot	func	crates/grid-tools/src/race.rs:122 grid-tools::race::grid_slot	docs/RACE_RULES_RESEARCH.md:165 ; docs/SERIES.md:526	F401 F308	[V]		grid_position_base/range) in a field of `field` cars [V 0x5BE470, 0x5C2AC0]:
-0x005C02D0		func	not ported	docs/CAR_LOD.md:83 ; docs/TRACK_LOD.md:188	F616	[O]		Call chain per pass: pass callback (main scene 0x5B6E00, CSM cascades 0x5C02D0, reflection and
-0x005C04C0		func	not ported	docs/TRACK_LOD.md:325 ; docs/CAR_LOD.md:85		[I]		is not traced [?]; 0x5C04C0 (cascade setup) was checked and does not read these.
+0x005C02D0	csm_cascade_pass_submit	func	not ported	docs/CAR_LOD.md:83 ; docs/TRACK_LOD.md:188 ; docs/SUN_SHADOWS.md:17	F616	[O]		Call chain per pass: pass callback (main scene 0x5B6E00, CSM cascades 0x5C02D0, reflection and
+0x005C04C0	csm_bind_shader_parameters	func	not ported	docs/TRACK_LOD.md:325 ; docs/CAR_LOD.md:85 ; docs/SUN_SHADOWS.md:36		[I]		is not traced [?]; 0x5C04C0 (cascade setup) was checked and does not read these.
 0x005C2AC0	NamedSlot	func	crates/grid-tools/src/career/data.rs:197 grid-tools::career::data::NamedSlot ; crates/grid-tools/src/race.rs:122 grid-tools::race::grid_slot	docs/RACE_RULES_RESEARCH.md:165 ; docs/SERIES.md:526		[V]		pool layout [D, V 0x5C2AC0].
 0x005C2E48		label	crates/grid-tools/src/career/data.rs:192 grid-tools::career::data			[V]		inside 0x005C2D30; The grid key's skill (0x5C2E48) [V].
 0x005C5000		label	not ported	docs/AI_CHOREOGRAPHER_PORT.md:68				inside 0x005C47B0; | Catch-up (catchup.xml, 0x90A000–0x917000, race manager 0x5C5000) | Engine torque factor per AI from its gap to the player, clamped 0.1–2.0, written to engi...
@@ -561,8 +563,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005C8A10	world_colour_nodes_and_particle_compose	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:458 ; docs/TRACK_LOD.md:402		[D]		before main colour-target setup, then world-colour traversal `0x5C8A10`.
 0x005C8F1A		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:470				inside 0x005C8A10; car-glass classifier. In `0x5C8A10`, exact compose calls at `0x5C8F1A` and `0x5C8FAA`
 0x005C8FAA		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:470				inside 0x005C8A10; car-glass classifier. In `0x5C8A10`, exact compose calls at `0x5C8F1A` and `0x5C8FAA`
-0x005CC6D0		func	not ported	docs/CAR_LOD.md:83		[O]		[O] The CSM plugin (`CMR6PluginCSMShadows`, init 0x5CC6D0) creates "Shadow Cascade" passes 1 and 2. Their callback 0x5C02D0 (`cascade > 0`, and skipped when ...
-0x005CCDC0	car_layer1	func	not ported	docs/CAR_LOD.md:83		[O]		[O] The CSM plugin (`CMR6PluginCSMShadows`, init 0x5CC6D0) creates "Shadow Cascade" passes 1 and 2. Their callback 0x5C02D0 (`cascade > 0`, and skipped when ...
+0x005CC6D0	csm_plugin_init	func	not ported	docs/CAR_LOD.md:83 ; docs/SUN_SHADOWS.md:7		[O]		[O] The CSM plugin (`CMR6PluginCSMShadows`, init 0x5CC6D0) creates "Shadow Cascade" passes 1 and 2. Their callback 0x5C02D0 (`cascade > 0`, and skipped when ...
+0x005CCDC0	car_layer1	func	not ported	docs/CAR_LOD.md:83 ; docs/SUN_SHADOWS.md:58		[O]		[O] The CSM plugin (`CMR6PluginCSMShadows`, init 0x5CC6D0) creates "Shadow Cascade" passes 1 and 2. Their callback 0x5C02D0 (`cascade > 0`, and skipped when ...
 0x005CD5F0	csm_render_and_smooth_mask	func	not ported	docs/SOURCE_SKY_LIGHTING.md		[D]		Selected stage draws CSM shader+0x654 into intermediate+0x644, then smoothing shader+0x658 into final+0x648; earlier branch/math remains partly unexpanded.
 0x005CFB30	entity_manager_load	func	not ported	docs/BODY_SLEEPING.md:164	F548	[D]		not a function entry in the master analysis; +0x640 is the entity buffer its load method **5CFB30** (slot 4) allocates. So parking runs in
 0x005D0000		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:372				not a function entry in the master analysis; The setter's caller was not found in 0x401000–0x40C000 or 0x5B0000–0x5D0000.
@@ -630,7 +632,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005FD310		func	not ported	docs/CAR_LOD.md:39		[O]		The real work happens in the call 0x608940 -> 0x5FD310 -> 0xA04660 -> 0x9F42A0. 0x5FD310 passes the active CameraPlugin camera (FOV in radians at `+0x50`, co...
 0x005FD640		func	not ported	docs/CAMERA_VIEWS.md:370				9. dash gauges (F630, [COCKPIT.md](COCKPIT.md) "Gauges"): a head-cam screenshot of the Lacetti's digital speed and gear and of a needle cockpit, for the digi...
 0x006006E0		func	not ported	docs/RACE_RULES_RESEARCH.md:203		[V]		`TerminalDamageMessage` (0x44C670, 0x6006E0, 0x6EBDF0, 0x70B030).
-0x00601B30	hardware_settings_read_graphics	func	not ported	docs/COCKPIT.md:16		[V]		MSAA is `<multisampling><rear_view_mirror level>`, read by `hardware_settings_read_graphics` (0x601B30): 0 in every option [V]. | note: multisampling levels incl. rear_view_mirror -> renderer +0xF4C
+0x00601B30	hardware_settings_read_graphics	func	not ported	docs/COCKPIT.md:16 ; docs/SUN_SHADOWS.md:8		[V]		MSAA is `<multisampling><rear_view_mirror level>`, read by `hardware_settings_read_graphics` (0x601B30): 0 in every option [V]. | note: multisampling levels incl. rear_view_mirror -> renderer +0xF4C
+0x00602137		label	not ported	docs/SUN_SHADOWS.md:23				inside 0x00601B30; `hardware_settings_read_graphics` reads `shadows size` into renderer +0xF48 and clamps it to 128..8192 (0x602137..0x602154); a missing key gives 0x400. (The ...
 0x00602400	renderer_create_race_passes	func	crates/grid-app/src/cockpit.rs:62 grid-app::cockpit::MIRROR_SIZE	docs/COCKPIT.md:13			MIRROR_SIZE	(0x602400; 512 x 128, the default and every shipped preset), no MSAA. | note: main game/reflections/rear view mirror/env map/far map passes; mirrors width/height/forceBilinear
 0x00606990		func	not ported	docs/RESET_AND_RESPAWN_RESEARCH.md:104				| 2 (fade-out starts) | camera hold 0x606990(veh, 0, …); **vehicle+0x2C90 vfunc +0x38(1)**; vehicle+0x88 = 1, +0x8C = 15 |
 0x00606E80	Transmission	func	crates/grid-tools/src/source_vehicle/assists.rs:11 grid-tools::source_vehicle::assists::Transmission	docs/DRIVER_AIDS.md:39 ; docs/DRIVING_ASSISTS_RESEARCH.md:59	F309			Profile option `transmission` (0 automatic, 1 manual). FUN_00606E80 gives
@@ -1659,7 +1662,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00859FC0	incar_interior_update	func	crates/grid-app/src/reach.rs:32 grid-app::reach::KNOB_SPEED ; crates/grid-app/src/cockpit.rs:225 grid-app::cockpit::play ; crates/grid-app/src/interior_anim.rs:4 grid-app::interior_anim	docs/COCKPIT.md:125	F647 F627	[D]	KNOB_SPEED Wheel reach_update update	length, and 0x859FC0 samples only the selected clip. | note: [D] samples the Steering clip at the steering timer and writes steering_wheel and hand dummies; gear knob and pedals"""""""""""""""
 0x0085C380	incar_interior_find_nodes	func	crates/grid-app/src/reach.rs:241 grid-app::reach	docs/COCKPIT.md:120				start (0x85C380). | note: [D] fills the interior node table (names 0xE4E1D8) per scene; creates SteeringDummy over exterior part 0x47
 0x0085CC41		label	crates/grid-app/src/reach.rs:238 grid-app::reach					inside 0x0085C380; `None` arrives at once (0x85CC41).
-0x0085CC80		func	not ported	docs/CAR_LOD.md:102 ; docs/COCKPIT.md:36		[I]		in-car characters (0x85CC80), trees and ornaments.
+0x0085CC80		func	not ported	docs/CAR_LOD.md:102 ; docs/COCKPIT.md:36 ; docs/SUN_SHADOWS.md:30		[I]		in-car characters (0x85CC80), trees and ornaments.
 0x0085D310	incar_select_driver_lod	func	crates/grid-app/src/driver.rs:7 grid-app::driver	docs/COCKPIT.md:251	F631	[D]		without helmet and visor (0x85D310). | note: [D] per driver LOD by distance; player with DisableDriverHead (+0x170) uses slot 1 (_x2, headless body)
 0x0085D960	incar_model_collect_instances	func	not ported	docs/COCKPIT.md:250				0x85D960 sorts them into six level-of-detail slots, numbered by the digit after `_x` minus one (0x84A9D0). | note: [D] sorts body_x4 instances into the 6 LOD slots; visor instances flagged
 0x0085DA80	incar_driver_update	func	crates/grid-app/src/driver.rs:5 grid-app::driver					not a function entry in the master analysis; two-bone IK (driver update 0x85DA80). The head-cam hides the head | note: [D] driver vtable+8: lean, face timers, requests, states, timers, blend, evaluate, IK
@@ -1896,7 +1899,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0095D5D0		func	not ported	docs/TRACK_LOD.md:400				00619AD0, 00951E40, 0095D2A0, 00951C40, 0095D880, 0095D5D0, 0095D200, 00951CB0, 009514F0,
 0x0095D880		func	not ported	docs/TRACK_LOD.md:191		[O]		0x95D880 (append to the level's instance buffer).
 0x0095FCE0	look_at	func	crates/grid-app/src/sky.rs:87 grid-app::sky::look_at ; crates/grid-tools/src/time_of_day.rs:223 grid-tools::time_of_day::sky_textures ; crates/grid-formats/src/sky.rs:8 grid-formats::sky	docs/LE_MANS.md:217 ; docs/SKY.md:58	F515 F430 G130	[V]	sky_textures	The look at day fraction `t` [V 0x95FCE0, 0x9ACE90]: slots from | note: merge retained additional port provenance: crates/grid-app/src/sky.rs:86 grid-app::sky::look_at
-0x0095FE90		func	not ported	docs/CAR_LOD.md:102	F616	[O]		Cascades (F616): 0x5C02D0 returns at once for cascade 0 (`0 < param_1`) and otherwise submits every caster list it has for that cascade with code 0x401: the ...
+0x0095FE90		func	not ported	docs/CAR_LOD.md:102 ; docs/SUN_SHADOWS.md:28	F616	[O]		Cascades (F616): 0x5C02D0 returns at once for cascade 0 (`0 < param_1`) and otherwise submits every caster list it has for that cascade with code 0x401: the ...
 0x00961640		func	not ported	docs/TRACK_LOD.md:398				0095CD90, 00961640, 009637C0, 00952B30, 009521E0, 0064ADB0, 0064B100, 0064C7E0, 00898EB0,
 0x009637C0		func	not ported	docs/TRACK_LOD.md:398				0095CD90, 00961640, 009637C0, 00952B30, 009521E0, 0064ADB0, 0064B100, 0064C7E0, 00898EB0,
 0x00965790	metric	func	crates/grid-app/src/ornament_lod.rs:117 grid-app::ornament_lod::metric	docs/TRACK_LOD.md:16	F633	[O]		line to its centre, warped by the camera's FOV (0x965790), and draws the
@@ -1914,9 +1917,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00971A20		func	not ported	docs/LE_MANS.md:245 ; docs/TYRE_SMOKE_RESEARCH.md:1184				returns a signed byte. The same query serves `0x971A20` and `0x97A630` (vegetation renderers).
 0x00977200		func	crates/grid-formats/src/ground_cover.rs:3 grid-formats::ground_cover					See docs/GROUND_EFFECTS_RESEARCH.md (loader 97EAB0, sprites 977200).
 0x00977500		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:366		[D]		[D] Scatter `977500 → 96CFA0 → 95BC90 → 95AF90`:
-0x00979430	REFERENCE_HALF_FOV	func	crates/grid-app/src/ornament_lod.rs:24 grid-app::ornament_lod::REFERENCE_HALF_FOV	docs/TRACK_LOD.md:189 ; docs/CAR_LOD.md:102		[O]		Reference FOV of the distances: 55 degrees (0x979430, tan(0.47996554)).
-0x00979590		func	not ported	docs/TRACK_LOD.md:189				other passes 0x5BCEA0, 0x5EA6A0, 0x5EC880) -> 0x979430 (static instances) / 0x979590 (second
-0x0097A160		func	not ported	docs/CAR_LOD.md:102		[I]		Cascades (F616): 0x5C02D0 returns at once for cascade 0 (`0 < param_1`) and otherwise submits every caster list it has for that cascade with code 0x401: the ...
+0x00979430	REFERENCE_HALF_FOV	func	crates/grid-app/src/ornament_lod.rs:24 grid-app::ornament_lod::REFERENCE_HALF_FOV	docs/TRACK_LOD.md:189 ; docs/CAR_LOD.md:102 ; docs/SUN_SHADOWS.md:31		[O]		Reference FOV of the distances: 55 degrees (0x979430, tan(0.47996554)).
+0x00979590		func	not ported	docs/TRACK_LOD.md:189 ; docs/SUN_SHADOWS.md:31				other passes 0x5BCEA0, 0x5EA6A0, 0x5EC880) -> 0x979430 (static instances) / 0x979590 (second
+0x0097A160		func	not ported	docs/CAR_LOD.md:102 ; docs/SUN_SHADOWS.md:32		[I]		Cascades (F616): 0x5C02D0 returns at once for cascade 0 (`0 < param_1`) and otherwise submits every caster list it has for that cascade with code 0x401: the ...
+0x0097A250		func	not ported	docs/SUN_SHADOWS.md:32				trees (0x97A160, 0x97A250).
 0x0097A630		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1184				returns a signed byte. The same query serves `0x971A20` and `0x97A630` (vegetation renderers).
 0x0097CE80		func	not ported	docs/TRACK_LOD.md:67		[O]		("Too many LODs found", 0x97CE80) and level count = `lodCount + 1` [O].
 0x0097D400		func	not ported	docs/TRACK_LOD.md:204		[I]		(+0x84 = 1.0 from the constructor 0x97D400; no other writer found [I: constant]);
