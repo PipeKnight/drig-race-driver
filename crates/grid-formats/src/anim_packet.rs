@@ -1,7 +1,8 @@
 //! Bounded ordinary L4/S4 animation packet payloads with preserved float32 keys.
 //!
 //! The caller supplies a bounded PSSG leaf and explicit parent metadata. This module
-//! does not change PSSG admission, decode KA/B1, interpolate keys or construct poses.
+//! does not change PSSG admission or decode KA/B1. Sampling accepts explicit caller
+//! bank coordinates and returns raw values; it does not construct clocks or poses.
 //! Native layout offsets are checked metadata, not serialized-payload offsets.
 use std::str;
 
@@ -77,6 +78,173 @@ pub struct Packet<'a> {
     pub native_size: usize,
     pub channels: Vec<Channel4<'a>>,
 }
+
+/// Refusal from the strict sampling domain, distinct from serialized-reader errors.
+/// Duplicate times remain valid resources; this API requires increasing sample times.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SampleError {
+    MissingChannel,
+    EmptyChannel,
+    TooManyKeys,
+    NonFiniteCoordinate,
+    NonFiniteKey { index: usize },
+    NotStrictlyIncreasing { right: usize },
+    NonFiniteSpan { right: usize },
+    NonFiniteNumerator,
+    NonFiniteFraction,
+    NonFiniteDot,
+    AcosDomain,
+    SphericalArithmetic,
+    NonFiniteOutput,
+}
+impl std::fmt::Display for SampleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for SampleError {}
+
+impl Packet<'_> {
+    /// Sample one ordinary channel at an explicit caller-supplied bank coordinate.
+    /// Returns raw four-lane values: no clock conversion, looping, sign flip,
+    /// normalization, pose/reference transform, output-slot map or rig binding.
+    ///
+    /// The full channel must be finite, within the reader's key-count bound and
+    /// strictly increasing. Finite out-of-range coordinates clamp the interval
+    /// fraction; a one-key channel preserves its words directly. Duplicate-time
+    /// resources remain readable but are refused here. These validation errors
+    /// are authored safety policy, not original malformed-input behavior.
+    ///
+    /// S4 uses raw-dot spherical weights below its source threshold, otherwise
+    /// unnormalized LERP. Host f64 acos/sin with f32 staging is not an original
+    /// x87/CRT bit-parity guarantee. No multi-key endpoint copy is substituted.
+    pub fn sample(
+        &self,
+        channel: usize,
+        coordinate: f32,
+    ) -> std::result::Result<[f32; 4], SampleError> {
+        let keys = &self
+            .channels
+            .get(channel)
+            .ok_or(SampleError::MissingChannel)?
+            .keys;
+        let interval = sample_interval(keys, coordinate)?;
+        let Some((left, fraction)) = interval else {
+            return Ok(keys[0].value);
+        };
+        let a = keys[left].value;
+        let b = keys[left + 1].value;
+        let weights = match self.kind {
+            Kind::L4 => [1.0 - fraction, fraction],
+            Kind::S4 => s4_weights(a, b, fraction)?,
+        };
+        let [w0, w1] = weights;
+        let value = match self.kind {
+            Kind::L4 => std::array::from_fn(|lane| {
+                let left = a[lane] * w0;
+                let right = b[lane] * w1;
+                left + right
+            }),
+            Kind::S4 => [
+                a[0] * w0 + b[0] * w1,
+                b[1] * w1 + w0 * a[1],
+                b[2] * w1 + w0 * a[2],
+                a[3] * w0 + w1 * b[3],
+            ],
+        };
+        if value.iter().any(|v| !v.is_finite()) {
+            return Err(SampleError::NonFiniteOutput);
+        }
+        Ok(value)
+    }
+}
+
+// B2DA90 search/previous exact-key interval; strict guards reuse the validated
+// diagnostic domain, not the resource reader's duplicate-time admission policy.
+fn sample_interval(
+    keys: &[Key4],
+    coordinate: f32,
+) -> std::result::Result<Option<(usize, f32)>, SampleError> {
+    if keys.is_empty() {
+        return Err(SampleError::EmptyChannel);
+    }
+    if keys.len() > MAX_KEYS_PER_CHANNEL {
+        return Err(SampleError::TooManyKeys);
+    }
+    if !coordinate.is_finite() {
+        return Err(SampleError::NonFiniteCoordinate);
+    }
+    for (index, key) in keys.iter().enumerate() {
+        if !key.time.is_finite() || key.value.iter().any(|v| !v.is_finite()) {
+            return Err(SampleError::NonFiniteKey { index });
+        }
+        if index > 0 {
+            if key.time <= keys[index - 1].time {
+                return Err(SampleError::NotStrictlyIncreasing { right: index });
+            }
+            if !(key.time - keys[index - 1].time).is_finite() {
+                return Err(SampleError::NonFiniteSpan { right: index });
+            }
+        }
+    }
+    if keys.len() == 1 {
+        return Ok(None);
+    }
+    let (mut left, mut right) = (0, keys.len() - 1);
+    while right - left > 1 {
+        let mid = left + (right - left) / 2;
+        if coordinate <= keys[mid].time {
+            right = mid;
+        } else {
+            left = mid;
+        }
+    }
+    let numerator = coordinate - keys[left].time;
+    if !numerator.is_finite() {
+        return Err(SampleError::NonFiniteNumerator);
+    }
+    let fraction = numerator / (keys[right].time - keys[left].time);
+    if !fraction.is_finite() {
+        return Err(SampleError::NonFiniteFraction);
+    }
+    Ok(Some((left, fraction.clamp(0.0, 1.0))))
+}
+
+fn s4_weights(
+    a: [f32; 4],
+    b: [f32; 4],
+    fraction: f32,
+) -> std::result::Result<[f32; 2], SampleError> {
+    // B32B80 source product/sum association: z+y+w+x; no abs(dot)/sign flip.
+    let zy = a[2] * b[2] + a[1] * b[1];
+    let zyw = zy + a[3] * b[3];
+    let dot = zyw + a[0] * b[0];
+    if !dot.is_finite() {
+        return Err(SampleError::NonFiniteDot);
+    }
+    let mut weights = [1.0 - fraction, fraction];
+    if dot < f32::from_bits(0x3f7fbe77) {
+        // Original has no protective clamp. Explicit refusal is diagnostic policy.
+        if dot < -1.0 {
+            return Err(SampleError::AcosDomain);
+        }
+        let theta = f64::from(dot).acos() as f32;
+        let sine = f64::from(theta).sin() as f32;
+        let inverse = 1.0 / sine;
+        let angles = [theta * weights[0], theta * weights[1]];
+        weights = angles.map(|angle| (f64::from(angle).sin() as f32) * inverse);
+        if [
+            theta, sine, inverse, angles[0], angles[1], weights[0], weights[1],
+        ]
+        .iter()
+        .any(|v| !v.is_finite())
+        {
+            return Err(SampleError::SphericalArithmetic);
+        }
+    }
+    Ok(weights)
+}
+
 struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
@@ -456,5 +624,195 @@ mod tests {
             read(&raw, env(Kind::L4, 96)).unwrap_err().reason,
             "overlapping native spans"
         );
+    }
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+    fn packet(kind: Kind, keys: Vec<Key4>) -> Packet<'static> {
+        Packet {
+            kind,
+            native_size: 0,
+            channels: vec![Channel4 {
+                target: "Authored",
+                time_offset: 0,
+                value_offset: 0,
+                keys,
+            }],
+        }
+    }
+    fn pair(kind: Kind, a: [f32; 4], b: [f32; 4]) -> Packet<'static> {
+        packet(
+            kind,
+            vec![
+                Key4 {
+                    time: 0.0,
+                    value: a,
+                },
+                Key4 {
+                    time: 1.0,
+                    value: b,
+                },
+            ],
+        )
+    }
+    fn near(a: f32, b: f64) {
+        assert!((f64::from(a) - b).abs() < 2e-6, "{a} != {b}");
+    }
+    #[test]
+    fn one_key_l4_s4_preserves_raw_words_and_input() {
+        let value = [-0.0, f32::from_bits(1), -2.0, 3.0];
+        for kind in [Kind::L4, Kind::S4] {
+            let p = packet(kind, vec![Key4 { time: 7.0, value }]);
+            for coordinate in [-100.0, 7.0, 100.0] {
+                assert_eq!(
+                    p.sample(0, coordinate).unwrap().map(f32::to_bits),
+                    value.map(f32::to_bits)
+                );
+            }
+            assert_eq!(
+                p.channels[0].keys[0].value.map(f32::to_bits),
+                value.map(f32::to_bits)
+            );
+        }
+    }
+    #[test]
+    fn l4_quarter_uses_all_four_unnormalized_lanes() {
+        let p = pair(Kind::L4, [1.0, 2.0, -3.0, 5.0], [5.0, 6.0, 1.0, 13.0]);
+        assert_eq!(p.sample(0, 0.25).unwrap(), [2.0, 3.0, -2.0, 7.0]);
+    }
+    #[test]
+    fn s4_near_dot_lerp_is_not_normalized() {
+        let p = pair(
+            Kind::S4,
+            [0.0, 0.0, 0.0, 1.0],
+            [0.02, 0.0, 0.0, (1.0f32 - 0.02f32 * 0.02f32).sqrt()],
+        );
+        let value = p.sample(0, 0.5).unwrap();
+        let norm = value.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>();
+        assert!((norm - 1.0).abs() > 5e-5);
+        near(value[0], 0.01);
+    }
+    #[test]
+    fn s4_negative_pair_is_not_shortest_path() {
+        let a = [0.0, 0.0, 0.0, 1.0];
+        let b = [0.6, 0.0, 0.0, -0.8];
+        let long = pair(Kind::S4, a, b).sample(0, 0.25).unwrap();
+        let theta = (-0.8f64).acos();
+        near(long[0], (theta * 0.25).sin());
+        near(long[3], (theta * 0.25).cos());
+        let flipped = pair(Kind::S4, a, b.map(|v| -v)).sample(0, 0.25).unwrap();
+        assert!((long[0] - flipped[0]).abs() > 0.5);
+    }
+    #[test]
+    fn s4_threshold_is_strict_and_dot_over_one_stays_linear() {
+        let a = [0.0, 0.0, 0.0, 1.0];
+        let threshold = f32::from_bits(0x3f7fbe77);
+        assert_eq!(
+            s4_weights(a, [0.04, 0.0, 0.0, threshold], 0.25).unwrap(),
+            [0.75, 0.25]
+        );
+        assert_ne!(
+            s4_weights(
+                a,
+                [0.04, 0.0, 0.0, f32::from_bits(threshold.to_bits() - 1)],
+                0.25
+            )
+            .unwrap()[0]
+                .to_bits(),
+            0.75f32.to_bits()
+        );
+        near(
+            pair(Kind::S4, a, [0.0, 0.0, 0.0, 1.1])
+                .sample(0, 0.5)
+                .unwrap()[3],
+            1.05,
+        );
+    }
+    #[test]
+    fn s4_source_dot_order_changes_the_sample() {
+        let a = [1e8, -1e8, 1.0, 1.0];
+        let b = [1.0; 4];
+        let value = pair(Kind::S4, a, b).sample(0, 0.25).unwrap();
+        // Generic XYZW accumulation gives dot2/LERP; source z+y+w+x gives dot0.
+        assert!((value[0] - (a[0] * 0.75 + 0.25)).abs() > 1e7);
+    }
+    #[test]
+    fn endpoints_and_exact_interior_use_the_source_interval() {
+        let keys = vec![
+            Key4 {
+                time: 0.0,
+                value: [0.0; 4],
+            },
+            Key4 {
+                time: 1.0,
+                value: [1.0; 4],
+            },
+            Key4 {
+                time: 3.0,
+                value: [2.0; 4],
+            },
+        ];
+        assert_eq!(sample_interval(&keys, -20.0), Ok(Some((0, 0.0))));
+        assert_eq!(sample_interval(&keys, 1.0), Ok(Some((0, 1.0))));
+        assert_eq!(sample_interval(&keys, 20.0), Ok(Some((1, 1.0))));
+        let p = packet(Kind::L4, keys);
+        assert_eq!(p.sample(0, -20.0).unwrap(), [0.0; 4]);
+        assert_eq!(p.sample(0, 20.0).unwrap(), [2.0; 4]);
+    }
+    #[test]
+    fn sampling_refusals_do_not_change_reader_admission() {
+        let p = pair(Kind::S4, [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, -1.1]);
+        assert_eq!(p.sample(0, 0.5), Err(SampleError::AcosDomain));
+        assert_eq!(p.sample(1, 0.5), Err(SampleError::MissingChannel));
+        assert_eq!(p.sample(0, f32::NAN), Err(SampleError::NonFiniteCoordinate));
+        // Real serialized duplicate-time fixtures remain admitted by the reader.
+        // Sampling is a separate stricter operation; do not change resource policy.
+        for kind in [Kind::L4, Kind::S4] {
+            let mut raw = Vec::new();
+            for word in [1u32, 16] {
+                raw.extend_from_slice(&word.to_be_bytes());
+            }
+            for text in ["Authored", kind.semantic()] {
+                raw.extend_from_slice(&(text.len() as u32).to_be_bytes());
+                raw.extend_from_slice(text.as_bytes());
+            }
+            for word in [2u32, 36, 48] {
+                raw.extend_from_slice(&word.to_be_bytes());
+            }
+            for values in [[0.0f32, 1.0, -0.0, 3.0, 4.0], [0.0, 5.0, 6.0, 7.0, 8.0]] {
+                for value in values {
+                    raw.extend_from_slice(&value.to_bits().to_be_bytes());
+                }
+            }
+            let before = raw.clone();
+            let (parent_type, leaf_type) = match kind {
+                Kind::L4 => ("NeAnimPacket_L4", "NeAnimPacketData_L4"),
+                Kind::S4 => ("NeAnimPacket_S4", "NeAnimPacketData_S4"),
+            };
+            let decoded = read(
+                &raw,
+                Envelope {
+                    parent_type,
+                    leaf_type,
+                    parent_alignment: 16,
+                    native_size: 80,
+                },
+            )
+            .unwrap();
+            assert_eq!(decoded.channels[0].keys.len(), 2);
+            assert_eq!(decoded.channels[0].keys[0].time.to_bits(), 0);
+            assert_eq!(decoded.channels[0].keys[1].time.to_bits(), 0);
+            assert_eq!(
+                decoded.channels[0].keys[0].value[1].to_bits(),
+                (-0.0f32).to_bits()
+            );
+            assert_eq!(
+                decoded.sample(0, 0.0),
+                Err(SampleError::NotStrictlyIncreasing { right: 1 })
+            );
+            assert_eq!(raw, before);
+        }
     }
 }

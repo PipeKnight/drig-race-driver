@@ -78,3 +78,46 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/release_playable.ps1 -
 The updater restores its process environment and records features/config/executable/runtime hashes in the existing build metadata. Runtime DLL310.5.3 must match SHA8707e53b26c68c606b98bf31c223485ff30d310a261b1a36d48b2eaabc1507ec; notice text must match the supplied hash. SDK/header contents remain trusted explicit toolchain inputs, not a verified repository snapshot. Parser-only `--aa dlaa --help` support is recorded separately from GPU acceptance. Portable DLAA requires the actual matching feature-build metadata, unchanged config and exact current DLL/notice inventory before copying; `-NoPrototype` cannot reuse stale native metadata. Featureless portable releases omit the optional `Play GRID DLAA.cmd` and remove only that exact stale portable launcher.
 
 G327 verification: actual ordinary/native updater plans, full release DryRun in an isolated local-only Git fixture (positive and refusal),24 controlled pipeline/portable cases,8 path cases and12 real direct/nested SHA checks. No real release, APK build, SDK/runtime copying or new GPU run was performed. Existing release DryRun may fetch Git metadata as before. A failed earlier nested PowerShell check is retained: inherited PS7 module paths hid PS5's `Get-FileHash`; local streaming .NET SHA-256 now avoids that module dependency without changing global settings. Actual native rendering remains the separately recorded G325/G326 evidence.
+
+## Current centred antenna evidence (G341, 30 October 2026)
+
+The previous G310 motion/depth and HDR rectangles missed the antenna, so their
+broad car-body motion pass could not diagnose this feature. A fresh, centred
+1920x1080 native-DLAA run uses the delivered G340 executable eb5076621cbb and
+unchanged enhanced settings, normal history and Motion shutter 1/32. Raw depth,
+velocity and paired HDR share actual GPU frame793/tick1652. Thirty PNG requests
+also complete; PNG0000 has the same requested tick, but a frozen PNG-to-GPU
+transaction is not established. Private evidence and input hashes are under
+`local/graphics/antenna-current01/run01/receipt.json`.
+
+The primary shaft is included in both audit rectangles. Independent selected-pixel
+analysis finds 34 currently covered shaft samples whose motion agrees with rigid
+body projection (p99 residual 0.0143 pixel). Eleven rows in the observed 45-row
+shaft span have no near-car depth sample; this is sparse current raster coverage,
+not a measured fraction of a known triangle footprint. Displaced trace rectangles
+instead contain current background depth and motion. Local coordinates in this
+runtime pose basis are Y0.9903..1.1971 for the shaft; the earlier supposition that
+it lies above the broad helper's Y1.65 limit was incorrect.
+
+A short trace about 19 pixels left of the shaft becomes stronger between before
+and after EarlyPostProcess HDR: the selected local flank-relative linear dark
+contrast changes from 0.00624 to 0.03198. Main-line contrast decreases. DLSS runs
+inside this interval, while Motion runs later, so final Motion is not required
+for this occurrence. This does not establish exclusive DLSS causality, duplicate
+geometry, previous visibility correctness or a general fix. There is only one
+frozen raw frame and no object-ID/history packet. Private independent reports:
+`local/handoff/drafts/antenna-motion01/FINDINGS.md` and
+`local/graphics/antenna-current01/independent-hdr-review01/FINDINGS.md`.
+
+The next narrow diagnostic is previous/current coverage with a verified matrix
+and pose join. Repeating old K/L, frame-time or exposure matrices is not justified
+by this result. The existing name-specific velocity-only antenna experiment stays
+a temporary diagnostic, not a general correction or a renderer default.
+
+One preceding-frame run completes at actual frame792/tick1649. Its body transform
+matches frame793's stored previous body exactly, but four float32 words in the
+camera matrix's last column differ. The strict join therefore remains
+INCONCLUSIVE, unchanged in `runtime02/temporal-join.json`; no automatic repeat or
+relaxed acceptance is used. A separately labelled approximate offline comparison
+may quantify the effect of the arithmetic difference, but cannot turn this into
+an exact-view/history proof.

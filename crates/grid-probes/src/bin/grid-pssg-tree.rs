@@ -89,40 +89,17 @@ fn sample_l4(packet: &anim_packet::Packet<'_>, channel: usize, query: f32)
     -> Result<[f32; 4], &'static str>
 {
     if packet.kind != anim_packet::Kind::L4 { return Err("not ordinary L4"); }
-    let keys = &packet.channels.get(channel).ok_or("missing channel")?.keys;
-    if keys.is_empty() || keys.len() > 100_000 || !query.is_finite() {
-        return Err("key count or nonfinite query");
-    }
-    for (index, key) in keys.iter().enumerate() {
-        if !key.time.is_finite() || !key.value.iter().all(|v| v.is_finite()) {
-            return Err("nonfinite saved key");
-        }
-        if index > 0 && (key.time <= keys[index-1].time
-            || !(key.time-keys[index-1].time).is_finite()) {
-            return Err("duplicate/reversed/nonfinite span unsupported");
-        }
-    }
-    if keys.len() == 1 { return Ok(keys[0].value); }
-    let (mut left, mut right) = (0, keys.len()-1);
-    while right-left > 1 {
-        let mid = left+(right-left)/2;
-        if query <= keys[mid].time { right=mid; } else { left=mid; }
-    }
-    let numerator = query-keys[left].time;
-    let fraction = numerator/(keys[right].time-keys[left].time);
-    if !numerator.is_finite() || !fraction.is_finite() {
-        return Err("nonfinite interval arithmetic unsupported");
-    }
-    let fraction = fraction.clamp(0.0, 1.0);
-    let left_weight = 1.0f32-fraction;
-    let mut value = [0.0; 4];
-    for (lane, output) in value.iter_mut().enumerate() {
-        let a = keys[left].value[lane]*left_weight;
-        let b = keys[right].value[lane]*fraction;
-        *output = a+b;
-        if !output.is_finite() { return Err("nonfinite L4 output unsupported"); }
-    }
-    Ok(value)
+    packet.sample(channel, query).map_err(|error| match error {
+        anim_packet::SampleError::MissingChannel => "missing channel",
+        anim_packet::SampleError::EmptyChannel | anim_packet::SampleError::TooManyKeys
+            | anim_packet::SampleError::NonFiniteCoordinate => "key count or nonfinite query",
+        anim_packet::SampleError::NonFiniteKey { .. } => "nonfinite saved key",
+        anim_packet::SampleError::NotStrictlyIncreasing { .. }
+            | anim_packet::SampleError::NonFiniteSpan { .. } => "duplicate/reversed/nonfinite span unsupported",
+        anim_packet::SampleError::NonFiniteNumerator | anim_packet::SampleError::NonFiniteFraction => "nonfinite interval arithmetic unsupported",
+        anim_packet::SampleError::NonFiniteOutput | anim_packet::SampleError::NonFiniteDot
+            | anim_packet::SampleError::AcosDomain | anim_packet::SampleError::SphericalArithmetic => "nonfinite L4 output unsupported",
+    })
 }
 
 fn words(packet: &anim_packet::Packet<'_>) -> Vec<u8> {
