@@ -152,6 +152,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 
 - [BODY_DEFORMATION_PRESENTATION.md](BODY_DEFORMATION_PRESENTATION.md) Experimental body dents from the source deformation grid — The clean **d221dc28f774** refresh now passes all ten source/five Bevy checks, collision and straight-road renders.
 - [CAR_LIVERY_DECALS.md](CAR_LIVERY_DECALS.md) Source car livery decals and missing race number — Owner noticed the Lacetti roof differs from the original-game recording: the prototype has a conspicuous empty white …
+- [CAR_REFLECTIONS.md](CAR_REFLECTIONS.md) Car reflections: the original's environment map and the port plan — Backlog row 100 (owner playtest F657).
 - [CAR_SHADER_MASKS.md](CAR_SHADER_MASKS.md) Original car normal and scratch masks — Original program bytecode/disassembly and metadata remain in ignored `local/graphics/`; source code in `tools/` is …
 - [CLEARCOAT_PREPASS.md](CLEARCOAT_PREPASS.md) Clearcoat normal-prepass investigation — 19.1 pinned.
 - [CSP_GRAPHICS_RESEARCH_RU.md](CSP_GRAPHICS_RESEARCH_RU.md) CSP и PP-фильтры: ориентир для графики GRID — Исследовано 18 октября 2026.
