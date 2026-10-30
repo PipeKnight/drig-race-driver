@@ -924,6 +924,16 @@ impl Mixer {
         }
     }
 
+    /// Every loop glides to silence and keeps its place: the next
+    /// [`Mixer::looped`] of a slot brings it back. The port's frozen race,
+    /// pause and failure stop the per-tick level updates that would have
+    /// faded the loops (docs/AUDIO_RESEARCH.md §29).
+    pub fn hush(&mut self) {
+        for l in self.loops.iter_mut().flatten() {
+            l.target = [0.; 2];
+        }
+    }
+
     /// Ends loop `slot` at once (the voice's stop, A23350).
     pub fn stop(&mut self, slot: usize) {
         if let Some(l) = self.loops.get_mut(slot) {
@@ -1311,5 +1321,14 @@ mod tests {
         let late_peak = late.iter().map(|f| f[0].abs()).fold(0f32, f32::max);
         assert!(late_peak > 0.001 && late_peak < 1., "{late_peak}");
         assert!(late.iter().all(|f| (f[0] - f[1]).abs() < 1e-6));
+        // Hushed (the ticks stopped): below -80 dB within 0.1 s (the 0.002 glide), the loop kept; the
+        // next level brings it back.
+        mixer.hush();
+        let quiet: Vec<[f32; 2]> = (0..9_600).map(|_| mixer.sample()).skip(4_800).collect();
+        assert!(quiet.iter().all(|f| f[0].abs() < 1e-4), "{:?}", quiet.iter().map(|f| f[0].abs()).fold(0f32, f32::max));
+        assert_eq!(mixer.loops(), 1);
+        mixer.scrape(0, "ScrapeSideRoad", 0.5, 0.5, [1., 1.]);
+        let back = (0..48_000).map(|_| mixer.sample()[0].abs()).fold(0f32, f32::max);
+        assert!(back > 0.001, "{back}");
     }
 }

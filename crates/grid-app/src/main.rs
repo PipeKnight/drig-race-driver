@@ -7783,6 +7783,161 @@ mod driving_tests {
             .unwrap();
     }
 
+    /// Backlog row 95: a loop must not hold its last level once the vehicle
+    /// ticks stop (pause, a drive failure, the frozen race end after a wreck).
+    /// The Lacetti at Shibuya drives off the grid while a loop plays on the
+    /// collision source, its level re-sent on every tick as a scrape or a
+    /// damage loop is (the engine-damage word is rewritten each tick, so it
+    /// is fed directly). Each stop runs 2 s and every decoder's last second
+    /// is measured; the loop returns when the ticks run again.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn looping_voices_fall_silent_when_the_ticks_stop() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+                let failures = held_loops(Path::new(&root));
+                assert!(failures.is_empty(), "{failures:#?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn held_loops(root: &Path) -> Vec<String> {
+        use grid_tools::{
+            engine_audio_continuous::BLOCK,
+            source_vehicle::{Controls, DELTA},
+            time_trial::State,
+        };
+        let route = Route::new("tracks/japan/shibuya/route_0").unwrap();
+        let model = CarModel::new("lac").unwrap();
+        let mut runtime = grid_tools::source_vehicle::Runtime::load(root, &route, &model, "slot_00", 200679).unwrap();
+        runtime.enable_lap_timing(root).unwrap();
+        let start = StartSequence::load(root, &route).unwrap();
+        let mut trial = time_trial::Trial::new(1, grid_tools::time_trial::Mode::Wheels, false).unwrap();
+        trial.state = State::new(1, f64::from(DELTA), start.seconds).unwrap();
+        let mix = Some(std::sync::Arc::new(grid_tools::audio_mix::Table::load(root).unwrap()));
+        let step = Duration::from_secs_f64(f64::from(DELTA));
+        crate::mobile::init_test_pool();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))
+            .insert_resource(Time::<Fixed>::from_duration(step))
+            .insert_resource(start)
+            .insert_resource(trial)
+            .insert_resource(Driving {
+                runtime,
+                geometry: None,
+                paused: false,
+                failure: None,
+                notices: Vec::new(),
+                scripted_ticks: Some(72_000),
+                scripted: Controls::default(),
+                handbrake_from: None,
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+                opponents: None,
+                auto_reset: Default::default(),
+                reset_line: None,
+            })
+            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
+            .init_resource::<input::ShiftQueue>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(FixedUpdate, drive_tick)
+            .init_asset::<engine_sound::EngineSource>()
+            .init_asset::<tyre_sound::TyreSource>()
+            .init_asset::<collision_sound::CollisionSource>();
+        let bank = grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap();
+        engine_sound::install_systems(&mut app, vec![Some(bank)], mix.clone());
+        collision_sound::install_systems(
+            &mut app,
+            grid_tools::collision_audio::Bank::load(root).unwrap(),
+            mix.clone(),
+            vec![grid_tools::collision_audio::Heights::of(root, &model).unwrap()],
+            vec![[[0., 0., 2.], [0., 0.5, 0.]]],
+            vec![0],
+        );
+        tyre_sound::install_systems(&mut app, grid_tools::tyre_audio::Bank::load(root).unwrap(), mix);
+        app.update();
+        fn decoder<T: Asset + Decodable>(app: &mut App) -> T::Decoder {
+            let world = app.world_mut();
+            let handle = world.query::<&AudioPlayer<T>>().single(world).unwrap().0.clone();
+            world.resource::<Assets<T>>().get(&handle).unwrap().decoder()
+        }
+        let mut sources: [Box<dyn Iterator<Item = f32>>; 3] = [
+            Box::new(decoder::<engine_sound::EngineSource>(&mut app)),
+            Box::new(decoder::<tyre_sound::TyreSource>(&mut app)),
+            Box::new(decoder::<collision_sound::CollisionSource>(&mut app)),
+        ];
+        const NAMES: [&str; 3] = ["engine", "tyres", "collision"];
+        // One frame: one update and one 16 ms block of every source; the
+        // sources' sums of squares.
+        let mut frame = |app: &mut App, looping: bool| -> [f64; 3] {
+            app.world_mut().resource_mut::<Driving>().scripted.throttle = 1.;
+            let driving = app.world().resource::<Driving>();
+            if looping && !driving.paused && driving.failure.is_none() {
+                collision_sound::test_loop(app.world().resource::<collision_sound::CollisionSound>(), 0.3);
+            }
+            app.update();
+            let mut sums = [0f64; 3];
+            for _ in 0..BLOCK * 2 {
+                for (k, source) in sources.iter_mut().enumerate() {
+                    let v = f64::from(source.next().unwrap_or(f32::NAN));
+                    sums[k] += v * v;
+                }
+            }
+            sums
+        };
+        let second = (1. / DELTA) as usize;
+        let rms = |frames: &[[f64; 3]], k: usize| {
+            (frames.iter().map(|f| f[k]).sum::<f64>() / (frames.len() * BLOCK * 2).max(1) as f64).sqrt()
+        };
+        // The countdown, then 2 s driving with the loop.
+        let mut n = 0;
+        while !app.world().resource::<time_trial::Trial>().driving() {
+            frame(&mut app, false);
+            n += 1;
+            assert!(n < 2000, "no green light");
+        }
+        let driving: Vec<_> = (0..2 * second).map(|_| frame(&mut app, true)).collect();
+        let level = rms(&driving[second..], 2);
+        println!("held_loops version=1 window=driving engine={:.5} tyres={:.5} collision={level:.5}", rms(&driving[second..], 0), rms(&driving[second..], 1));
+        let mut failures = Vec::new();
+        if level < 1e-3 {
+            failures.push(format!("the loop is not audible while driving: rms {level:.5}"));
+        }
+        type Stop = fn(&mut Driving, bool);
+        let stops: [(&str, Stop); 2] = [
+            ("pause", |d, on| d.paused = on),
+            ("failure", |d, on| d.failure = on.then(|| "test".to_owned())),
+        ];
+        for (name, stop) in stops {
+            stop(&mut app.world_mut().resource_mut::<Driving>(), true);
+            let held: Vec<_> = (0..2 * second).map(|_| frame(&mut app, true)).collect();
+            let levels: Vec<f64> = (0..3).map(|k| rms(&held[second..], k)).collect();
+            println!(
+                "held_loops version=1 window={name} engine={:.5} tyres={:.5} collision={:.5}",
+                levels[0], levels[1], levels[2]
+            );
+            for (k, l) in levels.iter().enumerate() {
+                if *l > 1e-4 {
+                    failures.push(format!("{name}: {} still sounds after 1 s: rms {l:.5}", NAMES[k]));
+                }
+            }
+            stop(&mut app.world_mut().resource_mut::<Driving>(), false);
+            let back: Vec<_> = (0..second).map(|_| frame(&mut app, true)).collect();
+            let back = rms(&back[second / 2..], 2);
+            println!("held_loops version=1 window={name}_resumed collision={back:.5}");
+            if back < 1e-3 {
+                failures.push(format!("{name}: the loop does not return: rms {back:.5}"));
+            }
+        }
+        failures
+    }
+
     /// One car's race start (see `race_start_audio_mix_is_audible`); the
     /// failed checks.
     fn race_start_mix(root: &Path, route: &Route, stem: &str) -> Vec<String> {

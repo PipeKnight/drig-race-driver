@@ -1737,3 +1737,47 @@ combo timer, and the port does not show that group.
   their formats and the event semantics (position, gaps, teammates, damage, accidents, strategy),
   most of which the port has only in part. A first slice (start race, position, end of race) is
   medium; the full spotter is several pushes. The rule engine and parameters: docs/SPEECH_AUDIO_RESEARCH.md (F594).
+
+## 29. Loops held after the race end, a wreck or a pause (backlog row 95)
+
+30 October 2026, Claude Code (car-series; owner report F639: after critical damage and the race
+end, the sound can freeze in its last state and loop until exit). Static and offline; GRID was
+not launched.
+
+**The port's path [V code, test].**
+- `Paced` (`audio_pacing`) and the collision mixer hold the last value they were given. The
+  engine and tyre voices stop on their own: an Update system mutes them when the race is frozen,
+  paused or failed (F434, `Listening::stopped`).
+- The collision source's loops have no such system. That covers each car's scrape (453710/458780)
+  and the player's damage loops (engine, brake, steering, suspension; 457BE0). Their level arrives
+  only from `collision_sound::tick`, once per vehicle tick.
+- After terminal damage, grid-app retires the player and, in a field race, the opponents
+  (AUTHORED), so `standings.over()` holds. `drive_tick` then returns at once, and so does the
+  collision tick. Whatever scrape or damage loop played at the wreck loops at its last level
+  until exit. The same holds at any race end that freezes the cars mid-scrape, during a pause,
+  and after a drive failure.
+- Test `looping_voices_fall_silent_when_the_ticks_stop` (grid-app, purchased data): a loop fed
+  each tick as a scrape is.
+  - Without the fix: engine and tyres are silent within 1 s of a pause or a failure, but the
+    collision loop keeps its level.
+  - With the fix: all three are silent, and the loop returns when the ticks run again.
+
+**The original [O static].**
+- The cars keep simulating after a finish and a wreck; there is no race-end freeze. 0x458D00
+  calls 457BE0 (the per-frame car audio, 458780 inside) for every one of the 20 car audio slots
+  every frame. A scrape voice with envelope g ≤ 0.1 is set to −48 dB (0xCB0BC0), and g halves
+  each frame while the car is slow or has no impulse (§10). So a resting wreck's scrape fades
+  out by itself.
+- After 457BE0, 0x458D00 marks a car whose state (+0x20 → +0x6C) is 3 as an AI car audio
+  (+0xA6B4 = 1, [+0xA494]+0x334 = 1). These are the flags 0x411120 sets for every car but the
+  listened one: not a stop.
+- Pause: the Paused mix mode drops every car and world group to −48 dB (§2).
+- The voices end when the race is torn down, not at the finish line. EndOfRace only lowers the
+  groups when the results appear (§13.2).
+
+**Fix.** `collision_audio::Mixer::hush` makes every loop glide to silence and keeps its place.
+grid-app's `collision_sound::audibility` (Update) sends it once when the ticks stop: race frozen,
+paused or failed, the condition the engine and tyres use. The next tick's levels bring the loops
+back, and the tick clears the flag. It logs `collision_audio version=2 event=hush`. One-shots
+play out as before. [I] Silence stands in for the fade the original's continuing simulation would
+give. Not heard (muted).

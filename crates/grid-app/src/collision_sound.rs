@@ -27,12 +27,13 @@ use std::{
 const RATE: u32 = grid_tools::engine_audio::RATE;
 
 /// For the audio thread: a one-shot (variety, pitch, linear gain, pan),
-/// loop slot k's level and pan (car k's scrape below `LOOP_SLOTS`), or the
-/// end of a loop.
+/// loop slot k's level and pan (car k's scrape below `LOOP_SLOTS`), the
+/// end of a loop, or every loop silent until its next level.
 enum Start {
     Shot(String, f32, f32, [f32; 2]),
     Scrape(usize, String, f32, f32, [f32; 2]),
     Stop(usize),
+    Hush,
 }
 
 #[derive(Resource)]
@@ -49,6 +50,8 @@ pub(crate) struct CollisionSound {
     damage: Damage,
     starts: Sender<Start>,
     last: Option<(u64, u64)>,
+    /// The loops were hushed and no tick has run since.
+    hushed: bool,
 }
 
 #[derive(Asset, TypePath)]
@@ -79,6 +82,7 @@ impl Iterator for Decoder {
                     }
                     Start::Scrape(slot, variety, pitch, gain, pan) => self.mixer.looped(slot, &variety, pitch, gain, pan),
                     Start::Stop(slot) => self.mixer.stop(slot),
+                    Start::Hush => self.mixer.hush(),
                 }
             }
         }
@@ -146,11 +150,37 @@ pub(crate) fn install_systems(
         damage: Damage::default(),
         starts,
         last: None,
+        hushed: false,
     })
     .insert_resource(PendingSource(Some(source)))
     .init_resource::<GlassBreaks>()
     .add_systems(Startup, start)
-    .add_systems(FixedUpdate, tick.after(super::drive_tick));
+    .add_systems(FixedUpdate, tick.after(super::drive_tick))
+    .add_systems(Update, audibility);
+}
+
+/// Backlog row 95: the scrape and damage loops follow the vehicle
+/// ticks, so once the ticks stop (the frozen race end after a wreck or the
+/// last finish, pause, a drive failure) they would loop at their last level
+/// until exit. The original keeps simulating, so 458780 fades a resting
+/// car's scrape to −48 dB, and its Paused mode drops the car groups to
+/// −48 dB [O, AUDIO_RESEARCH §29]. Here they glide to silence when the ticks
+/// stop, as the engine and tyre voices do (F434), and return with the next
+/// tick's levels.
+fn audibility(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listening: super::engine_sound::Listening) {
+    let audible = !driving.paused && driving.failure.is_none() && !listening.stopped(&driving);
+    if !audible && !sound.hushed {
+        let _ = sound.starts.send(Start::Hush);
+        sound.hushed = true;
+        log_line!("collision_audio version=2 event=hush paused={} failure={}", driving.paused, driving.failure.is_some());
+    }
+}
+
+/// A loop on slot 0 at `gain`, as a tick sends a scrape (tests).
+#[cfg(test)]
+pub(crate) fn test_loop(sound: &CollisionSound, gain: f32) {
+    let variety = sound.bank.varieties.iter().find(|(_, v)| !v.samples.is_empty()).map(|(k, _)| k.clone()).unwrap();
+    let _ = sound.starts.send(Start::Scrape(0, variety, 1., gain, [1.; 2]));
 }
 
 #[derive(Resource)]
@@ -193,6 +223,7 @@ fn tick(
         return;
     }
     sound.last = Some(now);
+    sound.hushed = false;
     let sound = &mut *sound;
     sound.listener.tick(DELTA);
     let mut cars: Vec<(&Runtime, Vec<(grid_tools::body_impacts::Impact, Contacted)>)> = Vec::new();

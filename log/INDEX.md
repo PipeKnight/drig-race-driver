@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F648](F0648.md) | 2026-10-30 | Collision and damage loops no longer hold after a wreck, the race end or a pause (backlog row 95) |
 | [F647](F0647.md) | 2026-10-30 | Cockpit: pedals and the general interior clip animator |
 | [F646](F0646.md) | 2026-10-30 | Playable dc4408b43366 with DLAA and APKs dc4408b43366 |
 | [F645](F0645.md) | 2026-10-30 | Tyre smoke drawn at half resolution with the original's soft fade |
