@@ -1,10 +1,11 @@
-//! Exact backing-only main-coverage experiment. No source D3D9level2 parity.
+//! Shared source mesh-family coverage trial and retained legacy backing diagnostic.
+//! Raw4x/cheap-rule1x coverage, explicit auxiliary policies; no original runtime parity claim.
 use bevy::{
     app::AppExit,
     asset::{AssetId, uuid_handle},
     light::{ClusteredDecal, NotShadowCaster},
     mesh::MeshVertexBufferLayoutRef,
-    pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline},
+    pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline, MeshPipelineKey},
     prelude::*,
     render::{batching::NoAutomaticBatching, render_resource::*},
     shader::{ShaderDefVal, ShaderRef},
@@ -18,6 +19,7 @@ use std::{
 };
 pub(crate) const TARGET: &str = "objects/building_grandstand_01_j_01";
 pub(crate) const SHADER: Handle<Shader> = uuid_handle!("567492aa-d1c9-4f1f-b099-d577bb8012be");
+const AUX_SHADER: Handle<Shader> = uuid_handle!("2b79be9e-6d23-4b78-a9d5-15654a286c7b");
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Mode {
     #[default]
@@ -66,19 +68,16 @@ impl MaterialExtension for RawPass {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
     }
-    fn enable_prepass() -> bool {
-        false
-    }
-    fn enable_shadows() -> bool {
-        false
-    }
+    fn prepass_fragment_shader() -> ShaderRef { AUX_SHADER.into() }
+    fn enable_prepass() -> bool { true }
+    fn enable_shadows() -> bool { true }
     fn specialize(
         _: &MaterialExtensionPipeline,
         d: &mut RenderPipelineDescriptor,
         _: &MeshVertexBufferLayoutRef,
-        _: MaterialExtensionKey<Self>,
+        key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        specialize_raw(d).expect("backing raw pipeline refused unsupported variant");
+        specialize_source(d, key.mesh_key).expect("source coverage refused unsupported pass");
         Ok(())
     }
 }
@@ -170,6 +169,101 @@ fn specialize_raw(d: &mut RenderPipelineDescriptor) -> Result<(), &'static str> 
     f.targets[0].as_mut().unwrap().blend = Some(source_blend());
     Ok(())
 }
+fn has_def(defs: &[ShaderDefVal], name: &str) -> bool {
+    defs.iter().any(|d| def_name(d) == name && !matches!(d, ShaderDefVal::Bool(_, false)))
+}
+fn source_depth(d: &RenderPipelineDescriptor) -> Result<(), &'static str> {
+    let z = d.depth_stencil.as_ref().ok_or("source coverage missing depth")?;
+    if z.format != TextureFormat::Depth32Float || z.depth_write_enabled != Some(true)
+        || z.depth_compare != Some(CompareFunction::GreaterEqual) {
+        return Err("source coverage requires Depth32/write/reverseLEQUAL");
+    }
+    if d.primitive.cull_mode.is_some() { return Err("mesh source family requires no face culling"); }
+    Ok(())
+}
+
+/// Actual descriptor routing precedes the old forward4x validator: shadows use
+/// the prepass hook but have no colour target and are not main1x coverage.
+fn specialize_source(d: &mut RenderPipelineDescriptor, key: MeshPipelineKey) -> Result<(), &'static str> {
+    let f = d.fragment.as_ref().ok_or("coverage requires a fragment for alpha ownership")?;
+    let aux = has_def(&d.vertex.shader_defs, "PREPASS_PIPELINE") || has_def(&f.shader_defs, "PREPASS_PIPELINE");
+    if has_def(&d.vertex.shader_defs, "DEFERRED_PREPASS") || has_def(&f.shader_defs, "DEFERRED_PREPASS") {
+        return Err("source coverage trial has no deferred G-buffer shader");
+    }
+    if aux { return specialize_auxiliary(d, key); }
+    if d.multisample.count == 4 { return specialize_raw(d); }
+    specialize_main_one(d)
+}
+
+/// Saved mesh cheap mask16's strictGREATER.25 coverage rule is an explicit
+/// source-backed adaptation, NOT proof the original chose it when MSAA was off.
+fn specialize_main_one(d: &mut RenderPipelineDescriptor) -> Result<(), &'static str> {
+    source_depth(d)?;
+    let f = d.fragment.as_ref().ok_or("no main fragment")?;
+    let t = f.targets.first().and_then(Option::as_ref).ok_or("no main colour")?;
+    if d.multisample.count != 1 || d.multisample.alpha_to_coverage_enabled
+        || f.shader != SHADER || f.targets.len() != 1 || t.write_mask != ColorWrites::ALL
+        || !matches!(t.format, TextureFormat::Rgba8UnormSrgb | TextureFormat::Rgba16Float)
+        || remaps(&d.vertex.shader_defs) != 0 || remaps(&f.shader_defs) != 0 {
+        return Err("source cheap coverage needs actual1x colour/no hardware A2C");
+    }
+    const BAD: [&str; 8] = ["PREMULTIPLY_ALPHA", "OIT_ENABLED", "PREPASS_PIPELINE", "DEFERRED_PREPASS",
+        "FORWARD_DECAL", "VISIBILITY_RANGE_DITHER", "MESHLET_MESH_MATERIAL_PASS", "READS_VIEW_TRANSMISSION_TEXTURE"];
+    if d.vertex.shader_defs.iter().chain(&f.shader_defs).any(|v| BAD.contains(&def_name(v))) {
+        return Err("unsupported source cheap main variant");
+    }
+    if !has_def(&d.vertex.shader_defs, "MAY_DISCARD") || !has_def(&f.shader_defs, "MAY_DISCARD") {
+        return Err("expected native1x A2C routing MAY_DISCARD");
+    }
+    let f = d.fragment.as_mut().unwrap();
+    f.shader_defs.push("OBJECT_COVERAGE_QUARTER".into());
+    f.targets[0].as_mut().unwrap().blend = Some(source_blend());
+    Ok(())
+}
+
+fn specialize_auxiliary(d: &mut RenderPipelineDescriptor, key: MeshPipelineKey) -> Result<(), &'static str> {
+    source_depth(d)?;
+    let f = d.fragment.as_ref().ok_or("no auxiliary alpha fragment")?;
+    if f.shader != AUX_SHADER || d.multisample.count != 1 || d.multisample.alpha_to_coverage_enabled {
+        return Err("auxiliary coverage requires custom fragment/actual1x/no A2C");
+    }
+    const BAD: [&str; 7] = ["DEFERRED_PREPASS", "BINDLESS", "MESHLET_MESH_MATERIAL_PASS",
+        "VISIBILITY_RANGE_DITHER", "STANDARD_MATERIAL_NORMAL_MAP", "PREMULTIPLY_ALPHA", "OIT_ENABLED"];
+    if d.vertex.shader_defs.iter().chain(&f.shader_defs).any(|v| BAD.contains(&def_name(v))) {
+        return Err("unsupported source auxiliary layout");
+    }
+    let directional = key.contains(MeshPipelineKey::UNCLIPPED_DEPTH_ORTHO)
+        && key.contains(MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC);
+    let normal = key.contains(MeshPipelineKey::NORMAL_PREPASS);
+    let motion = key.contains(MeshPipelineKey::MOTION_VECTOR_PREPASS);
+    let rule = if directional {
+        if !key.contains(MeshPipelineKey::DEPTH_PREPASS) || normal || motion || !f.targets.is_empty() {
+            return Err("unexpected directional shadow outputs");
+        }
+        "OBJECT_AUX_CLIP_CSM_HALF"
+    } else {
+        if key.contains(MeshPipelineKey::UNCLIPPED_DEPTH_ORTHO) || (!normal && !motion) {
+            return Err("ambiguous depth-only/point-shadow pass is not admitted");
+        }
+        // Native camera normal/motion output locations are pinned Bevy0.19.1.
+        if f.targets.iter().enumerate().any(|(i,t)| match t {
+            Some(t) => t.blend.is_some() || t.write_mask != ColorWrites::ALL || match i {
+                0 => !normal || t.format != TextureFormat::Rgb10a2Unorm,
+                1 => !motion || t.format != TextureFormat::Rg16Float,
+                _ => true,
+            },
+            None => (i == 0 && normal) || (i == 1 && motion),
+        }) || (normal && f.targets.first().and_then(Option::as_ref).is_none())
+            || (motion && f.targets.get(1).and_then(Option::as_ref).is_none()) {
+            return Err("wrong camera prepass outputs");
+        }
+        "OBJECT_AUX_CLIP_QUARTER"
+    };
+    // Preserve all shadow bias/unclipped-depth state, targets, shaders and cull.
+    d.fragment.as_mut().unwrap().shader_defs.push(rule.into());
+    Ok(())
+}
+
 pub(crate) fn actual_pipeline(d: &RenderPipelineDescriptor, raw: bool) -> bool {
     if attachment(d).is_err() {
         return false;
@@ -219,6 +313,39 @@ fn raw_material(base: &StandardMaterial) -> RawMaterial {
         extension: RawPass { marker: Vec4::ZERO },
     }
 }
+/// Permanent shared factory: caller selects exact source mesh-family members.
+/// AlphaToCoverage routes4x to raw coverage and1x to MAY_DISCARD; specialization
+/// chooses the explicit actual-sample backend. No panel names or fixture swaps.
+pub(crate) fn source_material(base: &StandardMaterial) -> Result<RawMaterial, &'static str> {
+    let mut base = base.clone();
+    base.alpha_mode = AlphaMode::Opaque;
+    if !admitted(&base) || base.normal_map_texture.is_some() || base.cull_mode.is_some() {
+        return Err("source coverage requires non-emissive non-transmissive textured unit-alpha/no-normal-map/no-cull base");
+    }
+    base.opaque_render_method = bevy::material::OpaqueRendererMethod::Forward;
+    Ok(raw_material(&base))
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct SourceAssets<'w, 's> {
+    pub standard: ResMut<'w, Assets<StandardMaterial>>,
+    pub raw: ResMut<'w, Assets<RawMaterial>>,
+    pub decals: Query<'w, 's, (), With<ClusteredDecal>>,
+}
+
+pub(crate) fn register_source_material(app: &mut App) -> Result<(), std::io::Error> {
+    if app.is_plugin_added::<MaterialPlugin<RawMaterial>>() { return Ok(()); }
+    for (handle, text, path) in [
+        (SHADER, include_str!("foundation_backing.wgsl"), "foundation_backing_raw.wgsl"),
+        (AUX_SHADER, include_str!("object_coverage_aux.wgsl"), "object_coverage_aux.wgsl"),
+    ] {
+        app.world_mut().resource_mut::<Assets<Shader>>().insert(handle.id(), Shader::from_wgsl(text, path))
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+    }
+    app.add_plugins(MaterialPlugin::<RawMaterial>::default());
+    Ok(())
+}
+
 #[derive(Component, Clone)]
 struct Backup {
     original: Handle<StandardMaterial>,
@@ -256,19 +383,7 @@ pub(crate) fn install(app: &mut App, mode: Mode) -> Result<(), Box<dyn std::erro
     if mode == Mode::Off {
         return Ok(());
     }
-    if mode == Mode::RawA2c {
-        app.world_mut()
-            .resource_mut::<Assets<Shader>>()
-            .insert(
-                SHADER.id(),
-                Shader::from_wgsl(
-                    include_str!("foundation_backing.wgsl"),
-                    "foundation_backing_raw.wgsl",
-                ),
-            )
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-        app.add_plugins(MaterialPlugin::<RawMaterial>::default());
-    }
+    if mode == Mode::RawA2c { register_source_material(app)?; }
     app.insert_resource(Fixture {
         mode,
         stopping: Arc::default(),
@@ -936,5 +1051,56 @@ mod tests {
                 assert!(!still_owned(&b, None, None));
             }
         }
+    }
+
+    #[test]
+    fn source_one_sample_main_and_camera_use_quarter_while_shadow_uses_source_half() {
+        let mut main = pipe();
+        main.multisample.count = 1;
+        main.multisample.alpha_to_coverage_enabled = false;
+        main.vertex.shader_defs = vec!["MAY_DISCARD".into()];
+        main.fragment.as_mut().unwrap().shader_defs = main.vertex.shader_defs.clone();
+        main.fragment.as_mut().unwrap().targets[0].as_mut().unwrap().format = TextureFormat::Rgba16Float;
+        specialize_source(&mut main, MeshPipelineKey::NONE).unwrap();
+        assert!(has_def(&main.fragment.as_ref().unwrap().shader_defs, "OBJECT_COVERAGE_QUARTER"));
+        assert_eq!(main.fragment.as_ref().unwrap().targets[0].as_ref().unwrap().blend, Some(source_blend()));
+
+        let mut shadow = pipe();
+        shadow.multisample.count = 1; shadow.multisample.alpha_to_coverage_enabled = false;
+        shadow.vertex.shader_defs = vec!["PREPASS_PIPELINE".into(), "MAY_DISCARD".into()];
+        let defs = shadow.vertex.shader_defs.clone();
+        let f = shadow.fragment.as_mut().unwrap(); f.shader = AUX_SHADER; f.shader_defs = defs; f.targets.clear();
+        shadow.depth_stencil.as_mut().unwrap().bias.constant = 17;
+        shadow.depth_stencil.as_mut().unwrap().bias.slope_scale = 1.75;
+        let before = shadow.clone();
+        let key = MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC | MeshPipelineKey::UNCLIPPED_DEPTH_ORTHO;
+        specialize_source(&mut shadow, key).unwrap();
+        let mut expected = before; expected.fragment.as_mut().unwrap().shader_defs.push("OBJECT_AUX_CLIP_CSM_HALF".into());
+        assert_eq!(shadow, expected);
+
+        let mut camera = shadow.clone();
+        let f = camera.fragment.as_mut().unwrap(); f.shader_defs.retain(|d| def_name(d) != "OBJECT_AUX_CLIP_CSM_HALF");
+        f.shader_defs.push("PREPASS_FRAGMENT".into()); f.shader_defs.push("MOTION_VECTOR_PREPASS".into());
+        f.targets = vec![None, Some(ColorTargetState { format: TextureFormat::Rg16Float, blend: None, write_mask: ColorWrites::ALL }), None, None];
+        specialize_source(&mut camera, MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::MOTION_VECTOR_PREPASS).unwrap();
+        assert!(has_def(&camera.fragment.as_ref().unwrap().shader_defs, "OBJECT_AUX_CLIP_QUARTER"));
+        let mut unsupported = camera.clone(); unsupported.multisample.count = 4;
+        let before = unsupported.clone();
+        assert!(specialize_source(&mut unsupported, MeshPipelineKey::MOTION_VECTOR_PREPASS).is_err());
+        assert_eq!(unsupported, before);
+    }
+
+    #[test]
+    fn source_factory_is_permanent_and_does_not_choose_a_track_or_panel() {
+        let mut base = base(); base.alpha_mode = AlphaMode::Mask(0.5); base.cull_mode = None;
+        let original = format!("{base:?}"); let mut made = source_material(&base).unwrap();
+        assert_eq!(made.base.alpha_mode, AlphaMode::AlphaToCoverage);
+        assert_eq!(made.base.opaque_render_method, bevy::material::OpaqueRendererMethod::Forward);
+        made.base.alpha_mode = base.alpha_mode; made.base.opaque_render_method = base.opaque_render_method;
+        assert_eq!(format!("{:?}", made.base), original);
+        assert!(<RawPass as MaterialExtension>::enable_prepass());
+        assert!(<RawPass as MaterialExtension>::enable_shadows());
+        let mut unsupported = base.clone(); unsupported.emissive = LinearRgba::WHITE;
+        assert!(source_material(&unsupported).is_err());
     }
 }

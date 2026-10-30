@@ -4518,6 +4518,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         crowd_preview::install(&mut app, prepared)?;
         if let Some(flash) = flash { flash_preview::install(&mut app, flash)?; }
     }
+    // Private trial integration: historic target adapters require their old artifact.
+    if foundation_front != foundation_front::Mode::Off || foundation_backing != foundation_backing::Mode::Off
+        || graphics.object_coverage != object_materials::CoverageMode::Off || graphics.double_fence_wire {
+        return Err("normal source-coverage trial cannot combine with legacy panel/fence diagnostics".into());
+    }
+    foundation_backing::register_source_material(&mut app)?;
     foundation_front::install(&mut app, foundation_front);
     foundation_front_audit::install(&mut app, foundation_front);
     foundation_backing::install(&mut app, foundation_backing)?;
@@ -4595,7 +4601,7 @@ fn setup(
     mut commands: Commands,
     mut car: ResMut<Car>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    material_assets: foundation_backing::SourceAssets,
     mut images: ResMut<Assets<Image>>,
     orbit: Res<Orbit>,
     capture: Option<ResMut<Capture>>,
@@ -4617,6 +4623,10 @@ fn setup(
         adapter.driver_info,
         device.features()
     );
+    // One grouped SystemParam preserves setup's existing argument count.
+    let foundation_backing::SourceAssets { standard: mut materials, raw: mut source_materials, decals } = material_assets;
+    let mut source_handles = std::collections::HashMap::new();
+    let mut source_coverage_parts = 0usize;
     let body_occlusion_handles = body_occlusion::upload(&mut paint_masks.occlusion, &mut images, graphics.sampler(false));
     #[cfg(feature = "paint-specular")]
     let body_specular_handles = body_specular::upload(&mut paint_masks.specular, &mut images, graphics.sampler(false));
@@ -4812,6 +4822,14 @@ fn setup(
                 materials.add(material)
             })
             .clone();
+        let source_material = if object_two_sided_materials.contains(&part.material) {
+            assert!(decals.is_empty(), "source raw coverage has not admitted clustered decals");
+            Some(source_handles.entry(material.id()).or_insert_with(|| {
+                let base = materials.get(&material).expect("loaded source object base");
+                source_materials.add(foundation_backing::source_material(base).unwrap_or_else(|error| panic!("source object material {:?}: {error}", part.material)))
+            }).clone())
+        } else { None };
+        if source_material.is_some() { source_coverage_parts += 1; }
         let model = part_model(&part.material);
         let interior = part.material.starts_with("car0/interior/");
         // Deforming body parts own their mesh per car (any car of the model).
@@ -4894,13 +4912,19 @@ fn setup(
                 Some(commands.spawn((
                     Name::new(part.name.clone()),
                     Mesh3d(mesh.clone()),
-                    MeshMaterial3d(material.clone()),
                     Transform::from_matrix(transform),
                     initial_bounds,
                 )))
             } else {
                 None
             };
+            if let Some(entity) = &mut entity {
+                if let Some(source_material) = &source_material {
+                    entity.insert(MeshMaterial3d(source_material.clone()));
+                } else {
+                    entity.insert(MeshMaterial3d(material.clone()));
+                }
+            }
             if let Some(source) = &facing
                 && let Some(entity) = &mut entity
             {
@@ -5061,6 +5085,7 @@ fn setup(
             }
         }
     }
+    println!("source_object_coverage prepared_parts={source_coverage_parts} materials={} family=object_simple_mesh backend=actual_samples scope=prepared_materials_not_queued_draws", source_handles.len());
     if piece_parts > 0 {
         println!(
             "piece_meshes parts={piece_parts} draws={} meshes={}",
