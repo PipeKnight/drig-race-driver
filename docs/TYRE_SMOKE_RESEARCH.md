@@ -1153,3 +1153,94 @@ Normal rendered driving now uses the shared smoke transaction automatically, wit
 Default544 tests/Clippy, combined-feature552 tests/Clippy and release pass. Four same-artifact Off/Auto pairs cover BMW/Shibuya nativeDLAA with11AI, Derby/STK ordinaryMSAA4 with11AI, Lacetti enhancedSMAA HDR and genuine cracked-glass nativeDLAA. Each has120frames plusfinal and matching selected physical/emission/request controls; Derby additionally compares12public endpoints. Selected dense BMW/Derby images show skid/glass/lamp ghosts attenuated with foreground retained. Real Lacetti glass transitions and deformation occur, but rear-view captures do not establish dense front-crack overlap. Five internal C actions and R also complete with native history resets and healed final damage state. See [G329](../log/G0329.md) and private local/graphics/smoke-automatic01/ for source/artifact/runtime evidence.
 
 These checks support the general normal-path integration, not universal source-compositor parity: foreground transparent overlap, Smashed states, positive smoke after reset, manual UI, device fallback, Android and performance still need their own evidence. Cold/unready frames retain ordinary draws; unexpected masked replay failures restore and report failure rather than silently dropping smoke. No shader, material, texture, particle, physics, lighting or AA settings were changed to hide the defect.
+
+
+## 8. Particle light (30 October 2026)
+
+Static recovery (Claude Code) for the per-particle lighting port; measurements and the port are in
+[SMOKE_RENDER_COST.md](SMOKE_RENDER_COST.md) and [TYRE_SMOKE.md](TYRE_SMOKE.md). Sources: the
+pinned analysis PE through `grid_re.py` (master project, decompile cache `00886BD0.c`), capstone
+disassembly, and the purchased `shaderpack.pssg` programs disassembled with
+`tools/disassemble_packed_grid_shader.py` into private `local/smoke-shaders/`. No live game was
+run. [V] verified statically, [D] shipped data, [I] interpretation.
+
+### 8.1 The birth light sample [V]
+
+- Spawn `0x890A10` reads the particle manager's sampler `mgr+0x3880` (`0x890DC0`). When it is set,
+  it calls the sampler's virtual +4 with the new particle's world (x, z) and stores the result at
+  particle +0x84 (`param_2[0x21]`). The sample is taken **once, at birth**; nothing updates it later.
+- The sampler is a sub-object of the particle plugin (static instance `0xDB84E0`, vtable
+  `0xCF2B64`) at +0x144, vtable `0xCF2030`. Resource callback `0x737D20` passes its address to
+  `0x875AE0`, which stores it in `mgr+0x3880` (the other writers are `0x868D50`, no direct
+  callers, and the manager constructor's clear at `0x893F40`).
+- `0x738890` resolves two plugins by name: `DebugRendererPlugin` into +0x88 and
+  `ShadowMapPlugin` into +0x148, which is the sampler's +4.
+- Sampler +4 is `0x740F90`: no ShadowMapPlugin → 1.0; otherwise `0x8F2300(x, z) > 0` → 0.0,
+  else 1.0. So the sample is binary: 0 in static shadow, 1 lit.
+- `0x8F2300` (ShadowMapPlugin, static instance `0xE3B9A0`, vtable `0xCF2B14`): returns 0 unless
+  the plugin is enabled (+0x89) and holds a grid (+0x80) of type 10 (+0x14). Cell indices are
+  `trunc((x − origin.x) · inv.x)`, `trunc((z − origin.z) · inv.z)` (grid +0/+4 origin, +8/+C
+  inverse cell size), bounded by the grid size +0x10; `0x8F1AC0` walks a 10 × 10 hierarchy and
+  returns a signed byte. The same query serves `0x971A20` and `0x97A630` (vegetation renderers).
+- The grid comes from a loaded resource node (`0x8F1A70` checks the node type at `0xD032F8`,
+  then `0x8F1A20` stores it). Which shipped file holds it was not traced [open].
+
+### 8.2 The lit vertex stream [V]
+
+Renderer `0x886BD0` fills each vertex stream by element:
+- TEXCOORD0 (element `0xF60A20`, `0x88BA7C`): atlas UVs; a second texture-coordinate set gets
+  particle +0x84, the birth light sample, on all four corners (`0x88BC9F..0x88BCBB`).
+- NORMAL (element `0xF60A14`, `0x88C221`): four constant corner normals (±1, ±1, 1)/√3
+  (`0x88C2AB..0x88C38C`, globals `0xE81710..0xE8174C`), multiplied by the billboard rows. The
+  in-plane signs match the corner's position signs, so each normal leans out through its corner;
+  the third row faces the camera [I: the shaders' depth test shows a −Z-forward view space, whose
+  camera third row points back to the viewer]. Interpolated, the normal rounds the sprite like a
+  ball.
+
+### 8.3 The shaders [D]
+
+`effects/config.xml` maps `smokeHalf` to `pfx_half_smoke` (lit stream) and
+`basicDepthAlphaBlendHalf` to `pfx_unlit_half_depth` (standard stream). In K_Tarmac only
+Burnout_circles (Wheel_spin) is `basicDepthAlphaBlendHalf`.
+
+- Vertex programs `pfx_smoke.cg.vp` / `vp_half`: `o1.w = dot(sunDirection, normal)` per vertex
+  (sunDirection points towards the light, SOURCE_SKY_LIGHTING.md), TEXCOORD1.x passed through.
+- Fragment programs `pfx_smoke.cg.fp` / `fp_half` / `fp_half_edges`, identical light:
+  `light = saturate((1 + N·sun) · 0.25 + 0.5) · pfxSunColour · sample + pfxPreMultipliedAmbientColour`,
+  `colour = light · texture.rgb · vertex.rgb`, alpha `texture.a · vertex.a · saturate(2.5 · d)`
+  with d the scene depth minus the particle's view depth (soft edge over 0.4 m), zero output where
+  d ≤ 0. The half variants output premultiplied colour; `fp_half` also writes the edge/alpha MRT.
+  The wrap term is affine in N·sun, so per-vertex evaluation and interpolation give the same value
+  at every pixel. Light per particle, then, means: sun direction per vertex, sun colour, ambient and
+  the birth sample per particle, nothing per pixel.
+- `pfx_unlit_depth.cg.fp_half_fakelight` (Burnout_circles): `colour = texture · vertex ·
+  pfxUnlitAmbientColour`, same soft depth; no sun.
+
+### 8.4 The light colours [V, D]
+
+The uniform dispatcher submits `pfxSunColour` from lighting +0x130 (`0x743418..0x74345D`),
+`pfxPreMultipliedAmbientColour` from +0x140 (`0x743496..0x7434DE`) and `pfxUnlitAmbientColour` from
++0x150 (`0x7434F2..0x743537`), each with w = 1. XML completion parses lighting.xml `pfx_suncolour`,
+`pfx_ambient` and `pfx_unlitambient` into those fields (`0x72C134..0x72C1A0`) and packs them with
+`0x742B00` (8-bit, about 0.4 % rounding, not reproduced). The constructor defaults all three to
+(1, 1, 1) (`0x741386..0x7413AF`). Shipped values [D]:
+
+| track | pfx_suncolour | pfx_ambient |
+|---|---|---|
+| Donington | 0.948 0.911 0.792 | 1.026 1.030 1.064 |
+| Istanbul | 0.879 0.786 0.675 | 0.817 0.838 0.873 |
+| Le Mans | 0.308 0.322 0.315 | 1.449 1.393 1.346 |
+| Nürburgring | 0.246 0.234 0.200 | 1.343 1.348 1.364 |
+| Spa | 0.369 0.361 0.282 | 1.114 1.124 1.179 |
+| Detroit | 0.754 0.715 0.664 | 1.062 1.088 1.133 |
+| Long Beach | 0.278 0.267 0.230 | 1.075 1.097 1.133 |
+
+`pfx_unlitambient` is 1 1 1 wherever present. Jarama, Milan, the Japanese tracks, San Francisco
+and Washington omit all three, so they keep (1, 1, 1). The ambient term dominates: where the sun
+is directly behind a particle it keeps 75-93 % of the brightness it has when the sun is in front.
+
+### 8.5 Open
+
+- The static shadow grid's source file and contents (8.1); the port has no birth sample yet.
+- The soft depth edge and the half-resolution pass itself (§7).
+- Whether 0x730F90's time-of-day path rewrites +0x130..+0x150 for any weather.

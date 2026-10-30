@@ -276,11 +276,11 @@ pub(crate) fn put<const N: usize>(bytes: &mut [u8], at: usize, value: [f32; N]) 
     }
 }
 
-/// One billboard: corners in draw order, one normal and one colour.
+/// One billboard: corners in draw order, a normal per corner and one colour.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Quad {
     pub positions: [[f32; 3]; 4],
-    pub normal: [f32; 3],
+    pub normals: [[f32; 3]; 4],
     pub uvs: [[f32; 2]; 4],
     pub colour: [f32; 4],
 }
@@ -288,7 +288,7 @@ pub(crate) struct Quad {
 /// Unused capacity: zero-area quads, which draw nothing.
 const PAD: Quad = Quad {
     positions: [[0.; 3]; 4],
-    normal: [0., 1., 0.],
+    normals: [[0., 1., 0.]; 4],
     uvs: [[0.; 2]; 4],
     colour: [0.; 4],
 };
@@ -344,7 +344,7 @@ fn quad_mesh(quads: &[Quad], capacity: usize, triangles: [u32; 6]) -> Mesh {
     for q in padded(quads, capacity) {
         let base = positions.len() as u32;
         positions.extend(q.positions);
-        normals.extend([q.normal; 4]);
+        normals.extend(q.normals);
         uvs.extend(q.uvs);
         colours.extend([q.colour; 4]);
         indices.extend(triangles.map(|k| base + k));
@@ -376,7 +376,7 @@ fn pack_quads(quads: &[Quad], capacity: usize, layout: &VertexLayout, bytes: &mu
     for q in padded(quads, capacity) {
         for k in 0..4 {
             put(bytes, vertex + p, q.positions[k]);
-            put(bytes, vertex + n, q.normal);
+            put(bytes, vertex + n, q.normals[k]);
             put(bytes, vertex + uv, q.uvs[k]);
             put(bytes, vertex + c, q.colour);
             vertex += layout.stride;
@@ -393,7 +393,7 @@ mod tests {
         let quads: Vec<_> = (0..3)
             .map(|i| Quad {
                 positions: std::array::from_fn(|k| [i as f32, k as f32 * 0.5, -1.25]),
-                normal: [0.1, 0.9, 0.2],
+                normals: std::array::from_fn(|k| [0.1, 0.9 - k as f32 * 0.25, 0.2]),
                 uvs: std::array::from_fn(|k| [k as f32 * 0.25, 1. - i as f32 * 0.125]),
                 colour: [1., 0.5, 0.25, 0.75 - i as f32 * 0.25],
             })

@@ -96,7 +96,7 @@ Gains are for the smoke pass at 3024 x 1890, dense mean 8.5 ms.
 | # | option | expected gain | fidelity risk |
 |---|---|---|---|
 | 1 | Reduced-resolution smoke buffer, as the original's `pfx_half_smoke` path ([TYRE_SMOKE_RESEARCH.md](TYRE_SMOKE_RESEARCH.md) §7: reduced colour and alpha target, reduced depth, `ONE/ONE_MINUS_SRC_ALPHA` accumulation, `compose_no_alpha` with `ONE/SRC_ALPHA`; the creator shifts 1280x720 by 2, a quarter per axis) | [I] half per axis, single-sample: about 2.1 ms plus 0.1-0.3 ms of depth downsample and composite, about -70 %. A quarter per axis about -90 %. Extrapolated from the measured pixel scaling, not run. Also fixes most of the Retina case. | Low-medium, and closer to the original. Edges at depth discontinuities (cars inside smoke) need the reduced-depth test or a bilateral upsample; G329's composition and glass ordering must carry into the compose step (Codex owns the look). Largest effort: render-graph node, targets, compose shader. |
-| 2 | Lighting per particle (the original samples light per particle) instead of per-pixel PBR, with an unlit-cost fragment shader | [O] upper bound -44 to -46 % (unlit). With #1 about 1.2 ms [I]. | Low if the sun and ambient terms are evaluated per particle; the exact source arithmetic is still open. Small: a custom material, or vertex colours with `unlit`. |
+| 2 | Lighting per particle (the original samples light per particle) instead of per-pixel PBR, with an unlit-cost fragment shader. **Done in F644: −58/−63 % measured.** | [O] upper bound -44 to -46 % (unlit). With #1 about 1.2 ms [I]. | Low if the sun and ambient terms are evaluated per particle; the exact source arithmetic is still open. Small: a custom material, or vertex colours with `unlit`. |
 | 3 | Near-camera fade or projected-size cap | [O] -17 to -22 % for a 3 m cull; sprites 5-15 m away carry about 45 % of the coverage | Medium-high: thins the cloud around the player; the source's near fade is not recovered (§7.5 item 3). Only as a safety valve under a GPU budget. |
 | 4 | G329 CPU: keep the five group entities (`TyreSmoke` already stores them) instead of five full `Mesh3d` scans per frame in `live.rs` `extract` | about -0.2 ms CPU per frame on the extract critical path, smoke or not; no GPU change | None (same entities; check uniqueness at install or on change). Codex-owned file. |
 | 5 | High-DPI render-scale default (row 98, F642) | 3024 x 1890 to 2304 x 1440: -42 % of all pixels, smoke included | Resolution only. Done in F642. |
@@ -104,6 +104,42 @@ Gains are for the smoke pass at 3024 x 1890, dense mean 8.5 ms.
 Not recommended as the main fix: fewer particles, or an alpha cut-off with `discard` (tile-based
 GPUs such as the M4 lose hidden-surface removal with `discard`, and the fragments are still
 shaded).
+
+## Per-particle light (F644, option 2 done)
+
+30 October 2026, Claude Code. The smoke material is now unlit with the original particle light
+in a small fragment (TYRE_SMOKE_RESEARCH.md §8, TYRE_SMOKE.md "Material"). Measured as above
+(Derby fixture, baseline, RTX 4070, Vulkan), before = origin/main 66a0c9cf and after = the change,
+each with the same uncommitted diagnostics (per-frame GPU pass lines, the `smoke_replay` span, a
+per-frame sprite count), release builds through the build lock. Dense frames (76-78 of 86 matched
+after the timestamp lag):
+
+| smoke_replay GPU ms | 1920x1080 mean / p95 / max | 3024x1890 mean / p95 / max |
+|---|---|---|
+| before (scene-lit per pixel) | 3.15 / 5.16 / 6.16 | 8.15 / 14.37 / 17.21 |
+| after (light per particle) | 1.34 / 2.60 / 3.12 (−58 %) | 2.98 / 5.12 / 6.44 (−63 %) |
+
+The gain exceeds F643's unlit bound (−44/−46 %). [I] The custom fragment never contains the PBR
+lighting code, so its compiled shader is smaller than the stock unlit variant, which keeps the
+lighting branch; not verified with a shader profiler. Over the whole run (after 60 frames) the
+pass averages 0.92 ms at 1080p and 1.97 ms at 3024x1890 (before 2.47 and 5.46).
+
+Look, 150-frame sequences of the same run at 1920x1080 (`--motion-capture 300,150`), compared
+frame by frame:
+- With the sun in front of the smoke (for example frame 140, dense cloud around the stopped car)
+  the clouds match; the new frame is 7-10 % brighter on average and has no dark patches where
+  sprites face away from the sun.
+- Looking towards the sun from inside the cloud (frames 90-100) the old material lit only the
+  ambient side and drew a near-black cloud (mean frame value 70-80 of 255); the original's wrap term
+  keeps 75-93 % of the sun-side brightness, so the cloud is light grey (160). This is the
+  intended source behaviour, not a calibration error.
+- Thin smoke against the cars and walls is now visible as light haze where it was dark before.
+Smoke in shadowed parts of the track is lit as in sunlight both before and after: the old
+material did not receive shadows, and the new one has no birth shadow sample yet.
+
+Not measured for this change: Metal/Android, enhanced and source-sky-IBL lighting modes (the
+fragment reads their environment map and atmosphere transmittance but was only checked in
+baseline), night tracks.
 
 ## Not measured
 

@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F644](log/F0644.md) | 2026-10-30 | Tyre smoke lit once per particle as the original |
 | [F643](log/F0643.md) | 2026-10-30 | Tyre smoke rendering cost measured (SMOKE_RENDER_COST.md) |
 | [F642](log/F0642.md) | 2026-10-29 | Dynamic resolution: high-DPI 1440-row ceiling, frame-time steps, inconclusive probes |
 | [F641](log/F0641.md) | 2026-10-29 | Le Mans barrier collision report recorded (backlog row 99) |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F587](log/F0587.md) | 2026-10-26 | Early-race tick cost: whole vehicle-record copies cut |
 | [F586](log/F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
 | [F585](log/F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
-| [F584](log/F0584.md) | 2026-10-26 | Car part batching |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

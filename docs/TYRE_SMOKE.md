@@ -35,11 +35,17 @@ Presentation only: it reads vehicle state and never feeds physics.
 
 ## AUTHORED (not recovered)
 
-- **Material:** scene-lit diffuse billboards (roughness 1, reflectance 0) instead of the
-  original `pfx_half_smoke` shader. Not reproduced: its per-particle light sample, its
-  half-resolution buffer, and the near-camera fade. An unlit trial with the data colours
-  (≈0.5 grey) looked sooty (render `handbrake-lock-250.png`); the lit version reads as light
-  smoke (`handbrake-lock-225-lit.png`).
+- **Material** (since F644): an unlit material whose fragment (`tyre_smoke.wgsl`) applies the
+  original particle light (TYRE_SMOKE_RESEARCH.md §8): ball-shaped corner normals, the wrap term
+  `saturate((1 + N·sun)/4 + 1/2)`, the track's `pfx_suncolour`/`pfx_ambient` (fakelight
+  `pfx_unlitambient` for the Wheel_spin rings). AUTHORED: one scalar per pixel maps those colours
+  to the port's radiometry, so that a sprite facing the sun is as bright as the earlier scene-lit
+  material drew it (the first directional light / π, ambient and environment-map irradiance, view
+  exposure). Point and spot lights no longer light the smoke, as in the original. The birth light
+  sample is always 1: the static shadow grid it reads is not loaded. Not reproduced: the
+  half-resolution buffer, the soft depth edge and the near-camera fade. Until F644 the smoke was
+  scene-lit per pixel (roughness 1, reflectance 0); an earlier unlit trial with the data colours
+  looked sooty (`handbrake-lock-250.png`).
 - **Data colours** are treated as display-referred (sRGB) and converted to linear vertex
   colours.
 - **Alpha scale:** particle alpha = age alpha × the driver's frac copied at birth. The

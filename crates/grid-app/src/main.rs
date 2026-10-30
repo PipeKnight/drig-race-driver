@@ -4147,7 +4147,17 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => warn!("Tyre audio unavailable; driving continues: {error}"),
             }
         }
-        tyre_smoke::install(&mut app, &root, smoke_order);
+        // The track's particle light colours; absent keys or file keep the
+        // original's (1, 1, 1).
+        let particle_light = match read(&root.join(route.track_file("lighting.xml"))) {
+            Ok(bytes) => grid_formats::track_lighting::read_particle_light(&bytes)
+                .unwrap_or_else(|error| {
+                    warn!("Track particle light unreadable; using defaults: {error}");
+                    Default::default()
+                }),
+            Err(_) => Default::default(),
+        };
+        tyre_smoke::install(&mut app, &root, smoke_order, particle_light);
         if ground_effect_assets::enabled() {
             wheel_ground::install(&mut app);
             if let Err(error) = skid_marks::install(&mut app, &root, skid_order, skid_reflectance) {

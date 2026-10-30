@@ -2,10 +2,12 @@
 //! simulation in `grid_tools::tyre_smoke` advances once per successful physics
 //! tick for the player and every opponent; this module draws its sprites as
 //! camera-facing (or horizon-aligned) quads, one alpha-blended mesh per shipped
-//! texture, sorted back to front. Presentation only, never feeds physics.
+//! texture, sorted back to front, lit once per particle as the original's
+//! particle shaders do (`tyre_smoke.wgsl`). Presentation only, never feeds
+//! physics.
 use super::mesh_stream::{MeshStream, Quad, QuadMesh};
 use bevy::{
-    asset::RenderAssetUsages,
+    asset::{RenderAssetUsages, uuid_handle},
     camera::{
         primitives::Aabb,
         visibility::{NoFrustumCulling, VisibilitySystems},
@@ -13,10 +15,54 @@ use bevy::{
     image::ImageSampler,
     light::{NotShadowCaster, NotShadowReceiver},
     mesh::{Indices, PrimitiveTopology},
+    pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
+    render::render_resource::AsBindGroup,
+    shader::ShaderRef,
 };
+use grid_formats::track_lighting::ParticleLight;
 use grid_tools::tyre_smoke::{self as smoke, Library, Smoke, Sprite};
 use std::sync::Arc;
+
+const SHADER: Handle<Shader> = uuid_handle!("6d1f3b52-0c47-4a8e-9b1e-5f2a7c9d4e31");
+
+/// An unlit material whose fragment applies the original particle light.
+pub(crate) type SmokeMaterial = ExtendedMaterial<StandardMaterial, SmokeLight>;
+
+/// The particle light colours (track lighting.xml), see `tyre_smoke.wgsl`.
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug, Default)]
+pub(crate) struct SmokeLight {
+    /// `pfxSunColour`; w = 1 for the lit smoke stream, 0 for the fakelight
+    /// burnout rings.
+    #[uniform(100)]
+    sun: Vec4,
+    /// `pfxPreMultipliedAmbientColour`.
+    #[uniform(101)]
+    ambient: Vec4,
+    /// `pfxUnlitAmbientColour`.
+    #[uniform(102)]
+    unlit: Vec4,
+}
+
+impl MaterialExtension for SmokeLight {
+    fn fragment_shader() -> ShaderRef {
+        SHADER.into()
+    }
+}
+
+impl SmokeLight {
+    /// Burnout_circles (the only Wheel_spin emitter) is `basicDepthAlphaBlendHalf`,
+    /// shader `pfx_unlit_half_depth` (fakelight); every other smoke emitter is
+    /// `smokeHalf`, `pfx_half_smoke` with the lit stream (effects/config.xml).
+    fn new(light: &ParticleLight, texture: &str) -> Self {
+        let lit = texture != "Wheel_spin.tga";
+        Self {
+            sun: Vec3::from_array(light.sun).extend(if lit { 1. } else { 0. }),
+            ambient: Vec3::from_array(light.ambient).extend(0.),
+            unlit: Vec3::from_array(light.unlit_ambient).extend(0.),
+        }
+    }
+}
 
 /// Default keeps the original five texture groups and draw system unchanged.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -52,7 +98,12 @@ impl TyreSmoke {
     }
 }
 
-pub(crate) fn install(app: &mut App, root: &std::path::Path, mode: SmokeOrder) {
+pub(crate) fn install(
+    app: &mut App,
+    root: &std::path::Path,
+    mode: SmokeOrder,
+    light: ParticleLight,
+) {
     let loaded = Library::load(root).and_then(|library| {
         let textures = smoke::load_textures(root, &library.texture_names())?;
         Ok((Arc::new(library), textures))
@@ -60,11 +111,22 @@ pub(crate) fn install(app: &mut App, root: &std::path::Path, mode: SmokeOrder) {
     match loaded {
         Ok((library, textures)) => {
             println!(
-                "tyre_smoke version=1 event=loaded systems={} textures={} particle_limit={} fidelity=experimental",
+                "tyre_smoke version=1 event=loaded systems={} textures={} particle_limit={} fidelity=experimental light=per-particle pfx_sun={:?} pfx_ambient={:?} pfx_unlit={:?}",
                 library.system_count(),
                 textures.len(),
-                library.particle_limit()
+                library.particle_limit(),
+                light.sun,
+                light.ambient,
+                light.unlit_ambient
             );
+            app.world_mut()
+                .resource_mut::<Assets<Shader>>()
+                .insert(
+                    SHADER.id(),
+                    Shader::from_wgsl(include_str!("tyre_smoke.wgsl"), "grid_tyre_smoke.wgsl"),
+                )
+                .expect("tyre smoke shader handle");
+            app.add_plugins(MaterialPlugin::<SmokeMaterial>::default());
             app.insert_resource(TyreSmoke {
                 smoke: Smoke::new(library.clone()),
                 pool: (mode == SmokeOrder::Sprites).then(SpritePool::default),
@@ -76,7 +138,7 @@ pub(crate) fn install(app: &mut App, root: &std::path::Path, mode: SmokeOrder) {
                 eye: [0.; 3],
                 frames: 0,
             })
-            .insert_resource(Pending(Some((library, textures))))
+            .insert_resource(Pending(Some((library, textures, light))))
             .add_systems(Startup, setup)
             .add_systems(FixedUpdate, tick.after(super::drive_tick));
             match mode {
@@ -100,6 +162,7 @@ pub(crate) fn install(app: &mut App, root: &std::path::Path, mode: SmokeOrder) {
 type Loaded = (
     Arc<Library>,
     std::collections::HashMap<String, (Vec<u8>, u32)>,
+    ParticleLight,
 );
 #[derive(Resource)]
 struct Pending(Option<Loaded>);
@@ -110,9 +173,9 @@ fn setup(
     mut state: ResMut<TyreSmoke>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<SmokeMaterial>>,
 ) {
-    let Some((library, textures)) = pending.0.take() else {
+    let Some((library, textures, light)) = pending.0.take() else {
         return;
     };
     for name in library.texture_names() {
@@ -129,19 +192,19 @@ fn setup(
             }
         };
 
-        let material = materials.add(StandardMaterial {
-            base_color_texture: Some(image),
-            // AUTHORED: scene-lit diffuse billboards (normals face the camera)
-            // with alpha blending; the original pfx_half_smoke shader, its
-            // per-particle light sample and half-resolution buffer are not
-            // reproduced.
-            perceptual_roughness: 1.,
-            reflectance: 0.,
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            cull_mode: None,
-            fog_enabled: false,
-            ..default()
+        let material = materials.add(SmokeMaterial {
+            base: StandardMaterial {
+                base_color_texture: Some(image),
+                // Lit in the extension's fragment, once per particle; the
+                // original's half-resolution buffer is not reproduced.
+                unlit: true,
+                alpha_mode: AlphaMode::Blend,
+                double_sided: true,
+                cull_mode: None,
+                fog_enabled: false,
+                ..default()
+            },
+            extension: SmokeLight::new(&light, name),
         });
         if let Some(pool) = &mut state.pool {
             pool.materials.push(material);
@@ -251,29 +314,11 @@ fn draw(
         }
         state.hidden[k] = group.is_empty();
         quads.clear();
-        for (_, s) in group.iter() {
-            let centre = Vec3::from_array(s.position);
-            let (axis_x, axis_y, normal) = if s.horizon {
-                (Vec3::X, Vec3::Z, Vec3::Y)
-            } else {
-                (right, up, (eye - centre).normalize_or(Vec3::Y))
-            };
-            // The original puts the corners at ±size (886BD0, 0x88B3DB): the
-            // stored size is the half extent, so the drawn edge is 2 × size.
-            let (sin, cos) = s.rotation.sin_cos();
-            let hx = (axis_x * cos + axis_y * sin) * s.size[0];
-            let hy = (axis_y * cos - axis_x * sin) * s.size[1];
-            let [u0, v0, u1, v1] = library.frame_uv(s.texture, s.frame);
-            // Data colours are display-referred; vertex colours are linear.
-            let c = Color::srgba(s.colour[0], s.colour[1], s.colour[2], s.colour[3]).to_linear();
-            quads.push(Quad {
-                positions: [-hx - hy, hx - hy, hx + hy, -hx + hy]
-                    .map(|corner| (centre + corner).to_array()),
-                normal: normal.to_array(),
-                uvs: [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
-                colour: [c.red, c.green, c.blue, c.alpha],
-            });
-        }
+        quads.extend(
+            group
+                .iter()
+                .map(|(_, s)| sprite_quad(s, right, up, library.frame_uv(s.texture, s.frame))),
+        );
         state.quads[k].update(
             &quads,
             [0, 1, 2, 0, 2, 3],
@@ -313,7 +358,7 @@ struct SpriteSlot {
 
 #[derive(Default, Resource)]
 struct SpritePool {
-    materials: Vec<Handle<StandardMaterial>>,
+    materials: Vec<Handle<SmokeMaterial>>,
     meshes: Vec<Handle<Mesh>>,
     slots: Vec<SpriteSlot>,
 }
@@ -389,25 +434,39 @@ fn quad_centre(quad: &Quad) -> Vec3 {
         .map_or(Vec3::ZERO, |aabb| aabb.center.into())
 }
 
-fn sprite_quad(s: &Sprite, eye: Vec3, right: Vec3, up: Vec3, uv: [f32; 4]) -> Quad {
+/// The original lit stream's corner normals (886BD0, normal stream branch
+/// 0x88C221, constants 0x88C2AB..0x88C38C): (±1, ±1, 1)/√3 in the billboard
+/// basis, the in-plane signs those of the corner and +Z towards the camera,
+/// so the interpolated normal rounds the sprite like a ball.
+fn ball_normals(axis_x: Vec3, axis_y: Vec3, back: Vec3) -> [[f32; 3]; 4] {
+    [(-1., -1.), (1., -1.), (1., 1.), (-1., 1.)]
+        .map(|(sx, sy)| ((axis_x * sx + axis_y * sy + back) / 3f32.sqrt()).to_array())
+}
+
+fn sprite_quad(s: &Sprite, right: Vec3, up: Vec3, uv: [f32; 4]) -> Quad {
     let centre = Vec3::from_array(s.position);
-    let (axis_x, axis_y, normal) = if s.horizon {
-        (Vec3::X, Vec3::Z, Vec3::Y)
+    let (axis_x, axis_y) = if s.horizon {
+        (Vec3::X, Vec3::Z)
     } else {
-        (right, up, (eye - centre).normalize_or(Vec3::Y))
+        (right, up)
     };
     // The original puts the corners at ±size (886BD0, 0x88B3DB): the
     // stored size is the half extent, so the drawn edge is 2 × size.
     let (sin, cos) = s.rotation.sin_cos();
-    let hx = (axis_x * cos + axis_y * sin) * s.size[0];
-    let hy = (axis_y * cos - axis_x * sin) * s.size[1];
+    let (unit_x, unit_y) = (axis_x * cos + axis_y * sin, axis_y * cos - axis_x * sin);
+    let (hx, hy) = (unit_x * s.size[0], unit_y * s.size[1]);
     let [u0, v0, u1, v1] = uv;
     // Data colours are display-referred; vertex colours are linear.
     let c = Color::srgba(s.colour[0], s.colour[1], s.colour[2], s.colour[3]).to_linear();
     Quad {
         positions: [-hx - hy, hx - hy, hx + hy, -hx + hy]
             .map(|corner| (centre + corner).to_array()),
-        normal: normal.to_array(),
+        // The horizon-aligned rings use the unlit fakelight shader: no normal is read.
+        normals: if s.horizon {
+            [[0., 1., 0.]; 4]
+        } else {
+            ball_normals(unit_x, unit_y, right.cross(up))
+        },
         uvs: [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
         colour: [c.red, c.green, c.blue, c.alpha],
     }
@@ -435,7 +494,7 @@ fn draw_sprites(
         .map(|s| {
             (
                 s.texture,
-                sprite_quad(s, eye, right, up, library.frame_uv(s.texture, s.frame)),
+                sprite_quad(s, right, up, library.frame_uv(s.texture, s.frame)),
             )
         })
         .collect();
@@ -481,7 +540,6 @@ mod sprite_pool_tests {
                 frame,
                 horizon,
             },
-            Vec3::new(21., 6., -19.),
             Vec3::X,
             Vec3::Y,
             [
@@ -495,9 +553,9 @@ mod sprite_pool_tests {
 
     fn app() -> App {
         let mut app = App::new();
-        let mut materials = Assets::<StandardMaterial>::default();
+        let mut materials = Assets::<SmokeMaterial>::default();
         let handles = (0..5)
-            .map(|_| materials.add(StandardMaterial::default()))
+            .map(|_| materials.add(SmokeMaterial::default()))
             .collect();
         app.insert_resource(SpritePool {
             materials: handles,
@@ -553,7 +611,7 @@ mod sprite_pool_tests {
         assert_eq!(pool.meshes, handles);
         assert_eq!(
             world
-                .get::<MeshMaterial3d<StandardMaterial>>(entities[0])
+                .get::<MeshMaterial3d<SmokeMaterial>>(entities[0])
                 .unwrap()
                 .0,
             pool.materials[4]
@@ -603,7 +661,7 @@ mod sprite_pool_tests {
             Visibility::Inherited
         );
         assert_eq!(world.resource::<Assets<Mesh>>().len(), 3);
-        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 5);
+        assert_eq!(world.resource::<Assets<SmokeMaterial>>().len(), 5);
         assert_eq!(
             world.resource::<MeshStream>().queued_centre(entities[1]),
             Some(quad_centre(&quad(5, false)))
@@ -636,11 +694,52 @@ mod sprite_pool_tests {
         let q = sprite_quad(&Sprite {
             position: [3., 4., 5.], size: [2., 3.], rotation: 0.,
             colour: [1., 0., 1., 0.25], texture: 0, frame: 0, horizon: true,
-        }, Vec3::new(20., 6., -4.), Vec3::Z, Vec3::Y, [0.125, 0.25, 0.5, 0.75]);
+        }, Vec3::Z, Vec3::Y, [0.125, 0.25, 0.5, 0.75]);
         assert_eq!(q.positions, [[1., 4., 2.], [5., 4., 2.], [5., 4., 8.], [1., 4., 8.]]);
-        assert_eq!(q.normal, [0., 1., 0.]);
+        assert_eq!(q.normals, [[0., 1., 0.]; 4]);
         assert_eq!(q.uvs, [[0.125, 0.75], [0.5, 0.75], [0.5, 0.25], [0.125, 0.25]]);
         assert_eq!(q.colour, [1., 0., 1., 0.25]);
+    }
+
+    #[test]
+    fn billboard_corner_normals_are_the_original_ball_normals() {
+        // Camera right +X, up +Y, so the billboard faces +Z; no spin.
+        let q = sprite_quad(&Sprite {
+            position: [0., 1., -6.], size: [1., 2.], rotation: 0.,
+            colour: [1.; 4], texture: 0, frame: 0, horizon: false,
+        }, Vec3::X, Vec3::Y, [0., 0., 1., 1.]);
+        let k = 1. / 3f32.sqrt();
+        assert_eq!(
+            q.normals,
+            [[-k, -k, k], [k, -k, k], [k, k, k], [-k, k, k]]
+        );
+        for (p, n) in q.positions.iter().zip(q.normals) {
+            // Each normal leans towards its own corner.
+            assert!((p[0] * n[0]) > 0. && ((p[1] - 1.) * n[1]) > 0.);
+        }
+        // A spun sprite keeps unit normals leaning to the spun corners.
+        let spun = sprite_quad(&Sprite { rotation: 0.7, ..Sprite {
+            position: [0.; 3], size: [1., 1.], rotation: 0.,
+            colour: [1.; 4], texture: 0, frame: 0, horizon: false,
+        } }, Vec3::X, Vec3::Y, [0., 0., 1., 1.]);
+        for (p, n) in spun.positions.iter().zip(spun.normals) {
+            let (p, n) = (Vec3::from_array(*p), Vec3::from_array(n));
+            assert!((n.length() - 1.).abs() < 1e-6);
+            assert!((n.truncate() - p.truncate().normalize() * (2f32 / 3.).sqrt()).length() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn wheel_spin_rings_use_the_fakelight_and_other_smoke_the_lit_stream() {
+        let light = ParticleLight {
+            sun: [0.75, 0.71, 0.66],
+            ambient: [1.06, 1.08, 1.13],
+            unlit_ambient: [1.; 3],
+        };
+        let lit = SmokeLight::new(&light, "SM33.tga");
+        assert_eq!(lit.sun, Vec4::new(0.75, 0.71, 0.66, 1.));
+        assert_eq!(lit.ambient, Vec4::new(1.06, 1.08, 1.13, 0.));
+        assert_eq!(SmokeLight::new(&light, "Wheel_spin.tga").sun.w, 0.);
     }
 
     #[test]
@@ -702,15 +801,15 @@ mod sprite_visibility_reset_regression {
             VisibilityPlugin,
         ))
         .init_asset::<Mesh>()
-        .init_asset::<StandardMaterial>()
+        .init_asset::<SmokeMaterial>()
         .init_asset::<SkinnedMeshInverseBindposes>()
         .init_resource::<MeshStream>()
         .init_resource::<Input>();
         let handles = (0..5)
             .map(|_| {
                 app.world_mut()
-                    .resource_mut::<Assets<StandardMaterial>>()
-                    .add(StandardMaterial::default())
+                    .resource_mut::<Assets<SmokeMaterial>>()
+                    .add(SmokeMaterial::default())
             })
             .collect();
         app.insert_resource(SpritePool {
@@ -728,7 +827,7 @@ mod sprite_visibility_reset_regression {
     fn quad() -> Quad {
         Quad {
             positions: [[0., 0., -5.], [1., 0., -5.], [1., 1., -5.], [0., 1., -5.]],
-            normal: [0., 0., 1.],
+            normals: [[0., 0., 1.]; 4],
             uvs: [[0., 1.], [1., 1.], [1., 0.], [0., 0.]],
             colour: [1.; 4],
         }

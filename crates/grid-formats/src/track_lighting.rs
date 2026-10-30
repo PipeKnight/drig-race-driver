@@ -233,6 +233,60 @@ pub fn read_sun_colour(bytes: &[u8]) -> Result<[f32; 3]> {
     Ok(rgb.map(|v| v / peak))
 }
 
+/// The particle light colours (`pfx_suncolour`, `pfx_ambient`,
+/// `pfx_unlitambient`). XML completion 0x72C134..0x72C1A0 parses them into
+/// lighting +0x130/+0x140/+0x150, which the uniform dispatcher (0x743418..
+/// 0x743543) submits as `pfxSunColour`, `pfxPreMultipliedAmbientColour` and
+/// `pfxUnlitAmbientColour`. Absent keys keep the constructor's (1, 1, 1)
+/// (0x741386..0x7413AF). The completion also packs each colour to 8 bits by
+/// 0x742B00; that rounding (under 0.4 %) is not reproduced.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParticleLight {
+    pub sun: [f32; 3],
+    pub ambient: [f32; 3],
+    pub unlit_ambient: [f32; 3],
+}
+
+impl Default for ParticleLight {
+    fn default() -> Self {
+        Self {
+            sun: [1.; 3],
+            ambient: [1.; 3],
+            unlit_ambient: [1.; 3],
+        }
+    }
+}
+
+pub fn read_particle_light(bytes: &[u8]) -> Result<ParticleLight> {
+    let values = parameters(bytes)?;
+    let colour = |name: &str| -> Result<[f32; 3]> {
+        let Some(text) = values.get(name) else {
+            return Ok([1.; 3]);
+        };
+        let components = text
+            .split_whitespace()
+            .map(str::parse::<f32>)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|_| Error {
+                offset: 0,
+                message: "invalid particle light colour",
+            })?;
+        let rgb: [f32; 3] = components.try_into().map_err(|_| Error {
+            offset: 0,
+            message: "particle light colour needs three components",
+        })?;
+        if rgb.iter().any(|v| !v.is_finite() || !(0.0..=32.0).contains(v)) {
+            return fail(0, "particle light colour outside supported range");
+        }
+        Ok(rgb)
+    };
+    Ok(ParticleLight {
+        sun: colour("pfx_suncolour")?,
+        ambient: colour("pfx_ambient")?,
+        unlit_ambient: colour("pfx_unlitambient")?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +346,21 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn particle_light_reads_saved_colours_and_defaults_absent_keys_to_one() {
+        let xml = r#"<lighting><param pfx_suncolour="0.75 0.71 0.66"/><param pfx_ambient="1.06 1.08 1.13"/></lighting>"#;
+        let light = read_particle_light(xml.as_bytes()).unwrap();
+        assert_eq!(light.sun, [0.75, 0.71, 0.66]);
+        assert_eq!(light.ambient, [1.06, 1.08, 1.13]);
+        assert_eq!(light.unlit_ambient, [1.; 3]);
+        assert_eq!(
+            read_particle_light(b"<lighting></lighting>").unwrap(),
+            ParticleLight::default()
+        );
+        for value in ["1 2", "NaN 1 1", "1 -1 1", "33 1 1"] {
+            assert!(read_particle_light(xml.replace("0.75 0.71 0.66", value).as_bytes()).is_err());
+        }
     }
     const XML: &str = r#"<lighting><param fogBaseLevel="0"/><param fogTopLevel="2000"/><param fogDistance="500"/><param fogDensityCap="0.4"/><param fogColour="0.6 0.7 0.9"/><param fogColourBrightness="0.5"/></lighting>"#;
     #[test]
