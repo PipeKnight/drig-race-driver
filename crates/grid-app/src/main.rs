@@ -515,6 +515,16 @@ const START_SEQUENCE_SECONDS: f64 = 4.0;
 /// Body dents of one opponent part, projected from that car's own field.
 #[derive(Component)]
 struct OpponentDeforming(DeformingPart);
+/// One opponent part's dents: its mesh and bounds, none when the field is
+/// refused (the part keeps its mesh).
+fn project_dent(
+    &(entity, source, field): &(Entity, &DeformingPart, &grid_tools::body_deformation::Field),
+) -> (Entity, Option<(Mesh, Aabb)>) {
+    let projected = body_damage::project(&source.source, source.raw_bind, field)
+        .ok()
+        .and_then(|mesh| mesh.compute_aabb().map(|bounds| (mesh, bounds)));
+    (entity, projected)
+}
 
 /// Wheel rim and tyre joints leave with a detached wheel (9FA6E0 detaches the
 /// wheel part; 9D9F80 sizes its body by the tyre); discs stay on the hub.
@@ -6070,12 +6080,14 @@ fn drive_present(
     >,
     mut opponent_parts: Query<
         (
+            Entity,
             &OpponentPart,
             &mut Transform,
             Option<&OpponentDeforming>,
             &Mesh3d,
             &mut Aabb,
             Has<car_batch::Unposed>,
+            Option<&bevy::camera::visibility::RenderLayers>,
         ),
         (Without<MovingPart>, Without<ViewerCamera>),
     >,
@@ -6093,6 +6105,11 @@ fn drive_present(
         Option<ResMut<camera::Cameras>>,
     ),
     mut refused: Local<Option<&'static str>>,
+    (mut dent_fast, mut dent_counts, mut demoted): (
+        Local<Option<bool>>,
+        Local<[u64; 4]>,
+        Option<ResMut<car_batch::Demoted>>,
+    ),
     render_clock: (
         Option<Res<Time<Fixed>>>,
         Option<Res<graphics::Settings>>,
@@ -6193,7 +6210,15 @@ fn drive_present(
                 )
             })
             .collect();
-        // Opponent body dents: re-project a car's parts when its field changes.
+        // Opponent body dents: re-project a car's parts when its field
+        // changes. The parts are projected on the compute pool (the same
+        // bits as one by one), and a projection equal to the mesh a part
+        // has is not written: that would re-upload the mesh and rebuild its
+        // car batch for nothing. A batched part's mesh is written for the
+        // main world only (car_batch::Demoted). `GRID_DENT_FAST=0` projects
+        // one by one on this thread and writes every part as before
+        // (comparisons).
+        let fast = *dent_fast.get_or_insert_with(|| std::env::var("GRID_DENT_FAST").map_or(true, |v| v != "0"));
         let opponent_keys = &mut presentation.1;
         opponent_keys.resize(opponents.multi.cars.len(), None);
         let mut dirty = Vec::new();
@@ -6209,21 +6234,78 @@ fn drive_present(
                 dirty.push((car, field));
             }
         }
-        for (part, mut transform, deforming, handle, mut bounds, unposed) in &mut opponent_parts {
+        let mut jobs = Vec::new();
+        for (entity, part, mut transform, deforming, _, _, unposed, _) in &mut opponent_parts {
             let (pose, wheels) = &cars[part.car];
             let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
             // A part car_batch does not draw on its own keeps no pose.
             if !unposed {
                 *transform = Transform::from_matrix(*pose * motion * part.rest);
             }
-            if let (Some(OpponentDeforming(source)), Some((_, field))) =
-                (deforming, dirty.iter().find(|(car, _)| *car == part.car))
-                && let Ok(mesh) = body_damage::project(&source.source, source.raw_bind, field)
-                && let Some(next) = mesh.compute_aabb()
-                && let Some(mut target) = meshes.get_mut(&handle.0)
+            if deforming.is_some()
+                && let Some(field) = dirty.iter().position(|(car, _)| *car == part.car)
             {
-                *target = mesh;
-                *bounds = next;
+                jobs.push((entity, field));
+            }
+        }
+        if !jobs.is_empty() {
+            let start = Instant::now();
+            let inputs: Vec<(Entity, &DeformingPart, &grid_tools::body_deformation::Field)> = jobs
+                .iter()
+                .filter_map(|&(entity, field)| match opponent_parts.get(entity) {
+                    Ok((_, _, _, Some(OpponentDeforming(source)), ..)) => Some((entity, source, &dirty[field].1)),
+                    _ => None,
+                })
+                .collect();
+            let results = if fast {
+                let pool = bevy::tasks::ComputeTaskPool::get();
+                let chunk = inputs.len().div_ceil(pool.thread_num().max(1)).max(1);
+                pool.scope(|scope| {
+                    for chunk in inputs.chunks(chunk) {
+                        scope.spawn(async move { chunk.iter().map(project_dent).collect::<Vec<_>>() });
+                    }
+                })
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+            } else {
+                inputs.iter().map(project_dent).collect()
+            };
+            dent_counts[1] += inputs.len() as u64;
+            drop(inputs);
+            for (entity, projected) in results {
+                let Some((mut mesh, next)) = projected else { continue };
+                let Ok((_, _, _, _, handle, mut bounds, _, layers)) = opponent_parts.get_mut(entity) else {
+                    continue;
+                };
+                if fast && meshes.get(&handle.0).is_some_and(|m| body_damage::same_shape(m, &mesh)) {
+                    continue;
+                }
+                // A batched part is drawn by its batch: its own mesh stays
+                // in the main world until it leaves (car_batch::Demoted).
+                if fast
+                    && car_batch::hidden(layers)
+                    && let Some(demoted) = demoted.as_mut()
+                {
+                    mesh.asset_usage = RenderAssetUsages::MAIN_WORLD;
+                    demoted.0.insert(entity, handle.0.id());
+                }
+                if let Some(mut target) = meshes.get_mut(&handle.0) {
+                    dent_counts[2] += 1;
+                    *target = mesh;
+                    *bounds = next;
+                }
+            }
+            dent_counts[0] += start.elapsed().as_micros() as u64;
+            dent_counts[3] += 1;
+            if dent_counts[3].is_power_of_two() || dent_counts[3].is_multiple_of(500) {
+                log_line!(
+                    "opponent_dents version=1 updates={} parts_projected={} meshes_written={} total_ms={:.1} fast={fast}",
+                    dent_counts[3],
+                    dent_counts[1],
+                    dent_counts[2],
+                    dent_counts[0] as f64 / 1e3
+                );
             }
         }
     }

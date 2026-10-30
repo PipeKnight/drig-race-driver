@@ -57,3 +57,11 @@ pub fn project(source: &Mesh, raw_bind: Mat4, field: &Field) -> Result<Mesh, &'s
     }
     Ok(mesh)
 }
+
+/// Whether two projections of one source draw the same: positions and
+/// normals equal (the rest of the mesh is the source's).
+pub fn same_shape(a: &Mesh, b: &Mesh) -> bool {
+    a.attribute(Mesh::ATTRIBUTE_POSITION) == b.attribute(Mesh::ATTRIBUTE_POSITION)
+        && a.attribute(Mesh::ATTRIBUTE_NORMAL) == b.attribute(Mesh::ATTRIBUTE_NORMAL)
+        && a.indices() == b.indices()
+}

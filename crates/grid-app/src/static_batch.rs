@@ -298,7 +298,10 @@ pub(crate) fn build<M: Asset>(
     origin: Vec3,
     layout: &[(MeshVertexAttributeId, VertexFormat)],
 ) -> (Mesh, Indices, Vec<Range<usize>>) {
-    let source_usages = meshes.get(&parts[0].mesh).map(|m| m.asset_usage).unwrap_or_default();
+    // A batch is drawn even when its parts' own meshes stay in the main
+    // world (car_batch::Demoted).
+    let source_usages = meshes.get(&parts[0].mesh).map(|m| m.asset_usage).unwrap_or_default()
+        | bevy::asset::RenderAssetUsages::RENDER_WORLD;
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, source_usages);
     let mut indices = Vec::new();
     let mut ranges = Vec::with_capacity(parts.len());

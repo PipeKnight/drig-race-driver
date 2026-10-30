@@ -67,13 +67,42 @@ pub fn install(app: &mut App) {
         println!("car_batch version=1 enabled=false");
         return;
     }
-    app.init_resource::<CarBatches>().add_systems(
-        PostUpdate,
-        refresh
-            .after(AssetEventSystems)
-            .before(TransformSystems::Propagate)
-            .before(VisibilitySystems::VisibilityPropagate),
-    );
+    app.init_resource::<CarBatches>()
+        .init_resource::<Demoted>()
+        .add_systems(
+            PostUpdate,
+            (refresh, restore)
+                .chain()
+                .after(AssetEventSystems)
+                .before(TransformSystems::Propagate)
+                .before(VisibilitySystems::VisibilityPropagate),
+        );
+}
+
+/// Part meshes written for the main world only: a batched part is drawn by
+/// its batch, so a dent need not clone and upload its own mesh too.
+/// `drive_present` records each; [`restore`] gives the part its render copy
+/// back in the frame it leaves the hidden layer (a loose panel, a level
+/// shown on its own), before extraction.
+#[derive(Resource, Default)]
+pub struct Demoted(pub std::collections::HashMap<Entity, AssetId<Mesh>>);
+
+/// Whether a part sits on the hidden layer of batched parts.
+pub fn hidden(layers: Option<&RenderLayers>) -> bool {
+    layers == Some(&RenderLayers::layer(HIDDEN_LAYER))
+}
+
+fn restore(mut demoted: ResMut<Demoted>, parts: Query<Option<&RenderLayers>>, mut meshes: ResMut<Assets<Mesh>>) {
+    demoted.0.retain(|&entity, &mut mesh| match parts.get(entity) {
+        Ok(layers) if hidden(layers) => true,
+        Ok(_) => {
+            if let Some(mut mesh) = meshes.get_mut(mesh) {
+                mesh.asset_usage |= bevy::asset::RenderAssetUsages::RENDER_WORLD;
+            }
+            false
+        }
+        Err(_) => false,
+    });
 }
 
 /// A merged mesh of one car's parts of one material.
@@ -899,5 +928,29 @@ mod tests {
         let rendered = app.world().get::<Mesh3d>(batch).unwrap();
         assert_eq!(app.world().resource::<Assets<Mesh>>()
             .get(&rendered.0).unwrap().count_vertices(), 6);
+    }
+
+    /// A demoted part mesh stays in the main world while its part is on the
+    /// hidden layer and gets its render copy back in the frame it leaves.
+    #[test]
+    fn a_demoted_mesh_returns_to_the_render_world_when_its_part_shows() {
+        use bevy::asset::RenderAssetUsages;
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Demoted>()
+            .add_systems(PostUpdate, restore);
+        let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(
+            Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::MAIN_WORLD),
+        );
+        let part = app.world_mut().spawn(RenderLayers::layer(HIDDEN_LAYER)).id();
+        app.world_mut().resource_mut::<Demoted>().0.insert(part, mesh.id());
+        let usage = |app: &App| app.world().resource::<Assets<Mesh>>().get(&mesh).unwrap().asset_usage;
+        app.update();
+        assert_eq!(usage(&app), RenderAssetUsages::MAIN_WORLD);
+        assert_eq!(app.world().resource::<Demoted>().0.len(), 1);
+        app.world_mut().entity_mut(part).remove::<RenderLayers>();
+        app.update();
+        assert!(usage(&app).contains(RenderAssetUsages::RENDER_WORLD));
+        assert!(app.world().resource::<Demoted>().0.is_empty());
     }
 }

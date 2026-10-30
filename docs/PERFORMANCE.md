@@ -1728,6 +1728,63 @@ mesh rebuilds behind the Washington spikes; ground cover partial writes (F592); 
 `WorldAdvance` (F568); the car-group contact solve and asleep pieces (F579); the vehicle stage
 (round 2).
 
+## Opponent dents: parallel projection, batched parts in the main world (F654)
+
+Follow-up of F633's Washington frame drops. What a dent costs [O, profile build, Washington, 1 s
+windows]: in the slow windows `drive_present` took 25-30 ms and `allocate_and_free_meshes` 14-42 ms
+per frame, next to physics. `drive_present` re-projects every deforming part of an opponent whose
+dent field changed (`body_damage::project`: two lattice samples per vertex and smooth normals), on
+the main thread, and replaces each mesh; each replaced mesh is cloned for extraction and uploaded,
+and `car_batch` rebuilds and uploads every batch holding one, although a batched part is never
+drawn on its own.
+
+A bit-exact skip of parts no moved lattice node reaches does not help: from one update to the next
+329 of a Viper's 364 nodes move (the whole field shifts by small amounts), so nearly every part
+really changes. Measured with a temporary diagnostic and dropped.
+
+Change (`main.rs` `drive_present`, `car_batch.rs`, `static_batch.rs`; `GRID_DENT_FAST=0` restores
+the old path for comparisons):
+
+- The dirty parts are projected on the compute pool (`project_dent`), the same bits as one by one,
+  and written on the main thread.
+- A projection equal to the part's current mesh (positions, normals, indices) is not written: no
+  upload, no batch rebuild (about 3.5 % of the writes at Washington: parts outside every dent).
+- A batched part's projected mesh is written for the main world only
+  (`RenderAssetUsages::MAIN_WORLD`): `car_batch` builds the batch from the main-world copy, and
+  Bevy neither clones nor uploads the part's own mesh. `car_batch::Demoted` records each such part,
+  and `car_batch::restore`, right after `refresh`, gives the mesh its render copy back in the frame
+  the part leaves the hidden layer (a loose panel, a level shown on its own), before extraction.
+  `static_batch::build` now always gives a batch render usage, whatever its first part has.
+
+Picture [O]: fixed step, 1600x900, `GRID_DENT_FAST=0` against 1: Washington ticks 3,000 and 6,000
+and the demolition derby at tick 2,700: 0 pixels differ in all three.
+
+Washington Viper race, PC, `--benchmark-frames 3600` after 240 warm-up frames, two rounds under the
+build lock (physics 1.03-1.07 ms per tick in every run, so no contention) [O]:
+
+| | old path | new path |
+|---|---|---|
+| dent work on the main thread per update | 6.1, 6.3 ms | 1.8, 1.9, 2.1, 2.1 ms |
+| meshes written per 128 updates | 49,490 | 46,795-47,775 |
+| phone view p99 frame interval | 24.6, 24.5 ms | 20.1, 21.6 ms |
+| desktop 1920x1080 p99 | 24.8, 23.9 ms | 22.8, 21.5 ms |
+| MainSchedule mean | 3.76-3.91 ms | 3.64-3.77 ms |
+
+The PC is held at 60 Hz, so mean frame times do not move (17.0 ms in all runs); the frames over
+33 ms (3-8 per 3,600) and the maxima vary run to run in both modes. Fixed-step renders of 128
+updates: main-thread dent time 2,009 ms (old) → 649 ms (parallel only) → 330 ms (parallel and
+main-world parts) at tick 3,000.
+
+Phone [I]: a dent update cost about 6 ms of main thread on the PC, roughly 20-25 ms on a phone 3-4x
+slower: one dropped frame per update when the pack touches. It is now about 2 ms (6-8 ms on the
+phone, spread over its cores), and the upload of each batched part's own mesh is gone. Check in the
+owner's log: the `opponent_dents` line (`total_ms` over `updates`), `perf_timing` MainSchedule and,
+in the profile APK, `drive_present` and `allocate_and_free_meshes`.
+
+Left: the batch rebuild itself still re-uploads the whole merged mesh of a dented car and material;
+writing only the changed member's vertex range needs partial mesh uploads, which Bevy does not
+offer. Physics per tick rises in the pack's contacts (collision-sweep's area).
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,
