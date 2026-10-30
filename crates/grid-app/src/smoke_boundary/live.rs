@@ -28,7 +28,8 @@ use bevy::{
             PhaseItem, SortedRenderPhase, ViewBinnedRenderPhases, ViewSortedRenderPhases,
         },
         render_resource::{CachedComputePipelineId, Extent3d, PipelineCache, TextureFormat},
-        renderer::{CurrentView, RenderContext, ViewQuery},
+        renderer::{CurrentView, RenderContext, RenderDevice, ViewQuery},
+        texture::TextureCache,
         sync_world::MainEntity,
         view::{
             ExtractedView, RetainedViewEntity, ViewDepthTexture, ViewTarget, ViewUniformOffset,
@@ -128,6 +129,8 @@ struct Snapshot {
     camera: Option<Entity>,
     target: Option<NormalizedRenderTarget>,
     groups: Vec<MainEntity>,
+    /// Sprites drawn this frame.
+    sprites: usize,
 }
 #[derive(Resource, Default)]
 struct Routing {
@@ -137,10 +140,12 @@ struct Routing {
     prepared: bool,
     size: Option<UVec2>,
     capability: Option<Capability>,
+    reduced: Option<crate::smoke_reduced::Frame>,
 }
 impl Routing {
     fn clean(&self) -> bool {
-        self.view.is_none() && self.clock.is_none() && self.capability.is_none() && !self.prepared && self.frame.clean()
+        self.view.is_none() && self.clock.is_none() && self.capability.is_none() && !self.prepared
+            && self.reduced.is_none() && self.frame.clean()
     }
 }
 fn stamp(snapshot: &Snapshot) -> (u32, u64, u64) {
@@ -272,6 +277,9 @@ fn install_kind(app:&mut App,kind:LiveKind,scope:&'static str)->std::io::Result<
         );
         }
     }
+    if kind==LiveKind::Automatic {
+        crate::smoke_reduced::install(app)?;
+    }
     Ok(())
 }
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -328,6 +336,7 @@ fn extract(
     let Some(smoke) = smoke.as_ref() else {
         return;
     };
+    snapshot.sprites = smoke.drawn();
     let handles = smoke.mesh_handles();
     if handles.len() != 5
         || handles
@@ -841,6 +850,45 @@ impl NativeReadiness<'_, '_> {
     }
 }
 
+/// The reduced smoke buffer's render-world inputs (F645).
+#[derive(SystemParam)]
+struct Reduction<'w> {
+    pipelines: Option<ResMut<'w, crate::smoke_reduced::Pipelines>>,
+    textures: ResMut<'w, TextureCache>,
+    device: Res<'w, RenderDevice>,
+    images: Res<'w, RenderAssets<bevy::render::texture::GpuImage>>,
+    depth: Option<Res<'w, crate::tyre_smoke::SmokeDepth>>,
+}
+impl Reduction<'_> {
+    /// The automatic replay's reduced targets for this frame, or None to
+    /// replay at full size.
+    fn prepare(
+        &mut self,
+        kind: LiveKind,
+        cache: &PipelineCache,
+        capability: Option<Capability>,
+        depth: Option<&ViewDepthTexture>,
+        frame: &core::Frame,
+        sprites: usize,
+    ) -> Option<crate::smoke_reduced::Frame> {
+        // With no sprite the full-size replay draws nothing; the reduced
+        // buffer would still reduce depth and compose.
+        if kind != LiveKind::Automatic || sprites == 0 {
+            return None;
+        }
+        crate::smoke_reduced::prepare(
+            self.pipelines.as_deref_mut()?,
+            cache,
+            &self.device,
+            &mut self.textures,
+            depth?,
+            self.images.get(&self.depth.as_ref()?.0),
+            capability?,
+            frame.owned.items.values().map(|i| i.pipeline),
+        )
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn prepare(
     snapshot: Res<Snapshot>,
@@ -857,6 +905,7 @@ fn prepare(
     proof: Res<core::Proof>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     mut route: ResMut<Routing>,
+    mut reduction: Reduction,
 ) {
     if state.failed() || !live_install_ready(profile.0, installed.as_deref()) {
         cancel_before_mask(&mut phases, &mut route, &proof, &state);
@@ -929,7 +978,12 @@ fn prepare(
         return;
     }
     match core::prepare_and_mask(phase, &mut route.frame, retained, &proof) {
-        Ok(()) => route.prepared = true,
+        Ok(()) => {
+            route.prepared = true;
+            let depth = found.map(|(_, (_, _, _, d, ..))| d);
+            route.reduced =
+                reduction.prepare(profile.0, &cache, route.capability, depth, &route.frame, snapshot.sprites);
+        }
         Err(_) => {
             state.fail("live prevalidated prepare unexpectedly failed");
             *route = Routing::default();
@@ -1087,8 +1141,13 @@ fn replay_current<'w>(
                 Err("native boundary feature absent")
             }
         }
-        LiveKind::Automatic => core::draw_into_scene_automatic(&mut context,world,entity,t,d,&route.frame,proof,
-            capability),
+        LiveKind::Automatic => match &route.reduced {
+            Some(reduced) => core::draw_into_scene_reduced(
+                &mut context, world, entity, t, d, &route.frame, proof, capability, reduced,
+            ),
+            None => core::draw_into_scene_automatic(&mut context,world,entity,t,d,&route.frame,proof,
+                capability),
+        },
     };
     if result.is_err() {
         let (heads, groups) = proof.successful_counts();
@@ -1149,6 +1208,7 @@ fn finalize(
     }
     let size = route.size;
     let capability=route.capability;
+    let reduced = route.reduced.is_some();
     *route = Routing::default();
     if success {
         let mut stats = state.lock();
@@ -1156,7 +1216,7 @@ fn finalize(
         stats.last_unsupported_capability=None;
         if !stats.first_reported {
             if profile.0==LiveKind::Automatic {
-                println!("smoke_boundary_live event=first_replayed frame={} segment={} tick={} groups=5 restored=true terminal=true positive_fragments=unknown screenshot_ledger=false mode=automatic capability={capability:?}",snapshot.frame,snapshot.segment,snapshot.tick);
+                println!("smoke_boundary_live event=first_replayed frame={} segment={} tick={} groups=5 restored=true terminal=true positive_fragments=unknown screenshot_ledger=false mode=automatic capability={capability:?} reduced={reduced}",snapshot.frame,snapshot.segment,snapshot.tick);
             } else if profile.0 == LiveKind::Strict(Profile::Baseline4) {
                 println!(
                     "smoke_boundary_live event=first_replayed frame={} segment={} tick={} groups=5 restored=true terminal=true positive_fragments=unknown screenshot_ledger=false size={size:?} target={:?} samples=4 format=Rgba8UnormSrgb depth=Depth32Float",

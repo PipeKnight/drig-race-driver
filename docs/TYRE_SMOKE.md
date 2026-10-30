@@ -43,9 +43,16 @@ Presentation only: it reads vehicle state and never feeds physics.
   material drew it (the first directional light / π, ambient and environment-map irradiance, view
   exposure). Point and spot lights no longer light the smoke, as in the original. The birth light
   sample is always 1: the static shadow grid it reads is not loaded. Not reproduced: the
-  half-resolution buffer, the soft depth edge and the near-camera fade. Until F644 the smoke was
+  near-camera fade. Until F644 the smoke was
   scene-lit per pixel (roughness 1, reflectance 0); an earlier unlit trial with the data colours
   looked sooty (`handbrake-lock-250.png`).
+- **Reduced buffer** (since F645, `smoke_reduced.rs`, SMOKE_RENDER_COST.md "Reduced smoke
+  buffer"): where G329's automatic replay runs and sprites are drawn, the smoke draws at half
+  width and height and is composed over the scene, as the original's `pfx_half_smoke`, with its
+  soft fade (alpha × saturate(2.5 × metres in front of the reduced depth)). AUTHORED: half rather
+  than the original's quarter per axis; the near rather than the far depth bound; edges resolved by
+  a depth-weighted compose instead of the original's full-size edge redraw. The full-size replay
+  (first frames, fallbacks, explicit diagnostic policies) has no soft fade.
 - **Data colours** are treated as display-referred (sRGB) and converted to linear vertex
   colours.
 - **Alpha scale:** particle alpha = age alpha × the driver's frac copied at birth. The

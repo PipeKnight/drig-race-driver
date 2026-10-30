@@ -9,12 +9,16 @@
 // them to this renderer's radiometry so that a sprite facing the sun is as
 // bright as the scene-lit material drew it (AUTHORED calibration).
 // The material is unlit, so only this light, fog and tone mapping run per pixel.
+// Drawn into the reduced smoke buffer (TYRE_SMOKE_REDUCED, smoke_reduced.rs),
+// alpha also fades in front of the reduced scene depth as pfx_smoke's half
+// fragment programs fade it: × saturate(2.5 × distance in front, metres).
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::main_pass_post_lighting_processing,
     mesh_view_bindings as view_bindings,
     lighting::F_AB,
+    view_transformations::depth_ndc_to_view_z,
 }
 #import bevy_render::maths::PI
 #ifdef ATMOSPHERE
@@ -28,6 +32,9 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> pfx_sun: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> pfx_ambient: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> pfx_unlit: vec4<f32>;
+#ifdef TYRE_SMOKE_REDUCED
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var reduced_depth: texture_depth_2d;
+#endif
 
 fn luminance(c: vec3<f32>) -> f32 {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -100,7 +107,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         light = wrap * pfx_sun.rgb + pfx_ambient.rgb;
     }
     let scale = luminance(port) / max(luminance(sunlit), 1e-4);
-    let colour = vec4(albedo.rgb * light * (scale * view_bindings::view.exposure), albedo.a);
+    var alpha = albedo.a;
+#ifdef TYRE_SMOKE_REDUCED
+    let scene = textureLoad(reduced_depth, vec2<i32>(in.position.xy), 0);
+    alpha *= saturate(2.5 * (depth_ndc_to_view_z(in.position.z) - depth_ndc_to_view_z(scene)));
+#endif
+    let colour = vec4(albedo.rgb * light * (scale * view_bindings::view.exposure), alpha);
     var out: FragmentOutput;
     out.color = main_pass_post_lighting_processing(pbr, colour);
     return out;

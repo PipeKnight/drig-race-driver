@@ -95,7 +95,7 @@ Gains are for the smoke pass at 3024 x 1890, dense mean 8.5 ms.
 
 | # | option | expected gain | fidelity risk |
 |---|---|---|---|
-| 1 | Reduced-resolution smoke buffer, as the original's `pfx_half_smoke` path ([TYRE_SMOKE_RESEARCH.md](TYRE_SMOKE_RESEARCH.md) §7: reduced colour and alpha target, reduced depth, `ONE/ONE_MINUS_SRC_ALPHA` accumulation, `compose_no_alpha` with `ONE/SRC_ALPHA`; the creator shifts 1280x720 by 2, a quarter per axis) | [I] half per axis, single-sample: about 2.1 ms plus 0.1-0.3 ms of depth downsample and composite, about -70 %. A quarter per axis about -90 %. Extrapolated from the measured pixel scaling, not run. Also fixes most of the Retina case. | Low-medium, and closer to the original. Edges at depth discontinuities (cars inside smoke) need the reduced-depth test or a bilateral upsample; G329's composition and glass ordering must carry into the compose step (Codex owns the look). Largest effort: render-graph node, targets, compose shader. |
+| 1 | Reduced-resolution smoke buffer, as the original's `pfx_half_smoke` path ([TYRE_SMOKE_RESEARCH.md](TYRE_SMOKE_RESEARCH.md) §7: reduced colour and alpha target, reduced depth, `ONE/ONE_MINUS_SRC_ALPHA` accumulation, `compose_no_alpha` with `ONE/SRC_ALPHA`; the creator shifts 1280x720 by 2, a quarter per axis). **Done in F645 at half per axis: smoke passes −41 %, dense-frame p95 −35/−43 %.** | [I] half per axis, single-sample: about 2.1 ms plus 0.1-0.3 ms of depth downsample and composite, about -70 %. A quarter per axis about -90 %. Extrapolated from the measured pixel scaling, not run. Also fixes most of the Retina case. | Low-medium, and closer to the original. Edges at depth discontinuities (cars inside smoke) need the reduced-depth test or a bilateral upsample; G329's composition and glass ordering must carry into the compose step (Codex owns the look). Largest effort: render-graph node, targets, compose shader. |
 | 2 | Lighting per particle (the original samples light per particle) instead of per-pixel PBR, with an unlit-cost fragment shader. **Done in F644: −58/−63 % measured.** | [O] upper bound -44 to -46 % (unlit). With #1 about 1.2 ms [I]. | Low if the sun and ambient terms are evaluated per particle; the exact source arithmetic is still open. Small: a custom material, or vertex colours with `unlit`. |
 | 3 | Near-camera fade or projected-size cap | [O] -17 to -22 % for a 3 m cull; sprites 5-15 m away carry about 45 % of the coverage | Medium-high: thins the cloud around the player; the source's near fade is not recovered (§7.5 item 3). Only as a safety valve under a GPU budget. |
 | 4 | G329 CPU: keep the five group entities (`TyreSmoke` already stores them) instead of five full `Mesh3d` scans per frame in `live.rs` `extract` | about -0.2 ms CPU per frame on the extract critical path, smoke or not; no GPU change | None (same entities; check uniqueness at install or on change). Codex-owned file. |
@@ -141,13 +141,72 @@ Not measured for this change: Metal/Android, enhanced and source-sky-IBL lightin
 fragment reads their environment map and atmosphere transmittance but was only checked in
 baseline), night tracks.
 
+## Reduced smoke buffer (F645, option 1 done)
+
+30 October 2026, Claude Code. `smoke_reduced.rs` / `smoke_reduced.wgsl`, inside G329's automatic
+replay (`smoke_boundary/live.rs`, `smoke_boundary_core.rs` `draw_into_scene_reduced`). On a frame
+with at least one sprite, once its pipelines are compiled:
+
+1. Depth reduction: a half-size `Depth32Float` image gets the nearest scene depth of the four
+   pixels under each texel (first sample of each pixel). The viewer camera's depth texture is made
+   sampleable for this (`Camera3d::depth_texture_usages`).
+2. Smoke: the five groups replay into a half-size `Rgba16Float` target cleared to (0, 0, 0, 1),
+   one sample, viewport exactly half the full extent, blend `SRC_ALPHA/ONE_MINUS_SRC_ALPHA` colour
+   and `ZERO/ONE_MINUS_SRC_ALPHA` alpha (the source's accumulation for a straight-alpha fragment).
+   The pipelines are the source smoke pipelines with that target, one sample and the shader def
+   `TYRE_SMOKE_REDUCED`; the depth test stays (read-only attachment). Under the def the smoke
+   fragment also fades alpha by `saturate(2.5 × metres in front of the reduced depth)`, the
+   original fp_half programs' soft fade (`pfx_smoke.cg.fp_half`), which the full-size port never had.
+3. Compose (`compose_no_alpha`: colour `ONE/SRC_ALPHA`, alpha kept), once per sample under MSAA:
+   the four nearest reduced texels' bilinear weights divided by their relative depth step from the
+   pixel's sample (half weight at 1 %), and where none lies within 5 % the best of the nine texels
+   around the pixel's own. Pixels whose four texels hold no smoke are discarded before any depth read.
+
+The glass and composition order is G329's: the compose runs where the full-size replay ran. Not
+taken (full-size replay as before): frames without sprites, pipelines still compiling (the first
+3-4 frames), a source pipeline that is not straight alpha blending, a depth texture that cannot
+be sampled, or the reduced depth image not yet resized after a resolution change.
+
+Deviations from the original [I]: half per axis instead of its quarter; the original faded
+against the far bound of a 4x4 block and redrew pixels between the near and far bounds at full
+size (`fp_half_edges`); this port tests and fades against the near bound and resolves edges in
+the compose instead. The near bound measured better than the far bound in the comparisons below
+(frame 110: 7 against 323 pixels off by more than 40/255).
+
+Cost, same binary with the reduced path switched off by an uncommitted probe variable (full) or on
+(reduced), four alternating runs each, Derby fixture, baseline (`Rgba8UnormSrgb`, MSAA4), RTX 4070,
+Vulkan; GPU ms per frame summed over the timed passes:
+
+| | 1920x1080 full | 1920x1080 reduced | 3024x1890 full | 3024x1890 reduced |
+|---|---|---|---|---|
+| dense frames mean / p95 / max | 4.94 / 9.52 / 13.88 | 4.23 / 6.22 / 7.51 | 6.15 / 11.74 / 16.07 | 4.98 / 6.69 / 8.56 |
+| smoke passes (replay + reduce + compose), dense mean | 2.88 | 1.01 + 0.17 + 0.52 = 1.70 (−41 %) | 4.34 | 1.65 + 0.13 + 0.79 = 2.57 (−41 %) |
+| `main_opaque_pass_3d`, dense mean | 1.36 | 1.66 | 1.39 | 1.85 |
+| whole run after 60 frames, mean / p95 | 3.27 / 6.48 | 3.43 / 5.18 | 4.09 / 7.58 | 3.74 / 5.54 |
+
+The opaque pass grows by 0.3-0.46 ms only when the depth is actually sampled: a probe with the
+depth sampleable but the reduced path off measured the same opaque time as without the flag (six
+runs each, 0.89-1.43 against 1.19-1.49 ms). [I] The driver decompresses the MSAA depth for
+sampling and the time lands in the next opaque pass. That fixed cost and the per-sample compose
+make light-smoke frames at 1080p about 5 % dearer on average while dense frames, which caused the
+F640 drops, lose a third of their p95 and half their worst case. Absolute times vary between
+sessions on this shared PC (the full-size replay measured 1.34 ms in F644 and 2.88 ms here for the
+same code), so only same-session comparisons are given.
+
+Look ([O], 150-frame sequences at 1920x1080 against the F644 full-size replay, plus the owner's
+review): the clouds and their brightness match (mean frame difference under 2/255; a car inside
+dense smoke looks the same). The soft fade removes the hard lines where flat sprites cut through
+the cars and the ground, and leaves smoke thinner within about 0.4 m of surfaces; the owner
+preferred this over the full-size look with its lines and doubling. Enhanced graphics (HDR,
+single sample, Lacetti at Donington) runs the single-sample variant with the same result.
+
 ## Not measured
 
 - Windowed frame time with present mode Immediate (the owner was at the PC; the offscreen renderer
   does not present). GPU timestamps were used instead.
 - Shadow cascades, SMAA, post and resolve passes (not timed by Bevy), so no total GPU frame time.
 - MSAA1 against MSAA4 for the blending.
-- The reduced-resolution variant itself: its gain is an estimate.
+- The reduced-resolution variant's quarter-per-axis setting (F645 measured half per axis).
 - Apple Metal and Android: the M4 ratio is an interpretation.
 - One scenario only (player donuts, chase_close camera); other cameras and other cars' distant
   smoke not separated.

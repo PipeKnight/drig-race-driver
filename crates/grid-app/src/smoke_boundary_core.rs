@@ -1,5 +1,6 @@
 //! Independently authored grouped-direct draw transaction; bounded bridge installs it.
-//! No material, shader, pipeline, mesh, source simulation or MSAA changes.
+//! No material, shader, pipeline, mesh, source simulation or MSAA changes,
+//! apart from the reduced smoke buffer's pipelines (F645, smoke_reduced.rs).
 use bevy::{
     core_pipeline::core_3d::Transparent3d,
     ecs::{
@@ -14,7 +15,7 @@ use bevy::{
             AddRenderCommand, DrawFunctionId, DrawFunctions, PhaseItem, RenderCommand,
             RenderCommandResult, SortedRenderPhase, TrackedRenderPass,
         },
-        render_resource::{RenderPassDescriptor, StoreOp, TextureFormat},
+        render_resource::{PipelineCache, RenderPassDescriptor, StoreOp, TextureFormat},
         renderer::RenderContext,
         sync_world::MainEntity,
         view::{ExtractedView, RetainedViewEntity, ViewDepthTexture, ViewTarget},
@@ -501,6 +502,49 @@ pub(crate) fn draw_into_scene_automatic<'w>(
     }
     draw_into_scene_format(context,world,view,target,depth,frame,proof,capability.format,
         "grouped-automatic same scene/depth")
+}
+
+/// Automatic entry through the reduced smoke buffer (F645): the same
+/// transaction, the owned groups drawn with their reduced pipelines between
+/// the depth reduction and the composition (smoke_reduced.rs).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_into_scene_reduced<'w>(
+    context: &'w mut RenderContext,
+    world: &'w World,
+    view: Entity,
+    target: &'w ViewTarget,
+    depth: &'w ViewDepthTexture,
+    frame: &'w Frame,
+    proof: &Proof,
+    capability: super::smoke_boundary::attachments::Capability,
+    reduced: &'w crate::smoke_reduced::Frame,
+) -> Result<(), &'static str> {
+    if !capability.matches(target, depth) {
+        proof.fail("automatic smoke attachment changed after masking");
+        return Err("automatic smoke attachment changed after masking");
+    }
+    if !frame.prepared || proof.failed() || target.main_texture_format() != capability.format {
+        proof.fail("boundary frame/target unready");
+        return Err("boundary frame/target unready");
+    }
+    let mut owned = SortedRenderPhase::default();
+    for item in frame.owned.items.values() {
+        let Some(pipeline) = reduced.pipeline(item.pipeline) else {
+            proof.fail("reduced smoke pipeline absent");
+            return Err("reduced smoke pipeline absent");
+        };
+        owned.add_retained(Transparent3d {
+            pipeline,
+            ..copy_item(item)
+        });
+    }
+    let cache = world.resource::<PipelineCache>();
+    proof.open_replay()?;
+    let ok = reduced.reduce_depth(context, cache).is_ok() && {
+        let mut pass = reduced.smoke_pass(context);
+        owned.render(&mut pass, world, view).is_ok()
+    } && reduced.compose(context, cache, target).is_ok();
+    proof.finish(ok)
 }
 
 // Private expected format, never an unrestricted public rendering profile.

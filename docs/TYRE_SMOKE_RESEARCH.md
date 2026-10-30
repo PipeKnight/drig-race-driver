@@ -1242,5 +1242,6 @@ is directly behind a particle it keeps 75-93 % of the brightness it has when the
 ### 8.5 Open
 
 - The static shadow grid's source file and contents (8.1); the port has no birth sample yet.
-- The soft depth edge and the half-resolution pass itself (§7).
+- The full-size edge redraw (`fp_half_edges`) and its pixel selection; F645 ports the reduced
+  pass and the soft fade, not the edge pass (SMOKE_RENDER_COST.md "Reduced smoke buffer").
 - Whether 0x730F90's time-of-day path rewrites +0x130..+0x150 for any weather.

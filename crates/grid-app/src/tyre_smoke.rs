@@ -42,6 +42,10 @@ pub(crate) struct SmokeLight {
     /// `pfxUnlitAmbientColour`.
     #[uniform(102)]
     unlit: Vec4,
+    /// The reduced scene depth the reduced smoke pass fades against (F645,
+    /// smoke_reduced.rs); unused by the full-size draw.
+    #[texture(103, sample_type = "depth")]
+    depth: Handle<Image>,
 }
 
 impl MaterialExtension for SmokeLight {
@@ -54,13 +58,37 @@ impl SmokeLight {
     /// Burnout_circles (the only Wheel_spin emitter) is `basicDepthAlphaBlendHalf`,
     /// shader `pfx_unlit_half_depth` (fakelight); every other smoke emitter is
     /// `smokeHalf`, `pfx_half_smoke` with the lit stream (effects/config.xml).
-    fn new(light: &ParticleLight, texture: &str) -> Self {
+    fn new(light: &ParticleLight, texture: &str, depth: Handle<Image>) -> Self {
         let lit = texture != "Wheel_spin.tga";
         Self {
             sun: Vec3::from_array(light.sun).extend(if lit { 1. } else { 0. }),
             ambient: Vec3::from_array(light.ambient).extend(0.),
             unlit: Vec3::from_array(light.unlit_ambient).extend(0.),
+            depth,
         }
+    }
+}
+
+/// The reduced smoke buffer's scene depth (F645): an image so that the smoke
+/// material can sample it; smoke_reduced.rs sizes it to the view.
+#[derive(Resource, Clone, bevy::render::extract_resource::ExtractResource)]
+pub(crate) struct SmokeDepth(pub Handle<Image>);
+
+impl SmokeDepth {
+    /// A depth image of `size` that is drawn into and sampled.
+    pub(crate) fn image(size: UVec2) -> Image {
+        let mut image = Image::new_uninit(
+            bevy::render::render_resource::Extent3d {
+                width: size.x.max(1),
+                height: size.y.max(1),
+                depth_or_array_layers: 1,
+            },
+            bevy::render::render_resource::TextureDimension::D2,
+            bevy::render::render_resource::TextureFormat::Depth32Float,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        image.texture_descriptor.usage |= bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT;
+        image
     }
 }
 
@@ -87,6 +115,8 @@ pub(crate) struct TyreSmoke {
     hidden: Vec<bool>,
     /// Camera position of the last drawn frame (distance level of detail).
     eye: [f32; 3],
+    /// Sprites drawn in the last frame.
+    drawn: usize,
     /// Frame counter for the periodic log line.
     frames: u64,
 }
@@ -95,6 +125,12 @@ impl TyreSmoke {
     /// The smoke group meshes (Performance test, `perf_test`).
     pub(crate) fn mesh_handles(&self) -> &[Handle<Mesh>] {
         self.pool.as_ref().map_or(&self.meshes, |pool| &pool.meshes)
+    }
+
+    /// Sprites drawn in the last frame (the reduced smoke buffer runs only
+    /// when there are any, F645).
+    pub(crate) fn drawn(&self) -> usize {
+        self.drawn
     }
 }
 
@@ -127,6 +163,11 @@ pub(crate) fn install(
                 )
                 .expect("tyre smoke shader handle");
             app.add_plugins(MaterialPlugin::<SmokeMaterial>::default());
+            let depth = app
+                .world_mut()
+                .resource_mut::<Assets<Image>>()
+                .add(SmokeDepth::image(UVec2::ONE));
+            app.insert_resource(SmokeDepth(depth));
             app.insert_resource(TyreSmoke {
                 smoke: Smoke::new(library.clone()),
                 pool: (mode == SmokeOrder::Sprites).then(SpritePool::default),
@@ -136,6 +177,7 @@ pub(crate) fn install(
                 quads: Vec::new(),
                 hidden: Vec::new(),
                 eye: [0.; 3],
+                drawn: 0,
                 frames: 0,
             })
             .insert_resource(Pending(Some((library, textures, light))))
@@ -174,6 +216,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SmokeMaterial>>,
+    depth: Res<SmokeDepth>,
 ) {
     let Some((library, textures, light)) = pending.0.take() else {
         return;
@@ -195,8 +238,7 @@ fn setup(
         let material = materials.add(SmokeMaterial {
             base: StandardMaterial {
                 base_color_texture: Some(image),
-                // Lit in the extension's fragment, once per particle; the
-                // original's half-resolution buffer is not reproduced.
+                // Lit in the extension's fragment, once per particle.
                 unlit: true,
                 alpha_mode: AlphaMode::Blend,
                 double_sided: true,
@@ -204,7 +246,7 @@ fn setup(
                 fog_enabled: false,
                 ..default()
             },
-            extension: SmokeLight::new(&light, name),
+            extension: SmokeLight::new(&light, name, depth.0.clone()),
         });
         if let Some(pool) = &mut state.pool {
             pool.materials.push(material);
@@ -333,6 +375,7 @@ fn draw(
         let centre = Aabb::enclosing(corners).map_or(Vec3::ZERO, |aabb| aabb.center.into());
         stream.sort_centre(state.entities[k], centre);
     }
+    state.drawn = total;
     state.frames += 1;
     if state.frames.is_multiple_of(600) {
         println!(
@@ -499,6 +542,7 @@ fn draw_sprites(
         })
         .collect();
     pool.update(&quads, &mut commands, &mut meshes, &stream);
+    state.drawn = quads.len();
     state.frames += 1;
     if state.frames.is_multiple_of(600) {
         println!(
@@ -736,10 +780,10 @@ mod sprite_pool_tests {
             ambient: [1.06, 1.08, 1.13],
             unlit_ambient: [1.; 3],
         };
-        let lit = SmokeLight::new(&light, "SM33.tga");
+        let lit = SmokeLight::new(&light, "SM33.tga", Handle::default());
         assert_eq!(lit.sun, Vec4::new(0.75, 0.71, 0.66, 1.));
         assert_eq!(lit.ambient, Vec4::new(1.06, 1.08, 1.13, 0.));
-        assert_eq!(SmokeLight::new(&light, "Wheel_spin.tga").sun.w, 0.);
+        assert_eq!(SmokeLight::new(&light, "Wheel_spin.tga", Handle::default()).sun.w, 0.);
     }
 
     #[test]
@@ -930,6 +974,7 @@ mod sprite_visibility_reset_regression {
                     quads: vec![],
                     hidden: vec![],
                     eye: [0.; 3],
+                    drawn: 0,
                     frames: 0,
                 });
                 app.insert_resource(crate::Driving {

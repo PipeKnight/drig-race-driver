@@ -88,6 +88,7 @@ mod skid_phase_ledger;
 mod smoke_ct_neutral;
 mod smoke_boundary_core;
 mod smoke_boundary;
+mod smoke_reduced;
 use smoke_boundary::native_diagnostic as native_smoke;
 mod ground_skid_pass;
 mod ground_skid_pass_core;
