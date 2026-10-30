@@ -186,6 +186,46 @@ integration and actual runtime behavior. It is not a shipped fix or source
 lifecycle/visual parity claim. No original-code execution or GPU capture was
 performed for this verification.
 
+### Shared layer-continuity fix (G340, delivery checks)
+
+The owner-reported grass frame includes both real contact loss and an authored
+strip end whenever Tread/Skid/SideSkid changes. The local candidate removes only
+the latter discontinuity: each segment carries immutable previous/current atlas
+bands, independent phase lanes and longitudinal RGBA interpolation. Contact loss,
+large movement, turning and reset still terminate the strip. A closed lit-Blend
+material factory replaces arbitrary StandardMaterial inputs; the shared shader
+keeps current PBR lighting, the native OIT terminal and actual `view.mip_bias` on
+both atlas samples. Source normal-map/light/fog parity is not claimed.
+
+Recovered pool/capacity phase rules apply in the finite domain. A separate,
+explicitly authored safety policy ends an invalid continuation and seeds a fresh
+finite point; it does not clamp the divisor to manufacture a connected strip.
+Positive recovery events must be reviewed before acceptance. A final containment
+check makes an invalid whole quad degenerate instead of uploading NaN vertices.
+These are renderer safety deviations, not source CRT exception handling.
+
+The Rust candidate passes558 package tests and strict Clippy before the
+subsequent WGSL corrections. An actual GPU check caught a reserved local name;
+the corrected combined-feature release now passes three windowless cases: matched
+native DLAA, ordinary baseline MSAA4 and native BMW/Shibuya with dense smoke. The control uses the same scripted native
+DLAA Lacetti/Donington drive and retains120 frames, ticks102..349. It passed
+native/automatic-smoke checks and contains GRAS contacts; the selected299 frame
+shows the reported area. The native pair preserves all four recorded player families, the entire frame
+request ledger and224contact rows. All three cases record zero safety recovery
+events. Root-reviewed stills retain textured tracks without a gross new
+regression; remaining irregular marks and universal temporal continuity are not
+claimed fixed. Sparse whole-frame pixel residuals remain unclassified. Source is
+local only. Private receipts:
+`local/graphics/grass-layer-crossfade01/`, source proposals and their documented
+limits in `local/handoff/drafts/grass-skid-source-audit01/`.
+
+The source's three-sample history/32-quad emission timing still differs from this
+port's direct33-point representation. Vertex allocation grows760320 to1720320
+bytes, plus segment/phase state; actual CPU/GPU cost remains unmeasured. No
+all-track/device, original visual or universal mark-continuity claim follows.
+The next main F645 smoke update must be integrated after the controlled
+comparison, with its appearance changes distinguished from this candidate.
+
 ## 2. Wheel kick-up (dirt, grass, gravel, sand)
 
 ### Selection [V data, D code]
@@ -485,3 +525,12 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
   float 16.0; GPU billboarding to avoid CPU mesh rebuilds; terrain-slope shear and fog.
 - Unify `grid_formats::kickup` with the overlapping `grid_tools::tyre_smoke` parsers (both on
   main now; the debris module already shares its `SMOKE_TEXTURES`).
+
+G340 then integrates F645/F646:561tests and strict Clippy pass; current combined
+DLAA/paint Clippy/release and three fresh native/baseline/BMW smoke cases pass.
+Selected frames retain tracks and cloud occlusion, with no positive safety
+recoveries. First automatic replay uses the full-size startup fallback in all
+three cases; later reduced-use success has no explicit receipt and stays unknown.
+These checks do not establish an original grass screenshot match or eliminate
+actual contact/texture/grass/terrain interruptions. Detailed source/artifact,
+failed shader trial and exact control records are in G340.
