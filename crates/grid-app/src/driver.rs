@@ -44,7 +44,33 @@ pub struct Driver {
     /// (additive: quaternion and translation differences).
     steer: [Pose; 4],
     limbs: Vec<Limb>,
+    /// The gear and handbrake reaches, when the car has them.
+    reaches: Option<Reaches>,
 }
+
+/// The car's gear and handbrake clips of its character set and the lever
+/// dummies the reaching arm takes (docs/COCKPIT.md "Gear and handbrake").
+#[derive(Clone, Debug)]
+struct Reaches {
+    /// The five gear reach variants and the five handbrake ones (from
+    /// neutral, left, right, to left, to right: 0x8521A0).
+    gear: [Anim; 5],
+    handbrake: [Anim; 5],
+    /// The hand pulling the handbrake (weight +0xDF8).
+    handbrake_on: Anim,
+    /// LHD_SEQ_GearStick_Dummy and LHD_HandBrake_Dummy, for the gear arm
+    /// and the handbrake arm.
+    gear_target: Option<Target>,
+    handbrake_target: Option<Target>,
+    /// Clip lengths: gear reach, change up, change down, handbrake reach,
+    /// hand on handbrake (the driver's timers, 0x857200).
+    lengths: [f32; 5],
+    /// The gear arm and the handbrake arm (0 left, 1 right).
+    arms: (usize, usize),
+}
+
+/// A clip on the skeleton: joint, rotation (else translation), keys.
+type Anim = Vec<(usize, bool, neanim::Keys)>;
 
 #[derive(Clone, Debug)]
 struct Joint {
@@ -65,7 +91,9 @@ struct Limb {
     lower: usize,
     end: usize,
     hint: usize,
-    target: Target,
+    /// `None` when the interior lacks the dummy: the limb keeps its FK pose
+    /// (b05, b06, c65 and lc7 have no `D_Lfoot_Dummy`) [I].
+    target: Option<Target>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -73,8 +101,20 @@ enum Target {
     /// A node of the interior clips ([`crate::interior_anim::Interior`]): the
     /// hand dummies under the wheel, the foot dummies the pedal clips move.
     Keyed(usize),
+    /// An interior node below a keyed one: that node and the frame in it.
+    Below(usize, Mat4),
     /// An interior node no clip keys, in the car frame.
     Fixed(Mat4),
+}
+
+impl Target {
+    fn world(self, interior: &[Mat4]) -> Mat4 {
+        match self {
+            Target::Keyed(n) => interior[n],
+            Target::Below(n, m) => interior[n] * m,
+            Target::Fixed(m) => m,
+        }
+    }
 }
 
 /// One skin joint's entity and its index in the skeleton.
@@ -90,6 +130,7 @@ pub fn append(
     anchor: Mat4,
     car: &mut Car,
     animated: Option<&crate::interior_anim::Interior>,
+    reach: Option<(&crate::reach::Setup, &crate::reach::Lever)>,
 ) -> Result<Option<Driver>, Box<dyn Error>> {
     let Some(seat) = crate::cockpit::named(interior, b"NODE", b"D_bip_position") else {
         return Ok(None);
@@ -164,9 +205,12 @@ pub fn append(
     let Some(neutral) = sets.first().and_then(|s| s.clips.iter().find(|c| c.name == "Neutral")) else {
         return Ok(None);
     };
-    let characters = neanim::read_sets(&pssg::read_tree(&read(&root.join("characters/anims/driver_anims.pssg"))?)?)?;
+    // small_cockpit rows use the other character set, with the same clip
+    // indices (driver +0xE54 → mgr +0x24 / +0x28).
+    let set = if reach.is_some_and(|(s, _)| s.small) { "small_cockpit_anims" } else { "driver_anims" };
+    let characters = neanim::read_sets(&pssg::read_tree(&read(&root.join(format!("characters/anims/{set}.pssg")))?)?)?;
     let Some(clips) = characters.first().map(|s| &s.clips).filter(|c| c.len() > 4) else {
-        return Err("driver_anims.pssg lacks the steering clips".into());
+        return Err(format!("{set}.pssg lacks the steering clips").into());
     };
     let find = |name: &str| joints.iter().position(|j| j.name == name).ok_or(format!("driver joint {name} absent"));
     let limb = |side: &str, upper: &str, lower: &str, end: &str, hint: &str, target| -> Result<Limb, String> {
@@ -178,12 +222,20 @@ pub fn append(
             target,
         })
     };
-    let target = |name: &str| -> Result<Target, Box<dyn Error>> {
+    let target = |name: &str| -> Result<Option<Target>, Box<dyn Error>> {
         if let Some(n) = animated.and_then(|c| c.node(name)) {
-            return Ok(Target::Keyed(n));
+            return Ok(Some(Target::Keyed(n)));
         }
-        let node = crate::cockpit::named(interior, b"NODE", name.as_bytes()).ok_or(format!("{name} absent"))?;
-        Ok(Target::Fixed(anchor * Mat4::from_cols_array(&scene::node_matrix(interior, node)?)))
+        let Some(node) = crate::cockpit::named(interior, b"NODE", name.as_bytes()) else {
+            return Ok(None);
+        };
+        let world = Mat4::from_cols_array(&scene::node_matrix(interior, node)?);
+        if let Some(a) = animated
+            && let Some((n, frame)) = a.below(interior, node, world)?
+        {
+            return Ok(Some(Target::Below(n, frame)));
+        }
+        Ok(Some(Target::Fixed(anchor * world)))
     };
     let limbs = vec![
         limb("L", "UpperArm", "Forearm", "Hand", "LA_hint", target("D_Lhand_Dummy")?)?,
@@ -204,7 +256,40 @@ pub fn append(
         }
         pose
     };
+    let anim = |i: usize| -> Result<Anim, String> {
+        let clip = clips.get(i).ok_or(format!("{set} clip {i} absent"))?;
+        let mut out = Anim::new();
+        for c in &clip.channels {
+            let Some(j) = joints.iter().position(|j| j.name == c.target) else { continue };
+            match c.semantic.as_str() {
+                "rotation_quaternion" => out.push((j, true, c.keys.clone())),
+                "translation" => out.push((j, false, c.keys.clone())),
+                _ => {}
+            }
+        }
+        Ok(out)
+    };
+    let length = |i: usize| clips.get(i).map_or(0., |c| c.duration());
+    let reaches = match reach {
+        Some((setup, lever)) => Some(Reaches {
+            gear: std::array::from_fn(|i| anim(setup.reach + i)).map(Result::ok).map(Option::unwrap_or_default),
+            handbrake: std::array::from_fn(|i| anim(setup.handbrake_reach + i)).map(Result::ok).map(Option::unwrap_or_default),
+            handbrake_on: anim(setup.handbrake_on)?,
+            gear_target: lever.gear.map(|_| target("LHD_SEQ_GearStick_Dummy")).transpose()?.flatten(),
+            handbrake_target: lever.handbrake.map(|_| target("LHD_HandBrake_Dummy")).transpose()?.flatten(),
+            lengths: [
+                length(setup.reach),
+                length(setup.change[0]),
+                length(setup.change[1]),
+                length(setup.handbrake_reach),
+                length(setup.handbrake_on),
+            ],
+            arms: (usize::from(setup.gear_right), usize::from(setup.handbrake_right)),
+        }),
+        None => None,
+    };
     let driver = Driver {
+        reaches,
         neutral: pose(neutral),
         steer: [pose(&clips[1]), pose(&clips[2]), pose(&clips[3]), pose(&clips[4])],
         root: anchor * Mat4::from_cols_array(&scene::node_matrix(interior, seat)?),
@@ -235,38 +320,118 @@ fn lod_slot(id: &[u8]) -> u32 {
 }
 
 impl Driver {
+    /// The reach clips' lengths (gear reach, change up and down, handbrake
+    /// reach, hand on handbrake), when the car has its reaches.
+    pub fn reach_lengths(&self) -> Option<[f32; 5]> {
+        self.reaches.as_ref().map(|r| r.lengths)
+    }
+
     /// The joints' model-frame transforms for the steering command `s`
-    /// (+1 = full right), the hands reaching for `hands` (car frame) when
-    /// the cockpit has them.
-    fn pose(&self, s: f32, interior: &[Mat4]) -> Vec<Mat4> {
+    /// (+1 = full right) and the reach state `reach`, the hands and feet
+    /// reaching for this frame's `interior` nodes.
+    fn pose(&self, s: f32, interior: &[Mat4], reach: Option<&crate::reach::State>) -> Vec<Mat4> {
         let (left, right) = ((-s).max(0.), s.max(0.));
-        // 0x851730 → 0x852030: to-left, left, to-right, right.
+        // 0x851730 → 0x852030: to-left, left, to-right, right, all scaled
+        // by the state crossfade's steering weight.
         let weights = [(2. * left).min(1.), (2. * left - 1.).max(0.), (2. * right).min(1.), (2. * right - 1.).max(0.)];
-        let mut locals: Vec<Mat4> = Vec::with_capacity(self.joints.len());
-        for (j, joint) in self.joints.iter().enumerate() {
-            let (mut q, mut t) = self.neutral[j];
+        let steering = reach.map_or(1., |r| r.states.w[0]);
+        let mut sums: Pose = self.neutral.clone();
+        if steering > STEER_MIN {
             for (pose, &w) in self.steer.iter().zip(&weights).filter(|(_, w)| **w > STEER_MIN) {
-                if let Some(d) = pose[j].0 {
-                    *q.get_or_insert(Vec4::ZERO) += w * d;
-                }
-                if let Some(d) = pose[j].1 {
-                    *t.get_or_insert(Vec3::ZERO) += w * d;
+                let w = w * steering;
+                for (sum, (q, t)) in sums.iter_mut().zip(pose) {
+                    if let Some(d) = q {
+                        *sum.0.get_or_insert(Vec4::ZERO) += w * *d;
+                    }
+                    if let Some(d) = t {
+                        *sum.1.get_or_insert(Vec3::ZERO) += w * *d;
+                    }
                 }
             }
+        }
+        if let (Some(r), Some(state)) = (&self.reaches, reach) {
+            // 0x8521A0: the five reach variants by where the hand left the
+            // rim (driver_steeringother_wc), under the state crossfade.
+            let other = steering_other(s);
+            for (anims, timer, w) in [(&r.gear, &state.reach, state.states.w[1]), (&r.handbrake, &state.handbrake_reach, state.states.w[2])] {
+                if w > STEER_MIN {
+                    for (anim, &o) in anims.iter().zip(&other).filter(|(_, o)| **o > STEER_MIN) {
+                        add(&mut sums, anim, timer.clip_time(), o * w);
+                    }
+                }
+            }
+            if state.blend[2] > STEER_MIN {
+                add(&mut sums, &r.handbrake_on, state.handbrake_on.clip_time(), state.blend[2]);
+            }
+        }
+        let mut locals: Vec<Mat4> = Vec::with_capacity(self.joints.len());
+        for (joint, &(q, t)) in self.joints.iter().zip(&sums) {
             // A slot no entry writes keeps the node's own transform.
             let (_, file_q, file_t) = joint.local.to_scale_rotation_translation();
-            let q = q.map_or(file_q, |q| Quat::from_vec4(q).normalize());
+            let q = q.filter(|q| q.length_squared() > 1e-12).map_or(file_q, |q| Quat::from_vec4(q).normalize());
             locals.push(Mat4::from_rotation_translation(q, t.unwrap_or(file_t)));
         }
         let to_model = self.root.inverse();
+        let parents = self.parents();
         // Legs first (0x852EC0), then arms (0x852FD0).
-        for limb in self.limbs.iter().rev() {
-            let target = match limb.target {
-                Target::Keyed(n) => interior[n],
-                Target::Fixed(m) => m,
-            };
+        for limb in self.limbs[2..].iter().rev() {
             let world = self.world(&locals);
-            ik::reach(&mut locals, &world, &self.parents(), limb, to_model * target);
+            if let Some(target) = limb.target {
+                ik::reach(&mut locals, &world, &parents, limb, to_model * target.world(interior));
+            }
+        }
+        for (arm, limb) in self.limbs[..2].iter().enumerate().rev() {
+            // Each arm blends its sources: the FK pose, the wheel, the gear
+            // lever and the handbrake, by the arm crossfade (0xACDC10).
+            let mut sources: Vec<(f32, Option<Target>)> = Vec::new();
+            match reach {
+                None => sources.push((1., limb.target)),
+                Some(state) => {
+                    let w = &state.arms[arm].w;
+                    let levers = self.reaches.as_ref().map_or((None, None), |r| (r.gear_target, r.handbrake_target));
+                    let setup = self.reaches.as_ref().map_or((2, 2), |r| r.arms);
+                    for (source, target) in [
+                        (crate::reach::ANIM, None),
+                        (crate::reach::STEER, limb.target),
+                        (crate::reach::GEAR, levers.0.filter(|_| setup.0 == arm)),
+                        (crate::reach::HANDBRAKE, levers.1.filter(|_| setup.1 == arm)),
+                    ] {
+                        if w[source] > crate::reach::MIN_WEIGHT && (source == crate::reach::ANIM || target.is_some()) {
+                            sources.push((w[source], target));
+                        }
+                    }
+                }
+            }
+            let world = self.world(&locals);
+            let solve = |target: Option<Target>| {
+                let mut out = locals.clone();
+                if let Some(t) = target {
+                    ik::reach(&mut out, &world, &parents, limb, to_model * t.world(interior));
+                }
+                [limb.upper, limb.lower, limb.end].map(|j| out[j])
+            };
+            match sources.as_slice() {
+                [] => {}
+                [(_, target)] => {
+                    let bones = solve(*target);
+                    for (j, m) in [limb.upper, limb.lower, limb.end].into_iter().zip(bones) {
+                        locals[j] = m;
+                    }
+                }
+                many => {
+                    let solved: Vec<(f32, [Mat4; 3])> = many.iter().map(|&(w, t)| (w, solve(t))).collect();
+                    for (k, j) in [limb.upper, limb.lower, limb.end].into_iter().enumerate() {
+                        let first = solved[0].1[k].to_scale_rotation_translation().1;
+                        let mut q = Vec4::ZERO;
+                        for (w, bones) in &solved {
+                            let r = Vec4::from(bones[k].to_scale_rotation_translation().1);
+                            q += *w * if r.dot(Vec4::from(first)) < 0. { -r } else { r };
+                        }
+                        let position = locals[j].w_axis.truncate();
+                        locals[j] = Mat4::from_rotation_translation(Quat::from_vec4(q).normalize(), position);
+                    }
+                }
+            }
         }
         self.world(&locals)
     }
@@ -320,6 +485,7 @@ fn pose(
     driving: Option<Res<crate::Driving>>,
     cockpit: Option<Res<crate::cockpit::Cockpit>>,
     interior: Res<crate::cockpit::InteriorPose>,
+    reaching: Res<crate::reach::Reaching>,
     mut joints: Query<(&DriverJoint, &mut Transform)>,
 ) {
     let (Some(driving), Some(cockpit)) = (driving, cockpit) else {
@@ -330,9 +496,34 @@ fn pose(
     };
     let vehicle = &driving.runtime.state.car.owner.vehicle;
     let s = crate::cockpit::steering(vehicle);
-    let world = driver.pose(s, &interior.0);
+    let world = driver.pose(s, &interior.0, reaching.0.as_ref().filter(|_| cockpit.reach.is_some()));
     for (DriverJoint(j), mut transform) in &mut joints {
         *transform = Transform::from_matrix(world[*j]);
+    }
+}
+
+/// driver_steeringother_wc (0x851730): a partition of unity over where the
+/// hands are on the rim, [neutral, left, right, to left, to right].
+pub(crate) fn steering_other(s: f32) -> [f32; 5] {
+    let (left, right) = ((-s).max(0.), s.max(0.));
+    if s > 0.5 {
+        [0., 0., 2. * right - 1., 0., 2. - 2. * right]
+    } else if s < -0.5 {
+        [0., 2. * left - 1., 0., 2. - 2. * left, 0.]
+    } else {
+        [1. - 2. * s.abs(), 0., 0., 2. * left, 2. * right]
+    }
+}
+
+/// Adds `anim` at clip time `t` with weight `w` to the per-joint sums.
+fn add(sums: &mut Pose, anim: &Anim, t: f32, w: f32) {
+    for (j, rotation, keys) in anim {
+        let v = w * Vec4::from_array(keys.sample(t));
+        if *rotation {
+            *sums[*j].0.get_or_insert(Vec4::ZERO) += v;
+        } else {
+            *sums[*j].1.get_or_insert(Vec3::ZERO) += v.truncate();
+        }
     }
 }
 
@@ -430,7 +621,7 @@ mod tests {
         let hands = [clips.node("D_Lhand_Dummy").unwrap(), clips.node("D_Rhand_Dummy").unwrap()];
         for s in [-1., -0.5, 0., 0.5, 1.] {
             let interior = clips.worlds(&[(steering, (s + 1.) * 0.5 * clips.duration(steering), 1.)]);
-            let world = driver.pose(s, &interior);
+            let world = driver.pose(s, &interior, None);
             for (limb, hand) in driver.limbs[..2].iter().zip(hands.map(|h| interior[h])) {
                 let got = driver.root * world[limb.end];
                 let gap = got.w_axis.distance(hand.w_axis);
@@ -457,9 +648,182 @@ mod tests {
             let turned = interior[n].to_scale_rotation_translation().1.angle_between(rest[n].to_scale_rotation_translation().1);
             println!("pedal {pedal}: moved {moved} m, turned {turned} rad");
             assert!(moved > 1e-3 || turned > 1e-2, "{pedal} did not move");
-            let world = driver.pose(0., &interior);
+            let world = driver.pose(0., &interior, None);
             let gap = (driver.root * world[driver.limbs[3].end]).w_axis.distance(interior[foot].w_axis);
             assert!(gap < 1e-3, "right foot {gap} m from its dummy");
         }
+    }
+
+    /// Lacetti: its vehicle_interior row, and through an up-shift and a
+    /// handbrake pull the right hand on LHD_SEQ_GearStick_Dummy and on
+    /// LHD_HandBrake_Dummy, then back on the wheel; the left hand stays on
+    /// the wheel.
+    #[test]
+    #[ignore = "needs GRID_GAME_ROOT"]
+    fn lacetti_right_hand_reaches_the_levers() {
+        use crate::reach::{Setup, State};
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT"));
+        let mut car = Car {
+            parts: Vec::new(),
+            textures: Default::default(),
+            bindings: Default::default(),
+            decal_materials: Default::default(),
+            object_glass_materials: Default::default(),
+            object_two_sided_materials: Default::default(),
+            center: Vec3::ZERO,
+            radius: 0.,
+            track: false,
+            liveries: Vec::new(),
+            low_lods: Vec::new(),
+            ornament_lods: Default::default(),
+        };
+        let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY).unwrap();
+        let reach = cockpit.reach.unwrap();
+        let expected = Setup {
+            gear_right: true,
+            handbrake_right: true,
+            small: false,
+            kind: 0,
+            reach: 17,
+            change: [22, 23],
+            handbrake_reach: 83,
+            handbrake_on: 88,
+        };
+        assert_eq!(reach.setup, expected);
+        assert!(reach.gear() && reach.handbrake() && reach.steering);
+        let (driver, interior) = (cockpit.driver.unwrap(), cockpit.interior.unwrap());
+        let r = driver.reaches.as_ref().unwrap();
+        let vehicle = |gear: u32, handbrake: bool| {
+            let mut v = vec![0u32; 0x1990 / 4];
+            v[0x196c / 4] = gear;
+            v[0xe38 / 4] = u32::from(handbrake);
+            v[0x1974 / 4] = 5f32.to_bits();
+            v
+        };
+        let gap = |state: &State, hand: usize, target: Target| {
+            let (lever, knob) = state.lever_play(&reach);
+            let worlds = interior.worlds_with(&lever, knob);
+            let world = driver.pose(0., &worlds, Some(state));
+            assert!(world.iter().all(|m| m.is_finite()));
+            (driver.root * world[driver.limbs[hand].end]).w_axis.distance(target.world(&worlds).w_axis)
+        };
+        let wheel = |hand: usize| driver.limbs[hand].target.unwrap();
+        let mut state = reach.start();
+        let frames = |state: &mut State, v: &[u32], n: usize, max_gap: &mut f32| {
+            for _ in 0..n {
+                state.update(&reach, v, 1. / 60.);
+                *max_gap = max_gap.max(gap(state, 0, wheel(0)));
+            }
+        };
+        let mut left = 0_f32;
+        frames(&mut state, &vehicle(1, false), 6, &mut left);
+        frames(&mut state, &vehicle(2, false), 36, &mut left);
+        assert_eq!(state.state, 3);
+        let on_lever = gap(&state, 1, r.gear_target.unwrap());
+        println!("gear: right hand {on_lever} m from LHD_SEQ_GearStick_Dummy");
+        assert!(on_lever < 1e-3);
+        frames(&mut state, &vehicle(2, false), 60, &mut left);
+        assert_eq!(state.state, 0);
+        assert!(gap(&state, 1, wheel(1)) < 1e-3);
+        frames(&mut state, &vehicle(2, true), 60, &mut left);
+        assert_eq!(state.state, 7);
+        let on_handbrake = gap(&state, 1, r.handbrake_target.unwrap());
+        println!("handbrake: right hand {on_handbrake} m from LHD_HandBrake_Dummy");
+        assert!(on_handbrake < 1e-3);
+        frames(&mut state, &vehicle(2, false), 60, &mut left);
+        assert_eq!(state.state, 0);
+        assert!(gap(&state, 1, wheel(1)) < 1e-3);
+        println!("left hand: at most {left} m from D_Lhand_Dummy");
+        assert!(left < 1e-3);
+    }
+
+    /// Every shipped cockpit: through two shifts and a handbrake pull the
+    /// pose stays finite, the reaching hand meets the lever dummy while it
+    /// holds it (sequential, H-pattern, either drive, small cockpits), and
+    /// both hands are back on the wheel at the end.
+    #[test]
+    #[ignore = "needs GRID_GAME_ROOT"]
+    fn every_cockpit_reaches_its_levers() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT"));
+        let mut stems: Vec<String> = std::fs::read_dir(root.join("interiors"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        stems.sort();
+        let mut checked = 0;
+        for stem in stems {
+            let mut car = Car {
+                parts: Vec::new(),
+                textures: Default::default(),
+                bindings: Default::default(),
+                decal_materials: Default::default(),
+                object_glass_materials: Default::default(),
+                object_two_sided_materials: Default::default(),
+                center: Vec3::ZERO,
+                radius: 0.,
+                track: false,
+                liveries: Vec::new(),
+                low_lods: Vec::new(),
+                ornament_lods: Default::default(),
+            };
+            let cockpit = match crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY) {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("{stem}: no cockpit ({e})");
+                    continue;
+                }
+            };
+            let (Some(reach), Some(driver), Some(interior)) = (cockpit.reach, cockpit.driver, cockpit.interior) else {
+                println!("{stem}: no reach");
+                continue;
+            };
+            let r = driver.reaches.as_ref().unwrap();
+            let (gear_arm, hb_arm) = r.arms;
+            let vehicle = |gear: u32, handbrake: bool| {
+                let mut v = vec![0u32; 0x1990 / 4];
+                v[0x196c / 4] = gear;
+                v[0xe38 / 4] = u32::from(handbrake);
+                v[0x1974 / 4] = 5f32.to_bits();
+                v
+            };
+            let mut state = reach.start();
+            let (mut on_gear, mut on_handbrake) = (f32::NAN, f32::NAN);
+            for (gear, handbrake, frames) in [(1, false, 6), (2, false, 150), (1, false, 150), (1, true, 90), (1, false, 90)] {
+                for _ in 0..frames {
+                    state.update(&reach, &vehicle(gear, handbrake), 1. / 60.);
+                    let (lever, knob) = state.lever_play(&reach);
+                    let worlds = interior.worlds_with(&lever, knob);
+                    let world = driver.pose(0., &worlds, Some(&state));
+                    assert!(world.iter().all(|m| m.is_finite()), "{stem}: pose not finite in state {}", state.state);
+                    let gap = |arm: usize, target: Target| (driver.root * world[driver.limbs[arm].end]).w_axis.distance(target.world(&worlds).w_axis);
+                    if state.arms[gear_arm].w[crate::reach::GEAR] == 1. {
+                        let g = gap(gear_arm, r.gear_target.unwrap());
+                        if g > 1e-3 && (on_gear.is_nan() || on_gear <= 1e-3) {
+                            // How far the lever is from the shoulder against the arm's length.
+                            let limb = &driver.limbs[gear_arm];
+                            let shoulder = (driver.root * world[limb.upper]).w_axis.truncate();
+                            let lengths = driver.joints[limb.lower].local.w_axis.truncate().length()
+                                + driver.joints[limb.end].local.w_axis.truncate().length();
+                            let lever = r.gear_target.unwrap().world(&worlds).w_axis.truncate();
+                            println!("{stem}: gear {gear} lever {} m from the shoulder, arm {lengths} m", shoulder.distance(lever));
+                        }
+                        on_gear = on_gear.max(g).max(0.);
+                    }
+                    if state.arms[hb_arm].w[crate::reach::HANDBRAKE] == 1. {
+                        on_handbrake = on_handbrake.max(gap(hb_arm, r.handbrake_target.unwrap())).max(0.);
+                    }
+                }
+            }
+            assert_eq!(state.state, 0, "{stem}");
+            println!(
+                "{stem}: kind {} gear arm {gear_arm} on gear {on_gear} m, handbrake arm {hb_arm} on handbrake {on_handbrake} m",
+                reach.setup.kind
+            );
+            assert_eq!(on_gear.is_nan(), !reach.gear(), "{stem}: gear reach");
+            assert_eq!(on_handbrake.is_nan(), !reach.handbrake(), "{stem}: handbrake reach");
+            assert!((on_gear.is_nan() || on_gear <= 1e-2) && (on_handbrake.is_nan() || on_handbrake <= 1e-2), "{stem}");
+            checked += 1;
+        }
+        assert!(checked >= 40, "{checked} cockpits");
     }
 }

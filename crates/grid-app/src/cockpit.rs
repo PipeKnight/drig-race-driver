@@ -46,6 +46,9 @@ pub struct Cockpit {
     pub dash: crate::dash::Dash,
     /// The driver (docs/COCKPIT.md "Driver").
     pub driver: Option<crate::driver::Driver>,
+    /// The gear and handbrake reaches (docs/COCKPIT.md "Gear and
+    /// handbrake"), when the car has a `vehicle_interior` row and a driver.
+    pub reach: Option<crate::reach::Reach>,
 }
 
 /// A cockpit part below a keyed interior node: the node and the part's
@@ -116,7 +119,8 @@ pub fn install(app: &mut App) {
     app.insert_resource(mirror)
         .add_systems(Update, (create_mirror, place_mirror).chain().after(crate::drive_present))
         .init_resource::<InteriorPose>()
-        .add_systems(Update, (attach_animated, animate_interior).chain().before(crate::drive_present))
+        .init_resource::<crate::reach::Reaching>()
+        .add_systems(Update, (attach_animated, crate::reach::update, animate_interior).chain().before(crate::drive_present))
         .add_systems(
             PostUpdate,
             (
@@ -243,13 +247,24 @@ pub fn play(interior: &crate::interior_anim::Interior, vehicle: &[u32]) -> Vec<c
 pub(crate) fn animate_interior(
     driving: Option<Res<crate::Driving>>,
     cockpit: Option<Res<Cockpit>>,
+    reaching: Res<crate::reach::Reaching>,
     mut pose: ResMut<InteriorPose>,
     mut parts: Query<(&mut crate::MovingPart, &AnimatedPart)>,
 ) {
-    let (Some(driving), Some(interior)) = (driving, cockpit.as_ref().and_then(|c| c.interior.as_ref())) else {
+    let (Some(driving), Some(cockpit)) = (driving, cockpit) else {
         return;
     };
-    pose.0 = interior.worlds(&play(interior, &driving.runtime.state.car.owner.vehicle));
+    let Some(interior) = &cockpit.interior else {
+        return;
+    };
+    let mut clips = play(interior, &driving.runtime.state.car.owner.vehicle);
+    let mut knob = None;
+    if let (Some(reach), Some(state)) = (&cockpit.reach, &reaching.0) {
+        let (lever, k) = state.lever_play(reach);
+        clips.extend(lever);
+        knob = k;
+    }
+    pose.0 = interior.worlds_with(&clips, knob);
     for (mut part, AnimatedPart(node, post)) in &mut parts {
         part.rest = pose.0[*node] * *post;
     }
@@ -477,8 +492,41 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
     car.parts.extend(parts);
     car.bindings.extend(bindings);
     car.textures.extend(images);
-    let driver = crate::driver::append(root, stem, &tree, anchor, car, animated.as_ref())?;
-    Ok(Cockpit { active, anchor, interior: animated, dash, driver })
+    // The gear and handbrake sets of the car's vehicle_interior row.
+    let setup = match grid_tools::read_database(root).and_then(|db| crate::reach::Setup::read(&db, stem)) {
+        Ok(setup) => setup,
+        Err(e) => {
+            println!("cockpit_reach stem={stem} unavailable: {e}");
+            None
+        }
+    };
+    let lever = match (setup, animated.as_ref()) {
+        (Some(s), Some(a)) => Some(crate::reach::Lever::load(&tree, a, s.kind)?),
+        _ => None,
+    };
+    let driver = crate::driver::append(root, stem, &tree, anchor, car, animated.as_ref(), setup.as_ref().zip(lever.as_ref()))?;
+    let wheel = animated.as_ref().is_some_and(|a| ["steering_wheel", "D_Lhand_Dummy", "D_Rhand_Dummy"].iter().all(|n| a.node(n).is_some()));
+    let reach = match (setup, lever, driver.as_ref().and_then(|d| d.reach_lengths())) {
+        (Some(setup), Some(lever), Some(lengths)) => Some(crate::reach::Reach { setup, lever, lengths, steering: wheel }),
+        _ => None,
+    };
+    if let Some(r) = &reach {
+        println!(
+            "cockpit_reach stem={stem} gear_right={} handbrake_right={} small={} kind={} gear={} handbrake={} clips={}/{:?}/{}/{} lengths={:?}",
+            r.setup.gear_right,
+            r.setup.handbrake_right,
+            r.setup.small,
+            r.setup.kind,
+            r.gear(),
+            r.handbrake(),
+            r.setup.reach,
+            r.setup.change,
+            r.setup.handbrake_reach,
+            r.setup.handbrake_on,
+            r.lengths,
+        );
+    }
+    Ok(Cockpit { active, anchor, interior: animated, dash, driver, reach })
 }
 
 /// The first `kind` element whose id is `id`.

@@ -96,11 +96,20 @@ impl Interior {
     /// Registers a part drawn from RENDERNODE `render` with scene world
     /// `transform` when it is below a keyed node (the deepest one).
     pub fn register(&mut self, tree: &pssg::Tree, name: String, render: usize, transform: Mat4) -> Result<(), Box<dyn Error>> {
-        if let Some(n) = (0..self.nodes.len()).rev().find(|&n| crate::cockpit::descends(tree, render, self.nodes[n].tree)) {
-            let world = Mat4::from_cols_array(&scene::node_matrix(tree, self.nodes[n].tree)?);
-            self.parts.insert(name, (n, world.inverse() * transform));
+        if let Some((n, frame)) = self.below(tree, render, transform)? {
+            self.parts.insert(name, (n, frame));
         }
         Ok(())
+    }
+
+    /// The deepest keyed node above tree node `n` (or `n` itself), and
+    /// `transform`, `n`'s scene world, relative to it.
+    pub fn below(&self, tree: &pssg::Tree, n: usize, transform: Mat4) -> Result<Option<(usize, Mat4)>, Box<dyn Error>> {
+        let Some(k) = (0..self.nodes.len()).rev().find(|&k| crate::cockpit::descends(tree, n, self.nodes[k].tree)) else {
+            return Ok(None);
+        };
+        let world = Mat4::from_cols_array(&scene::node_matrix(tree, self.nodes[k].tree)?);
+        Ok(Some((k, world.inverse() * transform)))
     }
 
     /// The index of clip `name` (any case, as the original's lookup).
@@ -120,13 +129,21 @@ impl Interior {
     /// Every keyed node in the car frame while `play` runs. A node's local
     /// transform is the weighted sum of the playing clips that key it, the
     /// quaternion normalised (0xACD760, 0xAC67A0), else the file's.
+    #[cfg(test)]
     pub fn worlds(&self, play: &[Play]) -> Vec<Mat4> {
+        self.worlds_with(play, None)
+    }
+
+    /// [`Self::worlds`] with `knob = (node, m)`: `m` between the node's
+    /// parent and its local transform (the H-pattern knob's HPatternDummy
+    /// above the gear lever, 0x85C380).
+    pub fn worlds_with(&self, play: &[Play], knob: Option<(usize, Mat4)>) -> Vec<Mat4> {
         let mut out: Vec<Mat4> = Vec::with_capacity(self.nodes.len());
-        for node in &self.nodes {
+        for (i, node) in self.nodes.iter().enumerate() {
             let (_, file_q, file_t) = node.file.to_scale_rotation_translation();
             let (mut q, mut t) = (None, None);
             for &(clip, time, weight) in play {
-                let Some(k) = &node.keyed[clip] else { continue };
+                let Some(Some(k)) = node.keyed.get(clip) else { continue };
                 if let Some(r) = &k.rotation {
                     *q.get_or_insert(Vec4::ZERO) += weight * Vec4::from_array(r.sample(time));
                 }
@@ -135,7 +152,12 @@ impl Interior {
                 }
             }
             let q = q.map_or(file_q, |q: Vec4| Quat::from_vec4(q).normalize());
-            let local = Mat4::from_rotation_translation(q, t.unwrap_or(file_t));
+            let mut local = Mat4::from_rotation_translation(q, t.unwrap_or(file_t));
+            if let Some((n, m)) = knob
+                && n == i
+            {
+                local = m * local;
+            }
             out.push(node.above.map_or(Mat4::IDENTITY, |a| out[a]) * node.base * local);
         }
         out

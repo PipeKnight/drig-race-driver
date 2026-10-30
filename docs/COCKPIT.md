@@ -164,6 +164,54 @@ Image proof (fixed-step renders against F625's):
 - `cockpit::play` gives the clips each frame: "Steering" from s, and "accel" or "Brake" from p as above. `animate_interior` stores the posed nodes (`InteriorPose`); the driver's four IK targets are those nodes (the left foot stays at its file pose).
 - Checks: `driver::tests::lacetti_hands_reach_the_wheel_dummies` also presses full throttle and full brake. Each pedal turns (0.167 and 0.175 rad) and the right foot stays within 1 mm of `D_Rfoot_Dummy`.
 
+## Gear and handbrake
+
+Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/gear_handbrake.txt` (the full reading, with the per-car table `vehicle_interior_table.txt` and the node scan `interior_gear_nodes_scan.txt`).
+
+### What the original does [D]
+
+Per car:
+- The car's `vehicle_interior` row (database.bin, through `vehicle.vehicle_interior_id`) chooses the clips (0x60E310 → 0x860AC0 → 0x861C50):
+  - `drive`: left-hand drive reaches with the right arm and the LHD clips, right-hand drive with the left arm;
+  - `gearstick_placement`, `gearstick`, `handbrake_placement` and `handbrake_type` (`set_01`..) choose the reach, change and hand-on-handbrake clips of `characters/anims/driver_anims.pssg`;
+  - `small_cockpit` rows use `small_cockpit_anims.pssg` instead, with the same indices (the steering poses too);
+  - `h_pattern_type` (none, 4speed, 5speed, 6speed) makes the lever an H-pattern knob.
+- The gear part needs `LHD_SEQ_GearStick_Dummy` and `sequential_gear_Dummy01` in the interior, and the handbrake part needs `LHD_HandBrake_Dummy` and `handbrake_Dummy01` (0x84CD40). Without them that part does nothing. The five paddle cars (b05, b06, cre, df3, r10) have no gear nodes; b06, cre, r10, bos, c65, fmj, lc7 and spk have no handbrake nodes.
+
+Requests, every frame (0x85F8F0):
+- A change of the gear word (+0x196C) asks for a reach: up, or down to a lower gear or into reverse.
+- The hand stays on the lever (no return) within 1 s of a shift (+0x1974), at more than 0.9 throttle within 9 m/s of the gear's up-shift speed (+0x191C), or at more than 0.95 brake (manager constants, 0x8613D0).
+- The handbrake byte (+0xE38) asks for the handbrake; releasing it asks to let go.
+
+The driver (0x851B20, 0x8573E0):
+- States: 0 steering; 1 reach for the lever (the reach clip, 0.5 s); 3 on the lever while the lever clip plays (sequential) or 4 while the knob moves (H-pattern); 2 back to the wheel (the reach clip backwards).
+- Handbrake: 5 reach, 7 pull and hold (the hand-on-handbrake clip, the lever's HandBrake_on clip, 0.2 s); on release the lever goes down, then 6 back to the wheel.
+- The reach clips are additive. Five variants, from neutral, left, right, to left and to right of the rim, are mixed by where the hand left the wheel (driver_steeringother_wc). They are faded in over the steering poses by the state crossfade (0.05 s).
+- Each arm crossfades between its FK pose, the wheel IK, the gear-lever IK and the handbrake IK. The reach is FK for its first 40 % (gear) or 50 % (handbrake), then IK on the lever's dummy; the return is the reverse (`int_*_anim.xml` blend 0.6 / 0.5; arm fades 0.1 s, the right arm's FK 0.3 s).
+- The driver's change_up / change_down clips only move the fingers of the hand on the wheel, which the mask zeroes, so they are invisible; only their lengths time state 3.
+
+The interior (0x859FC0, before the driver):
+- Sequential: change_up / change_down flick `sequential_gear_Dummy01` about 5° and back (0.267 s).
+- H-pattern: a code-made HPatternDummy above the lever carries it. On a shift the lever leaves its gate (second half of its clip), the knob slides to the new gear's `Gear_pos_0N` at 0.6 m/s, and the lever goes into the gear (first half at half speed, held). Gates per kind: 0x85CC41.
+- HandBrake_on turns `handbrake_Dummy01` about 16° over 0.2 s; it plays backwards on release.
+
+### The port (`reach.rs`)
+
+- `Setup::read` reads the row and the clip indices; `Lever::load` finds the lever nodes, clips and H-pattern gates; `State::update` runs the feed, the lever and the driver's state machine once per frame with the simulation time since the last frame (0 while paused; a reset starts over).
+- `animate_interior` adds the lever clips and the knob (`Interior::worlds_with`). `Driver::pose` adds the reach clips and blends each arm's sources (quaternion sum, normalised; one source is used as solved).
+- The original's state 7 also checks "lever down" while the handbrake is still held. Its interior timer has then advanced only one frame, so at 100 fps or more the hand left the raised lever at once. The port goes back only after the release has started (frame-rate dependent, not ported).
+- Not ported, or [I]:
+  - the knob's rotation interpolation (the port slerps by the same fraction as the translation; the original uses an approximation not decoded);
+  - HPatternPointlessDummy's frame (taken as the inverse of the lever's rest frame);
+  - car +0x198D (the feed skips gear requests while it is set; meaning unknown, read as is);
+  - LOD: the original accepts gear requests only at driver LOD < 2; the port runs them in every view (the driver is drawn only in the head-cam).
+- A limb whose interior lacks its dummy keeps its FK pose [I]. Before, a missing `D_Lfoot_Dummy` failed the whole cockpit, so b05, b06, c65 and lc7 had no head-cam interior (since F631).
+- Checks:
+  - `reach::tests` (state machine, timers, crossfades, steeringother, sequential and H-pattern shifts, handbrake).
+  - `driver::tests::lacetti_right_hand_reaches_the_levers` (ignored, GRID_GAME_ROOT): the row, and the right hand within 1 mm of each lever dummy while holding it and back on the wheel after.
+  - `driver::tests::every_cockpit_reaches_its_levers`: all 42 cockpits with a row. A hand holding a lever is within 1 µm of its dummy, except nsx and sup (H-pattern, gear 2): the knob is 0.533–0.535 m from the shoulder with a 0.532 m arm, so the solver straightens the arm 2–5 mm short, as the original's does.
+  - Renders: the other views and the head-cam at rest are 0 px; at full throttle the right hand leaves the rim about 0.4 s after the 1→2 shift and returns (the lever is below the head-cam's view).
+
 ## Gauges
 
 ### What the original does [D]
@@ -277,9 +325,7 @@ Not verified: the digit orientation against the original's screen (font strip or
   - the legs, then the arms, are solved (`ik::reach`) with this frame's FK;
   - the joints are written as children of the body part.
 - Not ported:
-  - gear-change and handbrake reaches (state machine 0x8573E0, per-car sets from database.bin `vehicle_interior`);
   - the g-force lean (0x857F20), breathing and face clips;
-  - `small_cockpit_anims.pssg` (cars with `small_cockpit`);
   - the suit tint (TTintColourMask, tintColour1..3);
   - the drivers seen through the windows in the other views and in the opponents' cars (slots 0, 2..5 and 0x862300).
 
