@@ -56,6 +56,7 @@ mod clearcoat_prepass;
 mod damage_hud;
 mod dash;
 mod driver;
+mod interior_anim;
 mod damage_parts;
 mod drift_event;
 mod dynamic_props;

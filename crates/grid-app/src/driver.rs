@@ -70,9 +70,10 @@ struct Limb {
 
 #[derive(Clone, Copy, Debug)]
 enum Target {
-    /// A hand dummy under the steering wheel, keyed by "Steering".
-    Hand(usize),
-    /// A fixed interior node (the foot dummies), in the car frame.
+    /// A node of the interior clips ([`crate::interior_anim::Interior`]): the
+    /// hand dummies under the wheel, the foot dummies the pedal clips move.
+    Keyed(usize),
+    /// An interior node no clip keys, in the car frame.
     Fixed(Mat4),
 }
 
@@ -88,6 +89,7 @@ pub fn append(
     interior: &pssg::Tree,
     anchor: Mat4,
     car: &mut Car,
+    animated: Option<&crate::interior_anim::Interior>,
 ) -> Result<Option<Driver>, Box<dyn Error>> {
     let Some(seat) = crate::cockpit::named(interior, b"NODE", b"D_bip_position") else {
         return Ok(None);
@@ -176,15 +178,18 @@ pub fn append(
             target,
         })
     };
-    let fixed = |name: &[u8]| -> Result<Target, Box<dyn Error>> {
-        let node = crate::cockpit::named(interior, b"NODE", name).ok_or("foot dummy absent")?;
+    let target = |name: &str| -> Result<Target, Box<dyn Error>> {
+        if let Some(n) = animated.and_then(|c| c.node(name)) {
+            return Ok(Target::Keyed(n));
+        }
+        let node = crate::cockpit::named(interior, b"NODE", name.as_bytes()).ok_or(format!("{name} absent"))?;
         Ok(Target::Fixed(anchor * Mat4::from_cols_array(&scene::node_matrix(interior, node)?)))
     };
     let limbs = vec![
-        limb("L", "UpperArm", "Forearm", "Hand", "LA_hint", Target::Hand(0))?,
-        limb("R", "UpperArm", "Forearm", "Hand", "RA_hint", Target::Hand(1))?,
-        limb("L", "Thigh", "Calf", "Foot", "LL_hint", fixed(b"D_Lfoot_Dummy")?)?,
-        limb("R", "Thigh", "Calf", "Foot", "RL_hint", fixed(b"D_Rfoot_Dummy")?)?,
+        limb("L", "UpperArm", "Forearm", "Hand", "LA_hint", target("D_Lhand_Dummy")?)?,
+        limb("R", "UpperArm", "Forearm", "Hand", "RA_hint", target("D_Rhand_Dummy")?)?,
+        limb("L", "Thigh", "Calf", "Foot", "LL_hint", target("D_Lfoot_Dummy")?)?,
+        limb("R", "Thigh", "Calf", "Foot", "RL_hint", target("D_Rfoot_Dummy")?)?,
     ];
     let pose = |clip: &neanim::Clip| -> Pose {
         let mut pose: Pose = vec![(None, None); joints.len()];
@@ -233,7 +238,7 @@ impl Driver {
     /// The joints' model-frame transforms for the steering command `s`
     /// (+1 = full right), the hands reaching for `hands` (car frame) when
     /// the cockpit has them.
-    fn pose(&self, s: f32, hands: Option<[Mat4; 2]>) -> Vec<Mat4> {
+    fn pose(&self, s: f32, interior: &[Mat4]) -> Vec<Mat4> {
         let (left, right) = ((-s).max(0.), s.max(0.));
         // 0x851730 → 0x852030: to-left, left, to-right, right.
         let weights = [(2. * left).min(1.), (2. * left - 1.).max(0.), (2. * right).min(1.), (2. * right - 1.).max(0.)];
@@ -256,10 +261,9 @@ impl Driver {
         let to_model = self.root.inverse();
         // Legs first (0x852EC0), then arms (0x852FD0).
         for limb in self.limbs.iter().rev() {
-            let target = match (limb.target, hands) {
-                (Target::Hand(i), Some(hands)) => hands[i],
-                (Target::Hand(_), None) => continue,
-                (Target::Fixed(m), _) => m,
+            let target = match limb.target {
+                Target::Keyed(n) => interior[n],
+                Target::Fixed(m) => m,
             };
             let world = self.world(&locals);
             ik::reach(&mut locals, &world, &self.parents(), limb, to_model * target);
@@ -281,7 +285,7 @@ impl Driver {
 }
 
 pub fn install(app: &mut App) {
-    app.add_systems(Update, (attach, pose).chain().before(crate::drive_present));
+    app.add_systems(Update, (attach, pose).chain().after(crate::cockpit::animate_interior).before(crate::drive_present));
 }
 
 /// Gives each driver part its joints once it is spawned.
@@ -310,10 +314,12 @@ fn attach(
 }
 
 /// Poses the driver for the human steering command −(vehicle +0xE30), the
-/// wheel's own input (docs/COCKPIT.md "Steering wheel").
+/// wheel's own input (docs/COCKPIT.md "Steering wheel"), reaching for this
+/// frame's interior dummies.
 fn pose(
     driving: Option<Res<crate::Driving>>,
     cockpit: Option<Res<crate::cockpit::Cockpit>>,
+    interior: Res<crate::cockpit::InteriorPose>,
     mut joints: Query<(&DriverJoint, &mut Transform)>,
 ) {
     let (Some(driving), Some(cockpit)) = (driving, cockpit) else {
@@ -324,7 +330,7 @@ fn pose(
     };
     let vehicle = &driving.runtime.state.car.owner.vehicle;
     let s = -vehicle.get(0xe30 / 4).copied().map_or(0., f32::from_bits);
-    let world = driver.pose(s, cockpit.wheel.as_ref().map(|w| w.hands(s)));
+    let world = driver.pose(s, &interior.0);
     for (DriverJoint(j), mut transform) in &mut joints {
         *transform = Transform::from_matrix(world[*j]);
     }
@@ -415,15 +421,17 @@ mod tests {
             ornament_lods: Default::default(),
         };
         let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY).unwrap();
-        let (driver, wheel) = (cockpit.driver.unwrap(), cockpit.wheel.unwrap());
+        let (driver, clips) = (cockpit.driver.unwrap(), cockpit.interior.unwrap());
         let drawn: Vec<_> = car.parts.iter().filter(|p| p.name.starts_with("interior/driver/")).collect();
         assert_eq!(drawn.len(), 1);
         assert!(drawn[0].name.ends_with("_body_x2"));
         assert_eq!((driver.joints.len(), driver.skin.len()), (80, 75));
+        let steering = clips.clip("steering").unwrap();
+        let hands = [clips.node("D_Lhand_Dummy").unwrap(), clips.node("D_Rhand_Dummy").unwrap()];
         for s in [-1., -0.5, 0., 0.5, 1.] {
-            let hands = wheel.hands(s);
-            let world = driver.pose(s, Some(hands));
-            for (limb, hand) in driver.limbs[..2].iter().zip(hands) {
+            let interior = clips.worlds(&[(steering, (s + 1.) * 0.5 * clips.duration(steering), 1.)]);
+            let world = driver.pose(s, &interior);
+            for (limb, hand) in driver.limbs[..2].iter().zip(hands.map(|h| interior[h])) {
                 let got = driver.root * world[limb.end];
                 let gap = got.w_axis.distance(hand.w_axis);
                 assert!(gap < 1e-3, "s={s} {}: hand {gap} m from its dummy", driver.joints[limb.end].name);
@@ -431,6 +439,27 @@ mod tests {
                 assert!(turn < 1e-3, "s={s}: hand rotation off by {turn} rad");
             }
             assert!(world.iter().all(|m| m.is_finite()));
+        }
+        // The pedals: full throttle and full brake press their pedal, and
+        // the right foot follows D_Rfoot_Dummy.
+        let vehicle = |throttle: f32, brake: f32| {
+            let mut v = vec![0u32; 0xe40 / 4];
+            v[0xe1c / 4] = throttle.to_bits();
+            v[0xe20 / 4] = brake.to_bits();
+            v
+        };
+        let foot = clips.node("D_Rfoot_Dummy").unwrap();
+        let rest = clips.worlds(&crate::cockpit::play(&clips, &vehicle(0., 0.)));
+        for (throttle, brake, pedal) in [(1., 0., "D_accelerator_Dummy"), (0.3, 1., "D_brake_Dummy")] {
+            let interior = clips.worlds(&crate::cockpit::play(&clips, &vehicle(throttle, brake)));
+            let n = clips.node(pedal).unwrap();
+            let moved = interior[n].w_axis.distance(rest[n].w_axis);
+            let turned = interior[n].to_scale_rotation_translation().1.angle_between(rest[n].to_scale_rotation_translation().1);
+            println!("pedal {pedal}: moved {moved} m, turned {turned} rad");
+            assert!(moved > 1e-3 || turned > 1e-2, "{pedal} did not move");
+            let world = driver.pose(0., &interior);
+            let gap = (driver.root * world[driver.limbs[3].end]).w_axis.distance(interior[foot].w_axis);
+            assert!(gap < 1e-3, "right foot {gap} m from its dummy");
         }
     }
 }

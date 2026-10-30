@@ -18,7 +18,7 @@ use bevy::{
     prelude::*,
     render::render_resource::TextureFormat,
 };
-use grid_formats::{interior, material, mesh, neanim, pssg, scene, texture};
+use grid_formats::{interior, material, mesh, pssg, scene, texture};
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
@@ -39,65 +39,24 @@ pub const LAYER: usize = 28;
 pub struct Cockpit {
     pub active: Vec<String>,
     pub anchor: Mat4,
-    /// The steering wheel, when the cockpit and its "Steering" clip have one.
-    pub wheel: Option<Wheel>,
+    /// The interior clips (steering wheel, pedals, levers), when the
+    /// cockpit has its animation set.
+    pub interior: Option<crate::interior_anim::Interior>,
     /// The dash displays (docs/COCKPIT.md "Gauges").
     pub dash: crate::dash::Dash,
     /// The driver (docs/COCKPIT.md "Driver").
     pub driver: Option<crate::driver::Driver>,
 }
 
-/// The interior "Steering" clip and the steering wheel's frame
-/// (docs/COCKPIT.md "Steering wheel"): the interior update (0x859FC0)
-/// samples the clip at (s + 1) / 2 of its duration and the result replaces
-/// the node's local transform.
-#[derive(Clone, Debug)]
-pub struct Wheel {
-    /// The wheel node's parent in the car frame (anchor · scene world).
-    parent: Mat4,
-    wheel: Keyed,
-    /// D_Lhand_Dummy and D_Rhand_Dummy under the wheel: keyed by the clip,
-    /// else their file transforms.
-    hands: [Result<Keyed, Mat4>; 2],
-    duration: f32,
-    /// Each part under the wheel: its frame relative to the wheel node.
-    parts: BTreeMap<String, Mat4>,
-}
-
-/// A node's channels in the clip.
-#[derive(Clone, Debug)]
-struct Keyed {
-    rotation: neanim::Keys,
-    translation: Vec<neanim::Keys>,
-}
-
-impl Keyed {
-    fn local(&self, t: f32) -> Mat4 {
-        let q = Vec4::from_array(self.rotation.sample(t));
-        let v: Vec3 = self.translation.iter().map(|k| Vec4::from_array(k.sample(t)).truncate()).sum();
-        Mat4::from_rotation_translation(Quat::from_vec4(q).normalize(), v)
-    }
-}
-
-impl Wheel {
-    /// The wheel node's local transform for the steering command `s`
-    /// (+1 = full right).
-    fn local(&self, s: f32) -> Mat4 {
-        self.wheel.local((s + 1.) * 0.5 * self.duration)
-    }
-
-    /// The hand dummies in the car frame for the steering command `s`.
-    pub fn hands(&self, s: f32) -> [Mat4; 2] {
-        let frame = self.parent * self.local(s);
-        let t = (s + 1.) * 0.5 * self.duration;
-        self.hands.each_ref().map(|h| frame * h.as_ref().map_or_else(|m| *m, |k| k.local(t)))
-    }
-}
-
-/// A cockpit part under the steering wheel: its frame relative to the
-/// wheel node.
+/// A cockpit part below a keyed interior node: the node and the part's
+/// frame relative to it.
 #[derive(Component)]
-pub struct WheelPart(Mat4);
+pub struct AnimatedPart(usize, Mat4);
+
+/// The keyed interior nodes in the car frame this frame (the driver's IK
+/// targets).
+#[derive(Resource, Default)]
+pub struct InteriorPose(pub Vec<Mat4>);
 
 /// The rear-view mirror target: hardware settings `mirrors` width and height
 /// (0x602400; 512 x 128, the default and every shipped preset), no MSAA.
@@ -156,7 +115,8 @@ pub fn install(app: &mut App) {
     crate::driver::install(app);
     app.insert_resource(mirror)
         .add_systems(Update, (create_mirror, place_mirror).chain().after(crate::drive_present))
-        .add_systems(Update, (attach_wheel, turn_wheel).chain().before(crate::drive_present))
+        .init_resource::<InteriorPose>()
+        .add_systems(Update, (attach_animated, animate_interior).chain().before(crate::drive_present))
         .add_systems(
             PostUpdate,
             (
@@ -208,37 +168,58 @@ fn no_mirror_shadows(
     }
 }
 
-/// Marks the parts under the steering wheel once they are spawned.
-fn attach_wheel(
+/// Marks the parts below keyed interior nodes once they are spawned.
+fn attach_animated(
     mut commands: Commands,
     cockpit: Option<Res<Cockpit>>,
     parts: Query<(Entity, &Name), Added<InteriorPart>>,
 ) {
-    let Some(wheel) = cockpit.as_ref().and_then(|c| c.wheel.as_ref()) else {
+    let Some(interior) = cockpit.as_ref().and_then(|c| c.interior.as_ref()) else {
         return;
     };
     for (entity, name) in &parts {
-        if let Some(post) = wheel.parts.get(name.as_str()) {
-            commands.entity(entity).insert(WheelPart(*post));
+        if let Some(&(node, post)) = interior.parts.get(name.as_str()) {
+            commands.entity(entity).insert(AnimatedPart(node, post));
         }
     }
 }
 
-/// The human driver's wheel follows the raw steering command
-/// −(vehicle +0xE30) with no smoothing (0x85F8F0 → 0x858C20 → 0x851730).
-fn turn_wheel(
+/// The interior clips the human driver's inputs play (0x85F8F0):
+/// - "Steering" at (s + 1) / 2 of its length for s = −(vehicle +0xE30), the
+///   raw command with no smoothing (0x858C20 → 0x851730 → 0x84CA10);
+/// - the pedals: p = throttle (+0xE1C) when it is at least the brake
+///   (+0xE20), else −brake; 0x84CC40 switches the pedal crossfade at once to
+///   "accel" (p ≥ 0) or "Brake" and sets that clip's time to |p| of its
+///   length, and 0x859FC0 samples only the selected clip.
+pub fn play(interior: &crate::interior_anim::Interior, vehicle: &[u32]) -> Vec<crate::interior_anim::Play> {
+    let word = |offset: usize| vehicle.get(offset / 4).copied().map_or(0., f32::from_bits);
+    let mut out = Vec::new();
+    if let Some(c) = interior.clip("steering") {
+        let s = -word(0xe30);
+        out.push((c, (s + 1.) * 0.5 * interior.duration(c), 1.));
+    }
+    let (throttle, brake) = (word(0xe1c), word(0xe20));
+    let p = if throttle >= brake { throttle } else { -brake };
+    if let (Some(accel), Some(brake)) = (interior.clip("accel"), interior.clip("brake")) {
+        let (c, f) = if p < 0. { (brake, -p) } else { (accel, p) };
+        out.push((c, f * interior.duration(c), 1.));
+    }
+    out
+}
+
+/// Poses the keyed interior nodes and the parts below them.
+pub(crate) fn animate_interior(
     driving: Option<Res<crate::Driving>>,
     cockpit: Option<Res<Cockpit>>,
-    mut parts: Query<(&mut crate::MovingPart, &WheelPart)>,
+    mut pose: ResMut<InteriorPose>,
+    mut parts: Query<(&mut crate::MovingPart, &AnimatedPart)>,
 ) {
-    let (Some(driving), Some(wheel)) = (driving, cockpit.as_ref().and_then(|c| c.wheel.as_ref())) else {
+    let (Some(driving), Some(interior)) = (driving, cockpit.as_ref().and_then(|c| c.interior.as_ref())) else {
         return;
     };
-    let vehicle = &driving.runtime.state.car.owner.vehicle;
-    let s = -vehicle.get(0xe30 / 4).copied().map_or(0., f32::from_bits);
-    let frame = wheel.parent * wheel.local(s);
-    for (mut part, WheelPart(post)) in &mut parts {
-        part.rest = frame * *post;
+    pose.0 = interior.worlds(&play(interior, &driving.runtime.state.car.owner.vehicle));
+    for (mut part, AnimatedPart(node, post)) in &mut parts {
+        part.rest = pose.0[*node] * *post;
     }
 }
 
@@ -367,7 +348,7 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_static_meshes(&tree)?;
     let draws = scene::read_static_draws(&tree, &sources)?;
-    let mut wheel = steering_wheel(root, stem, &tree, anchor)?;
+    let mut animated = crate::interior_anim::Interior::load(root, stem, &tree, anchor)?;
     let xml = std::fs::read_to_string(file(stem, "xml"))?;
     let dash = crate::dash::prepare(root, &xml, &tree, &draws)?;
     let mut groups = BTreeMap::new();
@@ -424,12 +405,10 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
         } else {
             geometry.insert_attribute(Mesh::ATTRIBUTE_NORMAL, source.normals.clone());
         }
-        if let Some((w, node, world)) = &mut wheel
+        if let Some(a) = &mut animated
             && let Some(render) = named(&tree, b"RENDERNODE", d.joint)
-            && descends(&tree, render, *node)
         {
-            let post = world.inverse() * Mat4::from_cols_array(&d.transform);
-            w.parts.insert(format!("interior/{}", utf8(d.id)), post);
+            a.register(&tree, format!("interior/{}", utf8(d.id)), render, Mat4::from_cols_array(&d.transform))?;
         }
         parts.push(Part {
             name: format!("interior/{}", utf8(d.id)),
@@ -453,20 +432,21 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
     }
     let active = interior::read_active_nodes(&xml)?;
     let active: Vec<String> = active.iter().map(|n| n.strip_prefix("x0_").unwrap_or(n).to_string()).collect();
-    let wheel = wheel.map(|(w, _, _)| w).filter(|w| !w.parts.is_empty());
+    let steering = animated.as_ref().and_then(|a| a.clip("steering").map(|c| a.duration(c)));
     println!(
-        "cockpit stem={stem} parts={} skipped={skipped} triangles={triangles} textures={} active_nodes={} wheel_parts={} steering_seconds={}",
+        "cockpit stem={stem} parts={} skipped={skipped} triangles={triangles} textures={} active_nodes={} wheel_parts={} steering_seconds={} animated_parts={}",
         parts.len(),
         images.len(),
         active.join(","),
-        wheel.as_ref().map_or(0, |w| w.parts.len()),
-        wheel.as_ref().map_or(0., |w| w.duration),
+        animated.as_ref().map_or(0, |a| a.parts_below("steering_wheel")),
+        steering.unwrap_or(0.),
+        animated.as_ref().map_or(0, |a| a.parts.len()),
     );
     car.parts.extend(parts);
     car.bindings.extend(bindings);
     car.textures.extend(images);
-    let driver = crate::driver::append(root, stem, &tree, anchor, car)?;
-    Ok(Cockpit { active, anchor, wheel, dash, driver })
+    let driver = crate::driver::append(root, stem, &tree, anchor, car, animated.as_ref())?;
+    Ok(Cockpit { active, anchor, interior: animated, dash, driver })
 }
 
 /// The first `kind` element whose id is `id`.
@@ -485,63 +465,6 @@ pub(crate) fn descends(tree: &pssg::Tree, mut node: usize, ancestor: usize) -> b
             None => return false,
         }
     }
-}
-
-/// A [`Wheel`] with its node index and the node's scene world.
-type WheelNode = (Wheel, usize, Mat4);
-
-/// The `steering_wheel` node with the interior animation set's "Steering"
-/// clip (`int_<stem>_anims.pssg`, set 0, looked up by 0x84C5F0), its node
-/// index and scene world; `None` when either is missing.
-fn steering_wheel(
-    root: &Path,
-    stem: &str,
-    tree: &pssg::Tree,
-    anchor: Mat4,
-) -> Result<Option<WheelNode>, Box<dyn Error>> {
-    let Some(node) = named(tree, b"NODE", b"steering_wheel") else {
-        return Ok(None);
-    };
-    let Some(parent) = tree.nodes[node].parent else {
-        return Ok(None);
-    };
-    let path = root.join(format!("interiors/{stem}/int_{stem}_anims.pssg"));
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let bytes = read(&path)?;
-    let sets = neanim::read_sets(&pssg::read_tree(&bytes)?)?;
-    let Some(clip) = sets.first().and_then(|s| s.clips.iter().find(|c| c.name.eq_ignore_ascii_case("steering"))) else {
-        return Ok(None);
-    };
-    let keyed = |target: &str| {
-        let of = |semantic: &'static str| {
-            clip.channels.iter().filter(move |c| c.target == target && c.semantic == semantic)
-        };
-        Some(Keyed {
-            rotation: of("rotation_quaternion").next()?.keys.clone(),
-            translation: of("translation").map(|c| c.keys.clone()).collect(),
-        })
-    };
-    let Some(wheel) = keyed("steering_wheel") else {
-        return Ok(None);
-    };
-    let mut hands = [Ok(wheel.clone()), Ok(wheel.clone())];
-    for (hand, name) in hands.iter_mut().zip(["D_Lhand_Dummy", "D_Rhand_Dummy"]) {
-        *hand = match (keyed(name), named(tree, b"NODE", name.as_bytes())) {
-            (Some(k), _) => Ok(k),
-            (None, Some(n)) => Err(Mat4::from_cols_array(&scene::matrix(tree, n)?)),
-            (None, None) => return Ok(None),
-        };
-    }
-    let wheel = Wheel {
-        parent: anchor * Mat4::from_cols_array(&scene::node_matrix(tree, parent)?),
-        wheel,
-        hands,
-        duration: clip.duration(),
-        parts: BTreeMap::new(),
-    };
-    Ok(Some((wheel, node, Mat4::from_cols_array(&scene::node_matrix(tree, node)?))))
 }
 
 #[cfg(test)]

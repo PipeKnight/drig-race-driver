@@ -132,7 +132,7 @@ The cockpit's wheel is not turned by a computed angle. It is an animation clip s
 
 - `grid_formats::neanim` reads NeAnim sets (`NeAnimPacketData_L4_KA` keys shared by channels, interpolated linearly; `B1` one-component Bezier). `pssg::read_tree` keeps `NeAnimPacketData_*` nodes as raw data. Every shipped interior and character animation file decodes [V, test `shipped_animation_files_decode`].
 - `cockpit::append` finds steering_wheel and the "Steering" clip; each cockpit part under the node keeps its frame relative to the node (Lacetti: 6 parts).
-- `turn_wheel`, before `drive_present`: s = −(vehicle +0xE30), t = (s + 1) / 2 · 4 s; the part's rest = anchor · parent world · T(t) R(t) · its frame. The quaternion convention is pinned by the test `shipped_lacetti_steering_clip`: the centre key is the file's bind matrix.
+- `turn_wheel` (F627; `animate_interior` since the pedals step), before `drive_present`: s = −(vehicle +0xE30), t = (s + 1) / 2 · 4 s; the part's rest = anchor · parent world · T(t) R(t) · its frame. The interior animator is described under "Pedals". The quaternion convention is pinned by the test `shipped_lacetti_steering_clip`: the centre key is the file's bind matrix.
 - Not ported:
   - the hand dummies (no driver model yet);
   - the exterior wheel in the other views (left as in F618, so those views stay unchanged);
@@ -141,6 +141,21 @@ The cockpit's wheel is not turned by a computed angle. It is an animation clip s
 Image proof (fixed-step renders against F625's):
 - chase_far, bonnet and bumper are 0 px different. chase_close is 0 px on a rerun; its first run differed in one pixel by 6, which the rerun showed to be run-to-run noise.
 - In the head-cam, `--steering 1` (the port's controls: positive to the left) turns the wheel 90° counter-clockwise and `--steering -1` 90° clockwise. Renders: `local/cam/render/wheel`, `wheel_s-1`, `wheel_s1`.
+
+## Pedals
+
+### What the original does [D]
+
+- The interior set's "accel" and "Brake" clips (0.333 s, 2 keys) each key all three pedal dummies (`D_accelerator_Dummy`, `D_brake_Dummy`, `D_clutch_Dummy`) and `D_Rfoot_Dummy`: each pose has one pedal pressed (about 10° on the Lacetti) and the foot on it. "Clutch" keys the clutch and `D_Lfoot_Dummy`; nothing plays it.
+- Feed (0x85F8F0, human driver): p = throttle (`0x9961D0(1)`, vehicle +0xE1C) when it is at least the brake (`0x9961D0(2)`, +0xE20), else −brake. `0x9961D0(i)` reads +0xE18 + 4i and negates index 6 (the steering).
+- 0x84CC40(p): the pedal crossfade switches at once to source 0 ("accel", p ≥ 0) or 1 ("Brake", p < 0); the accel timer is set to its length · max(p, 0), the Brake timer to its length · max(−p, 0).
+- 0x859FC0 samples the sources with weight > 0 through the pedal binding (scene index 0 only), so one clip at a time poses the pedals and the right foot; the right leg's IK follows `D_Rfoot_Dummy` (0x852EC0).
+
+### The port
+
+- `interior_anim::Interior` holds the whole interior set on the nodes it keys (parents first). Each frame a node's local transform is the weighted sum of the playing clips that key it, the quaternion normalised, else the file's. Parts below a keyed node follow it (`AnimatedPart`). The steering wheel and its hand dummies use the same path.
+- `cockpit::play` gives the clips each frame: "Steering" from s, and "accel" or "Brake" from p as above. `animate_interior` stores the posed nodes (`InteriorPose`); the driver's four IK targets are those nodes (the left foot stays at its file pose).
+- Checks: `driver::tests::lacetti_hands_reach_the_wheel_dummies` also presses full throttle and full brake. Each pedal turns (0.167 and 0.175 rad) and the right foot stays within 1 mm of `D_Rfoot_Dummy`.
 
 ## Gauges
 
@@ -256,7 +271,6 @@ Not verified: the digit orientation against the original's screen (font strip or
   - the joints are written as children of the body part.
 - Not ported:
   - gear-change and handbrake reaches (state machine 0x8573E0, per-car sets from database.bin `vehicle_interior`);
-  - the pedal clips (the right foot follows a fixed `D_Rfoot_Dummy`);
   - the g-force lean (0x857F20), breathing and face clips;
   - `small_cockpit_anims.pssg` (cars with `small_cockpit`);
   - the suit tint (TTintColourMask, tintColour1..3);
