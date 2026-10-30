@@ -1,4 +1,5 @@
 //! Resource-to-behavior adapters shared by local diagnostics.
+pub mod ambience_audio;
 pub mod audio_mix;
 pub mod audio_pacing;
 pub mod ai_driver;

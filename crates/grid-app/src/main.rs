@@ -42,6 +42,7 @@ mod body_specular;
 mod camera;
 mod player_view_visibility;
 mod cockpit;
+mod ambience_sound;
 mod collision_sound;
 mod car_materials;
 mod lamp_materials;
@@ -4134,6 +4135,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(error) => warn!("Collision audio unavailable; driving continues: {error}"),
             }
+            // The track model's location ambience (AUDIO_RESEARCH §30); a
+            // location without an AutoPlay is silent, as in the original.
+            match grid_tools::ambience_audio::location(&root, &route)
+                .map_err(|e| e.to_string())
+                .and_then(|name| name.map_or(Ok(None), |n| grid_tools::ambience_audio::AutoPlay::load(&root, &n)))
+            {
+                Ok(Some(play)) => ambience_sound::install(&mut app, play, mix.clone()),
+                Ok(None) => println!("ambience_audio version=1 event=none route={}", route.path()),
+                Err(error) => warn!("Ambience audio unavailable; driving continues: {error}"),
+            }
             match grid_tools::hud_audio::Bank::load(&root) {
                 Ok(bank) => hud_sound::install(&mut app, bank, mix.clone()),
                 Err(error) => warn!("HUD audio unavailable; driving continues: {error}"),
@@ -7865,6 +7876,143 @@ mod driving_tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    /// Backlog row 70: the location ambience (AUDIO_RESEARCH §30) at
+    /// Washington (loc_usa). Parked on the grid the field fills and its loops
+    /// play near their minVol; a pause and a drive failure silence them and
+    /// they return after each. Prints each window's RMS beside the engine's.
+    /// (The speed fade is `ambience_audio`'s field test: this harness has no
+    /// track geometry, so the car cannot drive here.)
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn location_ambience_plays_fades_and_pauses() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+                let failures = ambience_windows(Path::new(&root));
+                assert!(failures.is_empty(), "{failures:#?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn ambience_windows(root: &Path) -> Vec<String> {
+        use grid_tools::{
+            engine_audio_continuous::BLOCK,
+            source_vehicle::{Controls, DELTA},
+            time_trial::State,
+        };
+        let route = Route::new("tracks/usa/washington/route_0").unwrap();
+        let model = CarModel::new("lac").unwrap();
+        let mut runtime = grid_tools::source_vehicle::Runtime::load(root, &route, &model, "slot_00", 200679).unwrap();
+        runtime.enable_lap_timing(root).unwrap();
+        let start = StartSequence::load(root, &route).unwrap();
+        let mut trial = time_trial::Trial::new(1, grid_tools::time_trial::Mode::Wheels, false).unwrap();
+        trial.state = State::new(1, f64::from(DELTA), start.seconds).unwrap();
+        let mix = Some(std::sync::Arc::new(grid_tools::audio_mix::Table::load(root).unwrap()));
+        let location = grid_tools::ambience_audio::location(root, &route).unwrap().unwrap();
+        let play = grid_tools::ambience_audio::AutoPlay::load(root, &location).unwrap().unwrap();
+        let step = Duration::from_secs_f64(f64::from(DELTA));
+        crate::mobile::init_test_pool();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))
+            .insert_resource(Time::<Fixed>::from_duration(step))
+            .insert_resource(start)
+            .insert_resource(trial)
+            .insert_resource(Driving {
+                runtime,
+                geometry: None,
+                paused: false,
+                failure: None,
+                notices: Vec::new(),
+                scripted_ticks: Some(72_000),
+                scripted: Controls::default(),
+                handbrake_from: None,
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+                opponents: None,
+                auto_reset: Default::default(),
+                reset_line: None,
+            })
+            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
+            .init_resource::<input::ShiftQueue>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(FixedUpdate, drive_tick)
+            .init_asset::<engine_sound::EngineSource>()
+            .init_asset::<ambience_sound::AmbienceSource>();
+        let bank = grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap();
+        engine_sound::install_systems(&mut app, vec![Some(bank)], mix.clone());
+        ambience_sound::install_systems(&mut app, play, mix);
+        app.update();
+        fn decoder<T: Asset + Decodable>(app: &mut App) -> T::Decoder {
+            let world = app.world_mut();
+            let handle = world.query::<&AudioPlayer<T>>().single(world).unwrap().0.clone();
+            world.resource::<Assets<T>>().get(&handle).unwrap().decoder()
+        }
+        let mut sources: [Box<dyn Iterator<Item = f32>>; 2] = [
+            Box::new(decoder::<engine_sound::EngineSource>(&mut app)),
+            Box::new(decoder::<ambience_sound::AmbienceSource>(&mut app)),
+        ];
+        let mut frame = |app: &mut App, throttle: f32| -> [f64; 2] {
+            app.world_mut().resource_mut::<Driving>().scripted.throttle = throttle;
+            app.update();
+            let mut sums = [0f64; 2];
+            for _ in 0..BLOCK * 2 {
+                for (k, source) in sources.iter_mut().enumerate() {
+                    let v = f64::from(source.next().unwrap_or(f32::NAN));
+                    sums[k] += v * v;
+                }
+            }
+            sums
+        };
+        let second = (1. / DELTA) as usize;
+        let rms = |frames: &[[f64; 2]], k: usize| {
+            (frames.iter().map(|f| f[k]).sum::<f64>() / (frames.len() * BLOCK * 2).max(1) as f64).sqrt()
+        };
+        let active = |app: &App| ambience_sound::active(app.world().resource::<ambience_sound::AmbienceSound>());
+        let mut failures = Vec::new();
+        let mut window = |app: &mut App, name: &str, seconds: usize, throttle: f32| -> f64 {
+            let frames: Vec<_> = (0..seconds * second).map(|_| frame(app, throttle)).collect();
+            let last = &frames[frames.len() - second..];
+            let (engine, ambience) = (rms(last, 0), rms(last, 1));
+            let speed = grid_tools::ambience_audio::Listener::of(
+                &app.world().resource::<Driving>().runtime.pose(),
+                app.world().resource::<Driving>().runtime.velocity(),
+            )
+            .speed;
+            println!(
+                "ambience_windows version=1 window={name} speed={speed:.1} active={} engine={engine:.5} ambience={ambience:.5}",
+                active(app)
+            );
+            ambience
+        };
+        let parked = window(&mut app, "parked", 12, 0.);
+        if parked < 1e-4 {
+            failures.push(format!("parked: the ambience is silent: rms {parked:.5}"));
+        }
+        type Stop = fn(&mut Driving, bool);
+        let stops: [(&str, Stop); 2] = [
+            ("paused", |d, on| d.paused = on),
+            ("failure", |d, on| d.failure = on.then(|| "test".to_owned())),
+        ];
+        for (name, stop) in stops {
+            stop(&mut app.world_mut().resource_mut::<Driving>(), true);
+            let held = window(&mut app, name, 2, 0.);
+            if held > 1e-4 {
+                failures.push(format!("{name}: the ambience still sounds: rms {held:.5}"));
+            }
+            stop(&mut app.world_mut().resource_mut::<Driving>(), false);
+            let back = window(&mut app, &format!("{name}_resumed"), 4, 0.);
+            if back < 1e-4 {
+                failures.push(format!("{name}: the ambience does not return: rms {back:.5}"));
+            }
+        }
+        failures
     }
 
     /// Backlog row 95: a loop must not hold its last level once the vehicle

@@ -1781,3 +1781,103 @@ paused or failed, the condition the engine and tyres use. The next tick's levels
 back, and the tick clears the flag. It logs `collision_audio version=2 event=hush`. One-shots
 play out as before. [I] Silence stands in for the fade the original's continuing simulation would
 give. Not heard (muted).
+
+## 30. Location ambience ported (backlog row 70)
+
+30 October 2026, Claude Code. Static reading of the shared master (cache `local/re-cache/` of the
+main checkout: 0x453200, 0x44D420, 0x4477F0, 0x447FC0, 0x4611C0, 0x461430) and the disassembly of
+0x448004–0x4483A5. The original was not run. This corrects §7.5 on the AutoPlay choice.
+
+**The object [O].** Constructor 0x4611C0 (vtable 0xCB510C; update slot 0x453200) builds the in-race
+ambience object with 96 emitter slots of 0x50 bytes at +0x18E4. Its AutoPlay sub-object sits at
++0x1E0. 0x461430 is that sub-object's load step: mode 2 asks the track for its
+`local_audio_ambience` name, looks it up with 0x433310 (case-insensitive) and stores the AutoPlay
+at +0x21C and its bank at +0x220.
+
+**AutoPlay choice [O static].** Every caller of 0x433310 was traced. They are:
+- 0x461430: the location ambience, chosen once at load;
+- 0x433738/0x433748: two fixed lookups (crowd, not ported here);
+- 0x4392D0: the dev menu;
+- 0x45A690: the autoplaybanks loader;
+- 0x45D758: the front end.
+
+The ambience-trigger boxes never pick an AutoPlay, so the §7.5 reading that boxes "switch the
+active AutoPlay when entered" is withdrawn: their SETTING is not used for the AutoPlay [I: it
+belongs to the reverb zones]. Locations without an AutoPlay stay silent.
+
+The track models' `local_audio_ambience` values [V, test `shipped_ambience_per_track`]:
+
+| Location | AutoPlay | Tracks |
+|---|---|---|
+| loc_usa | yes | Long Beach, San Francisco, Detroit, Washington |
+| loc_yoko | yes | Yokohama Docks |
+| loc_europe | none | Nürburgring, Spa, Istanbul, Jarama, Milan, Donington |
+| loc_japan | none | Haruna, Okutama, Shibuya |
+| loc_lemans | none (no `loc_lemans.WIP` either) | Le Mans |
+| test | none | front end, freerace, skipfe |
+
+So only the five US and Yokohama tracks have race ambience. The AutoPlays loc_milan,
+loc_mil_tun, loc_tun_usa, loc_sf, loc_water, loc_japan1/2, loc_tun_jap, loc_britcir,
+loc_spacir, loc_yokoHP and loc_yokoDocks exist in autoplaybanks but no track model names them
+[O data; I: unused in the shipped game].
+
+**Per tick [O].** 0x453200 runs while the object is active. Its listener is the first car whose
++0x6C is 0, the human player (+0x3A74 = car +0x24 → +0xDB0):
+- 0xA69630 copies the body matrix into +0x3A30 (right), +0x3A40 (up), +0x3A50 (forward) and
+  +0x3A60 (position). These are the port's `Runtime::pose()` rows (physical +0x1D0).
+- +0x3A70 = |velocity| (0xA69800; the port's `velocity()`, physical +0x220), in m/s.
+- Then 0x44D420 runs: a spawn (0x4477F0), then the emitter update (0x447FC0).
+
+**Spawn, 0x4477F0 [O unless marked].**
+1. k = clamp(10·speed, 10, 100). Nothing spawns unless random(0, 50) ≤ density·k. For loc_usa
+   (density 0.12) that is 2.4 % of ticks when parked and 24 % at 10 m/s or more.
+2. A uniform sample of the AutoPlay is picked, kept if random(0, 1) ≤ its preset's probability.
+   Its condition and timeOfDay must match; no shipped Sample sets them.
+3. A free slot is taken (0x40FD60). For a looping sample (the bank sample's format bit 20, the
+   port's WIP flag 0x10), the spawn returns if the looper count is already above maxLoopers;
+   otherwise the count rises.
+4. r = random(minSpawiningDistance, maxSpawiningDistance). The position is the car's plus r
+   times a vector whose components are each uniform between a and a + 4·forward, where
+   a = −right or +right with odds 1/2 each (range(0, 4) < 2). The vector lies beside the car,
+   up to four forward units ahead [I: the per-component ordering of 0x4682A0].
+5. Start the sample (0x43E4B0) at its preset's min/max distance, looping per its flag, with the
+   level of the update below without the fade.
+
+**Update, 0x447FC0, per occupied slot [O].**
+1. Count the tick and measure the distance d from the emitter to the car.
+2. d > 117 m (0xCB4A84): stop the voice, lower the looper count for a loop, free the slot.
+3. Otherwise, a one-shot whose voice has ended and with d > 10 m (0xCAFA58) plays again with
+   odds 1 in 600 (random % 0x258). On the other 599 ticks its level is not touched.
+4. The level:
+   - band = linstep(minSpeed, maxSpeed, speed) when minSpeed < maxSpeed, else 1;
+   - fade = min(1, ticks/30);
+   - t = clamp(fade·band, 0, 1);
+   - dB = lerp(minVol, maxVol, t) + master + lin2db(fade);
+   - master = lerp(minVol, maxVol, linstep(minVel, maxVel, speed)) of the AutoPlay's
+     `masterCollisionInfo` (`autoplay` for the locations), applied only above its minVel
+     [I: the offsets +0x54..+0x60 are minVel, maxVel, minVol, maxVol in Curve order].
+   - The location presets are minVol −1 and maxVol −48 over 0–50 m/s, so a parked car hears the
+     loops at about −1 dB, and they fade out as the car speeds up.
+5. The voice is then mixed on the Ambience group (12) from the Camera listener (§7.2), with the
+   A23B70 distance law and the preset's min/max distance.
+
+**Port.**
+- `grid_tools::ambience_audio`:
+  - `location` reads the route's `track_model.local_audio_ambience`;
+  - `AutoPlay::load/parse` reads autoplaybanks.bin (presets merged into samples), the WIP bank
+    and the master curve;
+  - `Field::tick` is 0x44D420 with the spawn and update above;
+  - `Mixer` plays one voice per slot, looped or once, with the collision loops' gain glide.
+- grid-app `ambience_sound`:
+  - installed when the location has an AutoPlay; logs `ambience_audio version=1 event=queued`
+    or `event=none`;
+  - its FixedUpdate tick runs after `drive_tick` around the player's car and sends levels with
+    the group mix, the distance law and the camera pan;
+  - when the ticks stop (pause, failure, the frozen race end) it hushes, as §29.
+
+**[I] and gaps.**
+- The game's random generator is not reproduced; a seeded LCG stands in.
+- The free slot is taken as the first free one.
+- A finished one-shot is detected by its length in the field, not by the voice handle.
+- The tick is the port's 62.5 Hz vehicle tick for the original's frame (§8).
+- The crowds (0x44E220 with NormalCrowd/GrandStandCrowd, Crowd group 11) are not ported yet.
