@@ -226,11 +226,60 @@ diamond-wire fence and its posts sit in front of that structure. This supports
 restoring structural coverage while keeping foreground fence coverage a separate
 problem. It does not prove the exact blend/depth/A2C implementation, establish a
 matched-camera pixel comparison, or validate the original fence from its reverse
-side. The two ordinary opaque grandstand exceptions remain in the port; G283's
-SourceFront+RawA2c remains diagnostic rather than a delivered general solution.
+side. At the time of this reference, the port still had two ordinary opaque grandstand
+exceptions. The later G337 shared-family adaptation below replaces them.
 
 Private original captures: `local/graphics/original-stadium02/windowed01/`
 `original-replay-foundation01.png` and `original-replay-foundation02.png`.
 The game closed normally, and the sole temporary hardware-settings change was
 restored with the original SHA-256. Steam installation and profile saves were
 not modified by the comparison tools.
+
+## Shared family coverage (G337, selected runtime validation)
+
+The shared adapter selects permanent typed materials from the existing exact
+`object_simple_mesh` membership, including placed and breakable parts, and
+removes both grandstand-name Opaque exceptions. Ordinary glass-family sheets
+return to the existing Blend adaptation. This is separate from source-glass
+depth/velocity parity, which remains open. Coverage is shared across the source family; the limits below remain explicit.
+
+The candidate routes actual4x forward attachments to filtered raw-alpha A2C and
+actual1x forward/camera-prepass attachments to strict alpha greater than0.25.
+The latter borrows a saved cheap source variant's coverage rule while retaining
+ordinary PBR RGB; it does not establish original runtime variant selection.
+Selected CSM pixel bytecode additionally kills alpha below0.5, with equality
+preserved; the local shadow shader now follows this rule, preserving shadow bias
+and unclipped-depth behavior. Vertex alpha, source diffuse alpha/UVs and mips
+remain part of coverage. Selected actual baseline and native-DLAA runs validate material admission and
+shader specialization. Extreme minification and all devices remain unverified.
+
+Normal initial spawning and RawMaterial batching replace diagnostic component
+swaps. Deferred, ambiguous point/spot depth roles and4x camera prepasses are
+explicitly outside this adapter; the current baseline does not request camera
+prepasses and native DLAA requests1x depth/motion. Legacy exact-panel probes
+remain incompatible with this adapter rather than silently changing their controls. The original
+comparison and selected ordinary, native1x and Donington controls are recorded below.
+
+Corrected source passes553app tests, strictClippy/featurebuild and actual
+Detroit wide/opposite-face baseline captures, common baseline native-DLAA wide,
+ordinary twelve-car driving and another-track Donington native-DLAA drive.
+The enhanced-profile STK request failed CLI admission before rendering; it was
+corrected to the existing general baseline DLAA path, with failure evidence kept.
+Selected images restore framing/openings and keep the foreground net; fine
+patterns remain and extreme-mip/moving-camera/device coverage is not established.
+All ordered player/input/handling/deformation records in the matched Detroit
+ordinary run equal the previous control. Prepared counts are24parts/8materials
+for Detroit and12/4 for Donington, not an inventory of every queued family draw.
+Private evidence: local/graphics/foundation-general01/ and
+local/graphics/foundation-source-family01/. Fresh-main integration is recorded
+separately in G337.
+
+After integrating mainF644, the default crate gate passes555tests and Clippy;
+combined DLAA/paint Clippy and release build also pass. Three fresh windowless
+runs retain the exact wide static image, preserve all four recorded player
+families in ordinary twelve-car driving and render a120-frame native-DLAA BMW
+smoke sequence with the new particle material. Selected dense frames obscure
+glass/lenses/ground without the prior isolated cutouts. This integration check
+has no new Off arm or exhaustive temporal/device claim. Compiled source88dbfa20,
+EXEcd2139b4; full hashes/receipts are in G337 and ignored local/graphics/
+foundation-source-family01/build03/ and foundation-general01/integration-f644-01/.

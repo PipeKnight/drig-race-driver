@@ -43,7 +43,9 @@ of its `grid_tools::tyre_smoke::SMOKE_TEXTURES` (`SM33`, `SM33_dark`, `SM38`, `W
   - blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, depth test LEQUAL with no depth write;
   - pixel alpha = diffuse alpha × vertex COLOR.z;
   - the vertex normal is lerped toward the normal-mapped normal by COLOR.x;
-  - two UV sets are crossfaded by COLOR.w.
+  - two diffuse UV samples are mixed once by COLOR.w, with the old sample selected
+    directly when both UVs are identical; this is a UV-identity test, not a derivative test
+    (see the 30 October verification below).
 
 ### Emission (`73F860`, per car, AI included) [D]
 
@@ -68,7 +70,11 @@ of its `grid_tools::tyre_smoke::SMOKE_TEXTURES` (`SM33`, `SM33_dark`, `SM38`, `W
   direction turns by more than 10° (`73F0A0`).
 - **Vertices (`739570`):**
   - half width = 0.5 × tyre width (settings `+10A4`) × layer width scale;
-  - V advances by ΔU × 4 × step / width, which keeps the texel aspect.
+  - two incoming V phases advance independently. Each increment uses its own selected
+    ΔU, the atlas aspect and stored travel, but **both use the current endpoint's width
+    scale** as denominator. The familiar ΔU × 4 × step / width describes an unchanged
+    layer; it does not establish a shared phase across layer changes. See below for
+    the recovered state fields and remaining initialization/wrap gaps.
 - **Colour bytes:**
   - byte0 = ramp × Fade (ramp 0, 0.5, 1 over the first quads);
   - byte1 = wetLightingScale;
@@ -95,6 +101,70 @@ of its `grid_tools::tyre_smoke::SMOKE_TEXTURES` (`SM33`, `SM33_dark`, `SM38`, `W
 
 The other reading (D3DCOLOR) would scale alpha by 0.12 on tarmac. With a band-average texture
 alpha of 0.4–0.5, that would make marks nearly invisible, so it is rejected.
+
+### 30 October 2026: selected shader and independent V phases
+
+[V] The existing maintained `tools/disassemble_packed_grid_shader.py`, using
+Microsoft `D3DDisassemble` from `d3dcompiler_47.dll` version 10.0.26100.9606,
+rechecked the selected `skidmarks.cg.fp` program. Its 1544-byte program hash is
+`5ce8efb73590ec0d25c23af40ef364db8f1cc0264d8954c99beebb57443307e5`.
+Private assembly, source/tool hashes and lookup receipts remain under
+`local/handoff/drafts/grass-skid-source-audit01/phase05/`; no original bytecode
+or assembly is included here. This verifies a selected static program, not
+observed original runtime selection or visual equivalence.
+
+The historical private `local/ground-effects/skidmarks/scripts/sm3dis.py` table
+omitted `BEM` at opcode 89, shifting its subsequent names. Installed official
+Windows SDK 10.0.26100.0 `d3d9types.h` and Microsoft's disassembly agree:
+`DP2ADD` is 90, `DSX` is 91 and `DSY` is 92. The old four-operand instruction
+labeled `dsx` is therefore a dot-product-plus-add. Any derivative interpretation
+based on that private helper is superseded. The maintained Microsoft-based
+disassembly tools were already correct; no new public tool is needed.
+
+Both diffuse samples occur before the condition. The program computes squared
+UV separation. Identical UVs select the old diffuse and normal samples directly;
+otherwise COLOR.w mixes the new and old samples once. The selected diffuse alpha
+is then multiplied by COLOR.z. COLOR.w controls the layer transition; COLOR.x
+separately controls the normal-map influence. This does not resolve the existing
+COLOR byte-format/normalization caveat above or reproduce source lighting.
+
+[D] Cached vertex producer `739570` reads separate phases from emission context
+`+0x10` and `+0x14`, writes them into UV0.V and UV1.V at the previous endpoint,
+and advances each separately for the current endpoint. Each phase increment is
+its own selected ΔU multiplied by the common factor:
+
+`atlas_aspect × stored_travel × reciprocal_tyre_width / current_width_scale`.
+
+The old lane uses the previous selected band; the new lane uses the current
+selected band. Both increments use the **current** selected width scale. U
+mirroring happens after this calculation. A common incoming-V anchor, or using
+the old width for the old lane, is not supported by this recovered producer.
+[V] Saved caller instructions in `73F860` read strip `+0x2D48` and `+0x2D4C`
+into that temporary context and write both back after the vertex call.
+
+Full phase lifecycle fidelity remains open:
+
+- [D] `7288E0` zeros the temporary context phases, but the caller overwrites them
+  from strip state. Fresh strip initialization is not proved by that temporary
+  zeroing; the cached pool setup `73E5A0` does not explicitly initialize these
+  two fields, and the lower allocation/construction path is unresolved.
+- [V/D] Capacity chaining in `73F860` transforms the previous phases through
+  `BF7620` and `BF90EA`. The latter is the already indexed CRT modulo helper;
+  the former has no body in the inspected cache. Exact wrapping, divisor and
+  rounding remain unresolved. The second-lane sequence also uses the first
+  phase as an input to `BF7620`; independent guessed `fract()` calls are not
+  justified.
+- [D] Post-emission `730540` dispatches to `729E90` or `729FE0`; their bodies are
+  absent from the inspected cache, so further phase/vertex effects are not
+  excluded. Decompiled integer-pointer casts and packing helper `4B22D0` also
+  leave exact float/half conversion and rounding unverified.
+
+The production port still starts a new strip on a layer-kind change, as the
+implementation table records. Private patch06 carries the recovered two-phase
+segment formula and UV-identity condition, but remains uncompiled and untested;
+its fresh-zero initialization and unwrapped capacity carry are **AUTHORED**.
+It is not a shipped fix or source-phase lifecycle parity claim. No new build,
+GPU capture or original-code execution was performed for this verification.
 
 ## 2. Wheel kick-up (dirt, grass, gravel, sand)
 

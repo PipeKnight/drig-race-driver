@@ -55,7 +55,7 @@ pub fn install(app: &mut App) {
     }
     app.add_systems(
         PostStartup,
-        (merge::<StandardMaterial>, merge::<SurfaceMaterial>)
+        (merge::<StandardMaterial>, merge::<SurfaceMaterial>, merge::<crate::foundation_backing::RawMaterial>)
             .chain()
             .after(crate::track_surface::attach),
     )
@@ -132,7 +132,9 @@ fn merge<M: Material>(
         }
         if !materials
             .get(&material.0)
-            .is_some_and(|m| matches!(m.alpha_mode(), AlphaMode::Opaque | AlphaMode::Mask(_)))
+            .is_some_and(|m| matches!(m.alpha_mode(), AlphaMode::Opaque | AlphaMode::Mask(_))
+                || (std::any::TypeId::of::<M>() == std::any::TypeId::of::<crate::foundation_backing::RawMaterial>()
+                    && m.alpha_mode() == AlphaMode::AlphaToCoverage))
         {
             blended += 1;
             continue;
