@@ -393,3 +393,43 @@ probe checks the purchased bank at 195 coordinates over 49 keys and preserves
 all 980 input bytes. This is the relocated helper passing, not reuse of G303's
 historical result. Receipts and source/binary hashes are under
 `local/graphics/crowd-sampling-api01/`. Live clock/pose parity remains unverified.
+
+### Selected packet-range clock configuration (G344)
+
+[D, selected static paths] The known crowd controller advances its timer using
+an incoming scalar unchanged, then submits the mapped bank coordinate to packet
+evaluation. The producer of the crowd job's `+0x0C` scalar is still unknown;
+seconds, frames and normalized time are not interchangeable proven labels.
+
+| Address | Recovered role |
+|---|---|
+| `0x0074F530` | `crowd_select_pair_reset_timer`: installs the selected pair, sets extent and mapped span from the same argument, sets offset, repeat count0, seeks0 and enables advancement. Stop-policy byte is retained. |
+| `0x0076C7A0` | `crowd_select_pair_from_range`: successful range A,B supplies offset A and extent/span B-A. |
+| `0x0076C890` | `crowd_select_flagged_pair_from_range`: same range configuration with an auxiliary controller flag; not a recovered speed parameter. |
+| `0x00AC3E00` | `neanim_aggregate_packet_ranges`: nullable packet list range reduction through virtual+0x38. |
+| `0x00B32970` | `crowd_s4_get_header_range`: selected ordinary S4 vtable callback returns native header+8/+C. |
+| `0x00B34560` | `crowd_l4_get_header_range`: corresponding ordinary L4 callback returns header+8/+C. |
+| `0x00ACACE0` | `animation_set_mapped_span`: changes mapped span with requested/mapped coherence updates. |
+| `0x00ACAB10` | `animation_set_mapped_offset`: shifts mapped output by the offset difference and reconstructs requested input where allowed. |
+
+For a positive finite nonzero selected duration D=B-A, span S=D, offset O=A
+and repeat count0, the local mapping has unit slope and periodic repetition:
+requested input remains separate from mapped output, with offset added after
+wrapping. Source unsigned quotient conversion, finite-count behavior and negative
+coordinates must not be replaced blindly with Rust casts or Euclidean remainder.
+The range reducer initializes maximum with positive FLT_MIN_NORMAL, not negative
+FLT_MAX; empty, negative-only and NaN domains need their actual source policy.
+
+A caller flag can subsequently seek the absolute request B, rather than B-A.
+For A=2,B=6, reset maps to2; that later request6 maps to4. Calling this a retained
+final endpoint would be incorrect. Advance disables after mapping an overshoot
+only when the stop-policy byte is false; equality does not stop or clamp output.
+
+These facts close selected range-to-configuration and mapped-coordinate edges.
+They do not establish every selected packet family, header construction from keys,
+live instance parameters, real-time playback speed, provider binding or rendered
+pose parity. No clock API or production seconds-to-bank conversion is introduced.
+The eight proposed arithmetic controls in the private constraints note are not
+implemented or run. Shared lookups/cache and bounded instruction windows were
+reused; no new decompilation, original process or GPU run was needed. Evidence:
+`local/handoff/drafts/crowd-clock-contract29/`.
