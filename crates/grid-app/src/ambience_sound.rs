@@ -94,7 +94,7 @@ impl Decodable for AmbienceSource {
     type Decoder = Decoder;
     fn decoder(&self) -> Decoder {
         Decoder {
-            mixer: Mixer::new(self.play.clone(), RATE),
+            mixer: Mixer::new(self.play.sounds.clone(), RATE),
             messages: self.messages.lock().ok().and_then(|mut s| s.take()),
             count: 0,
             right: None,

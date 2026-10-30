@@ -44,6 +44,7 @@ mod player_view_visibility;
 mod cockpit;
 mod ambience_sound;
 mod collision_sound;
+mod crowd_sound;
 mod car_materials;
 mod lamp_materials;
 mod lamp_signals;
@@ -4159,6 +4160,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 Ok(None) => println!("ambience_audio version=1 event=none route={}", route.path()),
                 Err(error) => warn!("Ambience audio unavailable; driving continues: {error}"),
             }
+            // The crowds on the route's crowd cells (AUDIO_RESEARCH §31).
+            match (grid_tools::crowd_audio::Bank::load(&root), grid_tools::crowd_audio::Cells::load(&root, &route)) {
+                (Ok(bank), Ok(cells)) => crowd_sound::install(&mut app, bank, cells, mix.clone()),
+                (Err(error), _) => warn!("Crowd audio unavailable; driving continues: {error}"),
+                (_, Err(error)) => println!("crowd_audio version=1 event=none route={} reason={error}", route.path()),
+            }
             match grid_tools::hud_audio::Bank::load(&root) {
                 Ok(bank) => hud_sound::install(&mut app, bank, mix.clone()),
                 Err(error) => warn!("HUD audio unavailable; driving continues: {error}"),
@@ -7913,7 +7920,7 @@ mod driving_tests {
             .unwrap();
     }
 
-    /// Backlog row 70: the location ambience (AUDIO_RESEARCH §30) at
+    /// Backlog row 70: the location ambience (AUDIO_RESEARCH §30) and the crowds (§31) at
     /// Washington (loc_usa). Parked on the grid the field fills and its loops
     /// play near their minVol; a pause and a drive failure silence them and
     /// they return after each. Prints each window's RMS beside the engine's.
@@ -7979,24 +7986,28 @@ mod driving_tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .add_systems(FixedUpdate, drive_tick)
             .init_asset::<engine_sound::EngineSource>()
-            .init_asset::<ambience_sound::AmbienceSource>();
+            .init_asset::<ambience_sound::AmbienceSource>()
+            .init_asset::<crowd_sound::CrowdSource>();
         let bank = grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap();
         engine_sound::install_systems(&mut app, vec![Some(bank)], mix.clone());
-        ambience_sound::install_systems(&mut app, play, mix);
+        ambience_sound::install_systems(&mut app, play, mix.clone());
+        let cells = grid_tools::crowd_audio::Cells::load(root, &route).unwrap();
+        crowd_sound::install_systems(&mut app, grid_tools::crowd_audio::Bank::load(root).unwrap(), cells, mix);
         app.update();
         fn decoder<T: Asset + Decodable>(app: &mut App) -> T::Decoder {
             let world = app.world_mut();
             let handle = world.query::<&AudioPlayer<T>>().single(world).unwrap().0.clone();
             world.resource::<Assets<T>>().get(&handle).unwrap().decoder()
         }
-        let mut sources: [Box<dyn Iterator<Item = f32>>; 2] = [
+        let mut sources: [Box<dyn Iterator<Item = f32>>; 3] = [
             Box::new(decoder::<engine_sound::EngineSource>(&mut app)),
             Box::new(decoder::<ambience_sound::AmbienceSource>(&mut app)),
+            Box::new(decoder::<crowd_sound::CrowdSource>(&mut app)),
         ];
-        let mut frame = |app: &mut App, throttle: f32| -> [f64; 2] {
+        let mut frame = |app: &mut App, throttle: f32| -> [f64; 3] {
             app.world_mut().resource_mut::<Driving>().scripted.throttle = throttle;
             app.update();
-            let mut sums = [0f64; 2];
+            let mut sums = [0f64; 3];
             for _ in 0..BLOCK * 2 {
                 for (k, source) in sources.iter_mut().enumerate() {
                     let v = f64::from(source.next().unwrap_or(f32::NAN));
@@ -8006,29 +8017,36 @@ mod driving_tests {
             sums
         };
         let second = (1. / DELTA) as usize;
-        let rms = |frames: &[[f64; 2]], k: usize| {
+        let rms = |frames: &[[f64; 3]], k: usize| {
             (frames.iter().map(|f| f[k]).sum::<f64>() / (frames.len() * BLOCK * 2).max(1) as f64).sqrt()
         };
         let active = |app: &App| ambience_sound::active(app.world().resource::<ambience_sound::AmbienceSound>());
         let mut failures = Vec::new();
-        let mut window = |app: &mut App, name: &str, seconds: usize, throttle: f32| -> f64 {
+        let mut window = |app: &mut App, name: &str, seconds: usize, throttle: f32| -> [f64; 2] {
             let frames: Vec<_> = (0..seconds * second).map(|_| frame(app, throttle)).collect();
             let last = &frames[frames.len() - second..];
-            let (engine, ambience) = (rms(last, 0), rms(last, 1));
+            let (engine, ambience, crowd) = (rms(last, 0), rms(last, 1), rms(last, 2));
+            let (voices, excitement) = crowd_sound::state(app.world().resource::<crowd_sound::CrowdSound>());
+            let pose = app.world().resource::<Driving>().runtime.pose();
+            let nearest = crowd_sound::nearest(app.world().resource::<crowd_sound::CrowdSound>(), [pose[12], pose[13], pose[14]]);
             let speed = grid_tools::ambience_audio::Listener::of(
                 &app.world().resource::<Driving>().runtime.pose(),
                 app.world().resource::<Driving>().runtime.velocity(),
             )
             .speed;
             println!(
-                "ambience_windows version=1 window={name} speed={speed:.1} active={} engine={engine:.5} ambience={ambience:.5}",
-                active(app)
+                "ambience_windows version=2 window={name} speed={speed:.1} active={} engine={engine:.5} ambience={ambience:.5} crowd={crowd:.5} crowd_voices={voices} excitement={excitement} car={:?} nearest_cell={nearest:?}",
+                active(app),
+                [pose[12], pose[13], pose[14]]
             );
-            ambience
+            [ambience, crowd]
         };
-        let parked = window(&mut app, "parked", 12, 0.);
+        let [parked, crowd] = window(&mut app, "parked", 12, 0.);
         if parked < 1e-4 {
             failures.push(format!("parked: the ambience is silent: rms {parked:.5}"));
+        }
+        if crowd < 1e-4 {
+            failures.push(format!("parked: the crowd is silent: rms {crowd:.5}"));
         }
         type Stop = fn(&mut Driving, bool);
         let stops: [(&str, Stop); 2] = [
@@ -8038,13 +8056,13 @@ mod driving_tests {
         for (name, stop) in stops {
             stop(&mut app.world_mut().resource_mut::<Driving>(), true);
             let held = window(&mut app, name, 2, 0.);
-            if held > 1e-4 {
-                failures.push(format!("{name}: the ambience still sounds: rms {held:.5}"));
+            if held.iter().any(|&v| v > 1e-4) {
+                failures.push(format!("{name}: ambience or crowd still sounds: rms {held:?}"));
             }
             stop(&mut app.world_mut().resource_mut::<Driving>(), false);
             let back = window(&mut app, &format!("{name}_resumed"), 4, 0.);
-            if back < 1e-4 {
-                failures.push(format!("{name}: the ambience does not return: rms {back:.5}"));
+            if back.iter().any(|&v| v < 1e-4) {
+                failures.push(format!("{name}: ambience or crowd does not return: rms {back:?}"));
             }
         }
         failures

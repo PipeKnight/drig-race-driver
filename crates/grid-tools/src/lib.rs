@@ -7,6 +7,7 @@ pub mod ai_pacing;
 pub mod body_deformation;
 pub mod car;
 pub mod collision_audio;
+pub mod crowd_audio;
 pub mod damage_audio;
 pub mod career;
 pub mod body_geometry;

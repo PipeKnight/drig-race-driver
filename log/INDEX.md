@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F667](F0667.md) | 2026-10-31 | Crowds ported: NormalCrowd/GrandStandCrowd on the crowd cells, excited by ReactiveCrowd (backlog row 70) |
 | [F666](F0666.md) | 2026-10-31 | Head-cam mouse look-around, an owner-requested deviation (backlog row 101) |
 | [F665](F0665.md) | 2026-10-31 | Cockpit: driver g-force lean |
 | [F664](F0664.md) | 2026-10-30 | Cockpit: gear-change and handbrake reaches, lever, H-pattern knob |

@@ -128,6 +128,7 @@ fn view(green: Option<f64>, ids: &Identities, career: Option<&CareerRace>) -> Ra
         },
         off_track: false,
         wrong_way: green.is_some() && (100. ..112.).contains(&t),
+        drift: None,
         parts_lost: if hit { vec![part_id("bumper_fm").unwrap()] } else { Vec::new() },
         open_cockpit: false,
         status_changes: if ahead { vec![(4, 3)] } else { Vec::new() },

@@ -58,6 +58,8 @@ pub(crate) struct SpeechSound {
     last: Option<(u64, u64)>,
     /// Flashbacks used so far in this race.
     flashbacks: u32,
+    /// ReactiveCrowd excitement (level, hold seconds) for the crowd sound, oldest first.
+    pub(crate) crowd: Vec<(f32, f32)>,
     /// Each car's damage status (vehicle +0xD234) last frame.
     statuses: Vec<u32>,
 }
@@ -228,6 +230,7 @@ pub(crate) fn install(
         talking: false,
         last: None,
         flashbacks: 0,
+        crowd: Vec::new(),
         statuses: Vec::new(),
     })
     .insert_resource(PendingSource(Some(source)))
@@ -333,6 +336,7 @@ fn view(
         // driver object; the AI's test is applied to its wheel anchors].
         off_track: driving.reset_line.as_ref().is_some_and(|line| !line.on_track(&wheels)),
         wrong_way: super::race_hud::wrong_way(driving),
+        drift: None,
         // 0x9FF4F0 reports a part when its detached body is made: the parts detached this tick.
         parts_lost: player
             .parts()
@@ -416,6 +420,8 @@ fn tick(
             derby: derby.is_some(),
         };
         let Some(mut v) = view(&driving, listening.trial.as_deref(), kind, sound.player_slot, &sound.identities, sound.career.as_ref()) else { return };
+        // 0x438C10 copies the player's drift scorer (car 0) into its record (0x4390F7).
+        v.drift = drift.as_ref().and_then(|d| d.entries.first()).map(|e| (e.scorer.rating as i32, e.scorer.combo_failed));
         // The choreographer's messages since the last speech frame (several ticks can pass).
         if let Some(o) = driving.opponents.as_ref() {
             v.ai_events = o
@@ -447,6 +453,14 @@ fn tick(
     } else {
         return;
     };
+    if let Some(event) = out.crowd {
+        // Bounded when no crowd sound drains it (a track without crowds).
+        if sound.crowd.len() >= 8 {
+            sound.crowd.remove(0);
+        }
+        sound.crowd.push(event);
+        log_line!("speech_audio version=1 event=crowd level={} hold={}", event.0, event.1);
+    }
     if out.stop {
         let _ = sound.commands.send(Command::Stop);
         sound.ends = time;

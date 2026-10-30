@@ -57,7 +57,8 @@ pub struct AutoPlay {
     pub samples: Vec<Sample>,
     /// The `masterCollisionInfo` curve: an extra level from the speed.
     pub master: Option<Curve>,
-    pub sounds: Vec<Sound>,
+    /// The decoded samples (empty from [`AutoPlay::parse_shared`]).
+    pub sounds: Arc<[Sound]>,
 }
 
 fn attr<'a>(e: &binxml::Element<'a>, name: &str) -> Option<&'a str> {
@@ -120,6 +121,23 @@ impl AutoPlay {
     /// `data`: the AutoPlay's WIP bank.
     pub fn parse(dictionary: &[u8], banks: &[u8], infos: &[u8], name: &str, data: &[u8]) -> Result<Option<Self>, String> {
         let dictionary = audio_dictionary::read(dictionary).map_err(|e| format!("{e:?}"))?;
+        let mut sounds = Vec::new();
+        let play = Self::parse_shared(&dictionary, banks, infos, name, data, &mut sounds, &mut std::collections::HashMap::new())?;
+        Ok(play.map(|p| Self { sounds: sounds.into(), ..p }))
+    }
+
+    /// As [`AutoPlay::parse`], with the decoded samples appended to `sounds` (bank sample index
+    /// → sound in `decoded`, so AutoPlays of one bank share them); the result's own `sounds`
+    /// stay empty and its samples index `sounds`.
+    pub fn parse_shared(
+        dictionary: &audio_dictionary::Dictionary,
+        banks: &[u8],
+        infos: &[u8],
+        name: &str,
+        data: &[u8],
+        sounds: &mut Vec<Sound>,
+        decoded: &mut std::collections::HashMap<usize, usize>,
+    ) -> Result<Option<Self>, String> {
         let doc = binxml::read(banks).map_err(|e| format!("autoplaybanks: {e:?}"))?;
         const FIELDS: [&str; 9] = [
             "minSpeed",
@@ -152,19 +170,21 @@ impl AutoPlay {
             .iter()
             .find(|b| b.name.eq_ignore_ascii_case(bank_name))
             .ok_or(format!("{bank_name} bank absent"))?;
-        let mut sounds = Vec::new();
         let mut samples = Vec::new();
         for e in doc.elements[play.children.clone()].iter().filter(|e| e.name == "Sample") {
             let Some(sample) = attr(e, "name") else { continue };
             let v = attr(e, "preset").and_then(|p| presets.get(p)).copied().unwrap_or([0.; 9]);
             let index = bank.samples.iter().position(|s| s.name.eq_ignore_ascii_case(sample));
-            let (sound, looped) = match index.map(|i| (i, wip_sound(bank, i, data))) {
-                Some((i, Ok(s))) => {
+            let sound = index.and_then(|i| match decoded.get(&i) {
+                Some(&k) => Some(k),
+                None => {
+                    let s = wip_sound(bank, i, data).ok()?;
                     sounds.push(s);
-                    (Some(sounds.len() - 1), bank.samples[i].flags & 0x10 != 0)
+                    decoded.insert(i, sounds.len() - 1);
+                    Some(sounds.len() - 1)
                 }
-                _ => (None, false),
-            };
+            });
+            let looped = sound.is_some() && index.is_some_and(|i| bank.samples[i].flags & 0x10 != 0);
             samples.push(Sample {
                 name: sample.to_owned(),
                 sound,
@@ -188,13 +208,13 @@ impl AutoPlay {
             max_loopers: attr(play, "maxLoopers").and_then(|v| v.trim().parse().ok()).unwrap_or(0),
             samples,
             master,
-            sounds,
+            sounds: Vec::new().into(),
         }))
     }
 }
 
 /// 0x413990: where `x` lies between `a` and `b` (either order), in [0, 1].
-fn linstep(a: f32, b: f32, x: f32) -> f32 {
+pub(crate) fn linstep(a: f32, b: f32, x: f32) -> f32 {
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
     if x <= lo {
         0.
@@ -205,7 +225,7 @@ fn linstep(a: f32, b: f32, x: f32) -> f32 {
     }
 }
 /// 0x413130: `a` to `b` by `t`, clamped.
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
+pub(crate) fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0., 1.)
 }
 /// 0x4138F0: amplitude to dB, floored at −48.
@@ -425,19 +445,23 @@ const GLIDE: f32 = 0.002;
 
 /// Mixes the field's voices at `rate`, one per slot.
 pub struct Mixer {
-    play: Arc<AutoPlay>,
+    sounds: Arc<[Sound]>,
     rate: u32,
     voices: Vec<Option<Voice>>,
 }
 
 impl Mixer {
-    pub fn new(play: Arc<AutoPlay>, rate: u32) -> Self {
-        Self { play, rate, voices: vec![None; SLOTS] }
+    pub fn new(sounds: Arc<[Sound]>, rate: u32) -> Self {
+        Self { sounds, rate, voices: vec![None; SLOTS] }
     }
 
+    /// Start `sound` in `slot` at `pitch` (the voice's rate ratio).
     pub fn start(&mut self, slot: usize, sound: usize, looped: bool) {
-        let Some(s) = self.play.sounds.get(sound) else { return };
-        let step = f64::from(s.rate) / f64::from(self.rate);
+        self.start_pitched(slot, sound, looped, 1.);
+    }
+    pub fn start_pitched(&mut self, slot: usize, sound: usize, looped: bool, pitch: f32) {
+        let Some(s) = self.sounds.get(sound) else { return };
+        let step = f64::from(pitch) * f64::from(s.rate) / f64::from(self.rate);
         let gain = self.voices.get(slot).copied().flatten().map_or([0.; 2], |v| v.gain);
         if let Some(v) = self.voices.get_mut(slot) {
             *v = Some(Voice { sound, position: 0., step, looped, gain, target: gain });
@@ -471,10 +495,10 @@ impl Mixer {
     /// One stereo frame (left, right).
     pub fn sample(&mut self) -> [f32; 2] {
         let mut out = [0.; 2];
-        let play = &self.play;
+        let sounds = &self.sounds;
         for slot in self.voices.iter_mut() {
             let Some(v) = slot else { continue };
-            let s = &play.sounds[v.sound];
+            let s = &sounds[v.sound];
             let frames = s.pcm.len() / s.channels.max(1);
             if frames < 2 || (!v.looped && v.position as usize + 1 >= frames) {
                 *slot = None;

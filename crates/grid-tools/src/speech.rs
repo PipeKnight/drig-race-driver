@@ -16,8 +16,9 @@ use std::{collections::VecDeque, path::Path};
 pub const LINE_RATE: u32 = 32_000;
 /// Events evaluated [AUTHORED scope: part 1 the race start, position calls and finish; part 2
 /// the player's damage, performance, strategy and rules lines, the accidents and AI events, the
-/// teammate].
-pub const SLICE: [&str; 9] = ["Position", "EndOfRace", "CarDamage", "Performance", "Strategy", "Rules", "CrashesAccidents", "AIEvents", "Teammates"];
+/// teammate; ReactiveCrowd, whose messages excite the crowd, AUDIO_RESEARCH §31].
+pub const SLICE: [&str; 10] =
+    ["Position", "EndOfRace", "CarDamage", "Performance", "Strategy", "Rules", "CrashesAccidents", "AIEvents", "Teammates", "ReactiveCrowd"];
 /// An absent condition value or second parameter (0xC61C3C00).
 const UNSET: f32 = -10000.;
 /// The silence base after a line starts: now + 2.5 s (0xCB092C, 0x42FFC0).
@@ -167,6 +168,9 @@ params!(
     IsDrift = "isDrift",
     // Step 4: the teammate (§11, §15).
     TeammatePos = "teammatePos",
+    TeammateLap = "teammateLap",
+    CurrentDriftType = "currentDriftType",
+    LostCombo = "lostCombo",
     TeammateFinished = "teammateFinished",
     TeammateTermDam = "teammateTermDam",
     TeammateTotDam = "teammateTotDam",
@@ -768,6 +772,9 @@ pub struct Output {
     pub stop: bool,
     /// Start this line on the voice (0x42FFC0) and switch the mix to Talking unless `pa`.
     pub play: Option<Line>,
+    /// A ReactiveCrowd message for the crowd (0x44BE90 → `BroadcastMessage_EventMessage`):
+    /// its `userData` (excitement level, +0x78) and `queueValue` (hold seconds, +0x3C).
+    pub crowd: Option<(f32, f32)>,
 }
 
 /// `audio_event_speech_manager` for one race world.
@@ -780,6 +787,10 @@ pub struct Manager {
     /// +0xC0 queue and the ring of the last `previousQueue` played messages (front = newest).
     queue: Vec<usize>,
     ring: VecDeque<usize>,
+    /// +0x110 the external queue of `isEventTrigger` messages (ReactiveCrowd) and +0x630 the
+    /// last one sent to the crowd.
+    external: Vec<usize>,
+    sent: Option<usize>,
     /// +0x62C last played, +0x634 loading, +0x60B loaded, +0x60C pending playback.
     last: Option<usize>,
     current: Option<usize>,
@@ -822,6 +833,8 @@ impl Manager {
             silence: 0.,
             queue: Vec::new(),
             ring: VecDeque::new(),
+            external: Vec::new(),
+            sent: None,
             last: None,
             current: None,
             loaded: false,
@@ -863,6 +876,9 @@ impl Manager {
     /// - a speech with a long version plays it again.
     pub fn reset_race(&mut self) {
         self.queue.clear();
+        // [I] the external queue and its last sent message start again with the race.
+        self.external.clear();
+        self.sent = None;
         self.ring.clear();
         self.last = None;
         self.current = None;
@@ -899,6 +915,16 @@ impl Manager {
         self.now += dt;
         self.evaluate(p);
         self.expire();
+        // 0x44BEB0: the front of the external queue goes to the crowd unless it was the last
+        // one sent; the queue is emptied either way [I: before the enabled test].
+        if let Some(&front) = self.external.first() {
+            if self.sent != Some(front) {
+                self.sent = Some(front);
+                let msg = self.msg(front);
+                out.crowd = Some((msg.user_data, msg.queue_value));
+            }
+            self.external.clear();
+        }
         if self.rules.settings.enabled {
             self.queue_update(p, voice_busy, &mut out);
         }
@@ -974,8 +1000,15 @@ impl Manager {
                     continue;
                 }
                 for &m in &group.messages {
-                    // isEventTrigger events feed the external queue (+0x110), not part of this slice.
-                    if event.trigger || !rules.settings.enabled {
+                    // isEventTrigger events (ReactiveCrowd) feed the external queue (+0x110):
+                    // every message whose conditions hold, up to maxMsgInQueue.
+                    if event.trigger {
+                        if (self.external.len() as u32) < rules.settings.max_in_queue && holds(&rules.messages[m].conditions, p) {
+                            self.insert_into(true, m);
+                        }
+                        continue;
+                    }
+                    if !rules.settings.enabled {
                         continue;
                     }
                     let msg = &rules.messages[m];
@@ -1017,34 +1050,43 @@ impl Manager {
 
     /// 0x45EAE0: priority 0 first; otherwise by event priority, then message priority.
     fn insert(&mut self, m: usize) {
-        if self.queue.is_empty() {
-            self.queue.push(m);
+        self.insert_into(false, m);
+    }
+    /// 0x45EAE0 into the speech queue (+0xC0) or the external queue (+0x110).
+    fn insert_into(&mut self, external: bool, m: usize) {
+        let mut queue = std::mem::take(if external { &mut self.external } else { &mut self.queue });
+        self.insert_sorted(&mut queue, m);
+        *(if external { &mut self.external } else { &mut self.queue }) = queue;
+    }
+    fn insert_sorted(&self, queue: &mut Vec<usize>, m: usize) {
+        if queue.is_empty() {
+            queue.push(m);
             return;
         }
-        if self.queue.contains(&m) {
+        if queue.contains(&m) {
             return;
         }
         let msg = self.msg(m);
         if msg.priority == 0 {
-            self.queue.insert(0, m);
+            queue.insert(0, m);
             return;
         }
         let event = |q: usize| self.rules.events[self.msg(q).event].priority;
         let ours = event(m);
-        for i in 0..self.queue.len() {
-            let theirs = event(self.queue[i]);
+        for i in 0..queue.len() {
+            let theirs = event(queue[i]);
             if ours == theirs {
                 // The scan runs to the end of the queue, not only over this event's entries.
-                if let Some(j) = (i..self.queue.len()).find(|&j| msg.priority < self.msg(self.queue[j]).priority) {
-                    self.queue.insert(j, m);
+                if let Some(j) = (i..queue.len()).find(|&j| msg.priority < self.msg(queue[j]).priority) {
+                    queue.insert(j, m);
                     return;
                 }
             } else if ours < theirs {
-                self.queue.insert(i, m);
+                queue.insert(i, m);
                 return;
             }
         }
-        self.queue.push(m);
+        queue.push(m);
     }
 
     /// 0x444FE0.
@@ -1513,6 +1555,9 @@ pub struct RaceView {
     pub off_track: bool,
     /// The race interface's wrong-way flag (+0x18).
     pub wrong_way: bool,
+    /// The player's drift scorer (0x64DD50, drift races only): ratings reached (+0x20) and the
+    /// combo-failed flag (+0x4C).
+    pub drift: Option<(i32, bool)>,
     /// Part ids ([`part_id`]) the player's car lost this frame (0x9FF4F0 → 0x417D60).
     pub parts_lost: Vec<u32>,
     /// Car description byte +0xD4 (`isPlayerCarOpenCockpit`), read before the race.
@@ -1575,6 +1620,10 @@ struct Record {
     racing: bool,
     /// +0x34: the entry's place in the track order (game interface vf 0x80, 0x445770).
     track: i32,
+    /// +0x4C `currentDriftType`: the drift scorer's ratings reached − 1 (−1 between drifts) and
+    /// +0x78 `lostCombo`: its combo-failed flag (0x4390F7), copied while the car has a scorer.
+    drift_type: f32,
+    lost_combo: bool,
 }
 impl Record {
     /// 0x438C10. The previous position changes only when the position does.
@@ -2127,6 +2176,11 @@ impl Collector {
             self.one_two = v.career.as_ref().is_some_and(|c| c.one_two) as i32;
         }
         self.player.off_track = v.off_track;
+        // 0x4390F7: the scorer's state; without a scorer the record keeps its values.
+        if let Some((rating, failed)) = v.drift {
+            self.player.drift_type = (rating - 1) as f32;
+            self.player.lost_combo = failed;
+        }
         self.car = v.car;
         self.best = self.best.min(me.position as u32);
         // 0x452997: the teammate's entry when unset, then its record every frame.
@@ -2462,6 +2516,10 @@ impl Collector {
         p.flag(PlayerHasTeammate, self.teammate.is_some());
         p.set(TeammateNumber, self.teammate_number as f32);
         p.set(TeammatePos, self.mate.position);
+        // +0x42C: the teammate record's lap (record +0x38), read by ReactiveCrowd.
+        p.set(TeammateLap, self.mate.lap);
+        p.set(CurrentDriftType, self.player.drift_type);
+        p.flag(LostCombo, self.player.lost_combo);
         p.flag(TeammateFinished, self.mate.finished);
         p.flag(TeammateTermDam, self.mate.terminal);
         p.set(TmTimeInCurrentPos, self.mate.in_position);
@@ -2852,6 +2910,23 @@ mod tests {
             car: Car { density: 1., limit: 1., ..Car::default() },
             ..RaceView::default()
         }
+    }
+
+    /// ReactiveCrowd's drift parameters: the scorer's ratings − 1 and its combo flag (0x4390F7),
+    /// kept while no scorer is reported.
+    #[test]
+    fn drift_parameters_follow_the_scorer() {
+        let mut c = Collector::default();
+        let mut v = racing(0.5);
+        let p = c.update(&v, 0.1);
+        assert_eq!((p.get(Param::CurrentDriftType), p.get(Param::LostCombo)), (0., 0.));
+        v.drift = Some((0, false));
+        assert_eq!(c.update(&v, 0.1).get(Param::CurrentDriftType), -1.);
+        v.drift = Some((3, true));
+        let p = c.update(&v, 0.1);
+        assert_eq!((p.get(Param::CurrentDriftType), p.get(Param::LostCombo)), (2., 1.));
+        v.drift = None;
+        assert_eq!(c.update(&v, 0.1).get(Param::CurrentDriftType), 2.);
     }
 
     #[test]
@@ -3371,8 +3446,11 @@ mod tests {
         assert_eq!((rules.settings.max_in_queue, rules.settings.reduction, rules.settings.previous_queue), (5, 5, 5));
         assert_eq!(rules.bank.speeches.len(), 907);
         let bytes = std::fs::read(root.join("audio/eventSpeech.bin")).unwrap();
-        assert_eq!(rules.unknown_params(&bytes), Vec::<String>::new());
-        let slice: Vec<_> = rules.messages.iter().filter(|m| rules.events[m.event].on).collect();
+        let unknown = rules.unknown_params(&bytes);
+        println!("speech version=1 unknown_params={unknown:?}");
+        assert_eq!(unknown, Vec::<String>::new());
+        // The spoken events; ReactiveCrowd's messages have no lines (they excite the crowd).
+        let slice: Vec<_> = rules.messages.iter().filter(|m| rules.events[m.event].on && !rules.events[m.event].trigger).collect();
         assert_eq!(slice.len(), 881);
         assert!(slice.iter().all(|m| m.speech.is_some()));
         let m = |n: &str| &rules.messages[rules.message(n).unwrap()];

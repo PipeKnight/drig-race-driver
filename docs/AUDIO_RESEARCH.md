@@ -1881,3 +1881,129 @@ loc_spacir, loc_yokoHP and loc_yokoDocks exist in autoplaybanks but no track mod
 - A finished one-shot is detected by its length in the field, not by the voice handle.
 - The tick is the port's 62.5 Hz vehicle tick for the original's frame (§8).
 - The crowds (0x44E220 with NormalCrowd/GrandStandCrowd, Crowd group 11) are not ported yet.
+
+## 31. Crowds ported (backlog row 70)
+
+31 October 2026, Claude Code. Static reading of the disassembly. The original was not run. The
+work-up was 0x44E220, 0x4499A0, 0x449FA0, 0x41F280/0x411460, 0x41F2D0, 0x411600, 0x41BCD0,
+0x427730/0x4336E3 and the visual crowd's cell loader 0x769D50/0x963D90/0x97A630.
+
+**The object [O].**
+- The crowd object (audio manager +0x24DD0, constructor 0x427730) has 35 emitter slots (+0x40,
+  stride 0x60). Every slot plays on group 11 (Crowd, E+0x18, 0x4277AD), on the Camera listener.
+- At load (0x4336E3) it looks up the AutoPlays NormalCrowd (+0x1C) and GrandStandCrowd (+0x20),
+  bank `env_crowd`, and the CollisionInfos `group_gasp`, `grand_gasp`, `gaspControl` and
+  `gaspDistControl`.
+
+**Cells [O, I where marked].**
+- The audio's "instances" are the visual crowd's grid cells (manager +0x268, stride 0x70), built
+  from `crowd_standing.bin` by 0x769D50 and 0x963D90. Only cells without moving instances are
+  entered in the grid map. +0x30/+0x40 hold the box and +0x50 its centre.
+- +0x14 counts the instances actually placed (0x97A630). [I] All standing instances are placed.
+- +0x60 is the share of placed instances whose anim-selector type is 7. [I] That is
+  `Grandstand`, the seated sets `m_gr`/`f_gr` (maps `maleSit`/`femaleSit`), so
+  people·(+0x60) > 20 means "more than 20 seated spectators".
+- The query 0x756E70 scans the grid, x outer and z inner, for cells whose box lies within 150 m of
+  the query point. It keeps at most 250, each with the squared distance to its box, then
+  0x771D30 sorts the list nearest first. That is a Shell sort with the gaps 8191, 4095, …, 3, 1
+  (table 0xD08870–0xD088A0, strict less-than, not stable).
+- The order matters. The spawn leaves at the first slot whose cell lies beyond its sample's
+  MaxDistance, and slot i takes entry i mod count. Before the sort was ported, the unsorted scan
+  order put a far cell first on Washington's grid, and no voice ever started there [V, test].
+
+**Per tick, 0x44E220 [O].**
+1. 0x411600 settles the excitement (below).
+2. mph of the car (drift_mph).
+3. The query point:
+   - normally: car position + forward·70·linstep(1, 120, mph);
+   - in the mix modes Intro (5) and EndOfRace (6): the camera position, with the forward kept.
+4. The query, then the people summed over all results.
+5. The count is capped at 35. The bank is GrandStandCrowd when the total exceeds 2500 people,
+   else NormalCrowd.
+6. If density·clamp(mph, 80, 100) > random(0, 100), spawn (0x4499A0).
+7. 0x41F280 stops each looping voice the car is farther from than 0.75·its MaxDistance.
+8. If a recoil is pending, the gasp step (0x449FA0) runs.
+
+**Spawn, 0x4499A0 [O].**
+
+Setup:
+- s = clamp(mph/100, 0, 1).
+- The slots reserved for excited samples (+0x15A4) drop to count/2 when the count is below
+  them.
+- Intro/EndOfRace set the target excitement to 1.3, s = 0.4 and reserve 30 slots.
+- A branch on the race interface's +0x24 == 1 is the network receiver's [I]; it is not taken
+  offline.
+
+Then, for each free slot i of 35 (cell = result i mod count):
+- skip cells with ≤ 5 people;
+- the "grand" bank applies per cell (the seated test);
+- above s = 0.5 (and outside EndOfRace), skip cells behind the car;
+- pick a uniform sample. If the cell lies beyond the sample's MaxDistance, **leave the whole
+  spawn** (0x449CA2);
+- excitement band:
+  - while the current excitement x is outside [0, 1], the reserved slots take only samples whose
+    min/maxSpeed contains x (the excited and booing samples);
+  - otherwise the reserved slots stay empty, and the others take only samples whose band
+    contains s;
+- the people count must lie in the sample's min/maxSpawiningDistance (a head-count window);
+- the probability roll; the loop limit maxLoopers;
+- t = linstep(minSpawn, maxSpawn, people):
+  - level = lerp(minVol, maxVol, t), plus the master curve (`crowd`) over mph when not excited;
+  - pitch = lerp(0.95, 1.05, t), not random;
+- a one-shot below −32 dB is not started;
+- the voice plays at the cell centre with the sample's min/max distance. Its level and pitch
+  never change after the start. Its Doppler property is 0.5 for loops once the start lights have
+  begun (+0x15A0), else 0 (Doppler not modelled, §7.2).
+
+**Excitement [O].**
+- 0x424B60 (BroadcastMessage_EventMessage) calls 0x41F2D0(level = message `userData`,
+  hold = `queueValue`). The messages are those of the speech data's ReactiveCrowd event, the only
+  `isEventTrigger` event. 0x45EC00 puts each one whose conditions hold into the external queue
+  (+0x110, up to maxMsgInQueue). 0x44BE90 sends the queue's front unless it was the last sent,
+  then empties the queue.
+- 0x41F2D0 reserves 25 slots for a level above 1, else 10. It takes the level and hold only once
+  the previous hold has run out.
+- 0x411600 copies the target into the current value. Once a non-zero hold has run out it zeroes
+  only the current value, so the current value then alternates between the target and 0 on each
+  tick until the next event [O; ported as is].
+- The 26 ReactiveCrowd messages [V, test]:
+  - starting grid 1.3;
+  - overtaking and slipstream 1.2–1.3 (1 s);
+  - drifts 1.2–1.4 (2 s); lost combo −1.1;
+  - sat on track and wrong way −1;
+  - finish line 1.2, last 1.3, team 1.4, finish without damage 1.3;
+  - normal 0, normalGood 1.3.
+
+**Gasps (CrowdRecoil) [O, not ported].** The visual crowd broadcasts a recoil (0x764A40). After
+it, 0x449FA0 plays `group_gasp`/`grand_gasp` on query cell j, one per tick. The level is the sum
+of three curves: gaspControl over intensity, the variety's own curve over people, and
+gaspDistControl over the distance from the recoil. The port's visual crowd raises no recoil, so
+the gasps have no trigger and are left out.
+
+**Port.**
+- `grid_tools::crowd_audio`: `Cells` (grid, seated count, query), `Bank` (both AutoPlays over
+  one decoded `env_crowd`), `Crowd` (excitement, tick, spawn, loop stop).
+- `ambience_audio::AutoPlay::parse_shared` shares the decoded samples between AutoPlays.
+- `speech::Manager` now evaluates ReactiveCrowd into the external queue (`SLICE` += ReactiveCrowd)
+  and reports `Output::crowd`, logged `speech_audio version=1 event=crowd`.
+- ReactiveCrowd reads three collector parameters the speech slices had not needed [O]:
+  - `teammateLap` (0x45F590 getter, collector +0x42C): the teammate record's lap;
+  - `currentDriftType` (0x4193E0, +0x158) and `lostCombo` (0x419400, +0x184): the player
+    record's +0x4C and +0x78. 0x438C10 fills them from the car's drift scorer (0x64DD50 →
+    entry +0x60) only when it finds one (0x4390F7–0x439107):
+    - `currentDriftType` = the scorer's ratings reached (+0x20) − 1, so −1 between drifts,
+      0 for `osd_drift`, 1 great … 6 legend;
+    - `lostCombo` = the scorer's combo-failed byte (+0x4C), set by 0x630490 and cleared by the
+      next score step.
+  - Without a scorer the record keeps its values; a record clear sets 0.
+  - The port copies `drift::Scorer::{rating, combo_failed}` of the player's drift entry
+    (`RaceView::drift`).
+- grid-app `crowd_sound`: installed on every route with `crowd_standing.bin`. It drains the
+  speech's crowd events and sets each voice's gain each tick from the camera (group Crowd, the
+  distance law, the pan). It hushes when the ticks stop. Logs `crowd_audio version=1 event=queued`.
+
+**[I] and gaps.**
+- The game's RNG is not reproduced.
+- A finished one-shot is detected by its length.
+- The excitement needs the speech manager, which runs only in races with opponents.
+- The gasps are not ported.
