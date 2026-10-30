@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F663](log/F0663.md) | 2026-10-30 | Okutama loads: a template without an initial behaviour places an empty entity, as the original |
 | [F662](log/F0662.md) | 2026-10-31 | Race manager settles most first-corner matrix losses; original Nürburgring first corner captured; in-air steering blend |
 | [F661](log/F0661.md) | 2026-10-31 | Light clustering skipped without clusterables; minimap marker order fixed |
 | [F660](log/F0660.md) | 2026-10-31 | Car reflections: the original's environment map and the plan |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F606](log/F0606.md) | 2026-10-27 | AI planned offset at the car and the limit clamp's far-side case: Donington |
 | [F605](log/F0605.md) | 2026-10-27 | Playable f1e871287420 with F593-F603 and portable copy; APKs deferred |
 | [F604](log/F0604.md) | 2026-10-27 | Android pad rumble and phone vibration from the GameFFB task |
-| [F603](log/F0603.md) | 2026-10-27 | Phones without BC: OSD textures made before the upload path was chosen are converted; desktop check with BC off the device |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

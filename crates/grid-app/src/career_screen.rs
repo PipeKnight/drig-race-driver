@@ -3107,10 +3107,12 @@ speech_final_event = off
         let runs = offer_runs(&cat, &career, &routes, &Labels::default(), exists);
         let ids: Vec<i32> = runs.iter().map(|r| r.offer_id).collect();
         // US 2 (Lacetti, Washington) and 7 (time trial, Washington GP),
-        // Europe 15 and 16, Japan 25 (350Z, Yokohama): the offers on show
-        // whose car and layout the port races.
-        assert_eq!(ids, [2, 7, 15, 16, 25]);
+        // Europe 15 and 16, Japan 25 (350Z, Yokohama) and, since Okutama
+        // loads (F663), 27: the offers on show whose car and layout the port
+        // races.
+        assert_eq!(ids, [2, 7, 15, 16, 25, 27]);
         assert_eq!(runs[1].race.1, "tracks/usa/washington/route_0");
+        assert!(runs[5].race.1.starts_with("tracks/japan/okutama/"), "{:?}", runs[5].race);
         let r15 = &runs[2];
         assert_eq!(r15.car, "911");
         assert_eq!(r15.race.1, "tracks/europe/jarama/route_0");

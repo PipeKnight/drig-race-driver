@@ -226,15 +226,24 @@ fn read_kind<'a>(placements: &Tree<'a>, types: &Tree<'a>, kind: &[u8]) -> Result
                 "template reference kind mismatch",
             );
         }
-        let initial = one(types, template, b"TEMPLATEBEHAVIOUR")?;
-        let behaviour = local(
-            types,
-            &type_ids,
-            types.string(initial, b"typeuri")?,
-            b"TEMPLATEBEHAVIOURTYPE",
-        )?;
+        // A template without an initial behaviour (Okutama's
+        // `armco_02_end_right.max`) fails the template check 0x7C0F20 ("no
+        // initial behaviour"), which only warns. The load-time reset
+        // 0x7D6760 then applies nothing, so its instances keep no components.
+        let changes: &[usize] = match initial_behaviour(types, template)? {
+            Some(initial) => {
+                let behaviour = local(
+                    types,
+                    &type_ids,
+                    types.string(initial, b"typeuri")?,
+                    b"TEMPLATEBEHAVIOURTYPE",
+                )?;
+                &types.nodes[behaviour].children
+            }
+            None => &[],
+        };
         let mut active = BTreeSet::new();
-        for &change in &types.nodes[behaviour].children {
+        for &change in changes {
             if types.name(change) != b"TEMPLATECOMPONENTCHANGE" {
                 return fail(
                     types.nodes[change].offset,
@@ -316,6 +325,23 @@ fn read_kind<'a>(placements: &Tree<'a>, types: &Tree<'a>, kind: &[u8]) -> Result
         entities.push(entity);
     }
     Ok(entities)
+}
+
+/// The template's direct `TEMPLATEBEHAVIOUR` (template +0x38), or none.
+fn initial_behaviour(types: &Tree<'_>, template: usize) -> Result<Option<usize>> {
+    let mut found = types.nodes[template]
+        .children
+        .iter()
+        .copied()
+        .filter(|&i| types.name(i) == b"TEMPLATEBEHAVIOUR");
+    match (found.next(), found.next()) {
+        (None, _) => Ok(None),
+        (Some(initial), None) => Ok(Some(initial)),
+        (Some(_), Some(_)) => fail(
+            types.nodes[template].offset,
+            "expected one typed entity child",
+        ),
+    }
 }
 
 fn entity_link<'a>(tree: &Tree<'a>, node: usize) -> Result<Option<EntityLink<'a>>> {

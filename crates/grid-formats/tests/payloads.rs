@@ -1003,6 +1003,55 @@ fn resolves_startup_state_without_rendering_deleted_components() {
     assert_eq!(r.shapes[0].transform[12..15], [10., 20., 30.]);
 }
 #[test]
+fn a_template_without_initial_behaviour_places_an_entity_with_no_components() {
+    // 0x7C0F20 only warns ("no initial behaviour") and the load-time reset
+    // 0x7D6760 applies nothing: the instance stays, with its links.
+    let (p, t) = entity_fixture();
+    let p = pssg::read_tree(&p).unwrap();
+    let mut t = pssg::read_tree(&t).unwrap();
+    let template = (0..t.nodes.len())
+        .find(|&i| t.name(i) == b"TEMPLATEENTITY")
+        .unwrap();
+    let behaviours = t.nodes[template]
+        .children
+        .iter()
+        .filter(|&&i| t.name(i) == b"TEMPLATEBEHAVIOUR")
+        .count();
+    assert_eq!(behaviours, 1);
+    let kept: Vec<_> = t.nodes[template]
+        .children
+        .iter()
+        .copied()
+        .filter(|&i| t.name(i) != b"TEMPLATEBEHAVIOUR")
+        .collect();
+    t.nodes[template].children = kept;
+    let e = grid_formats::entities::read(&p, &t).unwrap();
+    assert_eq!(e.len(), 1);
+    assert_eq!(e[0].links, 1);
+    assert_eq!(e[0].transform[12..15], [10., 20., 30.]);
+    assert!(e[0].renderables.is_empty());
+    assert!(e[0].cloth.is_empty());
+}
+#[test]
+#[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+fn purchased_okutama_routes_read_their_entities() {
+    let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+    let track = std::path::Path::new(&root).join("tracks/japan/okutama");
+    let types = std::fs::read(track.join("objecttypes.pssg")).unwrap();
+    let types = pssg::read_tree(&types).unwrap();
+    // `armco_02_end_right.max` has no initial behaviour; it is placed 4
+    // times on route 0 and twice on the others.
+    for (route, ends) in [(0, 4), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2)] {
+        let placements = std::fs::read(track.join(format!("route_{route}/objects.ens"))).unwrap();
+        let placements = pssg::read_tree(&placements).unwrap();
+        let e = grid_formats::entities::read(&placements, &types).unwrap();
+        let empty: Vec<_> = e.iter().filter(|e| e.renderables.is_empty() && e.cloth.is_empty()).collect();
+        assert_eq!(empty.len(), ends, "route {route}");
+        assert!(empty.iter().all(|e| e.template == b"armco_02_end_right.max"));
+        assert!(e.iter().any(|e| e.template == b"armco_02_end_left.max" && !e.renderables.is_empty()));
+    }
+}
+#[test]
 fn rejects_bad_entity_references_states_and_collision_dimensions() {
     let (p, t) = entity_fixture();
     let p = pssg::read_tree(&p).unwrap();

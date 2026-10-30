@@ -229,7 +229,7 @@ track's `tracksplit.pssg`, and grid-app read only the tracksplit.
 |---|---|---|
 | Washington 0–9 | 148–216 | the layout's road, kerbs, walls and grid markings |
 | Milan 0–5 | 208–412 | the same; Milan's start straight had no road at all |
-| Okutama 0–5 | 239–492 | the same (Okutama still stops in the entity reader) |
+| Okutama 0–5 | 239–492 | the same (Okutama loads since F663) |
 | San Francisco 0–6 | 134–172 | the same |
 | Detroit 8/9 (stadium) | 11 | markings |
 | every other route with a split | 3–5 | grid boxes and start line (`decal.fx`) |

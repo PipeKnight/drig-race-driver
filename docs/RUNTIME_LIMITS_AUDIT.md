@@ -419,7 +419,7 @@ The original design notes for this group follow.
   - Spa (all 4 routes): "VCQTC packed count limit exceeded";
   - Le Mans (both routes): "prototype lap timing requires one forward route with finish gate zero";
   - Haruna (all 10 routes): "collision archive entry count unsupported";
-  - Okutama (all 6 routes): "expected one typed entity child";
+  - ~~Okutama (all 6 routes): "expected one typed entity child"~~ (loads since F663, TRACK_READERS §3.8);
   - Detroit (4 routes): "unsupported collision primitive";
   - San Francisco (6 routes) and Washington (2 routes): "unsupported mesh stream kind/format".
 

@@ -428,8 +428,9 @@ with a Lacetti (`grid-opponent-race --route R … 1 14000 ai`, rebuilt binary on
   - Yokohama 1/2/7/8/9, Shibuya 1–7.
 - **The solo car wrecks** on Detroit 0 (0.97 lap) and 2 (0.27), Washington 3 (0.51) and 8
   (0.32), and San Francisco 2 (1.74). These stay out (AI driving; FIDELITY_BACKLOG row 41).
-- **Do not load**: all six Okutama routes ("expected one typed entity child") and Washington
-  0/2/5/7 ("unsupported entity collision box count"). These stay out (FIDELITY_BACKLOG row 82).
+- **Do not load**: ~~all six Okutama routes ("expected one typed entity child")~~ (load since
+  F663; all six are surveyed routes) and Washington 0/2/5/7 ("unsupported entity collision box count"). These stay out
+  (FIDELITY_BACKLOG row 82).
 
 `series::route_supported` (CIRCUITS, surveyed tracks, surveyed routes) is now the one rule
 used by `Series::supported_layouts`, the event menu and the career screen. Every circuit series

@@ -117,6 +117,34 @@ entity without a collision box". Such templates are now counted in
 cannot break. Since row 20 (F462) cylinders are route shapes, so the 77
 barrels break.
 
+### 3.8 A template without an initial behaviour [V]
+
+Okutama's `objecttypes.pssg` has one `TEMPLATEENTITY`,
+`armco_02_end_right.max`, with two subentities and a constraint but no direct
+`TEMPLATEBEHAVIOUR` (its behaviour types exist but nothing selects them). It is
+placed 4 times on route 0 and twice on each of routes 1-5. The reader asked for
+exactly one behaviour and stopped with `expected one typed entity child`, so
+no Okutama route loaded. (The backlog's "more than one typed child" was a
+misreading of that message; no Okutama node has a duplicate typed child.)
+
+In the original [D, decompiled through `tools/re/grid_re.py`]:
+
+- the template check `0x7C0F20`, run per template at level load by `0x7D7B00`,
+  prints `[WARN] Error - no initial behaviour for %s` and goes on; any failed
+  check also clears the template's initial behaviour (+0x38);
+- the load pass `0x7D6BA0` resets every instance with `0x7D6760(0,0)`, which
+  follows instance +0x90, then template +0x2C, then the initial behaviour
+  +0x38. When that is null it returns without calling `break_entity`
+  (`0x7D5180`), so no component is added. The other two per-instance steps
+  (`0x7C52C0`, `0x7BD860`) only place lights and cloth from components.
+
+So such an instance exists (its id, transform and links stay) but has no
+renderable, body, shape or cloth. Since F663 `entities::read` does the
+same; two or more direct behaviours are still an error. Tests:
+`a_template_without_initial_behaviour_places_an_entity_with_no_components` and
+`purchased_okutama_routes_read_their_entities`. The other failures of
+`0x7C0F20` (properties missing) are not ported; the reader rejects those files.
+
 ## 4. Survey after
 
 `local/track-readers/survey-readers2.txt` [V] (before the barrel change, which
@@ -138,7 +166,7 @@ only affects the breakable catalog):
 | spa_francorchamps 0-3 | yes | retired, 0 laps (AI, not a reader; open) |
 | le_mans 0-1, jarama 0 | yes | wrecked, 0 laps (as before) |
 | haruna 0-9 | no | `grids.pssg` `expected unique grid marker`; progress `point_to_point`; AI `links do not form one loop`; `tracksplit.pssg` NaN UVs now read |
-| okutama 0-5 | no | `objects.ens` `expected one typed entity child` |
+| okutama 0-5 | yes (F663, §3.8) | every route finishes 2 laps solo (routes 2 and 5 count 1 valid lap of 2 on F653) and runs a 12-car race to a winner |
 
 12-car AI races, 2 laps, DF01 and the characteristics [V]
 (`local/track-readers/detroit{1,8}-12car.txt`):
@@ -155,7 +183,7 @@ only affects the breakable catalog):
 - ~~Point-to-point progress, the `start` split, Haruna's subroute grids and
   open AI line~~: done in F407 ([TOUGE.md](TOUGE.md)); Haruna routes 0-8 and
   Milan 3 now lap, the Yokohama arenas run Freestyle in the app.
-- Okutama `objects.ens`: an entity with more than one typed child.
+- ~~Okutama `objects.ens`: an entity with more than one typed child~~: a template without an initial behaviour, §3.8 (F663).
 - ~~Spa: the solo AI retires~~: the packed-contact material check still stopped
   at 8 keys; fixed in F425 ([SPA.md](SPA.md)). Spa, Milan, Shibuya and San
   Francisco route 0 race ([STREET_CIRCUITS.md](STREET_CIRCUITS.md)).

@@ -883,6 +883,17 @@ fn append_route_split(
     );
     Ok(())
 }
+/// `sscanf(value, "%f")` as 0x9522F0 reads `lod_distance_0N`: the longest
+/// leading number (Okutama route 4 has `150.0.00`, read as 150); none
+/// leaves the field unchanged.
+fn scan_f32(value: &str) -> Option<f32> {
+    let v = value.trim_start();
+    let end = v
+        .find(|c: char| !(c.is_ascii_digit() || "+-.eE".contains(c)))
+        .unwrap_or(v.len());
+    (1..=end).rev().find_map(|i| v[..i].parse::<f32>().ok())
+}
+
 /// The ornament types and instances of a route (docs/TRACK_LOD.md): level
 /// counts from the library, distances from `ornament_attributes.xml`, the
 /// `scenery` category from `ornaments.bin` and each instance's world box.
@@ -903,8 +914,8 @@ fn ornament_types(
             let Some(name) = field("name") else { continue };
             let mut d = ornament_lod::DEFAULT_DISTANCES;
             for (i, value) in d.iter_mut().enumerate() {
-                if let Some(v) = field(&format!("lod_distance_0{i}")) {
-                    *value = v.trim().parse()?;
+                if let Some(v) = field(&format!("lod_distance_0{i}")).and_then(scan_f32) {
+                    *value = v;
                 }
             }
             distances.insert(name.to_owned(), d);
@@ -6780,6 +6791,16 @@ fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGrou
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+
+    #[test]
+    fn ornament_distances_read_like_sscanf() {
+        assert_eq!(scan_f32("150.0.00"), Some(150.));
+        assert_eq!(scan_f32(" 1500.00"), Some(1500.));
+        assert_eq!(scan_f32("-10"), Some(-10.));
+        assert_eq!(scan_f32("2e3x"), Some(2000.));
+        assert_eq!(scan_f32("abc"), None);
+        assert_eq!(scan_f32(""), None);
+    }
 
     #[test]
     fn only_explicit_zero_can_use_the_narrow_manual_glass_branch() {
