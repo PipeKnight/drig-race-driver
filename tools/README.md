@@ -551,6 +551,7 @@ description is the first header found. Rows with a single file are validators wi
 
 | Topic | What it checks | Files | Doc |
 |---|---|---|---|
+| alongside_capture | Alongside squeeze capture for the original (FIRST_CORNER_LIVE section 13, rows 30/31). | [alongside_capture.py](alongside_capture.py) | [FIRST_CORNER_LIVE](../docs/FIRST_CORNER_LIVE.md) |
 | car_collision | Compare native car collision geometry, source bounds and saved live description words. | [validate_car_collision.py](validate_car_collision.py) | [CAR_COLLISION](../docs/CAR_COLLISION.md) |
 | geometry_provider | Advanced-pose provider versus complete original retained geometry stages. | [validate_geometry_provider.py](validate_geometry_provider.py) |  |
 | geometry_provider | Audit every provider/legacy/native byte, source request and prior regression. | [audit_geometry_provider.py](audit_geometry_provider.py) |  |

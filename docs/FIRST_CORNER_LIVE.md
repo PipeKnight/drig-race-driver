@@ -474,3 +474,77 @@ at arc 438). After the corner the left track limit closes from −24.6 m (arc 43
 Every port step on the way matches its decompile (§9–§11); the open question is the original's
 squeeze distance with a car inside, which §9's capture of the alongside fields would settle (or
 the same on a Long Beach route 1 start).
+
+**The other losses (props on) [V port].** Nürburgring 0 (seeds 2–3) and Detroit 1 (seed 3) lose
+the leader in the same way: in Alongside with car 1 inside it, the leader's planned offset holds
+or walks wide (Detroit +5.2 m at 39 m/s; Nürburgring with car 1 in contact, contact type 4, for
+1.2 s), and where the limits close the car cannot come back (Detroit: right track limit 11.2 →
+7.6 m over 27 m at 40.7 m/s, full lock, full throttle; the next brake line (target 28.1 m/s) does not activate before the wall, not checked further; Nürburgring:
+pushed to −28 m). Jarama 1 car 7 is pushed wide by car 8 in contact (type 3) at 40–50 m/s; Long
+Beach 4 car 2 holds a 7.5 m Alongside offset. No loss traced outside Alongside, so every remaining
+matrix loss waits on the same question as Long Beach 1.
+
+**Prepared capture (not run; needs the owner's go).** `tools/alongside_capture.py commands` writes
+the x32dbg lines for a silent, fast-resuming hardware breakpoint at 0x799630 that logs per call the
+planned offset view+0xE0, the car-link offset +0x1A0, the rooms +0x220..+0x234, the car point,
+the test's gaps, slot ids and flags, the previous desired offset (request +0x98), asTargetBuffer
+and min/max space; `decode` turns the log into a TSV. Plan: Race Day, Touring Cars, Nürburgring GP
+(route 0, on the list), grid back, 12 cars; `find_reference_vehicle_manager.ps1` on the grid, then
+`capture_grid_field.py` for 30 s from the go with the breakpoint armed; compare each car's
+view+0xE0 walk while alongside with the port's on the same grid (`GRID_PARKED_CAR`,
+`GRID_GRID_HOLD` as §5). The commands were accepted live (F662), but FastResume is not honoured (below); check the first lines of the log
+before the race starts.
+
+**Live run of 2026-10-30 (F662) [O original, V port].** The owner set up the research copy
+(Race Day, Touring Cars, Nürburgring GP, grid back, 12 cars) and paused it; the run then went
+unattended. The pause was not on the grid but in lap 1 (cars at about 42 m/s, arcs 60–150 m), so
+the capture covers the field from there. The 19 user files were snapshotted (with the game already
+running) and hash-identical after the restore; the manager scan needs `-ScanLimitBytes 268435456`
+(0 managers at the 64 MB default). `capture_grid_field.py` ran for 30 s from the unpause: median
+frame dt 16.0 ms, p90 16.9 ms (about 60 Hz; the owner had not changed the refresh rate and no cap
+is confirmed, so arcs and speeds were compared per row, not per frame). The x32dbg breakpoint did
+not log: headless x32dbg does not honour `SetHardwareBreakpointFastResume`, the target paused on
+the first hit of 0x799630, and the driver's safety path cleared it, resumed and detached (1 hit,
+game unaffected). So the squeeze internals are still not captured; `alongside_capture.py` needs a
+different logging route before another try.
+
+Original's first corner (route 0, arc 600–800 m): two columns, at lateral about 0 and +5…+9 m,
+folding to −6.7…+7.4 m at arc 700–800 m; minimum speeds 7–24 m/s (the leader 16.8 m/s); no AI car
+lost. The port on the same setup (`GRID_PARKED_CAR=11`, `GRID_REFERENCE_CAR=11`, the captured
+BMW/Lacetti order, props, characteristics, deformation parameters, seeds 0–5): the same two
+columns, the fold to −8…+0.4 m, minimum speeds 11–21 m/s, 0 AI cars lost in 6 seeds. On this
+corner the port's Alongside walk matches the original's field within the seed spread.
+Evidence: `local/driving/along-20261030/` (field.dec.tsv, lat.tsv, port/, summary.py).
+
+## 14. The matrix with the race manager (F662)
+
+**The harness ran without the race manager [V port].** grid-app always runs `ai_pacing::Field` with
+the player as the reference car (race-start power ×1.05 and grip ×1.25, F460), and the original's
+Race Day always has it; `grid-opponent-race` only does with `GRID_REFERENCE_CAR`. The §9–§13
+matrices ran without it. Same binary (main after F659), props on, characteristics and deformation
+parameters, seeds 0–5, 24 starts each:
+
+| Route | lost, no manager | lost, reference car = last |
+|---|---:|---:|
+| Detroit 1 | 8 | 0 |
+| Jarama 0 | 0 | 0 |
+| Jarama 1 | 8 | 7 |
+| Long Beach 0 | 3 | 3 |
+| Long Beach 1 | 49 | 0 |
+| Long Beach 3 | 0 | 0 |
+| Long Beach 4 | 7 | 0 |
+| Nürburgring 0 | 12 | 12 |
+| total | 87 | 22 |
+
+So most of the §12–§13 losses (Long Beach 1 alone 49) came from the harness, not from a game race.
+The losses left with the manager: Nürburgring 0 seeds 1 and 5, the front row (cars 0 and 1)
+side by side 3.5 m apart in Alongside, full throttle and full lock from arc 680 m at 28–32 m/s,
+both run off the closing left limit (−22 → −6 m over 30 m) to lateral −27 m; the same shape as the
+Long Beach 1 leader of §13 but here with the reference car's pace. In the captured original the
+leader takes this corner at 16.8 m/s, so the open question is the leaders' speed through the
+exit, not the walk. Jarama 1 (seeds 0, 2, 4: cars 6–10) belongs with FIDELITY_BACKLOG row 89;
+Long Beach 0 (seeds 2, 4: car 1 at about 1140 ticks) not traced. Matrices from now on run with
+the reference car (`REF=1` in `local/corners2/run.sh`).
+
+With the in-air steering blend of F662 on top (same setup): 16 lost (Detroit 1 1, Jarama 1 6,
+Long Beach 0/1/3 1 each, Nürburgring 0 6), within the seed spread of the 22.

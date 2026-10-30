@@ -888,6 +888,9 @@ pub struct Parameters {
     cornering_curvature: f32,
     st_ang_vel_factor: f32,
     st_angle_factor: f32,
+    /// stProportionRabbitWhenInAir: in the air, 0 steers along the slip angle,
+    /// 1 keeps the ground law (0x77AC50).
+    st_proportion_in_air: f32,
     slide_lift: [f32; 3],
     brake_cruise_exponent: f32,
     /// tcMinSpeed, tcMaxSpeed, tcMinLevel, tcMaxLevel, tcMaxWheelSpin
@@ -1119,6 +1122,7 @@ impl Parameters {
             cornering_curvature: d("crMaxTrackCurvature")?,
             st_ang_vel_factor: v("stAngVelFactor")?,
             st_angle_factor: v("stAngleFactorMin")?,
+            st_proportion_in_air: d("stProportionRabbitWhenInAir")?,
             slide_lift: [
                 v("throttleSlideLiftStartAngle")?,
                 v("throttleSlideLiftEndAngle")?,
@@ -2432,6 +2436,9 @@ pub struct View {
     /// them (car state +0x240 and +0x250, read by vfuncs +0x10 and +0x14).
     pub wheel_speeds: [f32; 4],
     pub driven: [bool; 4],
+    /// No wheel touches the ground: car state +0xE2 is 0 (0x402D20 sets it
+    /// to "fewer than four wheels without contact", 0x990FC0).
+    pub airborne: bool,
 }
 
 impl View {
@@ -2456,6 +2463,7 @@ impl View {
             extents: car.ai_extents(),
             wheel_speeds: car.wheel_rolling_speeds(),
             driven: car.driven_wheels(),
+            airborne: car.wheels_in_contact() == [false; 4],
         }
     }
 }
@@ -2619,6 +2627,22 @@ fn stop_at_limits(offset: f32, limits: [f32; 2], half_width: f32) -> f32 {
         }
     }
     offset
+}
+
+/// The airborne steering angle of 0x77AC50 in the +E30 convention: the angle
+/// between the horizontal velocity and the horizontal forward axis, positive
+/// when the velocity has a component along the car's left axis `left` (car
+/// state +0x50; the original's internal sign is the opposite and its publisher
+/// negates it). A zero horizontal velocity gives 0 [I].
+fn air_slip(velocity: [f32; 4], forward: [f32; 3], left: [f32; 3]) -> f32 {
+    let v = [velocity[0], 0., velocity[2]];
+    let n = [forward[0], 0., forward[2]];
+    let (lv, ln) = (dot3(v, v).sqrt(), dot3(n, n).sqrt());
+    if !(lv > 0. && ln > 0.) {
+        return 0.;
+    }
+    let a = (dot3(v, n) / (lv * ln)).clamp(-1., 1.).acos();
+    if dot3(v, left) > 0. { a } else { -a }
 }
 
 fn approach(current: f32, target: f32, up: f32, down: f32, dt: f32) -> f32 {
@@ -4242,9 +4266,19 @@ impl AiDriver {
                 Some(d) if drift_mode => d.st_ang_vel_factor,
                 _ => p.st_ang_vel_factor,
             };
-            ((p.st_angle_factor * heading_error + ang_vel_factor * yaw)
-                / view.maximum_steering_angle.max(1e-3))
-            .clamp(-1., 1.)
+            let ground = p.st_angle_factor * heading_error + ang_vel_factor * yaw;
+            // In the air (state +0xE2 == 0) the angle blends from the slip
+            // angle (horizontal velocity against the horizontal forward axis)
+            // to the ground law by stProportionRabbitWhenInAir (0 shipped:
+            // the wheels follow the travel direction). Here in the +E30
+            // convention: positive when the velocity points left of the nose.
+            let angle = if view.airborne {
+                let slip = air_slip(view.velocity, f, right);
+                slip + (ground - slip) * p.st_proportion_in_air
+            } else {
+                ground
+            };
+            (angle / view.maximum_steering_angle.max(1e-3)).clamp(-1., 1.)
         };
         let steer = if request.reverse { -steer } else { steer };
         // Reverse negates the throttle (0x783180); 0x7929D0 publishes
@@ -5343,6 +5377,19 @@ mod tests {
             ..default_drift()
         };
         assert_eq!(unskilled.drifting_grip(10., open, car)[0], 1.);
+    }
+
+    #[test]
+    fn airborne_steering_follows_the_slip_angle() {
+        // Nose along +Z, car left along +X (+E30 positive = left).
+        let (forward, left) = ([0., 0., 1.], [1., 0., 0.]);
+        let quarter = std::f32::consts::FRAC_PI_4;
+        assert!((air_slip([1., -3., 1., 0.], forward, left) - quarter).abs() < 1e-6);
+        assert!((air_slip([-1., 5., 1., 0.], forward, left) + quarter).abs() < 1e-6);
+        // Straight backwards: velocity not to the left, so −π as in 0x77AC50.
+        assert!((air_slip([0., 0., -2., 0.], forward, left) + std::f32::consts::PI).abs() < 1e-6);
+        // Vertical only or at rest: no direction.
+        assert_eq!(air_slip([0., -9., 0., 0.], forward, left), 0.);
     }
 
     #[test]

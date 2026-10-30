@@ -1512,6 +1512,12 @@ impl Runtime {
             f(w + 0xe0) * f(w + 0x104)
         })
     }
+    /// Each wheel's ground contact (0x990FC0: the contact material token
+    /// wheel +0xC0 is not 0).
+    pub fn wheels_in_contact(&self) -> [bool; 4] {
+        let b = &self.state.car.owner.vehicle;
+        std::array::from_fn(|i| b[(0x1990 + i * 0x150 + 0xc0) / 4] != 0)
+    }
     /// Each wheel's driven flag as the AI car state keeps it (+0x250, filled
     /// from 0x990EC0): the wheel's drive share +0x10C is not 0.0 (NaN counts).
     pub fn driven_wheels(&self) -> [bool; 4] {

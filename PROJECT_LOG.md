@@ -31,9 +31,10 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - The original's AI driver is ported (line following, braking lines, traction control and ABS cap
   F444, Redgate brake-line ratio on the cruise tables and Derby avoid F476, reverse byte F517,
   catch-up config F439, drift AI).
-- Open: first-corner pile-ups with 12 cars (rows 30, 31: three "alongside" parts not ported, no live
-  trace of an original overtake yet); Washington route 0 no-brake bend has no
-  1:1 fix (row 41, F526); start-light reaction (row 35); autopilot wreck at Jarama route 1 (row 89).
+- Open: first-corner losses with 12 cars (rows 30, 31: with the race manager the matrix loses 22,
+  F662; Nürburgring 0 front row at a closing exit; the original's Nürburgring first corner matches
+  the port); Washington route 0 no-brake bend has no 1:1 fix (row 41, F526); autopilot wreck at
+  Jarama route 1 (row 89).
 
 ### Events, career and race rules
 - Modes: race on the 11 circuits of `route::CIRCUITS` (Donington, Nürburgring, Istanbul, Long Beach,
@@ -157,7 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
-| [F662](log/F0662.md) | 2026-10-31 | Light clustering skipped without clusterables; minimap marker order fixed |
+| [F662](log/F0662.md) | 2026-10-31 | Race manager settles most first-corner matrix losses; original Nürburgring first corner captured; in-air steering blend |
 | [F661](log/F0661.md) | 2026-10-31 | Light clustering skipped without clusterables; minimap marker order fixed |
 | [F660](log/F0660.md) | 2026-10-31 | Car reflections: the original's environment map and the plan |
 | [F659](log/F0659.md) | 2026-10-30 | Long Beach route 1 leader: squeezed outside into a closing exit; line probe limits |
