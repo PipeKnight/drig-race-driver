@@ -7,6 +7,11 @@
 //! All placements start infinite-mass in the data; breakable boxes carry a
 //! contact limit and are disabled when broken (`dynamic_props`,
 //! DYNAMIC_PROPS_RESEARCH.md).
+//! The basic entities of the same file (`TEMPLATEBASICENTITYINSTANCE`:
+//! concrete blocks and walls, chain and catch fences, armco runs, ad boards,
+//! buildings, signs) add their templates' shapes as fixed boxes, as the
+//! original's level setup does (0x7CB440; docs/BARRIER_COLLISION.md). They
+//! replace F284's authored ornament stand-ins.
 use crate::route::Route;
 use grid_formats::{entities, pssg};
 use grid_world::{
@@ -14,7 +19,7 @@ use grid_world::{
     box_contacts::BoxShape,
     round_contacts::{CylinderShape, RoundShape, SphereShape},
 };
-use std::{collections::BTreeMap, path::Path};
+use std::path::Path;
 
 #[derive(Clone)]
 pub struct PropBox {
@@ -80,7 +85,7 @@ impl PropBox {
             let p = positions[1 << k];
             let edge = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
             let length = (edge[0] * edge[0] + edge[1] * edge[1] + edge[2] * edge[2]).sqrt();
-            if !(length > 0. && length < 200.) {
+            if !(length > 0. && length < MAX_EDGE) {
                 return Err("invalid route collision box".into());
             }
             matrix[k] = [edge[0] / length, edge[1] / length, edge[2] / length, 0.];
@@ -167,7 +172,7 @@ fn entity_box(
         }
     };
     let half = [width * 0.5, height * 0.5, length * 0.5];
-    if !half.iter().all(|h| h.is_finite() && *h > 0. && *h < 100.) {
+    if !half.iter().all(|h| h.is_finite() && *h > 0. && *h < MAX_EDGE * 0.5) {
         return Err("invalid entity collision box".into());
     }
     let positions = (0..8)
@@ -181,213 +186,31 @@ fn entity_box(
     PropBox::new(template, positions, s.shell)
 }
 
-/// Visible trackside barrier ornaments (route_0/ornaments.bin instances of
-/// objects.pssg prototypes). Their meshes stand up to ~0.5 m (concrete blocks)
-/// in front of the boundary sheet, which otherwise lets the car sink into them
-/// (owner playtest 15 October). The original's collision for these instances
-/// is not recovered; this solid oriented box of each prototype's mesh extent is
-/// an authored stand-in. Poles, lights and other ornaments stay non-solid.
-const BARRIER_FAMILIES: [&str; 4] = ["concrete_", "chnfen", "gg_ad_brd_", "don_ad_brd_"];
-/// AUTHORED tolerances of [`barrier_extent`]: a part within this height of the
-/// prototype's lowest point stands on the ground; a part starting within it
-/// of the base's top is mounted on the base.
-const BASE_TOLERANCE: f32 = 0.05;
-/// AUTHORED: a mounted part reaching this far past the base footprint leans out.
-const OVERHANG_TOLERANCE: f32 = 0.01;
-
-/// Lowest and highest corner of an axis-aligned extent.
-type Extent = ([f32; 3], [f32; 3]);
-
-/// Mesh points (prototype space, Y up) and triangles of one prototype.
-#[derive(Default)]
-struct PrototypeMesh {
-    points: Vec<[f32; 3]>,
-    triangles: Vec<[usize; 3]>,
-}
-
-/// The stand-in extent of a barrier prototype: its mesh extent without the
-/// parts mounted on top of the base that lean out past the base's footprint.
-/// Long Beach's `concrete_fence_*` carry a catch fence whose posts and panels
-/// start on the 1.0 m concrete wall and lean 0.63 m out over the track at
-/// 3.4-4.1 m; with them the box stood 0.63 m in front of the visible concrete
-/// at road level, where the tyre stacks stand, so their pieces spawned up to
-/// 0.76 m inside it (docs/LONG_BEACH.md section 5). Prototypes without such
-/// parts (every barrier of the other circuits) keep their whole extent.
-fn barrier_extent(mesh: &PrototypeMesh) -> Extent {
-    let parts = barrier_parts(mesh);
-    let union = |keep: &dyn Fn(&Extent) -> bool| {
-        parts
-            .iter()
-            .filter(|e| keep(e))
-            .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), e| {
-                (
-                    std::array::from_fn(|j| lo[j].min(e.0[j])),
-                    std::array::from_fn(|j| hi[j].max(e.1[j])),
-                )
-            })
-    };
-    let whole = union(&|_| true);
-    // Across the barrier: the shorter horizontal axis of the whole mesh.
-    let across = if whole.1[0] - whole.0[0] <= whole.1[2] - whole.0[2] {
-        0
-    } else {
-        2
-    };
-    let base = union(&|e| e.0[1] <= whole.0[1] + BASE_TOLERANCE);
-    let mounted_overhang = |e: &Extent| {
-        e.0[1] >= base.1[1] - BASE_TOLERANCE
-            && (e.0[across] < base.0[across] - OVERHANG_TOLERANCE
-                || e.1[across] > base.1[across] + OVERHANG_TOLERANCE)
-    };
-    union(&|e| !mounted_overhang(e))
-}
-
-/// The extents of a prototype mesh's connected parts.
-fn barrier_parts(mesh: &PrototypeMesh) -> Vec<Extent> {
-    // Connected parts by welded position (1 mm), across draws.
-    let mut welded = BTreeMap::new();
-    let ids: Vec<usize> = (mesh.points.iter())
-        .map(|p| {
-            let n = welded.len();
-            *welded
-                .entry(p.map(|x| (x * 1000.).round() as i64))
-                .or_insert(n)
-        })
-        .collect();
-    let mut parent: Vec<usize> = (0..welded.len()).collect();
-    fn find(parent: &mut [usize], mut x: usize) -> usize {
-        while parent[x] != x {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        x
-    }
-    for t in &mesh.triangles {
-        let a = find(&mut parent, ids[t[0]]);
-        for &k in &t[1..] {
-            let b = find(&mut parent, ids[k]);
-            parent[b] = a;
-        }
-    }
-    let mut parts: BTreeMap<usize, Extent> = BTreeMap::new();
-    for (i, p) in mesh.points.iter().enumerate() {
-        let e = parts
-            .entry(find(&mut parent, ids[i]))
-            .or_insert(([f32::MAX; 3], [f32::MIN; 3]));
-        *e = (
-            std::array::from_fn(|j| e.0[j].min(p[j])),
-            std::array::from_fn(|j| e.1[j].max(p[j])),
-        );
-    }
-    parts.into_values().collect()
-}
+/// AUTHORED sanity bound on a collision box edge (m): the longest source
+/// shape is Shibuya's `bridge_glass_c` deck, 315 m.
+const MAX_EDGE: f32 = 1000.;
 
 /// Bound on a route's prop collision boxes: the original's fixed-object pool
-/// (10,000, AD9220; docs/RUNTIME_LIMITS_AUDIT.md). Washington route 0 has
-/// 8662 with the group-part stand-ins.
+/// (10,000, AD9220; docs/RUNTIME_LIMITS_AUDIT.md).
 const MAX_BOXES: usize = 10_000;
 
-/// AUTHORED: the longest horizontal side of one part of a group prototype
-/// that gets its own box (a concrete block or fence section, not a run).
-const GROUP_PART_LENGTH: f32 = 10.;
-
-fn valid_extent((lo, hi): &Extent) -> bool {
-    (0..3).all(|j| hi[j] > lo[j] && hi[j] - lo[j] <= 100. && (hi[j] - lo[j]).is_finite())
-}
-
-/// Closest-LOD meshes of the barrier family prototypes, by root node name.
-fn barrier_meshes(
-    root: &Path,
-    route: &Route,
-) -> Result<BTreeMap<Vec<u8>, PrototypeMesh>, Box<dyn std::error::Error>> {
-    use grid_formats::{mesh, scene};
-    let objects = std::fs::read(root.join(route.track_file("objects.pssg")))?;
-    let tree = pssg::read_tree(&objects)?;
-    let sources = mesh::read_static_meshes(&tree)?;
-    let mut meshes: BTreeMap<Vec<u8>, PrototypeMesh> = BTreeMap::new();
-    for d in scene::read_object_draws(&tree, &sources)? {
-        let Some(prototype) = d.prototype else {
-            continue;
-        };
-        if !BARRIER_FAMILIES
-            .iter()
-            .any(|f| prototype.starts_with(f.as_bytes()))
-        {
-            continue;
-        }
-        let source = &sources[d.source];
-        let m = meshes.entry(prototype.to_vec()).or_default();
-        let mut local = BTreeMap::new();
-        let mut index = |i: u16| {
-            *local.entry(i).or_insert_with(|| {
-                m.points.push(scene::transform_point(
-                    &d.transform,
-                    source.positions[i as usize],
-                ));
-                m.points.len() - 1
-            })
-        };
-        let triangles: Vec<[usize; 3]> = (d.indices.as_chunks::<3>().0.iter())
-            .map(|t| [index(t[0]), index(t[1]), index(t[2])])
-            .collect();
-        m.triangles.extend(triangles);
-    }
-    Ok(meshes)
-}
-
-fn ornament_barriers(
-    root: &Path,
-    route: &Route,
-) -> Result<Vec<PropBox>, Box<dyn std::error::Error>> {
-    use grid_formats::{ornaments, scene};
-    let meshes = barrier_meshes(root, route)?;
-    let placement_bytes = std::fs::read(root.join(route.file("ornaments.bin")))?;
-    let placements = ornaments::read(&placement_bytes)?;
-    let mut boxes = Vec::new();
-    for p in &placements.prototypes {
-        let name = String::from_utf8_lossy(p.name).into_owned();
-        if !BARRIER_FAMILIES.iter().any(|f| name.starts_with(f)) {
-            continue;
-        }
-        let Some(mesh) = meshes.get(format!("{name} Root").as_bytes()) else {
-            continue;
-        };
-        let whole = barrier_extent(mesh);
-        // A group prototype: one placement of a mesh laid out in world
-        // space, either over more than 100 m (Detroit
-        // concrete_block_long_01, 146 m; Washington chnfen_e_group1, 540 m)
-        // or as a layout wider than a part in both horizontal directions
-        // (Washington chnfen_e_group3b, 40 x 43 m; group4, 96 x 67 m), which
-        // one box would close across the road. One box per short connected
-        // part; longer or flat parts stay non-solid.
-        let (lo, hi) = whole;
-        let layout = hi[0] - lo[0] > GROUP_PART_LENGTH && hi[2] - lo[2] > GROUP_PART_LENGTH;
-        let extents = if p.transforms.len() == 1 && (layout || !valid_extent(&whole)) {
-            barrier_parts(mesh)
-                .into_iter()
-                .filter(|e| {
-                    valid_extent(e) && (e.1[0] - e.0[0]).max(e.1[2] - e.0[2]) <= GROUP_PART_LENGTH
-                })
-                .collect()
-        } else if valid_extent(&whole) {
-            vec![whole]
-        } else {
-            return Err(format!("invalid barrier ornament extent: {name} {lo:?}..{hi:?}").into());
-        };
-        for (lo, hi) in extents {
-            for m in &p.transforms {
-                let positions = (0..8)
-                    .map(|i| {
-                        let local =
-                            std::array::from_fn(|j| if i >> j & 1 == 0 { lo[j] } else { hi[j] });
-                        scene::transform_point(m, local)
-                    })
-                    .collect();
-                boxes.push(PropBox::new(name.clone(), positions, 0.)?);
-            }
+/// The collision boxes of one placement's initial components, without
+/// phantom shapes; `entity` is the entity placement index, or none for a
+/// basic entity.
+fn placement_boxes(
+    e: &entities::Entity<'_>,
+    entity: Option<usize>,
+    boxes: &mut Vec<PropBox>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let template = String::from_utf8_lossy(e.template).into_owned();
+    for r in &e.renderables {
+        for s in r.shapes.iter().filter(|s| !s.phantom) {
+            let mut b = entity_box(template.clone(), &e.transform, s)?;
+            b.entity = entity;
+            boxes.push(b);
         }
     }
-    Ok(boxes)
+    Ok(())
 }
 
 impl Props {
@@ -411,14 +234,8 @@ impl Props {
         // Kept after every other box, so the active boxes keep their indices.
         let mut damaged = Vec::new();
         for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
+            placement_boxes(&e, Some(index), &mut boxes)?;
             let template = String::from_utf8_lossy(e.template).into_owned();
-            for r in &e.renderables {
-                for s in r.shapes.iter().filter(|s| !s.phantom) {
-                    let mut b = entity_box(template.clone(), &e.transform, s)?;
-                    b.entity = Some(index);
-                    boxes.push(b);
-                }
-            }
             // The static pieces of the damage state, once per behaviour type.
             let mut types = Vec::new();
             if !static_damage_ported(&template) {
@@ -441,7 +258,12 @@ impl Props {
                 }
             }
         }
-        boxes.extend(ornament_barriers(root, route)?);
+        // Basic entities: the fixed barriers, fences, walls, buildings and
+        // signs whose meshes `ornaments.bin` draws. Their shapes stay intact
+        // (their damage behaviours, e.g. Le Mans armco, are not ported).
+        for e in entities::read_basic(&placements, &types)? {
+            placement_boxes(&e, None, &mut boxes)?;
+        }
         boxes.extend(damaged);
         if boxes.is_empty() || boxes.len() > MAX_BOXES {
             return Err(format!("unsupported entity collision box count {}", boxes.len()).into());
@@ -688,6 +510,7 @@ impl BoxIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn box_index_candidates_cover_every_overlap_in_order() {
@@ -751,19 +574,62 @@ mod tests {
             "route_props boxes={} templates={templates:?}",
             props.boxes.len()
         );
-        let entity_boxes: usize = templates
-            .iter()
-            .filter(|(t, _)| t.ends_with(".max"))
-            .map(|(_, n)| n)
-            .sum();
+        let entity_boxes = props.boxes.iter().filter(|b| b.entity.is_some()).count();
         assert_eq!(entity_boxes, 1021);
-        // Barrier ornaments without entity counterparts, e.g. concrete blocks.
-        assert_eq!(templates.get("concrete_block_long"), Some(&264));
-        assert_eq!(props.boxes.len(), 2066);
+        // Basic entities (fences, concrete blocks, walls, ad boards), each
+        // shape of its template once per placement.
+        assert_eq!(templates.get("concrete_block_long.max"), Some(&264));
+        assert_eq!(props.boxes.len(), 1021 + 972);
         assert!(
             !templates.contains_key("tyre_wall"),
             "no duplicated entity walls"
         );
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn basic_entities_leave_every_racing_line_open() {
+        // Before F284's stand-ins were replaced, Washington's chnfen_e_group3b
+        // and group4 layouts (one ornament placement each) became a box
+        // across route 0's line at (833, 7, 834). The basic-entity shapes
+        // are per placement and never stand on a racing line.
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        for path in crate::route::CIRCUITS {
+            let route = Route::new(path).unwrap();
+            let props = Props::read_route(root, &route).unwrap();
+            assert!(props.boxes.len() <= MAX_BOXES, "{path} {}", props.boxes.len());
+            let basic: Vec<PropBox> =
+                props.boxes.iter().filter(|b| b.entity.is_none()).cloned().collect();
+            assert!(basic.len() > 300, "{path} {}", basic.len());
+            let basic = Props {
+                boxes: std::sync::Arc::new(basic),
+            };
+            let line = crate::ai_driver::Line::load_route(root, &route).unwrap();
+            // The line every 0.5 m or so, 0.5 m up.
+            let points = line.points();
+            let lifted: Vec<[f32; 3]> = points
+                .iter()
+                .zip(points.iter().cycle().skip(1))
+                .flat_map(|(a, b)| {
+                    (0..20).map(move |k| {
+                        let t = k as f32 / 20.;
+                        std::array::from_fn(|j| {
+                            a[j] + (b[j] - a[j]) * t + if j == 1 { 0.5 } else { 0. }
+                        })
+                    })
+                })
+                .collect();
+            let blocked: Vec<String> = lifted
+                .iter()
+                .filter_map(|p| {
+                    basic
+                        .deepest_overlap(std::slice::from_ref(p))
+                        .map(|(i, _)| format!("{} {p:?}", basic.boxes[i].template))
+                })
+                .collect();
+            assert!(blocked.is_empty(), "{path} {blocked:?}");
+        }
     }
 
     /// Soak seed 1087 (F342 build, both routes): the player hit a tyre wall
@@ -771,104 +637,6 @@ mod tests {
     /// wall's box gave contacts with downward normals (up to 0.9 m deep),
     /// which pushed the car through the road; it then fell out of the world.
     /// As one box primitive (AE8AD0) every contact pushes up or sideways.
-    /// A wall with a catch fence: a 0.42 m base on the ground, a post on it
-    /// leaning 0.63 m out across the wall, and a fence plane above the base.
-    fn fenced_wall(lean: f32) -> PrototypeMesh {
-        let mut mesh = PrototypeMesh::default();
-        let mut add = |lo: [f32; 3], hi: [f32; 3]| {
-            let base = mesh.points.len();
-            mesh.points.extend(
-                (0..8)
-                    .map(|i| std::array::from_fn(|j| if i >> j & 1 == 0 { lo[j] } else { hi[j] })),
-            );
-            // Two triangles per box connect all eight corners.
-            mesh.triangles
-                .extend([[0, 1, 3], [3, 2, 7], [7, 6, 4], [4, 5, 1]].map(|t| t.map(|k| base + k)));
-        };
-        add([0., 0., -0.22], [4., 1., 0.2]);
-        add([0.1, 0.98, -0.03], [0.2, 4.09, lean]);
-        add([0.2, 1.1, 0.04], [3.9, 3.1, 0.06]);
-        mesh
-    }
-
-    #[test]
-    fn a_catch_fence_leaning_out_is_not_part_of_the_stand_in() {
-        // Long Beach concrete_fence_*: the post leans out across the wall.
-        let (lo, hi) = barrier_extent(&fenced_wall(0.83));
-        assert_eq!((lo, hi), ([0., 0., -0.22], [4., 3.1, 0.2]));
-        // A post that stays over the base is kept, and so is the whole mesh.
-        let (lo, hi) = barrier_extent(&fenced_wall(0.2));
-        assert_eq!((lo, hi), ([0., 0., -0.22], [4., 4.09, 0.2]));
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT"]
-    fn washington_group_layouts_leave_the_racing_line_open() {
-        // chnfen_e_group3b (40 x 43 m) and group4 (96 x 67 m) are single
-        // placements of a world-space layout; one box of the whole extent
-        // stood across Washington route 0's line at (833, 7, 834).
-        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
-        let root = Path::new(&root);
-        let route = Route::new("tracks/usa/washington/route_0").unwrap();
-        let props = Props::read_route(root, &route).unwrap();
-        assert!(props.boxes.len() > 8192 && props.boxes.len() <= MAX_BOXES, "{}", props.boxes.len());
-        let line = crate::ai_driver::Line::load_route(root, &route).unwrap();
-        // The line every metre or so, 0.5 m up.
-        let points = line.points();
-        let lifted: Vec<[f32; 3]> = points
-            .iter()
-            .zip(points.iter().cycle().skip(1))
-            .flat_map(|(a, b)| {
-                (0..20).map(move |k| {
-                    let t = k as f32 / 20.;
-                    std::array::from_fn(|j| a[j] + (b[j] - a[j]) * t + if j == 1 { 0.5 } else { 0. })
-                })
-            })
-            .collect();
-        let blocked: Vec<String> = lifted
-            .iter()
-            .filter_map(|p| props.deepest_overlap(std::slice::from_ref(p)).map(|(i, _)| props.boxes[i].template.clone()))
-            .filter(|t| t.starts_with("chnfen"))
-            .collect();
-        assert!(blocked.is_empty(), "{blocked:?}");
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT"]
-    fn only_long_beach_fences_lose_their_leaning_catch_fence() {
-        // Long Beach soak seeds 1..12 and 17..20 lost tyre-stack pieces through
-        // the road: with the leaning catch fence the stand-in reached 0.63 m in
-        // front of the concrete, and the pieces spawned inside it.
-        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
-        let root = Path::new(&root);
-        for path in crate::route::CIRCUITS {
-            let route = Route::new(path).unwrap();
-            let meshes = barrier_meshes(root, &route).unwrap();
-            assert!(!meshes.is_empty());
-            for (name, mesh) in meshes {
-                let name = String::from_utf8_lossy(&name).into_owned();
-                let whole =
-                    mesh.points
-                        .iter()
-                        .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| {
-                            (
-                                std::array::from_fn(|j| lo[j].min(p[j])),
-                                std::array::from_fn(|j| hi[j].max(p[j])),
-                            )
-                        });
-                let (lo, hi) = barrier_extent(&mesh);
-                if path == crate::route::LONG_BEACH && name.starts_with("concrete_fence_") {
-                    // The concrete wall's front face, not the fence top (0.83).
-                    assert!(whole.1[2] > 0.8, "{name}");
-                    assert!((0.19..0.2).contains(&hi[2]), "{name} {hi:?}");
-                    assert_eq!((lo[0], lo[1], hi[0]), (whole.0[0], whole.0[1], whole.1[0]));
-                } else {
-                    assert_eq!((lo, hi), whole, "{path} {name}");
-                }
-            }
-        }
-    }
-
     /// The poses are the recorded hull matrices of the failing replays.
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]

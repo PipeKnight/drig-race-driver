@@ -175,12 +175,32 @@ fn boolean(tree: &Tree<'_>, node: usize, name: &[u8]) -> Result<bool> {
     }
 }
 
+/// The `TEMPLATEENTITYINSTANCE` placements, in file order.
 pub fn read<'a>(placements: &Tree<'a>, types: &Tree<'a>) -> Result<Vec<Entity<'a>>> {
+    let entities = read_kind(placements, types, b"TEMPLATEENTITYINSTANCE")?;
+    if entities.is_empty() {
+        return fail(0, "no entity placements");
+    }
+    Ok(entities)
+}
+
+/// The `TEMPLATEBASICENTITYINSTANCE` placements, in file order (possibly
+/// none). The original builds them as world entities from the same
+/// templates: the level loader keeps them in their own list (0x7D97B0,
+/// world +0xBBCC) and gives each the collision primitives of its template's
+/// initial components (0x7CB440, called per basic instance by 0x7D6BA0).
+/// Their meshes are drawn through `ornaments.bin`, not through these
+/// renderables.
+pub fn read_basic<'a>(placements: &Tree<'a>, types: &Tree<'a>) -> Result<Vec<Entity<'a>>> {
+    read_kind(placements, types, b"TEMPLATEBASICENTITYINSTANCE")
+}
+
+fn read_kind<'a>(placements: &Tree<'a>, types: &Tree<'a>, kind: &[u8]) -> Result<Vec<Entity<'a>>> {
     let placement_ids = index(placements)?;
     let type_ids = index(types)?;
     let mut entities = Vec::new();
     for i in 0..placements.nodes.len() {
-        if placements.name(i) != b"TEMPLATEENTITYINSTANCE" {
+        if placements.name(i) != kind {
             continue;
         }
         let reference = local(
@@ -294,9 +314,6 @@ pub fn read<'a>(placements: &Tree<'a>, types: &Tree<'a>) -> Result<Vec<Entity<'a
                 .push(subentity(types, &type_ids, template, component, true)?);
         }
         entities.push(entity);
-    }
-    if entities.is_empty() {
-        return fail(0, "no entity placements");
     }
     Ok(entities)
 }

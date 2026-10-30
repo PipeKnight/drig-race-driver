@@ -173,6 +173,9 @@ pair per tick. [verified prototype; inference about original frequency]
 the boundary, then the packed chunks. The scene loader `append_entities` (`grid-app`
 `main.rs` about line 580) only **renders** entities and counts boxes. Static ornaments
 (1,985) carry no collision data (`ornament_attributes.xml` holds LOD/instancing only).
+Correction (BARRIER_COLLISION.md): 836 of them are drawn copies of `objects.ens` basic
+entities (`TEMPLATEBASICENTITYINSTANCE`), whose templates do have infinite-mass collision
+shapes that the original builds at level setup (0x7CB440).
 
 Donington `route_0` entity inventory (`grid-entities` report, all `infMass = 1`, all box
 shapes with `shell = 0.02`):

@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F653](log/F0653.md) | 2026-10-30 | Barrier collision sweep: basic entities collide (fences, armco, walls on every route) |
 | [F652](log/F0652.md) | 2026-10-30 | Sun shadows: casters culled per cascade by receiver, shadow passes timed, the original's cascades traced |
 | [F651](log/F0651.md) | 2026-10-30 | First-corner matrix with breakable props; start-line routes; flag bases |
 | [F650](log/F0650.md) | 2026-10-30 | Cockpit: the wheel follows the front wheels' applied steering (row 94) |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F596](log/F0596.md) | 2026-10-27 | Speech part 2 research: damage, performance, accidents, teammate and key-driver parameters |
 | [F595](log/F0595.md) | 2026-10-27 | Speech part 1 ported: race start, position calls and finish lines |
 | [F594](log/F0594.md) | 2026-10-27 | Speech research: triggers, choice and queue of the race engineer's lines |
-| [F593](log/F0593.md) | 2026-10-27 | Playable b90f145101b3 with F581-F592, portable copy and APKs 3c7a3516e27a |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -7,4 +7,4 @@ name	args	env	sha256
 solo	1 11200 ai	-	69fdf81f73fb2114636c3ecbfd554d20c561ec543bfad9078f4fc433e0262e58
 12-car	12 11200 ai	-	25ed3727ba6e2775eadcd4f85b047c92d7a1f628b2de543dc9564540959ff37c
 12-car-df	12 11200 ai	DF+AI	b82bbde38d402b88fe77b49ff5e506dbc6c1a90174ee17939b116b4556acd131
-derby-df	--route tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai	DF+AI	fb7f8ffc91fa0fb118dfea134a21fadf22029cbcc1d67d10b9da1c933fbfa244
+derby-df	--route tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai	DF+AI	83bff721d159766df559e119c2b3ad0a1010b362232cfa8444d8314a910f1851

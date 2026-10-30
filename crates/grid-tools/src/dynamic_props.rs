@@ -1126,8 +1126,8 @@ const DEEP_ROAD: f32 = 0.1;
 
 /// The world contacts of a piece hull at `pose` that press it down: a road
 /// contact with a downward normal (y < −0.5), a downward contact from a route
-/// entity box other than `own` (authored stand-ins have no entity and do not
-/// count), and whether any road contact is deeper than [`DEEP_ROAD`].
+/// entity or basic-entity box other than `own`, and whether any road contact
+/// is deeper than [`DEEP_ROAD`].
 fn pressing_at(
     spec: &PieceSpec,
     pose: Matrix,
@@ -1140,7 +1140,6 @@ fn pressing_at(
         margin: spec.shell,
         directions: directions.directions,
     };
-    let boxes = track.props().map(|p| &p.boxes);
     let hits = track.body_contacts(
         spec.collider(),
         pose,
@@ -1153,11 +1152,7 @@ fn pressing_at(
     Ok(Pressing {
         road: hits.iter().any(|h| h.prop.is_none()),
         road_down: hits.iter().filter(down).any(|h| h.prop.is_none()),
-        entity_down: hits.iter().filter(down).any(|h| {
-            h.prop.is_some_and(|i| {
-                !own.contains(&i) && boxes.is_some_and(|b| b[i].entity.is_some())
-            })
-        }),
+        entity_down: (hits.iter().filter(down)).any(|h| h.prop.is_some_and(|i| !own.contains(&i))),
         deep_road: hits
             .iter()
             .any(|h| h.prop.is_none() && h.contact.penetration > DEEP_ROAD),
@@ -2688,9 +2683,8 @@ impl PropWorld {
     /// spawn pose, if anything: a contact with a downward normal from the
     /// original's static geometry, a road chunk or the boundary sheet
     /// (`Pressed::Road`) or an entity box other than the piece's own intact
-    /// boxes (`Pressed::EntityBox`). Authored ornament stand-ins do not
-    /// count. The original spawns pieces at the raw placement (0x7D3C40, no
-    /// ground snap) and orients a non-sheet triangle's normal by the shape
+    /// boxes (`Pressed::EntityBox`), basic entities included. The original
+    /// spawns pieces at the raw placement (0x7D3C40, no ground snap) and orients a non-sheet triangle's normal by the shape
     /// origin (AEA1F0/AEE640), so such a body is pushed under in the original
     /// too [I] (docs/ROBUSTNESS_RESEARCH.md). Diagnostics only (grid-soak).
     pub fn pressed_down_at_spawn(
@@ -3338,12 +3332,13 @@ mod tests {
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]
-    fn no_piece_spawns_pressed_down_by_a_barrier_stand_in() {
+    fn no_piece_spawns_pressed_down_by_a_basic_entity() {
         // Long Beach soak seeds 1..12 and 17..20 (F354): the tyre stacks stand
-        // in front of concrete_fence_* walls whose stand-in box reached 0.63 m
-        // past the concrete (the catch fence leans out over the track). Their
-        // pieces spawned up to 0.76 m inside it, the box pushed them down
-        // through the road and they fell out of the world.
+        // in front of concrete_fence_* walls whose authored stand-in box (F284,
+        // replaced by the basic entities' own shapes) reached 0.63 m past the
+        // concrete (the catch fence leans out over the track). Their pieces
+        // spawned up to 0.76 m inside it, the box pushed them down through the
+        // road and they fell out of the world.
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
         let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
@@ -3371,7 +3366,7 @@ mod tests {
                         })
                         .unwrap();
                     for h in hits {
-                        // Ornament stand-ins are the prop boxes without an entity.
+                        // Basic-entity boxes are the prop boxes without an entity.
                         if h.prop.is_none_or(|k| props.boxes[k].entity.is_some()) {
                             continue;
                         }
@@ -3388,9 +3383,9 @@ mod tests {
                     }
                 }
             }
-            println!("{path}: {pieces} pieces, {touching} stand-in contacts, deepest {deepest}");
+            println!("{path}: {pieces} pieces, {touching} basic-entity contacts, deepest {deepest}");
             if path == crate::route::LONG_BEACH {
-                // 1330 piece/stand-in pairs up to 0.76 m deep before the fix.
+                // 1330 piece/stand-in pairs up to 0.76 m deep before F357.
                 assert!(pieces > 1000 && deepest < 0.15, "{deepest}");
             }
         }

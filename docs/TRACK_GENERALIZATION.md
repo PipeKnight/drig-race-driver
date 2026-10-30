@@ -41,7 +41,7 @@ Observed by `grep` over `crates/` at 32e747e.
 | `source_vehicle/multi.rs` | `Runtime::lacetti` per car | route |
 | `lap_progress.rs` | `route_0/progress_track.xml`; one route, finish gate 0 | route; the one-route/finish-0 check still applies |
 | `entity_geometry.rs` `Props::read` | `route_0/objects.ens`, `objecttypes.pssg` | route |
-| `entity_geometry.rs` `ornament_barriers` | `objects.pssg`, `route_0/ornaments.bin`; family list includes the Donington-only `don_ad_brd_` | route; family list unchanged (authored stand-in, see below) |
+| `entity_geometry.rs` basic entities | `objects.ens` `TEMPLATEBASICENTITYINSTANCE` shapes; replaced the F284 `ornament_barriers` stand-ins (BARRIER_COLLISION.md) | route |
 | `ai_driver.rs` | doc example and two asset tests use Donington | unchanged (tests are Donington-specific by design) |
 | `time_trial.rs` | record header `donington-route0` | unchanged; the app saves bests only on the default route |
 | `bin/grid-opponent-race.rs` | AI data and lap progress from Donington | `--route` |
@@ -134,9 +134,7 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
   the app still uses the Donington sequence constants on every route.
 - ~~Spa VCQTC count limits~~ (F399); Spa's solo AI retires; Jarama route 0 late-braking corner (route 1, the other
   direction, is the fifth circuit: JARAMA.md); Istanbul off-track excursions at ~56 m/s.
-- Barrier ornament stand-in families: generic `concrete_`, `chnfen`,
-  `gg_ad_brd_` match on other tracks; armco/tyre stacks stay non-solid as on
-  Donington; per-track barrier keys of the CAR_ material mix not re-checked.
-  Since F357 a stand-in leaves out mounted parts that lean out across the
-  barrier (Long Beach catch fences; LONG_BEACH.md section 5.1).
+- ~~Barrier ornament stand-in families~~: replaced by the basic entities'
+  own collision shapes on every route (BARRIER_COLLISION.md); per-track
+  barrier keys of the CAR_ material mix not re-checked.
 - Diagnostic binaries listed above remain Donington-only.

@@ -880,3 +880,13 @@ test = false
 name = "grid-pssg-tree"
 path = "src/bin/grid-pssg-tree.rs"
 test = false
+
+[[bin]]
+name = "grid-barrier-sweep"
+path = "src/bin/grid-barrier-sweep.rs"
+test = false
+
+[[bin]]
+name = "grid-barrier-impact"
+path = "src/bin/grid-barrier-impact.rs"
+test = false

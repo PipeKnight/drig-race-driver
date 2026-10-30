@@ -317,7 +317,7 @@ mod tests {
         }
         // Brake boards, tyre walls (the single walls' blocks are joined,
         // F484) and armco (shapeless posts, F501) break.
-        assert_eq!(props.boxes.len(), 1689);
+        assert_eq!(props.boxes.len(), 2049);
         assert_eq!(templates["armco_main_section.max"], 802);
         assert_eq!(templates["tyrewall_black_double.max"], 222);
         assert_eq!(templates["tyrewall_black.max"], 221);
@@ -373,7 +373,7 @@ mod tests {
         }
         // Tyre stacks (single and double, three colours) break; the tyre walls
         // need the joint rows the port lacks and stay static, as on Donington.
-        assert_eq!(props.boxes.len(), 1325);
+        assert_eq!(props.boxes.len(), 2796);
         assert_eq!(templates.values().sum::<usize>(), 124);
         assert!(templates.keys().all(|t| t.starts_with("tyrestack_")));
         assert_eq!(catalog.unported.values().sum::<usize>(), 275);
@@ -425,7 +425,7 @@ mod tests {
         // drift flags break; the armco ends (a rail of three shapes) stay
         // static. The flags stand on cylinders (route shapes since row 20);
         // each adds its damage state's static base, two boxes.
-        assert_eq!(props.boxes.len(), 2283);
+        assert_eq!(props.boxes.len(), 2815);
         assert_eq!(templates.values().sum::<usize>(), 1187);
         assert_eq!(templates["close_drift_flag.max"], 16);
         assert_eq!(
@@ -489,7 +489,7 @@ mod tests {
         // The barrels stand on cylinders (128 cylinder route shapes) and
         // break, and the armco sections (F501) and 17 of the 21 drift flags;
         // the crates, chevrons and armco ends stay static.
-        assert_eq!(props.boxes.len(), 1673);
+        assert_eq!(props.boxes.len(), 4258);
         assert_eq!(
             templates,
             [("armco_main_section.max", 42), ("close_drift_flag.max", 17), ("gg_barrel.max", 77)]
@@ -544,7 +544,7 @@ mod tests {
         // F484) and 296 armco sections (F501) break; the armco ends, the
         // `tyrewall_a_*` walls (a static or phantom piece) and cones stay
         // static (the 37 cones are cylinder route shapes).
-        assert_eq!(props.boxes.len(), 1552);
+        assert_eq!(props.boxes.len(), 2239);
         assert_eq!(templates.values().sum::<usize>(), 373);
         assert_eq!(templates["tyrewall_b_red.max"] + templates["tyrewall_b_white.max"], 55);
         assert!(
@@ -573,9 +573,9 @@ mod tests {
         // (route, name, gates, distance, time splits, grid slots, AI line,
         // route boxes, breakable entities, unported placements)
         for (path, name, gates, distance, splits, slots, line, boxes, breakables, unported) in [
-            (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2340, 1376, 87),
-            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 1250, 19, 363),
-            (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 1309, 239, 1),
+            (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2296, 1376, 87),
+            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 2924, 19, 363),
+            (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 2270, 239, 1),
         ] {
             let route = Route::new(path).unwrap();
             assert_eq!(route.track_name(), name);
@@ -655,7 +655,7 @@ mod tests {
         // Brake boards, tyre stacks, the joined tyre walls (F484) and the
         // armco sections (shapeless posts, F501) break; the armco ends and
         // foam posts stay static (the 97 foam posts are cylinder route shapes).
-        assert_eq!(props.boxes.len(), 2510);
+        assert_eq!(props.boxes.len(), 3009);
         assert_eq!(templates.values().sum::<usize>(), 1056);
         assert_eq!(templates["armco_02_main_section.max"], 637);
         assert_eq!(templates["tyrestack_black.max"], 173);
