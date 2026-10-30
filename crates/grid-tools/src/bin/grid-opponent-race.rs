@@ -551,20 +551,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
-        if drift {
-            // The drift test's race place; without a race manager the AI
-            // request grips of the last update reach the wheels here, as the
-            // grip application 0x408710 does.
-            for (i, driver) in drivers.iter_mut().enumerate() {
-                if let Driver::Ai(ai) = driver {
-                    ai.race = grid_tools::ai_driver::RaceView {
-                        place: standings.position(i).saturating_sub(1) as u32,
-                        cars: cars as u32,
-                        progress: standings.laps_covered(i) as f32,
-                    };
-                    if field.is_none() {
-                        multi.cars[i].set_ai_grip(ai.request_grip());
-                    }
+        // The race place (drift test, line choice 0x794870); in drift events
+        // without a race manager the AI request grips of the last update
+        // reach the wheels here, as the grip application 0x408710 does.
+        for (i, driver) in drivers.iter_mut().enumerate() {
+            if let Driver::Ai(ai) = driver {
+                ai.race = grid_tools::ai_driver::RaceView {
+                    place: standings.position(i).saturating_sub(1) as u32,
+                    cars: cars as u32,
+                    progress: standings.laps_covered(i) as f32,
+                };
+                if drift && field.is_none() {
+                    multi.cars[i].set_ai_grip(ai.request_grip());
                 }
             }
         }

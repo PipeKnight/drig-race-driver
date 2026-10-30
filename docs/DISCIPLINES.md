@@ -323,6 +323,11 @@ and without the overlay `behaviour_drift` would be off and the drift code below 
 drift 6, start 7; AI_DRIVER_RESEARCH's "retirement 1 … drift 7" was off by one): optimal; traffic
 with trafficBehaviour (cfg+0xC98); **drift with behaviour_drift (cfg+0xCC3)**; start before the start
 line (context progress < 0); a link without the wanted kind falls back to optimal (0x793720(…, 1)).
+Decompiled order: traffic with trafficBehaviour; else, when the context flag param_4+0x1C is set
+or progress ≥ 0, drift with behaviour_drift and otherwise optimal; else (progress < 0) start.
+Shibuya routes 0–1 and Yokohama Docks routes 0, 1 and 9 ship a `start` line on every gate (all other
+routes none); the port follows it before the start line since F649 (`AiData::start`, the context
+flag [I] taken as clear). Traffic is not ported (Haruna ships it).
 
 **Drift test 0x78FE90** (object 0x1C bytes from 0x7A7950: +8 fired, +0x10 place at the last fire,
 +0x14 timer = −1, +0x18 before-start flag, +0x19 "always" flag, never set). f = place/(cars − 1)

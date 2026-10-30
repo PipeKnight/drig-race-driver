@@ -605,6 +605,31 @@ pub struct AiData {
     /// config enables the drift behaviour (line choice 0x794870 reads
     /// cfg+0xCC3 = behaviour_drift).
     drift: Option<Box<AiData>>,
+    /// The same data on the route's `start` racing line, followed before the
+    /// start line (0x794870 kind 7), when the route ships one that differs
+    /// from `optimal` (Shibuya; most routes ship `optimal` only).
+    start: Option<Box<AiData>>,
+}
+
+/// The racing line a car follows (line choice 0x794870).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RacingLine {
+    Optimal,
+    Start,
+    Drift,
+}
+
+impl AiData {
+    /// The data on `kind`, or the optimal line when the route lacks it (a
+    /// link without the kind falls back to `optimal`, 0x793720(..., 1)).
+    fn on(&self, kind: RacingLine) -> &AiData {
+        match kind {
+            RacingLine::Optimal => None,
+            RacingLine::Start => self.start.as_deref(),
+            RacingLine::Drift => self.drift.as_deref(),
+        }
+        .unwrap_or(self)
+    }
 }
 
 /// `(arc length of the brake-line gate, class brake data)` per brake-line id.
@@ -787,6 +812,7 @@ impl AiData {
             mappings,
             switches,
             drift: None,
+            start: None,
         };
         if data.switch("behaviour_drift") {
             let (line, brake_lines) =
@@ -794,6 +820,21 @@ impl AiData {
             data.drift = Some(Box::new(Self {
                 line,
                 brake_lines,
+                ..data.clone()
+            }));
+        }
+        let start = ai::track_named(&track_doc, ai_track, "start")?;
+        if start
+            .gates
+            .iter()
+            .zip(&track.gates)
+            .any(|(s, o)| s.racing_line != o.racing_line)
+        {
+            let (line, brake_lines) = track_lines(&start, &class_lines)?;
+            data.start = Some(Box::new(Self {
+                line,
+                brake_lines,
+                drift: None,
                 ..data.clone()
             }));
         }
@@ -2540,8 +2581,8 @@ pub struct AiDriver {
     /// Race place, set before each update (drift events).
     pub race: RaceView,
     drift: DriftState,
-    /// The car follows the `drift` racing line.
-    on_drift_line: bool,
+    /// The racing line the car follows.
+    racing_line: RacingLine,
 }
 
 fn clamp01(x: f32) -> f32 {
@@ -2699,7 +2740,7 @@ impl AiDriver {
             reverse: false,
             race: RaceView::default(),
             drift: DriftState::default(),
-            on_drift_line: false,
+            racing_line: RacingLine::Optimal,
         }
     }
 
@@ -2809,30 +2850,34 @@ impl AiDriver {
             0.
         };
 
-        // Line choice (0x794870): with the drift behaviour switched on the
-        // car follows the `drift` line once past the start line (before it
-        // the `start` kind, absent on our routes, falls back to `optimal`).
-        let drift_line = match (&p.drift, &data.drift) {
-            (Some(_), Some(d)) if self.race.progress >= 0. => Some(d.as_ref()),
-            _ => None,
+        // Line choice (0x794870): before the start line (race progress
+        // negative) the `start` kind, after it the `drift` kind when the drift
+        // behaviour is switched on, else `optimal`. A kind the route lacks
+        // falls back to `optimal`. The context flag param_4+0x1C that also
+        // selects the after-start kinds is unidentified [I] and taken as clear.
+        let kind = if self.race.progress < 0. {
+            RacingLine::Start
+        } else if p.drift.is_some() {
+            RacingLine::Drift
+        } else {
+            RacingLine::Optimal
         };
-        if drift_line.is_some() != self.on_drift_line {
+        let kind = if std::ptr::eq(data.on(kind), data) {
+            RacingLine::Optimal
+        } else {
+            kind
+        };
+        if kind != self.racing_line {
             // Keep the planned path in place across the change [I]: shift
             // the offsets by the two lines' lateral distance at the car.
-            let new = drift_line.unwrap_or(data);
-            let old = if self.on_drift_line {
-                data.drift.as_deref().unwrap_or(data)
-            } else {
-                data
-            };
-            let (_, _, from) = old.line.project(position, self.segment);
-            let (_, _, to) = new.line.project(position, self.segment);
+            let (_, _, from) = data.on(self.racing_line).line.project(position, self.segment);
+            let (_, _, to) = data.on(kind).line.project(position, self.segment);
             self.offset += to - from;
             self.offset_here += to - from;
             self.desired_offset += to - from;
-            self.on_drift_line = drift_line.is_some();
+            self.racing_line = kind;
         }
-        let data = drift_line.unwrap_or(data);
+        let data = data.on(kind);
 
         // Track view: progress along the racing line (0x79C360).
         let (segment, arc, line_distance) = data.line.project(position, self.segment);
@@ -3927,7 +3972,7 @@ impl AiDriver {
         let (id, distance) = next_brake_line(data, arc);
         let line = data.brake_lines[id].1;
         // Off the optimal line the factor is tgNonOptimalSpeedFactor.
-        let factor = if self.on_drift_line {
+        let factor = if self.racing_line != RacingLine::Optimal {
             p.tg_non_optimal_speed_factor
         } else {
             remap(
@@ -4244,7 +4289,7 @@ impl AiDriver {
             drift_fired: self.drift.fired,
             drift_state: self.drift.state,
             drift_mode,
-            drift_line: self.on_drift_line,
+            drift_line: self.racing_line == RacingLine::Drift,
             drift_room,
         };
         // Packet handbrake byte +0x1C (0x77A110): request +0xB3, or a forced
@@ -5291,6 +5336,26 @@ mod tests {
             ..default_drift()
         };
         assert_eq!(unskilled.drifting_grip(10., open, car)[0], 1.);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn the_start_line_is_read_where_a_route_ships_one() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        // Shibuya ships a `start` line on every gate; before the start line
+        // the cars follow it (0x794870 kind 7) instead of the optimal line,
+        // whose last-hairpin exit cuts across the grid (F635).
+        let shibuya = AiData::load(root, "tracks/japan/shibuya/route_0", "touring", "bmw").unwrap();
+        let start = shibuya.start.as_deref().unwrap();
+        assert_eq!(start.line.points.len(), shibuya.line.points.len());
+        assert!(std::ptr::eq(shibuya.on(RacingLine::Start), start));
+        // Routes with the optimal kind only keep it before the start line.
+        for route in ["tracks/europe/donington/route_0", "tracks/europe/milan/route_0"] {
+            let data = AiData::load(root, route, "touring", "bmw").unwrap();
+            assert!(data.start.is_none(), "{route}");
+            assert!(std::ptr::eq(data.on(RacingLine::Start), &data));
+        }
     }
 
     #[test]

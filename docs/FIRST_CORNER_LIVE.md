@@ -371,3 +371,49 @@ Per seed (adopted): 13 8 21 30 30 7; gate only 19 37 57 26 27 37. Donington slot
 runs off in seeds 0–2; the one stall left on the live tracks is Milan car 10 at 27.7 s, after
 the first corner. Against old main (F585, characteristics set, 220) the matrix loses half as many
 cars.
+
+## 12. Shibuya: the `start` racing line before the start line (F649)
+
+**Report** (owner playtest, Shibuya route 0, BMW field, backlog row 93): at the go every opponent
+shifts right by a few metres, then drives normally.
+
+**Port before F649 [V headless].** `grid-opponent-race --route tracks/japan/shibuya/route_0 --cars bmw
+12 900 ai`: at the go every car steers full lock right (−1.00) for about 0.3 s, then +0.3–0.5 back;
+heading errors −0.25 … −0.78 rad. grid-app (TMP trace, muted) showed the same −1.00 at tick 320.
+The race start's side and lane choice (0x776740, 0x78A740), the observer list and the lateral PID
+match their decompiles and were not the cause. A gate-plane progress (0x79C360 → 0x793F60) tried as
+the track view did not help either (contacts 151 → 280, heading errors unchanged) and was dropped.
+
+**Cause [D].** Line choice 0x794870 (DISCIPLINES "Line choice") selects kind 7, `start`, while the
+race progress is negative. The port read only `optimal` (and `drift`). On Shibuya the optimal line's
+last-hairpin exit runs diagonally across the grid (line points 148–163, x 112–157, z 62–121): the
+slot heading against the line tangent falls from 0.993 (slot 0) to 0.377 (slot 11), so every car
+aims to the right of its slot. The `start` line differs from `optimal` on gates 0–2 and 150–163
+and runs along the grid (gate 158: optimal 3.87 m, start 20.83 m from the left edge).
+
+**Which routes ship it.** Of the 92 routes' ai_track.xml files only Shibuya routes 0–1 and Yokohama
+Docks routes 0, 1 and 9 carry a `start` racing line (all 164/162/142/145/101 gates). Haruna also
+ships `traffic` (kind 5, trafficBehaviour), not ported.
+
+**Port (F649).** `AiData::start` holds the route data on the `start` line, built when any gate's
+`start` line differs from `optimal`. `AiDriver::controls` follows it while `RaceView::progress < 0`,
+then `drift` (drift behaviour) or `optimal`; a kind the route lacks falls back to optimal, and the
+planned offsets shift by the two lines' lateral distance at the change, as for the drift line [I].
+The corner-speed factor off the optimal line (tgNonOptimalSpeedFactor) applies on `start` too, as
+0x792C80 tests "not optimal". The context flag param_4+0x1C is unidentified [I] and taken as clear.
+grid-opponent-race now passes the race progress in every race, not only drift events (grid-app
+already did); RaceView's default progress 0 keeps the optimal line in tools that set none.
+
+**Measured (12 BMWs, 900 ticks, same seed):**
+
+| route | car-7 steer at tick 30 | car 5–7 gap t30–t300 | contacts before → after |
+|---|---|---|---|
+| Shibuya route 0 | −1.00 → +0.05 | before 8.0 → 37.3 m (strung out); after 8.0 → 8.1 m | 151 → 2342 |
+| Donington, Milan, Spa, Jarama, Long Beach route 0 | unchanged | unchanged | identical (189, 0, 1298, 33, 126) |
+| Yokohama Docks route 0 | (no baseline) | — | 2963 after |
+
+The start is now straight: the field holds its two columns to the first corner. It reaches that
+corner (arc ≈ 100 m) in formation at about 43 m/s and piles up there (cars 5, 7, 9, 10 in Avoid and
+Recovery from tick 450), where before the swerve had strung it out. This is the open first-corner
+problem of backlog row 31 (as Spa's 1298 contacts), now visible on Shibuya; not compared with the
+original's Shibuya start.

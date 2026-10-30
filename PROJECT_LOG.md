@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F649](log/F0649.md) | 2026-10-30 | Shibuya start swerve: the start racing line before the start line |
 | [F648](log/F0648.md) | 2026-10-30 | Collision and damage loops no longer hold after a wreck, the race end or a pause (backlog row 95) |
 | [F647](log/F0647.md) | 2026-10-30 | Cockpit: pedals and the general interior clip animator |
 | [F646](log/F0646.md) | 2026-10-30 | Playable dc4408b43366 with DLAA and APKs dc4408b43366 |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F592](log/F0592.md) | 2026-10-27 | Skid marks stream only changed strips |
 | [F591](log/F0591.md) | 2026-10-27 | Single static parts gather in coarse cells |
 | [F590](log/F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |
-| [F589](log/F0589.md) | 2026-10-27 | OSD timer box sounds are online-only; speech and music sized |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
