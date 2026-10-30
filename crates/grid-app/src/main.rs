@@ -108,6 +108,7 @@ mod post_race;
 mod ornament_lod;
 mod osd_scene;
 mod shadow_cull;
+mod light_clusters;
 mod race_hud;
 mod race_osd;
 mod render_scale;
@@ -4426,6 +4427,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     mesh_stream::install(&mut app);
     shadow_cull::install(&mut app);
+    light_clusters::install(&mut app, graphics.reflection_mode == 3);
     if let Some(script) = window_transition_script {
         window_transitions::install(&mut app, script);
     }

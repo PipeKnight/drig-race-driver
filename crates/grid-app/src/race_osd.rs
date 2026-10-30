@@ -262,10 +262,16 @@ pub struct Minimap {
     markers: Vec<Entity>,
     /// (min x, min z, size) of the route and the mask's centre and radius.
     map: Option<((f32, f32, f32), Vec2, f32)>,
+    /// The markers' saved depth in the mask's space.
+    depth: f32,
 }
 
 /// Fraction of the mask radius the route's square fills (AUTHORED).
 const MAP_FILL: f32 = 0.68;
+/// Depth step between minimap markers, toward the OSD camera (AUTHORED, scene
+/// units): a few float steps at the camera's distance of about 3,300 units,
+/// and 12 cars span 0.024, a tenth of the route ribbon's 0.2 offset.
+const MARKER_STEP: f32 = 0.002;
 
 /// A point of the map plane (world x, z) in the mask's local space: x to
 /// the right, world +Z up [I, as the plain HUD].
@@ -314,6 +320,8 @@ pub fn minimap(
     mut materials: ResMut<Assets<crate::osd_scene::OsdMaterial>>,
     looks: Query<(&Mesh3d, &MeshMaterial3d<crate::osd_scene::OsdMaterial>)>,
     mut transforms: Query<&mut Transform>,
+    camera: Query<&GlobalTransform, With<crate::osd_scene::OsdCamera>>,
+    globals: Query<&GlobalTransform>,
 ) {
     let (Some(osd), Some(line)) = (osd, &driving.reset_line) else {
         return;
@@ -342,6 +350,9 @@ pub fn minimap(
         ));
         let player = osd.entity("player");
         let opponent = osd.entity("opponent");
+        if let Some(Ok(t)) = opponent.or(player).map(|e| transforms.get(e)) {
+            state.depth = t.translation.z;
+        }
         state.markers = vec![player.unwrap_or(Entity::PLACEHOLDER)];
         if let Some(o) = opponent {
             state.markers.push(o);
@@ -366,10 +377,23 @@ pub fn minimap(
     let Some((fit, centre, radius)) = state.map else {
         return;
     };
+    // The markers blend at one saved depth, so where they overlap their
+    // order was a sort tie that unrelated changes flipped. Each car now has
+    // its own depth: the player's arrow in front, then the opponents in car
+    // order (AUTHORED order).
+    let toward = match (camera.single(), globals.get(mask)) {
+        (Ok(camera), Ok(mask)) => {
+            let local = mask.affine().inverse().transform_point3(camera.translation());
+            if local.z >= state.depth { 1. } else { -1. }
+        }
+        _ => 1.,
+    };
+    let count = state.markers.len();
     for (car, &e) in state.markers.iter().enumerate() {
         let Ok(mut t) = transforms.get_mut(e) else {
             continue;
         };
+        t.translation.z = state.depth + toward * MARKER_STEP * (count - car) as f32;
         match crate::race_hud::car_pose(&driving, car).filter(|_| car < cars) {
             Some(p) => {
                 let at = map_local([p[12], p[13], p[14]], fit, centre, radius);

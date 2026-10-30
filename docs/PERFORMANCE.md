@@ -2297,3 +2297,47 @@ depth-remapped per frame, and a racing camera moves the near cascades completely
 a second. With the passes at 0.1-0.3 ms on the PC and fill-bound, not pursued. The faithful layout
 (two world cascades and the car's own map, docs/SUN_SHADOWS.md section 3) would roughly halve the
 passes on every device but changes the picture; it needs the owner's decision.
+
+## Light clustering and the OSD view (F661)
+
+Task: profile RenderSchedule and MainSchedule and cut the top render-thread costs without changing the
+picture. F652's profile (Washington phone view, quiet PC) showed the render app at 8.0 ms, about 1 ms
+of it Bevy's light clustering for the main and the OSD dial camera, and 1.5-1.7 ms more for the OSD
+camera as a whole (clustering 0.45 ms, two extra command buffers 0.27 ms, its transparent pass 0.28 ms).
+
+**What clusters.** Bevy clusters point and spot lights, light probes and clustered decals per 3D camera
+every frame. grid-app has no point or spot light, light probes only with `--reflections probe`
+(`scene_probe`), and clustered decals not at all; the sun is not clustered. On the desktop Bevy
+clusters on the GPU, and that path rebuilds its buffers, bind groups and two compute passes for every
+camera even with nothing to cluster. Android always clusters on the CPU.
+
+**Change** (`crates/grid-app/src/light_clusters.rs`, `GRID_LIGHT_CLUSTERS=bevy` for Bevy's): without
+light probes the app clusters on the CPU (`GlobalClusterSettings::gpu_clustering = None`, as on
+Android), and while nothing clusterable exists every 3D camera's `ClusterConfig` is `None`, which skips
+the CPU assignment and uploads an empty grid. A light, probe or decal appearing restores Bevy's default
+config the same frame. With probes the GPU path stays.
+
+**Picture.** Fixed-step renders 1600x900, same executable, `GRID_LIGHT_CLUSTERS=bevy` against the
+port's: Donington ticks 300 and 2,400, the enhanced profile (Lacetti, Donington 2,400) and probe
+reflections (enhanced, `--ibl source`) are bit-identical. Washington tick 3,000 differed in 115 pixels
+of the minimap: the player's arrow and the opponents' dots blend at one saved depth, so where they
+overlap their order was a sort tie, and the change flipped it (the dark outline of one dot over
+another does not blend commutatively). `race_osd::minimap` now gives each car its own depth toward
+the OSD camera (player in front, then the opponents in car order; 0.002 scene units per car at about
+3,300 units' distance), so the order no longer depends on unrelated changes; with it Washington and
+Donington are bit-identical between the two clusterings. That is a small HUD
+change against the old frames where markers overlap (Donington 2,400: 199 pixels, at most 14 per
+channel).
+
+**Cost** (PC, `--benchmark-frames 3600`, GPU timing on; other sessions' builds ran throughout, so
+whole-frame and render-app totals moved by about ±1 ms between runs and are not compared):
+
+- GPU: the `clustering` pass, 0.17-0.20 ms per frame with Bevy's clustering (main camera, two
+  rounds, all four views), is gone.
+- Render thread, profile build: Bevy's GPU-clustering systems (`prepare_clusters_for_gpu_clustering`,
+  `cluster_on_gpu` encoding, `prepare_clustering_bind_groups`) took 1.0-1.8 ms per frame in this busy
+  round (Washington phone view 1.79, desktop 1.17; Donington phone view 1.01, desktop 1.81); with the
+  change none run and `prepare_clusters_for_cpu_clustering` takes at most 0.23 ms. `queue_submit` sends
+  19 command buffers instead of 21.
+- The phone already clustered on the CPU; `ClusterConfig::None` there skips the assignment for both
+  cameras (F652's phone log: CPU clustering about 0.6 ms) [I until the owner's log].
