@@ -6126,8 +6126,8 @@ fn drive_present(
     trial: Option<Res<time_trial::Trial>>,
     actions: Option<Res<input::Actions>>,
     mut look_back: Local<Option<bool>>,
-    (free_look, mut cameras): (
-        Option<Res<free_look::FreeLook>>,
+    (mut free_look, mut cameras): (
+        Option<ResMut<free_look::FreeLook>>,
         Option<ResMut<camera::Cameras>>,
     ),
     mut refused: Local<Option<&'static str>>,
@@ -6371,8 +6371,18 @@ fn drive_present(
     // Right mouse button orbits a chase view (AUTHORED free look).
     let side = if back { -1. } else { 1. };
     let shot = cameras.frame(&sample, back, look, |o| free_look::offset(free_look.as_deref(), o, side));
+    // The same gesture turns the driver's view in the head-cam (AUTHORED,
+    // owner request: backlog row 101), up to 90 degrees either way.
+    let inside = cameras.own_car() == camera::OwnCar::Interior;
+    if inside && let Some(l) = free_look.as_mut().filter(|l| l.yaw.abs() > free_look::HEAD_YAW) {
+        free_look::hold_head(l);
+    }
+    let rotation = match inside {
+        true => free_look::turn_head(free_look.as_deref(), sample.pose.y_axis.truncate().normalize(), shot.rotation),
+        false => shot.rotation,
+    };
     let (transform, projection) = &mut *camera;
-    **transform = Transform::from_translation(shot.eye).with_rotation(shot.rotation);
+    **transform = Transform::from_translation(shot.eye).with_rotation(rotation);
     if let Some(Projection::Perspective(p)) = projection.as_deref_mut() {
         p.fov = shot.fov;
         p.near = shot.near.unwrap_or(PerspectiveProjection::default().near);

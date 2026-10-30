@@ -2,6 +2,8 @@
 //! feature): hold the right mouse button and move the mouse to orbit the chase
 //! camera around the car, without a yaw limit; release it and the camera eases
 //! back behind the car. Presentation only, never feeds the simulation.
+//! The head-cam turns the driver's view with the same gesture (owner request,
+//! backlog row 101; the original only has the Look keys there).
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 
@@ -22,6 +24,9 @@ const PITCH_SENSITIVITY: f32 = 0.002;
 const PITCH: [f32; 2] = [-0.15, 0.45];
 /// Exponential return rate (1/s) after the button is released.
 const RETURN_RATE: f32 = 6.;
+/// The head-cam's yaw either way: out of the side windows. Further round,
+/// the interior models show untextured backs never meant to be seen.
+pub const HEAD_YAW: f32 = std::f32::consts::FRAC_PI_2;
 
 fn wrap(a: f32) -> f32 {
     (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
@@ -92,6 +97,24 @@ pub fn offset(look: Option<&FreeLook>, offset: Vec3, side: f32) -> Vec3 {
     }
 }
 
+/// Holds the free look inside the head-cam's yaw range, so a drag past it
+/// stops there instead of winding up.
+pub fn hold_head(look: &mut FreeLook) {
+    look.yaw = look.yaw.clamp(-HEAD_YAW, HEAD_YAW);
+}
+
+/// The head-cam's view `rotation` turned by the free look: yaw about the
+/// car's `up` axis through the eye, then pitch about the view's right axis
+/// (positive looks down, as positive pitch raises the chase camera).
+pub fn turn_head(look: Option<&FreeLook>, up: Vec3, rotation: Quat) -> Quat {
+    match look {
+        Some(l) if l.yaw != 0. || l.pitch != 0. => {
+            Quat::from_axis_angle(up, l.yaw.clamp(-HEAD_YAW, HEAD_YAW)) * rotation * Quat::from_rotation_x(-l.pitch)
+        }
+        _ => rotation,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,5 +156,32 @@ mod tests {
         assert!(offset(Some(&up), base, 1.).y > base.y);
         let back = Vec3::new(0., 2., 9.);
         assert!(offset(Some(&up), back, -1.).y > back.y);
+    }
+
+    #[test]
+    fn head_cam_turns_with_the_drag_and_stops_at_the_side_window() {
+        // A car rolled a little, its view straight ahead (Bevy cameras look
+        // along -Z; the car's forward is +Z, its left +X).
+        let body = Quat::from_rotation_z(0.2);
+        let forward = body * Quat::from_rotation_y(std::f32::consts::PI);
+        let up = body * Vec3::Y;
+        let view = |look: &FreeLook| body.inverse() * (turn_head(Some(look), up, forward) * Vec3::NEG_Z);
+        assert_eq!(turn_head(Some(&FreeLook::default()), up, forward), forward);
+        // Dragging right looks to the car's right (-X), keeping the horizon.
+        let mut look = FreeLook::default();
+        step(&mut look, true, Vec2::new(100., 0.), 1. / 60.);
+        let dir = view(&look);
+        assert!(dir.x < -0.4 && dir.y.abs() < 1e-5, "{dir}");
+        // Dragging down looks down.
+        step(&mut look, true, Vec2::new(0., 100.), 1. / 60.);
+        assert!(view(&look).y < -0.1, "{}", view(&look));
+        // A long drag stops at the limit; the release returns ahead.
+        step(&mut look, true, Vec2::new(500., 0.), 1. / 60.);
+        hold_head(&mut look);
+        assert_eq!(look.yaw, -HEAD_YAW);
+        for _ in 0..240 {
+            step(&mut look, false, Vec2::ZERO, 1. / 60.);
+        }
+        assert_eq!(turn_head(Some(&look), up, forward), forward);
     }
 }
