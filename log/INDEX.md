@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F651](F0651.md) | 2026-10-30 | First-corner matrix with breakable props; start-line routes; flag bases |
 | [F650](F0650.md) | 2026-10-30 | Cockpit: the wheel follows the front wheels' applied steering (row 94) |
 | [F649](F0649.md) | 2026-10-30 | Shibuya start swerve: the start racing line before the start line |
 | [F648](F0648.md) | 2026-10-30 | Collision and damage loops no longer hold after a wreck, the race end or a pause (backlog row 95) |

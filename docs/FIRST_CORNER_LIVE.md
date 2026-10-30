@@ -417,3 +417,48 @@ corner (arc ≈ 100 m) in formation at about 43 m/s and piles up there (cars 5, 
 Recovery from tick 450), where before the swerve had strung it out. This is the open first-corner
 problem of backlog row 31 (as Spa's 1298 contacts), now visible on Shibuya; not compared with the
 original's Shibuya start.
+
+## 13. The matrix without breakable props; start-line routes; what is left (F651)
+
+2026-10-30, Claude Code. Headless only. Evidence (ignored, this worktree `local/corners2/`):
+`run.sh` (now takes `ROUTES`), `mm.sh` (the §9 matrix, seeds 0–5), `startm.sh` (start-line routes),
+scores `m-f649*-s*.score`, `sm-f649*-s*.score`, traces `yk0.*`, `lb1.*`.
+
+**Harness gap [V].** grid-app always calls `enable_dynamic_props` (opponent races included);
+`grid-opponent-race` does so only with `GRID_DYNAMIC_PROPS=1`, which the §9–§11 matrix never set.
+Without it every breakable entity stays an intact static box, so a car that clips a
+`close_drift_flag` pole or a tyre stack hits a wall. From now on the matrix runs with
+`GRID_DYNAMIC_PROPS=1`, as the game does.
+
+**Measured at main F649** (24 starts × seeds 0–5, characteristics and DF as §10):
+
+| props | lost cars per seed | sum | in 12-car starts | contacts |
+|---|---|---|---|---|
+| off (as §9–§11) | 13 8 21 30 30 7 | 109 | 47 | 146k |
+| on | 7 5 15 13 21 8 | 69 | 24 | 136k |
+
+Per route with props (sum of seeds, 10–12 cars): Long Beach 1 31, Nürburgring 0 12, Jarama 1 8,
+Detroit 1 7, Long Beach 4 7, Long Beach 0 4, Jarama 0 0, Long Beach 3 0.
+
+**Start-line routes** (F649; 15 starts × 6 seeds, props off → on): Shibuya 0 6 → 6, Shibuya 1 2 → 2,
+Yokohama Docks 0 131 → 7, Yokohama Docks 1 93 → 93, Yokohama Docks 9 122 → 122. Without F649
+(no race progress, the optimal line before the start; props off) Shibuya route 0 lost 4–5 cars per
+start and 2400–6900 contacts; with F649 none and 2100–2300. So in this setup F649 improves
+Shibuya; §12's BMW-only run (151 → 2342 contacts, no characteristics) is the exception.
+
+**Close-drift flag bases do not break [V port].** On Yokohama Docks route 0 the whole field
+stopped at a `close_drift_flag` on the racing line (x −81, z 78; the leader 32 → 19 m/s in three
+ticks, terminal damage) with props off; with props on the pole (bPhantom, 50) breaks and the field
+passes. On routes 1 and 9 the cars meet the flag **base** (box 0.96 × 0.26 m, bHeavy 2000; route 1
+entity 106 at x −160, z −157): the car stops dead from 31 m/s, climbs it (y +0.3 m) and the entity
+never breaks. Over all props-on runs 118 flags broke, every one at force 50 (the pole), none at 2000.
+Not yet explained: whether the base contact reaches the solver as a car-box contact (the break
+check 0x7BDFD0 sees only car-box pairs) or through the wheels. Physics/props topic, not AI.
+Whether the original places the flags in a normal race at all is not known [I].
+
+**Long Beach route 1 [V port].** Car 0 (the leader) stops in every seed at tick 857–883. In
+Alongside from tick 600 its planned offset walks left by about 0.64 m per 10 ticks, 0 → −5.5 m
+(arc 381–437), as §11's slot 4 did at Donington before the clamp fix; it swings back, meets the wall
+at x 124 (Recovery at tick 780 with full lock) and slides to a stop. The car beside it and the
+limits at the car are the next things to read; §9's proposed capture of the alongside fields would
+settle whether the original's squeeze walks this far.
