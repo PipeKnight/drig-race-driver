@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F657](log/F0657.md) | 2026-10-30 | Owner playtest Viper Washington: car reflections, cockpit mouse look, floating track pieces (rows 100-102) |
 | [F656](log/F0656.md) | 2026-10-30 | Location ambience ported: the track's AutoPlay field around the player (backlog row 70) |
 | [F655](log/F0655.md) | 2026-10-30 | Washington pack tick profile: piece islands, not car contacts or basic boxes |
 | [F654](log/F0654.md) | 2026-10-30 | Opponent dents: parallel projection, batched parts stay in the main world |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F600](log/F0600.md) | 2026-10-27 | Grid start: GPU pass timer and opponent shadow bodies |
 | [F599](log/F0599.md) | 2026-10-27 | Speech part 2 step 2: the player's damage, performance, strategy and wrong-way lines |
 | [F598](log/F0598.md) | 2026-10-27 | Force feedback research: the original GameFFB pipeline, snapshot builder and device output |
-| [F597](log/F0597.md) | 2026-10-27 | Row 90 rechecked on current main: the Le Mans 24 Hours race runs to its end |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

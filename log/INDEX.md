@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F657](F0657.md) | 2026-10-30 | Owner playtest Viper Washington: car reflections, cockpit mouse look, floating track pieces (rows 100-102) |
 | [F656](F0656.md) | 2026-10-30 | Location ambience ported: the track's AutoPlay field around the player (backlog row 70) |
 | [F655](F0655.md) | 2026-10-30 | Washington pack tick profile: piece islands, not car contacts or basic boxes |
 | [F654](F0654.md) | 2026-10-30 | Opponent dents: parallel projection, batched parts stay in the main world |
