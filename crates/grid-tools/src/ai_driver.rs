@@ -450,6 +450,13 @@ impl Line {
         self.project(p, None).1
     }
 
+    /// Research view of `p` (global search): its arc, signed lateral from
+    /// the line, and the racing and track limits there.
+    pub fn limits_near(&self, p: [f32; 3]) -> (f32, f32, [f32; 2], [f32; 2]) {
+        let (_, arc, lateral) = self.project(p, None);
+        (arc, lateral, self.at(arc).3, self.track_limits_at(arc))
+    }
+
     /// Signed distance along the line from arc `from` to arc `to` (0x909340):
     /// clamped to the length on an open line, wrapped into half a lap
     /// either way on a closed one.

@@ -11,7 +11,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let line = grid_tools::ai_driver::Line::load_route(Path::new(&a[1]), &route)?;
     let p: [f32; 3] = [a[3].parse()?, a[4].parse()?, a[5].parse()?];
     let radius: f32 = a.get(6).map_or(Ok(40.), |r| r.parse())?;
-    println!("arc_at_point={:.1} points={}", line.arc(p), line.points().len());
+    let (arc, lateral, racing, track) = line.limits_near(p);
+    println!(
+        "arc_at_point={arc:.1} lateral={lateral:.2} racing_limits={racing:?} track_limits={track:?} points={}",
+        line.points().len()
+    );
     for (i, q) in line.points().iter().enumerate() {
         let d = ((q[0] - p[0]).powi(2) + (q[2] - p[2]).powi(2)).sqrt();
         if d <= radius {

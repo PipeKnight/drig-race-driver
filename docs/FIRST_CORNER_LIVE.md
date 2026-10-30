@@ -462,3 +462,15 @@ Alongside from tick 600 its planned offset walks left by about 0.64 m per 10 tic
 at x 124 (Recovery at tick 780 with full lock) and slides to a stop. The car beside it and the
 limits at the car are the next things to read; §9's proposed capture of the alongside fields would
 settle whether the original's squeeze walks this far.
+
+**Long Beach route 1, the profile [V port]** (`grid-line-near` now prints the lateral and both
+limit pairs at a point; seed 0, 12 cars, props on). The corner at arc 400–445 is a right-hander
+with the line on the right racing limit (right limit 0.35 m at arc 433). Car 1 comes up on the
+leader's right and cuts inside (lateral +6.2 → −2.3 m); the leader's squeeze moves it to the
+outside (lateral −0.3 → −6.3 m at arc 457), inside the limits there (racing −10.8, track −24.6 m
+at arc 438). After the corner the left track limit closes from −24.6 m (arc 438) to −4.1 m
+(arc 472). The planned offset is back at −0.3 m by arc 467 (the look-ahead clamp, look-ahead about
+15 m at 33 m/s), but the car is still at −5 m and meets the wall at arc 468–472, then Recovery.
+Every port step on the way matches its decompile (§9–§11); the open question is the original's
+squeeze distance with a car inside, which §9's capture of the alongside fields would settle (or
+the same on a Long Beach route 1 start).
