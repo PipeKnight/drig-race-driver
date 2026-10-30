@@ -1785,6 +1785,51 @@ Left: the batch rebuild itself still re-uploads the whole merged mesh of a dente
 writing only the changed member's vertex range needs partial mesh uploads, which Bevy does not
 offer. Physics per tick rises in the pack's contacts (collision-sweep's area).
 
+## Washington pack tick profile (F655)
+
+Coordinator's question after F654: where does the contact tick spend its time in the pack, and do
+F653's basic-entity collision boxes add per-tick cost? Profile only; nothing changed.
+
+Setup [O]: headless grid-app on main ca565a2a (`--settings local/p12/washington.ini --headless
+--drive-ticks 9000`, `GRID_AUTOPILOT=1 GRID_THREADS=4 GRID_PERF_TIMING=1`), per 600-tick window
+from the cumulative `perf_timing` lines; every run under the build lock. F653's boxes were switched
+off through a temporary local environment toggle in `Props::read_route` (reverted, never
+committed). Two rounds each; the rounds give identical contact counts, and the timings of the two
+"on" rounds differ by up to 1.5x across the whole tick (machine state), so the comparisons are
+within a run.
+
+Main, quieter round, ms per world tick:
+
+| window (ticks) | WorldTick | FramePlain | PieceContacts | LiftSunk | FrameGroup | BodyContacts | car contacts/tick | pieces (asleep) | piece contacts/tick |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| quiet (1800-5400) | 0.62-0.85 | 0 | 0.02-0.03 | 0.003 | 0-0.03 | 0.07-0.10 | 0-1.2 | 9 (9) | 0 |
+| car contacts (600-1200, 1800-2400) | 0.69-0.84 | 0-0.01 | 0.02 | 0.003-0.009 | 0.08-0.09 | 0.07-0.09 | 2.6-5.3 | 5-9 (3-9) | 0-8 |
+| props broken (5400-7200) | 1.29-1.44 | 0.29-0.37 | 0.17-0.20 | 0.07-0.08 | 0.01-0.04 | 0.08-0.09 | 0-1 | 65-82 (21-35) | 224-294 |
+
+- [V] The doubling of the tick comes from broken prop pieces: islands without a car
+  (`FramePlain`, piece piles) about 0.3-0.4 ms, piece contacts about 0.2 ms, `lift_sunk` about
+  0.08 ms, while about 45 pieces are awake with 220-290 piece contacts per tick. Once all 82 sleep
+  (from 7,200) the tick is back to 0.65-0.77 ms.
+- [V] Car-to-car contact groups cost little: `FrameGroup` 0.08-0.09 ms per tick in the
+  contact windows, `CarPairs` 0.06-0.08 ms throughout.
+- [V] F653's basic boxes add no visible per-tick cost: `BodyContacts` 0.07-0.10 ms with them and
+  0.07-0.13 without (a different race: the boxes change the course of events, so the off runs
+  break props at other times). The body query uses the 16 m grid `BoxIndex`.
+- [I] The "drive_tick 5.5 → 9.5 ms per tick" in F654 came from the span-instrumented profile build
+  (`local/derby/spk-1.log`, run soon after the 14:38 reboot while builds ran): its cost per tick grew
+  with the ticks per frame (3.5 ms at 1.9 ticks per frame, 9.7 ms at 13.6). That is span overhead
+  and load, not contact work; the release build peaks at 1.6 ms per drive tick on this PC.
+- Phone [I]: at 3-4x, about 2.5-3 ms per tick normally and 4-6 ms while pieces are awake.
+
+Candidates (not done, each must keep every identity bit-exact):
+1. Islands without a registered car on the compute pool. They do not use the shared deformation
+   seed, but `grouped_physical_frame::calculate_impl` passes solver state from one island to the
+   next (`manager.rows` contents copied into the row builder, `ends`, `cached_pair` and
+   `cached_material`, `workspace` prefix, `properties` by local index). Each needs a proof that it
+   cannot change a result (or an ordered replay of it), then a serial-against-parallel twin test.
+2. Piece contacts per piece on the compute pool, merged in order like the body contacts.
+3. Smaller: `lift_sunk` already has a parallel path; its 0.08 ms is the casts of awake pieces.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

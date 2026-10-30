@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F655](F0655.md) | 2026-10-30 | Washington pack tick profile: piece islands, not car contacts or basic boxes |
 | [F654](F0654.md) | 2026-10-30 | Opponent dents: parallel projection, batched parts stay in the main world |
 | [F653](F0653.md) | 2026-10-30 | Barrier collision sweep: basic entities collide (fences, armco, walls on every route) |
 | [F652](F0652.md) | 2026-10-30 | Sun shadows: casters culled per cascade by receiver, shadow passes timed, the original's cascades traced |
