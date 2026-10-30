@@ -368,3 +368,28 @@ host trigonometry with f32 staging is a numerical candidate, not native x87/CRT
 bit parity. Synthetic packet envelopes do not establish purchased-bank admission.
 No production sampler or rendered crowd animation is delivered by this check.
 Actual receipts/source pins: `local/handoff/drafts/crowd-s4-sample25/`.
+
+### Shared ordinary packet sampler (G342)
+
+`grid-formats::anim_packet::Packet::sample` now shares ordinary L4/S4 raw-slot
+sampling with the registered L4 probe. The caller supplies the bank coordinate;
+this does not introduce a gameplay clock, rig, pose, binding or active-clip rule.
+The reader remains unchanged, including duplicate-time admission. Sampling has a
+separate typed refusal policy for strictly increasing finite keys and arithmetic
+domains; callers must not reinterpret a sampling refusal as unreadable resources.
+
+The recovered S4 raw-dot association and strict threshold are preserved, without
+normalization or shortest-path sign flipping. Host trigonometry with f32 staging
+still does not establish native x87/CRT bit parity. Full-channel validation is
+O(keys) per call and is not yet a crowd playback performance design.
+
+The production module compiles and passes fifteen selected tests: eight new
+sampling controls and seven retained reader tests. Ninety-three other library
+tests and all integration tests were filtered out by this targeted run; they are
+not included in that pass. The decoded duplicate-time controls call the actual
+reader for both families, then verify the stricter sampling refusal separately.
+Workspace Clippy and all 1295 workspace tests pass. A freshly linked registered
+probe checks the purchased bank at 195 coordinates over 49 keys and preserves
+all 980 input bytes. This is the relocated helper passing, not reuse of G303's
+historical result. Receipts and source/binary hashes are under
+`local/graphics/crowd-sampling-api01/`. Live clock/pose parity remains unverified.
