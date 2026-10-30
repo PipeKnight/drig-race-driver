@@ -519,15 +519,11 @@ fn a_finished_race_goes_through_stats_to_classified_results() {
 /// Jarama route 1 finishes at gate 67 of its progress file; lap timing re-indexes
 /// it so the finish is gate 0 (docs/JARAMA.md).
 #[test]
-#[ignore = "row 89: autopilot wrecked at Jarama turn 1, see F497; GRID_RUN_KNOWN_FAILING=1 runs it"]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
 fn a_race_finishing_at_a_later_gate_is_classified() {
-    // FAILS (F497): on the track view's Catmull-Rom line the autopilot takes
-    // turn 1 at brake line 0's 55.4 m/s, runs 18 m wide at full lock and is
-    // wrecked at tick 1013 (FIDELITY_BACKLOG row 89).
-    if std::env::var_os("GRID_RUN_KNOWN_FAILING").is_none() {
-        eprintln!("skipped: known failing, FIDELITY_BACKLOG row 89");
-        return;
-    }
+    // The autopilot was wrecked at turn 1 in F497 (FIDELITY_BACKLOG row 89);
+    // on main at F662 it takes it at about 55 m/s at 0.63 steering and
+    // finishes (the fixing change was not bisected).
     big_stack(|| finish_one_lap(grid_tools::route::JARAMA));
 }
 

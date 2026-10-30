@@ -33,8 +33,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   catch-up config F439, drift AI).
 - Open: first-corner losses with 12 cars (rows 30, 31: with the race manager the matrix loses 22,
   F662; Nürburgring 0 front row at a closing exit; the original's Nürburgring first corner matches
-  the port); Washington route 0 no-brake bend has no 1:1 fix (row 41, F526); autopilot wreck at
-  Jarama route 1 (row 89).
+  the port); Washington route 0 no-brake bend has no 1:1 fix (row 41, F526).
 
 ### Events, career and race rules
 - Modes: race on the 11 circuits of `route::CIRCUITS` (Donington, Nürburgring, Istanbul, Long Beach,
@@ -158,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F668](log/F0668.md) | 2026-10-31 | Jarama route 1 autopilot finishes again; known-failing asset test restored |
 | [F667](log/F0667.md) | 2026-10-31 | Crowds ported: NormalCrowd/GrandStandCrowd on the crowd cells, excited by ReactiveCrowd (backlog row 70) |
 | [F666](log/F0666.md) | 2026-10-31 | Head-cam mouse look-around, an owner-requested deviation (backlog row 101) |
 | [F665](log/F0665.md) | 2026-10-31 | Cockpit: driver g-force lean |
@@ -217,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F611](log/F0611.md) | 2026-10-27 | Speech part 2 step 3: accidents and AI events by race entry |
 | [F610](log/F0610.md) | 2026-10-27 | Playable 3f4382d3cc41 with F604-F609, portable copy and APKs f07fcafb0dad |
 | [F609](log/F0609.md) | 2026-10-27 | Grid start: opponent car levels by distance as in the original |
-| [F608](log/F0608.md) | 2026-10-27 | Bundled APKs carry every file their event reads: traced file lists, speech lines, a stage check |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
