@@ -135,10 +135,10 @@ pub(crate) struct ProducerPolicy;
 pub(crate) struct OwnedGroundSkid {
     pub entity: Entity,
     pub mesh: AssetId<Mesh>,
-    pub material: AssetId<StandardMaterial>,
+    pub material: AssetId<super::skid_marks::SkidMaterial>,
 }
 impl OwnedGroundSkid {
-    pub fn new(entity: Entity, mesh: AssetId<Mesh>, material: AssetId<StandardMaterial>) -> Self {
+    pub fn new(entity: Entity, mesh: AssetId<Mesh>, material: AssetId<super::skid_marks::SkidMaterial>) -> Self {
         Self {
             entity,
             mesh,
@@ -483,12 +483,12 @@ fn extract(
         Query<(
             &OwnedGroundSkid,
             &Mesh3d,
-            &MeshMaterial3d<StandardMaterial>,
+            &MeshMaterial3d<super::skid_marks::SkidMaterial>,
             Has<NoAutomaticBatching>,
             Option<&Visibility>,
         )>,
     >,
-    materials: Extract<Res<Assets<StandardMaterial>>>,
+    materials: Extract<Res<Assets<super::skid_marks::SkidMaterial>>>,
     mut snapshot: ResMut<Snapshot>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     mut route: ResMut<Routing>,
@@ -544,7 +544,7 @@ fn extract(
         || visibility == Some(&Visibility::Hidden)
         || !materials
             .get(expected.material)
-            .is_some_and(|m| m.alpha_mode == AlphaMode::Blend)
+            .is_some_and(|m| m.base.alpha_mode == AlphaMode::Blend)
     {
         snapshot.unavailable = Reason::OwnerUnverified;
         return;

@@ -142,29 +142,89 @@ the old width for the old lane, is not supported by this recovered producer.
 [V] Saved caller instructions in `73F860` read strip `+0x2D48` and `+0x2D4C`
 into that temporary context and write both back after the vertex call.
 
-Full phase lifecycle fidelity remains open:
+A subsequent read-only shared-master decompile closes the previously missing
+finite-domain lifecycle bodies. It used the existing master with `-noanalysis`
+and `-readOnly`, without a new project or naming changes. Private cache hashes,
+service receipts and the following qualifications are recorded under
+`local/handoff/drafts/grass-skid-source-audit01/lifecycle08/`.
 
-- [D] `7288E0` zeros the temporary context phases, but the caller overwrites them
-  from strip state. Fresh strip initialization is not proved by that temporary
-  zeroing; the cached pool setup `73E5A0` does not explicitly initialize these
-  two fields, and the lower allocation/construction path is unresolved.
-- [V/D] Capacity chaining in `73F860` transforms the previous phases through
-  `BF7620` and `BF90EA`. The latter is the already indexed CRT modulo helper;
-  the former has no body in the inspected cache. Exact wrapping, divisor and
-  rounding remain unresolved. The second-lane sequence also uses the first
-  phase as an input to `BF7620`; independent guessed `fract()` calls are not
-  justified.
-- [D] Post-emission `730540` dispatches to `729E90` or `729FE0`; their bodies are
-  absent from the inspected cache, so further phase/vertex effects are not
-  excluded. Decompiled integer-pointer casts and packing helper `4B22D0` also
-  leave exact float/half conversion and rounding unverified.
+- [D] `BF7620` implements floor on the finite phase domain: its fast path clears
+  positive fractional bits and subtracts one for a negative noninteger. Its
+  slow path installs the initial control word `E572C8=0x173F`, whose x87 rounding
+  bits select downward rounding, then restores the caller's word. Exceptional
+  paths and arbitrary live changes to that control global were not executed.
+- [D] Pool allocator `7456F0` calls constructor `741D70` once per newly allocated
+  slot. That constructor explicitly zeros phases at `+0x2D48/+0x2D4C`.
+  Recycled allocation is different: the inspected release/allocator/emission
+  chain does not rerun that constructor or clear those phases. Initial pool
+  zeroing does not justify zeroing every newly visible strip.
+- [V/D] On capacity chaining, save the old pair before writing either result.
+  Both new phases use `D=floor(double(oldP0))` as the common divisor:
+  `newP0=float32(fmod(double(oldP0),D))` and
+  `newP1=float32(fmod(double(oldP1),D))`. The second floor call reads the old
+  slot's first phase again, not the first reduced result. This is not a pair
+  of independent `fract()` operations. If allocation returns the predecessor
+  slot itself, the caller drops that predecessor and skips the chain transform.
+- [D] Post-commit helpers `729E90/729FE0` build compact output packets; their
+  shared helper `741E10` packs bounds into the packet. The inspected bodies do
+  not reset or rewrite the phase pair.
+
+Full lifecycle/precision parity is still not established. No positive-divisor
+guard appears in the saved capacity caller: `0<=oldP0<1` gives a zero divisor.
+Original CRT domain/exception behavior and natural reachability are untested;
+no fallback is inferred. Decompiled casts, x87 intermediates and packing helper
+`4B22D0` leave exact float/half conversion and rounding unverified. The source's
+three-sample history and allocation timing also differ from the port's direct
+segment/point management; equal 32-quad capacity alone does not close that gap.
 
 The production port still starts a new strip on a layer-kind change, as the
-implementation table records. Private patch06 carries the recovered two-phase
-segment formula and UV-identity condition, but remains uncompiled and untested;
-its fresh-zero initialization and unwrapped capacity carry are **AUTHORED**.
-It is not a shipped fix or source-phase lifecycle parity claim. No new build,
-GPU capture or original-code execution was performed for this verification.
+implementation table records. Private patch07 supersedes the earlier authored
+phase proposals with two lanes, pool-constructor zeroing, recycled-state
+retention and the recovered common-divisor capacity formula. It remains
+uncompiled and untested, including zero-divisor policy, typed material/shader
+integration and actual runtime behavior. It is not a shipped fix or source
+lifecycle/visual parity claim. No original-code execution or GPU capture was
+performed for this verification.
+
+### Shared layer-continuity fix (G340, delivery checks)
+
+The owner-reported grass frame includes both real contact loss and an authored
+strip end whenever Tread/Skid/SideSkid changes. The local candidate removes only
+the latter discontinuity: each segment carries immutable previous/current atlas
+bands, independent phase lanes and longitudinal RGBA interpolation. Contact loss,
+large movement, turning and reset still terminate the strip. A closed lit-Blend
+material factory replaces arbitrary StandardMaterial inputs; the shared shader
+keeps current PBR lighting, the native OIT terminal and actual `view.mip_bias` on
+both atlas samples. Source normal-map/light/fog parity is not claimed.
+
+Recovered pool/capacity phase rules apply in the finite domain. A separate,
+explicitly authored safety policy ends an invalid continuation and seeds a fresh
+finite point; it does not clamp the divisor to manufacture a connected strip.
+Positive recovery events must be reviewed before acceptance. A final containment
+check makes an invalid whole quad degenerate instead of uploading NaN vertices.
+These are renderer safety deviations, not source CRT exception handling.
+
+The Rust candidate passes558 package tests and strict Clippy before the
+subsequent WGSL corrections. An actual GPU check caught a reserved local name;
+the corrected combined-feature release now passes three windowless cases: matched
+native DLAA, ordinary baseline MSAA4 and native BMW/Shibuya with dense smoke. The control uses the same scripted native
+DLAA Lacetti/Donington drive and retains120 frames, ticks102..349. It passed
+native/automatic-smoke checks and contains GRAS contacts; the selected299 frame
+shows the reported area. The native pair preserves all four recorded player families, the entire frame
+request ledger and224contact rows. All three cases record zero safety recovery
+events. Root-reviewed stills retain textured tracks without a gross new
+regression; remaining irregular marks and universal temporal continuity are not
+claimed fixed. Sparse whole-frame pixel residuals remain unclassified. Source is
+local only. Private receipts:
+`local/graphics/grass-layer-crossfade01/`, source proposals and their documented
+limits in `local/handoff/drafts/grass-skid-source-audit01/`.
+
+The source's three-sample history/32-quad emission timing still differs from this
+port's direct33-point representation. Vertex allocation grows760320 to1720320
+bytes, plus segment/phase state; actual CPU/GPU cost remains unmeasured. No
+all-track/device, original visual or universal mark-continuity claim follows.
+The next main F645 smoke update must be integrated after the controlled
+comparison, with its appearance changes distinguished from this candidate.
 
 ## 2. Wheel kick-up (dirt, grass, gravel, sand)
 
@@ -465,3 +525,12 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
   float 16.0; GPU billboarding to avoid CPU mesh rebuilds; terrain-slope shear and fog.
 - Unify `grid_formats::kickup` with the overlapping `grid_tools::tyre_smoke` parsers (both on
   main now; the debris module already shares its `SMOKE_TEXTURES`).
+
+G340 then integrates F645/F646:561tests and strict Clippy pass; current combined
+DLAA/paint Clippy/release and three fresh native/baseline/BMW smoke cases pass.
+Selected frames retain tracks and cloud occlusion, with no positive safety
+recoveries. First automatic replay uses the full-size startup fallback in all
+three cases; later reduced-use success has no explicit receipt and stays unknown.
+These checks do not establish an original grass screenshot match or eliminate
+actual contact/texture/grass/terrain interruptions. Detailed source/artifact,
+failed shader trial and exact control records are in G340.

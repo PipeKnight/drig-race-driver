@@ -549,6 +549,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G340](G0340.md) | 2026-10-30 | Preserve tyre strips across surface layer changes |
+| [G339](G0339.md) | 2026-10-30 | Close finite skid phase lifecycle source contracts |
 | [G338](G0338.md) | 2026-10-30 | Recover Euler receiver and tyre-layer phase contracts |
 | [G337](G0337.md) | 2026-10-30 | Restore shared source-family coverage for grandstand structure |
 | [G336](G0336.md) | 2026-10-30 | Continue graphics checks actively and close crowd receiver contracts |

@@ -6,7 +6,7 @@
 use super::mesh_stream::{MeshStream, VertexLayout, put};
 use super::wheel_ground::{Wheel, WheelGround};
 use bevy::{
-    asset::RenderAssetUsages,
+    asset::{RenderAssetUsages, uuid_handle},
     camera::primitives::Aabb,
     mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology},
     pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline},
@@ -15,6 +15,7 @@ use bevy::{
 };
 use grid_formats::skidmarks::{Layer, Profile};
 use std::path::Path;
+use bevy::shader::ShaderRef;
 
 
 /// Default-off diagnostic; no smoke/skid simulation or atlas changes.
@@ -52,22 +53,27 @@ pub(crate) fn parse_reflectance(value: &str) -> Result<f32, &'static str> {
 
 // StandardMaterial.depth_bias sets BOTH a transparent sort offset and raster
 // depth bias. This extension keeps raster constant50 while permitting bounded diagnostic sort offsets.
-// No vertex/fragment override: use the stock StandardMaterial PBR shaders.
-type SkidOrderMaterial = ExtendedMaterial<StandardMaterial, SkidRasterBias>;
+// One diffuse crossfade fragment for ordinary rendering and smoke replay;
+// base PBR lighting and the existing raster/sort policy remain authored.
+pub(crate) type SkidMaterial = ExtendedMaterial<StandardMaterial, SkidRasterBias>;
+const LAYER_SHADER: Handle<Shader> = uuid_handle!("28837716-d9b9-4d87-b230-4055be1080b8");
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 #[bind_group_data(SkidRasterKey)]
-struct SkidRasterBias {
-    // Nonempty extension bind group; intentionally unused by stock shaders.
-    #[uniform(100)]
-    marker: Vec4,
+pub(crate) struct SkidRasterBias {
+    #[texture(100)]
+    #[sampler(101)]
+    atlas: Handle<Image>,
     raster_constant: i32,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-struct SkidRasterKey(i32);
+pub(crate) struct SkidRasterKey(i32);
 impl From<&SkidRasterBias> for SkidRasterKey {
     fn from(value: &SkidRasterBias) -> Self { Self(value.raster_constant) }
 }
 impl MaterialExtension for SkidRasterBias {
+    // Fixed AlphaMode::Blend uses the native forward queue only. No custom
+    // deferred/prepass/meshlet shader support is advertised by this material.
+    fn fragment_shader() -> ShaderRef { LAYER_SHADER.into() }
     fn specialize(
         _: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
@@ -86,20 +92,33 @@ fn restore_raster_constant(descriptor: &mut RenderPipelineDescriptor, constant: 
     }
 }
 
-fn extended_order_material(mut base: StandardMaterial, mode: OrderMode) -> SkidOrderMaterial {
-    debug_assert_ne!(mode, OrderMode::Off);
-    base.depth_bias = mode.sort_bias();
-    SkidOrderMaterial {
-        base,
-        extension: SkidRasterBias { marker: Vec4::ZERO, raster_constant: 50 },
+/// Closed factory: callers cannot pass unlit/transmission/UV-transform flags
+/// that the shared forward-Blend fragment does not implement.
+fn skid_material(atlas: Handle<Image>, mode: OrderMode, reflectance: Option<f32>) -> SkidMaterial {
+    // This existing diagnostic only admits0/0.5; enforce it in release too.
+    assert!(reflectance.is_none_or(|v| v == 0. || v == 0.5), "unsupported skid reflectance");
+    SkidMaterial {
+        base: StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            unlit: false,
+            perceptual_roughness: 0.9,
+            diffuse_transmission: 0.,
+            specular_transmission: 0.,
+            reflectance: reflectance.unwrap_or(0.),
+            depth_bias: mode.sort_bias(),
+            // White/UV0/identity, no auxiliary maps, zero transmission and
+            // existing back-cull/fog defaults. No arbitrary base input.
+            ..default()
+        },
+        extension: SkidRasterBias { atlas, raster_constant: 50 },
     }
 }
 
 /// Global strip pool and strip length [D 73F860/739570].
 const STRIPS: usize = 240;
 const QUADS: usize = 32;
-/// Vertices of one strip slot in the streamed mesh: two per point (F580).
-const SLOT: usize = (QUADS + 1) * 2;
+/// Segment-local UV payloads need four vertices per quad; seams coincide.
+const SLOT: usize = QUADS * 4;
 /// Retire the farthest finished strip while free + retiring strips < 40 [D].
 const SPARE: usize = 40;
 /// Alpha lost by the oldest quad of a retiring strip per update (25/255) [D].
@@ -146,6 +165,14 @@ fn choose(wheel: &Wheel, profile: &Profile) -> Option<(Kind, Layer)> {
     }
 }
 
+fn finite_phase(pair: [f32; 2]) -> bool {
+    pair.into_iter().all(|value| value.is_finite() && value >= 0.)
+}
+
+fn finite_seed(pair: [f32; 2]) -> [f32; 2] {
+    if finite_phase(pair) { pair } else { [0.; 2] }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Point {
     center: Vec3,
@@ -153,13 +180,70 @@ struct Point {
     normal: Vec3,
     half_width: f32,
     u: [f32; 2],
-    v: f32,
+    // Independent UV0/UV1 endpoint phases, seeded from persistent pool-slot state.
+    v: [f32; 2],
     alpha: f32,
+}
+
+impl Point {
+    fn finite_payload(&self) -> bool {
+        self.center.is_finite() && self.side.is_finite() && self.normal.is_finite()
+            && self.normal.length_squared().is_finite() && self.normal.length_squared() > 0.
+            && self.half_width.is_finite() && self.half_width > 0.
+            && self.u.into_iter().all(f32::is_finite) && finite_phase(self.v)
+            && self.alpha.is_finite() && (0. ..=1.).contains(&self.alpha)
+            && (self.center - self.side * self.half_width).is_finite()
+            && (self.center + self.side * self.half_width).is_finite()
+    }
+}
+
+/// Each segment keeps both atlas bands immutable when the next layer changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct QuadUv {
+    old: [[f32; 2]; 4],
+    new: [[f32; 2]; 4],
+}
+impl QuadUv {
+    fn between(a: &Point, b: &Point, step: f32) -> Option<Self> {
+        if !a.finite_payload() || !b.finite_payload() || !step.is_finite() || step < 0. {
+            return None;
+        }
+        // Cached739570 advances both independent phases using the CURRENT
+        // endpoint width as common denominator. Constructor/recycle/capacity
+        // phase policy is handled separately from this segment payload.
+        let scale = ATLAS_ASPECT * step / (2. * b.half_width).max(1e-3);
+        let old_end_v = a.v[0] + (a.u[1] - a.u[0]).abs() * scale;
+        let new_end_v = a.v[1] + (b.u[1] - b.u[0]).abs() * scale;
+        let result = Self {
+            old: [[a.u[0], a.v[0]], [a.u[1], a.v[0]],
+                [a.u[0], old_end_v], [a.u[1], old_end_v]],
+            new: [[b.u[0], a.v[1]], [b.u[1], a.v[1]],
+                [b.u[0], new_end_v], [b.u[1], new_end_v]],
+        };
+        result.finite_payload().then_some(result)
+    }
+    fn finite_payload(&self) -> bool {
+        self.old.iter().chain(&self.new)
+            .all(|uv| uv[0].is_finite() && uv[1].is_finite() && uv[1] >= 0.)
+    }
+}
+
+/// Recovered finite-domain capacity math. Domain failure is NOT uploaded:
+/// callers apply the explicit authored terminate/reseed policy below.
+fn capacity_phase(previous: [f32; 2]) -> Option<[f32; 2]> {
+    if !finite_phase(previous) { return None; }
+    let divisor = f64::from(previous[0]).floor();
+    if !divisor.is_finite() || divisor < 1. { return None; }
+    let result = previous.map(|phase| (f64::from(phase) % divisor) as f32);
+    finite_phase(result).then_some(result)
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Strip {
     points: Vec<Point>,
+    segments: Vec<QuadUv>,
+    /// Contact-start ramp position at point zero; capacity chains retain it.
+    ramp_start: usize,
     /// (car, wheel) while the strip is being extended.
     owner: Option<(usize, usize)>,
     retiring: bool,
@@ -171,13 +255,14 @@ struct Strip {
 #[derive(Clone, Copy, Debug)]
 struct Head {
     strip: usize,
-    kind: Kind,
     direction: Option<Vec3>,
 }
 
 #[derive(Resource)]
 pub(crate) struct SkidMarks {
     profile: Profile,
+    /// Initial construction zeros phases; geometry recycle/reset does not.
+    phases: [[f32; 2]; STRIPS],
     strips: Vec<Strip>,
     heads: Vec<[Option<Head>; 4]>,
     camera: Vec3,
@@ -192,7 +277,11 @@ pub(crate) struct SkidMarks {
     /// The strips as last written to the mesh (none yet: write it whole).
     written: Option<Vec<Strip>>,
     pub laid: u64,
+    phase_safety_events: u64,
 }
+
+/// Packed position, normal, previous/current atlas UV and blend/opacity.
+type SkidVertex = ([f32; 3], [f32; 3], [f32; 2], [f32; 2], [f32; 4]);
 
 impl SkidMarks {
     pub(crate) fn owned_ground_draw(&self) -> Option<super::ground_skid_pass::OwnedGroundSkid> {
@@ -201,6 +290,7 @@ impl SkidMarks {
     fn new(profile: Profile) -> Self {
         Self {
             profile,
+            phases: [[0.; 2]; STRIPS],
             strips: vec![Strip::default(); STRIPS],
             heads: Vec::new(),
             camera: Vec3::ZERO,
@@ -212,10 +302,13 @@ impl SkidMarks {
             dirty: true,
             written: None,
             laid: 0,
+            phase_safety_events: 0,
         }
     }
 
     fn clear(&mut self) {
+        // Keep slot phase history. Clearing all geometry on reset is still the
+        // port policy; the source reset ends wheels rather than rebuilding pool.
         self.strips = vec![Strip::default(); STRIPS];
         self.heads.clear();
         self.dirty = true;
@@ -252,6 +345,9 @@ impl SkidMarks {
             used: true,
             ..Strip::default()
         };
+        // The source slot constructor is not rerun for recycled geometry.
+        // Also invalidate any previous visible contents when stealing a slot.
+        self.dirty = true;
         Some(index)
     }
 
@@ -274,9 +370,49 @@ impl SkidMarks {
         }
     }
 
+    fn safety_event(&mut self, car: usize, wheel: usize, reason: &'static str) {
+        self.phase_safety_events = self.phase_safety_events.saturating_add(1);
+        let count = self.phase_safety_events;
+        // Bounded logarithmic reporting, not one message every bad frame.
+        if count <= 4 || count.is_power_of_two() {
+            println!("skid_phase_safety authored=true event=finite-domain-recovery count={count} reason={reason} car={car} wheel={wheel} source_CRT_domain_parity=false");
+        }
+    }
+
+    fn begin(&mut self, car: usize, wheel: usize, strip: usize, mut point: Point) {
+        if !finite_phase(self.phases[strip]) {
+            self.safety_event(car, wheel, "seed-domain");
+        }
+        self.phases[strip] = finite_seed(self.phases[strip]);
+        point.v = self.phases[strip];
+        if !point.finite_payload() {
+            self.safety_event(car, wheel, "point-suppressed");
+            return;
+        }
+        self.strips[strip].owner = Some((car, wheel));
+        self.strips[strip].points.push(point);
+        self.heads[car][wheel] = Some(Head { strip, direction: None });
+        self.dirty = true;
+    }
+
+    /// AUTHORED safety deviation, not an original CRT exception fallback.
+    /// End first; a fresh current point cannot bridge the invalid continuation.
+    fn recover(&mut self, car: usize, wheel: usize, point: Option<Point>, reason: &'static str) {
+        self.safety_event(car, wheel, reason);
+        if let Some(head) = self.heads[car][wheel] {
+            self.phases[head.strip] = finite_seed(self.phases[head.strip]);
+        }
+        self.end(car, wheel);
+        if let Some(point) = point.filter(Point::finite_payload)
+            && let Some(strip) = self.allocate()
+        {
+            self.begin(car, wheel, strip, point);
+        }
+    }
+
     /// Advance one wheel by one physics sample.
     fn advance(&mut self, car: usize, index: usize, wheel: &Wheel) {
-        let Some((kind, layer)) = choose(wheel, &self.profile) else {
+        let Some((_kind, layer)) = choose(wheel, &self.profile) else {
             self.end(car, index);
             return;
         };
@@ -294,44 +430,95 @@ impl SkidMarks {
             normal: wheel.normal,
             half_width: 0.5 * width,
             u,
-            v: 0.,
+            v: [0.; 2],
             alpha: 1.,
         };
+        if !point.finite_payload() {
+            self.recover(car, index, None, "point-domain");
+            return;
+        }
         if let Some(head) = self.heads[car][index] {
-            let last = *self.strips[head.strip]
+            if !finite_phase(self.phases[head.strip]) {
+                self.recover(car, index, Some(point), "incoming-phase");
+                return;
+            }
+            let mut last = *self.strips[head.strip]
                 .points
                 .last()
                 .expect("owned strip point");
             let delta = point.center - last.center;
             let step = delta.length();
+            if !step.is_finite() {
+                self.recover(car, index, None, "step-domain");
+                return;
+            }
             if step <= STEP {
                 return;
             }
             let direction = delta / step;
             let turned = head.direction.is_some_and(|d| d.dot(direction) < TURN_COS);
-            if step > 4.0 || turned || head.kind != kind {
+            if step > 4.0 || turned {
                 self.end(car, index);
             } else {
-                point.v = last.v
-                    + (layer.end_u - layer.start_u).abs() * ATLAS_ASPECT * step / width.max(1e-3);
                 let full = self.strips[head.strip].points.len() > QUADS;
+                let ramp_start = (self.strips[head.strip].ramp_start
+                    + self.strips[head.strip].points.len() - 1).min(2);
+                let previous_phases = self.phases[head.strip];
                 let strip = if full {
-                    // Chain into a new strip, keeping V continuity.
+                    // Source capacity is32 emitted quads; this port reaches the
+                    // same limit via33 points, at its next accepted-point tick.
                     self.strips[head.strip].owner = None;
                     let Some(next) = self.allocate() else {
                         self.heads[car][index] = None;
                         return;
                     };
+                    if next == head.strip {
+                        //73F860 drops the predecessor when allocation steals it.
+                        // No linked capacity wrap or old-to-new bridge remains.
+                        self.begin(car, index, next, point);
+                        return;
+                    }
+                    let Some(wrapped) = capacity_phase(previous_phases) else {
+                        // Allocation already cleared next: end the old head and
+                        // reuse that exact slot for a fresh seed, not another allocation.
+                        self.safety_event(car, index, "capacity-domain");
+                        self.end(car, index);
+                        self.begin(car, index, next, point);
+                        return;
+                    };
+                    last.v = wrapped;
+                    self.phases[next] = last.v;
                     self.strips[next].points.push(last);
+                    self.strips[next].ramp_start = ramp_start;
                     self.strips[next].owner = Some((car, index));
                     next
                 } else {
+                    last.v = previous_phases;
                     head.strip
                 };
+                let Some(segment) = QuadUv::between(&last, &point, step) else {
+                    if strip == head.strip {
+                        self.recover(car, index, Some(point), "advance-domain");
+                        return;
+                    }
+                    self.safety_event(car, index, "advance-domain");
+                    self.end(car, index);
+                    // If a distinct chain slot was prepared, clear its copied
+                    // endpoint before seeding the current point. No bridge survives.
+                    self.strips[strip].owner = None;
+                    self.strips[strip].points.clear();
+                    self.strips[strip].segments.clear();
+                    self.strips[strip].ramp_start = 0;
+                    self.strips[strip].used = true;
+                    self.begin(car, index, strip, point);
+                    return;
+                };
+                point.v = [segment.old[2][1], segment.new[2][1]];
+                self.phases[strip] = point.v;
+                self.strips[strip].segments.push(segment);
                 self.strips[strip].points.push(point);
                 self.heads[car][index] = Some(Head {
                     strip,
-                    kind,
                     direction: Some(direction),
                 });
                 self.laid += 1;
@@ -343,13 +530,7 @@ impl SkidMarks {
         let Some(strip) = self.allocate() else {
             return;
         };
-        self.strips[strip].owner = Some((car, index));
-        self.strips[strip].points.push(point);
-        self.heads[car][index] = Some(Head {
-            strip,
-            kind,
-            direction: None,
-        });
+        self.begin(car, index, strip, point);
     }
 
     /// Keep spare strips by retiring the farthest finished ones; fade them
@@ -383,35 +564,33 @@ impl SkidMarks {
         }
     }
 
-    /// Vertex `k` of a strip slot: point `k / 2`, left or right edge, as
-    /// `build` places them. Points past the strip's end repeat its last one,
-    /// so their quads have no area; a strip under two points collapses to the
-    /// origin.
-    fn slot_vertex(strip: &Strip, k: usize) -> ([f32; 3], [f32; 3], [f32; 2], [f32; 4]) {
-        if strip.points.len() < 2 {
-            return ([0.; 3], [0., 1., 0.], [0.; 2], [0.; 4]);
-        }
-        let i = (k / 2).min(strip.points.len() - 1);
-        let p = &strip.points[i];
-        // Fresh strips ramp in over their first two quads [D byte0 ramp].
-        let ramp = match i {
-            0 => 0.,
-            1 => 0.5,
-            _ => 1.,
+    /// Segment-local attributes, with coincident geometry/opacity at shared seams.
+    /// COLOR.r is blend metadata; COLOR.a remains visible opacity.
+    fn slot_vertex(strip: &Strip, k: usize)
+        -> SkidVertex
+    {
+        let q = k / 4;
+        let edge = k % 4;
+        let Some(uv) = strip.segments.get(q) else {
+            // All four unused vertices coincide: no trailing positive-area quad.
+            let p = strip.points.last().map(|p| p.center)
+                .filter(|p| p.is_finite()).unwrap_or(Vec3::ZERO);
+            return (p.to_array(), [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]);
         };
-        let alpha = p.alpha
-            * if strip.owner.is_some() || i < 2 {
-                ramp
-            } else {
-                1.
-            };
-        let (sign, u) = if k.is_multiple_of(2) { (-1., p.u[0]) } else { (1., p.u[1]) };
-        (
-            (p.center + p.side * p.half_width * sign).to_array(),
-            p.normal.to_array(),
-            [u, p.v],
-            [1., 1., 1., alpha],
-        )
+        if !uv.finite_payload()
+            || !strip.points.get(q).is_some_and(Point::finite_payload)
+            || !strip.points.get(q + 1).is_some_and(Point::finite_payload)
+        {
+            return ([0.; 3], [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]);
+        }
+        let i = q + edge / 2;
+        let p = &strip.points[i];
+        let ordinal = strip.ramp_start + i;
+        let ramp = match ordinal { 0 => 0., 1 => 0.5, _ => 1. };
+        let alpha = p.alpha * if strip.owner.is_some() || ordinal < 2 { ramp } else { 1. };
+        let sign = if edge.is_multiple_of(2) { -1. } else { 1. };
+        ((p.center + p.side * p.half_width * sign).to_array(), p.normal.to_array(),
+            uv.old[edge], uv.new[edge], [if edge < 2 { 0. } else { 1. }, 1., 1., alpha])
     }
 
     /// Every strip slot at its full length, so later changes are written over
@@ -419,7 +598,8 @@ impl SkidMarks {
     /// The triangles with area and their order are the ones `build` makes.
     fn streamed(&self) -> Mesh {
         let count = STRIPS * SLOT;
-        let (mut positions, mut normals, mut uvs, mut colors) = (
+        let (mut positions, mut normals, mut uvs, mut uvs_new, mut colors) = (
+            Vec::with_capacity(count),
             Vec::with_capacity(count),
             Vec::with_capacity(count),
             Vec::with_capacity(count),
@@ -428,14 +608,15 @@ impl SkidMarks {
         let mut indices = Vec::with_capacity(STRIPS * QUADS * 6);
         for (s, strip) in self.strips.iter().enumerate() {
             for k in 0..SLOT {
-                let (p, n, uv, c) = Self::slot_vertex(strip, k);
+                let (p, n, uv, uv_new, c) = Self::slot_vertex(strip, k);
                 positions.push(p);
                 normals.push(n);
                 uvs.push(uv);
+                uvs_new.push(uv_new);
                 colors.push(c);
             }
             for i in 0..QUADS as u32 {
-                let a = (s * SLOT) as u32 + i * 2;
+                let a = (s * SLOT) as u32 + i * 4;
                 indices.extend([a, a + 2, a + 1, a + 1, a + 2, a + 3]);
             }
         }
@@ -446,6 +627,7 @@ impl SkidMarks {
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uvs_new);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
         mesh.insert_indices(Indices::U32(indices));
         mesh
@@ -486,10 +668,11 @@ impl SkidMarks {
         bytes: &mut Vec<u8>,
     ) {
         let at = |attribute| layout.offset(attribute).expect("skid mark attribute");
-        let (p, n, uv, c) = (
+        let (p, n, uv, uv_new, c) = (
             at(Mesh::ATTRIBUTE_POSITION),
             at(Mesh::ATTRIBUTE_NORMAL),
             at(Mesh::ATTRIBUTE_UV_0),
+            at(Mesh::ATTRIBUTE_UV_1),
             at(Mesh::ATTRIBUTE_COLOR),
         );
         let start = bytes.len();
@@ -497,10 +680,11 @@ impl SkidMarks {
         let mut vertex = start;
         for strip in &self.strips[strips] {
             for k in 0..SLOT {
-                let (pv, nv, uvv, cv) = Self::slot_vertex(strip, k);
+                let (pv, nv, uvv, uvn, cv) = Self::slot_vertex(strip, k);
                 put(bytes, vertex + p, pv);
                 put(bytes, vertex + n, nv);
                 put(bytes, vertex + uv, uvv);
+                put(bytes, vertex + uv_new, uvn);
                 put(bytes, vertex + c, cv);
                 vertex += layout.stride;
             }
@@ -514,7 +698,7 @@ impl SkidMarks {
             .strips
             .iter()
             .filter(|s| s.points.len() >= 2)
-            .flat_map(|s| (0..s.points.len() * 2).map(move |k| Vec3::from(Self::slot_vertex(s, k).0)));
+            .flat_map(|s| (0..(s.points.len() - 1) * 4).map(move |k| Vec3::from(Self::slot_vertex(s, k).0)));
         Aabb::enclosing(corners).map_or(Vec3::ZERO, |aabb| aabb.center.into())
     }
 
@@ -543,7 +727,7 @@ impl SkidMarks {
                 for (sign, u) in [(-1., p.u[0]), (1., p.u[1])] {
                     positions.push((p.center + p.side * p.half_width * sign).to_array());
                     normals.push(p.normal.to_array());
-                    uvs.push([u, p.v]);
+                    uvs.push([u, p.v[0]]);
                     colors.push([1., 1., 1., alpha]);
                 }
             }
@@ -570,9 +754,11 @@ pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode, reflectance: 
         profile.surfaces.len(),
         profile.offset
     );
-    if mode != OrderMode::Off {
-        app.add_plugins(MaterialPlugin::<SkidOrderMaterial>::default());
-    }
+    app.world_mut().resource_mut::<Assets<Shader>>().insert(
+        LAYER_SHADER.id(), Shader::from_wgsl(include_str!("skid_layers.wgsl"), "grid_skid_layers.wgsl"),
+    ).expect("UUID skid layer shader");
+    app.add_plugins(MaterialPlugin::<SkidMaterial>::default());
+    println!("skid_layers geometry=segment-local phase_policy=dual-current-width pool_zero_recycle_preserve_common_floor_fmod source_precision_unverified=true source_shader_parity=false vertices={}", STRIPS * SLOT);
     println!("skid_order mode={mode:?} raster_constant=50 sort_bias={} source_parity=false",
         mode.sort_bias());
     app.init_resource::<MeshStream>()
@@ -596,8 +782,7 @@ fn start(
     pending: Option<Res<Pending>>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    experimental: Option<ResMut<Assets<SkidOrderMaterial>>>,
+    mut materials: ResMut<Assets<SkidMaterial>>,
     ground_pass: Option<Res<super::ground_skid_pass::ProducerPolicy>>,
 ) {
     let Some(pending) = pending else { return };
@@ -611,53 +796,25 @@ fn start(
         }
     };
     let mut marks = SkidMarks::new(pending.profile.clone());
+    println!("skid_phase_safety authored=true policy=terminate-reseed finite_only=true initial_events=0 source_CRT_domain_parity=false");
     let mesh = marks.streamed();
     marks.layout = Some(VertexLayout::of(&mesh));
     marks.mesh = meshes.add(mesh);
-    // Alpha blended, no depth write, lit by the ground normal. The original
-    // also blends a normal map by the Fade bound; not reproduced (AUTHORED).
-    let mut base = StandardMaterial {
-        base_color_texture: Some(images.add(image)),
-        alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.9,
-        // The selected ordinary source skid fragment is diffuse/normal/light/fog,
-        // without the extra dielectric F0 lobe of the authored PBR adaptation.
-        // G262 matched controls trace white bands over smoke to the old 0.5.
-        // This does not restore source normal crossfade or smoke composition.
-        reflectance: 0.,
-        depth_bias: 50.,
-        ..default()
-    };
+    let atlas = images.add(image);
     if let Some(value) = pending.reflectance {
-        base.reflectance = value;
-        println!("skid_reflectance active=true value={value} mode=Isolated shader=stock-lit-PBR source_parity=false");
+        println!("skid_reflectance active=true value={value} mode=Isolated shader=shared-layer-lit-PBR source_parity=false");
     }
-    if pending.mode == OrderMode::Off {
-        let material = materials.add(base);
-        let material_id = material.id();
-        let entity = commands.spawn((
-            Name::new("skid marks"),
-            Mesh3d(marks.mesh.clone()),
-            MeshMaterial3d(material),
-            Transform::IDENTITY,
-            bevy::camera::visibility::NoFrustumCulling,
-        )).id();
-        marks.entity = entity;
-        if ground_pass.is_some() {
-            let owner = super::ground_skid_pass::OwnedGroundSkid::new(entity, marks.mesh.id(), material_id);
-            commands.entity(entity).insert((owner, bevy::render::batching::NoAutomaticBatching));
-            marks.owned_ground = Some(owner);
-        }
-    } else {
-        let mut experimental = experimental.expect("skid order MaterialPlugin installed");
-        let material = experimental.add(extended_order_material(base, pending.mode));
-        marks.entity = commands.spawn((
-            Name::new("skid marks"),
-            Mesh3d(marks.mesh.clone()),
-            MeshMaterial3d(material),
-            Transform::IDENTITY,
-            bevy::camera::visibility::NoFrustumCulling,
-        )).id();
+    let material = materials.add(skid_material(atlas, pending.mode, pending.reflectance));
+    let material_id = material.id();
+    let entity = commands.spawn((
+        Name::new("skid marks"), Mesh3d(marks.mesh.clone()), MeshMaterial3d(material),
+        Transform::IDENTITY, bevy::camera::visibility::NoFrustumCulling,
+    )).id();
+    marks.entity = entity;
+    if pending.mode == OrderMode::Off && ground_pass.is_some() {
+        let owner = super::ground_skid_pass::OwnedGroundSkid::new(entity, marks.mesh.id(), material_id);
+        commands.entity(entity).insert((owner, bevy::render::batching::NoAutomaticBatching));
+        marks.owned_ground = Some(owner);
     }
     commands.remove_resource::<Pending>();
     commands.insert_resource(marks);
@@ -727,24 +884,19 @@ mod tests {
     }
     #[test]
     fn isolated_sort_preserves_raster_key_atlas_alpha_and_lighting() {
-        let original = StandardMaterial {
-            base_color_texture: Some(Handle::default()),
-            base_color: Color::srgba(0.8, 0.7, 0.6, 0.4),
-            alpha_mode: AlphaMode::Blend,
-            perceptual_roughness: 0.9,
-            depth_bias: 50.,
-            ..default()
-        };
-        let control = extended_order_material(original.clone(), OrderMode::Control);
-        let isolated = extended_order_material(original.clone(), OrderMode::Isolated);
+        let atlas = Handle::default();
+        let control = skid_material(atlas.clone(), OrderMode::Control, None);
+        let isolated = skid_material(atlas.clone(), OrderMode::Isolated, None);
+        let original = control.base.clone();
         assert_eq!(control.base.depth_bias, 50.);
         assert_eq!(isolated.base.depth_bias, 0.);
-        assert_eq!(<SkidOrderMaterial as bevy::pbr::Material>::depth_bias(&control), 50.);
-        assert_eq!(<SkidOrderMaterial as bevy::pbr::Material>::depth_bias(&isolated), 0.);
+        assert_eq!(<SkidMaterial as bevy::pbr::Material>::depth_bias(&control), 50.);
+        assert_eq!(<SkidMaterial as bevy::pbr::Material>::depth_bias(&isolated), 0.);
         assert_eq!(SkidRasterKey::from(&control.extension), SkidRasterKey(50));
         assert_eq!(SkidRasterKey::from(&isolated.extension), SkidRasterKey(50));
         for material in [control, isolated] {
-            assert_eq!(material.base.base_color_texture, original.base_color_texture);
+            assert_eq!(material.extension.atlas, atlas);
+            assert!(material.base.base_color_texture.is_none());
             assert_eq!(material.base.base_color, original.base_color);
             assert_eq!(material.base.alpha_mode, original.alpha_mode);
             assert_eq!(material.base.perceptual_roughness, original.perceptual_roughness);
@@ -752,13 +904,13 @@ mod tests {
             assert_eq!(material.base.unlit, original.unlit);
             assert_eq!(material.base.fog_enabled, original.fog_enabled);
         }
-        let changed = SkidRasterBias { marker: Vec4::ZERO, raster_constant: 51 };
+        let changed = SkidRasterBias { atlas: Handle::default(), raster_constant: 51 };
         assert_ne!(SkidRasterKey::from(&changed), SkidRasterKey(50));
     }
 
 
     #[test]
-    fn raster_restore_changes_only_constant_and_keeps_default_stock_shaders() {
+    fn raster_restore_changes_only_constant_and_keeps_shared_layer_fragment() {
         use bevy::render::render_resource::{BlendState, ColorTargetState, ColorWrites,
             CompareFunction, DepthBiasState, DepthStencilState, FragmentState, TextureFormat};
         let mut descriptor = RenderPipelineDescriptor {
@@ -789,9 +941,9 @@ mod tests {
         restore_raster_constant(&mut no_depth, 50);
         assert_eq!(no_depth, untouched);
         assert!(matches!(<SkidRasterBias as MaterialExtension>::vertex_shader(), bevy::shader::ShaderRef::Default));
-        assert!(matches!(<SkidRasterBias as MaterialExtension>::fragment_shader(), bevy::shader::ShaderRef::Default));
+        assert!(matches!(<SkidRasterBias as MaterialExtension>::fragment_shader(), ShaderRef::Handle(_)));
         assert!(matches!(<SkidRasterBias as MaterialExtension>::prepass_fragment_shader(), bevy::shader::ShaderRef::Default));
-        assert!(matches!(<SkidRasterBias as MaterialExtension>::deferred_fragment_shader(), bevy::shader::ShaderRef::Default));
+        assert!(matches!(<SkidRasterBias as MaterialExtension>::deferred_fragment_shader(), ShaderRef::Default));
     }
 
     fn profile() -> Profile {
@@ -880,6 +1032,231 @@ mod tests {
         assert_same_triangles(&marks);
     }
 
+    /// Behavioral replay: material changes are continuous; true loss/reset is not.
+    /// Atlas ranges are deliberately disjoint, including same-Kind surfaces.
+    #[test]
+    fn contact_layer_transitions_chain_without_bridging_airborne_or_reset() {
+        let profile = grid_formats::skidmarks::read(r#"<SKIDMARKS offset="0.04">
+<SURFACE name="GRAS" tread="1" treadStartU="0.1" treadEndU="0.2" treadWidthScale="1.1"
+ skid="1" skidStartU="0.4" skidEndU="0.55" skidWidthScale="2.0"
+ sideSkidStartU="0.8" sideSkidEndU="0.9" sideSkidWidthScale="2.25"/>
+<SURFACE name="STDR" tread="0" skid="1" skidStartU="0.65" skidEndU="0.7" skidWidthScale="1.1"/>
+</SKIDMARKS>"#).unwrap();
+        let mut marks = SkidMarks::new(profile);
+        assert!(marks.phases.iter().all(|phase| *phase == [0.; 2]));
+        // Common divisor distinguishes this from independentfract or using
+        // floor(newP0) after the first result: lane1 must remain1.75, not0.75.
+        assert_eq!(capacity_phase([3.25, 4.75]), Some([0.25, 1.75]));
+        marks.heads.resize(1, [None; 4]);
+        let layout = VertexLayout::of(&marks.streamed());
+        let mut gpu = Vec::new();
+        // Independent Bevy packing is the byte oracle, not a second serializer.
+        let flush = |marks: &mut SkidMarks, gpu: &mut Vec<u8>| {
+            for run in marks.changes() {
+                let mut part = Vec::new();
+                marks.pack_strips(&layout, run.clone(), &mut part);
+                let at = run.start * SLOT * layout.stride;
+                gpu.resize((at + part.len()).max(gpu.len()), 0);
+                gpu[at..at + part.len()].copy_from_slice(&part);
+            }
+            assert_eq!(*gpu, marks.streamed().create_packed_vertex_buffer_data());
+        };
+        flush(&mut marks, &mut gpu);
+        for i in 0..=5 {
+            marks.advance(0, 0, &wheel(b"GRAS", 0., 0., i as f32 * 0.2));
+        }
+        let first = marks.heads[0][0].unwrap().strip;
+        // An unchanged layer remains neutral: both atlas sample paths agree.
+        assert!(marks.strips[first].segments.iter().all(|uv| uv.old == uv.new));
+        // All directed Tread/Skid/SideSkid transitions, then same-Kind new surface.
+        let sequence = [(*b"GRAS", 3., 0.), (*b"GRAS", 3., 0.6),
+            (*b"GRAS", 0., 0.), (*b"GRAS", 3., 0.6),
+            (*b"GRAS", 3., 0.), (*b"GRAS", 0., 0.),
+            (*b"GRAS", 3., 0.), (*b"STDR", 3., 0.)];
+        for (j, (code, excess, side)) in sequence.into_iter().enumerate() {
+            let frozen = marks.strips[first].segments.clone();
+            marks.advance(0, 0, &wheel(&code, excess, side, (j + 6) as f32 * 0.2));
+            assert_eq!(marks.heads[0][0].unwrap().strip, first);
+            assert_eq!(&marks.strips[first].segments[..frozen.len()], frozen.as_slice());
+            let strip = &marks.strips[first];
+            let k = (strip.segments.len() - 1) * 4;
+            // Warmed contact never fades merely because the selected layer changes.
+            assert_eq!(SkidMarks::slot_vertex(strip, k).4[3], 1.);
+            assert_eq!(SkidMarks::slot_vertex(strip, k + 2).4[3], 1.);
+            let uv = strip.segments.last().unwrap();
+            // Each sample travels along one band, never through intermediate bands.
+            assert_eq!(uv.old[0][0], uv.old[2][0]);
+            assert_eq!(uv.old[1][0], uv.old[3][0]);
+            assert_eq!(uv.new[0][0], uv.new[2][0]);
+            assert_eq!(uv.new[1][0], uv.new[3][0]);
+            flush(&mut marks, &mut gpu);
+        }
+        let surface_change = marks.strips[first].segments.last().unwrap();
+        assert_ne!(surface_change.old[0][1], surface_change.new[0][1]);
+        assert_ne!(surface_change.old[0][0], surface_change.new[0][0]);
+        assert_eq!(marks.strips.iter().filter(|s| s.used).count(), 1);
+        for i in 14..=35 {
+            marks.advance(0, 0, &wheel(b"GRAS", 3., 0., i as f32 * 0.2));
+            flush(&mut marks, &mut gpu);
+        }
+        let chain = marks.heads[0][0].unwrap().strip;
+        assert_ne!(first, chain);
+        assert_eq!(marks.strips.iter().filter(|s| s.used).count(), 2);
+        let a = SkidMarks::slot_vertex(&marks.strips[first], (QUADS - 1) * 4 + 2);
+        let b = SkidMarks::slot_vertex(&marks.strips[chain], 0);
+        assert_eq!(a.0, b.0); // physical capacity seam
+        assert_eq!(a.1, b.1);
+        assert_eq!(a.4[3], 1.);
+        assert_eq!(a.4[3], b.4[3]); // no contact-start ramp on a capacity chain
+        // Wrapping subtracts whole texture periods from each lane using one
+        // common integer divisor; geometry/opacity stays continuous.
+        assert!((a.2[1].fract() - b.2[1].fract()).abs() < 2e-6);
+        assert!((a.3[1].fract() - b.3[1].fract()).abs() < 2e-6);
+        for strip in marks.strips.iter().filter(|s| s.segments.len() > 1) {
+            for q in 1..strip.segments.len() {
+                for edge in 0..2 {
+                    let end = SkidMarks::slot_vertex(strip, (q - 1) * 4 + 2 + edge);
+                    let start = SkidMarks::slot_vertex(strip, q * 4 + edge);
+                    assert_eq!(end.0, start.0);
+                    assert_eq!(end.4[3], start.4[3]);
+                    assert_eq!(end.2[1], start.2[1]);
+                    assert_eq!(end.3[1], start.3[1]);
+                }
+            }
+        }
+        assert_same_triangles(&marks);
+        let mut airborne = wheel(b"GRAS", 3., 0., 7.2);
+        airborne.contact = false;
+        marks.advance(0, 0, &airborne);
+        assert!(marks.heads[0][0].is_none());
+        assert_eq!(marks.strips[chain].points.last().unwrap().alpha, 0.);
+        for x in [20., 20.2, 20.4] {
+            marks.advance(0, 0, &wheel(b"GRAS", 3., 0., x));
+        }
+        // No positive-area triangle may cross the actual airborne interval.
+        for tri in drawn(&marks.streamed()) {
+            let min = tri.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+            let max = tri.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+            assert!(!(min < 20. && max >= 20.));
+        }
+        flush(&mut marks, &mut gpu);
+        let recycled_phases = marks.phases;
+        marks.clear();
+        assert_eq!(marks.phases, recycled_phases);
+        assert!(marks.heads.is_empty());
+        assert!(drawn(&marks.streamed()).is_empty());
+        flush(&mut marks, &mut gpu);
+        marks.heads.resize(1, [None; 4]);
+        for x in [100., 100.2, 100.4] {
+            let mut w = wheel(b"GRAS", 0., 0., x);
+            w.left = true;
+            marks.advance(0, 1, &w);
+        }
+        let left_slot = marks.heads[0][1].unwrap().strip;
+        let left = &marks.strips[left_slot];
+        assert_eq!(left.segments[0].old[0][1], recycled_phases[left_slot][0]);
+        assert_eq!(left.segments[0].new[0][1], recycled_phases[left_slot][1]);
+        assert!(left.segments[0].old[0][0] > left.segments[0].old[1][0]);
+        assert!(drawn(&marks.streamed()).iter().flatten().all(|p| p[0] >= 100.));
+        flush(&mut marks, &mut gpu);
+        assert_same_triangles(&marks);
+    }
+    /// Inspect the actual mesh/Bevy packer output, not a duplicate phase serializer.
+    fn assert_finite_stream(marks: &SkidMarks) {
+        use bevy::mesh::VertexAttributeValues;
+        let mesh = marks.streamed();
+        for attribute in [Mesh::ATTRIBUTE_POSITION, Mesh::ATTRIBUTE_NORMAL,
+            Mesh::ATTRIBUTE_UV_0, Mesh::ATTRIBUTE_UV_1, Mesh::ATTRIBUTE_COLOR] {
+            let finite = match mesh.attribute(attribute).expect("stream attribute") {
+                VertexAttributeValues::Float32x2(v) => v.iter().flatten().all(|v| v.is_finite()),
+                VertexAttributeValues::Float32x3(v) => v.iter().flatten().all(|v| v.is_finite()),
+                VertexAttributeValues::Float32x4(v) => v.iter().flatten().all(|v| v.is_finite()),
+                _ => panic!("unexpected skid vertex format"),
+            };
+            assert!(finite, "nonfinite vertex attribute");
+        }
+        let layout = VertexLayout::of(&mesh);
+        let mut packed = Vec::new();
+        marks.pack(&layout, &mut packed);
+        assert_eq!(packed, mesh.create_packed_vertex_buffer_data());
+    }
+
+    #[test]
+    fn invalid_phase_domains_restart_without_crossing_or_nonfinite_uploads() {
+        // Explicit expected seeds, rather than computing an oracle with the
+        // implementation's finite_seed/capacity_phase helpers.
+        let cases = [
+            ([0., 0.], [0., 0.]), ([-0., 0.], [-0., 0.]),
+            ([0.75, 4.75], [0.75, 4.75]),
+            ([-1., 3.], [0., 0.]), ([3., -1.], [0., 0.]),
+            ([f32::NAN, 3.], [0., 0.]), ([3., f32::NAN], [0., 0.]),
+            ([f32::INFINITY, 3.], [0., 0.]), ([3., f32::INFINITY], [0., 0.]),
+            ([f32::NEG_INFINITY, 3.], [0., 0.]), ([3., f32::NEG_INFINITY], [0., 0.]),
+        ];
+        for (invalid, expected_seed) in cases {
+            let mut marks = SkidMarks::new(profile());
+            marks.heads.resize(1, [None; 4]);
+            for i in 0..=QUADS {
+                marks.advance(0, 0, &wheel(b"STDR", 3., 0., i as f32 * 0.2));
+            }
+            let old = marks.heads[0][0].unwrap().strip;
+            marks.phases[old] = invalid;
+            // Exercise bad/recycled next-slot history as well as the old input.
+            marks.phases[1] = invalid;
+            let at = (QUADS + 1) as f32 * 0.2;
+            marks.advance(0, 0, &wheel(b"STDR", 3., 0., at));
+            assert!(marks.phase_safety_events > 0);
+            let fresh = marks.heads[0][0].expect("valid current point reseeded").strip;
+            assert_ne!(fresh, old);
+            assert_eq!(marks.strips[fresh].points.len(), 1);
+            assert_eq!(marks.strips[fresh].points[0].v, expected_seed);
+            assert_eq!(marks.phases[fresh], expected_seed);
+            // Actual contact stays true: this gap must be the explicit safety
+            // deviation, not a fabricated airborne interval or old/new bridge.
+            marks.advance(0, 0, &wheel(b"STDR", 3., 0., at + 0.2));
+            for tri in drawn(&marks.streamed()) {
+                let lo = tri.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+                let hi = tri.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+                assert!(!(lo < at && hi >= at), "unsafe continuation bridged");
+            }
+            assert_finite_stream(&marks);
+        }
+    }
+
+    #[test]
+    fn ordinary_advance_overflow_and_bad_points_never_enter_the_stream() {
+        // Finite source-style data whose ordinary non-capacity V increment
+        // overflows f32; rejecting only capacity transforms would miss this.
+        let huge = grid_formats::skidmarks::read(r#"<SKIDMARKS offset="0.04">
+<SURFACE name="STDR" tread="0" skid="1" skidStartU="0" skidEndU="1e38" skidWidthScale="1"/>
+</SKIDMARKS>"#).unwrap();
+        let mut marks = SkidMarks::new(huge);
+        marks.heads.resize(1, [None; 4]);
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., 0.));
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., 2.));
+        assert!(marks.phase_safety_events > 0);
+        assert!(drawn(&marks.streamed()).is_empty());
+        let seed = marks.heads[0][0].unwrap().strip;
+        assert_eq!(marks.strips[seed].points.len(), 1);
+        assert_eq!(marks.strips[seed].points[0].center.x, 2.);
+        assert_finite_stream(&marks);
+        let mut bad = wheel(b"STDR", 3., 0., 3.);
+        bad.normal = Vec3::new(f32::NAN, 1., 0.);
+        marks.advance(0, 0, &bad);
+        assert!(marks.heads[0][0].is_none());
+        assert_finite_stream(&marks);
+
+        // Independent final containment: corrupt metadata cannot poison an
+        // upload even if a future producer bypasses the checked advance path.
+        let mut marks = SkidMarks::new(profile());
+        marks.heads.resize(1, [None; 4]);
+        for i in 0..4 { marks.advance(0, 0, &wheel(b"STDR", 3., 0., i as f32 * 0.2)); }
+        let strip = marks.heads[0][0].unwrap().strip;
+        let before = drawn(&marks.streamed()).len();
+        marks.strips[strip].segments[0].new[2][1] = f32::NAN;
+        assert_eq!(drawn(&marks.streamed()).len(), before - 2);
+        assert_finite_stream(&marks);
+    }
     /// Triangles with area, as position triples in draw order.
     fn drawn(mesh: &Mesh) -> Vec<[[f32; 3]; 3]> {
         let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) =
@@ -968,11 +1345,12 @@ mod tests {
                         normal: Vec3::Y,
                         half_width: 0.1,
                         u: [0., 1.],
-                        v: 0.,
+                        v: [0.; 2],
                         alpha: 1.,
                     };
                     2
                 ];
+                strip.segments = vec![QuadUv::between(&strip.points[0], &strip.points[1], 0.).unwrap()];
             }
         }
         // 73F330: no free or retiring strip, so the open far strip is stolen
