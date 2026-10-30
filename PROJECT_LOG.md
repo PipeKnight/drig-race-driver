@@ -156,6 +156,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F646](log/F0646.md) | 2026-10-30 | Playable dc4408b43366 with DLAA and APKs dc4408b43366 |
 | [F645](log/F0645.md) | 2026-10-30 | Tyre smoke drawn at half resolution with the original's soft fade |
 | [F644](log/F0644.md) | 2026-10-30 | Tyre smoke lit once per particle as the original |
 | [F643](log/F0643.md) | 2026-10-30 | Tyre smoke rendering cost measured (SMOKE_RENDER_COST.md) |
@@ -215,7 +216,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F589](log/F0589.md) | 2026-10-27 | OSD timer box sounds are online-only; speech and music sized |
 | [F588](log/F0588.md) | 2026-10-27 | Shadow and bounds passes skip batched and static meshes |
 | [F587](log/F0587.md) | 2026-10-26 | Early-race tick cost: whole vehicle-record copies cut |
-| [F586](log/F0586.md) | 2026-10-27 | Player damage and suspension sounds ported |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

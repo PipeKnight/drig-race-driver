@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F646](F0646.md) | 2026-10-30 | Playable dc4408b43366 with DLAA and APKs dc4408b43366 |
 | [F645](F0645.md) | 2026-10-30 | Tyre smoke drawn at half resolution with the original's soft fade |
 | [F644](F0644.md) | 2026-10-30 | Tyre smoke lit once per particle as the original |
 | [F643](F0643.md) | 2026-10-30 | Tyre smoke rendering cost measured (SMOKE_RENDER_COST.md) |
