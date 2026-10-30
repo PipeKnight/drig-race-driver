@@ -142,29 +142,49 @@ the old width for the old lane, is not supported by this recovered producer.
 [V] Saved caller instructions in `73F860` read strip `+0x2D48` and `+0x2D4C`
 into that temporary context and write both back after the vertex call.
 
-Full phase lifecycle fidelity remains open:
+A subsequent read-only shared-master decompile closes the previously missing
+finite-domain lifecycle bodies. It used the existing master with `-noanalysis`
+and `-readOnly`, without a new project or naming changes. Private cache hashes,
+service receipts and the following qualifications are recorded under
+`local/handoff/drafts/grass-skid-source-audit01/lifecycle08/`.
 
-- [D] `7288E0` zeros the temporary context phases, but the caller overwrites them
-  from strip state. Fresh strip initialization is not proved by that temporary
-  zeroing; the cached pool setup `73E5A0` does not explicitly initialize these
-  two fields, and the lower allocation/construction path is unresolved.
-- [V/D] Capacity chaining in `73F860` transforms the previous phases through
-  `BF7620` and `BF90EA`. The latter is the already indexed CRT modulo helper;
-  the former has no body in the inspected cache. Exact wrapping, divisor and
-  rounding remain unresolved. The second-lane sequence also uses the first
-  phase as an input to `BF7620`; independent guessed `fract()` calls are not
-  justified.
-- [D] Post-emission `730540` dispatches to `729E90` or `729FE0`; their bodies are
-  absent from the inspected cache, so further phase/vertex effects are not
-  excluded. Decompiled integer-pointer casts and packing helper `4B22D0` also
-  leave exact float/half conversion and rounding unverified.
+- [D] `BF7620` implements floor on the finite phase domain: its fast path clears
+  positive fractional bits and subtracts one for a negative noninteger. Its
+  slow path installs the initial control word `E572C8=0x173F`, whose x87 rounding
+  bits select downward rounding, then restores the caller's word. Exceptional
+  paths and arbitrary live changes to that control global were not executed.
+- [D] Pool allocator `7456F0` calls constructor `741D70` once per newly allocated
+  slot. That constructor explicitly zeros phases at `+0x2D48/+0x2D4C`.
+  Recycled allocation is different: the inspected release/allocator/emission
+  chain does not rerun that constructor or clear those phases. Initial pool
+  zeroing does not justify zeroing every newly visible strip.
+- [V/D] On capacity chaining, save the old pair before writing either result.
+  Both new phases use `D=floor(double(oldP0))` as the common divisor:
+  `newP0=float32(fmod(double(oldP0),D))` and
+  `newP1=float32(fmod(double(oldP1),D))`. The second floor call reads the old
+  slot's first phase again, not the first reduced result. This is not a pair
+  of independent `fract()` operations. If allocation returns the predecessor
+  slot itself, the caller drops that predecessor and skips the chain transform.
+- [D] Post-commit helpers `729E90/729FE0` build compact output packets; their
+  shared helper `741E10` packs bounds into the packet. The inspected bodies do
+  not reset or rewrite the phase pair.
+
+Full lifecycle/precision parity is still not established. No positive-divisor
+guard appears in the saved capacity caller: `0<=oldP0<1` gives a zero divisor.
+Original CRT domain/exception behavior and natural reachability are untested;
+no fallback is inferred. Decompiled casts, x87 intermediates and packing helper
+`4B22D0` leave exact float/half conversion and rounding unverified. The source's
+three-sample history and allocation timing also differ from the port's direct
+segment/point management; equal 32-quad capacity alone does not close that gap.
 
 The production port still starts a new strip on a layer-kind change, as the
-implementation table records. Private patch06 carries the recovered two-phase
-segment formula and UV-identity condition, but remains uncompiled and untested;
-its fresh-zero initialization and unwrapped capacity carry are **AUTHORED**.
-It is not a shipped fix or source-phase lifecycle parity claim. No new build,
-GPU capture or original-code execution was performed for this verification.
+implementation table records. Private patch07 supersedes the earlier authored
+phase proposals with two lanes, pool-constructor zeroing, recycled-state
+retention and the recovered common-divisor capacity formula. It remains
+uncompiled and untested, including zero-divisor policy, typed material/shader
+integration and actual runtime behavior. It is not a shipped fix or source
+lifecycle/visual parity claim. No original-code execution or GPU capture was
+performed for this verification.
 
 ## 2. Wheel kick-up (dirt, grass, gravel, sand)
 

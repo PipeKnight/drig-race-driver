@@ -315,3 +315,56 @@ A separately registered `NeAnimDefaultSceneBinding` path supplies compatible tar
 The actual crowd receiver+0x2C provider type, selector contexts, 35-slot target/group order, selected output values and prior-local/reference initialization were not captured. The default provider path is source verified; its live connection to those sampled actors remains unknown. Existing USA rig name coverage does not fill this gap or make35 a joint count. The next general implementation must keep actor-scoped target binding, prior locals and the independently resolved skin palette explicit; no blanket bind reset, clock guess or track/actor exception follows.
 
 Private evidence: this worktree's `local/handoff/drafts/crowd-receiver-semantics17/` and `crowd-binding-contract19/` contain selected assembly, address lookups, source pins and findings. `crowd-receiver-cpu18/` contains an independently authored partial CPU draft whose earlier10 synthetic quaternion/scale/translation tests passed; that version rejects Euler/parameter branches. `local/handoff/drafts/crowd-euler-branch21/` adds the saved Euler assembly slice, bounded constant pins, exact instruction associations and an authored binary32 Python model. Its12 trig controls passed, and a noncommuting case distinguishes the recovered XYZ product from all five other axis orders. These are model checks, not original function execution or native parity. The optional private Rust Euler extension and its3 additional tests are **uncompiled and unrun**; the earlier10-test result does not validate that extension. No production port, new decompile, live read, renderer edit or application build was performed for these findings. Concrete crowd provider/reference initialization, active slot binding and clock remain open; recovering this branch does not establish full crowd animation.
+
+
+### Standalone receiver control (G339)
+
+The private Euler extension now actually compiles with rustc1.99.0 and passes
+14 standalone tests. These include a noncommuting radian XYZ case, preserved
+basis W/translation, and both Euler-before-scale and scale-before-Euler orders.
+Earlier attempts stopped before compilation due to private PowerShell helpers;
+the repaired runner passed a real hash-only preflight and then ran under the
+shared build lease. Receipts and the complete test output are in
+`local/handoff/drafts/crowd-euler-cpu22/`. This validates the independently
+written CPU model's stated controls, not execution of the original function,
+full native arithmetic, actual provider/reference initialization or crowd clock.
+No rendered animation or production pose evaluator is supplied by this check.
+
+### Serialized scene-binding reference (G339)
+
+The receiver's `+0x2C` field now has a recovered named reference route:
+`sceneBinding`. Metadata `E52084` pairs that name at `CF5004` with key
+`EC2510`; the receiver deserializer supplies destination `receiver+2C` to
+`773AB0`. The reference adapter's type query returns descriptor `EC2490`,
+registered as `NeAnimSceneBinding`, and its resolved-pointer callback `7D9F10`
+stores the lookup result through that destination. The observed small callback
+extent is four instructions ending at `7D9F19`, not a newly established larger
+master function extent. The starting-`#` reference path resolves an internal
+name in the owner's context. The full external resource syntax was not traced.
+
+This establishes the declared reference type and assignment path, not the
+concrete provider allocated for the crowd. Neither the actual serialized
+reference value nor a live provider vtable/selector array was captured. Do not
+substitute `NeAnimDefaultSceneBinding` or assume 35 joints from the prior
+35-slot snapshot. Private source anchors and an unexecuted minimal future read
+plan are in `local/handoff/drafts/crowd-scene-reference24/`; no original launch,
+UI, process write or new decompilation was used for this small static check.
+
+### Pure S4 sampling control (G339)
+
+The existing registered L4 probe already covers explicit-coordinate sampling
+(G303); it was reused rather than rewritten. A separate private ordinary-S4
+candidate now compiles and passes eight authored controls, with the fourteen
+imported reader/bracket tests filtered out. It uses the production packet types
+and existing strict bracket implementation, accepts an explicit caller-supplied
+bank coordinate, and preserves the recovered raw-slot rules: source dot-product
+association, strict threshold, unnormalized near-dot LERP, and the negative-dot
+spherical path without a shortest-path sign flip. No gameplay clock conversion,
+provider selection, output-slot mapping or bind reset is introduced.
+
+The controls include an independent great-circle oracle, threshold and dot-order
+cases, endpoint/interior intervals and explicit malformed-domain refusals. Rust
+host trigonometry with f32 staging is a numerical candidate, not native x87/CRT
+bit parity. Synthetic packet envelopes do not establish purchased-bank admission.
+No production sampler or rendered crowd animation is delivered by this check.
+Actual receipts/source pins: `local/handoff/drafts/crowd-s4-sample25/`.
