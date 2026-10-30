@@ -51,8 +51,12 @@ const FIELDS: [&str; 4] = [
 ];
 
 /// On in the profile build, or with `GRID_GPU_PASSES=1`.
-pub fn enabled() -> bool {
+fn profiling_enabled() -> bool {
     cfg!(feature = "profile") || std::env::var("GRID_GPU_PASSES").is_ok_and(|v| v == "1")
+}
+
+pub fn enabled() -> bool {
+    profiling_enabled() || submissions::budget().is_some()
 }
 
 /// Seconds per logged table: `GRID_PROFILE_SECONDS`, default 10 (as the
@@ -69,10 +73,15 @@ fn window_seconds() -> f32 {
 }
 
 pub fn install(app: &mut App) {
-    app.add_plugins(RenderDiagnosticsPlugin)
-        .add_systems(Last, (report, view_triangles));
-    if let Some(render) = app.get_sub_app_mut(RenderApp) {
-        render.add_systems(Render, mesh_triangles.after(RenderSystems::Cleanup));
+    if profiling_enabled() {
+        app.add_plugins(RenderDiagnosticsPlugin)
+            .add_systems(Last, (report, view_triangles));
+        if let Some(render) = app.get_sub_app_mut(RenderApp) {
+            render.add_systems(Render, mesh_triangles.after(RenderSystems::Cleanup));
+        }
+    }
+    if let Some(budget) = submissions::budget() {
+        submissions::install(app, budget);
     }
 }
 
@@ -146,7 +155,11 @@ fn view_triangles(
         sums
     };
     let line = |view: String, sums: [u64; 6]| {
-        let fields: Vec<String> = OWNERS.iter().zip(sums).map(|(n, v)| format!("{n}={v}")).collect();
+        let fields: Vec<String> = OWNERS
+            .iter()
+            .zip(sums)
+            .map(|(n, v)| format!("{n}={v}"))
+            .collect();
         log_line!(
             "view_triangles view={view} total={} {}",
             sums.iter().sum::<u64>(),
@@ -157,11 +170,17 @@ fn view_triangles(
         if !camera.is_active {
             continue;
         }
-        line(format!("camera{}", camera.order), count(visible.get(TypeId::of::<Mesh3d>())));
+        line(
+            format!("camera{}", camera.order),
+            count(visible.get(TypeId::of::<Mesh3d>())),
+        );
         for light in &lights {
             if let Some(cascades) = light.entities.get(&entity) {
                 for (i, cascade) in cascades.iter().enumerate() {
-                    line(format!("camera{}_cascade{i}", camera.order), count(&cascade.entities));
+                    line(
+                        format!("camera{}_cascade{i}", camera.order),
+                        count(&cascade.entities),
+                    );
                 }
             }
         }
@@ -222,5 +241,362 @@ fn report(
             mean(p, 2),
             mean(p, 3)
         );
+    }
+}
+
+// Opt-in CPU observer. No GPU query/readback, geometry or phase-key changes.
+mod submissions {
+    use super::*;
+    use bevy::{
+        core_pipeline::core_3d::{AlphaMask3d, Opaque3d},
+        ecs::{
+            query::ROQueryItem,
+            system::{ReadOnlySystemParam, SystemParamItem, lifetimeless::SRes},
+        },
+        pbr::{
+            DrawDepthOnlyPrepass, DrawMaterial, DrawMesh, DrawPrepass, RenderMaterialInstances,
+            SetMaterialBindGroup, SetMeshBindGroup, SetMeshViewBindGroup,
+            SetMeshViewBindingArrayBindGroup, SetPrepassEmptyMaterialBindGroup,
+            SetPrepassViewBindGroup, SetPrepassViewEmptyBindGroup, Shadow,
+        },
+        render::{
+            RenderStartup,
+            render_phase::{
+                BinnedPhaseItem, DrawFunctions, PhaseItem, PhaseItemExtraIndex, RenderCommand,
+                RenderCommandResult, RenderCommandState, SetItemPipeline, TrackedRenderPass,
+                ViewBinnedRenderPhases,
+            },
+        },
+    };
+    use std::sync::atomic::{AtomicBool, Ordering};
+    const MAX_ROWS: usize = 256;
+    const MAX_VIEWS: usize = 64;
+    const MAX_MEMBERSHIPS: usize = 131_072;
+    const KINDS: [&str; 4] = ["raw", "standard", "other", "unknown"];
+    pub(super) fn budget() -> Option<u32> {
+        std::env::var("GRID_OBJECT_SUBMISSIONS")
+            .ok()?
+            .parse::<u32>()
+            .ok()
+            .filter(|n| (1..=360).contains(n))
+    }
+    fn sampled(frame: u32, limit: u32) -> bool {
+        frame == 1 || frame.is_multiple_of(30) || frame == limit
+    }
+    #[derive(Resource)]
+    struct Observer {
+        active: AtomicBool,
+        done: AtomicBool,
+        limit: u32,
+        state: Mutex<Stats>,
+    }
+    #[derive(Default)]
+    struct Stats {
+        frame: u32,
+        // Render-world view ID, phase kind, material kind. Values: direct API,
+        // indirect API, indirect capacity, terminal Skip, terminal Failure.
+        rows: HashMap<(Entity, u8, usize), [u64; 5]>,
+        overflow: u64,
+    }
+    #[derive(Resource)]
+    struct MainBudget {
+        frame: u32,
+        limit: u32,
+    }
+    pub(super) fn install(app: &mut App, limit: u32) {
+        app.insert_resource(MainBudget { frame: 0, limit })
+            .add_systems(Last, visibility);
+        let Some(render) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        render
+            .insert_resource(Observer {
+                active: AtomicBool::new(false),
+                done: AtomicBool::new(false),
+                limit,
+                state: Mutex::new(Stats::default()),
+            })
+            .add_systems(RenderStartup, wrap_all)
+            .add_systems(
+                Render,
+                begin
+                    .after(RenderSystems::PrepareBindGroups)
+                    .before(RenderSystems::Render),
+            )
+            .add_systems(
+                Render,
+                finish
+                    .after(RenderSystems::Render)
+                    .before(RenderSystems::Cleanup),
+            );
+    }
+    type CountMaterial = (
+        SetItemPipeline,
+        SetMeshViewBindGroup<0>,
+        SetMeshViewBindingArrayBindGroup<1>,
+        SetMeshBindGroup<2>,
+        SetMaterialBindGroup<3>,
+        CountMesh,
+    );
+    type CountPrepass = (
+        SetItemPipeline,
+        SetPrepassViewBindGroup<0>,
+        SetPrepassViewEmptyBindGroup<1>,
+        SetMeshBindGroup<2>,
+        SetMaterialBindGroup<3>,
+        CountMesh,
+    );
+    type CountDepthOnly = (
+        SetItemPipeline,
+        SetPrepassViewBindGroup<0>,
+        SetPrepassViewEmptyBindGroup<1>,
+        SetMeshBindGroup<2>,
+        SetPrepassEmptyMaterialBindGroup<3>,
+        CountMesh,
+    );
+    fn replace<P, Original, Counted>(world: &mut World)
+    where
+        P: PhaseItem,
+        Original: 'static,
+        Counted: RenderCommand<P> + Send + Sync + 'static,
+        Counted::Param: ReadOnlySystemParam,
+    {
+        let replacement = RenderCommandState::<P, Counted>::new(world);
+        let functions = world.resource::<DrawFunctions<P>>();
+        let mut functions = functions.write();
+        let id = functions
+            .get_id::<Original>()
+            .expect("submission observer missing stock draw function");
+        // Keep the original indices map AND draw-function ID; no phase rerouting.
+        functions.draw_functions[id.0 as usize] = Box::new(replacement);
+    }
+    fn wrap_all(world: &mut World) {
+        replace::<Opaque3d, DrawMaterial, CountMaterial>(world);
+        replace::<AlphaMask3d, DrawMaterial, CountMaterial>(world);
+        replace::<Shadow, DrawPrepass, CountPrepass>(world);
+        replace::<Shadow, DrawDepthOnlyPrepass, CountDepthOnly>(world);
+    }
+    struct CountMesh;
+    impl<P: PhaseItem> RenderCommand<P> for CountMesh {
+        type Param = (
+            <DrawMesh as RenderCommand<P>>::Param,
+            SRes<Observer>,
+            SRes<RenderMaterialInstances>,
+        );
+        type ViewQuery = (<DrawMesh as RenderCommand<P>>::ViewQuery, Entity);
+        type ItemQuery = <DrawMesh as RenderCommand<P>>::ItemQuery;
+        fn render<'w>(
+            item: &P,
+            (view, view_entity): ROQueryItem<'w, '_, Self::ViewQuery>,
+            entity: Option<ROQueryItem<'w, '_, Self::ItemQuery>>,
+            (params, observer, materials): SystemParamItem<'w, '_, Self::Param>,
+            pass: &mut TrackedRenderPass<'w>,
+        ) -> RenderCommandResult {
+            let active = observer.active.load(Ordering::Relaxed);
+            let kind = if active {
+                materials.instances.get(&item.main_entity()).map_or(3, |m| {
+                    let id = m.asset_id.type_id();
+                    if id == TypeId::of::<crate::foundation_backing::RawMaterial>() {
+                        0
+                    } else if id == TypeId::of::<StandardMaterial>() {
+                        1
+                    } else {
+                        2
+                    }
+                })
+            } else {
+                3
+            };
+            // Delegate exactly once, preserving every GPU command and original result.
+            let result = <DrawMesh as RenderCommand<P>>::render(item, view, entity, params, pass);
+            if active {
+                let phase = if TypeId::of::<P>() == TypeId::of::<Opaque3d>() {
+                    0
+                } else if TypeId::of::<P>() == TypeId::of::<AlphaMask3d>() {
+                    1
+                } else {
+                    2
+                };
+                let key = (view_entity, phase, kind);
+                let mut state = observer.state.lock().expect("submission observer poisoned");
+                if state.rows.len() == MAX_ROWS && !state.rows.contains_key(&key) {
+                    state.overflow += 1;
+                } else {
+                    let row = state.rows.entry(key).or_default();
+                    match &result {
+                        RenderCommandResult::Skip => row[3] += 1,
+                        RenderCommandResult::Failure(_) => row[4] += 1,
+                        RenderCommandResult::Success => match item.extra_index() {
+                            PhaseItemExtraIndex::IndirectParametersIndex { range, .. } => {
+                                row[1] += 1;
+                                row[2] += u64::from(range.end.saturating_sub(range.start));
+                            }
+                            _ => row[0] += 1,
+                        },
+                    }
+                }
+            }
+            result
+        }
+    }
+    fn queue_keys<P: BinnedPhaseItem>(
+        phases: Option<&ViewBinnedRenderPhases<P>>,
+        frame: u32,
+        phase: &str,
+    ) {
+        let Some(phases) = phases else {
+            log_line!(
+                "object_queue sample={frame} phase={phase} state=unknown reason=resource-absent"
+            );
+            return;
+        };
+        if phases.0.len() > MAX_VIEWS {
+            log_line!("object_queue sample={frame} phase={phase} state=unknown reason=view-cap");
+            return;
+        }
+        for (view, p) in &phases.0 {
+            let ordinary_members: usize = p
+                .batchable_meshes
+                .values()
+                .map(|b| b.entities().len())
+                .sum();
+            let unbatchable: usize = p
+                .unbatchable_meshes
+                .values()
+                .map(|b| b.entities.len())
+                .sum();
+            log_line!(
+                "object_queue sample={frame} view={view:?} phase={phase} multidraw_set_keys={} batchable_bins={} batchable_members={ordinary_members} unbatchable_members={unbatchable} multidraw_members=unknown prepared_batches=unknown material_split=unknown",
+                p.multidrawable_meshes.len(),
+                p.batchable_meshes.len()
+            );
+        }
+    }
+    fn begin(
+        observer: Res<Observer>,
+        opaque: Option<Res<ViewBinnedRenderPhases<Opaque3d>>>,
+        mask: Option<Res<ViewBinnedRenderPhases<AlphaMask3d>>>,
+        shadows: Option<Res<ViewBinnedRenderPhases<Shadow>>>,
+    ) {
+        if observer.done.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut state = observer.state.lock().expect("submission observer poisoned");
+        state.frame += 1;
+        let frame = state.frame;
+        state.rows.clear();
+        state.overflow = 0;
+        let active = sampled(frame, observer.limit);
+        observer.active.store(active, Ordering::Relaxed);
+        drop(state);
+        if active {
+            queue_keys(opaque.as_deref(), frame, "opaque");
+            queue_keys(mask.as_deref(), frame, "mask");
+            queue_keys(shadows.as_deref(), frame, "shadow");
+        }
+    }
+    fn finish(observer: Res<Observer>) {
+        if !observer.active.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        let mut state = observer.state.lock().expect("submission observer poisoned");
+        let frame = state.frame;
+        for ((view, phase, kind), row) in state.rows.drain() {
+            log_line!(
+                "object_commands sample={frame} view_space=render view={view:?} phase={phase} representative_material={} direct_cpu_calls={} indirect_cpu_calls={} indirect_capacity={} terminal_skip={} terminal_failure={} gpu_executed_commands=unknown ornament_ownership=unknown",
+                KINDS[kind],
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4]
+            );
+        }
+        log_line!(
+            "object_commands sample={} dropped_counter_updates={} join_to_main_visibility=none",
+            state.frame,
+            state.overflow
+        );
+        if state.frame == observer.limit {
+            observer.done.store(true, Ordering::Relaxed);
+        }
+    }
+    type Membership = (
+        Has<MeshMaterial3d<crate::foundation_backing::RawMaterial>>,
+        Has<MeshMaterial3d<StandardMaterial>>,
+        Has<crate::ornament_lod::OrnamentLevel>,
+    );
+    fn visibility(
+        mut budget: ResMut<MainBudget>,
+        cameras: Query<(Entity, &Camera, &VisibleEntities), With<Camera3d>>,
+        lights: Query<&CascadesVisibleEntities>,
+        owners: Query<Membership, With<Mesh3d>>,
+    ) {
+        if budget.frame == budget.limit {
+            return;
+        }
+        budget.frame += 1;
+        if !sampled(budget.frame, budget.limit) {
+            return;
+        }
+        let (mut views, mut visits) = (0usize, 0usize);
+        let mut emit = |camera: Entity, cascade: Option<usize>, entities: &[Entity]| {
+            views += 1;
+            if views > MAX_VIEWS {
+                return;
+            }
+            let mut counts = [0u64; 4];
+            let mut ornaments = 0u64;
+            for entity in entities {
+                visits += 1;
+                if visits > MAX_MEMBERSHIPS {
+                    log_line!(
+                        "object_visibility sample={} state=unknown reason=membership-cap",
+                        budget.frame
+                    );
+                    return;
+                }
+                match owners.get(*entity) {
+                    Ok((raw, standard, ornament)) => {
+                        let k = match (raw, standard) {
+                            (true, false) => 0,
+                            (false, true) => 1,
+                            (false, false) => 2,
+                            _ => 3,
+                        };
+                        counts[k] += 1;
+                        ornaments += u64::from(ornament);
+                    }
+                    Err(_) => counts[3] += 1,
+                }
+            }
+            log_line!(
+                "object_visibility sample={} view_space=main camera={camera:?} cascade={cascade:?} raw={} standard={} other={} unknown={} ornament_members={ornaments} metric=cpu-membership join_to_render=none",
+                budget.frame,
+                counts[0],
+                counts[1],
+                counts[2],
+                counts[3]
+            );
+        };
+        for (camera, settings, visible) in &cameras {
+            if !settings.is_active {
+                continue;
+            }
+            emit(camera, None, visible.get(TypeId::of::<Mesh3d>()));
+            for light in &lights {
+                if let Some(cascades) = light.entities.get(&camera) {
+                    for (i, c) in cascades.iter().enumerate() {
+                        emit(camera, Some(i), &c.entities);
+                    }
+                }
+            }
+        }
+        if views > MAX_VIEWS {
+            log_line!(
+                "object_visibility sample={} state=unknown reason=view-cap",
+                budget.frame
+            );
+        }
     }
 }
