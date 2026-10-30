@@ -2038,3 +2038,43 @@ Donington early by stage, base → fixed: `WorldAdvance` 0.18-0.19 → 0.08; `Ve
 G302 integrates pinned main F587-F590 after the G300 ownership guard. The true three-way car_batch merge preserves player SourcePart car0/no-Opponent exclusion, opponent batching, incoming NoAutoAabb/NotShadowCaster handling and (!shadowless || ours) admission. Exact player ownership ECS test, full1137tests/Clippy/four unchanged identities/24soak, combined feature build and fresh native BMW smoke pair pass. This establishes bounded integration safety, not a new measured FPS gain or actual bumper view. See G302 for source/artifact/capture hashes; incoming F587/F588 measurements keep their original scope.
 
 G304 integrates pinned F591/F592 into the graphics branch, retaining player ownership and native ground-skid identity. Full1139tests/Clippy/four unchanged identities/24soak and a fresh combined-feature native Istanbul pair pass. Root sees actual laid curves in Off and their attenuation in Late; no additional FPS gain or exhaustive strip-delivery claim. Last-queued snapshots still precede upload acknowledgment, so the conditional missing-allocator cold-drop limit remains explicitly open. Upstream measurements retain their scope. Source/artifact/visual and cleanup evidence is in G304.
+
+## Bounded CPU submission observer (G343)
+
+`GRID_OBJECT_SUBMISSIONS=120` enables sampled diagnostic tables for at most 120
+main/render invocations (accepted budget 1..360). The default path installs no
+observer. This switch alone does not enable GPU timestamp queries or profile
+mode. Samples are first, every thirtieth and last invocation; startup may not yet
+have prepared geometry, so empty early samples are not a claim of zero draws.
+
+The observer preserves existing opaque, alpha-mask and shadow draw-function IDs
+and command tuples, replacing only the terminal mesh command with a delegate
+that calls the original exactly once. It reports successful direct/indirect CPU
+submission calls, indirect capacity and terminal skips/failures. A material label
+identifies the representative phase entity, not every member of an indirect draw.
+Render phase numbers are 0 opaque, 1 alpha-mask and 2 shadow.
+
+Queue keys, CPU visibility memberships and issued API calls are different metrics.
+Main-world visibility IDs and render-world IDs are intentionally not joined by
+matching invocation numbers. GPU executed command counts, indirect live members,
+per-material GPU work and ornament ownership remain unknown. These tables alone
+do not establish a bottleneck, culling defect, FPS gain or measured GPU cost.
+
+Tables have explicit storage/view/membership caps, but every sampled terminal
+call still incurs a lookup and lock; these caps do not bound all CPU work. After
+the budget ends, installed wrappers retain an atomic flag check per terminal draw.
+Use a fully disabled control for performance measurements. A same-artifact
+Off/On runtime comparison and actual output checks are required before accepting
+this diagnostic; compilation alone does not prove draw-order or pixel neutrality.
+
+The actual 600-tick twelve-STK Detroit baseline Off/On pair passes with exact
+final RGBA and all four ordered player-record families. Five bounded sample
+footers complete; the four prepared samples report Raw 2 indirect CPU calls with
+capacity2, versus Standard 2/capacity117 in the main opaque view. Four shadow
+views each report Raw2/capacity2 and Standard6, with capacities80/94/95/103.
+Those samples occur during the held starting grid, not a controlled moving-view
+comparison. There are no reported terminal failures or dropped updates. This
+supports the observer's operation and sampled neutrality, not all-context or
+GPU-execution equivalence, a measured speedup or absence of other bottlenecks.
+Receipts and the independent counter audit are private under
+`local/graphics/object-submissions01/runtime01/`.
