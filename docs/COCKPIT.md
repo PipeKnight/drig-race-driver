@@ -132,7 +132,14 @@ The cockpit's wheel is not turned by a computed angle. It is an animation clip s
 
 - `grid_formats::neanim` reads NeAnim sets (`NeAnimPacketData_L4_KA` keys shared by channels, interpolated linearly; `B1` one-component Bezier). `pssg::read_tree` keeps `NeAnimPacketData_*` nodes as raw data. Every shipped interior and character animation file decodes [V, test `shipped_animation_files_decode`].
 - `cockpit::append` finds steering_wheel and the "Steering" clip; each cockpit part under the node keeps its frame relative to the node (Lacetti: 6 parts).
-- `turn_wheel` (F627; `animate_interior` since the pedals step), before `drive_present`: s = −(vehicle +0xE30), t = (s + 1) / 2 · 4 s; the part's rest = anchor · parent world · T(t) R(t) · its frame. The interior animator is described under "Pedals". The quaternion convention is pinned by the test `shipped_lacetti_steering_clip`: the centre key is the file's bind matrix.
+- `turn_wheel` (F627; `animate_interior` since the pedals step), before `drive_present`: s from `cockpit::steering` (below; F627 used −(vehicle +0xE30)), t = (s + 1) / 2 · 4 s; the part's rest = anchor · parent world · T(t) R(t) · its frame. The interior animator is described under "Pedals". The quaternion convention is pinned by the test `shipped_lacetti_steering_clip`: the centre key is the file's bind matrix.
+- Deliberate deviation (owner's request, FIDELITY_BACKLOG row 94): the original's wheel follows the raw command, so with the keyboard (+0xE30 is 0 or ±1) it snaps to a full lock. The port's s is the steering the simulation applies to the front wheels instead, whatever the device:
+  - each front wheel's (cos, sin) at wheel +0x20/+0x24 (the pair the renderer turns), its toe and rotation offset taken off (`steering_coefficients::update` applies them last);
+  - the centre angle a from the two wheels: the geometry gives each wheel cot(a) ∓ track / (2 · wheelbase), so tan a = 2 t₁t₂ / (t₁ + t₂), the harmonic mean of their tangents (the arithmetic mean of the angles if they turn opposite ways);
+  - s = −a / (vehicle +0xE54), clamped to ±1; −(+0xE30) when the lock is 0.
+  - With the keyboard and the pad (assisted steering) the wheel turns at the front wheels' slewed rate and shows the assist's angle; with a wheel device (unassisted) a = +0xE30 · +0xE54 and s is the raw command.
+  - The driver's steering poses and hand targets use the same s.
+  - CAMERA_VIEWS §4 item 8 (a capture of the original's wheel) is still open; the RE shows no smoothing for the human driver, so the change stays recorded as a deviation.
 - Not ported:
   - the hand dummies (no driver model yet);
   - the exterior wheel in the other views (left as in F618, so those views stay unchanged);
@@ -265,7 +272,7 @@ Not verified: the digit orientation against the original's screen (font strip or
 - `grid_formats::scene::read_skin` reads the skin's joints, inverse bind matrices and instances. `mesh::read_object_meshes` now also keeps each vertex's four joints and weights (`Mesh::skin_weights`).
 - The `_x2` instance is drawn through the car's material path as `car0/interior/driver/body`, with its TDiffuseAlphaMap and the default interior material, as a Bevy `SkinnedMesh`. It is an interior part, so it shows in the head-cam only. NoFrustumCulling, because the bind-pose bounds do not follow the seated pose.
 - Each frame, before `drive_present`:
-  - `s` = −(vehicle +0xE30), as for the wheel;
+  - `s` as for the wheel (`cockpit::steering`; the original: −(vehicle +0xE30));
   - the Neutral and steering poses are blended as above;
   - the legs, then the arms, are solved (`ik::reach`) with this frame's FK;
   - the joints are written as children of the body part.

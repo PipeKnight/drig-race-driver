@@ -184,9 +184,41 @@ fn attach_animated(
     }
 }
 
+/// The wheel's s (−1 full left .. 1 full right, the Steering clip's range):
+/// the steering the simulation applies to the front wheels, as a fraction of
+/// full lock (vehicle +0xE54). The original turns the wheel with the raw
+/// command −(+0xE30) (0x85F8F0); the port follows the applied angle at the
+/// owner's request (FIDELITY_BACKLOG row 94), so keyboard steering turns the
+/// wheel as smoothly as the front wheels. Without a lock: the raw command.
+pub fn steering(vehicle: &[u32]) -> f32 {
+    let word = |offset: usize| vehicle.get(offset / 4).copied().map_or(0., f32::from_bits);
+    let raw = -word(0xe30);
+    let lock = word(0xe54);
+    if lock.is_nan() || lock <= 1e-4 {
+        return raw.clamp(-1., 1.);
+    }
+    // A front wheel's tangent before its toe and rotation offset
+    // (steering_coefficients::update): (cos, sin) at wheel +0x20/+0x24,
+    // wheel i at +0x1990 + 0x150 i, toe +0xE8 signed by the side (+0x0).
+    let tangent = |i: usize| {
+        let wheel = 0x1990 + i * 0x150;
+        let toe = if word(wheel) < 0. { -word(wheel + 0xe8) } else { word(wheel + 0xe8) };
+        (word(wheel + 0x24).atan2(word(wheel + 0x20)) + toe + word(0x22a0 + i * 4)).tan()
+    };
+    let (left, right) = (tangent(2), tangent(3));
+    // The two wheels' cotangents average to the centre angle's (Ackermann).
+    let angle = if left * right > 0. {
+        (2. * left * right / (left + right)).atan()
+    } else {
+        0.5 * (left.atan() + right.atan())
+    };
+    (-angle / lock).clamp(-1., 1.)
+}
+
 /// The interior clips the human driver's inputs play (0x85F8F0):
-/// - "Steering" at (s + 1) / 2 of its length for s = −(vehicle +0xE30), the
-///   raw command with no smoothing (0x858C20 → 0x851730 → 0x84CA10);
+/// - "Steering" at (s + 1) / 2 of its length; the original's s is the raw
+///   command −(vehicle +0xE30) with no smoothing (0x858C20 → 0x851730 →
+///   0x84CA10), the port's is [`steering`];
 /// - the pedals: p = throttle (+0xE1C) when it is at least the brake
 ///   (+0xE20), else −brake; 0x84CC40 switches the pedal crossfade at once to
 ///   "accel" (p ≥ 0) or "Brake" and sets that clip's time to |p| of its
@@ -195,7 +227,7 @@ pub fn play(interior: &crate::interior_anim::Interior, vehicle: &[u32]) -> Vec<c
     let word = |offset: usize| vehicle.get(offset / 4).copied().map_or(0., f32::from_bits);
     let mut out = Vec::new();
     if let Some(c) = interior.clip("steering") {
-        let s = -word(0xe30);
+        let s = steering(vehicle);
         out.push((c, (s + 1.) * 0.5 * interior.duration(c), 1.));
     }
     let (throttle, brake) = (word(0xe1c), word(0xe20));
@@ -479,5 +511,63 @@ mod tests {
         assert_eq!(Mirror::parse("0x64"), None);
         assert_eq!(Mirror::parse("256x64/0"), None);
         assert_eq!(Mirror::parse("on"), None);
+    }
+
+    /// FIDELITY_BACKLOG row 94 on the Lacetti: the wheel's s times the lock
+    /// is the front wheels' centre angle, between the inner and outer wheel.
+    /// Keyboard (assisted): a tap, a hold and the releases move s smoothly
+    /// and back to 0. Wheel device (unassisted): s is the raw command −E30.
+    /// Prints the time series (`--nocapture`).
+    #[test]
+    #[ignore = "needs GRID_GAME_ROOT"]
+    fn lacetti_wheel_follows_the_front_wheels() {
+        use grid_tools::source_vehicle::{assists, Controls, Runtime, DELTA};
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT");
+        let word = |v: &[u32], o: usize| f32::from_bits(v[o / 4]);
+        let yaw = |v: &[u32], i: usize| {
+            let w = 0x1990 + i * 0x150;
+            let toe = if word(v, w) < 0. { -word(v, w + 0xe8) } else { word(v, w + 0xe8) };
+            word(v, w + 0x24).atan2(word(v, w + 0x20)) + toe + word(v, 0x22a0 + i * 4)
+        };
+        for input in [assists::Input::Keyboard, assists::Input::Wheel] {
+            let mut runtime = Runtime::lacetti(Path::new(&root), "slot_00", 1).unwrap();
+            runtime.set_assists(assists::Assists { input, ..runtime.assists }).unwrap();
+            // Keyboard: rest, a 0.05 s tap, release, a 1 s hold, release;
+            // then a pad stick (the same assisted class) held at half.
+            // Wheel: a ramp from full left to full right over 2 s.
+            let script: Vec<f32> = match input {
+                assists::Input::Keyboard => [(0.2, 0.), (0.05, 1.), (0.6, 0.), (1., 1.), (1., 0.), (1., 0.5), (1., 0.)]
+                    .iter()
+                    .flat_map(|&(t, c)| std::iter::repeat_n(c, (t / DELTA) as usize))
+                    .collect(),
+                assists::Input::Wheel => {
+                    let n = (2. / DELTA) as usize;
+                    (0..=n).map(|k| 2. * k as f32 / n as f32 - 1.).collect()
+                }
+            };
+            let (mut last, mut largest_step) = (0_f32, 0_f32);
+            for (k, &c) in script.iter().enumerate() {
+                runtime.tick(Controls { steering: c, ..Default::default() }).unwrap();
+                let v = &runtime.state.car.owner.vehicle;
+                let s = steering(v);
+                let lock = word(v, 0xe54);
+                let (l, r) = (yaw(v, 2), yaw(v, 3));
+                let centre = -s * lock;
+                if k % 5 == 0 {
+                    println!("{input:?} t={:.3} command={c} e30={:.4} s={s:.4} angle={centre:.4} fl={l:.4} fr={r:.4}", k as f32 * DELTA, word(v, 0xe30));
+                }
+                assert!(centre >= l.min(r) - 1e-4 && centre <= l.max(r) + 1e-4, "{input:?} tick {k}: {centre} not between {l} and {r}");
+                if input == assists::Input::Wheel {
+                    assert!((s + word(v, 0xe30)).abs() < 2e-3, "tick {k}: s {s} e30 {}", word(v, 0xe30));
+                }
+                largest_step = largest_step.max((s - last).abs());
+                last = s;
+            }
+            if input == assists::Input::Keyboard {
+                assert!(largest_step < 0.2, "largest step {largest_step}");
+                assert!(last.abs() < 0.01, "after the release {last}");
+            }
+            println!("{input:?} largest step per tick {largest_step}");
+        }
     }
 }

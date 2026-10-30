@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F650](log/F0650.md) | 2026-10-30 | Cockpit: the wheel follows the front wheels' applied steering (row 94) |
 | [F649](log/F0649.md) | 2026-10-30 | Shibuya start swerve: the start racing line before the start line |
 | [F648](log/F0648.md) | 2026-10-30 | Collision and damage loops no longer hold after a wreck, the race end or a pause (backlog row 95) |
 | [F647](log/F0647.md) | 2026-10-30 | Cockpit: pedals and the general interior clip animator |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F593](log/F0593.md) | 2026-10-27 | Playable b90f145101b3 with F581-F592, portable copy and APKs 3c7a3516e27a |
 | [F592](log/F0592.md) | 2026-10-27 | Skid marks stream only changed strips |
 | [F591](log/F0591.md) | 2026-10-27 | Single static parts gather in coarse cells |
-| [F590](log/F0590.md) | 2026-10-27 | Race HUD: no countdown box at race starts |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

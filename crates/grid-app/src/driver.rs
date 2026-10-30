@@ -313,9 +313,9 @@ fn attach(
     }
 }
 
-/// Poses the driver for the human steering command −(vehicle +0xE30), the
-/// wheel's own input (docs/COCKPIT.md "Steering wheel"), reaching for this
-/// frame's interior dummies.
+/// Poses the driver for the wheel's s (the original: −(vehicle +0xE30); the
+/// port: `cockpit::steering`, docs/COCKPIT.md "Steering wheel"), reaching
+/// for this frame's interior dummies.
 fn pose(
     driving: Option<Res<crate::Driving>>,
     cockpit: Option<Res<crate::cockpit::Cockpit>>,
@@ -329,7 +329,7 @@ fn pose(
         return;
     };
     let vehicle = &driving.runtime.state.car.owner.vehicle;
-    let s = -vehicle.get(0xe30 / 4).copied().map_or(0., f32::from_bits);
+    let s = crate::cockpit::steering(vehicle);
     let world = driver.pose(s, &interior.0);
     for (DriverJoint(j), mut transform) in &mut joints {
         *transform = Transform::from_matrix(world[*j]);
