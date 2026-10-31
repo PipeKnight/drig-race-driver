@@ -815,7 +815,7 @@ fn load_package(
     };
     if !track {
         for shader in material::read_constants(&tree)? {
-            if let Some(controls) = car_reflection_overlay::Controls::from_constants(&shader.values) {
+            if let Some(controls) = car_reflection_overlay::Controls::from_constants(shader.group, &shader.values) {
                 car.reflections
                     .insert(String::from_utf8(shader.shader.to_vec())?, controls);
             }
@@ -3852,6 +3852,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if !graphics.enhanced() { return Err("body occlusion pilot requires enhanced graphics".into()); }
         body_occlusion::prepare(&car, &field)?
     } else { body_occlusion::Prepared::default() };
+    let reflection_masks = if graphics.car_reflections != car_reflections::Level::Off {
+        car_reflection_overlay::Masks::prepare(&car, &field)
+    } else {
+        car_reflection_overlay::Masks::default()
+    };
     let mut orbit = if track {
         Orbit {
             yaw: -0.4,
@@ -4622,6 +4627,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     let exit = app
         .insert_resource(body_occlusion)
+        .insert_resource(reflection_masks)
         .insert_resource(field)
         .insert_resource(graphics)
         .insert_resource(car)
@@ -4681,6 +4687,7 @@ fn graphics_texture_state(images: Res<Assets<Image>>, mut emitted: Local<bool>) 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PaintMaskResources<'w> {
     occlusion: ResMut<'w, body_occlusion::Prepared>,
+    reflection: ResMut<'w, car_reflection_overlay::Masks>,
     #[cfg(feature = "paint-specular")]
     specular: ResMut<'w, body_specular::Prepared>,
 }
@@ -4718,6 +4725,7 @@ fn setup(
     let mut source_handles = std::collections::HashMap::new();
     let mut source_coverage_parts = 0usize;
     let body_occlusion_handles = body_occlusion::upload(&mut paint_masks.occlusion, &mut images, graphics.sampler(false));
+    let reflection_masks = paint_masks.reflection.upload(&mut images, graphics.sampler(false));
     #[cfg(feature = "paint-specular")]
     let body_specular_handles = body_specular::upload(&mut paint_masks.specular, &mut images, graphics.sampler(false));
     let mut occluded_liveries = BTreeMap::new();
@@ -5266,17 +5274,25 @@ fn setup(
         }
     }
     // The reflecting car materials' saved controls (docs/CAR_REFLECTIONS.md).
-    // Opponents' livery copies keep their part's controls.
+    // Opponents' livery copies keep their part's controls and take their own
+    // car's paint map; a shared material takes the first car of its model's.
+    let first_of_model = |key: &str| {
+        part_model(key)
+            .and_then(|m| field.car_model.iter().position(|&c| c == m))
+            .unwrap_or(0)
+    };
     let reflective = material_handles
         .iter()
-        .chain(livery_materials.iter().map(|((_, key), handle)| (key, handle)))
-        .chain(occluded_liveries.iter().map(|((_, key), handle)| (key, handle)))
-        .filter_map(|(key, handle)| {
+        .map(|(key, handle)| (first_of_model(key), key, handle))
+        .chain(livery_materials.iter().map(|((k, key), handle)| (*k, key, handle)))
+        .chain(occluded_liveries.iter().map(|((k, key), handle)| (*k, key, handle)))
+        .filter_map(|(k, key, handle)| {
             let controls = *car.reflections.get(key)?;
             let glass = materials
                 .get(handle)
                 .is_some_and(|m| matches!(m.alpha_mode, AlphaMode::Blend));
-            Some((handle.id(), (controls, glass)))
+            let mask = controls.paint.and_then(|_| reflection_masks.get(&k).cloned());
+            Some((handle.id(), car_reflection_overlay::Response { controls, glass, mask }))
         })
         .collect();
     commands.insert_resource(car_reflection_overlay::Reflective(reflective));

@@ -206,7 +206,7 @@ fn select(
                     Visibility::Inherited
                 });
                 let want = if colour { &caster } else { &shadow_only };
-                if *layers != *want {
+                if layers.clone().without(crate::car_reflections::LAYER) != *want {
                     *layers = want.clone();
                 }
             }

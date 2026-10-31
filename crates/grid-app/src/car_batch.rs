@@ -223,11 +223,11 @@ type Candidate = (
     Option<&'static crate::track_surface::SourcePart>,
     Option<&'static LodPart>,
     (
-        Has<RenderLayers>,
+        Option<&'static RenderLayers>,
         Has<NotShadowCaster>,
         Has<VisibilityRange>,
         Has<ChildOf>,
-        Has<Children>,
+        Option<&'static Children>,
         Has<crate::source_trees::Facing>,
         Has<crate::sidewall_filter::Sidewall>,
         Has<crate::cockpit::InteriorPart>,
@@ -266,6 +266,7 @@ fn refresh(
     mut commands: Commands,
     mut state: ResMut<CarBatches>,
     added: Query<Candidate, NewPart>,
+    overlays: Query<(), With<crate::car_reflection_overlay::OverlayOf>>,
     parts: Query<Placement, Without<Batch>>,
     mut batches: Query<(&mut Transform, &mut Visibility, &Mesh3d, &mut Aabb), With<Batch>>,
     mut bodies: Query<Body, (Without<Batch>, Without<Batchable>)>,
@@ -292,6 +293,7 @@ fn refresh(
     if register(
         &mut commands,
         &added,
+        &overlays,
         &meshes,
         &materials,
         &mut state.groups,
@@ -335,7 +337,7 @@ fn refresh(
         let ours = layers.is_some_and(|l| *l == hidden);
         member.placed = Some(group.slot) != loose_slot
             && *visibility != Visibility::Hidden
-            && (layers.is_none() || ours)
+            && (crate::car_reflections::default_layers(layers) || ours)
             && (!shadowless || ours || group.shadow_body)
             && !ranged
             && material.0 == group.material
@@ -533,6 +535,7 @@ fn refresh(
 fn register(
     commands: &mut Commands,
     added: &Query<Candidate, NewPart>,
+    overlays: &Query<(), With<crate::car_reflection_overlay::OverlayOf>>,
     meshes: &Assets<Mesh>,
     materials: &Assets<StandardMaterial>,
     groups: &mut Vec<Group>,
@@ -552,7 +555,10 @@ fn register(
             (_, Some(m)) => (0, m.rest, m.wheel),
             _ => continue,
         };
-        let (layers, shadowless, ranged, child, parent, facing, sidewall, interior) = special;
+        let (layers, shadowless, ranged, child, children, facing, sidewall, interior) = special;
+        // The reflection layer and overlays do not set a part apart.
+        let layers = !crate::car_reflections::default_layers(layers);
+        let parent = children.is_some_and(|c| c.iter().any(|e| !overlays.contains(e)));
         // A car with a shadow body casts no shadow from its parts.
         let shadow_body = opponent.is_some() && shadow_cars.contains(&car);
         if shadow_body && !shadowless {

@@ -4,9 +4,11 @@
 // colour = env, alpha = weight over the already drawn part.
 #import bevy_pbr::{
     forward_io::VertexOutput,
-    mesh_view_bindings::view,
+    mesh_view_bindings::{view, lights},
+    mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT,
     pbr_types::pbr_input_new,
     pbr_functions::main_pass_post_lighting_processing,
+    shadows::fetch_directional_shadow,
 }
 
 // EnvironmentColour (rgb), FresnelPower.
@@ -18,6 +20,28 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var cube_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var base: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var base_sampler: sampler;
+// The car's packed paint map (main_m1, linear); white when absent.
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var mask: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var mask_sampler: sampler;
+// The paint program's gates: 1 when they apply, OcclusionMapScale, and the
+// SpecularValues z and w floors added to the occlusion and the shadow.
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var<uniform> paint: vec4<f32>;
+
+// The sun's shadow at the fragment, 1 when lit or when no sun casts.
+fn sun_shadow(in: VertexOutput, n: vec3<f32>) -> f32 {
+    let view_z = dot(vec4(
+        view.view_from_world[0].z,
+        view.view_from_world[1].z,
+        view.view_from_world[2].z,
+        view.view_from_world[3].z,
+    ), in.world_position);
+    for (var i = 0u; i < lights.n_directional_lights; i += 1u) {
+        if (lights.directional_lights[i].flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+            return fetch_directional_shadow(i, in.world_position, n, view_z, in.position.xy);
+        }
+    }
+    return 1.0;
+}
 
 fn hash3(p: vec2<f32>) -> vec3<f32> {
     let q = vec3(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)), dot(p, vec2(419.2, 371.9)));
@@ -55,7 +79,19 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
     }
     let r = reflect(-v, n);
     // Bevy's environment sampling flips Z (car_reflections::direction).
-    let env = textureSampleLevel(cube, cube_sampler, vec3(r.xy, -r.z), 0.0).rgb * environment.rgb;
+    var env = textureSampleLevel(cube, cube_sampler, vec3(r.xy, -r.z), 0.0).rgb * environment.rgb;
+    // The paint program: the packed map's alpha gates the weight, its green
+    // occludes the environment, and the sun's shadow darkens it.
+    if paint.x > 0.0 {
+#ifdef VERTEX_UVS_A
+        let m1 = textureSample(mask, mask_sampler, in.uv);
+#else
+        let m1 = vec4(1.0);
+#endif
+        weight *= saturate(2.0 * m1.a);
+        env *= saturate(1.0 + paint.y * (m1.g - 1.0) + paint.z);
+        env *= saturate(sun_shadow(in, n) + paint.w);
+    }
     var pbr = pbr_input_new();
     pbr.frag_coord = in.position;
     pbr.world_position = in.world_position;

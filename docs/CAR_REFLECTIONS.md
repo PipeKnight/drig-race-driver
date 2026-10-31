@@ -150,12 +150,14 @@ Common build. Off unless `--car-reflections original|high|ultra` or `GRID_CAR_RE
   - Placement: 0.5 m above the player's car origin, as in 0x5FBC10. In a replay, the shown car.
   - Range: near 0.1 m, far 1000 m (the far map).
   - Size by level: 256 (original), 512 (high), 1024 (ultra).
-- **Copy:** after each frame, the faces are copied into one cube texture. The main view samples it the next frame.
+- **Copy:** after each frame, each drawn face's view texture is copied into one cube texture; the faces have no output pass of their own. The main view samples the cube the next frame.
 - **Layer 27:** the cameras draw only render layer 27.
   - Every mesh on the default layer is also put on layer 27, except the player car's parts and batches, and the overlays.
   - A mesh that leaves the default layer leaves layer 27 too: a batched part, an opponent's hidden detail level.
+  - Systems that read a mesh's layers treat "default plus 27" as the default layer (`car_reflections::default_layers`): car batching (`car_batch`) and ornament levels. Overlay children do not count as a part's children for batching. A mesh whose layers are removed is rechecked the same frame. Until F676 the probe's layers and overlays stopped every car from batching: with reflections on, opponents were drawn part by part, without their shadow body's shadow, and the measured cost included that.
 - **Lighting:** a copy of the brightest sun, without shadow maps, lights layer 27. The main sun is not on that layer, so the probe has no shadow cascades: Bevy gives a view the cascades of every shadowing sun its layers see. Point and spot lights stay out of the probe.
 - **Detail:** the probe draws the main camera's choice of track and car levels; finer levels for ultra are not separate yet.
+- **Faces per frame:** all six, as the original. `GRID_CAR_REFLECTIONS_FACES=N` (1–5) redraws only N faces per frame in turn, the others keep their last frame; an option for the owner to weigh, not the default.
 - **Dump:** `GRID_CAR_REFLECTIONS_DUMP=N` writes the six faces as one PNG after N copies, to `<data dir>/graphics/`, for checking orientation and contents.
 - **Pass timing:** `gpu_passes` sums every camera's pass of one name (it read only the newest measurement before), so the probe's cost shows in the `gpu_pass` lines.
 
@@ -189,10 +191,18 @@ Survey of all 44 `*_highLOD.pssg` files (private `local/reflections/constants.js
 - **What it follows:** the part's mesh (deformation recomputes the normals, so dents bend the reflection), its layers and its visibility (a smashed pane is hidden).
 - **Opponents:** their livery copies carry their part's controls.
 
+**Paint gates** [O, `carpaint_metallic` pixel program, `car-paint-normal-scratches01` private disassembly]. With m1 = the car's packed `main_m1` map (s4, `TDustMap`) and shadow = the screen shadow mask's red (s5):
+- `weight ×= sat(2·m1.a)`: the map's alpha masks the reflection (trim, gaps and badges reflect less).
+- `env ×= sat(1 + OcclusionMapScale·(m1.g − 1) + SpecularValues.z)`: the green is the ambient occlusion that also darkens the lighting.
+- `env ×= sat(shadow + SpecularValues.w)`: where the sun is shadowed, the paint mixes toward a darker environment.
+- `weight ×= (1 − 2·m1.r·dirt)·(1 − scratch.a·vertex.g)·sat(1.1 − vertex.r)`: dust, scratches and the vertex damage masks. A clean car has 1 for all three.
+- No other gate. An earlier note of a fade on downward-facing surfaces was a misreading: the only `sunDirection` terms weigh the lighting and the specular, not the reflection.
+
+The port (F-entry of this change) applies the first three to `carpaint_metallic` parts: each car's own `main_m1` (an opponent its livery's), uploaded linear; the main sun's Bevy shadow at the fragment; `OcclusionMapScale` as saved (1 when absent, the loader's fallback). [I] `SpecularValues.z` and `.w` are taken as 0: the only code seen setting them is the debug material editor (0x9E7360), which copies two fields of its own state; their production value is not traced. Dust, scratches and the damage vertex masks are left out (the port has no dirt yet).
+
 **AUTHORED:**
 - Glass weighs the reflection by the pane's alpha.
 - A cracked pane (damage_parts' crack-map copy): its facets turn by up to ±0.17 in a 48×48 grid of the pane's texture, and it reflects 60% less where the crack map is opaque.
-- The paint program's other gates are not applied yet: the packed-map environment mask, shadow, dust, scratch and vertex masks, and the hemisphere term. So reflections are likely stronger than the original's on shadowed and masked areas.
 
 ### 4.3 Object selection and cost (31 October 2026)
 
@@ -226,9 +236,41 @@ Survey of all 44 `*_highLOD.pssg` files (private `local/reflections/constants.js
 - `ClusterConfig::None` on the faces fails Bevy's GPU clustering (an invalid dummy texture, validation errors every frame), so the faces use `ClusterConfig::Single`.
 - Even with only Donington's large objects drawn, each face costs about 1.5 ms of render-schedule CPU.
 
+**Profile of the per-view cost** (31 October 2026; `--features profile`, baseline 1080p, original level against off, 3600 ticks, no GPU timestamps; private `local/reflections/runs/prof2-*`). Exclusive CPU per frame, summed over the six faces:
+
+| Where | ms | What it is |
+|---|---|---|
+| Command buffer finish (`RenderContextState::apply`) | 3.0 | Bevy gives every render-graph system its own wgpu command encoder and finishes it per view; wgpu records and validates there. Eight systems per face: main opaque 0.73, main transparent 0.69, bin unpacking 0.41, early prepass indirect parameters 0.27, upscaling 0.26, main indirect parameters 0.25, early mesh preprocessing 0.23, clearing indirect metadata 0.18. |
+| `queue_submit` | 1.7 | Submitting those command buffers (about 8 more per face). |
+| Visibility (`check_visibility`) | 0.7 | Every entity tested against every view; runs in the main schedule. |
+| Preprocessing setup | 0.8 | Bind groups, binned instance buffers and work items per view. |
+| Pass recording | 0.5 | Opaque, transparent and upscaling draws. |
+| `copy_faces` | 0.13 | |
+
+- The cost is per view, not per object: original, which draws only Donington's large objects, pays most of it.
+- GPU pass timestamps are not the cause: without them, original still adds 9.4 ms to the render schedule (two repeats, `cost4-*`).
+- Three of the per-view systems do global work: clearing the indirect metadata and building the indirect parameters walk every view's batches, once per view. Bevy needs that order (each view clears, preprocesses, builds and draws in turn), so it cannot be dropped from outside Bevy.
+- The transparent pass cannot be emptied either: the sky dome is a blended material.
+- **Cut:** the faces skip their output pass (`CameraOutputMode::Skip`), and `copy_faces` copies each view's own texture into the cube. That removes the upscaling system and its command buffer for every face.
+
+**After the cut** (normal release build, baseline 1080p, 3600 ticks, no GPU timestamps; private `ab-*` and `cost5-*`). Other sessions were building, so runs with the main schedule above 4.1 ms (about twice its quiet value) are left out as loaded:
+
+| Build, level | Render schedule CPU, quiet runs |
+|---|---|
+| off | 4.4–5.4 ms (n = 6) |
+| original, before the cut | 13.2–14.9 ms (n = 4, interleaved with the next row) |
+| original, after the cut | 8.0–9.5 ms (n = 4) |
+| high, after | 8.7–9.5 ms (n = 2) |
+| ultra, after | 8.5 ms (n = 1) |
+| original, 3 / 2 / 1 faces per frame | 7.4 / 6.9 / 5.5 ms (n = 1 each) |
+
+- Six faces now add about 3.5–4.5 ms instead of about 9 ms (≈0.65 ms per face). The upscaling share in the profile (≈0.4 ms with its submits) does not explain the whole drop; [?] the output pass into an image target also costs elsewhere (bind groups and target views per frame) where the spans do not reach.
+- Loaded runs of both builds scatter up to 19–21 ms, so single numbers above are not comparable across batches.
+- Fewer faces per frame saves about 0.7 ms per face left out. Not the default (section 1.3: the original redraws all six).
+
 **Open items:**
-- That fixed per-view cost in Bevy needs a profile (`span_profile`) before any default.
-- Drawing fewer faces per frame would cut it, as the original's `faces` setting allows (round robin, 0x5BCA80). That trades reflection update rate, which is the owner's decision.
+- The rest of the per-view cost is Bevy's: a command buffer per render-graph system per view, and the indirect-parameter systems that redo every view's work once per view. Cutting it needs a Bevy change (one encoder per view, or building indirect parameters once).
+- Fewer faces per frame is the option `GRID_CAR_REFLECTIONS_FACES` (section 4.1); whether to use it is the owner's decision.
 - The phone has not been measured.
 
 **Look.** Private `local/reflections/runs/s2-*`, 1080p enhanced, Lacetti against the Donington pit wall:

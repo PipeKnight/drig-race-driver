@@ -16,18 +16,23 @@
 //! draws the main camera's choice of track and car levels; point and spot
 //! lights stay out of the probe.
 use bevy::{
-    camera::{Exposure, Hdr, RenderTarget, primitives::Aabb, visibility::RenderLayers},
+    camera::{
+        CameraMainTextureUsages, CameraOutputMode, Exposure, Hdr, RenderTarget, primitives::Aabb,
+        visibility::RenderLayers,
+    },
     core_pipeline::tonemapping::Tonemapping,
     light::EnvironmentMapLight,
     prelude::*,
     render::{
         Render, RenderApp, RenderSystems,
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         gpu_readback::{Readback, ReadbackComplete},
         render_asset::RenderAssets,
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         texture::GpuImage,
+        view::{ExtractedView, ViewTarget},
     },
 };
 use std::sync::{
@@ -37,6 +42,13 @@ use std::sync::{
 
 /// The reflection cameras' layer.
 pub const LAYER: usize = 27;
+/// Whether the main views draw a mesh like one on the default layer: no
+/// layers, the default layer, or the default layer and [`LAYER`]. Systems that
+/// read a mesh's layers (batching, ornament levels) treat these alike.
+pub fn default_layers(layers: Option<&RenderLayers>) -> bool {
+    layers.is_none_or(|l| l.clone().without(LAYER) == RenderLayers::layer(0))
+}
+
 /// Height of the cube's centre above the focused car's origin (0x5FBC10).
 const CENTRE_HEIGHT: f32 = 0.5;
 /// Far plane of the far map (0x602400: 0.1, 1000, cull 600).
@@ -92,7 +104,7 @@ impl Level {
 
 /// One face camera; the face index in Bevy's cube order (+X, −X, +Y, −Y,
 /// +Z, −Z).
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, ExtractComponent)]
 pub struct FaceCamera(pub usize);
 
 /// The sun's copy that lights the probe, without shadow maps.
@@ -122,6 +134,15 @@ struct Selection {
     chosen_at: Option<Vec3>,
 }
 const RESELECT: f32 = 2.;
+
+/// Faces redrawn per frame, in turn (`GRID_CAR_REFLECTIONS_FACES`, 1–6). The
+/// original redraws all six every frame (0x5BCA80); fewer is an option to
+/// weigh against the cost, not the default.
+#[derive(Resource)]
+struct Rotation {
+    per_frame: usize,
+    frame: usize,
+}
 /// `route_overrides.xml` defaults when the route sets none (0x64C070), and
 /// the clamp of `refmap_dist` (0x62E680).
 const REFMAP_OBJ_SIZE: f32 = 0.2;
@@ -170,6 +191,11 @@ pub fn install(
         return;
     }
     let size = level.size();
+    let per_frame = std::env::var("GRID_CAR_REFLECTIONS_FACES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6usize)
+        .clamp(1, 6);
     let (refmap_size, refmap_dist) = route_refmap(root, route);
     let (min_size, far) = match level {
         Level::Original => (refmap_size, refmap_dist),
@@ -214,7 +240,14 @@ pub fn install(
         centre: None,
         chosen_at: None,
     })
-    .add_plugins(ExtractResourcePlugin::<Cube>::default())
+    .insert_resource(Rotation {
+        per_frame,
+        frame: 0,
+    })
+    .add_plugins((
+        ExtractResourcePlugin::<Cube>::default(),
+        ExtractComponentPlugin::<FaceCamera>::default(),
+    ))
     .add_systems(Update, spawn)
     .add_systems(
         PostUpdate,
@@ -242,7 +275,7 @@ pub fn install(
         render.add_systems(Render, copy_faces.in_set(RenderSystems::Cleanup));
     }
     println!(
-        "car_reflections level={} size={size} faces=6 far={far} min_object_size={min_size} layer={LAYER} centre=focused-car+{CENTRE_HEIGHT}",
+        "car_reflections level={} size={size} faces=6 per_frame={per_frame} far={far} min_object_size={min_size} layer={LAYER} centre=focused-car+{CENTRE_HEIGHT}",
         level.name()
     );
 }
@@ -296,8 +329,12 @@ fn spawn(
             Camera {
                 order: -20 + face as isize,
                 clear_color: ClearColorConfig::Custom(Color::BLACK),
+                // copy_faces takes the view's own texture: no upscaling
+                // pass (a command buffer per face) into the target.
+                output_mode: CameraOutputMode::Skip,
                 ..default()
             },
+            CameraMainTextureUsages::default().with(TextureUsages::COPY_SRC),
             RenderTarget::Image(target.clone().into()),
             Projection::Perspective(PerspectiveProjection {
                 fov: std::f32::consts::FRAC_PI_2,
@@ -338,6 +375,7 @@ fn spawn(
 fn assign_layers(
     mut commands: Commands,
     mut selection: ResMut<Selection>,
+    mut removed: RemovedComponents<RenderLayers>,
     meshes: Query<
         (
             Entity,
@@ -363,8 +401,14 @@ fn assign_layers(
     if all {
         selection.chosen_at = Some(centre);
     }
+    // A mesh whose layers were removed is back on the default layer.
+    let reset: bevy::platform::collections::HashSet<Entity> = removed.read().collect();
     for (entity, mesh, layers, transform, aabb, own, batch) in &meshes {
-        if !all && !mesh.is_added() && !layers.as_ref().is_some_and(Ref::is_changed) {
+        if !all
+            && !mesh.is_added()
+            && !layers.as_ref().is_some_and(Ref::is_changed)
+            && !reset.contains(&entity)
+        {
             continue;
         }
         let own = own || batch.is_some_and(|b| b.car == 0);
@@ -382,7 +426,7 @@ fn assign_layers(
         } else {
             current.clone().without(LAYER)
         };
-        if layers.is_none() || wanted != current {
+        if wanted != current {
             commands.entity(entity).insert(wanted);
         }
     }
@@ -403,6 +447,11 @@ fn drop_cascades(
     }
 }
 
+/// Whether a face is redrawn this frame: `per_frame` faces in turn.
+fn drawn(face: usize, frame: usize, per_frame: usize) -> bool {
+    (face + 6 - frame * per_frame % 6) % 6 < per_frame
+}
+
 /// Centre the faces on the focused car and keep the probe's sun, exposure,
 /// sky lighting and fog those of the scene.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -410,7 +459,7 @@ fn follow(
     mut commands: Commands,
     driving: Option<Res<crate::Driving>>,
     replay: Option<Res<crate::replay::Replay>>,
-    mut faces: Query<(Entity, &FaceCamera, &mut Transform, &mut Exposure)>,
+    mut faces: Query<(Entity, &FaceCamera, &mut Camera, &mut Transform, &mut Exposure)>,
     viewer: Query<
         (
             Option<Ref<Exposure>>,
@@ -422,6 +471,7 @@ fn follow(
     suns: Query<(&DirectionalLight, &Transform), (Without<ProbeSun>, Without<FaceCamera>)>,
     mut probe_sun: Query<(&mut DirectionalLight, &mut Transform), (With<ProbeSun>, Without<FaceCamera>)>,
     mut selection: ResMut<Selection>,
+    mut rotation: ResMut<Rotation>,
 ) {
     // A replay presents snapshot poses while the live runtime is paused.
     let pose = replay
@@ -440,7 +490,13 @@ fn follow(
         selection.centre = centre;
     }
     let view = viewer.single().ok();
-    for (entity, face, mut transform, mut exposure) in &mut faces {
+    let frame = rotation.frame;
+    rotation.frame += 1;
+    for (entity, face, mut camera, mut transform, mut exposure) in &mut faces {
+        let drawn = drawn(face.0, frame, rotation.per_frame);
+        if camera.is_active != drawn {
+            camera.is_active = drawn;
+        }
         if let Some(centre) = centre {
             *transform = face_transform(face.0, centre);
         }
@@ -480,10 +536,13 @@ fn follow(
     }
 }
 
-/// The frame's faces into the cube, after every camera has drawn.
+/// The frame's drawn faces into the cube, after every camera has drawn: each
+/// face view's own texture (a face not drawn this frame keeps its last).
 fn copy_faces(
     cube: Option<Res<Cube>>,
     images: Res<RenderAssets<GpuImage>>,
+    // An inactive camera keeps its last ViewTarget but loses its view.
+    views: Query<(&FaceCamera, &ViewTarget), With<ExtractedView>>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
@@ -493,22 +552,17 @@ fn copy_faces(
     let Some(target) = images.get(&cube.image) else {
         return;
     };
-    let Some(faces) = cube
-        .faces
-        .iter()
-        .map(|h| images.get(h))
-        .collect::<Option<Vec<_>>>()
-    else {
+    if views.is_empty() {
         return;
-    };
+    }
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
         label: Some("car reflection faces"),
     });
-    for (face, source) in faces.iter().enumerate() {
+    for (face, view) in &views {
         let mut destination = target.texture.as_image_copy();
-        destination.origin.z = face as u32;
+        destination.origin.z = face.0 as u32;
         encoder.copy_texture_to_texture(
-            source.texture.as_image_copy(),
+            view.main_texture().as_image_copy(),
             destination,
             Extent3d {
                 width: cube.size,
@@ -594,6 +648,31 @@ mod tests {
         assert_eq!(Level::parse("ultra").map(Level::size), Some(1024));
         assert_eq!(Level::parse("off"), Some(Level::Off));
         assert_eq!(Level::parse("2048"), None);
+    }
+
+    #[test]
+    fn the_reflection_layer_keeps_a_mesh_on_the_default_layer() {
+        assert!(default_layers(None));
+        assert!(default_layers(Some(&RenderLayers::layer(0))));
+        assert!(default_layers(Some(&RenderLayers::from_layers(&[0, LAYER]))));
+        assert!(!default_layers(Some(&RenderLayers::layer(LAYER))));
+        assert!(!default_layers(Some(&crate::car_batch::hidden_layer())));
+        assert!(!default_layers(Some(&RenderLayers::from_layers(&[0, 3]))));
+    }
+
+    #[test]
+    fn rotation_draws_every_face_in_turn() {
+        for per_frame in 1..=6 {
+            let mut count = [0; 6];
+            for frame in 0..6 {
+                let faces = (0..6).filter(|&f| drawn(f, frame, per_frame));
+                for face in faces {
+                    count[face] += 1;
+                }
+            }
+            assert_eq!(count, [per_frame; 6], "per_frame={per_frame}");
+        }
+        assert!((0..6).all(|f| drawn(f, 7, 6)));
     }
 
     #[test]
