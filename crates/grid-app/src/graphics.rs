@@ -122,6 +122,8 @@ pub struct Settings {
     pub grass_soft_alpha: bool,
     /// Authored enhanced directional-shadow reach; defaults to the verified 250 m.
     pub shadow_distance_metres: f32,
+    /// `[video] shadows` with the original's layout (shadow_layout.rs).
+    pub shadow_quality: super::shadow_layout::Quality,
     /// Optional authored coverage-preserving leaf alpha mips; source remains default.
     pub foliage_coverage: bool,
     pub clearcoat_prepass_fix: bool,
@@ -200,6 +202,7 @@ impl Default for Settings {
             grass_receive_shadows: true,
             grass_soft_alpha: true,
             shadow_distance_metres: 250.,
+            shadow_quality: super::shadow_layout::Quality::High,
             foliage_coverage: false,
             clearcoat_prepass_fix: true,
             tread_normals: true,
@@ -372,6 +375,16 @@ impl Settings {
         }
     }
 
+    /// The original layout's world reach: 252 m (cascade 2's 250 m plus its
+    /// 2 m extension); the enhanced profile's shadow distance plus 2 m.
+    pub fn shadow_layout_far(&self) -> f32 {
+        if self.enhanced() {
+            self.shadow_distance_metres + 2.
+        } else {
+            super::shadow_layout::WORLD_FAR[1]
+        }
+    }
+
     pub fn cascades(&self) -> CascadeShadowConfig {
         if self.enhanced() {
             CascadeShadowConfigBuilder {
@@ -438,11 +451,15 @@ pub fn configure(
         println!("source_haze enabled=true distance={} density_cap={} colour={:?} brightness={} height_bounds=[{},{}] mapping=source-distance-shape-authored-uniforms-linear30 height_applied=false colour_space=assumed-linear source_sky=unchanged",
             fog.distance, fog.density_cap, fog.colour, fog.brightness, fog.base_height, fog.top_height);
     }
-    println!("graphics_shadow_range metres={} cascades=4 first=18 map_size=4096 mapping=authored", settings.shadow_distance_metres);
+    if !super::shadow_layout::enabled() {
+        println!("graphics_shadow_range metres={} cascades=4 first=18 map_size=4096 mapping=authored", settings.shadow_distance_metres);
+    }
     println!("graphics_exposure ev100={} mode=fixed tonemapping={tone_map:?}", settings.exposure_ev100);
     println!("graphics_tone_map value={tone_map:?} override={} scope=main-view-authored-display-diagnostic exposure_grade_materials_probe_hdr=unchanged", settings.tone_map_override.is_some());
     println!("graphics_post_saturation value={} override={} scope=authored-camera-grade temperature_tint=unchanged", settings.post_saturation_override.unwrap_or(if settings.track_grade { 1.0 } else { 0.9 }), settings.post_saturation_override.is_some());
-    commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
+    if !super::shadow_layout::enabled() {
+        commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
+    }
     commands.insert_resource(GlobalAmbientLight::NONE);
     commands.spawn(Atmosphere::earth(
         media.add(ScatteringMedium::earth(256, 256)),

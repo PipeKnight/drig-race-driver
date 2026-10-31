@@ -340,6 +340,8 @@ pub struct Settings {
     /// screen saved the refresh rate.
     pub refresh_hz_version: Option<u32>,
     pub frame_latency: Option<std::num::NonZero<u32>>,
+    /// `[video] shadows`: off, low, medium, high or ultra (shadow_layout.rs).
+    pub shadows: Option<crate::shadow_layout::Quality>,
     /// `[front_end] show`: the Race Options front end before the race
     /// (docs/DRIVER_AIDS.md); default on.
     pub front_end: Option<bool>,
@@ -619,6 +621,9 @@ impl Settings {
                 }
                 ("video", "frame_latency") => {
                     self.frame_latency = Some(crate::render_scale::frame_latency(value).map_err(at)?)
+                }
+                ("video", "shadows") => {
+                    self.shadows = Some(crate::shadow_layout::Quality::parse(value).map_err(at)?)
                 }
                 ("video", "render_height") => {
                     self.render_height = Some(crate::render_scale::RenderHeight::parse(value).map_err(at)?)

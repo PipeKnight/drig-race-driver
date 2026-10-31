@@ -115,6 +115,7 @@ mod ornament_lod;
 mod osd_scene;
 mod shadow_cull;
 mod light_clusters;
+mod shadow_layout;
 mod race_hud;
 mod race_osd;
 mod render_scale;
@@ -1859,7 +1860,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut target = None;
     let mut drive = profile.drive;
     let mut audio_check = false;
-    let mut graphics = graphics::Settings::default();
+    let mut graphics = graphics::Settings {
+        shadow_quality: profile.shadows.unwrap_or_else(|| shadow_layout::Quality::default_for(mobile::enabled())),
+        ..default()
+    };
     let mut source_haze = false;
     let mut reflection_calibration = false;
     let mut geometry_pixel = None;
@@ -4493,6 +4497,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     mesh_stream::install(&mut app);
     shadow_cull::install(&mut app);
     light_clusters::install(&mut app, graphics.reflection_mode == 3);
+    if shadow_layout::enabled() && graphics.shadow_quality.map_size().is_some() {
+        shadow_layout::install(&mut app, graphics.shadow_quality);
+    }
     if let Some(script) = window_transition_script {
         window_transitions::install(&mut app, script);
     }
@@ -5331,11 +5338,16 @@ fn setup(
             DirectionalLight {
                 illuminance: graphics.sun_illuminance(),
                 color: graphics.sun_colour(),
-                shadow_maps_enabled: true,
+                shadow_maps_enabled: !shadow_layout::enabled()
+                    || graphics.shadow_quality.map_size().is_some(),
                 ..default()
             },
             graphics.sun_transform(),
-            graphics.cascades(),
+            if shadow_layout::enabled() {
+                shadow_layout::config(graphics.shadow_layout_far())
+            } else {
+                graphics.cascades()
+            },
         ))
         .id();
     if ornament_shadows {
@@ -5362,6 +5374,13 @@ fn setup(
         ))
         .id();
     graphics::configure(&mut commands, camera, &graphics, &mut scattering_media);
+    if shadow_layout::enabled() {
+        let size = graphics.shadow_quality.map_size();
+        // After `configure`, which sets the enhanced profile's own size.
+        commands.insert_resource(bevy::light::DirectionalLightShadowMap { size: size.unwrap_or(1024) });
+        println!("shadow_layout quality={:?} map_size={} maps={} world_far={}", graphics.shadow_quality,
+            size.unwrap_or(0), if size.is_some() { 3 } else { 0 }, graphics.shadow_layout_far());
+    }
     if driving.is_some() {
         commands.spawn((
             DrivingHud,

@@ -101,7 +101,10 @@ fn cull(
                 continue;
             };
             let world_from_view = camera.affine();
-            for (i, list) in lists.iter_mut().enumerate() {
+            // With the original's layout cascade 0 is the player car's map
+            // (shadow_layout.rs), not a slice of the view.
+            let first = usize::from(crate::shadow_layout::enabled());
+            for (i, list) in lists.iter_mut().enumerate().skip(first) {
                 let (Some(&far), Some(cascade)) = (config.bounds.get(i), view_cascades.get(i)) else {
                     continue;
                 };

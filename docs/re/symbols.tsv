@@ -575,6 +575,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005A2840		func	not ported	docs/TOUGE.md:66				not a function entry in the master analysis; Meaning of `+4`.** `+4` in {2, 3} selects the Haruna drift intro and results scenes (`haruna_drift_intro_reveal`, `drift_results_intro_haruna`, 0x5A2840/0x5A...
 0x005B0000		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:372				The setter's caller was not found in 0x401000–0x40C000 or 0x5B0000–0x5D0000.
 0x005B43E0	csm_set_map_size	func	not ported	docs/SUN_SHADOWS.md:8	F652	[O]		[O] Map size: `<shadows size=...>` from the hardware settings, clamped to 128..8192, 1024 when the key is missing (0x601B30 -> 0x5B43E0). The shipped options...
+0x005B4620	csm_mode1_values	func	not ported	docs/SUN_SHADOWS.md:44	F677	[O]		CSM mode-table entry 1 (cockpit interior): same ranges; cascade 1 fade 0.27, cascade 2 extension 3.0, cascade 0 extension 0.8.
+0x005B4720	csm_mode2_values	func	not ported	docs/SUN_SHADOWS.md:44	F677	[O]		CSM mode-table entry 2 values (front end [I]).
+0x005B4860	csm_mode3_values	func	not ported	docs/SUN_SHADOWS.md:44	F677	[O]		CSM mode-table entry 3 values; mode 3 skips the cascade passes.
+0x005B4990	csm_mode_entry_defaults	func	not ported	docs/SUN_SHADOWS.md:44	F677	[O]		CSM view-mode table entry (0x90 bytes) defaults: near 0.4 (+0x20), cascade-0 far 1600 (+0x1C), cascade blocks at +0x38/+0x54/+0x70 (range 250/75/250, extension 3.75/1/2, fade 0/0.2/0.7).
 0x005B4C10	entity_manager_construct	func	not ported	docs/BODY_SLEEPING.md:162	F548	[D]		5C6B90 is slot 1 of the EntityManager service (vtable CDFA28; constructor **5B4C10** names it
 0x005B4D40		func	not ported	docs/GRID_POPULATION.md:11				78/78 datasets / 706,149/706,149 output words exact in debug and release**, covering1,177paths. All245installed Donington chunks, single paths at every depth...
 0x005B51A0		func	not ported	docs/TRACK_LOD.md:291 ; docs/CAR_REFLECTIONS.md:20				The generic range setter 0x5B51A0 (near, far clip, cull far) is called with:
@@ -631,6 +635,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005D7630		func	not ported	docs/SERIES.md:500				from `session+0x241C` = QPC × 10000 (0x669700, used in 0x5D7630), and the field manager `mgr+0x1C` is
 0x005D8290		func	not ported	docs/LOADER_RESEARCH.md:23				| `0x005d8290` | Ref at `0x005d93f8` to initialization diagnostic; references to PSSG default/front-end/track/car context names | Likely initialization/setup...
 0x005D93F8		label	not ported	docs/LOADER_RESEARCH.md:23				inside 0x005D8290; | `0x005d8290` | Ref at `0x005d93f8` to initialization diagnostic; references to PSSG default/front-end/track/car context names | Likely initialization/setup...
+0x005DABC0	csm_cascade_split_setup	func	crates/grid-app/src/shadow_layout.rs grid-app::shadow_layout::config	docs/SUN_SHADOWS.md:54	F677	[O]		Per-frame cascade split (loop 0x5DB4A4): near +0xD0, far +0xD8 per cascade structure (CSM+0xE0+0x160 i); far = range + extension; cascade 2 near = cascade 1 range - fade share (59.88 m in mode 0).
 0x005E09BC		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:320		[I]		inside 0x005E08C0; [I] Other camera callers of `63A370` (`5BCDCF`, `5C8023`, `5E09BC`, `5F3F09/5F4558`,
 0x005E17C0	selected_camera_model	func	not ported	docs/CAMERA_VIEWS.md:431		[D]		`0x99C2F0` stores that byte at the model manager's `+0x1CD4`. `0x9CB0B0` applies the override only to the selected model returned by `0x5E17C0`, leaving othe...
 0x005E20C0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:116				never parsed). Record (0xF4 bytes, copied by `0x5E20C0` into material+0x130): names with
@@ -1076,6 +1081,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0072C299	lighting_xml_pack_ambient_colour	label	not ported	docs/SOURCE_SKY_LIGHTING.md	G330	[V]		Shared HDR colour normalizer receives lighting+1D0 and scale+30C; result stored packed+300.
 0x0072E170	nightlights_bind_shared_shader_inputs	func	not ported	docs/SOURCE_SKY_LIGHTING.md		[D]		Binds headlightMap from NightLights+0x94 and screenDepthMap from+0x8C for selected projected-light shader instances.
 0x0072E7D0	particle_draw_compose_shader	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:442		[D]		`0x72E7D0` binds reduced colour to sampler0 of its supplied shader and draws it.
+0x0072ECD0	csm_mask_quality_read	func	crates/grid-app/src/shadow_layout.rs grid-app::shadow_layout::filter	docs/SUN_SHADOWS.md:64	F677	[O]		Reads hardware setting maskQuality (default 2) and adds pass-config key shadowMaskQuality0..2 for the csm_wedge_shadow passes.
 0x00730540	skid_commit_dispatch	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md	G338	[D]		Cached body dispatches729E90/729FE0 by emitted count. Target bodies not cached in bounded inventory; no claim about phase side effects.
 0x00730F90		func	not ported	docs/SOURCE_SKY_LIGHTING.md:47 ; docs/TYRE_SMOKE_RESEARCH.md:1247				Whether 0x730F90's time-of-day path rewrites +0x130..+0x150 for any weather.
 0x00732970		func	not ported	docs/LE_MANS.md:209				direction, range 8–20, brightness 0.8–4, parsed by 0x732970) has no
@@ -3460,6 +3466,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D8205A		global	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:37				Attempt to reconstruct and reuse the first NTCore result by setting only the flag failed its SHA-256 equality assertion. No candidate executable was saved. N...
 0x00D85A50		global	crates/grid-world/src/impact_frame.rs:332 grid-world::impact_frame (in run)	docs/AUDIO_RESEARCH.md:539 ; docs/CAR_TO_CAR_DEFORMATION_RESEARCH.md:131 ; docs/IMPACT_FRAME.md:72		[O]		The file-backed D85A50 threshold is positive zero. Preserve the outer
 0x00DA83B0	choreographer_message_types	global	crates/grid-formats/src/ai.rs:680 grid-formats::ai::MESSAGE_TYPES	docs/SPEECH_AUDIO_RESEARCH.md:514	F611	[O]	MESSAGE_TYPES	The `message_type` names in type order (table 0xDA83B0, read by 0x401860):
+0x00DAFC38	csm_shadow_sample_pos	data	crates/grid-app/src/shadow_layout.rs grid-app::shadow_layout	docs/SUN_SHADOWS.md:65	F677	[O]		shadowSamplePos0..3: four float4 Poisson points for the world cascades' mask taps (csm_wedge_shadow_1 uses 0 and 1).
 0x00DB0201		global	not ported	docs/TRACK_LOD.md:262				Per frame, if the system flag 0xDB0201 is set:
 0x00DB29E4		global	not ported	docs/RESET_AND_RESPAWN_RESEARCH.md:96				manager+0xD8 is set; and `0.9 − clamp(0.02·|v|, 0, 0.4)` (0xCB0DE8, 0xDB29E4, 0xCB22A4)
 0x00DB29E8	DELAY	global	crates/grid-world/src/reset_lines.rs:12 grid-world::reset_lines::DELAY	docs/RESET_AND_RESPAWN_RESEARCH.md:73		[V]		0xDB29E8: seconds the car must stay still and tilted.
