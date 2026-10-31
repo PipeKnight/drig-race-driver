@@ -146,6 +146,14 @@ pub fn static_damage_ported(template: &str) -> bool {
     template.contains("close_drift_flag")
 }
 
+/// Whether an entity instance takes part in the physics of an event on
+/// `route`: [V] outside the drift formats the race setup frees every
+/// instance whose name (`id`) contains `close_drift_flag` (0x62FEB0, strstr
+/// 0xA66880; [`Route::with_drift_flags`]).
+pub fn entity_in_event(route: &Route, id: &[u8]) -> bool {
+    route.has_drift_flags() || !id.windows(16).any(|w| w == b"close_drift_flag")
+}
+
 /// The collision box of one entity shape at the entity placement.
 fn entity_box(
     template: String,
@@ -234,6 +242,9 @@ impl Props {
         // Kept after every other box, so the active boxes keep their indices.
         let mut damaged = Vec::new();
         for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
+            if !entity_in_event(route, e.id) {
+                continue;
+            }
             placement_boxes(&e, Some(index), &mut boxes)?;
             let template = String::from_utf8_lossy(e.template).into_owned();
             // The static pieces of the damage state, once per behaviour type.
@@ -314,12 +325,13 @@ impl Props {
         capacity: usize,
     ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
         let mesh = mesh.into();
-        self.contacts_known(mesh, matrix, query, bounds, capacity, None)
+        self.contacts_known(mesh, matrix, query, bounds, capacity, None, None)
     }
 
     /// [`Self::contacts`] with a [`BoxIndex`] the caller holds for these
     /// boxes; `bounds` must be `mesh.world_bounds(matrix, query.margin)`.
     /// Identical results.
+    #[allow(clippy::too_many_arguments)]
     pub fn contacts_known<'m>(
         &self,
         mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
@@ -328,6 +340,7 @@ impl Props {
         bounds: [[f32; 4]; 2],
         capacity: usize,
         known: Option<KnownBoxes<'_>>,
+        directions: Option<&mut PairDirections>,
     ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
         let mesh = mesh.into();
         if known
@@ -343,9 +356,10 @@ impl Props {
             None => (0..self.boxes.len()).collect(),
         };
         let mut contacts = Vec::new();
+        let mut next = Vec::new();
         for index in candidates {
             let b = &self.boxes[index];
-            if contacts.len() >= capacity {
+            if contacts.len() >= capacity && directions.is_none() {
                 break;
             }
             if !b.enabled
@@ -353,16 +367,35 @@ impl Props {
             {
                 continue;
             }
-            let room = (capacity - contacts.len()).min(16);
-            let generated = match &b.shape {
-                Shape::Box(shape) => {
-                    grid_world::box_contacts::contacts(mesh, matrix, shape, query, room)?
-                }
-                Shape::Round(shape) => {
-                    grid_world::round_contacts::contacts(mesh, matrix, shape, query, room)?
-                }
-            };
-            contacts.extend(generated.into_iter().map(|c| (index, c)));
+            let mut direction = directions.as_ref().map_or([0.; 4], |d| d.get(index));
+            // No room left: the pair keeps its direction (B39500 skips the
+            // query at zero capacity).
+            if contacts.len() < capacity {
+                let room = (capacity - contacts.len()).min(16);
+                let generated = match &b.shape {
+                    Shape::Box(shape) => grid_world::box_contacts::contacts_cached(
+                        mesh,
+                        matrix,
+                        shape,
+                        query,
+                        room,
+                        &mut direction,
+                    )?,
+                    Shape::Round(shape) => grid_world::round_contacts::contacts_cached(
+                        mesh,
+                        matrix,
+                        shape,
+                        query,
+                        room,
+                        &mut direction,
+                    )?,
+                };
+                contacts.extend(generated.into_iter().map(|c| (index, c)));
+            }
+            next.push((index, direction));
+        }
+        if let Some(directions) = directions {
+            directions.0 = next;
         }
         Ok(contacts)
     }
@@ -416,6 +449,22 @@ fn round_shape(
             margin: shell,
         }),
     })
+}
+
+/// The cached distance direction (world space) of one body's pair with each
+/// box its bounds overlap, by box index: the broadphase pair's +0x10 that
+/// B39500 hands AE8AD0 (`box_contacts::contacts_cached`). A box whose bounds
+/// no longer overlap the body's drops out, as its pair ends; one met again
+/// starts cold. [I] The port's bounds test stands in for the broadphase.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PairDirections(Vec<(usize, [f32; 4])>);
+
+impl PairDirections {
+    fn get(&self, index: usize) -> [f32; 4] {
+        self.0
+            .binary_search_by_key(&index, |e| e.0)
+            .map_or([0.; 4], |k| self.0[k].1)
+    }
 }
 
 /// Values a caller holds for repeated body queries of unchanged boxes: a
@@ -592,10 +641,13 @@ mod tests {
         // Before F284's stand-ins were replaced, Washington's chnfen_e_group3b
         // and group4 layouts (one ornament placement each) became a box
         // across route 0's line at (833, 7, 834). The basic-entity shapes
-        // are per placement and never stand on a racing line.
+        // are per placement and never stand on a racing line. Okutama
+        // (loading since F663; its route 0 field retired 7 cars after F653,
+        // F680) is checked on every route.
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
-        for path in crate::route::CIRCUITS {
+        let okutama: Vec<String> = (0..6).map(|i| format!("tracks/japan/okutama/route_{i}")).collect();
+        for path in crate::route::CIRCUITS.iter().copied().chain(okutama.iter().map(String::as_str)) {
             let route = Route::new(path).unwrap();
             let props = Props::read_route(root, &route).unwrap();
             assert!(props.boxes.len() <= MAX_BOXES, "{path} {}", props.boxes.len());
@@ -669,7 +721,8 @@ mod tests {
             ),
         ];
         for (route, wall, pose) in cases {
-            let route = Route::new(route).unwrap();
+            // The box indices count the close-drift flags (a drift event).
+            let route = Route::new(route).unwrap().with_drift_flags();
             let mut runtime =
                 crate::source_vehicle::Runtime::lacetti_on(root, &route, "slot_00", 200679)
                     .unwrap();

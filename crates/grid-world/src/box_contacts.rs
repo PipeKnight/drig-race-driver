@@ -10,8 +10,9 @@
 //! manifold feature), so the published records keep the packed convention:
 //! the normal pushes the mesh. AE8AD0 itself runs with the mesh as A; the two
 //! assignments differ only in signs and witness order, which AEE640 and
-//! AE2FA0 treat symmetrically. The sampled directions are rotated from the
-//! mesh frame, where the original evaluates them, into the world.
+//! AE2FA0 treat symmetrically. B7F740 expresses the box in the mesh's frame
+//! for the distance and penetration queries, so the 44 sampled directions
+//! stay in that frame, and the witnesses go back to the world.
 use crate::{
     Error,
     contact_manifold::{self, Contact, Face, Settings},
@@ -26,6 +27,30 @@ fn dot(a: V, b: V) -> f32 {
 fn sub(a: V, b: V) -> V {
     std::array::from_fn(|j| a[j] - b[j])
 }
+
+/// B7F740's frame change for a rigid pose `matrix` (unit axes in rows 0..2,
+/// origin in row 3): a world point or direction (`w` = 0) in the pose's
+/// frame, and back. The distance loop then works near the moving body, not
+/// a few kilometres from the origin.
+pub(crate) fn to_frame(matrix: &Matrix, p: V) -> V {
+    let d = if p[3] == 0. { p } else { sub(p, matrix[3]) };
+    let local = |k: usize| (d[0] * matrix[k][0] + d[1] * matrix[k][1]) + d[2] * matrix[k][2];
+    [local(0), local(1), local(2), p[3]]
+}
+pub(crate) fn from_frame(matrix: &Matrix, p: V) -> V {
+    std::array::from_fn(|j| {
+        if j == 3 {
+            p[3]
+        } else {
+            (p[0] * matrix[0][j] + p[1] * matrix[1][j]) + (p[2] * matrix[2][j] + p[3] * matrix[3][j])
+        }
+    })
+}
+/// B7F740: a cached direction shorter than 1e-3 starts along world +x.
+pub(crate) fn cold_start(direction: V) -> V {
+    if dot(direction, direction) < 1e-6 { [1., 0., 0., 0.] } else { direction }
+}
+pub(crate) const IDENTITY: Matrix = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
 
 /// A box primitive: unit axes in rows 0..2, centre in row 3, half extents
 /// along the axes and the shape margin (TEMPLATESHAPEBOX `shell`).
@@ -116,13 +141,30 @@ impl BoxShape {
 
 /// Contacts of `mesh` at `matrix` (margin `query.margin`, sampled directions
 /// in the mesh frame) against `shape`, at most `capacity` (<= 16). Empty when
-/// the shapes are farther apart than their margins.
+/// the shapes are farther apart than their margins. A pair met for the first
+/// time: see [`contacts_cached`].
 pub fn contacts<'m>(
     mesh: impl Into<Hull<'m>>,
     matrix: Matrix,
     shape: &BoxShape,
     query: &ContactSettings,
     capacity: usize,
+) -> Result<Vec<Contact>, Error> {
+    contacts_cached(mesh, matrix, shape, query, capacity, &mut [0.; 4])
+}
+
+/// [`contacts`] with the pair's cached direction (world space): B39500 hands
+/// AE8AD0 the broadphase pair's +0x10, and B7F740 starts there (zero: +x),
+/// rotated into the mesh's frame, and stores the final distance direction
+/// back in world space, hit or miss: a body sliding along a wall starts each
+/// tick from the last tick's direction. Unchanged when the query fails.
+pub fn contacts_cached<'m>(
+    mesh: impl Into<Hull<'m>>,
+    matrix: Matrix,
+    shape: &BoxShape,
+    query: &ContactSettings,
+    capacity: usize,
+    direction: &mut V,
 ) -> Result<Vec<Contact>, Error> {
     let mesh = mesh.into();
     if capacity > 16 || !shape.valid() {
@@ -131,34 +173,24 @@ pub fn contacts<'m>(
     if capacity == 0 {
         return Ok(Vec::new());
     }
-    let rotate = |d: V| -> V {
-        std::array::from_fn(|j| {
-            if j == 3 {
-                0.
-            } else {
-                (d[0] * matrix[0][j] + d[1] * matrix[1][j]) + d[2] * matrix[2][j]
-            }
-        })
-    };
-    let settings = ContactSettings {
-        margin: query.margin,
-        directions: query.directions.map(rotate),
-    };
-    let corners = shape.corners();
-    let axes = [shape.matrix[0], shape.matrix[1], shape.matrix[2]];
+    // B7F740: the box in the mesh's frame; the directions already are.
+    let corners = shape.corners().map(|c| to_frame(&matrix, c));
+    let axes = [0, 1, 2].map(|k| to_frame(&matrix, shape.matrix[k]));
     let mut context = Context::new();
-    let query = context.contact_points(
+    let local = context.contact_points(
         mesh,
-        matrix,
+        IDENTITY,
         &corners,
         shape.margin,
         Extra::Axes(axes),
-        [0.; 4],
-        &settings,
+        to_frame(&matrix, cold_start(*direction)),
+        query,
     )?;
-    let Some(witnesses) = query.witnesses else {
+    *direction = from_frame(&matrix, local.direction);
+    let Some(witnesses) = local.witnesses else {
         return Ok(Vec::new());
     };
+    let witnesses = witnesses.map(|w| from_frame(&matrix, w));
     // AE8AD0: depth is the witness distance; nothing at or below 1e-3.
     let difference = sub(witnesses[0], witnesses[1]);
     let square = dot(difference, difference);
@@ -177,7 +209,7 @@ pub fn contacts<'m>(
     let (normal, witnesses) =
         contact_manifold::orient(shape.matrix[3], matrix[3], normal, witnesses)?;
     let s = Settings {
-        margin: settings.margin,
+        margin: query.margin,
         shape_margin: shape.margin,
         normal,
         fallback_point: witnesses[1],
@@ -304,6 +336,74 @@ mod tests {
             1
         );
         assert!(contacts(&mesh, at(0., 1.03, 0.), &block, &settings(), 17).is_err());
+    }
+
+    /// Le Mans route 0, 8,689 m (BARRIER_COLLISION §5.3): a car sliding along
+    /// an 80 m, 8.5 cm armco plate 2.5 km from the origin, its core a few
+    /// millimetres from the plate. The f32 distance loop can stop there with
+    /// a direction tens of degrees off the plate's normal, along which the
+    /// shapes overlap by metres; the far face and a 4 m deep manifold
+    /// followed, in world coordinates or the mesh's frame, cold or cached.
+    /// With such results sent to the sampled penetration path (and that
+    /// path's own runs checked the same way; the two negative gaps overlap
+    /// the cores) every contact pushes the mesh straight out of the near
+    /// face, and stays shallow.
+    #[test]
+    fn a_mesh_beside_a_long_thin_plate_far_from_the_origin_is_pushed_out_of_its_near_face() {
+        let mesh = cube(1.);
+        let u = [0.864_399, 0., 0.502_806, 0.];
+        let n = [-0.502_806, 0., 0.864_399, 0.];
+        let centre = [712.8, 14.2, 2498.1, 1.];
+        let plate = BoxShape {
+            matrix: [u, [0., 1., 0., 0.], n, centre],
+            half: [39.98, 0.459, 0.0428],
+            margin: 0.01,
+        };
+        let yaw = u[2].atan2(u[0]);
+        let mut checked = 0;
+        let mut worst = (1f32, 0f32);
+        let mut failed = Vec::new();
+        for k in 0..41 {
+            let angle = yaw + (k as f32 - 20.) * 0.015;
+            let (sin, cos) = angle.sin_cos();
+            let x = [cos, 0., -sin, 0.];
+            let z = [sin, 0., cos, 0.];
+            let extent = dot(x, n).abs() + dot(z, n).abs();
+            for along in [-30., -17., -3., 9., 26.] {
+                for gap in [-0.015, -0.004, 0.0003, 0.0009, 0.0018, 0.004, 0.008] {
+                    let offset = plate.half[2] + extent + gap;
+                    let origin: V = std::array::from_fn(|j| {
+                        if j == 3 { 1. } else { centre[j] + along * u[j] + offset * n[j] + if j == 1 { 0.3 } else { 0. } }
+                    });
+                    let matrix = [x, [0., 1., 0., 0.], z, origin];
+                    // The pair's direction from the ticks before, approaching
+                    // from 5 cm in 1 cm steps (the car's lateral speed is far
+                    // lower; the plate is met at least this gradually).
+                    let mut direction = [0.; 4];
+                    for step in (1..=5).rev() {
+                        let mut earlier = matrix;
+                        for j in 0..3 {
+                            earlier[3][j] += n[j] * 0.01 * step as f32;
+                        }
+                        contacts_cached(&mesh, earlier, &plate, &settings(), 16, &mut direction).unwrap();
+                    }
+                    let cached = contacts_cached(&mesh, matrix, &plate, &settings(), 16, &mut direction).unwrap();
+                    let cold = contacts(&mesh, matrix, &plate, &settings(), 16).unwrap();
+                    for c in cached.iter().chain(&cold) {
+                        worst.0 = worst.0.min(dot(c.normal, n));
+                        worst.1 = worst.1.max(c.penetration);
+                        if dot(c.normal, n) < 0.99 || c.penetration >= 0.05 {
+                            failed.push(format!("angle {angle} along {along} gap {gap}: {c:?}"));
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        eprintln!("plate contacts {checked}, least alignment {}, deepest {}, failed {}", worst.0, worst.1, failed.len());
+        assert!(failed.is_empty(), "{}", failed[..failed.len().min(5)].join("
+"));
+        assert!(checked > 1000, "{checked}");
     }
 
     #[test]

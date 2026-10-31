@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F681](F0681.md) | 2026-10-31 | Close-drift flags take no contact outside the drift formats (row 104) |
+| [F680](F0680.md) | 2026-10-31 | Box contacts beside long barrier boxes: an inconsistent distance result, the mesh frame and the pair direction (row 99) |
 | [F679](F0679.md) | 2026-11-02 | Car reflections: the cube was black since F676 (faces not drawn); masked strength checked against the original |
 | [F678](F0678.md) | 2026-10-31 | Cockpit: dash backlight at night |
 | [F677](F0677.md) | 2026-10-31 | Sun shadows in the original's layout: three maps, the player car's map, shadow quality setting |

@@ -829,6 +829,8 @@ impl MultiRuntime {
         let mut car_normals = Vec::new();
         let mut contact_failed: Vec<Option<Error>> = vec![None; n];
         let mut provider_calls = 0;
+        // Each car's prop pair directions, updated by every collection.
+        let mut directions: Vec<_> = cars.iter().map(|c| c.pair_directions.clone()).collect();
         let mut provider = |bodies: &mut [contact_groups::Body], remaining: usize| {
             let provider_started = crate::perf::enabled().then(std::time::Instant::now);
             // A second call collects again after a wake (B184F0); the
@@ -861,36 +863,45 @@ impl MultiRuntime {
             // smaller capacity left to that car gives the same one.
             let full = crate::parallel::map(n, parallel, |i| {
                 wanted[i].then(|| {
-                    geometry[i].contacts_with_props(
+                    let mut cached = directions[i].clone();
+                    let full = geometry[i].contacts_with_props(
                         &cars[i].track,
                         &cars[i].surfaces,
                         &bodies[i..=i],
                         remaining,
-                    )
+                        Some(&mut cached),
+                    );
+                    (full, cached)
                 })
             });
             for (i, full) in full.into_iter().enumerate() {
                 if out.len() >= remaining {
                     break;
                 }
-                let Some(full) = full else {
+                let Some((full, cached)) = full else {
                     continue;
                 };
                 let room = remaining - out.len();
-                let fresh = if room == remaining
+                let (fresh, cached) = if room == remaining
                     || crate::body_geometry::BodyGeometry::reusable_with(&full, room)
                 {
-                    full
+                    (full, cached)
                 } else {
-                    geometry[i].contacts_with_props(
+                    let mut cached = directions[i].clone();
+                    let fresh = geometry[i].contacts_with_props(
                         &cars[i].track,
                         &cars[i].surfaces,
                         &bodies[i..=i],
                         room,
-                    )
+                        Some(&mut cached),
+                    );
+                    (fresh, cached)
                 };
                 let fresh = match fresh {
-                    Ok(fresh) => fresh,
+                    Ok(fresh) => {
+                        directions[i] = cached;
+                        fresh
+                    }
                     Err(error) => {
                         contact_failed[i] = Some(error);
                         continue;
@@ -1288,6 +1299,9 @@ impl MultiRuntime {
         }
         if let Some(shapes) = shapes {
             self.shapes = shapes;
+        }
+        for (car, cached) in self.cars.iter_mut().zip(directions) {
+            car.pair_directions = cached;
         }
         self.world = world;
         self.ticks += 1;
@@ -1899,7 +1913,7 @@ mod tests {
                     crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
                         .unwrap(),
                 );
-                let route = Route::new("tracks/europe/jarama/route_0").unwrap();
+                let route = Route::new("tracks/europe/jarama/route_0").unwrap().with_drift_flags();
                 let mut multi =
                     MultiRuntime::lacetti_on(root, &route, &["slot_00"], &table, events).unwrap();
                 multi.enable_dynamic_props(root).unwrap();
@@ -2136,7 +2150,9 @@ mod tests {
                     crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
                         .unwrap(),
                 );
-                let route = Route::new("tracks/europe/nurburgring/route_1").unwrap();
+                // Breakable 2276 counts the close-drift flags (a drift event).
+                let route =
+                    Route::new("tracks/europe/nurburgring/route_1").unwrap().with_drift_flags();
                 let mut multi =
                     MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
                         .unwrap();
@@ -2204,7 +2220,8 @@ mod tests {
                 };
                 let route = std::env::var("GRID_PILE_ROUTE")
                     .unwrap_or_else(|_| "tracks/europe/nurburgring/route_1".into());
-                let route = Route::new(&route).unwrap();
+                // GRID_PILE_CENTRE counts the close-drift flags (a drift event).
+                let route = Route::new(&route).unwrap().with_drift_flags();
                 let mut multi =
                     MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
                         .unwrap();
@@ -3316,7 +3333,7 @@ mod tests {
                     crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
                         .unwrap(),
                 );
-                let route = Route::new("tracks/usa/long_beach/route_1").unwrap();
+                let route = Route::new("tracks/usa/long_beach/route_1").unwrap().with_drift_flags();
                 let bmw = Car::new(crate::car::BMW).unwrap();
                 let data =
                     AiData::load_for(root, route.path(), "touring", "bmw", Some("drift_battle"))

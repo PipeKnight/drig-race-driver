@@ -15,8 +15,14 @@ fn race_app() -> App {
 /// `models` (car 0, the player, takes the first), player at the back.
 /// `autopilot`: the ported AI drives the player's car too.
 pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> App {
+    race_app_on(grid_tools::route::Route::new(route).unwrap(), models, laps, autopilot)
+}
+
+/// [`race_app_with`] on a prepared `route` (a drift event's
+/// `Route::with_drift_flags`).
+pub(crate) fn race_app_on(route: grid_tools::route::Route, models: &[&str], laps: u32, autopilot: bool) -> App {
     use grid_tools::ai_driver::{AiData, AiDriver, Line, Parameters};
-    use grid_tools::{car::Car, route::Route};
+    use grid_tools::car::Car;
     let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
     let root = Path::new(&root);
     let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
@@ -27,7 +33,6 @@ pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: 
     let deformation = Some(
         grid_tools::deformation_parameters::read(&read("GRID_DEFORMATION_PARAMETERS")).unwrap(),
     );
-    let route = Route::new(route).unwrap();
     let field: Vec<Car> = (0..=OPPONENTS)
         .map(|i| Car::new(models[i % models.len()]).unwrap())
         .collect();
@@ -590,15 +595,12 @@ fn a_drift_battle_is_scored_banked_and_classified_by_drift_points() {
         // One lap of the Long Beach drift circuit (route_1), BMW field, the
         // ported AI driving the player's car, as settings/drift-battle.ini.
         let route = "tracks/usa/long_beach/route_1";
-        let mut app = race_app_with(route, &["bmw"], 1, true);
+        let drift_route = grid_tools::route::Route::new(route).unwrap().with_drift_flags();
+        let mut app = race_app_on(drift_route.clone(), &["bmw"], 1, true);
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
         let settings = grid_tools::drift::Settings::load(root).unwrap();
-        let flags = grid_tools::drift::close_drift_flags(
-            root,
-            &grid_tools::route::Route::new(route).unwrap(),
-        )
-        .unwrap();
+        let flags = grid_tools::drift::close_drift_flags(root, &drift_route).unwrap();
         assert!(!flags.is_empty());
         app.insert_resource(DriftEvent::battle(settings, flags, OPPONENTS + 1, 1, 1))
             .add_systems(Update, crate::drift_event::tick.after(crate::drive_tick));

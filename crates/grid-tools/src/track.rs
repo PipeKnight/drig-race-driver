@@ -243,7 +243,23 @@ impl Track {
         query: &grid_world::convex_distance::ContactSettings,
         pair_capacity: usize,
         pool: usize,
+        sheet: impl FnMut([u8; 4]) -> Result<bool, grid_world::Error>,
+    ) -> Result<Vec<BodyContact>, grid_world::Error> {
+        self.body_contacts_cached(mesh, matrix, query, pair_capacity, pool, sheet, None)
+    }
+
+    /// [`Self::body_contacts`] with the body's prop pair directions, read and
+    /// updated (`entity_geometry::PairDirections`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn body_contacts_cached<'m>(
+        &self,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
+        matrix: grid_world::physical_pose::Matrix,
+        query: &grid_world::convex_distance::ContactSettings,
+        pair_capacity: usize,
+        pool: usize,
         mut sheet: impl FnMut([u8; 4]) -> Result<bool, grid_world::Error>,
+        pair_directions: Option<&mut crate::entity_geometry::PairDirections>,
     ) -> Result<Vec<BodyContact>, grid_world::Error> {
         let mesh = mesh.into();
         if pair_capacity > 16 || pool > grid_world::MAX_WORLD_CONTACTS {
@@ -278,6 +294,7 @@ impl Track {
                         self.props_index
                             .as_ref()
                             .map(|index| crate::entity_geometry::KnownBoxes { index }),
+                        pair_directions,
                     )?
                     .into_iter()
                     .map(|(index, contact)| BodyContact {

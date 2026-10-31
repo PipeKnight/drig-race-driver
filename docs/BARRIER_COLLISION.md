@@ -34,7 +34,9 @@ the original was not launched.
 - **The boundary sheet held everywhere it exists**: no contact-free sheet crossing on Le
   Mans in 698 branches; two in 4,736 branches over all routes before the fix, both at about
   12-30 m/s, both now stopped earlier by a basic-entity fence (section 5.2). After the fix
-  one case remains in 4,662 branches: a 4 m position jump with no body contact (section 5.3).
+  one case remained in 4,662 branches, a 4 m jump through the sheet: a box contact whose
+  distance loop stopped with a direction far off an 80 m armco plate's face, so the far face
+  gave a manifold as deep as the car (section 5.3, fixed in F680).
 
 ## 2. Original behaviour [D]
 
@@ -149,17 +151,124 @@ remains on Donington route 0 (R10). Per-route table: section 6.
   and no longer reach the sheet. The sheet-only mechanism is not reproduced [I: the sheet has
   no continuous collision, row 10, so a thin corner of the hull can step through it].
 
-### 5.3 A position jump through the sheet (after the fix)
+### 5.3 A position jump through the sheet: an inconsistent distance result beside a long plate (F680)
 
-Le Mans route 0, R10, branch at 8,689 m, right (reproduced with `GRID_BARRIER_TRACE=8689`,
-`local/barrier/cross/lm0full.txt`). The car slides parallel to the sheet near 8,850 m at
-about 33 m/s with no body contact (no sheet, prop or road contact, no pieces). Between ticks
-194 and 195 its position jumps 4.2 m against its velocity, (729.56, 2509.95) → (733.52,
-2507.81), across sheet triangle 8679 (a 150 m tall SHTC panel), and the velocity changes by
-19 m/s in x in that tick. It then rolls on behind the sheet and falls when the ground ends.
-No body contact explains the jump [O]; the trace does not record the wheels, so a wheel or
-suspension contact against the near-vertical sheet is the leading candidate [I]. Not
-traced further; one case in 4,600+ branches.
+Le Mans route 0, R10, branch at 8,689 m, right (`GRID_BARRIER_TRACE=8689`; evidence
+`local/barrier/cross/lm0trace.err`, `lm0deep.err`, `lm0fix.err`). The earlier "no body
+contact" (here and for the two crossings of section 5.2) was a probe error:
+`grid-barrier-impact` counted from contact slot 4, and slots 0-3 can hold
+the car's body contacts (here they did; the wheels are slot kinds 4-6). It now counts every slot and
+traces each one with its tokens, depth, normal and point, the wheels and the prop boxes
+within 3 m.
+
+**What happens [V port].** The car slides along `armco_02_group_longer` basic entity box
+2917, one box 80 m long, 0.92 m tall and 8.5 cm thick, with four shallow contacts
+(0.00-0.04 m, normal (-0.503, 0, 0.864), the plate's near face). In tick 195 the four
+contacts are replaced by three 3.9-5.1 m deep ones with normal (0.919, 0.03, -0.392), whose
+points lie 3.9 m to the car's side, outside its hull. The solver moves the car 4.2 m along
+that normal, through the armco and the sheet behind it.
+
+**Cause [V port].** The contacts come from `box_contacts::contacts` (AE8AD0) at an
+ordinary pose, the witness depth only 0.018 m. The distance loop (B7F520/B7EA60) ends with
+the cores 1.8 mm apart and a direction 32 degrees from the plate's normal, into the plate.
+That direction separates nothing: along it the 80 m plate overlaps the car by metres. The
+loop's convergence test cannot hold for such a direction, so it stopped through one of its
+other exits (a duplicate vertex, a failed sub-simplex, no progress) [I: the exit was not
+logged]. With a box 80 m long and 8.5 cm thick the simplex vertices lie tens of metres from
+the closest point, and an f32 loop loses millimetre accuracy there. AEE640's orientation
+(the sign from the two pose origins) cannot correct the direction: the plate's centre is 20
+m away along the plate. B3D890 then takes the plate's far face, and AE2FA0 clips the car's
+face against that plane, 4-5 m deep. Replays at the stored pose and with the hull pushed
+into the plate in 5 mm steps gave correct contacts: the failure needs this exact pose.
+
+The same mechanism stops cars at rest. Route 0, 6,663 m left of the line, Lacetti, old
+path (`local/barrier/cross/w6663.err`): the car stands against armco box 2222 at 0.6 m/s.
+In tick 219 its contact normal is 27 degrees off the plate's (0.897, 0.091, 0.431), in tick
+220 AEE640 flips it, the far face gives four contacts 1.83-2.09 m deep, and the car moves
+1.76 m in one tick.
+
+**What the original does [D: decompiles of B39500, AE8AD0 and B7F740, private].**
+1. **Frame.** B7F740 expresses B in A's frame (the mesh's) before B7F520 and takes the
+   witnesses back to world space. The 44 sampled directions are already in that frame.
+2. **Pair direction.** B39500 hands AE8AD0 the broadphase pair's +0x10 as the direction.
+   B7F740 replaces a vector shorter than 1e-3 with world +x, rotates it into A's frame, starts
+   the early test and the distance loop from it, and writes the final direction back in
+   world space, hit or miss. A car sliding along a wall therefore starts each tick from the
+   last tick's direction. The port started every query cold from +x in world space.
+3. The distance loop, AEE640, B3D890 and AE2FA0 are the port's. From the same pose the
+   original trusts the same kind of result [I]: B7F740 has no check on it.
+
+Neither the frame nor the cached direction removes the failure. An A/B probe (temporary
+`GRID_AB` switch; Le Mans routes 0 and 1, Lacetti at 30 m/s and R10 at 70 m/s, a branch
+every 150 m, 400 ticks; `local/barrier/impact/ab-*`) gave prop contacts deeper than 1.5 m
+in 11 branches with the old path, 16 in the mesh's frame from a cold start and 17 in the
+mesh's frame with the cached direction, and 4, 6 and 8 sheet crossings. One branch (route
+1, 7,612 m, Lacetti) failed with `unsupported body event pool or query ownership` in all
+three.
+
+**Fix.**
+- Ported: `box_contacts::contacts_cached` and `round_contacts::contacts_cached` (cylinders
+  and spheres) transform the box corners and axes (the round shape's pose) into the mesh's
+  frame with `to_frame`, run the query with an identity mesh matrix, the directions as given
+  and the cached direction rotated in, then return the witnesses and the direction to world
+  space. Orientation, faces and clipping stay in world space.
+  `entity_geometry::PairDirections` holds one direction per box whose bounds overlap the
+  body's: kept while they overlap (and when the capacity is spent, as B39500 skips the
+  query), dropped when they part, as the pair ends [I: the port's bounds test stands in for
+  the broadphase]. Each car's set lives on its `Runtime`: cloned with it (flashback,
+  replay), cleared by `reset`, updated by every contact collection of a tick and kept only
+  when the tick succeeds. In the multi-car tick, each parallel query carries its car's copy
+  and the sequential pass keeps the copy of the result it uses. Prop pieces still query
+  cold (FIDELITY_BACKLOG row 12).
+- AUTHORED (owner rule F320; BOX_CONTACTS.md deviations): in the convex-pair queries
+  (`Extra::Axes`), a result whose final direction does not separate the cores by its own
+  length, to within 1 mm, goes to B7ED10's sampled penetration path, as touching cores do
+  (`convex_distance::separates`, one more support evaluation on a copy of the support
+  cache). B7ED10 samples the box's axes, so the plate's normal wins. Its own two
+  distance runs, at the pose shifted out along the sampled axis, get the same test: a
+  failed first run keeps the sampled axis, and a failed second run takes the mesh's
+  support point along that axis and its projection on the box's supporting plane as the
+  witnesses. Without that, Le Mans route 1, 5,390 m (Lacetti, `local/barrier/cross/c5390.err`)
+  measured the depth along a tilted first-run axis, 18.4 m, and the car moved 18 m and
+  rolled in one tick. An accurate result always passes the test. The triangle path keeps
+  the original's result.
+
+**Checks.** Test
+`a_mesh_beside_a_long_thin_plate_far_from_the_origin_is_pushed_out_of_its_near_face`
+(grid-world): a 2 m cube beside that plate at Le Mans coordinates, 41 yaw angles × 5
+positions × 7 core gaps (-15 to 8 mm), each approached from 5 cm in 1 cm steps with the
+direction carried, then queried cached and cold. [V] Least alignment of a contact normal
+with the plate's normal over the five positive gaps, the cached query only, before the
+check: -0.70 cold in world space (the old path, through the plate), -0.10 cold in the
+mesh's frame, -0.05 cached; with the first check 0.9992-0.9997 in all three. Final test
+(both checks, all seven gaps, cached and cold): 2,870 contacts, least alignment 0.99995,
+deepest 0.046 m (the 15 mm overlap and the margins). The test requires 0.99 and less than
+5 cm.
+
+The same Le Mans sweep with the fix (`local/barrier/impact/fin/`): no sheet crossing, no
+fall and no error in the four runs (700 branches; the route 1 body-event pool error is
+gone too); the deepest prop contact 1.03 m (a 30 m/s straight hit that stops the car), none
+deeper elsewhere than 0.90 m (70 m/s, 1.2 m per tick). The 8,689 m R10 branch alone
+(`local/barrier/cross/f8689.*`): the car slides along the armco, deepest contact 0.14 m.
+
+**Okutama route 0 [V port].** After F653 (basic entities collide) its 12-car race
+(`grid-opponent-race`, Lacetti, AI, 16,000 ticks; F663) retired 7 cars with 27,736 car
+contacts, against 1 and 1,079 before. On the base before F671 (f358f7ef) the same
+mechanism was at work, against the 20-80 m concrete-block and armco boxes beside its line.
+With this fix: 2 retired (lost wheels after a 50 m/s armco
+hit and a 36 m/s tyre-stack hit, normal contacts), 1,629 contacts. The same build with both
+checks switched off (temporary `GRID_NO_SEPARATES`, frame and cached direction kept): 5
+retired, 11,881 contacts, one car pinned at concrete block box 1913 for 6,567 contacts at
+0.1 m/s (`local/okutama/`, `GRID_PROP_TRACE`). Rechecked after F671 (every car finishes on
+its own line crossing) on main ea1688db: main alone 2 retired, 1,697 contacts; with this fix 2,
+1,629 (`local/okutama/{main,rb}-fin-*`). So the 7-car loss is gone on main without this fix,
+from a change after F663 not traced here; this fix no longer changes the count. Routes 1-5 retire none, as before, with
+fewer contacts on four of them. `basic_entities_leave_every_racing_line_open` now covers the
+six Okutama routes too: no basic-entity box stands on their AI lines. Other routes, same
+race, fix / checks off: Le Mans 0 1 / 1 retired (3,287 contacts both), Yokohama Docks 1 0 / 0
+(380), Nürburgring 0 0 / 0 (634): identical, the checks never fired; Washington 3 1 / 2
+retired, 345 / 6,641 contacts. Every retirement left with the fix is a lost wheel after a
+hard hit. No pre-F653 baseline was rerun for these four.
 
 ### 5.4 Other findings
 

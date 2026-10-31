@@ -211,6 +211,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let props_shape = runtime.track_shape_count() as u32;
     let boundary_shape = props_shape - 1;
+    eprintln!("shapes props={props_shape} boundary={boundary_shape}");
 
     let mut text = String::from(
         "distance\tside\tentry_speed\tfirst_contact_tick\tfirst_contact_speed\tboundary_contacts\tboundary_pen\tboundary_normal\tprop_contacts\tprop_pen\troad_contacts\tpiece_contacts\tthrough_tick\tthrough_x\tthrough_z\tthrough_key\tfrom_front\tcontacts_before\tpieces_before\tfell\tfinal_offset\tfinal_speed\tticks\terror\n",
@@ -308,7 +309,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     recent[0] = 0;
                     recent_pieces[0] = 0;
                     let active = r.last_active_contacts.min(r.state.world.groups.contacts.len());
-                    for c in &r.state.world.groups.contacts[4.min(active)..active] {
+                    for c in &r.state.world.groups.contacts[..active] {
                         // The car is token 1; a token past the track shapes
                         // is a dynamic prop piece or a lost part.
                         let [a, o] = [c[0x28 / 4], c[0x2c / 4]];
@@ -368,6 +369,39 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             recent[0], b.prop_contacts, b.road_contacts
                         );
                         eprintln!("trace pieces={}", recent_pieces[0]);
+                        let w = r.angular_velocity();
+                        eprintln!(
+                            "trace pose x={:.3},{:.3},{:.3} y={:.3},{:.3},{:.3} w={:.2},{:.2},{:.2} active={active} detached={:?}",
+                            pose[0], pose[1], pose[2], pose[4], pose[5], pose[6], w[0], w[1], w[2],
+                            r.detached_wheels()
+                        );
+                        // Every active contact slot: kind word, tokens, depth, normal.
+                        for (k, c) in r.state.world.groups.contacts[..active].iter().enumerate() {
+                            let n: [f32; 3] =
+                                std::array::from_fn(|j| f32::from_bits(c[0x60 / 4 + j]));
+                            eprintln!(
+                                "trace contact {k} kind={} tokens={},{} pen={:.4} n={:.3},{:.3},{:.3} at={:.3},{:.3},{:.3}",
+                                c[1], c[0x28 / 4], c[0x2c / 4],
+                                f32::from_bits(c[0x38 / 4]), n[0], n[1], n[2], f32::from_bits(c[0x50 / 4]), f32::from_bits(c[0x54 / 4]), f32::from_bits(c[0x58 / 4])
+                            );
+                        }
+                        // Prop boxes within 3 m of the car (token props_shape + 1).
+                        if let Some(props) = r.track().props() {
+                            for (i, pb) in props.boxes.iter().enumerate() {
+                                if (0..3).all(|j| p[j] >= pb.bounds[j] - 3. && p[j] <= pb.bounds[j + 3] + 3.) {
+                                    eprintln!(
+                                        "trace box {i} {} entity={:?} enabled={} bounds={:?} positions={:?}",
+                                        pb.template, pb.entity, pb.enabled, pb.bounds, pb.positions
+                                    );
+                                }
+                            }
+                        }
+                        for (k, wp) in r.wheels().iter().enumerate() {
+                            eprintln!(
+                                "trace wheel {k} anchor={:.2},{:.2},{:.2} displacement={:.3}",
+                                wp.anchor[0], wp.anchor[1], wp.anchor[2], wp.displacement
+                            );
+                        }
                     }
                     // Below the road, or over no road for 15 ticks: a single
                     // vertical query can miss a sliver between chunks.

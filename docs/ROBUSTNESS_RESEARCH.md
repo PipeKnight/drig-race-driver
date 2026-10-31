@@ -380,6 +380,14 @@ instrumentation, removed).
       than 0.1 m (AUTHORED threshold; resting pieces show about 0.03 m);
     - the body counts only when that first deep contact comes in the same step as a box
       contact or the step after one.
+    - Since F680: any deep road contact, not only the first. Quick seed 18 (Long Beach 0, solo,
+      after F680 changed the trajectories): a prop piece sliding at 24 m/s presses a road
+      triangle 0.1 m deep (upward normal) at tick 3304; at 3305 it enters basic-entity box 1011
+      (`concrete_fence_white_vara`, 0.38 m thick, bottom 1.13 m) 0.57 m sideways, whose
+      minimum-overlap exit is its bottom face (normal y -1.0, the seed 17 mechanism); it is
+      driven under the road and falls. The first deep contact came before the box, so the old
+      rule missed it. Quick 1..24 with the change: 24 pass, box losses 1 (seed 18). Coordinator
+      approval 2026-11-02; classification, not a fix: the step debt stays open (row 88).
   - Counts [V], on 8f02760 + F444 + this rule: quick 1..56: (i) 3 bodies (seed 23), (ii) 1 body
     (seed 17); long 1001..1100 (100 scenarios): (i) 3 bodies (seeds 1023, 1089 Le Mans, 1092 Spa), (ii) none,
     and 37 option A losses (Jarama 1010, 1013). Quick 1..24 passes 24/24 again; Haruna seeds 29 (known since

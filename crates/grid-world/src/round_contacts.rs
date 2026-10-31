@@ -21,6 +21,7 @@
 //! triangle (AE2210) and polygon clipping (AEB630).
 use crate::{
     Error,
+    box_contacts,
     contact_manifold::{self, Contact, Face, Settings},
     convex_distance::{ContactSettings, Context, Extra, Hull, Static},
     physical_pose::Matrix,
@@ -810,7 +811,20 @@ pub fn contacts<'m>(
     query: &ContactSettings,
     capacity: usize,
 ) -> Result<Vec<Contact>, Error> {
-    shape_contacts(hull.into(), matrix, shape, query, capacity, false)
+    shape_contacts(hull.into(), matrix, shape, query, capacity, false, &mut [0.; 4])
+}
+
+/// [`contacts`] with the pair's cached world direction, as
+/// [`box_contacts::contacts_cached`].
+pub fn contacts_cached<'m>(
+    hull: impl Into<Hull<'m>>,
+    matrix: Matrix,
+    shape: &RoundShape,
+    query: &ContactSettings,
+    capacity: usize,
+    direction: &mut V,
+) -> Result<Vec<Contact>, Error> {
+    shape_contacts(hull.into(), matrix, shape, query, capacity, false, direction)
 }
 
 /// [`contacts`] for a `shape` that belongs to a dynamic body (two broken
@@ -823,7 +837,19 @@ pub fn pair_contacts<'m>(
     query: &ContactSettings,
     capacity: usize,
 ) -> Result<Vec<Contact>, Error> {
-    shape_contacts(hull.into(), matrix, shape, query, capacity, true)
+    shape_contacts(hull.into(), matrix, shape, query, capacity, true, &mut [0.; 4])
+}
+
+/// [`pair_contacts`] with the pair's cached world direction.
+pub fn pair_contacts_cached<'m>(
+    hull: impl Into<Hull<'m>>,
+    matrix: Matrix,
+    shape: &RoundShape,
+    query: &ContactSettings,
+    capacity: usize,
+    direction: &mut V,
+) -> Result<Vec<Contact>, Error> {
+    shape_contacts(hull.into(), matrix, shape, query, capacity, true, direction)
 }
 
 fn shape_contacts(
@@ -833,6 +859,7 @@ fn shape_contacts(
     query: &ContactSettings,
     capacity: usize,
     dynamic: bool,
+    direction: &mut V,
 ) -> Result<Vec<Contact>, Error> {
     let valid = match shape {
         RoundShape::Cylinder(c) => c.valid(),
@@ -844,41 +871,42 @@ fn shape_contacts(
     if capacity == 0 {
         return Ok(Vec::new());
     }
-    let rotate = |d: V| -> V {
-        std::array::from_fn(|j| {
-            if j == 3 {
-                0.
-            } else {
-                (d[0] * matrix[0][j] + d[1] * matrix[1][j]) + d[2] * matrix[2][j]
-            }
-        })
-    };
-    let settings = ContactSettings {
-        margin: query.margin,
-        directions: query.directions.map(rotate),
-    };
-    let (pose, centre, margin, shape_margin) = match shape {
-        RoundShape::Cylinder(c) => (c.matrix, [c.matrix[3]], c.margin, c.margin),
+    let settings = query;
+    let (pose, margin, shape_margin) = match shape {
+        RoundShape::Cylinder(c) => (c.matrix, c.margin, c.margin),
         // B4B0A0: the centre pushed by radius plus shell.
-        RoundShape::Sphere(s) => (s.matrix, [s.matrix[3]], s.radius + s.margin, s.margin),
+        RoundShape::Sphere(s) => (s.matrix, s.radius + s.margin, s.margin),
     };
-    let support = match shape {
-        RoundShape::Cylinder(c) => Static::Cylinder(c),
-        RoundShape::Sphere(_) => Static::Points(&centre),
+    // B7F740: the shape in the body's frame, as for boxes (box_contacts);
+    // the directions already are.
+    let local: Matrix = std::array::from_fn(|k| box_contacts::to_frame(&matrix, pose[k]));
+    let centre = [local[3]];
+    let cylinder = match shape {
+        RoundShape::Cylinder(c) => Some(CylinderShape {
+            matrix: local,
+            ..c.clone()
+        }),
+        RoundShape::Sphere(_) => None,
+    };
+    let support = match &cylinder {
+        Some(c) => Static::Cylinder(c),
+        None => Static::Points(&centre),
     };
     let mut context = Context::new();
-    let query = context.contact_static(
+    let output = context.contact_static(
         hull,
-        matrix,
+        box_contacts::IDENTITY,
         support,
         margin,
-        Extra::Axes([pose[0], pose[1], pose[2]]),
-        [0.; 4],
-        &settings,
+        Extra::Axes([local[0], local[1], local[2]]),
+        box_contacts::to_frame(&matrix, box_contacts::cold_start(*direction)),
+        settings,
     )?;
-    let Some(witnesses) = query.witnesses else {
+    *direction = box_contacts::from_frame(&matrix, output.direction);
+    let Some(witnesses) = output.witnesses else {
         return Ok(Vec::new());
     };
+    let witnesses = witnesses.map(|w| box_contacts::from_frame(&matrix, w));
     // AE8AD0: depth is the witness distance; nothing at or below 1e-3.
     let difference = sub(witnesses[0], witnesses[1]);
     let square = dot(difference, difference);

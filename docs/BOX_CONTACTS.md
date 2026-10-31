@@ -82,7 +82,8 @@ AEE640 orientation with the two pose origins; AE2FA0 manifold
 - `box_contacts` (new): AE8AD0 for a moving mesh against a static box. The box takes
   the packed path's static role (query shape with the point set, second manifold
   feature), so the records keep the packed convention (the normal pushes the mesh).
-  The original runs AE8AD0 with the mesh as A. The two assignments differ only in
+  The original runs AE8AD0 with the mesh as A, in A's frame (B7F740; the port
+  ran it in world space until F680). The two assignments differ only in
   signs and witness order, which AEE640 and AE2FA0 treat symmetrically [I]. The 44
   directions are rotated from the mesh frame into the world.
 - `entity_geometry`: every route prop box is a `BoxShape` (axes and half extents
@@ -96,10 +97,25 @@ AEE640 orientation with the two pose origins; AE2FA0 manifold
   section explains why the first two were tried and not adopted.
 
 [I] Deviations, recorded: no per-pair direction cache (every query starts along
-+x, as the port's other cold queries do); the vertex order of a box face matches
++x, as the port's other cold queries do; F680 ported it for cars against route props,
+and the query frame, see BARRIER_COLLISION §5.3; pieces still start cold); the vertex order of a box face matches
 the one decompiled branch, and the others are assumed to follow it; the box face
 normal carries the face's sign (the clipper aligns it with the contact normal
 either way).
+
+AUTHORED (F680, owner rule F320): in the convex-pair queries (`Extra::Axes`: boxes,
+cylinders, spheres), a distance-loop result whose final direction does not separate
+the cores by its own length, to within 1 mm, is treated like touching cores and goes
+to B7ED10's sampled penetration path (`convex_distance::separates`). The original
+trusts it. Beside a long thin box the f32 loop can stop on a duplicate vertex or a
+failed sub-simplex with a 2 mm gap and a direction tens of degrees off the face,
+along which the shapes overlap by metres; AEE640 then picks the far face and AE2FA0
+clips a manifold as deep as the car (BARRIER_COLLISION §5.3). B7ED10's two distance
+runs at the shifted pose get the same test: a failed first run keeps the sampled axis
+(it had measured an 18 m depth along a tilted axis), and a failed second run takes the
+mesh's support point along that axis and its projection on the box's supporting plane
+as the witnesses. An accurate result always passes. The triangle path (AEA1F0) keeps
+the original's result.
 
 ## Players falling out of the world (seed 1087)
 

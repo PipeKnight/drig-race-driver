@@ -68,6 +68,7 @@ pub struct Route {
     split: usize,
     subroute: u8,
     ignore_progress: bool,
+    drift_flags: bool,
 }
 
 impl Route {
@@ -91,6 +92,7 @@ impl Route {
             split: path.rfind('/').unwrap(),
             subroute: 0,
             ignore_progress: false,
+            drift_flags: false,
         })
     }
     /// The same folder for an event that ignores race progress: [V] for the
@@ -105,6 +107,20 @@ impl Route {
     }
     pub fn ignores_progress(&self) -> bool {
         self.ignore_progress
+    }
+    /// The same folder for a drift event (format enum 2, 3 or 4; also 9 and
+    /// 10, which name no format): [V] only then does the race setup keep the
+    /// `close_drift_flag` entities (0x669C53 calls the collector 0x668670).
+    /// For every other format it calls 0x62FEB0, which frees the physics
+    /// of each entity instance whose name contains `close_drift_flag`
+    /// (0x7D4B00: its parts, links and constraints), so the flags take no
+    /// contact in a race. The route props then leave them out.
+    pub fn with_drift_flags(mut self) -> Self {
+        self.drift_flags = true;
+        self
+    }
+    pub fn has_drift_flags(&self) -> bool {
+        self.drift_flags
     }
     /// The same folder run as progress route `subroute` of its
     /// `progress_track.xml` (0 or 1). Haruna's point-to-point routes ship a
@@ -389,7 +405,8 @@ mod tests {
         };
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = std::path::Path::new(&root);
-        let route = Route::new(JARAMA).unwrap();
+        // As in a drift event: a race leaves the 16 flags out (Route::with_drift_flags).
+        let route = Route::new(JARAMA).unwrap().with_drift_flags();
         assert_eq!(route.track_name(), "jarama");
         let progress = lap_progress::load_route(root, &route).unwrap();
         let splits: Vec<_> = progress.progress.routes[0]
@@ -455,7 +472,8 @@ mod tests {
         };
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = std::path::Path::new(&root);
-        let route = Route::new(YOKOHAMA).unwrap();
+        // As in a drift event: a race leaves the 21 flags out (Route::with_drift_flags).
+        let route = Route::new(YOKOHAMA).unwrap().with_drift_flags();
         assert_eq!(route.track_name(), "yokohama_docks");
         let progress = lap_progress::load_route(root, &route).unwrap();
         let splits: Vec<_> = progress.progress.routes[0]
@@ -574,7 +592,7 @@ mod tests {
         // route boxes, breakable entities, unported placements)
         for (path, name, gates, distance, splits, slots, line, boxes, breakables, unported) in [
             (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2296, 1376, 87),
-            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 2924, 19, 363),
+            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 2848, 0, 363),
             (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 2270, 239, 1),
         ] {
             let route = Route::new(path).unwrap();
@@ -598,8 +616,15 @@ mod tests {
             assert!((data.line.length - line).abs() < 1., "{path} {}", data.line.length);
             let props = Props::read_route(root, &route).unwrap();
             let catalog = Catalog::read(root, &route, &props).unwrap();
-            assert_eq!(props.boxes.len(), boxes, "{path}");
-            assert_eq!(catalog.breakables.len(), breakables, "{path}");
+            assert_eq!(
+                (
+                    props.boxes.len(),
+                    catalog.breakables.len(),
+                    catalog.unported.values().sum::<usize>()
+                ),
+                (boxes, breakables, unported),
+                "{path}"
+            );
             // Tyre stacks, the joined Milan green cushions and San
             // Francisco tyre walls (F484), and Milan's armco (F501).
             assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")
@@ -607,7 +632,6 @@ mod tests {
                 || b.template.starts_with("armco_main_section_large")
                 || b.template == "tyrewall_black.max"
                 || b.template == "close_drift_flag.max"));
-            assert_eq!(catalog.unported.values().sum::<usize>(), unported, "{path}");
         }
     }
 

@@ -2,7 +2,7 @@
 //! the race with the same inputs equals, tick for tick, the race that never
 //! flashed back; the count and the rules of the original.
 use super::*;
-use crate::pause_menu::race_tests::{big_stack, digest, keys, race_app_with, tap, ticks};
+use crate::pause_menu::race_tests::{big_stack, digest, keys, race_app_on, race_app_with, tap, ticks};
 use crate::replay::race_tests::{frame, replay, with_replay};
 use crate::replay::seconds;
 use crate::{Driving, pause_menu::PauseMenu};
@@ -127,12 +127,15 @@ struct Case {
 }
 
 fn app_for(case: &Case) -> App {
-    let mut app = with_flashback(race_app_with(case.route, case.models, case.laps, false), case.route);
+    let mut route = grid_tools::route::Route::new(case.route).unwrap();
+    if case.drift {
+        route = route.with_drift_flags();
+    }
+    let mut app = with_flashback(race_app_on(route.clone(), case.models, case.laps, false), case.route);
     if case.drift {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = std::path::Path::new(&root);
         let settings = grid_tools::drift::Settings::load(root).unwrap();
-        let route = grid_tools::route::Route::new(case.route).unwrap();
         let flags = grid_tools::drift::close_drift_flags(root, &route).unwrap();
         app.insert_resource(crate::drift_event::DriftEvent::battle(
             settings,

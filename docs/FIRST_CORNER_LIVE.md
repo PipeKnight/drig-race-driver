@@ -454,7 +454,7 @@ entity 106 at x −160, z −157): the car stops dead from 31 m/s, climbs it (y 
 never breaks. Over all props-on runs 118 flags broke, every one at force 50 (the pole), none at 2000.
 Not yet explained: whether the base contact reaches the solver as a car-box contact (the break
 check 0x7BDFD0 sees only car-box pairs) or through the wheels. Physics/props topic, not AI.
-Whether the original places the flags in a normal race at all is not known [I].
+Whether the original places the flags in a normal race at all is not known [I]. F681: it places them, but race setup frees their physics in every non-drift format [V] (DISCIPLINES §4.3.1); the port now does the same, so race fields no longer meet them.
 
 **Long Beach route 1 [V port].** Car 0 (the leader) stops in every seed at tick 857–883. In
 Alongside from tick 600 its planned offset walks left by about 0.64 m per 10 ticks, 0 → −5.5 m

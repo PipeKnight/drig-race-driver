@@ -3323,6 +3323,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         route = route.ignoring_progress();
         trial_laps = Some(1);
     }
+    // [V] only the drift formats keep the close-drift flags (Route::with_drift_flags).
+    if drift_format.is_some() {
+        route = route.with_drift_flags();
+    }
     let drift = drift_format == Some(Format::DriftBattle);
     if let Some(position) = grid_position
         && !opponents.is_some_and(|n| (1..=n + 1).contains(&position))

@@ -530,6 +530,9 @@ impl Catalog {
         }
         let mut catalog = Self::default();
         'entities: for (index, e) in all.iter().enumerate() {
+            if !crate::entity_geometry::entity_in_event(route, e.id) {
+                continue;
+            }
             let template = String::from_utf8_lossy(e.template).into_owned();
             let behaviours: Vec<_> = e
                 .renderables
@@ -3152,12 +3155,43 @@ mod tests {
         );
     }
 
+    /// [V 0x669C53, 0x62FEB0] outside the drift formats the flags take no
+    /// contact: no route box, no breakable. Yokohama Docks route 1 stopped
+    /// race fields at a flag base (docs/FIRST_CORNER_LIVE.md §13).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn close_drift_flags_take_no_contact_outside_drift_events() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        for (path, count) in [
+            ("tracks/europe/jarama/route_0", 16),
+            ("tracks/japan/yokohama_docks/route_0", 17),
+            ("tracks/japan/yokohama_docks/route_1", 0),
+        ] {
+            let flags = |route: &Route| {
+                let props = Props::read_route(root, route).unwrap();
+                let catalog = Catalog::read(root, route, &props).unwrap();
+                let boxes = props.boxes.iter().filter(|b| b.template.contains("close_drift_flag")).count();
+                let breakables =
+                    catalog.breakables.iter().filter(|b| b.template.contains("close_drift_flag")).count();
+                (boxes, breakables)
+            };
+            let race = Route::new(path).unwrap();
+            assert_eq!(flags(&race), (0, 0), "{path}");
+            let (boxes, breakables) = flags(&race.with_drift_flags());
+            assert!(boxes > 0, "{path}");
+            if count > 0 {
+                assert_eq!(breakables, count, "{path}");
+            }
+        }
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn jarama_close_drift_flags_break_into_a_static_base_and_a_phantom_pole() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
-        let route = Route::new("tracks/europe/jarama/route_0").unwrap();
+        let route = Route::new("tracks/europe/jarama/route_0").unwrap().with_drift_flags();
         let props = Props::read_route(root, &route).unwrap();
         let catalog = Catalog::read(root, &route, &props).unwrap();
         assert!(!catalog.unported.contains_key("close_drift_flag.max"), "{:?}", catalog.unported);

@@ -77,6 +77,9 @@ pub struct Runtime {
     ai_packet: Option<(u64, bool)>,
     /// Opt-in breakable route props (`enable_dynamic_props`).
     props: Option<crate::dynamic_props::PropWorld>,
+    /// The body's cached direction with each route prop box it overlaps
+    /// (the broadphase pairs' +0x10, `entity_geometry::PairDirections`).
+    pub(crate) pair_directions: crate::entity_geometry::PairDirections,
     /// `collision_main` bounds of the car's `.ned` (description extents).
     hull: car_collision::Bounds,
     /// The car's NED loose-part levels; the wheel rule changes driving.
@@ -526,6 +529,7 @@ impl Runtime {
             shift: None,
             ai_packet: None,
             props: None,
+            pair_directions: Default::default(),
             hull: shape.bounds,
             loose_parts,
             wheel_nodes: None,
@@ -808,6 +812,8 @@ impl Runtime {
         let mut recorded = Vec::new();
         let mut rebuilt_geometry = None;
         let mut next_registration = None;
+        // Updated by every contact collection of this tick; kept on success.
+        let directions = std::cell::RefCell::new(self.pair_directions.clone());
         let output = match geometry {
             Some(Geometry::Deforming(geometry)) => {
                 let resource = std::cell::RefCell::new(geometry.clone());
@@ -834,8 +840,13 @@ impl Runtime {
                         )?;
                     }
                     let bodies: &[grid_world::contact_groups::Body] = bodies;
-                    let contacts =
-                        self.fresh_contacts(&resource.borrow(), bodies, remaining, &mut recorded)?;
+                    let contacts = self.fresh_contacts(
+                        &resource.borrow(),
+                        bodies,
+                        remaining,
+                        &mut recorded,
+                        &mut directions.borrow_mut(),
+                    )?;
                     body_contacts = contacts.len();
                     Ok(contacts)
                 };
@@ -890,8 +901,13 @@ impl Runtime {
                 query,
                 material,
                 |bodies, remaining| {
-                    let contacts =
-                        self.fresh_contacts(geometry, bodies, remaining, &mut recorded)?;
+                    let contacts = self.fresh_contacts(
+                        geometry,
+                        bodies,
+                        remaining,
+                        &mut recorded,
+                        &mut directions.borrow_mut(),
+                    )?;
                     body_contacts = contacts.len();
                     Ok(contacts)
                 },
@@ -941,6 +957,7 @@ impl Runtime {
             self.props = Some(next);
         }
         self.last_active_contacts = output.active_contacts;
+        self.pair_directions = directions.into_inner();
         self.state = state;
         if let Some(registration) = next_registration {
             self.deformation_registration = Some(registration);
@@ -1180,6 +1197,7 @@ impl Runtime {
             byte(&mut self.state.car.owner.vehicle, 0xc7f2, 1);
         }
         self.cache = self.initial_cache;
+        self.pair_directions = Default::default();
         self.ticks = 0;
         self.last_body_contacts = 0;
         self.last_active_contacts = 0;
@@ -1440,9 +1458,14 @@ impl Runtime {
         bodies: &[grid_world::contact_groups::Body],
         remaining: usize,
         recorded: &mut Vec<(usize, crate::dynamic_props::PropContact)>,
+        directions: &mut crate::entity_geometry::PairDirections,
     ) -> Result<Vec<grid_world::contact_groups::Contact>, Error> {
         let Some(props) = &self.props else {
-            return geometry.contacts(&self.track, &self.surfaces, bodies, remaining);
+            return Ok(geometry
+                .contacts_with_props(&self.track, &self.surfaces, bodies, remaining, Some(directions))?
+                .into_iter()
+                .map(|(c, _)| c)
+                .collect());
         };
         let first = self
             .state
@@ -1458,6 +1481,7 @@ impl Runtime {
             &self.surfaces,
             bodies.get(..1).ok_or(Error("missing car body"))?,
             remaining,
+            Some(directions),
         )? {
             if let Some(prop) = prop {
                 recorded.push((

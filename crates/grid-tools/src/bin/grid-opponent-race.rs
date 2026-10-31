@@ -78,6 +78,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         None => None,
     };
     let drift = discipline.is_some();
+    // [V] only the drift formats keep the close-drift flags (Route::with_drift_flags).
+    let route = if drift { route.with_drift_flags() } else { route };
     // The drift AI config: the stand-in player's drift line and behaviour in
     // a Drift GP come from the drift_battle section (the drift_grand_prix
     // section switches every behaviour off).
@@ -390,6 +392,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )?;
             }
             writeln!(t, "\tpairs")?;
+            Some(t)
+        }
+        Err(_) => None,
+    };
+    // GRID_PROP_TRACE=local/X.tsv: every solved car-against-prop-box contact
+    // of every tick (box index, template, point, normal, impulse), and the
+    // car's speed, to find the boxes a field hits.
+    let mut prop_trace = match std::env::var("GRID_PROP_TRACE") {
+        Ok(path) => {
+            if !Path::new(&path).starts_with("local") {
+                return Err("trace must stay under local/".into());
+            }
+            let mut t = std::io::BufWriter::new(std::fs::File::create(path)?);
+            writeln!(t, "tick\tcar\tspeed\tbox\ttemplate\tx\ty\tz\tnx\tny\tnz\timpulse")?;
             Some(t)
         }
         Err(_) => None,
@@ -919,6 +935,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 grid_tools::engine_audio_whine::Voice::pack(voice),
                 u8::from(words[0xe38 / 4] & 255 != 0)
             )?;
+        }
+        if let Some(t) = &mut prop_trace {
+            let props = multi.cars[0].track().props();
+            for (k, car) in multi.cars.iter().enumerate() {
+                let v = car.velocity();
+                let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                for (impact, contacted) in multi.contact_impacts(k) {
+                    let grid_tools::source_vehicle::multi::Contacted::Prop(b) = contacted else {
+                        continue;
+                    };
+                    let template = props.and_then(|p| p.boxes.get(b)).map_or("-", |p| p.template.as_str());
+                    let [x, y, z] = impact.point;
+                    let [nx, ny, nz] = impact.normal;
+                    writeln!(
+                        t,
+                        "{}\t{k}\t{speed:.2}\t{b}\t{template}\t{x:.3}\t{y:.3}\t{z:.3}\t{nx:.3}\t{ny:.3}\t{nz:.3}\t{:.1}",
+                        multi.ticks, impact.impact
+                    )?;
+                }
+            }
         }
         if let Some(t) = &mut field_trace {
             write!(t, "{}", multi.ticks)?;

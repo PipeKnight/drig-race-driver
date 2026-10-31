@@ -157,6 +157,8 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F681](log/F0681.md) | 2026-10-31 | Close-drift flags take no contact outside the drift formats (row 104) |
+| [F680](log/F0680.md) | 2026-10-31 | Box contacts beside long barrier boxes: an inconsistent distance result, the mesh frame and the pair direction (row 99) |
 | [F679](log/F0679.md) | 2026-11-02 | Car reflections: the cube was black since F676 (faces not drawn); masked strength checked against the original |
 | [F678](log/F0678.md) | 2026-10-31 | Cockpit: dash backlight at night |
 | [F677](log/F0677.md) | 2026-10-31 | Sun shadows in the original's layout: three maps, the player car's map, shadow quality setting |
@@ -215,8 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F624](log/F0624.md) | 2026-10-27 | Speech part 3 step 3: championship and career values |
 | [F623](log/F0623.md) | 2026-10-27 | Speech part 3 step 2: the player-name phrases (audio name) |
 | [F622](log/F0622.md) | 2026-10-27 | Speech part 3 step 1: the lapping lines from the track order |
-| [F621](log/F0621.md) | 2026-10-27 | Owner request: PC graphics options as in the original, later |
-| [F620](log/F0620.md) | 2026-10-27 | AI car wedged against Washington tyre stacks: stuck retire requests removal |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

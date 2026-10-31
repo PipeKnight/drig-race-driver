@@ -732,9 +732,9 @@ pub struct Session {
 struct PieceHistory {
     /// Last tick with a downward route entity box contact.
     entity: Option<u64>,
-    /// First tick with a deep road contact.
-    deep: Option<u64>,
-    /// That first deep contact came with or one step after a box contact.
+    /// A deep road contact came with or one step after a box contact
+    /// (any of them, not only the first: a fast piece can press a kerb
+    /// 0.1 m deep before a box drives it in, F680 seed 18).
     boxed: bool,
     /// Parked (byte +0x413) at the last check.
     parked: bool,
@@ -1300,7 +1300,7 @@ impl Session {
                 );
                 // (ii) Driven into the ground by a route entity box in one
                 // step: the box contact in the same or the previous step as
-                // the first deep road contact.
+                // a deep road contact.
                 let in_run = self
                     .piece_history
                     .borrow()
@@ -1375,9 +1375,8 @@ impl Session {
             };
             let tick = self.total_ticks;
             let entry = history.entry((self.resets, i)).or_default();
-            if p.deep_road && entry.deep.is_none() {
-                entry.deep = Some(tick);
-                entry.boxed = p.entity_down || entry.entity.is_some_and(|e| e + 1 == tick);
+            if p.deep_road && (p.entity_down || entry.entity.is_some_and(|e| e + 1 == tick)) {
+                entry.boxed = true;
             }
             if p.entity_down {
                 entry.entity = Some(tick);

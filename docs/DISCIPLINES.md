@@ -514,6 +514,33 @@ without base results.
   (`local/drift-est/runs/base-*` against `road-*`): summed scores Istanbul 5,911 → 44,980,
   Nürburgring 47,297 → 64,381, Long Beach 1,875 → 2,566.
 
+### 4.3.1 Close-drift flags outside the drift formats (F681)
+
+[V static] Race setup 0x669700 reads the competition format enum (mode vf 0x80 result, +0x4C;
+the name table 0xDB39CC, §1.1) and at 0x669C53 compares it with 2, 4, 3, 10 and 9. For those it
+calls the collector 0x668670 (§2, the drift manager's flag list). For every other format it calls
+0x62FEB0. That walks the level's entity instance list (world +0xBBFC, next +0xC4) and, for each
+instance whose name (+0x20) contains `close_drift_flag` (strstr 0xA66880), calls 0x7D4B00. 0x7D4B00
+frees the entity's physical parts (list +0x9C, 0x7C5190: the shape leaves the world through its
+vtable, 0xA72A70, and the part's joint is released), its entity links (+0xA0, the bodies through
+0xAD12B0) and its constraints (+0x94, 0x7D3130). `remove_joint` (0xAD9260) is the pool release
+under all three. So in a race, a time trial, Touge, Demolition Derby and the test offers the flags
+take no contact. Enum values 9 and 10 have no name in the table (two null slots after
+`test_offer_speed_test`) [O]; no event reaches them [I].
+
+Not established: whether the flags are still drawn in those events. 0x7D4B00 does not touch the
+entity's render instance [O], so the port keeps drawing them, as static meshes [I].
+
+Port: `Route::with_drift_flags` marks a drift-format event (grid-app `--discipline drift_*`,
+`grid-opponent-race --discipline`). On any other route `entity_geometry::entity_in_event` leaves
+the flag instances out of `Props::read_route` (no intact or damaged-base boxes) and out of the
+breakable catalog `dynamic_props::Catalog::read`. Test
+`close_drift_flags_take_no_contact_outside_drift_events` (Jarama 0, Yokohama Docks 0 and 1).
+Before this change every race on the 32 routes with flags (Istanbul 1/3, Jarama 0/1, Nürburgring
+0/1/3, Haruna 0, Okutama 1/2/4/5, Shibuya 0–3, Yokohama Docks 0–9, Long Beach 1/4, Washington 2/3/7/8) had
+them as obstacles. The Yokohama Docks route 1 and 9 bases (bHeavy 2000) stopped race fields dead
+(FIRST_CORNER_LIVE §13).
+
 ### 4.4 Routes (F367)
 
 Launch options (`settings/drift-battle-*.ini`, `Play GRID Drift Battle *.cmd`, 2 laps, 7 AI BMWs as

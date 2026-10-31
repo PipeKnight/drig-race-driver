@@ -821,7 +821,11 @@ impl Context {
                 &mut staged.cache,
             )?;
             direction = result.direction;
-            if result.flags[0] {
+            // The triangle path (AEA1F0) keeps the original's result.
+            let separated = result.flags[0]
+                && (matches!(extra, Extra::Triangle)
+                    || separates(mesh, matrix, triangle, direction, staged.cache)?);
+            if separated {
                 let [mut a, mut b] = staged.simplex.witnesses();
                 let inverse = 1. / dot(direction, direction).sqrt();
                 let am = inverse * margin;
@@ -927,7 +931,15 @@ impl Context {
         if !first.flags[0] {
             return Ok(None);
         }
-        axis = normalize_sample(*direction)?;
+        // AUTHORED (F680): a run whose direction does not separate the
+        // shifted shapes keeps the sampled axis (`separates`); beside an 80 m
+        // plate it measured an 18 m depth along a tilted axis.
+        let checked = matches!(extra, Extra::Axes(_));
+        if checked && !separates(mesh, shifted, triangle, *direction, self.cache)? {
+            *direction = axis;
+        } else {
+            axis = normalize_sample(*direction)?;
+        }
         let opposite = axis.map(|v| -1. * v);
         let a = triangle.support(opposite);
         let b = mesh_support(mesh, matrix, axis, &mut self.cache)?;
@@ -951,7 +963,17 @@ impl Context {
         if !second.flags[0] {
             return Ok(None);
         }
-        let [mut a, mut b] = self.simplex.witnesses();
+        let [mut a, mut b] = if checked && !separates(mesh, shifted, triangle, *direction, self.cache)? {
+            // The mesh's support point and its projection on the static
+            // shape's supporting plane along the axis.
+            *direction = axis;
+            let mut cache = self.cache;
+            let b = mesh_support(mesh, shifted, axis, &mut cache)?;
+            let gap = dot(axis, sub(triangle.support(axis.map(|v| -1. * v)), b));
+            [std::array::from_fn(|j| b[j] + gap * axis[j]), b]
+        } else {
+            self.simplex.witnesses()
+        };
         let length = dot(*direction, *direction).sqrt();
         let seed = crate::spawn::reference_seed(length, true)?;
         let normal = direction.map(|v| {
@@ -969,6 +991,32 @@ impl Context {
         }
         Ok(Some([a, b]))
     }
+}
+
+/// Whether the distance loop's final `direction` separates the cores by its
+/// own length, to within a millimetre (the loop's EPS touching distance).
+/// An accurate result always does. Beside a long thin box (an 80 m armco
+/// plate) the f32 loop can stop on a duplicate vertex or a failed sub-simplex
+/// with a 2 mm gap and a direction tens of degrees off the face, along which
+/// the shapes overlap by metres; its witnesses then select the far face and
+/// publish contacts as deep as the car (BARRIER_COLLISION §5.3). Such a
+/// result goes to the sampled penetration path instead, like touching cores.
+/// The original trusts it (AUTHORED, owner rule F320; deviation recorded in
+/// BOX_CONTACTS.md). The support search runs on a copy of the cache.
+#[allow(clippy::neg_multiply)]
+fn separates(
+    mesh: Hull<'_>,
+    matrix: Matrix,
+    triangle: Static<'_>,
+    direction: V,
+    mut cache: [usize; 7],
+) -> Result<bool, Error> {
+    let length = dot(direction, direction).sqrt();
+    let opposite = direction.map(|v| -1. * v);
+    let a = triangle.support(opposite);
+    let b = mesh_support(mesh, matrix, direction, &mut cache)?;
+    let gap = dot(direction, sub(a, b)) / length;
+    Ok(length - gap <= 1e-3)
 }
 
 #[allow(clippy::neg_multiply)] // Preserve the original multiply-by-minus-one.

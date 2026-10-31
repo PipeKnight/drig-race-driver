@@ -480,7 +480,7 @@ impl BodyGeometry {
         remaining: usize,
     ) -> Result<Vec<contact_groups::Contact>, Error> {
         Ok(self
-            .contacts_with_props(track, surfaces, bodies, remaining)?
+            .contacts_with_props(track, surfaces, bodies, remaining, None)?
             .into_iter()
             .map(|(c, _)| c)
             .collect())
@@ -488,23 +488,26 @@ impl BodyGeometry {
 
     /// As [`Self::contacts`], with the route prop box of each prop contact.
     /// A breakable prop's threshold is the contact impulse limit (+0x3C).
+    /// `directions`: the car's prop pair directions, read and updated.
     pub fn contacts_with_props(
         &self,
         track: &Track,
         surfaces: &Surfaces,
         bodies: &[contact_groups::Body],
         remaining: usize,
+        directions: Option<&mut crate::entity_geometry::PairDirections>,
     ) -> Result<Vec<(contact_groups::Contact, Option<usize>)>, Error> {
         if bodies.len() != 1 {
             return Err(Error("body geometry requires one owned vehicle"));
         }
-        let fresh = track.body_contacts(
+        let fresh = track.body_contacts_cached(
             self.shape.mesh(),
             self.pose(&bodies[0])?,
             &self.query,
             PAIR_CONTACTS,
             remaining,
             |code| surfaces.sheet(code),
+            directions,
         )?;
         Ok(fresh
             .into_iter()
