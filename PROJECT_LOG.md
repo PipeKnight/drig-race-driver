@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F678](log/F0678.md) | 2026-10-31 | Cockpit: dash backlight at night |
 | [F677](log/F0677.md) | 2026-10-31 | Sun shadows in the original's layout: three maps, the player car's map, shadow quality setting |
 | [F676](log/F0676.md) | 2026-10-31 | Car reflections: paint masks, per-view cost, damage and level crops |
 | [F675](log/F0675.md) | 2026-10-31 | Paused and Intro mix modes from the state flow; race music research (row 71 and the music sizing) |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F621](log/F0621.md) | 2026-10-27 | Owner request: PC graphics options as in the original, later |
 | [F620](log/F0620.md) | 2026-10-27 | AI car wedged against Washington tyre stacks: stuck retire requests removal |
 | [F619](log/F0619.md) | 2026-10-27 | Camera: every view against the F470 captures with the final code; live captures still needed |
-| [F618](log/F0618.md) | 2026-10-27 | Camera: the player's cockpit in the head-cam, no car in the bumper views |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

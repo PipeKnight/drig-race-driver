@@ -285,6 +285,11 @@ Needles:
 Backlight (`interior_set_backlight` (0x9FE6A0)):
 - The shaders listed in `backlight_shaders` get EmissiveMapScale 0.3 while the player's headlights are on, and their file value (0 for Lacetti) otherwise.
 - 0.3 applies whenever `emissive_scale` is present, whatever its text; without it the default is 0.15.
+- All 43 cockpits list the three dial shaders, and most also list their digital speedometer or tachometer display; every file has `emissive_scale` (0.3 or 1.5 in the text, so 0.3) [V].
+- When it switches (private notes `local/cam/cockpit/backlight_spec.txt`, static analysis):
+  - at race start 0x596440 passes the track's `vehicle_lights_on` to every car (0xA08DA0 → 0x9FE6A0) unless the route is a headlights route: on at Shibuya, Yokohama Docks and the Haruna day routes, off elsewhere;
+  - on a forced-night or day/night route the night-lights pass (0x736020, only while the light fade F is above 0) sets each car's lights to (F − d_i)·4 > 0 with no delay for the focus car, and the fade's end turns them all off (0x735BD0): on the Haruna night routes from the first frame; at Le Mans while the headlights' fade is up;
+  - 0x602FE0 passes the lighting file's `headlights`, which is 0 on all 23 shipped files [V], at load only.
 
 EmissiveFactor is never set by the code. Its constant-table default is 2.7 [I: whether that default is uploaded].
 
@@ -306,7 +311,9 @@ EmissiveFactor is never set by the code. Its constant-table default is 2.7 [I: w
   - speed and gear as the original;
   - tach from car +0x1894 [I], the engine speed the HUD also shows, because 0x414C70 (the audio's displayed speed) is not ported;
   - boost, drift_angle and drift_peak are fed 0 (not ported).
-- Backlight: not ported. By day the original's backlight shaders have no emissive, as the port draws them. At night (headlights on) they should glow at 0.3.
+- Backlight (`dash::backlight`): on a change of the rule above (`Mode::ForcedNight`, the Le Mans `Headlights::intensity` > 0, else `Environment::vehicle_lights`), each backlight shader's parts, the displays' copies included, get their TEmissiveMap × the scale × 2.7; unlit, the file value. Shaders without an emissive map stay dark.
+  - The file value is 0 in 33 cockpits, so by day nothing changes there; 10 cockpits (911, c6r, ccg, ccx, cre, df3, fmj, je4, spk, stk) save 1 on some backlight shaders and fmj also 10, so those glow by day and dim to 0.3 when lit, as 0x9FE6A0 sets them [D; a capture of the original is open].
+  - The system starts once the race runs and skips the first state when it is off and every file value is 0 (the constructor's state, as drawn).
 
 Checks:
 - `dash::tests::readouts_follow_0x9d07f0`: leading zeros, overflow and '-'.
@@ -318,7 +325,10 @@ Checks:
   - chase_close, chase_far, bonnet and bumper: 0 px against F627.
 - Render (Nissan 350Z, `--car 350`, 10 displays: 2 analog, 8 analog_dummy): at rest the speed needle is at 0 and the tach at idle; after 500 ticks at full throttle the speedometer reads about 140 mph (HUD 225 km/h) and the tach about 6 krpm.
 
-Not verified: the digit orientation against the original's screen (font strip order [I]) and EmissiveFactor.
+- Backlight renders (`--hidden`, against F672): Lacetti by day: head-cam, chase_far and bumper 0 px, chase_close and bonnet 1 px each (the system leaves Lacetti untouched by day, so this is the single-pixel drift F672 also saw [I]); Lacetti on Haruna route 1 (night) head-cam: only the dash display changes (6004 px, lit cyan); fmj by day head-cam: 1112 px, only the small lower displays (file scale 10 against 0 before).
+- `dash::tests::every_cockpit_backlight` (ignored, needs GRID_GAME_ROOT): all 43 cockpits have at least one backlight shader with an emissive map and parts.
+
+Not verified: the digit orientation against the original's screen (font strip order [I]), EmissiveFactor and the backlight against a capture of the original.
 
 ## Driver
 

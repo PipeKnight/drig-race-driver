@@ -20,6 +20,18 @@ const EMISSIVE_FACTOR: f32 = 2.7;
 #[derive(Clone, Debug, Default)]
 pub struct Dash {
     displays: Vec<Display>,
+    /// The `backlight_shaders` and the scale they take while lit.
+    backlit: Vec<Backlit>,
+    backlight_scale: f32,
+}
+
+/// One backlight shader's parts, its TEmissiveMap (RGBA8) and the
+/// EmissiveMapScale its file saves (the unlit value).
+#[derive(Clone, Debug)]
+struct Backlit {
+    parts: Vec<String>,
+    map: (UVec2, Vec<u8>),
+    file: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -196,7 +208,27 @@ pub fn prepare(root: &Path, xml: &str, tree: &pssg::Tree, draws: &[scene::Draw])
         };
         displays.push(Display { source, parts, kind });
     }
-    Ok(Dash { displays })
+    // The backlight (0xA13D99): only shaders with an emissive map can glow.
+    let (shaders, backlight_scale) = interior::read_backlight(xml)?;
+    // The saved constants only give the unlit scale: 0 without them.
+    let constants = material::read_constants(tree).unwrap_or_else(|error| {
+        eprintln!("cockpit_backlight constants unreadable: {error}");
+        Vec::new()
+    });
+    let mut backlit = Vec::new();
+    for name in &shaders {
+        let shader = name.as_bytes();
+        let parts: Vec<String> =
+            draws.iter().filter(|d| d.material == shader).map(|d| format!("interior/{}", utf8(d.id))).collect();
+        let map = bindings.iter().find(|b| b.shader == shader && b.sampler == b"TEmissiveMap" && b.container.is_none());
+        let (false, Some(map)) = (parts.is_empty(), map) else { continue };
+        let file = (constants.iter().find(|c| c.shader == shader))
+            .and_then(|c| c.values.get(&b"EmissiveMapScale"[..]))
+            .and_then(|v| v.first().copied())
+            .unwrap_or(0.);
+        backlit.push(Backlit { parts, map: rgba(tree, map.texture)?, file });
+    }
+    Ok(Dash { displays, backlit, backlight_scale })
 }
 
 /// The shader group of a shader instance.
@@ -288,7 +320,79 @@ fn font(root: &Path, name: &str) -> Result<Font, Box<dyn Error>> {
 }
 
 pub fn install(app: &mut App) {
-    app.add_systems(Update, (attach, feed).chain().before(crate::drive_present));
+    app.add_systems(Update, (attach, feed, backlight).chain().before(crate::drive_present));
+}
+
+/// Whether the player's cockpit backlight is on (docs/COCKPIT.md
+/// "Backlight"): on a forced-night route always (0x736020 with the light
+/// fade at 1), on the day/night timeline while the headlights' fade is up
+/// (0x736020, the focus car without delay), otherwise when the track turns
+/// the car lights on at the start (0x596440 → 0xA08DA0). The lighting
+/// file's `headlights` (0x602FE0) is 0 on every shipped track.
+fn backlight_on(environment: Option<&crate::track_environment::TrackEnvironment>, le_mans: Option<&crate::le_mans_event::LeMansEvent>) -> bool {
+    use grid_tools::time_of_day::Mode;
+    let Some(environment) = environment else { return false };
+    match environment.0.mode() {
+        Mode::ForcedNight => true,
+        Mode::Timeline => le_mans.is_some_and(|e| e.headlights.intensity() > 0.),
+        Mode::None => environment.0.vehicle_lights(),
+    }
+}
+
+/// interior_set_backlight (0x9FE6A0): on a change, each backlight shader's
+/// EmissiveMapScale becomes 0.3 (lit) or its file value, the emissive map
+/// × the scale × the emissive factor. The displays' own copies of a
+/// backlight shader's material follow too.
+#[allow(clippy::too_many_arguments)] // Explicit Bevy resource ownership.
+fn backlight(
+    cockpit: Option<Res<crate::cockpit::Cockpit>>,
+    running: Option<Res<Running>>,
+    environment: Option<Res<crate::track_environment::TrackEnvironment>>,
+    le_mans: Option<Res<crate::le_mans_event::LeMansEvent>>,
+    parts: Query<(&Name, &MeshMaterial3d<StandardMaterial>), With<crate::cockpit::InteriorPart>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut state: Local<Option<bool>>,
+    mut maps: Local<Vec<Handle<Image>>>,
+) {
+    let Some(dash) = cockpit.as_ref().map(|c| &c.dash) else {
+        return;
+    };
+    // After `attach`: the displays have their own materials by then.
+    if running.is_none() || dash.backlit.is_empty() {
+        return;
+    }
+    let on = backlight_on(environment.as_deref(), le_mans.as_deref());
+    // The constructor's state is off with the file values, as drawn.
+    if *state == Some(on) || (state.is_none() && !on && dash.backlit.iter().all(|b| b.file == 0.)) {
+        *state = Some(on);
+        return;
+    }
+    *state = Some(on);
+    if maps.is_empty() {
+        *maps = dash.backlit.iter().map(|b| images.add(image(b.map.0, b.map.1.clone()))).collect();
+    }
+    for (backlit, map) in dash.backlit.iter().zip(maps.iter()) {
+        let scale = if on { dash.backlight_scale } else { backlit.file };
+        let mut handles: Vec<AssetId<StandardMaterial>> = Vec::new();
+        for (name, material) in &parts {
+            if backlit.parts.iter().any(|p| p == name.as_str()) && !handles.contains(&material.0.id()) {
+                handles.push(material.0.id());
+            }
+        }
+        for id in handles {
+            let Some(mut m) = materials.get_mut(id) else { continue };
+            if scale > 0. {
+                let k = scale * EMISSIVE_FACTOR;
+                m.emissive = LinearRgba::rgb(k, k, k);
+                m.emissive_texture = Some(map.clone());
+            } else {
+                m.emissive = LinearRgba::BLACK;
+                m.emissive_texture = None;
+            }
+        }
+    }
+    println!("cockpit_backlight on={on} shaders={} scale={}", dash.backlit.len(), dash.backlight_scale);
 }
 
 /// A display at run time: its entities, material and what it shows.
@@ -529,6 +633,53 @@ fn feed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every shipped cockpit's backlight shaders (GRID_GAME_ROOT): the lit
+    /// scale is 0.3; the unlit file values are listed (0 except where
+    /// printed: those glow by day too).
+    #[test]
+    #[ignore = "needs GRID_GAME_ROOT"]
+    fn every_cockpit_backlight() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT"));
+        let mut stems: Vec<String> = std::fs::read_dir(root.join("interiors"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        stems.sort();
+        let (mut cockpits, mut lit) = (0, 0);
+        for stem in stems {
+            let mut car = crate::Car {
+                parts: Vec::new(),
+                textures: Default::default(),
+                bindings: Default::default(),
+                decal_materials: Default::default(),
+                object_glass_materials: Default::default(),
+                object_two_sided_materials: Default::default(),
+                center: Vec3::ZERO,
+                radius: 0.,
+                track: false,
+                liveries: Vec::new(),
+                low_lods: Vec::new(),
+                ornament_lods: Default::default(),
+                reflections: Default::default(),
+            };
+            let Ok(cockpit) = crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY) else { continue };
+            let dash = &cockpit.dash;
+            cockpits += 1;
+            lit += usize::from(!dash.backlit.is_empty());
+            assert_eq!(dash.backlight_scale, 0.3, "{stem}");
+            for b in &dash.backlit {
+                assert!(b.file >= 0., "{stem}");
+                if b.file != 0. {
+                    println!("{stem}: unlit EmissiveMapScale {} on {:?}", b.file, b.parts);
+                }
+                assert!(b.map.0.x > 0 && b.map.1.len() == (b.map.0.x * b.map.0.y * 4) as usize, "{stem}");
+            }
+            println!("{stem}: backlit shaders {} parts {}", dash.backlit.len(), dash.backlit.iter().map(|b| b.parts.len()).sum::<usize>());
+        }
+        println!("cockpits {cockpits} with a lit backlight {lit}");
+        assert!(cockpits >= 40 && lit > 0);
+    }
 
     /// Leading zeros, the leftmost digits on overflow, '-' as glyph 0.
     #[test]
