@@ -532,7 +532,7 @@ fn report_binding(
     }
 }
 
-fn half(bits: u16) -> f32 {
+pub(crate) fn half(bits: u16) -> f32 {
     let sign = if bits & 0x8000 == 0 { 1. } else { -1. };
     let exponent = (bits >> 10) & 31;
     let mantissa = f32::from(bits & 1023) / 1024.;

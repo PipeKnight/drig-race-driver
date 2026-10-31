@@ -69,7 +69,7 @@ struct Shard {
 }
 /// Original material of a draw whose material was swapped for damage.
 #[derive(Component)]
-struct Original(Handle<StandardMaterial>);
+pub(crate) struct Original(pub(crate) Handle<StandardMaterial>);
 
 /// AUTHORED hinge of a loose part, in model space.
 #[derive(Clone, Copy)]

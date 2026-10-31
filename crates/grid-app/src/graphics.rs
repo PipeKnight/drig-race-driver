@@ -53,6 +53,8 @@ pub struct Settings {
     pub anti_aliasing: u8,
     /// 0: sky IBL, 1: deferred control, 2: SSR, 3: local HDR scene probe.
     pub reflection_mode: u8,
+    /// The cars' dynamic environment cube (docs/CAR_REFLECTIONS.md).
+    pub car_reflections: crate::car_reflections::Level,
     pub probe_size: u32,
     pub moving_probe: bool,
     pub ssr_thickness: f32,
@@ -157,6 +159,7 @@ impl Default for Settings {
             smooth_wheel_motion: true,
             anti_aliasing: 1,
             reflection_mode: 0,
+            car_reflections: crate::car_reflections::Level::from_env().unwrap_or_default(),
             probe_size: 1024,
             moving_probe: false,
             ssr_thickness: 0.05,

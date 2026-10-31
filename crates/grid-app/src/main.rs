@@ -46,6 +46,8 @@ mod ambience_sound;
 mod collision_sound;
 mod crowd_sound;
 mod car_materials;
+mod car_reflection_overlay;
+mod car_reflections;
 mod lamp_materials;
 mod lamp_signals;
 mod paint_environment;
@@ -199,6 +201,9 @@ struct Car {
     low_lods: Vec<LowLod>,
     /// Track ornaments' levels of detail (docs/TRACK_LOD.md).
     ornament_lods: ornament_lod::Levels,
+    /// Reflecting materials' saved controls, keyed like the parts' materials
+    /// (docs/CAR_REFLECTIONS.md).
+    reflections: BTreeMap<String, car_reflection_overlay::Controls>,
 }
 /// A model's `_lowLOD.pssg` for its opponents.
 #[derive(Default)]
@@ -805,7 +810,16 @@ fn load_package(
         liveries: Vec::new(),
         low_lods: Vec::new(),
         ornament_lods: Default::default(),
+        reflections: Default::default(),
     };
+    if !track {
+        for shader in material::read_constants(&tree)? {
+            if let Some(controls) = car_reflection_overlay::Controls::from_constants(&shader.values) {
+                car.reflections
+                    .insert(String::from_utf8(shader.shader.to_vec())?, controls);
+            }
+        }
+    }
     if objects {
         append_objects(root, route, &mut car)?;
     }
@@ -1531,6 +1545,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         liveries: Vec::new(),
         low_lods: Vec::new(),
         ornament_lods: Default::default(),
+        reflections: Default::default(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -1582,6 +1597,9 @@ fn append_car(
     for (name, texture) in source.bindings {
         car.bindings
             .insert(format!("{prefix}{name}"), format!("{prefix}{texture}"));
+    }
+    for (name, controls) in source.reflections {
+        car.reflections.insert(format!("{prefix}{name}"), controls);
     }
     car.parts.extend(source.parts);
     while car.low_lods.len() <= m {
@@ -2429,6 +2447,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     return Err("invalid geometry pixel".into());
                 }
                 geometry_pixel = Some(pixel);
+            }
+            "--car-reflections" => {
+                graphics.car_reflections = car_reflections::Level::parse(&args.next().unwrap_or_default())
+                    .ok_or("--car-reflections needs off, original, high or ultra")?;
             }
             "--probe-update" => {
                 graphics.moving_probe = match args.next().as_deref() {
@@ -4432,6 +4454,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off {
         lamp_materials::install(&mut app);
     }
+    if graphics.car_reflections != car_reflections::Level::Off && graphics.reflection_mode == 3 {
+        return Err("--car-reflections replaces --reflections probe; choose one".into());
+    }
+    car_reflections::install(&mut app, graphics.car_reflections, &root, &route);
+    if graphics.car_reflections != car_reflections::Level::Off {
+        car_reflection_overlay::install(&mut app)?;
+    }
     if graphics.paint_environment > 0. {
         paint_environment::install(&mut app)?;
     }
@@ -5222,6 +5251,21 @@ fn setup(
             }
         }
     }
+    // The reflecting car materials' saved controls (docs/CAR_REFLECTIONS.md).
+    // Opponents' livery copies keep their part's controls.
+    let reflective = material_handles
+        .iter()
+        .chain(livery_materials.iter().map(|((_, key), handle)| (key, handle)))
+        .chain(occluded_liveries.iter().map(|((_, key), handle)| (key, handle)))
+        .filter_map(|(key, handle)| {
+            let controls = *car.reflections.get(key)?;
+            let glass = materials
+                .get(handle)
+                .is_some_and(|m| matches!(m.alpha_mode, AlphaMode::Blend));
+            Some((handle.id(), (controls, glass)))
+        })
+        .collect();
+    commands.insert_resource(car_reflection_overlay::Reflective(reflective));
     if let Some(material) = material_handles.get("objects/start_lights").cloned()
         && start_light_images.iter().all(Option::is_some)
     {
@@ -7050,6 +7094,7 @@ mod driving_tests {
                         liveries: Vec::new(),
                         low_lods: Vec::new(),
                         ornament_lods: Default::default(),
+                        reflections: Default::default(),
                     };
                     append_route_split(root, &route, &model, &mut car)
                         .unwrap_or_else(|e| panic!("{}: {e}", route.path()));

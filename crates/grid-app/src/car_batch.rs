@@ -107,7 +107,10 @@ fn restore(mut demoted: ResMut<Demoted>, parts: Query<Option<&RenderLayers>>, mu
 
 /// A merged mesh of one car's parts of one material.
 #[derive(Component)]
-pub struct Batch;
+pub struct Batch {
+    /// The car, 0 the player's.
+    pub car: usize,
+}
 
 /// Opponent `car`'s shadow caster: its model's coarsest level.
 #[derive(Component)]
@@ -803,7 +806,7 @@ fn rebuild(
                     MeshMaterial3d(group.material.clone()),
                     pose.map_or_else(Transform::default, Transform::from_matrix),
                     bounds,
-                    Batch,
+                    Batch { car: group.car },
                     NoAutoAabb,
                 ));
                 if group.shadow_body {

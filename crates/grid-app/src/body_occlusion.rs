@@ -202,6 +202,7 @@ mod tests {
             ],
             low_lods: Vec::new(),
             ornament_lods: Default::default(),
+            reflections: Default::default(),
         };
         let original = car.textures.clone();
         let banks = car.liveries.clone();

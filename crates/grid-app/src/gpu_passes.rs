@@ -10,6 +10,9 @@
 //! gpu_pass rank=1 gpu_ms=6.10 primitives=812345 vertices=1201234 fragments=2101234 name=main_opaque_pass_3d
 //! ```
 //!
+//! A pass every camera runs (the reflection faces' `main_opaque_pass_3d`
+//! beside the main view's) is the sum over the cameras.
+//!
 //! Bevy times the main passes but not the shadow passes; `shadow_span` adds
 //! one pass per sun cascade (`shadow_cam0_c0..3`). Each window also logs the
 //! triangles each view submits (the camera and every shadow cascade), by
@@ -205,17 +208,21 @@ fn report(
         let Some(field) = FIELDS.iter().position(|f| rest.ends_with(f)) else {
             continue;
         };
-        let Some(m) = diagnostic.measurement() else {
+        // Every camera's pass of one name records its own measurement (the six
+        // reflection faces and the main view each run main_opaque_pass_3d):
+        // sum the ones added since the last frame, counting the frame once.
+        let last = seen.get(path).copied();
+        let new: Vec<_> = diagnostic
+            .measurements()
+            .filter(|m| last.is_none_or(|t| m.time > t))
+            .collect();
+        let Some(newest) = new.iter().map(|m| m.time).max() else {
             continue;
         };
-        // One measurement per rendered frame; count each once.
-        if seen.get(path) == Some(&m.time) {
-            continue;
-        }
-        seen.insert(path.to_string(), m.time);
+        seen.insert(path.to_string(), newest);
         let name = rest[..rest.len() - FIELDS[field].len()].trim_end_matches('/');
         let pass = passes.entry(name.to_string()).or_default();
-        pass.sums[field] += m.value;
+        pass.sums[field] += new.iter().map(|m| m.value).sum::<f64>();
         pass.frames[field] += 1;
     }
     *frames += 1;
