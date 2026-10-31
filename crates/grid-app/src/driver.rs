@@ -143,67 +143,23 @@ pub fn append(
     if !anims.is_file() {
         return Ok(None);
     }
-    let bytes = read(&root.join("characters/models/driver_model.pssg"))?;
-    let tree = pssg::read_tree(&bytes)?;
-    let mut joints = Vec::new();
-    let mut index = std::collections::HashMap::new();
-    // The IK hints (LA_hint, ...) and Bip01 Footsteps are plain NODEs in the
-    // joint hierarchy.
-    for i in (0..tree.nodes.len()).filter(|&i| matches!(tree.name(i), b"JOINTNODE" | b"NODE")) {
-        let parent = tree.nodes[i].parent.and_then(|p| index.get(&p).copied());
-        index.insert(i, joints.len());
-        joints.push(Joint {
-            name: String::from_utf8_lossy(tree.string(i, b"id")?).into_owned(),
-            parent,
-            local: Mat4::from_cols_array(&scene::matrix(&tree, i)?),
-        });
-    }
-    let meshes = mesh::read_object_meshes(&tree)?;
-    let skin = scene::read_skin(&tree, &meshes, b"body_x4")?;
-    let skin_joints: Vec<usize> = skin.joints.iter().map(|j| index[j]).collect();
-    let mut diffuse = std::collections::BTreeMap::new();
-    for b in material::read_texture_bindings(&tree)? {
-        if b.sampler == b"TDiffuseAlphaMap" && b.container.is_none() {
-            diffuse.insert(b.shader, b.texture);
-        }
-    }
-    let utf8 = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-    let mut needed = Vec::new();
-    for &(id, shader, source) in &skin.instances {
-        if lod_slot(id) != HEADLESS_SLOT {
-            continue;
-        }
-        let source = &meshes[source];
-        let (bound, weights) = source.skin_weights.as_ref().expect("read_skin checked the weights");
-        let mut geometry = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        );
-        geometry.insert_attribute(Mesh::ATTRIBUTE_POSITION, source.positions.clone());
-        geometry.insert_attribute(Mesh::ATTRIBUTE_NORMAL, source.normals.clone());
-        geometry.insert_attribute(Mesh::ATTRIBUTE_UV_0, source.texcoords.clone());
-        geometry.insert_attribute(
-            Mesh::ATTRIBUTE_JOINT_INDEX,
-            VertexAttributeValues::Uint16x4(bound.iter().map(|j| j.map(u16::from)).collect()),
-        );
-        geometry.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, weights.clone());
-        geometry.insert_indices(Indices::U16(source.indices.clone()));
-        let material = format!("car0/interior/driver/{}", utf8(shader));
-        if let Some(texture) = diffuse.get(shader) {
-            car.bindings.insert(material.clone(), format!("car0/interior/driver/{}", utf8(texture)));
-            needed.push(*texture);
+    let Model { joints, skin: skin_joints, inverse_bind, instances, textures } = Model::read(root)?;
+    for instance in instances.into_iter().filter(|i| i.slot == HEADLESS_SLOT) {
+        let material = format!("car0/interior/driver/{}", instance.shader);
+        if let Some(texture) = &instance.texture {
+            car.bindings.insert(material.clone(), format!("car0/interior/driver/{texture}"));
+            if let Some(dds) = textures.get(texture) {
+                car.textures.insert(format!("car0/interior/driver/{texture}"), dds.clone());
+            }
         }
         car.parts.push(Part {
-            name: format!("interior/driver/{}", utf8(id)),
+            name: format!("interior/driver/{}", instance.id),
             joint: format!("{}body_x4", crate::cockpit::JOINT),
             material,
-            mesh: geometry,
+            mesh: instance.mesh,
             matrices: vec![anchor * Mat4::from_cols_array(&scene::node_matrix(interior, seat)?)],
             wheel: None,
         });
-    }
-    for t in texture::read_named(&tree, &needed)? {
-        car.textures.insert(format!("car0/interior/driver/{}", utf8(t.id)), t.validated_dds().0);
     }
     let sets = neanim::read_sets(&pssg::read_tree(&read(&anims)?)?)?;
     let Some(neutral) = sets.first().and_then(|s| s.clips.iter().find(|c| c.name == "Neutral")) else {
@@ -247,19 +203,7 @@ pub fn append(
         limb("L", "Thigh", "Calf", "Foot", "LL_hint", target("D_Lfoot_Dummy")?)?,
         limb("R", "Thigh", "Calf", "Foot", "RL_hint", target("D_Rfoot_Dummy")?)?,
     ];
-    let pose = |clip: &neanim::Clip| -> Pose {
-        let mut pose: Pose = vec![(None, None); joints.len()];
-        for c in &clip.channels {
-            let Some(j) = joints.iter().position(|j| j.name == c.target) else { continue };
-            let v = Vec4::from_array(c.keys.sample(0.));
-            match c.semantic.as_str() {
-                "rotation_quaternion" => *pose[j].0.get_or_insert(Vec4::ZERO) += v,
-                "translation" => *pose[j].1.get_or_insert(Vec3::ZERO) += v.truncate(),
-                _ => {}
-            }
-        }
-        pose
-    };
+    let pose = |clip: &neanim::Clip| first_key(&joints, clip);
     let anim = |i: usize| -> Result<Anim, String> {
         let clip = clips.get(i).ok_or(format!("{set} clip {i} absent"))?;
         let mut out = Anim::new();
@@ -305,7 +249,7 @@ pub fn append(
         root: anchor * Mat4::from_cols_array(&scene::node_matrix(interior, seat)?),
         joints,
         skin: skin_joints,
-        inverse_bind: skin.inverse_bind.iter().map(Mat4::from_cols_array).collect(),
+        inverse_bind,
         limbs,
     };
     println!(
@@ -316,6 +260,160 @@ pub fn append(
         driver.limbs.len(),
     );
     Ok(Some(driver))
+}
+
+/// `characters/models/driver_model.pssg`: the skeleton, the skin and every
+/// level-of-detail instance (0x85D960 sorts them into six slots).
+pub struct Model {
+    joints: Vec<Joint>,
+    skin: Vec<usize>,
+    inverse_bind: Vec<Mat4>,
+    pub instances: Vec<Instance>,
+    /// The diffuse textures by id, as DDS.
+    pub textures: std::collections::BTreeMap<String, Vec<u8>>,
+}
+
+/// One skinned instance (body, helmet or visor of an `_xN` set).
+pub struct Instance {
+    pub id: String,
+    /// The level-of-detail slot: the digit after `_x`, minus one.
+    pub slot: u32,
+    pub shader: String,
+    /// The shader's TDiffuseAlphaMap texture id.
+    pub texture: Option<String>,
+    pub mesh: Mesh,
+}
+
+impl Model {
+    pub fn read(root: &Path) -> Result<Self, Box<dyn Error>> {
+        let bytes = read(&root.join("characters/models/driver_model.pssg"))?;
+        let tree = pssg::read_tree(&bytes)?;
+        let mut joints = Vec::new();
+        let mut index = std::collections::HashMap::new();
+        // The IK hints (LA_hint, ...) and Bip01 Footsteps are plain NODEs in
+        // the joint hierarchy.
+        for i in (0..tree.nodes.len()).filter(|&i| matches!(tree.name(i), b"JOINTNODE" | b"NODE")) {
+            let parent = tree.nodes[i].parent.and_then(|p| index.get(&p).copied());
+            index.insert(i, joints.len());
+            joints.push(Joint {
+                name: String::from_utf8_lossy(tree.string(i, b"id")?).into_owned(),
+                parent,
+                local: Mat4::from_cols_array(&scene::matrix(&tree, i)?),
+            });
+        }
+        let meshes = mesh::read_object_meshes(&tree)?;
+        let skin = scene::read_skin(&tree, &meshes, b"body_x4")?;
+        let mut diffuse = std::collections::BTreeMap::new();
+        for b in material::read_texture_bindings(&tree)? {
+            if b.sampler == b"TDiffuseAlphaMap" && b.container.is_none() {
+                diffuse.insert(b.shader, b.texture);
+            }
+        }
+        let utf8 = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+        let mut instances = Vec::new();
+        let mut needed = Vec::new();
+        for &(id, shader, source) in &skin.instances {
+            let source = &meshes[source];
+            let (bound, weights) = source.skin_weights.as_ref().expect("read_skin checked the weights");
+            let mut geometry = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+            geometry.insert_attribute(Mesh::ATTRIBUTE_POSITION, source.positions.clone());
+            geometry.insert_attribute(Mesh::ATTRIBUTE_NORMAL, source.normals.clone());
+            geometry.insert_attribute(Mesh::ATTRIBUTE_UV_0, source.texcoords.clone());
+            geometry.insert_attribute(
+                Mesh::ATTRIBUTE_JOINT_INDEX,
+                VertexAttributeValues::Uint16x4(bound.iter().map(|j| j.map(u16::from)).collect()),
+            );
+            geometry.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, weights.clone());
+            geometry.insert_indices(Indices::U16(source.indices.clone()));
+            let texture = diffuse.get(shader).copied();
+            if let Some(t) = texture.filter(|t| !needed.contains(t)) {
+                needed.push(t);
+            }
+            instances.push(Instance {
+                id: utf8(id),
+                slot: lod_slot(id),
+                shader: utf8(shader),
+                texture: texture.map(utf8),
+                mesh: geometry,
+            });
+        }
+        let textures = (texture::read_named(&tree, &needed)?.into_iter())
+            .map(|t| (utf8(t.id), t.validated_dds().0))
+            .collect();
+        Ok(Model {
+            joints,
+            skin: skin.joints.iter().map(|j| index[j]).collect(),
+            inverse_bind: skin.inverse_bind.iter().map(Mat4::from_cols_array).collect(),
+            instances,
+            textures,
+        })
+    }
+
+    /// The model-frame joint transforms of a car's "Neutral" seat pose
+    /// (`interiors/<stem>/int_<stem>_driver_anims.pssg`): an opponent's
+    /// whole pose (docs/COCKPIT.md "Drivers outside the head-cam"); `None`
+    /// when the car has no such clip.
+    pub fn neutral(&self, root: &Path, stem: &str) -> Result<Option<Vec<Mat4>>, Box<dyn Error>> {
+        let anims = root.join(format!("interiors/{stem}/int_{stem}_driver_anims.pssg"));
+        if !anims.is_file() {
+            return Ok(None);
+        }
+        let sets = neanim::read_sets(&pssg::read_tree(&read(&anims)?)?)?;
+        let Some(neutral) = sets.first().and_then(|s| s.clips.iter().find(|c| c.name == "Neutral")) else {
+            return Ok(None);
+        };
+        Ok(Some(world(&self.joints, &locals(&self.joints, &first_key(&self.joints, neutral)))))
+    }
+
+    /// The skin joints in skin order (indices into a pose).
+    pub fn skin(&self) -> &[usize] {
+        &self.skin
+    }
+
+    /// The inverse bind matrices, in skin order.
+    pub fn inverse_bind(&self) -> &[Mat4] {
+        &self.inverse_bind
+    }
+}
+
+/// A clip sampled at its first key on `joints` (the static poses of
+/// 0x84BA20).
+fn first_key(joints: &[Joint], clip: &neanim::Clip) -> Pose {
+    let mut pose: Pose = vec![(None, None); joints.len()];
+    for c in &clip.channels {
+        let Some(j) = joints.iter().position(|j| j.name == c.target) else { continue };
+        let v = Vec4::from_array(c.keys.sample(0.));
+        match c.semantic.as_str() {
+            "rotation_quaternion" => *pose[j].0.get_or_insert(Vec4::ZERO) += v,
+            "translation" => *pose[j].1.get_or_insert(Vec3::ZERO) += v.truncate(),
+            _ => {}
+        }
+    }
+    pose
+}
+
+/// Local transforms of summed poses, each quaternion normalised (0xAC67A0);
+/// a slot no entry writes keeps the node's own transform.
+fn locals(joints: &[Joint], sums: &Pose) -> Vec<Mat4> {
+    let mut out = Vec::with_capacity(joints.len());
+    for (joint, &(q, t)) in joints.iter().zip(sums) {
+        let (_, file_q, file_t) = joint.local.to_scale_rotation_translation();
+        let q = q.filter(|q| q.length_squared() > 1e-12).map_or(file_q, |q| Quat::from_vec4(q).normalize());
+        out.push(Mat4::from_rotation_translation(q, t.unwrap_or(file_t)));
+    }
+    out
+}
+
+/// Model-frame transforms of local ones, parents first.
+fn world(joints: &[Joint], locals: &[Mat4]) -> Vec<Mat4> {
+    let mut out: Vec<Mat4> = Vec::with_capacity(locals.len());
+    for (joint, local) in joints.iter().zip(locals) {
+        out.push(joint.parent.map_or(*local, |p| out[p] * *local));
+    }
+    out
 }
 
 /// The level-of-detail slot of a model instance (0x84A9D0): the number
@@ -350,6 +448,29 @@ impl Driver {
     /// (+1 = full right) and the reach state `reach`, the hands and feet
     /// reaching for this frame's `interior` nodes.
     fn pose(&self, s: f32, interior: &[Mat4], reach: Option<&crate::reach::State>, lean: &[f32; 12]) -> Vec<Mat4> {
+        let locals = self.solve(locals(&self.joints, &self.sums(s, reach, lean)), interior, reach);
+        self.world(&locals)
+    }
+
+    /// The pose outside the head-cam at animation level 2 or coarser
+    /// (0x85DA80): Neutral and the steering poses; no lean, no reaches, no
+    /// IK.
+    pub fn exterior_pose(&self, s: f32) -> Vec<Mat4> {
+        self.world(&locals(&self.joints, &self.sums(s, None, &[0.; 12])))
+    }
+
+    /// The skin joints in skin order (indices into a pose).
+    pub fn skin(&self) -> &[usize] {
+        &self.skin
+    }
+
+    /// The inverse bind matrices, in skin order.
+    pub fn inverse_bind(&self) -> &[Mat4] {
+        &self.inverse_bind
+    }
+
+    /// The summed clip poses: Neutral, steering, reaches and lean.
+    fn sums(&self, s: f32, reach: Option<&crate::reach::State>, lean: &[f32; 12]) -> Pose {
         let (left, right) = ((-s).max(0.), s.max(0.));
         // 0x851730 → 0x852030: to-left, left, to-right, right, all scaled
         // by the state crossfade's steering weight.
@@ -388,13 +509,12 @@ impl Driver {
         for (anim, &w) in self.lean.iter().zip(lean).filter(|(_, w)| **w > STEER_MIN) {
             add(&mut sums, anim, 0., w);
         }
-        let mut locals: Vec<Mat4> = Vec::with_capacity(self.joints.len());
-        for (joint, &(q, t)) in self.joints.iter().zip(&sums) {
-            // A slot no entry writes keeps the node's own transform.
-            let (_, file_q, file_t) = joint.local.to_scale_rotation_translation();
-            let q = q.filter(|q| q.length_squared() > 1e-12).map_or(file_q, |q| Quat::from_vec4(q).normalize());
-            locals.push(Mat4::from_rotation_translation(q, t.unwrap_or(file_t)));
-        }
+        sums
+    }
+
+    /// The IK passes on `locals`: legs first (0x852EC0), then arms
+    /// (0x852FD0), each arm blending its sources.
+    fn solve(&self, mut locals: Vec<Mat4>, interior: &[Mat4], reach: Option<&crate::reach::State>) -> Vec<Mat4> {
         let to_model = self.root.inverse();
         let parents = self.parents();
         // Legs first (0x852EC0), then arms (0x852FD0).
@@ -457,15 +577,11 @@ impl Driver {
                 }
             }
         }
-        self.world(&locals)
+        locals
     }
 
     fn world(&self, locals: &[Mat4]) -> Vec<Mat4> {
-        let mut world: Vec<Mat4> = Vec::with_capacity(locals.len());
-        for (joint, local) in self.joints.iter().zip(locals) {
-            world.push(joint.parent.map_or(*local, |p| world[p] * *local));
-        }
-        world
+        world(&self.joints, locals)
     }
 
     fn parents(&self) -> Vec<Option<usize>> {

@@ -357,7 +357,7 @@ Not verified: the digit orientation against the original's screen (font strip or
 - Not ported:
   - breathing and face clips;
   - the suit tint (TTintColourMask, tintColour1..3);
-  - the drivers seen through the windows in the other views and in the opponents' cars (slots 0, 2..5 and 0x862300).
+  - the drivers seen through the windows and in the opponents' cars: ported, see "Drivers outside the head-cam".
 
 Checks:
 - `driver::tests::level_of_detail_slot_reads_the_digit_after_x`.
@@ -365,3 +365,73 @@ Checks:
 - Renders (Lacetti, `local/cam/render/driver*`): gloved hands on the rim at rest and following it to both locks (`driver/turns.png`). Chase_close, chase_far, bonnet and bumper: 0 px against F630.
 
 Not verified: the suit colours without the tint and the arm shape against a capture of the original.
+
+## Drivers outside the head-cam
+
+Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/exterior_drivers.txt` (static analysis; the original was not launched).
+
+### What the original does [D unless marked]
+
+- **Placement** (0x861C50 player, 0x862300 opponents, from 0x862850): the car's `D_bip_position` node is moved under the car root and the driver model under it.
+  - That node comes from `cars/<stem>/<stem>_anim_dummies.pssg`, cloned into each car LOD root (0x8FA030). It is the identity in all 43 files [V].
+  - So every driver sits in the car frame, seated by its car type's "Neutral" clip (`int_<stem>_driver_anims.pssg`), and is drawn wherever the car is.
+  - The player's driver in the exterior views is the same model and seat as in the head-cam.
+- **Level of detail** (0x85D310, every frame after the camera):
+  - each driver's distance is d = |car root − camera| · tan(fov/2) / tan(0.47996554) (the 55° reference of the car LOD); the focus car's is 0;
+  - desired level = clamp(⌊d / 10⌋, 0, 5), at most 4;
+  - drivers are served nearest first; each takes the first level at or above its desired one whose cap is not used up; none left hides it.
+- **Caps** (`raceload.jpk#characterlodsettings.xml`, parser 0x848E50 [V]), levels 0..4:
+
+  | set | 0 | 1 | 2 | 3 | 4 |
+  |---|---|---|---|---|---|
+  | low | 0 | 0 | 1 | 3 | 99 |
+  | medium (default) | 0 | 0 | 1 | 5 | 99 |
+  | high | 0 | 0 | 2 | 5 | 99 |
+  | ultra | 1 | 0 | 2 | 8 | 99 |
+  | replay | 1 | 0 | 2 | 4 | 99 |
+  | FE | 0 | 0 | 0 | 0 | 0 |
+
+  - The set follows the "vehicleDrivers" option, characterQuality 1..4 (default 2, `system/hardware_settings_config.xml` [V]); replays use set 5 and the front end set 6 (0x607BC0).
+  - characterQuality 0 ("off") loads no driver at all, the player's included (0x8F2A60).
+- **Meshes** (0x84A930): level 0 and 1 draw `_x1` (with helmet and visor, 3300 triangles), 2 `_x3` (1082), 3 `_x4` (484), 4 `_x5` (200); `_x6` never.
+  - A view with DisableDriverHead draws the focus driver's headless `_x2` instead. cameras.xml sets it for the head-cam, bonnet, bumper and the replay wing and rear views of every car [V]; the chase views have no driver parameter, so the head shows.
+- **Result on medium:**
+  - the player takes the one level-2 slot (`_x3`);
+  - the five nearest opponents get level 3 (`_x4`), the rest level 4 (`_x5`).
+  - An opponent whose desired level is 4 (beyond 40 FOV-scaled metres) takes level 4 even when level 3 has room.
+- **Animation** (0x85DA80): at level 2 and coarser, no IK, no lean, no reaches, no face clips; the player's steering poses still run (animation flag +0x2C = 0).
+  - The opponents' animators find no steering, gear, handbrake or pedal nodes, so they hold the Neutral pose [D; I: rests on the attach order, a live check is open].
+- **Passes** (0x84A810): the player's driver draws in the colour, shadow and reflection passes; the opponents' in the colour pass only.
+  - In the exterior views the player's driver follows the body's damage deformation (0x8494C0); the opponents' never do.
+- **Tints:** the opponents' suits are tinted from `driver_suit.tint1..3` through `vehicle_livery.driver_suit_id`, on the body and helmet shaders.
+
+### The port (`exterior_driver.rs`)
+
+- `exterior_driver::prepare` (at load) reads the model (`driver::Model`, all six slots), the medium caps and each opponent car type's Neutral pose.
+- `spawn` (first frame) creates:
+  - the player's exterior driver: the cockpit driver's skeleton, skinned, every slot 0..4 under one root;
+  - each opponent's driver: its Neutral pose baked into static meshes once per car type (no joints), with NotShadowCaster.
+  - Materials follow the car material path's rule for the head-cam driver: the diffuse map, roughness 0.7, opaque; the visor too [I: its shader is not decoded].
+- `present`, after `drive_present`, each frame:
+  - places each root at its car's pose · model offset (the player: `Driver::root`, as the cockpit);
+  - computes the levels with `levels` from the driving camera, the vertical FOV as for the car LOD [I];
+  - shows one slot per driver, `_x2` for the player in a DisableDriverHead view;
+  - hides the player's exterior driver in the head-cam (the cockpit draws its own) and the bumper views;
+  - poses the player's skeleton with `Driver::exterior_pose`: Neutral and the steering poses for the wheel's s.
+- `GRID_EXTERIOR_DRIVERS=0` leaves them out (comparisons).
+- Not ported:
+  - the vehicleDrivers option (the port uses medium), the replay and front-end sets, and ultra's level-0 animation (lean and leg IK);
+  - the suit tints (all drivers draw the untinted suit, as the head-cam);
+  - the player driver's damage deformation;
+  - whether the drivers appear in the car reflection cube (F670, off by default) was not checked;
+  - the cars without a driver (vehicle +0x3910, meaning open).
+
+Checks:
+- `exterior_driver::tests`: the level rule on the medium and ultra caps (the focus car first, five opponents at level 3, a far opponent at level 4 with level 3 free, the front-end set hides all), the slot rule (never slot 1 by level), and the shipped caps (GRID_GAME_ROOT: medium (0, 0, 1, 5, 99), ultra (1, 0, 2, 8, 99)).
+- `driver::tests` (all three cockpit tests) pass on the refactored `driver::Model`.
+- Renders (Lacetti, Donington, 300 ticks; worktree camera-dynamics-11a55d `local/cam/render/`, private), against the F666 build:
+  - with the drivers: the head-cam and bumper 0 px, the bonnet 1 px; chase_close and chase_far change only inside the car's rear window (`r_ext`);
+  - `GRID_EXTERIOR_DRIVERS=0`: chase_close, chase_far, bonnet and bumper 0 px; the head-cam 2 px with a channel difference of 1, repeatable and not explained (0 px with the drivers on);
+  - chase_close turned 69° to the side (free look): the driver seated behind the cage, helmet under the roof (`r_ext_side_zoom.png`);
+  - twelve cars from grid slot 12, tick 30: the changed pixels lie only in the cabins of the player's car and the cars ahead (`r_ext_opp30_mask.png`); log `exterior_drivers ... opponents=11 posed=11`, `seats=12`.
+- Not measured: the frame cost (twelve drivers of 200 to 1082 triangles; the opponents' are static meshes without joints).

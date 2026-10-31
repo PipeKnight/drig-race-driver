@@ -243,6 +243,9 @@ pub struct View {
     pub hidden: bool,
     pub reverse: Option<usize>,
     pub rig: Rig,
+    /// DisableDriverHead (view +0xFD): the player's driver draws its headless
+    /// `_x2` meshes (0x84E440, 0x85D310).
+    pub disable_driver_head: bool,
 }
 
 /// One car's views.
@@ -359,6 +362,7 @@ impl Views {
                 hidden: v.hidden,
                 reverse: None,
                 rig,
+                disable_driver_head: v.flag("DisableDriverHead").unwrap_or(false),
             });
         }
         for (i, v) in def.views.iter().enumerate() {
@@ -421,12 +425,14 @@ impl Views {
                 hidden: false,
                 reverse: Some(1),
                 rig: chase(Vec3::new(0., 3., -9.), Vec3::Y),
+                disable_driver_head: false,
             },
             View {
                 ident: format!("{DEFAULT_VIEW}_reverse"),
                 hidden: true,
                 reverse: None,
                 rig: chase(Vec3::new(0., 3., 9.), Vec3::Y),
+                disable_driver_head: false,
             },
         ])
     }
@@ -1864,6 +1870,11 @@ impl Cameras {
         )
     }
 
+    /// Whether the view on screen hides the driver's head (DisableDriverHead).
+    pub fn driver_head_hidden(&self) -> bool {
+        self.views.0[self.shown.unwrap_or(self.current)].disable_driver_head
+    }
+
     /// Audio camera of the view on screen (4139F0, docs/AUDIO_RESEARCH.md).
     pub fn audio_camera(&self) -> grid_tools::audio_mix::Camera {
         let rig = &self.views.0[self.shown.unwrap_or(self.current)].rig;
@@ -2276,6 +2287,7 @@ mod tests {
                     hidden,
                     reverse,
                     rig,
+                    disable_driver_head: false,
                 })
                 .collect(),
         )

@@ -60,6 +60,7 @@ mod clearcoat_prepass;
 mod damage_hud;
 mod dash;
 mod driver;
+mod exterior_driver;
 mod interior_anim;
 mod lean;
 mod reach;
@@ -3754,6 +3755,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     let mut cockpit = None;
+    let mut exterior_drivers = None;
     if reference {
         let model = if let Some(driving) = &driving {
             model_offset(&driving.runtime)
@@ -3766,6 +3768,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             match cockpit::append(&root, player_car.stem(), &mut car, model) {
                 Ok(c) => cockpit = Some(c),
                 Err(error) => eprintln!("cockpit skipped: {error}"),
+            }
+            // The drivers seen from outside, the opponents' included.
+            let opponents = driving.as_ref().and_then(|d| d.opponents.as_ref()).map_or(&[][..], |o| &o.multi.cars[1..]);
+            let stems: Vec<&str> = (1..=opponents.len()).map(|k| field.models[field.car_model[k]].stem()).collect();
+            let offsets: Vec<Mat4> = opponents.iter().map(model_offset).collect();
+            match exterior_driver::prepare(&root, &stems, &offsets) {
+                Ok(p) => exterior_drivers = p,
+                Err(error) => eprintln!("exterior drivers skipped: {error}"),
             }
         }
         if let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
@@ -4405,6 +4415,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         camera::install(&mut app, &root, field.models[0].stem());
         player_view_visibility::install(&mut app);
         cockpit::install(&mut app);
+        exterior_driver::install(&mut app);
         track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
@@ -4605,6 +4616,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     foundation_backing::install(&mut app, foundation_backing)?;
     if let Some(cockpit) = cockpit {
         app.insert_resource(cockpit);
+    }
+    if let Some(pending) = exterior_drivers {
+        app.insert_resource(pending);
     }
     let exit = app
         .insert_resource(body_occlusion)

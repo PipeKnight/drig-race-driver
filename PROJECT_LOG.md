@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F672](log/F0672.md) | 2026-10-31 | Cockpit: drivers through the windows and in opponents' cars |
 | [F671](log/F0671.md) | 2026-10-31 | Every car finishes on its own line crossing; Okutama routes 2 and 5 count both laps |
 | [F670](log/F0670.md) | 2026-10-31 | Car reflections: dynamic cube and per-material response (off by default) |
 | [F669](log/F0669.md) | 2026-10-31 | A wheel on a material without mechanics reads the original's initializer record (row 9) |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F615](log/F0615.md) | 2026-10-27 | The Viper race at Washington in every bundled APK: menu entry race_viper, traced data, stage check |
 | [F614](log/F0614.md) | 2026-10-27 | Speech part 2 step 4: driver identities, key drivers and the teammate |
 | [F613](log/F0613.md) | 2026-10-27 | Camera: Change View blends as in a race, every view runs every frame |
-| [F612](log/F0612.md) | 2026-10-27 | Camera: spin hold proven on a deterministic scene, the chase knock, and the original's per-frame clock (camera_fps) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
