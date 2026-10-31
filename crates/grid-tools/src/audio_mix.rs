@@ -62,6 +62,7 @@ pub const TALKING: usize = 1;
 pub const CRASHED: usize = 2;
 pub const PAUSED: usize = 3;
 pub const START_LINE: usize = 4;
+pub const INTRO: usize = 5;
 pub const END_OF_RACE: usize = 6;
 pub const PAUSED_REPLAY: usize = 7;
 pub const TRANSITION: usize = 8;

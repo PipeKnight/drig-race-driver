@@ -415,25 +415,52 @@ pub(crate) struct AudioMode(pub(crate) Mutex<audio_mix::ModeMix>);
 /// Crashed in between (collision_sound) returns by itself. Pause keeps its
 /// existing silence; Paused, PausedReplay and Transition (replays) are not
 /// driven here [I].
+/// The state flow's `StateAudioSetState` modes (docs/AUDIO_RESEARCH.md §13, §33;
+/// `flow.bin`): the pause menu and a replay from it are Paused (`c_pause_set_audio_paused`),
+/// and leaving the pause sets Normal (`c_pause_set_audio_normal`), even during the start
+/// lights; a restart returns to StartLine. The post-race stats are Intro
+/// (`c_post_set_audio_intro`), the results EndOfRace, a replay from the results Normal
+/// (`c_post_set_audio_normal`). The in-race terminal-damage replay changes nothing.
+#[allow(clippy::too_many_arguments)]
 fn mix_mode(
     mode: Res<AudioMode>,
     sound: Res<EngineSound>,
     trial: Option<Res<super::time_trial::Trial>>,
     post: Option<Res<super::post_race::PostRace>>,
+    pause: Option<Res<super::pause_menu::PauseMenu>>,
+    replay: Option<Res<super::replay::Replay>>,
+    driving: Option<Res<super::Driving>>,
     time: Res<Time<Real>>,
     mut flow: Local<Option<usize>>,
+    mut resumed: Local<Option<u64>>,
 ) {
     use super::post_race::{Return, Stage};
+    use super::replay::Origin;
     let start_line = trial
         .as_ref()
         .is_some_and(|t| matches!(t.state.phase(), grid_tools::time_trial::Phase::Countdown(_)));
-    let results = post
-        .as_ref()
-        .is_some_and(|p| matches!(p.stage, Stage::Results | Stage::Confirm(_, Return::Results)));
-    let next = if start_line {
-        audio_mix::START_LINE
+    let stage = post.as_ref().map(|p| p.stage);
+    let results = matches!(stage, Some(Stage::Results | Stage::Confirm(_, Return::Results)));
+    let origin = replay.as_ref().and_then(|r| r.session.as_ref()).map(|s| s.origin);
+    let paused = pause.as_ref().is_some_and(|p| p.open) || origin == Some(Origin::PauseMenu);
+    let segment = driving.as_ref().map_or(0, |d| d.segment);
+    // A pause left during the start lights keeps Normal until the lights end or a restart
+    // (a new segment) runs the pre-race again.
+    if paused && start_line {
+        *resumed = Some(segment);
+    } else if !start_line || *resumed != Some(segment) {
+        *resumed = None;
+    }
+    let next = if paused {
+        audio_mix::PAUSED
+    } else if origin == Some(Origin::Results) {
+        audio_mix::NORMAL
+    } else if stage == Some(Stage::Stats) {
+        audio_mix::INTRO
     } else if results {
         audio_mix::END_OF_RACE
+    } else if start_line && resumed.is_none() {
+        audio_mix::START_LINE
     } else {
         audio_mix::NORMAL
     };
@@ -954,6 +981,51 @@ mod tests {
             assert!(rms > 1e-3, "silent engine");
             assert!((ratio / f64::from(f) - 1.).abs() < 0.01, "ratio {ratio} vs factor {f}");
         }).unwrap().join().unwrap();
+    }
+    /// Row 71: the flow's audio states (§33). Pause → Paused, leaving it → Normal even during
+    /// the start lights (until a restart), post-race stats → Intro, results → EndOfRace.
+    #[test]
+    fn mix_mode_follows_the_state_flow() {
+        use crate::{pause_menu::{PauseMenu, Variant}, post_race::{PostRace, Stage}, time_trial::Trial};
+        use grid_tools::time_trial::State;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(EngineSound::with_models(Vec::new()))
+            .init_resource::<AudioMode>()
+            .insert_resource(PauseMenu::new(Variant::TestDrive, false, false, Default::default()))
+            .add_systems(Update, mix_mode);
+        let countdown = |app: &mut App, seconds: f64| {
+            let mut trial = Trial::new(1, grid_tools::time_trial::Mode::Wheels, false).unwrap();
+            trial.state = State::new(1, f64::from(grid_tools::source_vehicle::DELTA), seconds).unwrap();
+            app.insert_resource(trial);
+        };
+        let mode = |app: &mut App| {
+            app.update();
+            app.world().resource::<AudioMode>().0.lock().unwrap().mode()
+        };
+        let pause = |app: &mut App, open: bool| app.world_mut().resource_mut::<PauseMenu>().open = open;
+        countdown(&mut app, 3.);
+        assert_eq!(mode(&mut app), audio_mix::START_LINE);
+        pause(&mut app, true);
+        assert_eq!(mode(&mut app), audio_mix::PAUSED);
+        pause(&mut app, false);
+        // `c_pause_set_audio_normal`, though the lights still run.
+        assert_eq!(mode(&mut app), audio_mix::NORMAL);
+        assert_eq!(mode(&mut app), audio_mix::NORMAL);
+        // The lights end, then a new countdown (a restart) is StartLine again.
+        countdown(&mut app, 0.);
+        assert_eq!(mode(&mut app), audio_mix::NORMAL);
+        countdown(&mut app, 3.);
+        assert_eq!(mode(&mut app), audio_mix::START_LINE);
+        countdown(&mut app, 0.);
+        let mut post = PostRace::new(Variant::TestDrive);
+        post.stage = Stage::Stats;
+        app.insert_resource(post);
+        assert_eq!(mode(&mut app), audio_mix::INTRO);
+        app.world_mut().resource_mut::<PostRace>().stage = Stage::Results;
+        assert_eq!(mode(&mut app), audio_mix::END_OF_RACE);
+        pause(&mut app, true);
+        assert_eq!(mode(&mut app), audio_mix::PAUSED);
     }
     /// A model whose bank fails to load leaves only that car silent: the
     /// others load, and the player's source is spawned only with a bank.

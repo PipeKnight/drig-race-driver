@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F675](log/F0675.md) | 2026-10-31 | Paused and Intro mix modes from the state flow; race music research (row 71 and the music sizing) |
 | [F674](log/F0674.md) | 2026-10-31 | Nürburgring and Jarama first-corner losses: inside car clamped to the line beside a car; field trace detail |
 | [F673](log/F0673.md) | 2026-10-31 | Doppler for the opponent engines and the crowd loops: the game's own CMStream_Update shift (backlog row 71) |
 | [F672](log/F0672.md) | 2026-10-31 | Cockpit: drivers through the windows and in opponents' cars |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F618](log/F0618.md) | 2026-10-27 | Camera: the player's cockpit in the head-cam, no car in the bumper views |
 | [F617](log/F0617.md) | 2026-10-27 | Speech part 2 step 5: the namedAI name phrase |
 | [F616](log/F0616.md) | 2026-10-27 | Start hitch: prop pieces share meshes; OSD camera without sun cascades; cascade rule checked |
-| [F615](log/F0615.md) | 2026-10-27 | The Viper race at Washington in every bundled APK: menu entry race_viper, traced data, stage check |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

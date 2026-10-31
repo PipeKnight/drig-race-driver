@@ -29,8 +29,7 @@ const QUIETEST: f32 = -32.;
 /// A loop stops once the car is farther than this share of its MaxDistance (0xCAFE64).
 const STOP_SHARE: f32 = 0.75;
 /// The mix modes 0x4499A0 and 0x44E220 test (`[[AM+0x28]+0xBF0]`, 0x411C10).
-pub const INTRO: usize = 5;
-pub const END_OF_RACE: usize = 6;
+pub use crate::audio_mix::{END_OF_RACE, INTRO};
 
 /// A visual crowd cell as the audio sees it (0x963D90, 0x97A630).
 #[derive(Clone, Debug, PartialEq)]

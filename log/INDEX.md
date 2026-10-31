@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F675](F0675.md) | 2026-10-31 | Paused and Intro mix modes from the state flow; race music research (row 71 and the music sizing) |
 | [F674](F0674.md) | 2026-10-31 | Nürburgring and Jarama first-corner losses: inside car clamped to the line beside a car; field trace detail |
 | [F673](F0673.md) | 2026-10-31 | Doppler for the opponent engines and the crowd loops: the game's own CMStream_Update shift (backlog row 71) |
 | [F672](F0672.md) | 2026-10-31 | Cockpit: drivers through the windows and in opponents' cars |

@@ -1719,7 +1719,7 @@ start the box. Fixed in F590: races no longer show it.
 combo timer, and the port does not show that group.
 
 **Sizes of the speech and music items [O data, I estimates]** (F589, for the owner's ordering):
-- **Music (large).** The original plays race music. 0x4127C0 (the `cmr6_audio_music_manager`
+- **Music (large).** Superseded by [MUSIC_RESEARCH.md](MUSIC_RESEARCH.md) (31 October): the WIM files are 8-channel G.711 μ-law stems, `raceend.WIM` is Le Mans music, and +0x121 means "race music on". The original paragraph follows. The original plays race music. 0x4127C0 (the `cmr6_audio_music_manager`
   stream chooser) picks `audio/music/raceend.WIM` at the race end. While +0x121 is set it picks
   `music0%i.WIM` with i = rand & 7 + 1. In a replay it picks `replay%i.WIM`, starting at channel
   pair (n & 3)·2. A `race_music_option` (0x4A9E80, `DataRaceMusicToggle`) switches it; its default
@@ -2081,3 +2081,53 @@ Doppler and velocity writer; the original was not run. This completes §7.2.
 - `stereo::tests::doppler_resamples_the_mono_stream`;
 - `engine_sound::tests::an_approaching_opponent_engine_rises_by_the_doppler_factor`;
 - the crowd's Doppler property in `crowd_audio::tests::shipped_crowd_cells_and_spawns`.
+
+## 33. Paused, Intro and the state flow's other modes (backlog row 71)
+
+31 October 2026, Claude Code. Static: the decoded `flow.bin` and `states.bin`
+(`local/pause-menu/flow.xml`; `StateAudioSetState`, e.g. `set_audio_paused` mode="Paused") and
+the mode rows of `GroupModeVolumes.bin`. GRID was not launched.
+
+**Where the flow sets each mode [O].** The line numbers are in `flow.xml`.
+- **Pause.** `c_pause_set_audio_paused` (6702) encloses the whole pause menu, including the
+  instant replay. Leaving the pause goes through `c_pause_set_audio_normal` (6676) to Normal,
+  even when the pause came during the start lights. Reset Vehicle also ends in Normal. Restart
+  goes through `restart_race` and `c_pause_set_audio_startline` (6682) into the pre-race.
+- **Post-race stats.** `c_post_set_audio_intro` (7583) encloses them, so they are Intro.
+- **Results.** EndOfRace (§13.2).
+- **Leaving the results.** Replay, Restart, Continue and Exit run their darken
+  (`overlay_fade_on_hh`) inside a Transition state (7834; per discipline 7790–8006).
+- **The results replay.** It plays inside `c_post_set_audio_normal` (7561), so Normal. Its end
+  hides the screen inside Transition (7576).
+- **Touge finish and loading the world.** Paused (7946, 8107–8354).
+- **PausedReplay.** Only the knockout tree (8469, 8560) inside `c_set_audio_transition` (8453),
+  in `state_post_race`.
+- **The in-race terminal-damage replay** (`instant_race_replay_silent`) sets no mode.
+
+**The rows [O].**
+- Paused: attack 0.5 s. Every group goes to −48 except Global Ambience and HUD (0), so the pause
+  menu's sounds stay.
+- Intro: attack 0.5 s. Engine and Exhaust −2; the other car and world groups −6; AI −6.5;
+  Crowd and Race Music 0; HUD +5.
+- PausedReplay and Transition: attack 1.0 s.
+
+**Port.** `engine_sound::mix_mode` follows the flow:
+- the pause menu, or a replay started from it: Paused;
+- leaving the pause: Normal, until the start lights end or a restart starts a new segment;
+- a replay from the results: Normal;
+- post-race stats: Intro;
+- results: EndOfRace;
+- the countdown: StartLine;
+- otherwise Normal.
+
+The engine bus and the HUD read the mode every frame, so they take Paused's 0.5 s fade. The
+tick-driven sources (tyres, collisions, ambience, crowd) are frozen while paused, so they keep
+§29's hush [I: the hush is faster than the 0.5 s attack].
+
+**Not driven [I].**
+- Transition: the port has no darken between the results and a replay or restart, so the mode
+  would last no time at all.
+- PausedReplay: the port has no knockout tree.
+- Intro before the race: the port has no race intro.
+
+**Test.** `engine_sound::tests::mix_mode_follows_the_state_flow`.

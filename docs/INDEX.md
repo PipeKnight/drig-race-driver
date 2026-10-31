@@ -384,6 +384,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [DLAA_PRESET_RESEARCH.md](DLAA_PRESET_RESEARCH.md) Supported DLAA preset hint experiment — G203, 20 October2026.
 - [EDGE_ATLAS_DRY_RESPONSE.md](EDGE_ATLAS_DRY_RESPONSE.md) Optional dry response in mixed edge atlases — 19October2026.
 - [LAMP_REFLECTOR_RESEARCH.md](LAMP_REFLECTOR_RESEARCH.md) Lamp reflector material research — Initial19 October2026 static purchased-resource observations.
+- [MUSIC_RESEARCH.md](MUSIC_RESEARCH.md) Race music: codec, stem manager and port sizing (research) — Static analysis of `local/compatibility/grid-unpacked.exe` (cache `local/re-cache`) and of the purchased …
 - [NATIVE_DLAA.md](NATIVE_DLAA.md) Optional native-resolution DLAA — 19 October2026.
 - [PER_VIEW_FOLIAGE.md](PER_VIEW_FOLIAGE.md) Per-view foliage in shadows, reflections and temporal inputs — 19October2026.
 - [SMOKE_RENDER_COST.md](SMOKE_RENDER_COST.md) Tyre smoke rendering cost — How much tyre smoke costs per frame and where, measured to explain the owner's Derby frame-rate collapse on a MacBook …
