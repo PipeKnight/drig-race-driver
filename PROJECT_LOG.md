@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F671](log/F0671.md) | 2026-10-31 | Every car finishes on its own line crossing; Okutama routes 2 and 5 count both laps |
 | [F670](log/F0670.md) | 2026-10-31 | Car reflections: dynamic cube and per-material response (off by default) |
 | [F669](log/F0669.md) | 2026-10-31 | A wheel on a material without mechanics reads the original's initializer record (row 9) |
 | [F668](log/F0668.md) | 2026-10-31 | Jarama route 1 autopilot finishes again; known-failing asset test restored |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F614](log/F0614.md) | 2026-10-27 | Speech part 2 step 4: driver identities, key drivers and the teammate |
 | [F613](log/F0613.md) | 2026-10-27 | Camera: Change View blends as in a race, every view runs every frame |
 | [F612](log/F0612.md) | 2026-10-27 | Camera: spin hold proven on a deterministic scene, the chase knock, and the original's per-frame clock (camera_fps) |
-| [F611](log/F0611.md) | 2026-10-27 | Speech part 2 step 3: accidents and AI events by race entry |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

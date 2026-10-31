@@ -5894,9 +5894,21 @@ fn drive_tick(
         {
             let positions = opponents.positions(&driving.runtime);
             let time = trial.race_time(driving.runtime.ticks).unwrap_or(0.);
+            // The player finishes through the trial, an opponent with lap
+            // timing on its own line crossing (0x912170).
+            let external: Vec<usize> = std::iter::once(0)
+                .chain((1..opponents.multi.cars.len()).filter(|&k| opponents.multi.cars[k].lap.is_some()))
+                .collect();
             opponents
                 .standings
-                .update(&opponents.ai.line, &positions, time, &[0]);
+                .update(&opponents.ai.line, &positions, time, &external);
+            for k in 1..opponents.multi.cars.len() {
+                for event in &opponents.multi.cars[k].lap_events {
+                    if let grid_world::lap_timing::Event::Finished(completed) = event {
+                        opponents.standings.line_crossing(k, completed.number, time);
+                    }
+                }
+            }
             if let grid_tools::time_trial::Phase::Finished(result) = trial.state.phase() {
                 opponents.standings.finish(0, result.seconds);
             }

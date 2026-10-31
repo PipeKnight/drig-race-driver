@@ -247,8 +247,8 @@ impl Standings {
     }
 
     /// Advance with the cars' current positions at race time `time` (s from GO).
-    /// Cars listed in `external` finish only through [`Self::finish`] (the
-    /// player, whose finish follows the lap-timing gates).
+    /// Cars listed in `external` finish only through [`Self::finish`] or
+    /// [`Self::line_crossing`] (every car with lap timing).
     pub fn update(&mut self, line: &Line, positions: &[[f32; 3]], time: f64, external: &[usize]) {
         let arcs: Vec<f64> = positions.iter().map(|&p| f64::from(line.arc(p))).collect();
         self.step(&arcs, time, external);
@@ -318,6 +318,18 @@ impl Standings {
         {
             c.finish = Some(time);
             c.status = Status::Finished;
+        }
+    }
+
+    /// A lap-timing line crossing that completes lap `number` of `car`: the car
+    /// finishes when it completes the event laps [V 0x912170: every car's
+    /// laps come from its line crossings]. Cars with lap timing are passed
+    /// to [`Self::update`] as `external`, so the racing-line distance never
+    /// finishes them: from a wide, slanted start gate (Okutama route 2) that
+    /// distance runs out before the car reaches the gate.
+    pub fn line_crossing(&mut self, car: usize, number: u32, time: f64) {
+        if number >= self.laps {
+            self.finish(car, time);
         }
     }
 

@@ -263,6 +263,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         grid_tools::race::Standings::new(&data.line, race_laps, start, &positions_of(&multi))
     };
     let race_laps = if open { 1 } else { race_laps };
+    // Cars with lap timing finish on their line crossings (0x912170), the
+    // rest on the racing-line distance.
+    let timed_cars: Vec<usize> = (0..multi.cars.len())
+        .filter(|&i| multi.cars[i].lap.is_some())
+        .collect();
     let names: Vec<String> = (0..cars).map(|i| format!("car{i}")).collect();
     let mut field = match reference {
         Some(k) => {
@@ -991,7 +996,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             &data.line,
             &positions_of(&multi),
             multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
-            &[],
+            &timed_cars,
         );
         if let Some((settings, not_moving)) = &mut derby {
             // Every car here is AI: a stopped car is disqualified (0x630CF0).
@@ -1174,6 +1179,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if let Event::Finished(completed) = event {
                     laps[i].push(completed.seconds);
+                    standings.line_crossing(
+                        i,
+                        completed.number,
+                        multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
+                    );
                 }
             }
         }

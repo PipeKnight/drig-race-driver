@@ -222,6 +222,12 @@ entry order; `grid_order` is not read.
 - `leader_flag()` (chequered);
 - `grid_slot`.
 
+Finishing (F671): every car with lap timing finishes on the lap-timing line crossing that completes
+the event laps (`Standings::line_crossing`, as 0x912170), the player through its trial; the
+racing-line distance finishes only a car without lap timing. Before F671 AI cars finished on that
+distance, measured from gate 0's midpoint: on Okutama route 2 (gate 0 53 m wide and slanted) it ran
+out 0.47 m before the car reached the gate, so the race ended with the second lap unfinished.
+
 The race progress measure (distance along the AI line) and the remaining-distance estimate (the car's
 mean race speed so far) are AUTHORED. The app and headless race use it as described in
 docs/RACE_MODE.md.
