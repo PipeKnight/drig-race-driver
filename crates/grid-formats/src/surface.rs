@@ -37,7 +37,8 @@ pub struct Mechanics<'a> {
 pub struct Material<'a> {
     pub code: [u8; 4],
     pub physical: Physical,
-    /// Missing mechanics stays explicit; no complete default object is inferred.
+    /// Missing mechanics stays explicit here; contact consumers use
+    /// [`Mechanics::initial`], as the original does.
     pub mechanics: Option<Mechanics<'a>>,
 }
 
@@ -198,31 +199,76 @@ fn mechanics<'a>(element: &Element<'a>) -> Result<Mechanics<'a>> {
             tyre_table.copy_from_slice(&text.as_bytes()[..4]);
         }
     }
+    let d = Mechanics::initial();
     Ok(Mechanics {
         name,
-        grip_per_ms: number(element, "grip_per_ms", 0.)?,
-        ms_for_max_effect: number(element, "ms_for_max_effect", 1.)?,
-        grip: number(element, "grip", 1.)?,
-        camera_factor: number(element, "camera_factor", 0.)?,
-        roughness: number(element, "roughness", 0.)?,
-        minimum_speed_for_slowdown: number(element, "minimumSpeedForSlowdown", 20.)?,
-        speed_for_maximum_slowdown: number(element, "speedForMaximumSlowdown", 40.)?,
-        slowdown: number(element, "slowdown", 0.)?,
-        roll_induce: number(element, "roll_induce", 0.)?,
-        hardness: number(element, "hardness", 1.)?,
-        heat: number(element, "heat", 1.)?,
-        wear: number(element, "wear", 1.)?,
-        curved: boolean("curved", false)?,
-        dirt_build_up: boolean("dirt_build_up", false)?,
-        high_downforce: boolean("high_downforce", false)?,
-        time_based: boolean("bumpstimebased", true)?,
-        wavelength: number(element, "bumpswavelength", f32::from_bits(0x3d4c_cccd))?,
-        magnitude: number(element, "bumpsmagnitude", 0.)?,
-        real_proportion: number(element, "bumpsrealproportion", 0.)?.clamp(0., 1.),
-        car_proportion: number(element, "bumpsproportionCarDependent", 0.)?,
-        depth: number(element, "depth", 0.)?,
+        grip_per_ms: number(element, "grip_per_ms", d.grip_per_ms)?,
+        ms_for_max_effect: number(element, "ms_for_max_effect", d.ms_for_max_effect)?,
+        grip: number(element, "grip", d.grip)?,
+        camera_factor: number(element, "camera_factor", d.camera_factor)?,
+        roughness: number(element, "roughness", d.roughness)?,
+        minimum_speed_for_slowdown: number(
+            element,
+            "minimumSpeedForSlowdown",
+            d.minimum_speed_for_slowdown,
+        )?,
+        speed_for_maximum_slowdown: number(
+            element,
+            "speedForMaximumSlowdown",
+            d.speed_for_maximum_slowdown,
+        )?,
+        slowdown: number(element, "slowdown", d.slowdown)?,
+        roll_induce: number(element, "roll_induce", d.roll_induce)?,
+        hardness: number(element, "hardness", d.hardness)?,
+        heat: number(element, "heat", d.heat)?,
+        wear: number(element, "wear", d.wear)?,
+        curved: boolean("curved", d.curved)?,
+        dirt_build_up: boolean("dirt_build_up", d.dirt_build_up)?,
+        high_downforce: boolean("high_downforce", d.high_downforce)?,
+        time_based: boolean("bumpstimebased", d.time_based)?,
+        wavelength: number(element, "bumpswavelength", d.wavelength)?,
+        magnitude: number(element, "bumpsmagnitude", d.magnitude)?,
+        real_proportion: number(element, "bumpsrealproportion", d.real_proportion)?.clamp(0., 1.),
+        car_proportion: number(element, "bumpsproportionCarDependent", d.car_proportion)?,
+        depth: number(element, "depth", d.depth)?,
         tyre_table,
     })
+}
+
+impl Mechanics<'_> {
+    /// The record of a material without MECHANICS: the material array is
+    /// zeroed (0xB3B400 memset), then the loader 0x9B90F0 runs the
+    /// initializer 0x99C8B0 on every material and reads attributes only when
+    /// MECHANICS exists. The wheel contact producer 0x9C1660 reads this record
+    /// with no presence test. The same values are the defaults of absent
+    /// attributes. Name bytes +24 are "?????" (0x3F3F3F3F, 0x003F).
+    pub fn initial() -> Self {
+        Self {
+            name: "?????",
+            grip_per_ms: 0.,
+            ms_for_max_effect: 1.,
+            grip: 1.,
+            camera_factor: 0.,
+            roughness: 0.,
+            minimum_speed_for_slowdown: 20.,
+            speed_for_maximum_slowdown: 40.,
+            slowdown: 0.,
+            roll_induce: 0.,
+            hardness: 1.,
+            heat: 1.,
+            wear: 1.,
+            curved: false,
+            dirt_build_up: false,
+            high_downforce: false,
+            time_based: true,
+            wavelength: f32::from_bits(0x3d4c_cccd),
+            magnitude: 0.,
+            real_proportion: 0.,
+            car_proportion: 0.,
+            depth: 0.,
+            tyre_table: *b"DEFA",
+        }
+    }
 }
 
 pub fn read<'a>(doc: &Document<'a>) -> Result<Vec<Material<'a>>> {
@@ -337,6 +383,23 @@ mod tests {
         assert_eq!(m.depth, 0.);
         assert_eq!(m.tyre_table, *b"TARM");
         assert_eq!((m.grip, m.hardness), (1., 1.));
+    }
+    #[test]
+    fn a_material_without_mechanics_reads_the_initializer_record() {
+        // 0x99C8B0 on zeroed memory: the values an empty MECHANICS gets.
+        let empty = read(&document(vec![("name", "TEST")])).unwrap();
+        let e = empty[0].mechanics.as_ref().unwrap();
+        let i = Mechanics::initial();
+        assert_eq!(i.name, "?????");
+        assert_eq!(
+            format!("{:?}", Mechanics { name: "?????", ..e.clone() }),
+            format!("{i:?}")
+        );
+        assert!(i.time_based);
+        assert_eq!(i.wavelength, f32::from_bits(0x3d4c_cccd));
+        assert_eq!((i.magnitude, i.real_proportion, i.car_proportion, i.depth), (0., 0., 0., 0.));
+        assert_eq!((i.grip, i.hardness, i.ms_for_max_effect), (1., 1., 1.));
+        assert_eq!((i.minimum_speed_for_slowdown, i.speed_for_maximum_slowdown), (20., 40.));
     }
     #[test]
     fn missing_mechanics_and_invalid_values_stay_explicit() {

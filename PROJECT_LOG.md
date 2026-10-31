@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F669](log/F0669.md) | 2026-10-31 | A wheel on a material without mechanics reads the original's initializer record (row 9) |
 | [F668](log/F0668.md) | 2026-10-31 | Jarama route 1 autopilot finishes again; known-failing asset test restored |
 | [F667](log/F0667.md) | 2026-10-31 | Crowds ported: NormalCrowd/GrandStandCrowd on the crowd cells, excited by ReactiveCrowd (backlog row 70) |
 | [F666](log/F0666.md) | 2026-10-31 | Head-cam mouse look-around, an owner-requested deviation (backlog row 101) |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F612](log/F0612.md) | 2026-10-27 | Camera: spin hold proven on a deterministic scene, the chase knock, and the original's per-frame clock (camera_fps) |
 | [F611](log/F0611.md) | 2026-10-27 | Speech part 2 step 3: accidents and AI events by race entry |
 | [F610](log/F0610.md) | 2026-10-27 | Playable 3f4382d3cc41 with F604-F609, portable copy and APKs f07fcafb0dad |
-| [F609](log/F0609.md) | 2026-10-27 | Grid start: opponent car levels by distance as in the original |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

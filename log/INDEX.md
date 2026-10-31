@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F669](F0669.md) | 2026-10-31 | A wheel on a material without mechanics reads the original's initializer record (row 9) |
 | [F668](F0668.md) | 2026-10-31 | Jarama route 1 autopilot finishes again; known-failing asset test restored |
 | [F667](F0667.md) | 2026-10-31 | Crowds ported: NormalCrowd/GrandStandCrowd on the crowd cells, excited by ReactiveCrowd (backlog row 70) |
 | [F666](F0666.md) | 2026-10-31 | Head-cam mouse look-around, an owner-requested deviation (backlog row 101) |
