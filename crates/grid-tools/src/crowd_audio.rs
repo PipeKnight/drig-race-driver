@@ -224,6 +224,10 @@ pub struct Emitter {
     pub position: [f32; 3],
     pub min_distance: f32,
     pub max_distance: f32,
+    /// The voice's Doppler property, set at the start (0x449F72): 0.5 for a loop once the
+    /// race intro has handed over to the in-game cameras (C+0x15A0), else 0. Its velocity is
+    /// zero (0x435747), so only the listener's motion shifts it.
+    pub doppler: f32,
     /// Seconds left of a one-shot; the slot frees when it ends (the voice handle E+0x14).
     left: f32,
 }
@@ -251,6 +255,8 @@ pub struct Crowd {
     position: [f32; 3],
     forward: [f32; 3],
     random: u32,
+    /// +0x15A0: the crowd's loops get Doppler 0.5 from now on.
+    doppler_on: bool,
 }
 
 impl Crowd {
@@ -267,6 +273,7 @@ impl Crowd {
             position: [0.; 3],
             forward: [0., 0., 1.],
             random: seed | 1,
+            doppler_on: false,
         }
     }
 
@@ -318,6 +325,9 @@ impl Crowd {
     /// position, the listener in Intro and EndOfRace.
     pub fn tick(&mut self, cells: &Cells, l: &Listener, mode: usize, camera: [f32; 3], dt: f32, out: &mut Vec<Event>) {
         self.since += dt;
+        // C+0x15A0: set by 0x420280 when the race intro hands over to the in-game cameras
+        // (0x58BAF0); the port has no intro, so the first tick outside Intro.
+        self.doppler_on |= mode != INTRO;
         self.settle();
         // Finished one-shots free their slot.
         for slot in self.slots.iter_mut() {
@@ -448,6 +458,7 @@ impl Crowd {
                 position: cell.centre,
                 min_distance: smp.min_distance,
                 max_distance: smp.max_distance,
+                doppler: if smp.looped && self.doppler_on { 0.5 } else { 0. },
                 left: if smp.looped { f32::INFINITY } else { seconds / pitch },
             });
             out.push(Event::Start { slot: i });
@@ -570,6 +581,8 @@ mod tests {
         }
         println!("crowd version=1 window=parked_30s starts={starts} active={} loopers={} loudest={loud:.1}", crowd.emitters().count(), crowd.loopers());
         assert!(starts > 0);
+        // Outside Intro the loops carry Doppler 0.5, the one-shots 0 (0x449F72).
+        assert!(crowd.emitters().all(|(_, e)| e.doppler == if e.looped { 0.5 } else { 0. }));
         crowd.since = 100.;
         crowd.excite(1.3, 5.);
         let mut excited = 0;

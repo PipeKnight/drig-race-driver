@@ -7,7 +7,7 @@ use bevy::audio::{ChannelCount, SampleRate, Source};
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -32,6 +32,33 @@ impl Pan {
     }
 }
 
+/// A source's Doppler factor (`grid_tools::audio_mix::doppler`), shared like [`Pan`]: the
+/// game's CMStream_Update multiplies the voice's AL_PITCH by it.
+#[derive(Clone)]
+pub(crate) struct Rate(Arc<AtomicU32>);
+
+impl Rate {
+    pub(crate) fn unit() -> Self {
+        Self(Arc::new(AtomicU32::new(1f32.to_bits())))
+    }
+    pub(crate) fn set(&self, factor: f32) {
+        self.0.store(factor.to_bits(), Ordering::Relaxed);
+    }
+    pub(crate) fn get(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+}
+
+/// Linear resampling of a mono stream by the Doppler factor (the decoder's whole mix plays at
+/// clamp(f, 0.5, 2) [I: OpenAL clamps each voice's pitch·f; the mix is scaled as one]).
+struct Resample {
+    rate: Rate,
+    factor: f64,
+    phase: f64,
+    previous: f32,
+    next: f32,
+}
+
 /// Pan gains of `emitter` for a listener at `listener` facing like a Bevy
 /// camera with `rotation` (looking along -Z, +X to the right).
 pub(crate) fn pan_from(rotation: bevy::math::Quat, listener: bevy::math::Vec3, emitter: bevy::math::Vec3) -> [f32; 2] {
@@ -52,12 +79,18 @@ pub(crate) struct Stereo<D> {
     right: Option<f32>,
     frames: usize,
     rate: u32,
+    doppler: Option<Resample>,
 }
 
 impl<D> Stereo<D> {
     pub(crate) fn new(inner: D, pan: Pan, rate: u32) -> Self {
         let gains = pan.get();
-        Self { inner, pan, gains, target: gains, right: None, frames: 0, rate }
+        Self { inner, pan, gains, target: gains, right: None, frames: 0, rate, doppler: None }
+    }
+    /// As `new`, resampled by the source's Doppler factor.
+    pub(crate) fn with_doppler(inner: D, pan: Pan, rate: u32, doppler: Rate) -> Self {
+        let resample = Resample { factor: f64::from(doppler.get()), rate: doppler, phase: 0., previous: 0., next: 0. };
+        Self { doppler: Some(resample), ..Self::new(inner, pan, rate) }
     }
 }
 
@@ -67,8 +100,23 @@ impl<D: Iterator<Item = f32>> Iterator for Stereo<D> {
         if let Some(right) = self.right.take() {
             return Some(right);
         }
-        let value = self.inner.next()?;
-        if self.frames.is_multiple_of(64) {
+        let read = self.frames.is_multiple_of(64);
+        let value = match &mut self.doppler {
+            None => self.inner.next()?,
+            Some(r) => {
+                if read {
+                    r.factor = f64::from(grid_tools::audio_mix::doppler_pitch(1., r.rate.get()));
+                }
+                r.phase += r.factor;
+                while r.phase >= 1. {
+                    r.previous = r.next;
+                    r.next = self.inner.next()?;
+                    r.phase -= 1.;
+                }
+                r.previous + (r.next - r.previous) * r.phase as f32
+            }
+        };
+        if read {
             self.target = self.pan.get();
         }
         self.frames = self.frames.wrapping_add(1);
@@ -98,6 +146,21 @@ impl<D: Iterator<Item = f32>> Source for Stereo<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Doppler factor resamples the stream (from a silent first sample): 1 passes it
+    /// through one sample late, and 3 is clamped to 2, two input samples per output frame.
+    #[test]
+    fn doppler_resamples_the_mono_stream() {
+        let ramp = (0..).map(|i| i as f32);
+        let rate = Rate::unit();
+        let mut s = Stereo::with_doppler(ramp.clone(), Pan::centre(), 48_000, rate.clone());
+        let left: Vec<f32> = (0..4).map(|_| (s.next().unwrap(), s.next()).0).collect();
+        assert_eq!(left, [0., 0., 1., 2.]);
+        rate.set(3.);
+        let mut s = Stereo::with_doppler(ramp, Pan::centre(), 48_000, rate);
+        let left: Vec<f32> = (0..4).map(|_| (s.next().unwrap(), s.next()).0).collect();
+        assert_eq!(left, [0., 2., 4., 6.]);
+    }
 
     #[test]
     fn mono_frames_become_panned_stereo_pairs() {

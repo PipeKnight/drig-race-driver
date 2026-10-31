@@ -26,7 +26,7 @@ const RATE: u32 = grid_tools::engine_audio::RATE;
 
 enum Message {
     Start(usize, usize, bool, f32),
-    Level(usize, f32, [f32; 2]),
+    Level(usize, f32, [f32; 2], f32),
     Stop(usize),
     Hush,
 }
@@ -65,7 +65,10 @@ impl Iterator for Decoder {
             while let Ok(message) = messages.try_recv() {
                 match message {
                     Message::Start(slot, sound, looped, pitch) => self.mixer.start_pitched(slot, sound, looped, pitch),
-                    Message::Level(slot, gain, pan) => self.mixer.level(slot, gain, pan),
+                    Message::Level(slot, gain, pan, doppler) => {
+                        self.mixer.level(slot, gain, pan);
+                        self.mixer.doppler(slot, doppler);
+                    }
                     Message::Stop(slot) => self.mixer.stop(slot),
                     Message::Hush => self.mixer.hush(),
                 }
@@ -184,10 +187,13 @@ fn tick(
     // Every voice's level from the camera (433AA0: Crowd is on the Camera listener).
     let (trim, camera) = (listening.trim(), listening.camera());
     let group = sound.table.as_ref().map_or(-3., |t| modes.group_db(t, camera, CROWD, trim));
+    // A still voice heard by the moving camera (0xA233D0: velocity × Doppler).
+    let listener = listening.camera_velocity();
     for (slot, e) in sound.crowd.emitters() {
         let at = Vec3::from_array(e.position);
         let gain = audio_mix::backend_gain(e.db, group, audio_mix::distance_db(at.distance(ear), e.min_distance, e.max_distance));
-        let _ = sound.messages.send(Message::Level(slot, gain, listening.heard(ear, at)));
+        let doppler = audio_mix::doppler((at - ear).to_array(), (-listener * e.doppler).to_array());
+        let _ = sound.messages.send(Message::Level(slot, gain, listening.heard(ear, at), doppler));
     }
 }
 

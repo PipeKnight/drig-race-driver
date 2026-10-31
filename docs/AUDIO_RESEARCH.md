@@ -1534,7 +1534,7 @@ car-audio +0xA4D8 block).
 - While played is clear: pulled plays `hbrakeon` (M+0x128, read as [P+0xB8], 43C3A8), else released
   plays `hbrakeoff` (M+0x12C, [P+0xBC], 43C515); then played = 1 (43C677).
 - [O] So the first frame plays `hbrakeoff` once, before any pull.
-- The one-shot goes through 421B70 at 0 dB, pitch 1, Doppler 0, at the Cockpit emitter
+- The one-shot goes through 421B70 at 0 dB, pitch 1, Doppler 1 (the voice template; §32 corrects an earlier "0"), at the Cockpit emitter
   car-audio +0x7E0, group car-audio +8 (Other Mech, 9), priority +0xA3C4.
 - Varieties (car_genmec): `hbrakeon` (handon1, handon2) and `hbrakeoff` (handoff1, handoff2), preset
   Handbrake 4/8.5 m.
@@ -2007,3 +2007,77 @@ the gasps have no trigger and are left out.
 - A finished one-shot is detected by its length.
 - The excitement needs the speech manager, which runs only in races with opponents.
 - The gasps are not ported.
+
+## 32. Doppler ported (backlog row 71)
+
+31 October 2026, Claude Code. Static reading of the disassembly. A subagent surveyed every
+Doppler and velocity writer; the original was not run. This completes §7.2.
+
+**The law [O].**
+- The backend sets OpenAL's Doppler factor to 0. CMStream_Update (a2cc1d–a2cd14) computes the
+  shift itself for 3D voices:
+  - v = position·velocity / (|position| + 0.01), in listener space, positive when receding;
+  - f = 343 / (343 + v), or 0 at or below −343;
+  - AL_PITCH = clamp(pitch·f, 0.5, 2).
+- pitch is the voice's rate ratio: 0xA25D90 sets freq = round(native·Pitch + 0.5).
+- The velocity is (the voice's velocity − the listener's) × the voice's Doppler property
+  (0xA233D0). A Doppler of 0 sends a zero vector, so f = 1.
+- The Not3D groups (+0x1C: 13, 14, 16, 18, 19, 20) have no Doppler: 0xA23F10 and 0xA26010.
+
+**Voice properties [O].**
+- The voice template 0xA31EA0 (0xE9C3C0) gives Doppler 1 and velocity (0, 0, 0, 987654). Every
+  start copies it (0xA32120, 0xA32360, 0xA329B0).
+- The writers of Doppler (+0x58) are 0x42C2C0 and the engine block of 0x42DE60:
+
+| Voices | Doppler | Velocity |
+|---|---|---|
+| Engine voices, 13 handles (0x42DE60) | 0 for the human player's car unless the audio camera is Detached (3, 4); 1 for AI cars (0x42EEDB–0x42EF2D) | the car's rigid-body velocity (0xA69800, 0x42EF1B), each update |
+| Whine, spindle, hiss (0x44BAD0, 0x44D560, 0x44D6D0) | 1 | the car's velocity (+0xA480) |
+| Ambience AutoPlay (0x447FA1) | 0 | zero (0x435747) |
+| Crowd (0x449F72) | 0.5 for a loop once C+0x15A0 is set, else 0 | zero |
+| Mechanical and damage loops, 0x435690 starts | 1 | zero (only the listener moves) |
+| Tyres (0x456640 chain), 0x421B70 one-shots (collisions, handbrake, …), streams | 1 | none: the fallback below |
+
+- **Correction to §26:** the handbrake one-shot (0x421B70 → 0xA32360) keeps the template
+  Doppler 1 (0xA324AF), not 0.
+- **The fallback [O].** For a voice without a velocity (w = 987654), 0xA23DC0 uses its
+  listener-space position change since the last update, not divided by dt (0 on the first
+  update). At a 60 Hz update this amounts to v below about 1 "m/s": f stays within 0.3 % of 1,
+  even for the listener's own rotation.
+- **C+0x15A0 [O for the path, I for the meaning].** It is set by 0x420280, which also sets
+  other manager flags. 0x420280 runs from 0x58BAF0, which hands the race intro over to the
+  in-game cameras ("raceintro_cam_move_*", then "C.in_game_cameras"). It is also set by the
+  message handler 0x424B90 (likely the intro skip).
+
+**Listeners [O].**
+- All four listeners start with velocity 0 (0x433AA0).
+- Camera listener (0x43F570): the camera's displacement over the frame / dt. A displacement of
+  8 m or more is not used [I: counted as 0].
+- Car listener (0x43F7A0): the car's velocity in Internal, Bonnet and EndOfRace. In Chase and
+  Detached it is the camera's displacement / dt.
+- 3D_Speech: always 0.
+
+**Port.**
+- `audio_mix::{doppler, doppler_pitch, SPEED_OF_SOUND, LISTENER_JUMP}`.
+- grid-app `engine_sound::ListenerMotion`: the camera's displacement / frame time, below 8 m,
+  read through `Listening::camera_velocity`.
+- Opponent engines (AI group, camera listener):
+  - each car's `Rate` is set every frame from its position and its velocity minus the camera's;
+  - `stereo::Stereo::with_doppler` resamples the car's mono mix (engine and mechanical voices)
+    by clamp(f, 0.5, 2) [I: OpenAL clamps each voice's pitch·f; the mix is scaled as one, and
+    the mechanical voices take the car's velocity, as the whine does].
+- Crowd: `Emitter::doppler` (0.5 for loops outside Intro). The camera's velocity × that is
+  applied per slot through `ambience_audio::Mixer::doppler`. The port has no race intro, so
+  the flag is set from the first tick.
+- Unchanged, as in the original:
+  - the player's engine (Doppler 0: the port has no Detached cameras);
+  - the ambience (Doppler 0).
+- Not ported:
+  - the fallback for the tyres and the one-shots (below 0.3 %);
+  - the Car listener's velocity, which only these and the detached engine use.
+
+**Tests.**
+- `audio_mix::tests::doppler_follows_cmstream_update`;
+- `stereo::tests::doppler_resamples_the_mono_stream`;
+- `engine_sound::tests::an_approaching_opponent_engine_rises_by_the_doppler_factor`;
+- the crowd's Doppler property in `crowd_audio::tests::shipped_crowd_cells_and_spawns`.

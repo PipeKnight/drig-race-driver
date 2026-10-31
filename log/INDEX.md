@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F673](F0673.md) | 2026-10-31 | Doppler for the opponent engines and the crowd loops: the game's own CMStream_Update shift (backlog row 71) |
 | [F672](F0672.md) | 2026-10-31 | Cockpit: drivers through the windows and in opponents' cars |
 | [F671](F0671.md) | 2026-10-31 | Every car finishes on its own line crossing; Okutama routes 2 and 5 count both laps |
 | [F670](F0670.md) | 2026-10-31 | Car reflections: dynamic cube and per-material response (off by default) |

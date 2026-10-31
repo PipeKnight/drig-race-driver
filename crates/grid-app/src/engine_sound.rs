@@ -11,7 +11,7 @@ use grid_tools::{
     engine_audio_whine::{self, Whine},
     mech_audio,
 };
-use super::stereo::{Pan, Stereo};
+use super::stereo::{Pan, Rate, Stereo};
 use std::{
     sync::{
         Arc, Mutex,
@@ -134,6 +134,8 @@ pub(crate) struct OpponentEngine {
     model: usize,
     /// Heard from the camera (the AI group's listener, 433AA0).
     pan: Pan,
+    /// Its Doppler factor from the camera (Doppler property 1 for AI cars, 0x42EEDB).
+    doppler: Rate,
     /// This car's own decoder failure: its mixer stays silent until the
     /// next reset, the other engines play on.
     failure: Arc<AtomicU32>,
@@ -177,6 +179,9 @@ pub(crate) struct EngineSource {
     bus: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
     pan: Pan,
+    /// The car's Doppler factor; `None` for the player's car, whose engine voices have
+    /// Doppler 0 outside the detached cameras (0x42EEDB), which the port does not have.
+    doppler: Option<Rate>,
     /// The car's mechanical-sound levels (`mech_audio::Levels::to_bits`);
     /// `None` when its model has no mec bank.
     mech: Option<MechBus>,
@@ -267,6 +272,7 @@ impl TestVoice {
             bus: Arc::new(AtomicU64::new(pack_bus([f32::NEG_INFINITY; 2]))),
             failure: Arc::new(AtomicU32::new(0)),
             pan,
+            doppler: None,
             mech: None,
             player: false,
         };
@@ -303,8 +309,7 @@ impl Source for Decoder {
 impl Decodable for EngineSource {
     type Decoder = Stereo<Decoder>;
     fn decoder(&self) -> Stereo<Decoder> {
-        Stereo::new(
-            Decoder {
+        let decoder = Decoder {
                 mixer: {
                     let mut mixer = Mixer::new(self.bank.clone());
                     mixer.player = self.player;
@@ -320,10 +325,11 @@ impl Decodable for EngineSource {
                 count: 0,
                 failure: self.failure.clone(),
                 reported_failure: false,
-            },
-            self.pan.clone(),
-            RATE,
-        )
+            };
+        match &self.doppler {
+            Some(doppler) => Stereo::with_doppler(decoder, self.pan.clone(), RATE, doppler.clone()),
+            None => Stereo::new(decoder, self.pan.clone(), RATE),
+        }
     }
 }
 /// One bank per field car model, the player's first. A model whose bank
@@ -372,9 +378,28 @@ pub(crate) fn install_systems(app: &mut App, banks: Vec<Option<Arc<EngineBank>>>
     sound.table = table;
     app.insert_resource(sound)
         .init_resource::<AudioMode>()
+        .init_resource::<ListenerMotion>()
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, publish.after(super::drive_tick))
-        .add_systems(Update, (mix_mode, update).chain().after(super::drive_present));
+        .add_systems(Update, (listener_motion, mix_mode, update).chain().after(super::drive_present));
+}
+/// The camera listener's motion (0x43F570): the camera's displacement over the frame divided
+/// by the frame time, kept only below `audio_mix::LISTENER_JUMP` (8 m).
+#[derive(Resource, Default)]
+pub(crate) struct ListenerMotion {
+    last: Option<Vec3>,
+    pub(crate) velocity: Vec3,
+}
+fn listener_motion(
+    time: Res<Time>,
+    mut motion: ResMut<ListenerMotion>,
+    listener: Query<&GlobalTransform, With<super::ViewerCamera>>,
+) {
+    let Ok(at) = listener.single().map(|t| t.translation()) else { return };
+    let dt = time.delta_secs();
+    let moved = motion.last.map_or(Vec3::ZERO, |last| at - last);
+    motion.velocity = if dt > 0. && moved.length() < audio_mix::LISTENER_JUMP { moved / dt } else { Vec3::ZERO };
+    motion.last = Some(at);
 }
 /// The mix mode (411C10/427ED0, `audio_mix::ModeMix`) shared by the car,
 /// collision and HUD sounds; behind a lock so the collision tick can switch
@@ -441,6 +466,7 @@ fn start(
             bus: sound.bus.clone(),
             failure: sound.failure.clone(),
             pan: Pan::centre(),
+            doppler: None,
             mech: Some(sound.mech.clone()),
             player: true,
         });
@@ -463,6 +489,7 @@ fn start(
             continue;
         };
         let pan = Pan::centre();
+        let doppler = Rate::unit();
         let failure = Arc::new(AtomicU32::new(0));
         // Its backfire and gear whine (451260, 4518E0) from its own mec bank.
         let mech = mech_bus();
@@ -473,6 +500,7 @@ fn start(
             bus: bus.clone(),
             failure: failure.clone(),
             pan: pan.clone(),
+            doppler: Some(doppler.clone()),
             player: false,
         });
         // Played once, as the player's engine: the decoder never ends. LOOP
@@ -488,6 +516,7 @@ fn start(
                 mech,
                 model,
                 pan,
+                doppler,
                 failure,
             },
         ));
@@ -512,6 +541,7 @@ pub(crate) struct Listening<'w, 's> {
     menu: Option<Res<'w, super::pause_menu::PauseMenu>>,
     cameras: Option<Res<'w, super::camera::Cameras>>,
     mode: Option<Res<'w, AudioMode>>,
+    motion: Option<Res<'w, ListenerMotion>>,
     listener: Query<'w, 's, &'static GlobalTransform, With<super::ViewerCamera>>,
 }
 impl Listening<'_, '_> {
@@ -557,6 +587,10 @@ impl Listening<'_, '_> {
             .map_or(Vec3::new(player[12], player[13], player[14]), |t| {
                 t.translation()
             })
+    }
+    /// The camera listener's velocity (0x43F570), for the Doppler term.
+    pub(crate) fn camera_velocity(&self) -> Vec3 {
+        self.motion.as_ref().map_or(Vec3::ZERO, |m| m.velocity)
     }
     /// Stereo gains of `emitter` heard at `listener` (A23DC0's listener
     /// space: the position relative to the listener in its orientation).
@@ -645,7 +679,13 @@ fn update(
             }
             let car = &opponents.multi.cars[engine.car];
             let pose = car.pose();
-            engine.pan.set(listening.heard(ear, Vec3::new(pose[12], pose[13], pose[14])));
+            let at = Vec3::new(pose[12], pose[13], pose[14]);
+            engine.pan.set(listening.heard(ear, at));
+            // Its engine voices carry the car's rigid-body velocity (0x42EF1B); the camera
+            // listener moves with the camera (0x43F570).
+            let v = car.velocity();
+            let relative = Vec3::new(v[0], v[1], v[2]) - listening.camera_velocity();
+            engine.doppler.set(audio_mix::doppler((at - ear).to_array(), relative.to_array()));
             let at = Mat4::from_cols_array(&pose);
             let distances = distances(at, engine.model);
             // Its backfire and whine: the AI group (4223D0: 0x11 for all of an
@@ -820,6 +860,7 @@ mod tests {
                 bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
                 failure: Arc::new(AtomicU32::new(0)),
                 pan: Pan::centre(),
+                doppler: None,
                 mech: None,
                 player: true,
             }
@@ -845,6 +886,73 @@ mod tests {
             }
             let quantised = |rpm: f32| Control::unpack(control(rpm).pack()).normalized_rpm;
             assert_eq!(seen, [(quantised(0.4), 4), (quantised(0.5), 5), (quantised(0.6), 6)]);
+        }).unwrap().join().unwrap();
+    }
+    /// Row 71: an opponent's engine heard through its Doppler factor. The Lacetti's mono mix at
+    /// a steady 50 % RPM, played through `Stereo::with_doppler` once still and once approaching
+    /// the camera at 30 m/s from 50 m ahead: the fundamental period (autocorrelation peak) of
+    /// the output shortens by f = 343/(343 − 30·50/50.01).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased sources; no audio device used"]
+    fn an_approaching_opponent_engine_rises_by_the_doppler_factor() {
+        std::thread::Builder::new().stack_size(16 * 1024 * 1024).spawn(|| {
+            let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+            let bank = EngineBank::lacetti(std::path::Path::new(&root)).unwrap();
+            let source = EngineSource {
+                bank,
+                mailbox: mailbox(),
+                bus: Arc::new(AtomicU64::new(pack_bus([0.; 2]))),
+                failure: Arc::new(AtomicU32::new(0)),
+                pan: Pan::centre(),
+                doppler: None,
+                mech: None,
+                player: false,
+            };
+            let mut engine = source.decoder().inner;
+            let control = Control { normalized_rpm: 0.5, throttle: 1., audible: true, generation: 0, gear: 3 };
+            let mono: Vec<f32> = (0..RATE as usize * 4)
+                .map(|frame| {
+                    if frame % grid_tools::engine_audio_continuous::BLOCK == 0 {
+                        push(&source.mailbox, control);
+                    }
+                    engine.next().unwrap()
+                })
+                .collect();
+            // The fundamental period in samples of the second after the start-up second: the
+            // first autocorrelation peak above 90 % of the largest one past the first dip.
+            let period = |x: &[f32]| {
+                let w = &x[RATE as usize..RATE as usize * 2];
+                let ac: Vec<f64> = (0..2000).map(|l| w[..w.len() - l].iter().zip(&w[l..]).map(|(a, b)| f64::from(a * b)).sum()).collect();
+                let dip = ac.iter().position(|&v| v < 0.).unwrap_or(1);
+                let best = ac[dip..].iter().cloned().fold(f64::MIN, f64::max);
+                let mut l = (dip..ac.len()).find(|&l| ac[l] > 0.9 * best).unwrap();
+                while l + 1 < ac.len() && ac[l + 1] > ac[l] {
+                    l += 1;
+                }
+                // Parabolic refinement of the peak.
+                let (a, b, c) = (ac[l - 1], ac[l], ac[l + 1]);
+                l as f64 + 0.5 * (a - c) / (a - 2. * b + c)
+            };
+            let heard = |factor: f32| -> Vec<f32> {
+                let rate = Rate::unit();
+                rate.set(factor);
+                let mut s = Stereo::with_doppler(mono.clone().into_iter(), Pan::centre(), RATE, rate);
+                std::iter::from_fn(|| {
+                    let left = s.next()?;
+                    s.next();
+                    Some(left)
+                })
+                .collect()
+            };
+            let f = audio_mix::doppler([0., 0., 50.], [0., 0., -30.]);
+            let (still, approaching) = (period(&heard(1.)), period(&heard(f)));
+            let ratio = still / approaching;
+            let rms = (mono[RATE as usize..].iter().map(|v| f64::from(v * v)).sum::<f64>() / (mono.len() - RATE as usize) as f64).sqrt();
+            println!(
+                "engine_audio version=3 doppler factor={f:.4} period_still={still:.2} period_approaching={approaching:.2} ratio={ratio:.4} rms={rms:.5}"
+            );
+            assert!(rms > 1e-3, "silent engine");
+            assert!((ratio / f64::from(f) - 1.).abs() < 0.01, "ratio {ratio} vs factor {f}");
         }).unwrap().join().unwrap();
     }
     /// A model whose bank fails to load leaves only that car silent: the
@@ -876,7 +984,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre(), mech: None, player: true }.decoder().inner;
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre(), doppler: None, mech: None, player: true }.decoder().inner;
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();

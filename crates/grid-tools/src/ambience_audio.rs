@@ -434,6 +434,8 @@ struct Voice {
     sound: usize,
     position: f64,
     step: f64,
+    /// The rate ratio it started with (Pitch); `step` adds the Doppler factor.
+    pitch: f32,
     looped: bool,
     gain: [f32; 2],
     target: [f32; 2],
@@ -464,7 +466,16 @@ impl Mixer {
         let step = f64::from(pitch) * f64::from(s.rate) / f64::from(self.rate);
         let gain = self.voices.get(slot).copied().flatten().map_or([0.; 2], |v| v.gain);
         if let Some(v) = self.voices.get_mut(slot) {
-            *v = Some(Voice { sound, position: 0., step, looped, gain, target: gain });
+            *v = Some(Voice { sound, position: 0., step, pitch, looped, gain, target: gain });
+        }
+    }
+
+    /// The slot's Doppler factor this tick (`audio_mix::doppler`): AL_PITCH = clamp(pitch·f).
+    pub fn doppler(&mut self, slot: usize, factor: f32) {
+        if let Some(Some(v)) = self.voices.get_mut(slot)
+            && let Some(s) = self.sounds.get(v.sound)
+        {
+            v.step = f64::from(crate::audio_mix::doppler_pitch(v.pitch, factor)) * f64::from(s.rate) / f64::from(self.rate);
         }
     }
 

@@ -446,9 +446,45 @@ pub fn pan_gains(listener: [f32; 3]) -> [f32; 2] {
     [(1. - p).sqrt(), (1. + p).sqrt()]
 }
 
+/// Speed of sound of the Doppler term (stored by A22480 beside the floor and rolloff).
+pub const SPEED_OF_SOUND: f32 = 343.;
+/// The camera listener's velocity is its displacement over the frame, kept only below this
+/// (0x43F570); a larger jump (a camera cut) counts as standing still [I: 0].
+pub const LISTENER_JUMP: f32 = 8.;
+
+/// The game's own Doppler factor (CMStream_Update a2cc1d–a2cd14; OpenAL's factor is 0):
+/// `position` is the voice relative to its listener and `velocity` the voice's velocity minus
+/// the listener's, times the voice's Doppler property (0xA233D0). v > 0 recedes:
+/// v = position·velocity / (|position| + 0.01), f = c / (c + v), and 0 at or below −c.
+pub fn doppler(position: [f32; 3], velocity: [f32; 3]) -> f32 {
+    let distance = (position[0] * position[0] + position[1] * position[1] + position[2] * position[2]).sqrt();
+    let v = (position[0] * velocity[0] + position[1] * velocity[1] + position[2] * velocity[2]) / (distance + 0.01);
+    if v > -SPEED_OF_SOUND { SPEED_OF_SOUND / (SPEED_OF_SOUND + v) } else { 0. }
+}
+/// AL_PITCH of a 3D voice: its rate ratio times the Doppler factor, clamped to [0.5, 2].
+pub fn doppler_pitch(pitch: f32, doppler: f32) -> f32 {
+    (pitch * doppler).clamp(0.5, 2.)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doppler_follows_cmstream_update() {
+        // At rest, and moving across the line of sight: no shift.
+        assert_eq!(doppler([0., 0., 50.], [0.; 3]), 1.);
+        assert_eq!(doppler([0., 0., 50.], [30., 0., 0.]), 1.);
+        // Approaching at 34.3 m/s: v = −34.3·50/50.01, f ≈ 343/308.7.
+        let f = doppler([0., 0., 50.], [0., 0., -34.3]);
+        assert!((f - 343. / (343. - 34.3 * 50. / 50.01)).abs() < 1e-5, "{f}");
+        // Receding lowers the pitch.
+        assert!(doppler([0., 0., 50.], [0., 0., 34.3]) < 1.);
+        // At or beyond the speed of sound towards the listener: 0, so the pitch clamps to 0.5.
+        assert_eq!(doppler([0., 0., 50.], [0., 0., -400.]), 0.);
+        assert_eq!(doppler_pitch(1., 0.), 0.5);
+        assert_eq!(doppler_pitch(1.5, 1.5), 2.);
+    }
 
     #[test]
     fn pan_is_equal_power_on_the_azimuth() {
