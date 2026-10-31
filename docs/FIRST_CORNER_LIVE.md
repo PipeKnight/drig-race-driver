@@ -548,3 +548,41 @@ the reference car (`REF=1` in `local/corners2/run.sh`).
 
 With the in-air steering blend of F662 on top (same setup): 16 lost (Detroit 1 1, Jarama 1 6,
 Long Beach 0/1/3 1 each, Nürburgring 0 6), within the seed spread of the 22.
+
+## 15. The two losses left: an inside car clamped onto the line (F674)
+
+Tool: `GRID_FIELD_DETAIL=1` with `GRID_FIELD_TRACE` writes the behaviour column as
+`Behaviour/o<planned offset>/e<line error>/lt<line target>/gt<governor target>/h<heading error>/c<contact type>/arc<arc>/L<slot>/R<slot>`,
+a slot being `<car id>[s]g<gap>` (id = index + 1, `s` strict overlap) or `-` (empty, `g0.0` when the
+empty side's edge is past the racing limit). The slots come from `Telemetry::alongside`.
+Both runs: race manager on (reference car 11), props, characteristics, deformation parameters,
+12 cars, all Lacetti (the matrix's field). Evidence: `local/corners2/nb/` (s1.*, j0.*).
+
+**Nürburgring route 0, seed 1 [V port].** Cars 0 and 1 leave the grid side by side and stay in
+Alongside: car 0 on the inside (right) at +8 m, car 1 on the line, each in the other's slot
+(strict, gap 6.2 m). Into the right-hander the right racing limit at the look-ahead closes to
+0.3–1 m at arc 690–700, so the limit clamp 0x782D20 (`stop_at_limits`) moves car 0's planned
+offset from +8 to exactly 0 between ticks 840 and 900 (2.3 → 0 m in 20 ticks). Car 1 sees
+car 0's gap fall below minSpace and walks left at the alongside merge rate (0 → −1.5 m by tick
+900, about 4 m/s). The gap reaches 0 at tick 905; contact (types 4/7/8) yaws car 0 to a 1.6 rad
+heading error at full counter-lock and full throttle, and both run off the closing left limit.
+Neither car yields (0x789780): car 0 is ahead of car 1, and car 1 has room to move away.
+
+**Jarama route 1, seed 0 [V port].** Car 7, the inside car of a left-hander, has its planned
+offset held at 0.00 by the same clamp (the left racing limit is on the line); car 8 is in its
+right slot at 3.8 → 0.4 m and walks right at the merge rate while a third car (id 10) is in
+car 8's right slot at gap 0, so car 8 is three wide. Contact (types 3/6) from tick 720 pushes
+car 7 to +18 m from the line; it stops in Recovery at tick 860.
+
+**What this settles and what not.** Each step is the ported decompile (slots 0x795C00, squeeze
+0x799630, clamp 0x782D20, yield 0x789780; §9–§11), and no step differs from it. Through arc
+560–680 of the Nürburgring corner the port's minimum speeds match the captured original's within
+1–3 m/s; at arc 680–700 the original's leader is at 16.8 m/s where the port's front cars hold
+20–25 m/s (captured field, §13) or accelerate to 32 m/s (all Lacetti, full throttle in Alongside).
+The single capture had a mixed BMW/Lacetti field and lost nobody; the port on that field lost
+nobody in 6 seeds. Whether the original's inside car also lands on the outside car in an
+all-Lacetti start, or slows at the apex in a way the port does not, needs an original capture
+of such a start (CAPTURE_BACKLOG row 1); the 0x799630 squeeze log needs a logging route that does
+not stop the game (FastResume is not honoured by headless x32dbg, §13). No per-track change was
+made.
+

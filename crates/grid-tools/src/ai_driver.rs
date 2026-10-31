@@ -2539,6 +2539,9 @@ pub struct Telemetry {
     pub drift_line: bool,
     /// Room to the left/right track limits at the look-ahead (drift drive).
     pub drift_room: [f32; 2],
+    /// Alongside slots (0x795C00), left and right: gap (f32::MAX when
+    /// empty), strict overlap, the car's id (u32::MAX when empty).
+    pub alongside: [(f32, bool, u32); 2],
 }
 
 #[derive(Clone)]
@@ -4332,6 +4335,9 @@ impl AiDriver {
             drift_mode,
             drift_line: self.racing_line == RacingLine::Drift,
             drift_room,
+            alongside: std::array::from_fn(|k| {
+                slots[k].map_or((gaps[k], false, u32::MAX), |(_, strict, r)| (gaps[k], strict, r.id))
+            }),
         };
         // Packet handbrake byte +0x1C (0x77A110): request +0xB3, or a forced
         // brake below minimumMovingSpeed. +0xB3 is set only by race_start's

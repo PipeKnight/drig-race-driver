@@ -372,6 +372,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     // GRID_FIELD_TRACE=local/X.tsv: per tick every car's position, speed,
     // controls and behaviour, and the car pairs in contact.
+    // GRID_FIELD_DETAIL=1: the behaviour column also carries the planned
+    // offset, line error, line and governor targets, heading error, contact
+    // type and arc (Behaviour/o../e../lt../gt../h../c../arc..).
+    let field_detail = std::env::var_os("GRID_FIELD_DETAIL").is_some();
     let mut field_trace = match std::env::var("GRID_FIELD_TRACE") {
         Ok(path) => {
             if !Path::new(&path).starts_with("local") {
@@ -921,7 +925,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             for (i, (car, c)) in multi.cars.iter().zip(&controls).enumerate() {
                 let p = car.pose();
                 let v = car.velocity();
+                let slot = |(gap, strict, id): (f32, bool, u32)| {
+                    if id == u32::MAX {
+                        format!("-{}", if gap < 1e30 { format!("g{gap:.1}") } else { String::new() })
+                    } else {
+                        format!("{id}{}g{gap:.1}", if strict { "s" } else { "" })
+                    }
+                };
                 let behaviour = match &drivers[i] {
+                    Driver::Ai(ai) if Some(i) != parked_car && field_detail => {
+                        let m = &ai.telemetry;
+                        format!(
+                            "{:?}/o{:.2}/e{:.2}/lt{:.1}/gt{:.1}/h{:.3}/c{}/arc{:.1}/L{}/R{}",
+                            m.behaviour,
+                            m.offset,
+                            m.line_error,
+                            m.line_target,
+                            m.governor_target.min(999.),
+                            m.heading_error,
+                            m.contact,
+                            m.arc,
+                            slot(m.alongside[0]),
+                            slot(m.alongside[1])
+                        )
+                    }
                     Driver::Ai(ai) if Some(i) != parked_car => {
                         format!("{:?}", ai.telemetry.behaviour)
                     }
