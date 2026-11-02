@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F702](log/F0702.md) | 2026-11-02 | Invisible barriers: anchor-only entity renderables draw their enclosing root's intact LOD on every route |
 | [F701](log/F0701.md) | 2026-11-03 | No AI countersteer threshold in the original; with the same inputs the port's car yaws less |
 | [F700](log/F0700.md) | 2026-11-02 | Publish macOS rebuild scripts and engine-only preview |
 | [F699](log/F0699.md) | 2026-11-02 | Black drops and floating grass: god-ray cards not drawn as objects, land on every preset, water counted (rows 102, 107, 108) |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F645](log/F0645.md) | 2026-10-30 | Tyre smoke drawn at half resolution with the original's soft fade |
 | [F644](log/F0644.md) | 2026-10-30 | Tyre smoke lit once per particle as the original |
 | [F643](log/F0643.md) | 2026-10-30 | Tyre smoke rendering cost measured (SMOKE_RENDER_COST.md) |
-| [F642](log/F0642.md) | 2026-10-29 | Dynamic resolution: high-DPI 1440-row ceiling, frame-time steps, inconclusive probes |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

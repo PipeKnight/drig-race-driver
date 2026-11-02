@@ -332,6 +332,10 @@ path = "src/bin/grid-speech-render.rs"
 test = false
 
 [[bin]]
+name = "grid-empty-renderables"
+path = "src/bin/grid-empty-renderables.rs"
+
+[[bin]]
 name = "grid-entities"
 path = "src/bin/grid-entities.rs"
 test = false

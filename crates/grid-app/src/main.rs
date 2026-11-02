@@ -1275,30 +1275,23 @@ fn append_entities(
     for (node, placements) in &placements {
         let mut draws = scene::read_renderable_draws(objects, sources, node)?;
         if draws.is_empty() {
-            // Exact startup renderables containing anchors but no mesh.
-            // Preview intact closest LOD; runtime substitution remains untraced.
-            // Donington pairs are explicit; other routes try the renderable's
-            // `<stem>_default_NN` stem as `<stem> Root` and otherwise omit it.
-            let parts: Vec<&[u8]> = node.rsplitn(3, |&c| c == b'_').collect();
-            let stem = (parts.len() == 3 && parts[1] == b"default")
-                .then(|| [parts[2], b" Root".as_slice()].concat());
-            let prototype: &[u8] = match *node {
-                b"dcushion_green_a01_default_01" => b"cushion_blue Root",
-                b"tyrestack_black_default_01" => b"tyrestack_black Root",
-                _ if !route.is_default() => match &stem {
-                    Some(stem) => stem,
-                    None => {
-                        omitted_empty += placements.len();
-                        continue;
-                    }
-                },
-                _ => {
+            // A startup renderable holding anchors but no mesh (armco, tyre
+            // stacks, cushions): draw its object's intact closest LOD, the
+            // enclosing ROOTNODE's (F702). Until F702 the root was guessed
+            // from a `<stem>_default_NN` name, which missed every armco
+            // section and end (`armco_main_section_default`) and the
+            // cushions: invisible barriers, on Washington 1,042 of 1,479
+            // entities. Runtime substitution itself remains untraced [I].
+            let Some(prototype) = scene::enclosing_root(objects, node) else {
+                if route.is_default() {
                     return Err(format!(
                         "empty entity renderable {}",
                         String::from_utf8_lossy(node)
                     )
                     .into());
                 }
+                omitted_empty += placements.len();
+                continue;
             };
             draws = closest_lod
                 .iter()

@@ -49,7 +49,7 @@ Observed by `grep` over `crates/` at 32e747e.
 | `bin/grid-practice-drive`, `grid-wall-probe`, `grid-lap-replay`, `grid-multi-drive` | `lap_progress::load` / `Runtime::lacetti` defaults | unchanged (Donington) |
 | `grid-app` `load` | `donington/tracksplit.pssg` | route track folder |
 | `grid-app` `append_objects` | `objects.pssg`, `route_0/ornaments.bin`, `patchup_ot.pssg`, `lemans_sponsors.pssg` | route; `track_sponsors/tag_heuer` and `bridgestone` packages unchanged (event sponsors, not track data) |
-| `grid-app` `append_entities` | `route_0/objects.ens`, `objecttypes.pssg`; two Donington empty renderables mapped to closest-LOD prototypes, any other empty renderable is an error | route; other routes use the `<stem>_default_NN` -> `<stem> Root` fallback or omit (see validation) |
+| `grid-app` `append_entities` | `route_0/objects.ens`, `objecttypes.pssg`; two Donington empty renderables mapped to closest-LOD prototypes, any other empty renderable is an error | route; every empty renderable draws its enclosing ROOTNODE's closest LOD (F702; see validation) |
 | `grid-app` `load_collision`, `grid_slot` | `route_0/track.jpk`, `route_0/grids.pssg` | route |
 | `grid-app` driving/opponents | `Runtime::lacetti`, `lacetti_deforming`, AI data, `lap_progress::load` | route |
 | `grid-app` HUD | "Lacetti / Donington ..." | track folder name, title-cased (`Donington`, `Nurburgring`, `Istanbul Park`) |
@@ -126,6 +126,16 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
   (Nürburgring: armco_square_grey_end_right 6, tyrestack_red 387,
   tyrestack_white 429 instances) and is otherwise omitted with a count (827
   instances); Donington keeps the explicit pairs and the error.
+- Entity preview (F702): the name guess missed every armco section and end
+  (`armco_main_section_default`, no `_NN`) and the cushions, so 12,412 of
+  79,432 entity instances on the 92 routes were invisible (owner report:
+  invisible barriers on Washington). An empty startup renderable is an anchor
+  NODE inside its object's ROOTNODE, beside the intact LODVISIBLERENDERNODE
+  and the damage BUNDLENODE; it now draws that root's closest LOD
+  (`scene::enclosing_root`). All 22,669 such instances resolve, Donington's
+  explicit pairs included; an empty renderable without a root is still an
+  error on Donington and omitted with a count elsewhere
+  (`grid-empty-renderables`).
 
 ## Open items
 

@@ -81,6 +81,24 @@ pub fn read_object_level_draws<'a>(
     }
     Ok(result)
 }
+/// The id of the ROOTNODE that encloses the first node named `id`, if any.
+/// An entity's startup renderable can be an anchor NODE without draws (the
+/// object's `<name>_default` state); its object's intact geometry is the
+/// enclosing ROOTNODE's level-of-detail render node (Washington's
+/// `armco_main_section_default` in `armco_main_section Root`, Donington's
+/// `dcushion_green_a01_default_01` in `cushion_blue Root`).
+pub fn enclosing_root<'a>(tree: &Tree<'a>, id: &[u8]) -> Option<&'a [u8]> {
+    let node = (0..tree.nodes.len()).find(|&i| tree.string(i, b"id").is_ok_and(|v| v == id))?;
+    let mut ancestor = tree.nodes[node].parent;
+    while let Some(a) = ancestor {
+        if tree.name(a) == b"ROOTNODE" {
+            return tree.string(a, b"id").ok();
+        }
+        ancestor = tree.nodes[a].parent;
+    }
+    None
+}
+
 /// Ordinary draws under an exact renderable NODE; exclude other template states.
 pub fn read_renderable_draws<'a>(
     tree: &Tree<'a>,
@@ -896,5 +914,22 @@ mod renderables_tests {
             }
         }
         assert!(checked > 100, "{checked}");
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn an_anchor_only_armco_renderable_resolves_to_its_root_lod_on_washington() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").unwrap());
+        let bytes = std::fs::read(root.join("tracks/usa/washington/objects.pssg")).unwrap();
+        let tree = crate::pssg::read_tree(&bytes).unwrap();
+        let meshes = crate::mesh::read_object_meshes(&tree).unwrap();
+        let index = Renderables::new(&tree, &meshes).unwrap();
+        let node = b"armco_main_section_default";
+        assert!(index.draws(node).unwrap().is_empty());
+        let prototype = enclosing_root(&tree, node).unwrap();
+        assert_eq!(prototype, b"armco_main_section Root");
+        let lod = read_object_draws(&tree, &meshes).unwrap();
+        assert!(lod.iter().any(|d| d.prototype == Some(prototype)));
+        assert_eq!(enclosing_root(&tree, b"no such node"), None);
     }
 }
