@@ -1803,6 +1803,93 @@ pub struct Cameras {
     profile: Option<PathBuf>,
     /// Camera clock (diagnostics `camera_fps`; Clock::Tick by default).
     pub clock: Clock,
+    /// The FOV setting (owner deviation, row 103); the original's in tests.
+    pub fov: Fov,
+}
+
+/// The views a FOV offset applies to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FovGroup {
+    /// The head-cam and its look-back view.
+    Cockpit,
+    /// The other Mounted views: bonnet, bumper and their reverses.
+    Bonnet,
+    Chase,
+}
+
+/// The `[camera]` FOV setting (AUTHORED, owner request of 2026-10-31,
+/// FIDELITY_BACKLOG row 103): whole degrees added to the original's vertical
+/// FOV of each group of views. The original has no FOV option; its views
+/// take the cameras.xml value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fov {
+    pub cockpit: i32,
+    pub bonnet: i32,
+    pub chase: i32,
+}
+
+impl Fov {
+    /// The original's FOVs.
+    pub const ORIGINAL: Fov = Fov { cockpit: 0, bonnet: 0, chase: 0 };
+    /// The default: the cockpit view wider by [`COCKPIT_FOV`], the others as
+    /// the original.
+    pub const DEFAULT: Fov = Fov { cockpit: COCKPIT_FOV, ..Fov::ORIGINAL };
+    /// The offsets the settings file accepts.
+    pub const RANGE: std::ops::RangeInclusive<i32> = -20..=40;
+
+    /// `original` (0) or a signed whole number of degrees in [`Fov::RANGE`].
+    pub fn parse(value: &str) -> Result<i32, String> {
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("original") {
+            return Ok(0);
+        }
+        match value.strip_prefix('+').unwrap_or(value).parse::<i32>() {
+            Ok(n) if Self::RANGE.contains(&n) => Ok(n),
+            _ => Err(format!("a FOV offset is `original` or whole degrees {}..+{}", Self::RANGE.start(), Self::RANGE.end())),
+        }
+    }
+
+    /// The settings-file text of an offset.
+    pub fn text(offset: i32) -> String {
+        if offset == 0 { "original".into() } else { format!("{offset:+}") }
+    }
+
+    pub fn offset(&self, group: FovGroup) -> i32 {
+        match group {
+            FovGroup::Cockpit => self.cockpit,
+            FovGroup::Bonnet => self.bonnet,
+            FovGroup::Chase => self.chase,
+        }
+    }
+
+    /// `fov` (vertical, radians) with the group's offset, within 10°..150°;
+    /// unchanged at offset 0.
+    pub fn apply(&self, group: FovGroup, fov: f32) -> f32 {
+        match self.offset(group) {
+            0 => fov,
+            n => (fov + (n as f32).to_radians()).clamp(10f32.to_radians(), 150f32.to_radians()),
+        }
+    }
+}
+
+/// Degrees the default adds to the cockpit view's FOV (row 103).
+pub const COCKPIT_FOV: i32 = 10;
+
+impl Views {
+    /// The FOV group of view `i`: a Head view and the Mounted view a Head
+    /// view reverses to are the cockpit.
+    pub fn fov_group(&self, i: usize) -> FovGroup {
+        match &self.0[i].rig {
+            Rig::Head(_) => FovGroup::Cockpit,
+            Rig::Mounted(_)
+                if self.0.iter().any(|v| matches!(v.rig, Rig::Head(_)) && v.reverse == Some(i)) =>
+            {
+                FovGroup::Cockpit
+            }
+            Rig::Mounted(_) => FovGroup::Bonnet,
+            Rig::Chase(_) => FovGroup::Chase,
+        }
+    }
 }
 
 impl Cameras {
@@ -1820,6 +1907,7 @@ impl Cameras {
             back_cleared: false,
             profile,
             clock: Clock::Tick,
+            fov: Fov::ORIGINAL,
         }
     }
 
@@ -1919,10 +2007,13 @@ impl Cameras {
         let shown = self.on_screen(back);
         for (i, view) in self.views.0.iter().enumerate() {
             let history = &mut self.histories[i];
-            self.shots[i] = Some(match i == shown {
+            let mut shot = match i == shown {
                 true => shot_clocked(self.clock, &view.rig, history, sample, dt, look, &orbit),
                 false => shot_clocked(self.clock, &view.rig, history, sample, dt, look, |o| o),
-            });
+            };
+            // Per view, so Change View blends between the set FOVs.
+            shot.fov = self.fov.apply(self.views.fov_group(i), shot.fov);
+            self.shots[i] = Some(shot);
         }
         let mut blend = None;
         if let Some(tr) = &mut self.transition {
@@ -2018,7 +2109,7 @@ pub fn profile_path() -> PathBuf {
 
 /// Loads the car's views and the saved choice; the car file failing keeps the
 /// earlier authored chase with a log line.
-pub fn install(app: &mut App, root: &Path, stem: &str) {
+pub fn install(app: &mut App, root: &Path, stem: &str, fov: Fov) {
     let path = profile_path();
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     let views = Views::load(root, stem).unwrap_or_else(|error| {
@@ -2026,14 +2117,16 @@ pub fn install(app: &mut App, root: &Path, stem: &str) {
         Views::fallback()
     });
     let mut cameras = Cameras::new(views, parse_profile(&text), Some(path));
+    cameras.fov = fov;
     // Diagnostics camera_fps: the original's per-frame rules at that rate.
     if let Some(fps) = crate::settings::diagnostics().camera_fps.filter(|f| *f > 0.) {
         cameras.clock = Clock::Fps(fps);
         println!("drive_camera event=clock fps={fps}");
     }
     println!(
-        "drive_camera event=restore view={} views={}",
+        "drive_camera event=restore view={} fov={:?} views={}",
         cameras.ident(),
+        cameras.fov,
         cameras
             .views
             .0
@@ -3066,6 +3159,66 @@ mod tests {
         // Entries of the emulated 0x7F2B40 table (local/cam/shake).
         let t = shake_table();
         assert_eq!((t[0], t[34], t[35], t[5999]), (0.5134653, 0.5718816, 0.55590683, 0.8572497));
+    }
+
+    #[test]
+    fn fov_setting_offsets_each_group_of_views() {
+        let views = lacetti();
+        let groups: Vec<FovGroup> = (0..views.0.len()).map(|i| views.fov_group(i)).collect();
+        use FovGroup::*;
+        assert_eq!(groups, [Chase, Chase, Chase, Chase, Bonnet, Bonnet, Bonnet, Bonnet, Cockpit, Cockpit, Bonnet]);
+        assert_eq!(Fov::parse("original"), Ok(0));
+        assert_eq!(Fov::parse("+10"), Ok(10));
+        assert_eq!(Fov::parse("-5"), Ok(-5));
+        assert!(Fov::parse("41").is_err() && Fov::parse("wide").is_err());
+        assert_eq!(Fov::text(10), "+10");
+        assert_eq!(Fov::text(0), "original");
+        // The original's head-cam 48°: the default makes it 58°, the chase
+        // and bonnet views keep theirs bit for bit.
+        let mut cameras = Cameras::new(lacetti(), "head-cam", None);
+        cameras.fov = Fov::DEFAULT;
+        let shot = cameras.frame(&sample(Mat4::IDENTITY, Vec3::ZERO, 0), false, Look::default(), |o| o);
+        assert!((shot.fov - 58f32.to_radians()).abs() < 1e-6, "{}", shot.fov.to_degrees());
+        assert_eq!(cameras.shots[0].unwrap().fov, 52f32.to_radians());
+        assert_eq!(Fov::DEFAULT.apply(Chase, 0.9), 0.9);
+    }
+
+    /// The FOV of every view of every shipped car (GRID_GAME_ROOT), for
+    /// docs/CAMERA_VIEWS.md "FOV setting".
+    #[test]
+    #[ignore]
+    fn every_car_view_fov() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT"));
+        let mut stems: Vec<String> = std::fs::read_dir(root.join("cars"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|s| root.join(format!("cars/{s}/cameras.xml")).exists())
+            .collect();
+        stems.sort();
+        for stem in stems {
+            let views = match Views::load(&root, &stem) {
+                Ok(views) => views,
+                Err(error) => {
+                    println!("view_fov {stem} unreadable: {error}");
+                    continue;
+                }
+            };
+            let fovs: Vec<String> = views
+                .0
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| !v.hidden || v.ident.ends_with("_reverse"))
+                .map(|(i, v)| {
+                    let fov = match &v.rig {
+                        Rig::Chase(c) => c.fov,
+                        Rig::Mounted(m) => m.fov,
+                        Rig::Head(h) => h.fov,
+                    };
+                    format!("{}:{:?}={fov}", v.ident, views.fov_group(i))
+                })
+                .collect();
+            println!("view_fov {stem} {}", fovs.join(" "));
+        }
     }
 
     /// Diagnostic: the whole table against the emulated original's

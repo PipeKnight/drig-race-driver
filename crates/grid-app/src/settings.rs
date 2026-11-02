@@ -342,6 +342,11 @@ pub struct Settings {
     pub frame_latency: Option<std::num::NonZero<u32>>,
     /// `[video] shadows`: off, low, medium, high or ultra (shadow_layout.rs).
     pub shadows: Option<crate::shadow_layout::Quality>,
+    /// `[camera] cockpit_fov`, `bonnet_fov`, `chase_fov`: degrees added to
+    /// the original's FOV (camera::Fov, owner deviation row 103).
+    pub cockpit_fov: Option<i32>,
+    pub bonnet_fov: Option<i32>,
+    pub chase_fov: Option<i32>,
     /// `[front_end] show`: the Race Options front end before the race
     /// (docs/DRIVER_AIDS.md); default on.
     pub front_end: Option<bool>,
@@ -427,6 +432,7 @@ impl Settings {
                     "front_end",
                     "event",
                     "video",
+                    "camera",
                     "diagnostics",
                 ]
                 .contains(&section.as_str())
@@ -650,6 +656,13 @@ impl Settings {
                     })
                 }
                 ("front_end", "show") => self.front_end = Some(on(&key, value).map_err(at)?),
+                ("camera", "cockpit_fov" | "bonnet_fov" | "chase_fov") => {
+                    *match key.as_str() {
+                        "cockpit_fov" => &mut self.cockpit_fov,
+                        "bonnet_fov" => &mut self.bonnet_fov,
+                        _ => &mut self.chase_fov,
+                    } = Some(crate::camera::Fov::parse(value).map_err(|e| at(format!("`{key}`: {e}")))?);
+                }
                 ("front_end", "event_menu") => {
                     self.event_menu = Some(on(&key, value).map_err(at)?)
                 }
@@ -672,6 +685,16 @@ impl Settings {
     /// The render height in use. With the mobile preset a height saved before
     /// `auto` existed (no [`RENDER_HEIGHT_VERSION`]) reads as `auto` (F559:
     /// the Video screen offered only fixed heights then).
+    /// The `[camera]` FOV offsets over [`crate::camera::Fov::DEFAULT`].
+    pub fn fov(&self) -> crate::camera::Fov {
+        let d = crate::camera::Fov::DEFAULT;
+        crate::camera::Fov {
+            cockpit: self.cockpit_fov.unwrap_or(d.cockpit),
+            bonnet: self.bonnet_fov.unwrap_or(d.bonnet),
+            chase: self.chase_fov.unwrap_or(d.chase),
+        }
+    }
+
     pub fn video_render_height(&self) -> crate::render_scale::RenderHeight {
         use crate::render_scale::RenderHeight;
         let current = self.render_height_version.unwrap_or(0) >= RENDER_HEIGHT_VERSION;
@@ -909,6 +932,7 @@ pub fn save_video(path: &Path, video: &crate::front_end::Video) -> Result<(), St
     };
     let new = with_keys(&old, "osd", &[("fps", Some(if video.fps { "on" } else { "off" }.into()))]);
     let new = with_keys(&new, "video", &video.keys());
+    let new = with_keys(&new, "camera", &video.camera_keys());
     let mut check = Settings::new();
     check.apply(&new, path.parent().unwrap_or(Path::new(".")))?;
     if crate::front_end::Video::from_settings(&check) != *video {
@@ -1288,6 +1312,7 @@ tick_delay_ms = 20
             present_mode: PresentMode::AutoVsync,
             refresh_hz: Some(120.),
             frame_latency: None,
+            fov: crate::camera::Fov::DEFAULT,
         };
         let new = with_keys(&new, "video", &video.keys());
         assert_eq!(

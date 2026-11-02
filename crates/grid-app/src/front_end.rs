@@ -132,8 +132,11 @@ pub enum VideoRow {
     PresentMode,
     Refresh,
     Latency,
+    CockpitFov,
+    BonnetFov,
+    ChaseFov,
 }
-const VIDEO_ROWS: [(VideoRow, &str, &str); 5] = [
+const VIDEO_ROWS: [(VideoRow, &str, &str); 8] = [
     (
         VideoRow::Fps,
         "FPS counter",
@@ -159,7 +162,26 @@ const VIDEO_ROWS: [(VideoRow, &str, &str); 5] = [
         "Frame latency",
         "Frames prepared ahead of the screen. 1: less input lag; 3: smoother when frames are uneven. Default is 2. Applies at the next start.",
     ),
+    (
+        VideoRow::CockpitFov,
+        "Cockpit view FOV",
+        "Degrees added to the car's original field of view in the cockpit view and its look-back (up and down; the sides follow the screen shape). Default +10: wider than the original. Applies at once.",
+    ),
+    (
+        VideoRow::BonnetFov,
+        "Bonnet and bumper FOV",
+        "Degrees added to the car's original field of view in the bonnet and bumper views. Default: Original. Applies at once.",
+    ),
+    (
+        VideoRow::ChaseFov,
+        "Chase view FOV",
+        "Degrees added to the car's original field of view in the chase views. Default: Original. Applies at once.",
+    ),
 ];
+
+/// The FOV offsets the Video screen steps through (the settings file takes
+/// any whole degree in `camera::Fov::RANGE`).
+const FOV_STEPS: [i32; 9] = [-10, -5, 0, 5, 10, 15, 20, 25, 30];
 
 const RENDER_HEIGHTS: [RenderHeight; 5] = [
     RenderHeight::Auto,
@@ -195,6 +217,8 @@ pub struct Video {
     pub present_mode: PresentMode,
     pub refresh_hz: Option<f32>,
     pub frame_latency: Option<u32>,
+    /// `[camera]` FOV offsets (owner deviation, row 103).
+    pub fov: crate::camera::Fov,
 }
 
 impl Video {
@@ -205,7 +229,18 @@ impl Video {
             present_mode: s.present_mode.unwrap_or_default(),
             refresh_hz: s.video_refresh_hz(),
             frame_latency: s.frame_latency.map(|n| n.get()),
+            fov: s.fov(),
         }
+    }
+
+    /// `[camera]` keys for the settings file.
+    pub fn camera_keys(&self) -> Vec<(&'static str, Option<String>)> {
+        use crate::camera::Fov;
+        vec![
+            ("cockpit_fov", Some(Fov::text(self.fov.cockpit))),
+            ("bonnet_fov", Some(Fov::text(self.fov.bonnet))),
+            ("chase_fov", Some(Fov::text(self.fov.chase))),
+        ]
     }
 
     /// `[video]` keys for the settings file; default latency removes the key.
@@ -250,6 +285,9 @@ impl Video {
             }
             VideoRow::Refresh => self.refresh_hz = cycle(&REFRESH, self.refresh_hz, up),
             VideoRow::Latency => self.frame_latency = cycle(&LATENCY, self.frame_latency, up),
+            VideoRow::CockpitFov => self.fov.cockpit = cycle(&FOV_STEPS, self.fov.cockpit, up),
+            VideoRow::BonnetFov => self.fov.bonnet = cycle(&FOV_STEPS, self.fov.bonnet, up),
+            VideoRow::ChaseFov => self.fov.chase = cycle(&FOV_STEPS, self.fov.chase, up),
         }
     }
 
@@ -275,8 +313,15 @@ impl Video {
             VideoRow::Latency => self
                 .frame_latency
                 .map_or("Default (2)".into(), |n| n.to_string()),
+            VideoRow::CockpitFov => fov_value(self.fov.cockpit),
+            VideoRow::BonnetFov => fov_value(self.fov.bonnet),
+            VideoRow::ChaseFov => fov_value(self.fov.chase),
         }
     }
+}
+
+fn fov_value(offset: i32) -> String {
+    if offset == 0 { "Original".into() } else { format!("{offset:+}°") }
 }
 
 fn present_name(mode: PresentMode) -> &'static str {
@@ -677,6 +722,7 @@ fn apply_video(
     fps: Option<ResMut<crate::fps_counter::FpsCounter>>,
     scale: Option<ResMut<crate::render_scale::RenderScale>>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    cameras: Option<ResMut<crate::camera::Cameras>>,
     #[cfg(target_os = "android")] display: Option<ResMut<crate::android_display::Display>>,
 ) {
     if let Some(scale) = &scale {
@@ -697,6 +743,11 @@ fn apply_video(
     }
     if let Some(mut scale) = scale {
         scale.set_height(video.render_height);
+    }
+    if let Some(mut cameras) = cameras
+        && cameras.fov != video.fov
+    {
+        cameras.fov = video.fov;
     }
     for mut window in &mut windows {
         if window.present_mode != video.present_mode {
@@ -1057,7 +1108,7 @@ mod tests {
         assert_eq!(front.screen, Screen::Video);
         let view = front.view(&Labels::default());
         assert_eq!(view.title, "Video");
-        assert_eq!(view.rows.len(), 5);
+        assert_eq!(view.rows.len(), 8);
         assert!(view.subtitle.starts_with("Shows frames per second"));
         // FPS toggles; Render height Auto -> 720 -> 900 -> 1080 -> Native wraps.
         front.step(press(|n| n.right = true));
@@ -1093,6 +1144,19 @@ mod tests {
         front.step(press(|n| n.down = true));
         front.step(press(|n| n.right = true));
         assert_eq!(front.video.frame_latency, Some(1));
+        // The FOV rows (row 103): cockpit +10 -> +15, bonnet Original -> -5,
+        // chase Original -> +5.
+        assert_eq!(front.view(&Labels::default()).rows[5].1, "+10°");
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.right = true));
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.left = true));
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.right = true));
+        assert_eq!(front.video.fov, crate::camera::Fov { cockpit: 15, bonnet: -5, chase: 5 });
+        let rows = front.view(&Labels::default()).rows;
+        assert_eq!((rows[5].1.as_str(), rows[6].1.as_str(), rows[7].1.as_str()), ("+15°", "-5°", "+5°"));
+        assert!(front.view(&Labels::default()).subtitle.starts_with("Degrees added"));
         // Undo, then one change and Back: saved once.
         front.step(press(|n| n.button3 = true));
         assert_eq!(front.video, start);

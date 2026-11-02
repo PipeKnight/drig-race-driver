@@ -849,7 +849,8 @@ pub fn frame_camera(
             };
             let sample = crate::camera::Sample::moving(car.pose.to_mat4(), car.velocity, shown.tick, 0);
             let shot = crate::camera::shot(&views.0[index].rig, &mut session.history, &sample, dt, crate::camera::Look::default(), |o| o);
-            (shot.eye, shot.rotation, shot.fov, shot.near)
+            let fov = cameras.as_ref().map_or(shot.fov, |c| c.fov.apply(views.fov_group(index), shot.fov));
+            (shot.eye, shot.rotation, fov, shot.near)
         }
     };
     let (transform, projection) = &mut *camera;

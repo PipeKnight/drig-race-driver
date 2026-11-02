@@ -4425,7 +4425,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         // at the original's levels of detail (docs/CAR_LOD.md).
         car_lod::load(&root);
         car_batch::install(&mut app);
-        camera::install(&mut app, &root, field.models[0].stem());
+        camera::install(&mut app, &root, field.models[0].stem(), profile.fov());
         player_view_visibility::install(&mut app);
         cockpit::install(&mut app);
         exterior_driver::install(&mut app);
