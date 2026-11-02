@@ -75,7 +75,7 @@ impl BoxShape {
         p[3] = 1.;
         p
     }
-    fn corners(&self) -> [V; 8] {
+    pub(crate) fn corners(&self) -> [V; 8] {
         std::array::from_fn(|i| {
             self.corner(std::array::from_fn(
                 |k| {
@@ -173,41 +173,12 @@ pub fn contacts_cached<'m>(
     if capacity == 0 {
         return Ok(Vec::new());
     }
-    // B7F740: the box in the mesh's frame; the directions already are.
-    let corners = shape.corners().map(|c| to_frame(&matrix, c));
-    let axes = [0, 1, 2].map(|k| to_frame(&matrix, shape.matrix[k]));
     let mut context = Context::new();
-    let local = context.contact_points(
-        mesh,
-        IDENTITY,
-        &corners,
-        shape.margin,
-        Extra::Axes(axes),
-        to_frame(&matrix, cold_start(*direction)),
-        query,
-    )?;
-    *direction = from_frame(&matrix, local.direction);
-    let Some(witnesses) = local.witnesses else {
+    let Touch::Deep(normal, witnesses, depth) =
+        witness(&mut context, mesh, matrix, shape, query, direction)?
+    else {
         return Ok(Vec::new());
     };
-    let witnesses = witnesses.map(|w| from_frame(&matrix, w));
-    // AE8AD0: depth is the witness distance; nothing at or below 1e-3.
-    let difference = sub(witnesses[0], witnesses[1]);
-    let square = dot(difference, difference);
-    let depth = if square == 0. {
-        0.
-    } else {
-        let seed = crate::spawn::reference_seed(square, false)?;
-        let product = seed * square;
-        ((1. - product * seed) * product) * 0.5 + product
-    };
-    if depth <= f32::from_bits(0x3a83_126f) {
-        return Ok(Vec::new());
-    }
-    let inverse = 1. / depth;
-    let normal = difference.map(|x| inverse * x);
-    let (normal, witnesses) =
-        contact_manifold::orient(shape.matrix[3], matrix[3], normal, witnesses)?;
     let s = Settings {
         margin: query.margin,
         shape_margin: shape.margin,
@@ -229,6 +200,66 @@ pub fn contacts_cached<'m>(
     };
     let (mesh_feature, _) = contact_manifold::mesh_feature(&mut context, mesh, matrix, &s)?;
     contact_manifold::assemble_faces([mesh_feature.face(), box_face], &s, &[])
+}
+
+/// The B7F740 half of AE8AD0 (see [`witness`]).
+pub(crate) enum Touch {
+    /// No witnesses: farther apart than the margins.
+    Apart,
+    /// Witnesses at most 1e-3 apart: AE8AD0 makes no contact and AE34B0
+    /// neither a record nor a ray cast.
+    Within,
+    /// The oriented normal that pushes the mesh, the witnesses, their distance.
+    Deep(V, [V; 2], f32),
+}
+
+/// The B7F740 half of AE8AD0, shared with the swept test AE34B0
+/// (`continuous::sweep_fixed`): the oriented normal that pushes the mesh,
+/// the witnesses and their distance, unless the shapes are apart or the
+/// distance is at most 1e-3. Updates the pair's cached `direction`.
+pub(crate) fn witness(
+    context: &mut Context,
+    mesh: Hull<'_>,
+    matrix: Matrix,
+    shape: &BoxShape,
+    query: &ContactSettings,
+    direction: &mut V,
+) -> Result<Touch, Error> {
+    // B7F740: the box in the mesh's frame; the directions already are.
+    let corners = shape.corners().map(|c| to_frame(&matrix, c));
+    let axes = [0, 1, 2].map(|k| to_frame(&matrix, shape.matrix[k]));
+    let local = context.contact_points(
+        mesh,
+        IDENTITY,
+        &corners,
+        shape.margin,
+        Extra::Axes(axes),
+        to_frame(&matrix, cold_start(*direction)),
+        query,
+    )?;
+    *direction = from_frame(&matrix, local.direction);
+    let Some(witnesses) = local.witnesses else {
+        return Ok(Touch::Apart);
+    };
+    let witnesses = witnesses.map(|w| from_frame(&matrix, w));
+    // AE8AD0: depth is the witness distance; nothing at or below 1e-3.
+    let difference = sub(witnesses[0], witnesses[1]);
+    let square = dot(difference, difference);
+    let depth = if square == 0. {
+        0.
+    } else {
+        let seed = crate::spawn::reference_seed(square, false)?;
+        let product = seed * square;
+        ((1. - product * seed) * product) * 0.5 + product
+    };
+    if depth <= f32::from_bits(0x3a83_126f) {
+        return Ok(Touch::Within);
+    }
+    let inverse = 1. / depth;
+    let normal = difference.map(|x| inverse * x);
+    let (normal, witnesses) =
+        contact_manifold::orient(shape.matrix[3], matrix[3], normal, witnesses)?;
+    Ok(Touch::Deep(normal, witnesses, depth))
 }
 
 #[cfg(test)]

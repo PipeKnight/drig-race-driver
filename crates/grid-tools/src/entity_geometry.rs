@@ -399,6 +399,59 @@ impl Props {
         }
         Ok(contacts)
     }
+
+    /// The continuous stage's AE34B0 for one body swept from `start` to
+    /// `end` against every enabled box whose bounds overlap the union of
+    /// its margin-inflated start and end bounds (B212D0's swept candidates
+    /// [I], as `Track::sweep_road`), in data order, at most `capacity` hits.
+    /// Each pair starts cold (+x), as the prop pieces' ordinary queries do.
+    pub fn sweep<'m>(
+        &self,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
+        start: grid_world::physical_pose::Matrix,
+        end: grid_world::physical_pose::Matrix,
+        query: &grid_world::convex_distance::ContactSettings,
+        capacity: usize,
+        index: Option<&BoxIndex>,
+    ) -> Result<Vec<grid_world::continuous::Hit>, Error> {
+        let mesh = mesh.into();
+        let [a0, a1] = mesh.world_bounds(start, query.margin)?;
+        let [b0, b1] = mesh.world_bounds(end, query.margin)?;
+        let bounds: [[f32; 4]; 2] = [
+            std::array::from_fn(|j| a0[j].min(b0[j])),
+            std::array::from_fn(|j| a1[j].max(b1[j])),
+        ];
+        let candidates = match index {
+            Some(index) if index.boxes == self.boxes.len() => index.candidates(bounds),
+            _ => (0..self.boxes.len()).collect(),
+        };
+        let mut hits = Vec::new();
+        for index in candidates {
+            if hits.len() >= capacity {
+                break;
+            }
+            let b = &self.boxes[index];
+            if !b.enabled
+                || (0..3).any(|j| bounds[0][j] > b.bounds[j + 3] || bounds[1][j] < b.bounds[j])
+            {
+                continue;
+            }
+            let shape = match &b.shape {
+                Shape::Box(shape) => grid_world::continuous::Fixed::Box(shape),
+                Shape::Round(shape) => grid_world::continuous::Fixed::Round(shape),
+            };
+            let hit = grid_world::continuous::sweep_fixed(
+                mesh,
+                start,
+                end,
+                shape,
+                query,
+                &mut [0.; 4],
+            )?;
+            hits.extend(hit);
+        }
+        Ok(hits)
+    }
 }
 
 /// A cylinder (`height` given) or sphere primitive placed by the shape and

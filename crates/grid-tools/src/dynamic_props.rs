@@ -2134,6 +2134,11 @@ impl PropWorld {
             let hits = track.sweep_road(spec.collider(), start, end, &query, room, |code| {
                 surfaces.sheet(code)
             })?;
+            let mut hits = hits;
+            // AE34B0: the route boxes and round primitives, too (B15B70
+            // pairs a fast body with static shapes when +0x416 is set).
+            let room = room - hits.len();
+            hits.extend(track.sweep_props(spec.collider(), start, end, &query, room)?);
             records += hits.len();
             let inverse_mass = f32::from_bits(body[0x3f4 / 4]);
             let positions: Vec<_> = hits

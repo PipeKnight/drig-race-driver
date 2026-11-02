@@ -21,7 +21,7 @@
 //! triangle (AE2210) and polygon clipping (AEB630).
 use crate::{
     Error,
-    box_contacts,
+    box_contacts::{self, Touch},
     contact_manifold::{self, Contact, Face, Settings},
     convex_distance::{ContactSettings, Context, Extra, Hull, Static},
     physical_pose::Matrix,
@@ -872,57 +872,16 @@ fn shape_contacts(
         return Ok(Vec::new());
     }
     let settings = query;
-    let (pose, margin, shape_margin) = match shape {
-        RoundShape::Cylinder(c) => (c.matrix, c.margin, c.margin),
-        // B4B0A0: the centre pushed by radius plus shell.
-        RoundShape::Sphere(s) => (s.matrix, s.radius + s.margin, s.margin),
-    };
-    // B7F740: the shape in the body's frame, as for boxes (box_contacts);
-    // the directions already are.
-    let local: Matrix = std::array::from_fn(|k| box_contacts::to_frame(&matrix, pose[k]));
-    let centre = [local[3]];
-    let cylinder = match shape {
-        RoundShape::Cylinder(c) => Some(CylinderShape {
-            matrix: local,
-            ..c.clone()
-        }),
-        RoundShape::Sphere(_) => None,
-    };
-    let support = match &cylinder {
-        Some(c) => Static::Cylinder(c),
-        None => Static::Points(&centre),
+    let shape_margin = match shape {
+        RoundShape::Cylinder(c) => c.margin,
+        RoundShape::Sphere(s) => s.margin,
     };
     let mut context = Context::new();
-    let output = context.contact_static(
-        hull,
-        box_contacts::IDENTITY,
-        support,
-        margin,
-        Extra::Axes([local[0], local[1], local[2]]),
-        box_contacts::to_frame(&matrix, box_contacts::cold_start(*direction)),
-        settings,
-    )?;
-    *direction = box_contacts::from_frame(&matrix, output.direction);
-    let Some(witnesses) = output.witnesses else {
+    let Touch::Deep(normal, witnesses, depth) =
+        witness(&mut context, hull, matrix, shape, query, direction)?
+    else {
         return Ok(Vec::new());
     };
-    let witnesses = witnesses.map(|w| box_contacts::from_frame(&matrix, w));
-    // AE8AD0: depth is the witness distance; nothing at or below 1e-3.
-    let difference = sub(witnesses[0], witnesses[1]);
-    let square = dot(difference, difference);
-    let depth = if square == 0. {
-        0.
-    } else {
-        let seed = crate::spawn::reference_seed(square, false)?;
-        let product = seed * square;
-        ((1. - product * seed) * product) * 0.5 + product
-    };
-    if depth <= f32::from_bits(0x3a83_126f) {
-        return Ok(Vec::new());
-    }
-    let inverse = 1. / depth;
-    let normal = difference.map(|x| inverse * x);
-    let (normal, witnesses) = contact_manifold::orient(pose[3], matrix[3], normal, witnesses)?;
     let s = Settings {
         margin: settings.margin,
         shape_margin,
@@ -957,6 +916,70 @@ fn shape_contacts(
             Ok(contacts)
         }
     }
+}
+
+/// The B7F740 half of AE8AD0 for a round static shape, as
+/// [`box_contacts::witness`].
+pub(crate) fn witness(
+    context: &mut Context,
+    hull: Hull<'_>,
+    matrix: Matrix,
+    shape: &RoundShape,
+    query: &ContactSettings,
+    direction: &mut V,
+) -> Result<Touch, Error> {
+    let settings = query;
+    let (pose, margin) = match shape {
+        RoundShape::Cylinder(c) => (c.matrix, c.margin),
+        // B4B0A0: the centre pushed by radius plus shell.
+        RoundShape::Sphere(s) => (s.matrix, s.radius + s.margin),
+    };
+    // B7F740: the shape in the body's frame, as for boxes (box_contacts);
+    // the directions already are.
+    let local: Matrix = std::array::from_fn(|k| box_contacts::to_frame(&matrix, pose[k]));
+    let centre = [local[3]];
+    let cylinder = match shape {
+        RoundShape::Cylinder(c) => Some(CylinderShape {
+            matrix: local,
+            ..c.clone()
+        }),
+        RoundShape::Sphere(_) => None,
+    };
+    let support = match &cylinder {
+        Some(c) => Static::Cylinder(c),
+        None => Static::Points(&centre),
+    };
+    let output = context.contact_static(
+        hull,
+        box_contacts::IDENTITY,
+        support,
+        margin,
+        Extra::Axes([local[0], local[1], local[2]]),
+        box_contacts::to_frame(&matrix, box_contacts::cold_start(*direction)),
+        settings,
+    )?;
+    *direction = box_contacts::from_frame(&matrix, output.direction);
+    let Some(witnesses) = output.witnesses else {
+        return Ok(Touch::Apart);
+    };
+    let witnesses = witnesses.map(|w| box_contacts::from_frame(&matrix, w));
+    // AE8AD0: depth is the witness distance; nothing at or below 1e-3.
+    let difference = sub(witnesses[0], witnesses[1]);
+    let square = dot(difference, difference);
+    let depth = if square == 0. {
+        0.
+    } else {
+        let seed = crate::spawn::reference_seed(square, false)?;
+        let product = seed * square;
+        ((1. - product * seed) * product) * 0.5 + product
+    };
+    if depth <= f32::from_bits(0x3a83_126f) {
+        return Ok(Touch::Within);
+    }
+    let inverse = 1. / depth;
+    let normal = difference.map(|x| inverse * x);
+    let (normal, witnesses) = contact_manifold::orient(pose[3], matrix[3], normal, witnesses)?;
+    Ok(Touch::Deep(normal, witnesses, depth))
 }
 
 #[cfg(test)]

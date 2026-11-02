@@ -456,6 +456,13 @@ Not yet explained: whether the base contact reaches the solver as a car-box cont
 check 0x7BDFD0 sees only car-box pairs) or through the wheels. Physics/props topic, not AI.
 Whether the original places the flags in a normal race at all is not known [I]. F681: it places them, but race setup frees their physics in every non-drift format [V] (DISCIPLINES §4.3.1); the port now does the same, so race fields no longer meet them.
 
+**Start-line matrix after F681 [V port]** (F690; `local/corners3/startm.sh`, props on, 15 starts ×
+seeds 0–5, main 4baec5e9; lost cars per route, F649 props-on → now): Yokohama Docks 0 7 → 6,
+Yokohama Docks 1 93 → 2, Yokohama Docks 9 122 → 19, Shibuya 1 2 → 1, Shibuya 0 6 → 16. The
+Yokohama fields no longer stop at the flag bases. Shibuya 0 was already 17 on main ea1688db (before
+F680/F681, `sm-shib0main`), so its rise came between F649 and F679, not from the flags: in seed 0,
+cars 2 and 3 stop at tick 607 at every field size. Not yet bisected.
+
 **Long Beach route 1 [V port].** Car 0 (the leader) stops in every seed at tick 857–883. In
 Alongside from tick 600 its planned offset walks left by about 0.64 m per 10 ticks, 0 → −5.5 m
 (arc 381–437), as §11's slot 4 did at Donington before the clamp fix; it swings back, meets the wall

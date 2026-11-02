@@ -396,7 +396,8 @@ impl Track {
     /// The continuous stage (grid_world::continuous) for one mesh swept from
     /// `start` to `end` against every packed road chunk its swept bounds
     /// reach, in archive order, at most `capacity` hits. The boundary sheet
-    /// (kind 10, swept callback AE95B0) and the route props are not swept.
+    /// (kind 10, swept callback AE95B0) is not swept; the route props are
+    /// [`Self::sweep_props`].
     pub fn sweep_road<'m>(
         &self,
         mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
@@ -441,6 +442,21 @@ impl Track {
             )?);
         }
         Ok(hits)
+    }
+    /// AE34B0: [`Self::sweep_road`] against the route props (entity boxes
+    /// and round primitives), [`crate::entity_geometry::Props::sweep`].
+    pub fn sweep_props<'m>(
+        &self,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
+        start: grid_world::physical_pose::Matrix,
+        end: grid_world::physical_pose::Matrix,
+        query: &grid_world::convex_distance::ContactSettings,
+        capacity: usize,
+    ) -> Result<Vec<grid_world::continuous::Hit>, grid_world::Error> {
+        match &self.props {
+            Some(props) => props.sweep(mesh, start, end, query, capacity, self.props_index.as_deref()),
+            None => Ok(Vec::new()),
+        }
     }
     pub fn query(
         &self,

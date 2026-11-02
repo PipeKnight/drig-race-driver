@@ -5,9 +5,11 @@
 //!
 //! Scope: the moving shape is a collision mesh (kind 7) or a round piece
 //! (kind 5/3, `convex_distance::Hull`) and the other shape a
-//! packed road chunk (kind 11, swept callback AE4700, matrix entry +8).
+//! packed road chunk (kind 11, swept callback AE4700, matrix entry +8) or a
+//! static route box, cylinder or sphere (kinds 0/5/3, AE34B0).
 use crate::{
     Error,
+    box_contacts::Touch,
     contact_manifold,
     convex_distance::{self, ContactSettings},
     packed_candidates, packed_query,
@@ -225,20 +227,9 @@ pub struct Hit {
     pub normal: V,
 }
 
-/// B801C0 as AE4700 calls it through B80CE0: shape 1 the triangle (support
-/// B7C830, first maximum), shape 2 the mesh rotated about the origin, both
-/// with zero margin; the ray runs from the mesh's start translation `from`
-/// to its end translation `to`. Returns (time, point, normal) or None for a
-/// miss. Time 0 means the shapes already touch at the start.
-fn ray_cast(
-    triangle: [V; 3],
-    mesh: convex_distance::Hull<'_>,
-    rotation: Matrix,
-    from: V,
-    to: V,
-) -> Result<Option<(f32, V, V)>, Error> {
-    let mut cache = [0; 7];
-    let mut support = |v: V| -> Result<V, Error> {
+/// B7C830: a triangle's first vertex of greatest projection.
+fn triangle_support(triangle: [V; 3]) -> impl Fn(V) -> V {
+    move |v| {
         let mut t = triangle[0];
         let mut best = dot(t, v);
         for &p in &triangle[1..] {
@@ -248,6 +239,26 @@ fn ray_cast(
                 t = p;
             }
         }
+        t
+    }
+}
+
+/// B801C0 as AE4700 and AE34B0 call it through B80CE0: shape 1 the static
+/// shape (`fixed`, its support in world space: a triangle's B7C830, first
+/// maximum), shape 2 the mesh rotated about the origin, both with zero
+/// margin; the ray runs from the mesh's start translation `from` to its end
+/// translation `to`. Returns (time, point, normal) or None for a miss. Time 0
+/// means the shapes already touch at the start.
+fn ray_cast(
+    fixed: impl Fn(V) -> V,
+    mesh: convex_distance::Hull<'_>,
+    rotation: Matrix,
+    from: V,
+    to: V,
+) -> Result<Option<(f32, V, V)>, Error> {
+    let mut cache = [0; 7];
+    let mut support = |v: V| -> Result<V, Error> {
+        let t = fixed(v);
         let mut m = convex_distance::mesh_support(mesh, rotation, v.map(|x| -x), &mut cache)?;
         // B4B0A0's support carries the sphere's radius.
         if let convex_distance::Hull::Sphere { radius } = mesh {
@@ -382,7 +393,7 @@ pub fn sweep_packed<'m>(
                 normal,
             });
         } else if let Some((time, point, cast)) =
-            ray_cast(triangle, mesh, rotation, start[3], end[3])?
+            ray_cast(triangle_support(triangle), mesh, rotation, start[3], end[3])?
             && 0. < time
         {
             let normal = if sheet {
@@ -409,6 +420,103 @@ pub fn sweep_packed<'m>(
         }
     }
     Ok(hits)
+}
+
+/// A static convex shape of the swept test AE34B0: a route box (kind 0) or
+/// a round primitive (kinds 5 and 3).
+#[derive(Clone, Copy)]
+pub enum Fixed<'a> {
+    Box(&'a crate::box_contacts::BoxShape),
+    Round(&'a crate::round_contacts::RoundShape),
+}
+
+impl Fixed<'_> {
+    /// Shape 1's support for the ray cast, without the shell (B80CE0 passes
+    /// zero margins): the box corners (first maximum, as the distance query
+    /// takes them), B47A70, or the sphere centre pushed by its radius.
+    fn support(&self, v: V) -> V {
+        match self {
+            Fixed::Box(b) => {
+                let corners = b.corners();
+                let mut best = corners[0];
+                for &c in &corners[1..] {
+                    if dot(best, v) < dot(c, v) {
+                        best = c;
+                    }
+                }
+                best
+            }
+            Fixed::Round(crate::round_contacts::RoundShape::Cylinder(c)) => {
+                let mut p = c.support(v);
+                p[3] = 1.;
+                p
+            }
+            Fixed::Round(crate::round_contacts::RoundShape::Sphere(s)) => {
+                let mut p = s.matrix[3];
+                let length = dot(v, v).sqrt();
+                if length > 0. {
+                    let scale = s.radius / length;
+                    for j in 0..3 {
+                        p[j] += scale * v[j];
+                    }
+                }
+                p
+            }
+        }
+    }
+}
+
+/// AE34B0 for one mesh body (shell `query.margin`) against one static convex
+/// shape, the mesh moving from `start` to `end` (translation only), as
+/// AE4700 does per triangle: a shape the mesh already touches at the start
+/// gives the B7F740 contact with time 0 (only beyond 1e-3; `direction` is the
+/// pair's cached direction, as the ordinary query takes it); otherwise the
+/// ray cast's time of impact.
+pub fn sweep_fixed<'m>(
+    mesh: impl Into<convex_distance::Hull<'m>>,
+    start: Matrix,
+    end: Matrix,
+    shape: Fixed<'_>,
+    query: &ContactSettings,
+    direction: &mut V,
+) -> Result<Option<Hit>, Error> {
+    let mesh = mesh.into();
+    let mut context = convex_distance::Context::new();
+    let touch = match shape {
+        Fixed::Box(b) => {
+            crate::box_contacts::witness(&mut context, mesh, start, b, query, direction)?
+        }
+        Fixed::Round(r) => {
+            crate::round_contacts::witness(&mut context, mesh, start, r, query, direction)?
+        }
+    };
+    match touch {
+        Touch::Deep(normal, witnesses, _) => {
+            return Ok(Some(Hit {
+                time: 0.,
+                point: witnesses[1],
+                normal,
+            }));
+        }
+        // AE34B0 casts no ray for shapes that touch within 1e-3.
+        Touch::Within => return Ok(None),
+        Touch::Apart => {}
+    }
+    let mut rotation = start;
+    rotation[3] = [0., 0., 0., 1.];
+    let Some((time, point, cast)) =
+        ray_cast(|v| shape.support(v), mesh, rotation, start[3], end[3])?
+    else {
+        return Ok(None);
+    };
+    if time <= 0. {
+        return Ok(None);
+    }
+    Ok(Some(Hit {
+        time,
+        point,
+        normal: normalize(cast)?,
+    }))
 }
 
 /// B3A700 for a hit between a moving body (inverse mass `inverse_mass`,
@@ -557,7 +665,7 @@ mod tests {
             [0., 0., 10., 1.],
         ];
         // Bottom face at 0.1 - 0.075 = 0.025 at the start, -0.135 at the end.
-        let (time, _, normal) = ray_cast(floor, (&mesh).into(), at(0.), [0., 0.1, 0., 1.], [0., -0.06, 0., 1.])
+        let (time, _, normal) = ray_cast(triangle_support(floor), (&mesh).into(), at(0.), [0., 0.1, 0., 1.], [0., -0.06, 0., 1.])
             .unwrap()
             .unwrap();
         // B801C0 stops at |v|^2 <= 1e-6 x the largest |w|^2 (about 1 cm for
@@ -567,10 +675,64 @@ mod tests {
         assert!(n[1] > 0.999, "{n:?}");
         // Moving away misses.
         assert!(
-            ray_cast(floor, (&mesh).into(), at(0.), [0., 0.1, 0., 1.], [0., 0.3, 0., 1.])
+            ray_cast(triangle_support(floor), (&mesh).into(), at(0.), [0., 0.1, 0., 1.], [0., 0.3, 0., 1.])
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_cube_driven_sideways_into_a_thin_box_stops_at_its_side_face() {
+        // The F680 seed 18 shape: a fence box 0.38 m thick whose bottom is
+        // 1.13 m up; a piece 0.15 m across moves 0.38 m in one step from
+        // beside it to inside it. The minimum-overlap exit inside would be
+        // the bottom face; AE34B0's time of impact is on the side face.
+        let mesh = cube(0.075);
+        let fence = crate::box_contacts::BoxShape {
+            matrix: [
+                [1., 0., 0., 0.],
+                [0., 1., 0., 0.],
+                [0., 0., 1., 0.],
+                [0., 1.5, 0., 1.],
+            ],
+            half: [0.19, 0.37, 5.],
+            margin: 0.,
+        };
+        let axes = [
+            [1., 0., 0., 0.],
+            [-1., 0., 0., 0.],
+            [0., 1., 0., 0.],
+            [0., -1., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., 0., -1., 0.],
+        ];
+        let query = ContactSettings {
+            margin: 0.,
+            directions: std::array::from_fn(|i| axes[i % 6]),
+        };
+        let mut start = at(1.2);
+        start[3][0] = -0.3;
+        let mut end = start;
+        end[3][0] = 0.08;
+        let hit = sweep_fixed(&mesh, start, end, Fixed::Box(&fence), &query, &mut [0.; 4])
+            .unwrap()
+            .unwrap();
+        // The near face at x -0.19 meets the cube's face at -0.3 + 0.075 after 0.035 m.
+        assert!(0. < hit.time && hit.time <= 0.035 / 0.38 + 1e-3, "{hit:?}");
+        assert!(hit.normal[0] < -0.999, "{hit:?}");
+        let corrected = response(&hit, 1., [0.38, 0., 0., 0.], start[3]).unwrap();
+        assert!(corrected[0] < -0.19 - 0.075 + 0.01, "{corrected:?}");
+        // Moving away misses; a cube already inside the margin gives time 0.
+        let mut away = start;
+        away[3][0] = -0.6;
+        assert!(sweep_fixed(&mesh, start, away, Fixed::Box(&fence), &query, &mut [0.; 4]).unwrap().is_none());
+        let mut inside = start;
+        inside[3][0] = -0.2;
+        let hit = sweep_fixed(&mesh, inside, end, Fixed::Box(&fence), &query, &mut [0.; 4])
+            .unwrap()
+            .unwrap();
+        assert_eq!(hit.time, 0.);
+        assert!(hit.normal[0] < -0.99, "{hit:?}");
     }
 
     #[test]

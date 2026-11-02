@@ -342,6 +342,89 @@ Then on main 9050690 (F408, with F406's collision-floor lift; `local/robust/ccd/
 - **The F406 GT2 residual** (a car on its nose sinking through the road) is not covered: cars are
   not swept yet.
 
+### Route boxes and round primitives: AE34B0 (the step-size question, 2 November 2026)
+
+The coordinator asked what the original does when a fast piece would end a step deep inside a box
+(quick seeds 17 and 18: the box's minimum-overlap exit is its bottom face, row 88). Does it use
+substeps, a swept test or a different exit face? Answered from the master project
+(`grid_re.py decompile`, private cache). Nothing was run in the original.
+
+- **Substeps [D]: none for rigid bodies.**
+  - The world takes one step of the frame time (FRAME_STEPPING.md §1). At 60 Hz with vsync that
+    is 16.67 ms, about the port's tick.
+  - Only the wheel and tyre job substeps, in pieces of about 1 ms.
+  - So at 60 Hz the step length alone is not a difference from the original.
+- **Exit face [D]: the same.** AE8AD0 takes B7ED10's minimum-overlap axis in both. F680 replaced
+  only inconsistent distance results.
+- **Swept test [D]: yes, against static shapes too.** The port lacked this part.
+  - B15B70 pairs a fast body's shapes with other bodies' shapes. It also pairs them with static
+    shapes (shape `+0xD8` = 0) when body byte +0x416 is set, and B11F40 sets it for every body.
+    Route boxes, cylinders and spheres are static shapes of kinds 0, 5 and 3.
+  - B3A700 calls matrix entry +8 for each pair. For two convex kinds that entry is AE34B0.
+  - AE34B0 works like AE4700 does per triangle, for one convex pair:
+    - **Start pose:** B7F740 runs with the pair's cached direction and both shapes' margins.
+      Witnesses more than 1e-3 apart give a time-0 record with the witness normal (AEE640
+      orientation). Witnesses within 1e-3 give neither a record nor a ray cast.
+    - **Otherwise:** B80CE0 → B801C0 runs with zero margins in shape 1's start frame. A hit at
+      λ > 0 gives a record with the normalised ray normal, negated so that it pushes shape 1.
+  - Same precondition as AE4700: both shapes' `+0xC8` → `+0x18`/`+0x1C` are zero.
+- **Port [V]:**
+  - `continuous::sweep_fixed` holds the AE34B0 logic, with `continuous::Fixed` for a box or
+    round shape.
+  - The start-pose half is `box_contacts::witness` / `round_contacts::witness`, the B7F740 half
+    that AE8AD0 shares, now one function each.
+  - The ray cast takes shape 1's support. A box's support is its corners, first maximum, as the
+    distance query takes them.
+  - `Props::sweep` and `Track::sweep_props` cover the enabled route props whose bounds overlap
+    the union of the start and end bounds [I, as the road].
+  - `PropWorld::continuous` adds those records to the road's before B14550's mean.
+  - Inferences [I]:
+    - which of the two shapes is shape 1 (the port takes the static one, as in AE4700); only
+      the f32 frame of the cast depends on it;
+    - each pair starts cold (+x), as the pieces' ordinary queries do (row 12).
+- **Checks [V], release, `local/sweep/` and `local/soak18/`:**
+  - **Quick seed 18 replay:** box losses 1 → 0.
+    - At the fence (x −181, z 227) the piece starts each step touching it. AE34B0's time-0
+      record (normal about −z) removes the approach every step, so the piece never gets deep
+      enough for the bottom-face exit.
+    - All 50 box records in that replay are time-0 records.
+  - **Quick 1..56:**
+    - base: 55 pass; seed 25 (Yokohama) fails, a prop piece falling through the world; box
+      losses 1 (seed 18); expected losses on seeds 15, 18, 47, 48, 50 and 55;
+    - sweep: 56 pass; box losses 1 (seed 7); expected losses only on seeds 15, 18 and 55.
+  - **Seed 7 (Nürburgring) is a new trajectory:** 12 breaks against base's 7.
+    - Body 31 spawns from a break at about tick 1924. One step later it has a deep road
+      contact and a box contact that points down.
+    - It never gets a box record of its own (road records only): its start pose does not touch
+      a box, and the ray cast finds none.
+    - [I] The box is probably a damaged-state static shape that the same break enabled. This is
+      not traced. It is counted, not passed (row 88).
+  - **Identities:** solo, 12-car and 12-car-df unchanged.
+    - derby-df changes: 5347e4a3 → 11dd8743.
+    - With the box sweep switched off (temporary switch) it hashes as main, so the refactor is
+      neutral. The lost wheels (bodies 16 and up) are swept against Detroit's route boxes.
+    - No retirements in either run; standings and lap times differ.
+  - **The §7 sets** (`local/sweep/chaos.sh`; base → sweep):
+    - **Long Beach forced 21..80:** 56/60 → 59/60.
+      - Base fails 28, 55, 60 and 62, each a prop piece falling through the world.
+      - The sweep fails 57: a new trajectory (7 breaks against 3). Body 22 never gets a box
+        record; at tick 2541 its road contact points down while it sinks at 0.8 m/s, the
+        thin-piece family of section 3.
+      - Box losses 0 → 1 (seed 35, a new trajectory with 4 breaks against 3).
+        - Body 9 spawns from a break overlapping three route boxes. On that step it gets three
+          time-0 records (normals −z, +z, +x).
+        - The next step it has a deep road contact and a box contact that points down, and it
+          sinks.
+        - This is row 19's "spawned inside a neighbour's box" class.
+    - **Long Beach chaos prop 1..19:** 19/19 both.
+    - **Donington chaos prop 1..80:** 67/80 → 68/80.
+      - Every failure in both builds is the same world error, `unsupported body event pool or
+        query ownership`, most at tick 1059 in the same seeds.
+      - So it predates this change and is not about collision (seed 29 passes with the sweep,
+        41 fails).
+- Still not swept: cars, the boundary sheet (AE95B0) and piece/car pairs (AE34B0 between two
+  bodies) (row 10).
+
 ## 9. Quick seeds 17 and 23 after F444
 
 F444 (AI traction control and ABS cap) changed the AI's trajectories, so different props are hit.
@@ -434,8 +517,8 @@ retired car 5 at tick 2419. Replay: main checkout `local/lemans/soak/quick-37-40
 ## 8. Open
 
 - The 16 ms step against the original's per-frame step (F320; seeds 22 and 59, the pile-up depth).
-- Continuous collision (section 7): cars, the boundary sheet, route boxes and piece/car pairs are
-  not swept yet.
+- Continuous collision (section 7): cars, the boundary sheet and piece/car pairs are not swept yet
+  (route props since the AE34B0 port).
 - Kind-5 cylinders and `cylinderFacets` (10) against the port's 12-sided prisms.
   F462: static route cylinders use the round kind-5 support and features; the
   contact path never reads `cylinderFacets` (BOX_CONTACTS.md "Cylinders and
