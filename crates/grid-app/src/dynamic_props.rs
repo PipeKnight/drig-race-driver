@@ -246,3 +246,109 @@ pub(crate) fn present(
         }
     }
 }
+
+/// Diagnostic `GRID_FLOAT_CHECK=local/OUT.tsv` (backlog row 102): every 60
+/// frames, each live piece's lowest drawn vertex and its collision hull's
+/// lowest point against the road under them, rewritten in OUT. A piece whose
+/// hull rests but whose mesh does not shows the drawn and simulated shapes
+/// apart; one whose hull is above the road and that has no other piece
+/// under it (`piece_gap`) floats in the simulation.
+pub(crate) fn float_check(
+    driving: Option<Res<Driving>>,
+    pieces: Query<(&PropPiece, &Transform, &Visibility, &Mesh3d)>,
+    meshes: Res<Assets<Mesh>>,
+    mut frame: Local<u64>,
+) {
+    *frame += 1;
+    let Some(out) = std::env::var_os("GRID_FLOAT_CHECK") else {
+        return;
+    };
+    let Some(driving) = driving else {
+        return;
+    };
+    if !frame.is_multiple_of(60) {
+        return;
+    }
+    let (props, bodies, track) = match &driving.opponents {
+        Some(o) => match o.multi.dynamic_props() {
+            Some(p) => (p, o.multi.bodies(), o.multi.cars[0].track()),
+            None => return,
+        },
+        None => match driving.runtime.dynamic_props() {
+            Some(p) => (p, &driving.runtime.state.world.groups.bodies[..], driving.runtime.track()),
+            None => return,
+        },
+    };
+    let ground = |x: f32, y: f32, z: f32| {
+        let start = [x, y + 1., z, 1.];
+        let end = [x, y - 30., z, 1.];
+        let mut cache = grid_world::rectangle_cull::Cache::default();
+        let hit = track.query(start, end, &mut cache).ok()?.hit?;
+        Some(start[1] + (end[1] - start[1]) * hit.contact.fraction)
+    };
+    let hulls: BTreeMap<usize, grid_tools::dynamic_props::RoadDepth> =
+        props.road_depths(track, bodies).into_iter().map(|d| (d.body, d)).collect();
+    let body_of: BTreeMap<(usize, usize), usize> =
+        props.pieces.iter().map(|p| ((p.breakable, p.spec), p.body)).collect();
+    // Each drawn piece's lowest vertex and world box.
+    let mut drawn_pieces = Vec::new();
+    for (piece, transform, visibility, mesh) in &pieces {
+        if *visibility == Visibility::Hidden {
+            continue;
+        }
+        let Some(mesh) = meshes.get(&mesh.0) else { continue };
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            continue;
+        };
+        let used: Vec<usize> = match mesh.indices() {
+            Some(i) => i.iter().collect(),
+            None => (0..positions.len()).collect(),
+        };
+        let matrix = transform.to_matrix();
+        let world: Vec<Vec3> = (used.iter().filter_map(|&i| positions.get(i)))
+            .map(|&p| matrix.transform_point3(Vec3::from_array(p)))
+            .collect();
+        let Some(&low) = world.iter().min_by(|a, b| a.y.total_cmp(&b.y)) else {
+            continue;
+        };
+        let min = world.iter().fold(Vec3::INFINITY, |m, &v| m.min(v));
+        let max = world.iter().fold(Vec3::NEG_INFINITY, |m, &v| m.max(v));
+        drawn_pieces.push((piece, low, min, max));
+    }
+    let mut text = String::from(
+        "tick\tbreakable\tspec\ttemplate\tanchor\tdrawn_gap\thull_gap\tpiece_gap\tasleep\tx\ty\tz\n",
+    );
+    for (i, &(piece, low, ..)) in drawn_pieces.iter().enumerate() {
+        let drawn = ground(low.x, low.y, low.z).map_or(f32::NAN, |g| low.y - g);
+        // Approximate support by another piece: the top of a box under the
+        // lowest vertex, at most 5 cm above it.
+        let piece_gap = (drawn_pieces.iter().enumerate())
+            .filter(|&(j, &(_, _, min, max))| {
+                j != i
+                    && (min.x - 0.05..=max.x + 0.05).contains(&low.x)
+                    && (min.z - 0.05..=max.z + 0.05).contains(&low.z)
+                    && max.y <= low.y + 0.05
+            })
+            .map(|(_, &(_, _, _, max))| low.y - max.y)
+            .min_by(f32::total_cmp)
+            .unwrap_or(f32::NAN);
+        let hull = body_of.get(&(piece.breakable, piece.spec)).and_then(|b| hulls.get(b));
+        let spec = &props.catalog.breakables[piece.breakable];
+        text += &format!(
+            "{}\t{}\t{}\t{}\t{}\t{drawn:.3}\t{:.3}\t{piece_gap:.3}\t{}\t{:.2}\t{:.2}\t{:.2}\n",
+            *frame,
+            piece.breakable,
+            piece.spec,
+            spec.template,
+            spec.pieces[piece.spec].anchor,
+            hull.map_or(f32::NAN, |h| -h.depth),
+            hull.is_some_and(|h| h.asleep),
+            low.x,
+            low.y,
+            low.z
+        );
+    }
+    let _ = std::fs::write(out, text);
+}

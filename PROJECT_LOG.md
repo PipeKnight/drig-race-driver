@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F689](log/F0689.md) | 2026-11-02 | Runtime float check of broken prop pieces; ornament and LOD gaps are the original's data (row 102) |
 | [F688](log/F0688.md) | 2026-11-02 | Car reflections: the player's driver out of the cube; overlays of opaque parts before the glass; cracked glass as the original's program |
 | [F687](log/F0687.md) | 2026-11-02 | Cockpit wheel turns at most 2 lock-fractions per second on the keyboard (owner request, row 105) |
 | [F686](log/F0686.md) | 2026-11-02 | Pinned first-corner contact: port against the original capture; slip, yaw and gear in the field trace |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F632](log/F0632.md) | 2026-10-28 | grid-app compute pool with 64 MiB thread stacks (nested drive_tick overflow in parallel tests) |
 | [F631](log/F0631.md) | 2026-10-28 | Cockpit: driver and hands (skinned model, steering poses, two-bone IK) as the original |
 | [F630](log/F0630.md) | 2026-10-27 | Cockpit: dash gauges (digital readouts, motec bars, shift lights, needles) as the original |
-| [F629](log/F0629.md) | 2026-10-27 | Speech audio name default Jack (M_46) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

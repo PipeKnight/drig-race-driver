@@ -107,7 +107,67 @@ air" are not identified. Candidates are the bunting, and broken pieces in a race
   one by one.
 - A comparison with the original's screenshots at the same spots needs a capture. The original
   is not run from this session.
-- Small constant gaps not rendered yet, the next candidates for a port offset:
-  - `lamp_pole_d_01` 0.09 m (171);
-  - `post_tannoy_b_02` 0.13 m (108);
-  - `gg_vehicle_truck_02_c_01` 0.34 m (120).
+
+## Small gaps under ornaments: authored (2026-11-02)
+
+Three groups had small gaps that could have been a constant port offset. All three are
+ornaments: they are placed from `route_N/ornaments.bin`, not from entities.
+
+- **Measured.** For each group, the base sits the same height above the drawn surface and above
+  the collision (the two agree within 2 mm). The gap varies from instance to instance:
+  - `lamp_pole_d_01` (Detroit): 0.06-0.15 m;
+  - `post_tannoy_b_02` (Donington): 0.07-0.31 m;
+  - `gg_vehicle_truck_02_c_01` (Donington): 0.06-0.10 m.
+
+  A port offset would be constant. The `lamp_pole_d Root` node chain is identity throughout
+  (ROOTNODE, LODVISIBLERENDERNODE and LOD lists).
+- **The original.** Its ornament loader 0x980830 copies each stored 56-byte record's twelve
+  floats into a 4x4 matrix with no change. It then calls 0x96F3C0 (create an ornament
+  instance). That function reads the translation only for its bounds and uniform-scale tests,
+  and passes the matrix unchanged to 0x963BA0. Neither function makes a ground or collision
+  query (pseudocode in the shared RE cache).
+- **Conclusion.** The original draws these ornaments where the file puts them, as the port
+  does, so the gaps are authored. [I]: the claim that nothing later moves an ornament rests on
+  these two functions and their direct callees, not on a capture.
+
+## Runtime: broken prop pieces on Washington (2026-11-02)
+
+The owner saw pieces in the air while racing. The dynamic case was checked on Washington route
+0 in three ways. `GRID_FLOAT_CHECK=local/OUT.tsv` (grid-app, `dynamic_props::float_check`)
+rewrites OUT every 60 frames with each live piece's:
+- lowest drawn vertex against the road below (`drawn_gap`);
+- collision hull's lowest point against the road (`hull_gap`, from `PropWorld::road_depths`);
+- gap to the top of another piece's box under it (`piece_gap`, approximate).
+
+1. **Solo, scripted drive into `tyrestack_white:0` (16,000 ticks).** Two stacks broke at
+   ticks 9699/9701 (18 pieces).
+   - At tick 15960, every piece's drawn base is 1-3 cm below its hull bottom. The mesh follows
+     its body, with no offset between drawn and simulated shapes.
+   - Nine tyres rest on the road (hull 3 cm, the contact shell).
+   - The raised ones (0.5-0.96 m) rest on other tyres (`piece_gap` about 0), or lie within 2.5 m
+     of the stopped car, where the final frame shows a tyre on it
+     (`local/r40/solo-tyre2.png`).
+2. **12 cars, scripted player into `tyrestack_white_double:0` (16,000 ticks).** The player and
+   the AI broke five stacks (93 pieces).
+   - Eight raised tyres have no piece box under them. Four of them belong to stack 757, which an
+     AI car broke, beside the concrete blocks and the neighbouring intact stacks
+     (`local/r40/stack757-static.png`).
+3. **Physical support check, headless.** `grid-opponent-race --route
+   tracks/usa/washington/route_0` ran with 12 cars, `GRID_DYNAMIC_PROPS=1`,
+   `GRID_PROP_TARGET=tyrestack_white_double:0` and `GRID_HANG_CHECK=1000` (F561 wake test). Each
+   check wakes every asleep piece in a cloned world for 120 ticks.
+   - Result: 0 unsupported at every check from tick 1000 to 14000, up to 120 bodies (108
+     pieces, 84 asleep). No asleep piece falls more than 0.2 m when woken.
+   - So the raised tyres in runs 1-2 lean on cars, walls, intact stacks or other tyres.
+
+Pieces start at their intact placement by construction: a piece is drawn at
+`body now x start^-1 x rest`, so at the break it is exactly where the intact mesh was. Intact
+breakables are static and covered by the static audit. Lower ornament LOD levels: some
+buildings and `gg_vehicle_parked_cars_01_b_01` float 0.2-0.4 m at level 1 or 2 where level 0
+rests. These are the original's simplified meshes, drawn only at a distance.
+
+No runtime floating was found on Washington, so nothing was changed in the simulation. Not
+covered:
+- detached car panels and wheels, which turn off after 1 s (VISUAL_DAMAGE_PARTS_RESEARCH);
+- breakables that Washington route 0 does not have (boards, cushions);
+- what exactly the owner saw. A screenshot or position from the owner would settle that.

@@ -4441,6 +4441,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     drive_present,
                     dynamic_props::tag,
                     dynamic_props::present,
+                    dynamic_props::float_check,
                 )
                     .chain(),
             )
