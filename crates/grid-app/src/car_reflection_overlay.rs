@@ -54,6 +54,15 @@ pub struct Controls {
 /// The paint program's `SpecularValues` z (occlusion) and w (shadow) floors.
 const FLOORS: Vec2 = Vec2::ZERO;
 
+/// Diagnostic `GRID_CAR_REFLECTIONS_PAINT=x,y,z,w`: the paint gates' share
+/// of the alpha gate, occlusion scale and the two floors, for comparisons
+/// with original frames (docs/CAR_REFLECTIONS.md 4.2).
+fn paint_override() -> Option<Vec4> {
+    let text = std::env::var("GRID_CAR_REFLECTIONS_PAINT").ok()?;
+    let v: Vec<f32> = text.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+    (v.len() == 4).then(|| Vec4::new(v[0].max(1e-3), v[1], v[2], v[3]))
+}
+
 impl Controls {
     /// From a shader instance's constants; `None` when it does not reflect.
     pub fn from_constants(
@@ -316,9 +325,9 @@ fn follow(
                         .get(material.id())
                         .and_then(|m| m.base_color_texture.clone()),
                     mask: response.mask.clone(),
-                    paint: controls
-                        .paint
-                        .map_or(Vec4::ZERO, |scale| Vec4::new(1., scale, FLOORS.x, FLOORS.y)),
+                    paint: controls.paint.map_or(Vec4::ZERO, |scale| {
+                        paint_override().unwrap_or(Vec4::new(1., scale, FLOORS.x, FLOORS.y))
+                    }),
                 })
             })
             .clone();

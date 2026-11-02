@@ -17,22 +17,19 @@
 //! lights stay out of the probe.
 use bevy::{
     camera::{
-        CameraMainTextureUsages, CameraOutputMode, Exposure, Hdr, RenderTarget, primitives::Aabb,
-        visibility::RenderLayers,
+        Exposure, Hdr, RenderTarget, primitives::Aabb, visibility::RenderLayers,
     },
     core_pipeline::tonemapping::Tonemapping,
     light::EnvironmentMapLight,
     prelude::*,
     render::{
         Render, RenderApp, RenderSystems,
-        extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         gpu_readback::{Readback, ReadbackComplete},
         render_asset::RenderAssets,
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         texture::GpuImage,
-        view::{ExtractedView, ViewTarget},
     },
 };
 use std::sync::{
@@ -104,7 +101,7 @@ impl Level {
 
 /// One face camera; the face index in Bevy's cube order (+X, −X, +Y, −Y,
 /// +Z, −Z).
-#[derive(Component, Clone, Copy, ExtractComponent)]
+#[derive(Component, Clone, Copy)]
 pub struct FaceCamera(pub usize);
 
 /// The sun's copy that lights the probe, without shadow maps.
@@ -244,10 +241,7 @@ pub fn install(
         per_frame,
         frame: 0,
     })
-    .add_plugins((
-        ExtractResourcePlugin::<Cube>::default(),
-        ExtractComponentPlugin::<FaceCamera>::default(),
-    ))
+    .add_plugins(ExtractResourcePlugin::<Cube>::default())
     .add_systems(Update, spawn)
     .add_systems(
         PostUpdate,
@@ -329,12 +323,8 @@ fn spawn(
             Camera {
                 order: -20 + face as isize,
                 clear_color: ClearColorConfig::Custom(Color::BLACK),
-                // copy_faces takes the view's own texture: no upscaling
-                // pass (a command buffer per face) into the target.
-                output_mode: CameraOutputMode::Skip,
                 ..default()
             },
-            CameraMainTextureUsages::default().with(TextureUsages::COPY_SRC),
             RenderTarget::Image(target.clone().into()),
             Projection::Perspective(PerspectiveProjection {
                 fov: std::f32::consts::FRAC_PI_2,
@@ -536,13 +526,15 @@ fn follow(
     }
 }
 
-/// The frame's drawn faces into the cube, after every camera has drawn: each
-/// face view's own texture (a face not drawn this frame keeps its last).
+/// The frame's faces into the cube, after every camera has drawn. A face not
+/// redrawn this frame (`GRID_CAR_REFLECTIONS_FACES`) keeps its last image.
+///
+/// The faces write their own targets: a face with its output skipped
+/// (`CameraOutputMode::Skip`) and a clear colour gets no view target from
+/// Bevy (`prepare_view_targets`), so it is not drawn at all.
 fn copy_faces(
     cube: Option<Res<Cube>>,
     images: Res<RenderAssets<GpuImage>>,
-    // An inactive camera keeps its last ViewTarget but loses its view.
-    views: Query<(&FaceCamera, &ViewTarget), With<ExtractedView>>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
 ) {
@@ -552,17 +544,22 @@ fn copy_faces(
     let Some(target) = images.get(&cube.image) else {
         return;
     };
-    if views.is_empty() {
+    let Some(faces) = cube
+        .faces
+        .iter()
+        .map(|h| images.get(h))
+        .collect::<Option<Vec<_>>>()
+    else {
         return;
-    }
+    };
     let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
         label: Some("car reflection faces"),
     });
-    for (face, view) in &views {
+    for (face, source) in faces.iter().enumerate() {
         let mut destination = target.texture.as_image_copy();
-        destination.origin.z = face.0 as u32;
+        destination.origin.z = face as u32;
         encoder.copy_texture_to_texture(
-            view.main_texture().as_image_copy(),
+            source.texture.as_image_copy(),
             destination,
             Extent3d {
                 width: cube.size,

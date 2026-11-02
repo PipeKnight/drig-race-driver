@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F679](F0679.md) | 2026-11-02 | Car reflections: the cube was black since F676 (faces not drawn); masked strength checked against the original |
 | [F678](F0678.md) | 2026-10-31 | Cockpit: dash backlight at night |
 | [F677](F0677.md) | 2026-10-31 | Sun shadows in the original's layout: three maps, the player car's map, shadow quality setting |
 | [F676](F0676.md) | 2026-10-31 | Car reflections: paint masks, per-view cost, damage and level crops |

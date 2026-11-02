@@ -88,7 +88,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
 #else
         let m1 = vec4(1.0);
 #endif
-        weight *= saturate(2.0 * m1.a);
+        // paint.x: the share of the alpha gate applied (1 = the program's).
+        weight *= mix(1.0, saturate(2.0 * m1.a), saturate(paint.x));
         env *= saturate(1.0 + paint.y * (m1.g - 1.0) + paint.z);
         env *= saturate(sun_shadow(in, n) + paint.w);
     }
