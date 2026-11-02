@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F694](F0694.md) | 2026-11-02 | Release gate: paint-specular test missed the reflections field |
 | [F693](F0693.md) | 2026-11-02 | Shibuya route 0 first-corner rise bisected: seed spread from a tick-1 steering difference; slide steering follows the ported law |
 | [F692](F0692.md) | 2026-11-02 | Captured first-corner state injected into the port: contact and tyres reproduce the original |
 | [F691](F0691.md) | 2026-11-02 | Continuous collision against route boxes and round primitives (AE34B0): the step-size question answered |
