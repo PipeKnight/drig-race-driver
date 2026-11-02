@@ -12,10 +12,17 @@
 //! copied into the retained `Transparent3d` item when the entity is queued.
 //! A streamed asset is neither, so its padding and its old vertices would set
 //! the order. [`MeshStream::sort_centre`] gives the centre a replaced asset
-//! would have had; it is written into the queued item before Bevy sorts,
-//! transformed exactly as Bevy's queue does. It is written again whenever
-//! Bevy re-queues the entity (which writes the stale asset's centre), so the
-//! order changes exactly when it changed with replaced assets (F398).
+//! would have had (F398).
+//!
+//! Bevy 0.19.1 also keeps the queued item's WORLD centre: it is computed from
+//! the entity's transform when the entity is queued and is not updated when
+//! the entity moves without being re-queued. A moving car's glass and lamps
+//! then sorted by where they were queued, hundreds of metres back, so the
+//! order of a car's own panes depended on the camera's direction to that old
+//! point (the windscreen drawn over the rear window, F698). `resort` therefore
+//! writes every item's centre each frame from the entity's current transform
+//! and the asset's (or the streamed) local centre, as the original sorts its
+//! instances each frame.
 use bevy::{
     asset::RenderAssetUsages,
     core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d},
@@ -23,10 +30,13 @@ use bevy::{
     prelude::*,
     render::{
         Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
-        mesh::allocator::{MeshAllocator, allocate_and_free_meshes},
+        mesh::{
+            RenderMesh,
+            allocator::{MeshAllocator, allocate_and_free_meshes},
+        },
+        render_asset::RenderAssets,
         render_phase::{ViewSortedRenderPhases, sort_phase_system},
         renderer::RenderQueue,
-        sync_world::MainEntity,
     },
 };
 use bevy::{
@@ -34,7 +44,7 @@ use bevy::{
     render::batching::gpu_preprocessing::BatchedInstanceBuffers,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex},
 };
@@ -187,57 +197,42 @@ fn upload(writes: Res<RenderWrites>, allocator: Res<MeshAllocator>, queue: Res<R
     }
 }
 
-/// After the queue systems (which re-add an entity whose asset changed, with
-/// the prepared asset's centre) and before the transparent sort, which
-/// recomputes every item's distance from its stored centre.
-///
-/// `known` keeps, per entity, the latest local centre and the world centre
-/// last written. A centre sent this frame is written as a replaced asset
-/// would have been queued. Otherwise an item whose centre differs from the
-/// one written was re-queued by Bevy from the stale asset (it became visible
-/// again or its material changed), and gets the current centre; an item
-/// left alone keeps its old centre, as a retained item of an unchanged asset.
+/// After the queue systems and before the transparent sort, which recomputes
+/// every item's distance from its stored centre: writes each mesh item's
+/// world centre from the entity's current transform, as Bevy's queue does
+/// (`queue_material_meshes`), with the latest streamed local centre where one
+/// was sent (`known`) and the prepared asset's otherwise.
 fn resort(
     writes: Res<RenderWrites>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     instances: Res<RenderMeshInstances>,
+    meshes: Res<RenderAssets<RenderMesh>>,
     buffers: Option<Res<BatchedInstanceBuffers<MeshUniform, MeshInputUniform>>>,
-    mut known: Local<HashMap<Entity, (Vec3, Option<Vec3>)>>,
+    mut known: Local<HashMap<Entity, Vec3>>,
 ) {
-    let mut sent = HashSet::new();
-    for (entity, local) in &writes.0.centres {
-        known.insert(*entity, (*local, None));
-        sent.insert(*entity);
-    }
-    if known.is_empty() {
-        return;
-    }
-    for (entity, (local, written)) in known.iter_mut() {
-        let main = MainEntity::from(*entity);
-        let Some(data) = instances.render_mesh_queue_data(main) else {
-            continue;
-        };
-        let world = get_mesh_instance_world_from_local(
-            main,
-            data.current_uniform_index,
-            &instances,
-            buffers.as_deref(),
-        )
-        .transform_point3(*local);
-        let mut wrote = false;
-        for phase in phases.values_mut() {
-            // Mesh items are keyed with a placeholder render entity (queue_material_meshes).
-            let key = (Entity::PLACEHOLDER, main);
-            if let Some(item) = phase.items.get_mut(&key)
-                && let TransparentSortingInfo3d::Sorted { mesh_center, .. } = &mut item.sorting_info
-                && (sent.contains(entity) || Some(*mesh_center) != *written)
-            {
-                *mesh_center = world;
-                wrote = true;
-            }
-        }
-        if wrote {
-            *written = Some(world);
+    known.extend(writes.0.centres.iter().copied());
+    for phase in phases.values_mut() {
+        for ((_, main), item) in phase.items.iter_mut() {
+            let TransparentSortingInfo3d::Sorted { mesh_center, .. } = &mut item.sorting_info else {
+                continue;
+            };
+            let Some(data) = instances.render_mesh_queue_data(*main) else {
+                continue;
+            };
+            let local = match known.get(&main.id()) {
+                Some(local) => *local,
+                None => match meshes.get(data.mesh_asset_id()) {
+                    Some(mesh) => mesh.aabb_center,
+                    None => continue,
+                },
+            };
+            *mesh_center = get_mesh_instance_world_from_local(
+                *main,
+                data.current_uniform_index,
+                &instances,
+                buffers.as_deref(),
+            )
+            .transform_point3(local);
         }
     }
 }

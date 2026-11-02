@@ -635,7 +635,56 @@ entity is queued, so a streamed or skipped asset can keep a stale centre.
   asset (visible again, material changed), the item's centre no longer matches, so the
   current centre is written again. Otherwise an item keeps its old centre, as a retained
   item of an unchanged asset does. So the order changes exactly when it changed with
-  replaced assets.
+  replaced assets. Superseded by F698 (next section): every item's centre is now
+  written each frame.
+
+## World sort centres of moving meshes (F698)
+
+2 November 2026, Claude Code, car-reflections session; the owner's report of the windscreen and
+its frame showing sharply through the Viper's rear window, at some camera angles only.
+Evidence: this worktree's `local/reflections/crops/gl*`, `gd*` and `local/reflections/out/`.
+
+**Cause.** Bevy 0.19.1 `queue_material_meshes` (bevy_pbr `material.rs`) adds a blended mesh
+with `add_retained` and stores its world centre: the entity's world-from-local at that moment
+applied to the asset's bounds centre. Nothing updates it when the entity moves; the item is
+re-queued only when it is respecialised, becomes visible again or its asset or material
+changes. `sort_phase_system` then recomputes only the view distance from that stored point.
+So a car's glass and lamps sort by where the car was when they were queued, with the panes'
+offsets in the car's orientation of that moment. Car glass writes no depth, so whichever
+pane draws last covers the other. Once the car has turned, its windscreen can sort after
+its rear window, and the windscreen's black frame and cracks are then drawn over the rear
+window. The same held for every moving transparent mesh: opponents' glass and lamps, the
+reflection overlays and the sky dome, which follows the camera.
+
+Window-phase audits (`--window-phase-audit`, 1280 × 800 Baseline, reflections off,
+build 85e1c69c):
+
+| Case | Stored centre error | Order of the four Viper panes |
+|---|---|---|
+| Washington, standstill after spawn | 0 m | windscreen 313 first, rear window 310 last (correct) |
+| Washington, 500 ticks straight | 142.7 m | correct (same orientation) |
+| Donington, 1,250 ticks circling, three camera offsets | 15–18 m | **rear window 310 first, windscreen 313 last**, the cracked windscreen visible through the rear window |
+
+Codex's G237/G238 found the stale centres on the Lacetti; G313 refreshed them only for the
+player's windows, in ordinary Donington Lacetti driving (`window_response::install_current_sort`).
+
+**Fix.** `mesh_stream::resort` (before `sort_phase_system::<Transparent3d>`) now writes every
+mesh item's centre each frame, in every view: the entity's current world-from-local (as Bevy's
+queue takes it) applied to the asset's bounds centre, or to the latest centre streamed through
+`MeshStream::sort_centre`. The original also sorts its instances every frame: `carglass`
+saves `instancesRequireSorting` 1 (docs/TYRE_SMOKE_RESEARCH.md 7.6), and each pane is its
+own render instance (the Viper's `MPJRI310`–`313`, as the Lacetti's). The Lacetti-only
+`--window-sort current` adapter is now redundant, and `--window-sort off` no longer gives
+stale centres.
+
+**Not ported.** The original's `carglass` and `car_light_glass` also write depth (LEQUAL,
+writes on; docs/TYRE_SMOKE_RESEARCH.md 7.1) and draw two-sided, as ours (`cull_mode` none).
+With the panes in back-to-front order the depth writes do not change how one pane shows
+through another; they would hide later transparent draws behind the glass, which the
+smoke compositing here does not reproduce. Ours still writes none.
+
+**Cost.** A hash lookup and one point transform per transparent item per view per frame
+(about 70 items in the main view of a solo race).
 
 **HUD timer.** A temporary counter in `osd_scene::texts` (not committed) on a solo Baseline
 run at 1,300 ticks: one 8-character text (the running time) was rebuilt in 892 of about 900

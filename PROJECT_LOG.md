@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F698](log/F0698.md) | 2026-11-02 | Car glass: transparent items sort by their current position; the windscreen no longer shows over the rear window |
 | [F697](log/F0697.md) | 2026-11-02 | Body events after a wake: the solved contact count, not the sum of both collections (Donington chaos world error) |
 | [F696](log/F0696.md) | 2026-11-02 | Playable a8cef46b9294 with DLAA and APKs a8cef46b9294 |
 | [F695](log/F0695.md) | 2026-11-02 | Old APKs are deleted when new ones are built |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F641](log/F0641.md) | 2026-10-29 | Le Mans barrier collision report recorded (backlog row 99) |
 | [F640](log/F0640.md) | 2026-10-29 | macOS smoke FPS drops and Retina native render: owner logs recorded |
 | [F639](log/F0639.md) | 2026-10-29 | Backlog rows 95-96 (wreck sound loop, lost-wheel hub) and the owner's game unmuted |
-| [F638](log/F0638.md) | 2026-10-29 | Playable f48d1dc27f6a with DLAA and APKs f48d1dc27f6a |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

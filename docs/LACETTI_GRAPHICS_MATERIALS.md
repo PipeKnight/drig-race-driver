@@ -474,6 +474,8 @@ This closes the selected rendered cracked→reset case left open in G233/G238. I
 
 ### Ordinary playable current-centre delivery (G313, 28 October2026)
 
+Since F698 (2 November 2026) every transparent item's sort centre is written from its current transform each frame, for all cars, routes and views (docs/PERFORMANCE.md, "World sort centres of moving meshes"). The current-centre adapter below is then redundant, and `--window-sort off` no longer reproduces the stale centres.
+
 The owner G312 Reinhard helper did not select G238 current sorting, and its guard refused ordinary Window driving. Four fresh same-artifact controls cross source/authored sun with stale/current sort: physical streams, capture ledger and sampled motion/depth agree exactly; stale six-pane centres are421.67..424.61m away at tick1652 and rear/front order is reversed, whereas current centres have zero error with front before rear. Current ordering visibly attenuates the overdrawn front border in both light settings; the source frame remains physically visible. Light can change contrast, but does not explain this measured stale-centre defect. Evidence: G313 and private local/graphics/window-regression01/run01/.
 
 Ordinary direct enhanced/layered Lacetti Donington0/sub0 LOD0 forward driving now automatically selects the existing updater unless --window-sort is explicit. Explicit off remains the comparison control; existing bounded capture defaults remain off. No changes to glass textures, alpha, depth, Fresnel response or geometry. G314 closes actual new-artifact466tests/Clippy/build and ordinary Window auto-activation/Reinhard0.9/nativeDLAA/normal exit0, with the same private Reinhard launcher updated. Manual C/R and broad car/route/damage acceptance remain open.
