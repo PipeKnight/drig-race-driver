@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F696](F0696.md) | 2026-11-02 | Playable a8cef46b9294 with DLAA and APKs a8cef46b9294 |
 | [F695](F0695.md) | 2026-11-02 | Old APKs are deleted when new ones are built |
 | [F694](F0694.md) | 2026-11-02 | Release gate: paint-specular test missed the reflections field |
 | [F693](F0693.md) | 2026-11-02 | Shibuya route 0 first-corner rise bisected: seed spread from a tick-1 steering difference; slide steering follows the ported law |
