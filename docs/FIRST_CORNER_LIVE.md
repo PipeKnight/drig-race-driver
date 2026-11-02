@@ -800,3 +800,44 @@ suspension state (left from the port's own run) is the first suspect.
 Next: Shibuya 0 seeds 6, 8 and 16 (losses in both binaries) as the reproducible first-corner
 cases for row 93's start, and the outside car's yaw response with a fully settled injection
 (inject several ticks before and let the wheels settle).
+
+## 20. No countersteer threshold in the original; with the same inputs the port's car yaws less (F701)
+
+Coordinator's task: find the threshold at which the original's AI countersteers (about 12°
+against the port's 30°, §17–§19) and port it.
+
+**The original has no slip threshold in its steering [V].** Reread of 0x77AC50
+(`grid_re.py decompile`; master project): the ground command is
+`|car state +0xD4| · [params +0x180] + [cfg +0x2C or drift +0x3B0] · (−ω·up) + G · heading error`,
+followed by the all-wheels-off blend (+0xE2) and the division by the steering lock. The only
+slip term is unsigned (|slip| · stSlideFactor), so it cannot make a direction-dependent
+countersteer. The port's parser reads stSlideFactor = 0.0 from `ai/ai_driver_config.xml` in both
+the `default` and `drift_battle` sections, so the term is inert as in AI_DRIVER_RESEARCH §5. The
+other values are stAngVelFactor −0.4, driftStAngVelFactor −0.3, vehicle stAngleFactorMin 2.7 and
+stProportionRabbitWhenInAir 0. The "12°" was the slip at which one car's command crossed zero in
+one contact. It follows from that car's yaw rate and heading error, not from a constant. Nothing
+was ported, so the first-corner matrix and Drift Battle were not rerun.
+
+**With the same inputs the port's car yaws less [V port against O].** §18's injection 0.5 s
+earlier (capture t = 16.60 s, port tick 854, under braking at arc ≈ 660) with the original's
+controls replayed. Leader (slot 0, BMW), t = 16.6 → 17.45 s, before the original's contact:
+
+| | slip | yaw (rad/s) | speed (m/s) |
+|---|---|---|---|
+| original | +2.6° → −12.4° | −0.29 → −1.55 | 27.0 → 25.2 |
+| port, race manager on (reference car 11) | +1.4° → −5.2° | −0.19 → −1.02 | 27.2 → 28.6 |
+| port, race manager off | +1.2° → −17.4° | −0.16 → −0.89 | 27.4 → 28.6 |
+
+Open loop, the pair then separates in both port runs (no contact), because the port's leader is
+already ahead. On the same steering, throttle and brake from the captured motion, the port's car
+reaches about 60% of the original's yaw rate and gains 1.2–1.5 m/s at full throttle in 2nd. The
+original's loses 1.8 m/s. Each car keeps its own wheel spin and suspension from the port's run;
+they settle within a few ticks of the injection.
+
+**What this points to [I].** The difference behind §17–§19 is upstream of the AI's steering
+law: either the car's response (tyre lateral force or drag at 5–12° slip, steering geometry)
+or the per-car race manager multipliers (torque and the four grips that `set_ai_pacing` sets
+each tick, which the capture does not record). Next:
+- read the original's per-car pacing torque and grips in a capture (vehicle words beside +0xE00);
+- a single-car steady cornering comparison (port against original on the same inputs) at
+  25–30 m/s and 5–15° slip.

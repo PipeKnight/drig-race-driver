@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F701](log/F0701.md) | 2026-11-03 | No AI countersteer threshold in the original; with the same inputs the port's car yaws less |
 | [F700](log/F0700.md) | 2026-11-02 | Publish macOS rebuild scripts and engine-only preview |
 | [F699](log/F0699.md) | 2026-11-02 | Black drops and floating grass: god-ray cards not drawn as objects, land on every preset, water counted (rows 102, 107, 108) |
 | [F698](log/F0698.md) | 2026-11-02 | Car glass: transparent items sort by their current position; the windscreen no longer shows over the rear window |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F644](log/F0644.md) | 2026-10-30 | Tyre smoke lit once per particle as the original |
 | [F643](log/F0643.md) | 2026-10-30 | Tyre smoke rendering cost measured (SMOKE_RENDER_COST.md) |
 | [F642](log/F0642.md) | 2026-10-29 | Dynamic resolution: high-DPI 1440-row ceiling, frame-time steps, inconclusive probes |
-| [F641](log/F0641.md) | 2026-10-29 | Le Mans barrier collision report recorded (backlog row 99) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
