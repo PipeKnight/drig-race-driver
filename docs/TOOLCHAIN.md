@@ -214,7 +214,9 @@ detached worktree of origin/main in `local/release/apk-src-<rev>`, named
 `grid-<rev>-bundled-PRIVATE-drift-nurburgring-debug.apk` and `…-PRIVATE-profile-debug.apk` in
 `local/android/apk/` with their manifests, after which its build dir is pruned
 (`prune_build_dirs.ps1 -ForWorktree`) and the worktree removed (`-NoApk`, `-NoProfileApk`,
-`-KeepApkWorktree`); the APK test-order text (new names and sizes, the "updated" time, the upper
+`-KeepApkWorktree`), and once every new APK is in place the other `*.apk` files in
+`local/android/apk/` are deleted, their `.json` manifests kept (owner, 2026-11-02: old APKs go
+when new ones are built; a failed build keeps them); the APK test-order text (new names and sizes, the "updated" time, the upper
 end of the F range, and the previous revision in the no-data-copy lists when the bundle version
 is unchanged; the feature summary stays manual; `-NoTestOrder`); and a draft log entry in
 `local/release/<time>.md` (revisions, merged F range and commits, exe sha256, APK sizes and

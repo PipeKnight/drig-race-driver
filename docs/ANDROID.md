@@ -38,7 +38,7 @@ powershell -NoProfile -File tools\build_android.ps1
 
 1. `cargo ndk -t arm64-v8a -P 31 -o android/app/build/rust-jniLibs build --release --lib -p grid-app`. The release profile: a debug Bevy is too slow to drive. The `GRID_BUILD_REVISION` is set as in `tools/update_prototype.ps1`.
 2. `gradle -p android --no-daemon assembleDebug` with the pinned Gradle, JDK and SDK. `GRADLE_USER_HOME` is `C:\Users\debros\Tools\gradle-home`.
-3. The APK is copied to `local/android/apk/grid-<revision>-debug.apk`, with a `.json` manifest: revision, time, SHA-256 of the APK and of `libgrid_android.so`, rustc version and tool paths.
+3. The APK is copied to `local/android/apk/grid-<revision>-debug.apk`, with a `.json` manifest: revision, time, SHA-256 of the APK and of `libgrid_android.so`, rustc version and tool paths. APKs of other revisions in that folder are then deleted, their manifests kept (owner, 2026-11-02: old APKs go when new ones are built).
 
 Before step 1 the script adds the seed's Android artifacts to this worktree's build dir (`tools/seed_build_dir.ps1 -Android`; `-NoSeed` skips it), so Bevy for aarch64 is not compiled per worktree. Run the Android Clippy as `tools\build_android.ps1 -Clippy` (add `-Profile` for that variant), not as a bare `cargo ndk … clippy`: jni-sys's build script reruns whenever JAVA_HOME differs, and that rerun makes every Android crate built before it stale (docs/TOOLCHAIN.md "Build speed — 19 October 2026").
 

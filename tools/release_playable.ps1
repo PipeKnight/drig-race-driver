@@ -28,6 +28,9 @@ Steps, each skippable:
              -Event drift-nurburgring (-ProfileEvent), copied to local\android\apk as grid-<rev>-bundled-PRIVATE-drift-nurburgring-
              debug.apk and grid-<rev>-bundled-PRIVATE-profile-debug.apk (with their .json
              manifests); then tools\prune_build_dirs.ps1 -ForWorktree and git worktree remove.
+             Once every new APK is in place, the other *.apk files in local\android\apk are
+             deleted (owner, 2026-11-02: old APKs go when new ones are built); the small .json
+             manifests stay as the record.
                                                       -NoApk, -NoProfileApk, -KeepApkWorktree
   test order local\android\<APK test order>.txt: the previous APK names and sizes become the new
              ones, the "updated" time and the upper end of the F range move on, and when the
@@ -293,6 +296,12 @@ if (-not $NoApk) {
                 $manifest = Get-Content -LiteralPath "$built.json" -Raw | ConvertFrom-Json
                 $apks.Add([pscustomobject]@{ Name = $name; Bytes = (Get-Item -LiteralPath $out).Length; Sha256 = Get-Sha $out
                     Bundle = $manifest.bundled_data.version; Seconds = [int]((Get-Date) - $t0).TotalSeconds; Suffix = $v.Suffix })
+            }
+            # Old APKs go once all new ones exist (owner, 2026-11-02); a failed build keeps them.
+            $keep = @($apks | ForEach-Object { $_.Name })
+            foreach ($f in @(Get-ChildItem -LiteralPath $apkDir -Filter '*.apk' -File | Where-Object { $keep -notcontains $_.Name })) {
+                Remove-Item -LiteralPath $f.FullName -Force
+                $notes.Add("deleted old APK $($f.Name) ($([math]::Round($f.Length / 1MB)) MB)")
             }
         } finally {
             if ($KeepApkWorktree) { $notes.Add("APK worktree kept: $wt") }

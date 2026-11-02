@@ -19,6 +19,9 @@
 # for the owner's own phone only, is named grid-<rev>-bundled-PRIVATE-debug.apk
 # and stays in the ignored local/android/apk/; the staged assets stay in the
 # ignored local/android/bundle/. Never commit or share either.
+# After the copy, APKs of other revisions in local/android/apk/ are deleted
+# (owner, 2026-11-02: old APKs go when new ones are built); their .json
+# manifests stay.
 #
 # Tool locations are the pinned installs of docs/TOOLCHAIN.md "Android
 # toolchain"; each can be overridden by the matching environment variable.
@@ -156,6 +159,10 @@ try {
     $name = if ($bundle) { "grid-$($env:GRID_BUILD_REVISION)-bundled-PRIVATE$variant-debug.apk" } else { "grid-$($env:GRID_BUILD_REVISION)$variant-debug.apk" }
     $out = Join-Path $outDir $name
     Copy-Item -LiteralPath $apk -Destination $out -Force
+    foreach ($f in @(Get-ChildItem -LiteralPath $outDir -Filter 'grid-*.apk' -File | Where-Object { -not $_.Name.StartsWith("grid-$($env:GRID_BUILD_REVISION)-") })) {
+        Remove-Item -LiteralPath $f.FullName -Force
+        Write-Host "build_android: deleted old APK $($f.Name)"
+    }
     $manifest = [ordered]@{
         revision = $env:GRID_BUILD_REVISION
         built_utc = [DateTime]::UtcNow.ToString('o')
