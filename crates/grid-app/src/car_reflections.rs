@@ -374,6 +374,7 @@ fn assign_layers(
             &GlobalTransform,
             Option<&Aabb>,
             Has<crate::MovingPart>,
+            Has<crate::exterior_driver::PlayerDriver>,
             Option<&crate::car_batch::Batch>,
         ),
         (
@@ -393,7 +394,7 @@ fn assign_layers(
     }
     // A mesh whose layers were removed is back on the default layer.
     let reset: bevy::platform::collections::HashSet<Entity> = removed.read().collect();
-    for (entity, mesh, layers, transform, aabb, own, batch) in &meshes {
+    for (entity, mesh, layers, transform, aabb, own, driver, batch) in &meshes {
         if !all
             && !mesh.is_added()
             && !layers.as_ref().is_some_and(Ref::is_changed)
@@ -401,7 +402,7 @@ fn assign_layers(
         {
             continue;
         }
-        let own = own || batch.is_some_and(|b| b.car == 0);
+        let own = own || driver || batch.is_some_and(|b| b.car == 0);
         let current = layers.as_deref().cloned().unwrap_or_default();
         // Bounds not computed yet: drawn until the next choice.
         let big = aabb.is_none_or(|aabb| {

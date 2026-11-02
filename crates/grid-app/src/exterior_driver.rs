@@ -149,6 +149,11 @@ struct Seat {
     meshes: Vec<(u32, Entity)>,
 }
 
+/// A mesh of the player's exterior driver: part of the player's car, so kept
+/// out of its reflection cube like the body (`car_reflections`).
+#[derive(Component)]
+pub struct PlayerDriver;
+
 /// The spawned drivers: the player's (car 0, skinned) first when it has one.
 #[derive(Resource)]
 pub struct Drivers {
@@ -269,6 +274,7 @@ fn spawn(
                     Transform::default(),
                     Visibility::Hidden,
                     ChildOf(root),
+                    PlayerDriver,
                 ))
                 .id();
             parts.push((instance.slot, e));

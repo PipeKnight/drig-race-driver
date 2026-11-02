@@ -434,11 +434,11 @@ Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/exterio
   - shows one slot per driver, `_x2` for the player in a DisableDriverHead view;
   - hides the player's exterior driver in the head-cam (the cockpit draws its own) and the bumper views;
   - poses the player's skeleton with `Driver::exterior_pose`: Neutral and the steering poses for the wheel's s.
+- The car reflection cube (F670, off by default) leaves out the player's exterior driver like the player's car (`exterior_driver::PlayerDriver`); the opponents' drivers are drawn in it with their cars (docs/CAR_REFLECTIONS.md 4.1).
 - `GRID_EXTERIOR_DRIVERS=0` leaves them out (comparisons).
 - Not ported:
   - the vehicleDrivers option (the port uses medium), the replay and front-end sets, and ultra's level-0 animation (lean and leg IK);
   - the player driver's damage deformation;
-  - whether the drivers appear in the car reflection cube (F670, off by default) was not checked;
   - the cars without a driver (vehicle +0x3910, meaning open).
 
 Checks:

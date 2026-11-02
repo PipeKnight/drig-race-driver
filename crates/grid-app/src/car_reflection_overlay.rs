@@ -20,9 +20,13 @@
 //! and the shadow; only the debug material editor (0x9E7360) is seen setting
 //! them, so the port takes 0.
 //!
-//! AUTHORED: glass weighs its reflection by the pane's alpha; a cracked pane
-//! turns its facets and reflects less. The paint program's dust, scratch and
-//! vertex-colour gates are not applied (a clean, unscratched car).
+//! A cracked pane reflects like an intact one through its crack-map colour
+//! and alpha: the original's glass program (`car_basic` `fp_glass_windows`)
+//! keeps the interpolated normal and the Fresnel weight.
+//!
+//! AUTHORED: glass weighs its reflection by the pane's alpha. The paint
+//! program's dust, scratch and vertex-colour gates are not applied (a clean,
+//! unscratched car).
 use bevy::{
     asset::uuid_handle,
     camera::visibility::RenderLayers,
@@ -53,6 +57,21 @@ pub struct Controls {
 
 /// The paint program's `SpecularValues` z (occlusion) and w (shadow) floors.
 const FLOORS: Vec2 = Vec2::ZERO;
+
+/// Where an overlay sorts among the transparent draws (Bevy sorts by the
+/// mesh's bounds centre plus the material's bias). The original reflects in
+/// each part's own program, so an opaque part's reflection is in place before
+/// any glass is blended over it: its overlay goes before every transparent
+/// draw. Sorted by bounds centres instead, a pane in front and the cabin,
+/// cage or lamp reflector behind it swapped order with small camera moves,
+/// and the reflection was laid over the glass. A blended pane's overlay comes
+/// just after the pane.
+fn sort_bias(alpha: Option<AlphaMode>) -> f32 {
+    match alpha {
+        Some(AlphaMode::Opaque | AlphaMode::Mask(_)) | None => -1.0e6,
+        Some(_) => 0.01,
+    }
+}
 
 /// Diagnostic `GRID_CAR_REFLECTIONS_PAINT=x,y,z,w`: the paint gates' share
 /// of the alpha gate, occlusion scale and the two floors, for comparisons
@@ -185,6 +204,8 @@ pub struct Overlay {
     mask: Option<Handle<Image>>,
     #[uniform(8)]
     paint: Vec4,
+    /// The transparent phase's sort bias (`Material::depth_bias`).
+    bias: f32,
 }
 
 impl Material for Overlay {
@@ -194,9 +215,8 @@ impl Material for Overlay {
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
     }
-    /// Sorted just in front of the part it covers (a pane drawn first).
     fn depth_bias(&self) -> f32 {
-        0.01
+        self.bias
     }
     fn enable_prepass() -> bool {
         false
@@ -309,6 +329,7 @@ fn follow(
         };
         let (controls, glass) = (response.controls, response.glass);
         let cracked = original.is_some();
+        let part = standard.get(material.id());
         let handle = cache
             .entry(material.id())
             .or_insert_with(|| {
@@ -318,16 +339,15 @@ fn follow(
                         controls.min,
                         controls.max,
                         if glass || cracked { 1. } else { 0. },
-                        if cracked { 1. } else { 0. },
+                        0.,
                     ),
                     cube: cube.image.clone(),
-                    base: standard
-                        .get(material.id())
-                        .and_then(|m| m.base_color_texture.clone()),
+                    base: part.and_then(|m| m.base_color_texture.clone()),
                     mask: response.mask.clone(),
                     paint: controls.paint.map_or(Vec4::ZERO, |scale| {
                         paint_override().unwrap_or(Vec4::new(1., scale, FLOORS.x, FLOORS.y))
                     }),
+                    bias: sort_bias(part.map(|m| m.alpha_mode)),
                 })
             })
             .clone();
@@ -366,6 +386,19 @@ fn follow(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_opaque_part_reflects_before_the_glass_over_it() {
+        let (opaque, masked, pane) = (
+            sort_bias(Some(AlphaMode::Opaque)),
+            sort_bias(Some(AlphaMode::Mask(0.5))),
+            sort_bias(Some(AlphaMode::Blend)),
+        );
+        // A cage whose bounds centre is 1 m nearer than the pane's still
+        // sorts before it (Bevy draws ascending view-space z + bias).
+        assert!(opaque + 1.0 < pane && masked + 1.0 < pane);
+        assert!(pane > 0.);
+    }
 
     #[test]
     fn controls_need_a_colour_and_a_weight() {

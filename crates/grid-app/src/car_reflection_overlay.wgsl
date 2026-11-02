@@ -14,7 +14,7 @@
 // EnvironmentColour (rgb), FresnelPower.
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> environment: vec4<f32>;
 // FresnelMin, FresnelMax, 1 when the part's own alpha scales the weight
-// (glass), crack strength.
+// (glass), unused.
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> fresnel: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var cube: texture_cube<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var cube_sampler: sampler;
@@ -43,11 +43,6 @@ fn sun_shadow(in: VertexOutput, n: vec3<f32>) -> f32 {
     return 1.0;
 }
 
-fn hash3(p: vec2<f32>) -> vec3<f32> {
-    let q = vec3(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)), dot(p, vec2(419.2, 371.9)));
-    return fract(sin(q) * 43758.5453);
-}
-
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     var n = normalize(in.world_normal);
@@ -66,17 +61,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
     let texel = vec4(1.0);
 #endif
     weight *= mix(1.0, texel.a, fresnel.z);
-    // A cracked pane: AUTHORED broken facets, each turned a little, and a
-    // weaker reflection where the crack map is opaque.
-    if fresnel.w > 0.0 {
-#ifdef VERTEX_UVS_A
-        let jitter = hash3(floor(in.uv * 48.0)) - 0.5;
-#else
-        let jitter = vec3(0.0);
-#endif
-        n = normalize(n + fresnel.w * 0.35 * jitter);
-        weight *= 1.0 - 0.6 * fresnel.w * texel.a;
-    }
+    // A cracked pane reflects as an intact one: the original's glass program
+    // (car_basic fp_glass_windows) blends only the colour and alpha toward the
+    // crack map and keeps the interpolated normal and the Fresnel weight.
     let r = reflect(-v, n);
     // Bevy's environment sampling flips Z (car_reflections::direction).
     var env = textureSampleLevel(cube, cube_sampler, vec3(r.xy, -r.z), 0.0).rgb * environment.rgb;

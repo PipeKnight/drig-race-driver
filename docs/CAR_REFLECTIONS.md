@@ -152,7 +152,7 @@ Common build. Off unless `--car-reflections original|high|ultra` or `GRID_CAR_RE
   - Size by level: 256 (original), 512 (high), 1024 (ultra).
 - **Copy:** after each frame, the six face targets are copied into one cube texture. The main view samples it the next frame. The faces must write their targets: with `CameraOutputMode::Skip` Bevy does not draw them (4.3).
 - **Layer 27:** the cameras draw only render layer 27.
-  - Every mesh on the default layer is also put on layer 27, except the player car's parts and batches, and the overlays.
+  - Every mesh on the default layer is also put on layer 27, except the player car's parts and batches, the player's exterior driver (`exterior_driver::PlayerDriver`; before it was marked, the probe inside the car drew the driver's suit into every face), and the overlays.
   - A mesh that leaves the default layer leaves layer 27 too: a batched part, an opponent's hidden detail level.
   - Systems that read a mesh's layers treat "default plus 27" as the default layer (`car_reflections::default_layers`): car batching (`car_batch`) and ornament levels. Overlay children do not count as a part's children for batching. A mesh whose layers are removed is rechecked the same frame. Until F676 the probe's layers and overlays stopped every car from batching: with reflections on, opponents were drawn part by part, without their shadow body's shadow, and the measured cost included that.
 - **Lighting:** a copy of the brightest sun, without shadow maps, lights layer 27. The main sun is not on that layer, so the probe has no shadow cascades: Bevy gives a view the cascades of every shadowing sun its layers see. Point and spot lights stay out of the probe.
@@ -186,6 +186,7 @@ Survey of all 44 `*_highLOD.pssg` files (private `local/reflections/constants.js
 **The overlay.** The port draws that mix as a child entity of each reflecting part or batch:
 - **Geometry:** the same mesh, in the transparent pass, with depth compare GreaterEqual and no depth write.
 - **Blend:** colour = environment, alpha = weight, i.e. `lit·(1 − w) + env·w`.
+- **Order:** an opaque or masked part's overlay sorts before every transparent draw (bias −10⁶); a blended pane's overlay just after its pane (+0.01). The original mixes the reflection inside each part's own program, so a reflector, cabin or cage behind glass has its reflection before the glass is blended over it. Until 2 November 2026 every overlay sorted 0.01 in front of its part's bounds centre: glass writes no depth, so an overlay behind a pane passed the depth test and, whenever its centre sorted after the pane's, was laid over the glass. The tail lamps showed the reflector's chrome over the red lamp glass (black while the cube was black), and the order between a window and the cabin parts behind it changed with small camera moves (private `local/reflections/out/ch-lamps.png`, `orbit.png`).
 - **Fog and tonemapping:** applied as for the part.
 - **What it leaves alone:** the part's own material, and the systems that swap it (batching, damage, lamps).
 - **What it follows:** the part's mesh (deformation recomputes the normals, so dents bend the reflection), its layers and its visibility (a smashed pane is hidden).
@@ -204,9 +205,10 @@ The port (F-entry of this change) applies the first three to `carpaint_metallic`
 
 **Diagnostic:** `GRID_CAR_REFLECTIONS_PAINT=x,y,z,w` sets the paint gates for comparisons: x the share of the alpha gate, y the occlusion scale, z and w the two floors. `0,0,1,1` turns them all off (the F670 look).
 
+**Cracked glass** [O, `carglass` passConfigMask 1 and 32: `car_basic.cg.fp_glass_windows`, decoded statically, private `local/reflections/shaders/fp_glass_windows.asm`]: the program blends the diffuse colour and alpha toward `TDiffuseCrackMap` by a per-vertex crack amount (the interpolated normal's w), then mixes the lit colour toward the environment by the same Fresnel weight as intact glass (`FresnelValues`, the cube flipped in Z and divided by alpha, `EnvironmentColour`, the `SpecularValues` z/w floors on the occlusion and the shadow). The normal is the interpolated one: nothing perturbs it. A dust gate `sat(1 − 2·dust)` scales the weight. The output alpha rises with the weight where `GhostCarValues.z` applies (its in-race value is not traced). The port follows it: a cracked pane reflects like an intact one through its crack-map copy's colour and alpha. Until 2 November 2026 the port turned authored facets on a 48×48 UV grid and cut the weight by 60% where the crack map is opaque; at every level that showed as a square mosaic on the windscreen (private `local/reflections/out/look4-player-check.png`).
+
 **AUTHORED:**
-- Glass weighs the reflection by the pane's alpha.
-- A cracked pane (damage_parts' crack-map copy): its facets turn by up to ±0.17 in a 48×48 grid of the pane's texture, and it reflects 60% less where the crack map is opaque.
+- Glass weighs the reflection by the pane's alpha (the program's alpha path is approximated, `GhostCarValues` not traced).
 
 ### 4.3 Object selection and cost (31 October 2026)
 
