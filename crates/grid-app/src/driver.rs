@@ -660,7 +660,7 @@ fn attach(
 }
 
 /// Poses the driver for the wheel's s (the original: −(vehicle +0xE30); the
-/// port: `cockpit::steering`, docs/COCKPIT.md "Steering wheel"), reaching
+/// port: `cockpit::Wheel`, docs/COCKPIT.md "Steering wheel"), reaching
 /// for this frame's interior dummies.
 fn pose(
     driving: Option<Res<crate::Driving>>,
@@ -668,16 +668,16 @@ fn pose(
     interior: Res<crate::cockpit::InteriorPose>,
     reaching: Res<crate::reach::Reaching>,
     leaning: Res<crate::lean::Leaning>,
+    wheel: Res<crate::cockpit::Wheel>,
     mut joints: Query<(&DriverJoint, &mut Transform)>,
 ) {
-    let (Some(driving), Some(cockpit)) = (driving, cockpit) else {
+    let (Some(_), Some(cockpit)) = (driving, cockpit) else {
         return;
     };
     let Some(driver) = &cockpit.driver else {
         return;
     };
-    let vehicle = &driving.runtime.state.car.owner.vehicle;
-    let s = crate::cockpit::steering(vehicle);
+    let s = wheel.s;
     let lean = leaning.lean.as_ref().map_or([0.; 12], |l| l.weights);
     let world = driver.pose(s, &interior.0, reaching.0.as_ref().filter(|_| cockpit.reach.is_some()), &lean);
     for (DriverJoint(j), mut transform) in &mut joints {
@@ -840,9 +840,9 @@ mod tests {
             v
         };
         let foot = clips.node("D_Rfoot_Dummy").unwrap();
-        let rest = clips.worlds(&crate::cockpit::play(&clips, &vehicle(0., 0.)));
+        let rest = clips.worlds(&crate::cockpit::play(&clips, &vehicle(0., 0.), 0.));
         for (throttle, brake, pedal) in [(1., 0., "D_accelerator_Dummy"), (0.3, 1., "D_brake_Dummy")] {
-            let interior = clips.worlds(&crate::cockpit::play(&clips, &vehicle(throttle, brake)));
+            let interior = clips.worlds(&crate::cockpit::play(&clips, &vehicle(throttle, brake), 0.));
             let n = clips.node(pedal).unwrap();
             let moved = interior[n].w_axis.distance(rest[n].w_axis);
             let turned = interior[n].to_scale_rotation_translation().1.angle_between(rest[n].to_scale_rotation_translation().1);

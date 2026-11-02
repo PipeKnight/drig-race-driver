@@ -121,9 +121,12 @@ pub fn install(app: &mut App) {
         .init_resource::<InteriorPose>()
         .init_resource::<crate::reach::Reaching>()
         .init_resource::<crate::lean::Leaning>()
+        .init_resource::<Wheel>()
         .add_systems(
             Update,
-            (attach_animated, crate::reach::update, crate::lean::update, animate_interior).chain().before(crate::drive_present),
+            (attach_animated, smooth_wheel, crate::reach::update, crate::lean::update, animate_interior)
+                .chain()
+                .before(crate::drive_present),
         )
         .add_systems(
             PostUpdate,
@@ -223,6 +226,53 @@ pub fn steering(vehicle: &[u32]) -> f32 {
     (-angle / lock).clamp(-1., 1.)
 }
 
+/// The wheel's shown s (AUTHORED, owner request of 2026-11-02, FIDELITY_BACKLOG
+/// row 105): [`steering`] limited to [`WHEEL_RATE`] while the steering is
+/// assisted (vehicle +0xE6C = 1: keyboard and pad), so keyboard steering turns
+/// the wheel at most that fast; with a wheel device (+0xE6C = 0) it is
+/// [`steering`] itself. The wheel clip, the cockpit driver's arms and the
+/// exterior driver all take it, so the hands stay on the rim. It advances by
+/// simulation time (committed ticks) and snaps after a reset.
+#[derive(Resource, Default)]
+pub struct Wheel {
+    pub s: f32,
+    last: Option<(u64, u64)>,
+}
+
+/// The fastest the shown wheel turns with assisted steering, in s per second
+/// (2 = lock to lock): centre to full lock in 0.5 s, where the front wheels
+/// take about 0.16 s (Lacetti, at rest).
+pub const WHEEL_RATE: f32 = 2.;
+
+impl Wheel {
+    /// One step toward `target` over `dt` seconds.
+    pub fn step(&mut self, target: f32, assisted: bool, dt: f32) {
+        self.s = if assisted { self.s + (target - self.s).clamp(-WHEEL_RATE * dt, WHEEL_RATE * dt) } else { target };
+    }
+}
+
+fn smooth_wheel(driving: Option<Res<crate::Driving>>, mut wheel: ResMut<Wheel>) {
+    let Some(driving) = driving else {
+        return;
+    };
+    let runtime = &driving.runtime;
+    let vehicle = &runtime.state.car.owner.vehicle;
+    let target = steering(vehicle);
+    let now = (driving.segment, runtime.ticks);
+    match wheel.last {
+        Some((segment, ticks)) if segment == now.0 && ticks <= now.1 => {
+            let dt = (now.1 - ticks) as f32 * grid_tools::source_vehicle::DELTA;
+            let assisted = vehicle.get(0xe6c / 4).is_some_and(|w| *w & 0xff != 0);
+            wheel.step(target, assisted, dt);
+        }
+        _ => wheel.s = target,
+    }
+    if wheel.last != Some(now) && std::env::var_os("GRID_TRACE_WHEEL").is_some() {
+        println!("cockpit_wheel tick={} applied={target:.4} shown={:.4}", now.1, wheel.s);
+    }
+    wheel.last = Some(now);
+}
+
 /// The interior clips the human driver's inputs play (0x85F8F0):
 /// - "Steering" at (s + 1) / 2 of its length; the original's s is the raw
 ///   command −(vehicle +0xE30) with no smoothing (0x858C20 → 0x851730 →
@@ -231,11 +281,12 @@ pub fn steering(vehicle: &[u32]) -> f32 {
 ///   (+0xE20), else −brake; 0x84CC40 switches the pedal crossfade at once to
 ///   "accel" (p ≥ 0) or "Brake" and sets that clip's time to |p| of its
 ///   length, and 0x859FC0 samples only the selected clip.
-pub fn play(interior: &crate::interior_anim::Interior, vehicle: &[u32]) -> Vec<crate::interior_anim::Play> {
+///
+/// `s` is the wheel's shown s ([`Wheel`]).
+pub fn play(interior: &crate::interior_anim::Interior, vehicle: &[u32], s: f32) -> Vec<crate::interior_anim::Play> {
     let word = |offset: usize| vehicle.get(offset / 4).copied().map_or(0., f32::from_bits);
     let mut out = Vec::new();
     if let Some(c) = interior.clip("steering") {
-        let s = steering(vehicle);
         out.push((c, (s + 1.) * 0.5 * interior.duration(c), 1.));
     }
     let (throttle, brake) = (word(0xe1c), word(0xe20));
@@ -252,6 +303,7 @@ pub(crate) fn animate_interior(
     driving: Option<Res<crate::Driving>>,
     cockpit: Option<Res<Cockpit>>,
     reaching: Res<crate::reach::Reaching>,
+    wheel: Res<Wheel>,
     mut pose: ResMut<InteriorPose>,
     mut parts: Query<(&mut crate::MovingPart, &AnimatedPart)>,
 ) {
@@ -261,7 +313,7 @@ pub(crate) fn animate_interior(
     let Some(interior) = &cockpit.interior else {
         return;
     };
-    let mut clips = play(interior, &driving.runtime.state.car.owner.vehicle);
+    let mut clips = play(interior, &driving.runtime.state.car.owner.vehicle, wheel.s);
     let mut knob = None;
     if let (Some(reach), Some(state)) = (&cockpit.reach, &reaching.0) {
         let (lever, k) = state.lever_play(reach);
@@ -554,6 +606,25 @@ pub(crate) fn descends(tree: &pssg::Tree, mut node: usize, ancestor: usize) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assisted_wheel_turns_at_most_at_the_rate() {
+        let dt = grid_tools::source_vehicle::DELTA;
+        let mut wheel = Wheel::default();
+        // A full-lock step: WHEEL_RATE · dt per tick until it arrives.
+        wheel.step(1., true, dt);
+        assert!((wheel.s - WHEEL_RATE * dt).abs() < 1e-6);
+        let ticks = (1. / (WHEEL_RATE * dt)).ceil() as usize;
+        for _ in 1..ticks {
+            wheel.step(1., true, dt);
+        }
+        assert_eq!(wheel.s, 1.);
+        // Small moves pass through; a wheel device follows at once.
+        wheel.step(0.99, true, dt);
+        assert_eq!(wheel.s, 0.99);
+        wheel.step(-1., false, dt);
+        assert_eq!(wheel.s, -1.);
+    }
 
     #[test]
     fn mirror_setting_parses_off_size_and_interval() {

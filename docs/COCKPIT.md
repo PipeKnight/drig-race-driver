@@ -140,6 +140,11 @@ The cockpit's wheel is not turned by a computed angle. It is an animation clip s
   - With the keyboard and the pad (assisted steering) the wheel turns at the front wheels' slewed rate and shows the assist's angle; with a wheel device (unassisted) a = +0xE30 · +0xE54 and s is the raw command.
   - The driver's steering poses and hand targets use the same s.
   - CAMERA_VIEWS §4 item 8 (a capture of the original's wheel) is still open; the RE shows no smoothing for the human driver, so the change stays recorded as a deviation.
+- Second deviation (owner's request of 2026-11-02, FIDELITY_BACKLOG row 105: the cockpit wheel still turned "very sharply" on the keyboard):
+  - The front wheels follow the original's rate. The original has no ramp for digital keys (PLATFORMS_AND_INPUT_RESEARCH §4); the only softening is the assisted steering's slew, which the port has. Lacetti at rest, full left from tick 0 (`GRID_TRACE_WHEEL`): the applied s reaches 0.96 after 9 ticks and full lock after 10, about 0.16 s.
+  - `cockpit::Wheel` therefore limits the shown s to `WHEEL_RATE` = 2 per second while the steering is assisted (vehicle +0xE6C = 1: keyboard and pad): centre to full lock in 0.5 s. With a wheel device (+0xE6C = 0) the shown s is the applied one.
+  - The wheel clip, the cockpit driver's arms and hands (`driver::pose`) and the exterior driver's steering pose all take the shown s, so the hands stay on the rim; the front wheels and the simulation are unchanged, so the wheel can lag the car by up to about a third of a second on the keyboard.
+  - It advances by simulation time (committed ticks, so pause holds it) and snaps to the applied s after a reset. `GRID_TRACE_WHEEL=1` prints `cockpit_wheel tick=.. applied=.. shown=..` per tick.
 - Not ported:
   - the hand dummies (no driver model yet);
   - the exterior wheel in the other views (left as in F618, so those views stay unchanged);

@@ -319,10 +319,12 @@ fn spawn(
 }
 
 /// Places every driver on its car, picks the levels and poses the player's.
+#[allow(clippy::too_many_arguments)] // Explicit Bevy resource ownership.
 fn present(
     driving: Option<Res<crate::Driving>>,
     drivers: Option<Res<Drivers>>,
     cockpit: Option<Res<crate::cockpit::Cockpit>>,
+    wheel: Option<Res<crate::cockpit::Wheel>>,
     cameras: Option<Res<crate::camera::Cameras>>,
     camera: Query<(&Transform, &Projection), With<crate::ViewerCamera>>,
     mut transforms: Query<&mut Transform, Without<crate::ViewerCamera>>,
@@ -378,7 +380,7 @@ fn present(
     if own != crate::camera::OwnCar::Whole || drivers.joints.is_empty() {
         return;
     }
-    let world = driver.exterior_pose(crate::cockpit::steering(&driving.runtime.state.car.owner.vehicle));
+    let world = driver.exterior_pose(wheel.map_or(0., |w| w.s));
     for &(e, j) in &drivers.joints {
         if let Ok(mut t) = transforms.get_mut(e) {
             *t = Transform::from_matrix(world[j]);
