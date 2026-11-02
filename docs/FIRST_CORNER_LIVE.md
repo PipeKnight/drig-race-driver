@@ -696,3 +696,50 @@ What would settle it: an original capture of the two cars' contact records durin
 contact, meaning the contact points, the solved impulses (+0x3C) and the collision-hull state.
 Alternatively, a port run started from the captured poses and velocities of §16 at t = 17.2 s.
 The port cannot yet start from a captured field state.
+
+## 18. The captured state injected into the port: contact and tyres match (F692)
+
+Tools (diagnostic, `grid-opponent-race`):
+- `GRID_STATE_INJECT=FILE:TICK` moves cars at that tick to a given pose with given linear and
+  angular velocity through the same pose and velocity setters as a re-placement
+  (`MultiRuntime::set_moving_state`). Each car keeps its own wheel spin, suspension and gear.
+- `GRID_CONTROL_REPLAY=FILE` replaces cars' controls per tick.
+- `local/corners2/pin/inject.py` writes both files from a `capture_grid_field.py` capture. The
+  capture's c0 is port car 11 and c1..c11 are cars 0..10. Replay row n is the capture row
+  nearest T + n × 0.016 s.
+
+Set-up: the §16 field order (`--cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`), car 11
+parked, race manager on, props, characteristics, deformation parameters, seed 0. All 12 cars
+are injected at tick 885 with §16's state at t = 17.10 s. The leader is at about arc 678 and
+27.3 m/s, the outside car 3.2 m across, not yet touching. At tick 885 the port's own front
+pair runs 26.5–27.8 m/s, so the wheel spin left in place is within about 1 m/s.
+Evidence: `local/corners2/pin/` (state.txt, replay.txt, injA.*, injB.*, cmp.py).
+
+**Run B, the original's controls replayed [V port against O].** The port reproduces the
+original's contact:
+
+| t (s) | 17.42 | 17.74 | 18.02 | 18.38 |
+|---|---|---|---|---|
+| original leader (m/s, slip, yaw) | 25.2, −12°, −1.55 | 19.8, −9°, −1.71 | 16.8, −10°, −1.59 | 16.5 (minimum) |
+| port leader | 25.8, −12°, −1.27 | 21.4, −17°, −2.06 | ≈17.7, −20°, −1.6 | 15.8 (minimum) |
+| original outside car (m/s) | 27.3 | 24.1 | 24.1 | 24.6 |
+| port outside car | 27.8 | 26.0 | ≈24.4 | 24.5 |
+
+The leader slides at full lock and full throttle, keeps its yaw and sheds 12 m/s. The
+outside car keeps about 24 m/s and both continue. The port's leader slides up to about 8°
+further than the original's, within what one injected state can show. So the contact and tyre
+response is not where the port departs from the original: no step needs bisecting.
+
+**Run A, the port's AI from the captured state [V port].** The pair also scrubs (the leader
+to 18.4 m/s) and both continue; no car is lost. The outside car's AI differs from the
+original's. It holds full lock (−1.0) from 17.26 to 17.90 s while its slip grows from −9° to
+−36°, and it countersteers only at 17.98 s, falling to 11.7 m/s. The original's outside car
+eases to −0.1…+0.2 at −12…−14° slip (17.42–17.80 s) and keeps 24 m/s.
+
+**What this settles [I].** §17's spin is not a contact or tyre fault. It comes from how the
+port's own field arrives at the corner: car 1 is 2.6 m behind at 6.6 m/s lateral closing
+speed, and the first touch lands 1.4 m behind car 0's centre. The original's touch lands
+near the centre. A second, independent lead is the AI's steering in a slide: the original's
+outside car countersteers at about 12° body slip, and the port's does so only past 30°.
+Next: compare the AI steering path's slide correction against its decompile. Run A gives a
+reproducible case without the owner.

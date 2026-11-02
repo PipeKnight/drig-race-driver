@@ -1287,12 +1287,24 @@ impl Runtime {
     /// and both velocities zero; the query cache is filled in by the caller.
     fn posed(
         physical: &grid_world::contact_groups::Body,
-        mut vehicle: Vec<u32>,
+        vehicle: Vec<u32>,
         pose: [f32; 16],
     ) -> Result<Placement, Error> {
-        vehicle[0x15e0 / 4..0x1620 / 4].copy_from_slice(&pose.map(f32::to_bits));
         // Linear +15C0 and angular +15D0: every lane zero (0xA69840/0xA69860).
-        vehicle[0x15c0 / 4..0x15e0 / 4].fill(0);
+        Self::posed_moving(physical, vehicle, pose, [0.; 4], [0.; 4])
+    }
+
+    /// [`Self::posed`] with the given linear and angular velocity lanes.
+    fn posed_moving(
+        physical: &grid_world::contact_groups::Body,
+        mut vehicle: Vec<u32>,
+        pose: [f32; 16],
+        linear: [f32; 4],
+        angular: [f32; 4],
+    ) -> Result<Placement, Error> {
+        vehicle[0x15e0 / 4..0x1620 / 4].copy_from_slice(&pose.map(f32::to_bits));
+        vehicle[0x15c0 / 4..0x15d0 / 4].copy_from_slice(&linear.map(f32::to_bits));
+        vehicle[0x15d0 / 4..0x15e0 / 4].copy_from_slice(&angular.map(f32::to_bits));
         let mut bridged = *physical;
         // Interface-only zero slots of the bridge (as at construction); only
         // the pose and velocity words are taken back.
@@ -1337,6 +1349,22 @@ impl Runtime {
         placement.cache = self.cache;
         apply_placement(&mut self.state.world.groups.bodies[0], &placement.physical);
         self.commit_placement(placement);
+    }
+
+    /// Diagnostic: the car moved to `pose` with the given linear and angular
+    /// velocity (through the same pose and velocity setters as a re-placement),
+    /// keeping its wheels, suspension and query cache.
+    pub(crate) fn moving_placement(
+        &self,
+        physical: &grid_world::contact_groups::Body,
+        pose: [f32; 16],
+        linear: [f32; 4],
+        angular: [f32; 4],
+    ) -> Result<Placement, Error> {
+        let mut placement =
+            Self::posed_moving(physical, self.state.car.owner.vehicle.clone(), pose, linear, angular)?;
+        placement.cache = self.cache;
+        Ok(placement)
     }
 
     pub(crate) fn commit_placement(&mut self, placement: Placement) {

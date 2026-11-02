@@ -470,6 +470,53 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         _ => None,
     };
     // GRID_SPIN_CAR0=tick[:ticks] (default 60 ticks).
+    // GRID_STATE_INJECT=FILE:TICK: at that tick every car listed in FILE
+    // (rows `car`, 16 pose words, linear xyzw, angular xyzw) is moved to
+    // that pose and velocity, keeping its wheels and suspension
+    // (FIRST_CORNER_LIVE §18: a captured field state injected mid-run).
+    let state_inject = match std::env::var("GRID_STATE_INJECT") {
+        Ok(v) => {
+            let (path, tick) = v.rsplit_once(':').ok_or("GRID_STATE_INJECT=FILE:TICK")?;
+            let mut rows = Vec::new();
+            for line in std::fs::read_to_string(path)?.lines().filter(|l| !l.starts_with('#')) {
+                let f: Vec<f32> = line.split_whitespace().map(str::parse).collect::<Result<_, _>>()?;
+                if f.len() != 25 {
+                    return Err("GRID_STATE_INJECT row: car, 16 pose, 4 linear, 4 angular".into());
+                }
+                let pose: [f32; 16] = f[1..17].try_into()?;
+                let linear: [f32; 4] = f[17..21].try_into()?;
+                let angular: [f32; 4] = f[21..25].try_into()?;
+                rows.push((f[0] as usize, pose, linear, angular));
+            }
+            Some((tick.parse::<u64>()?, rows))
+        }
+        Err(_) => None,
+    };
+    // GRID_CONTROL_REPLAY=FILE: rows `tick car throttle brake steering`
+    // replace those cars' controls on those ticks.
+    let control_replay: std::collections::HashMap<(u64, usize), Controls> =
+        match std::env::var("GRID_CONTROL_REPLAY") {
+            Ok(path) => {
+                let mut replay = std::collections::HashMap::new();
+                for line in std::fs::read_to_string(path)?.lines().filter(|l| !l.starts_with('#')) {
+                    let f: Vec<&str> = line.split_whitespace().collect();
+                    if f.len() != 5 {
+                        return Err("GRID_CONTROL_REPLAY row: tick car throttle brake steering".into());
+                    }
+                    replay.insert(
+                        (f[0].parse()?, f[1].parse()?),
+                        Controls {
+                            throttle: f[2].parse()?,
+                            brake: f[3].parse()?,
+                            steering: f[4].parse()?,
+                            handbrake: false,
+                        },
+                    );
+                }
+                replay
+            }
+            Err(_) => Default::default(),
+        };
     let spin_car0 = match std::env::var("GRID_SPIN_CAR0") {
         Ok(v) => {
             let (start, length) = v.split_once(':').unwrap_or((&v, "60"));
@@ -660,6 +707,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        if let Some((tick, rows)) = &state_inject
+            && multi.ticks == *tick
+        {
+            for &(car, pose, linear, angular) in rows {
+                multi.set_moving_state(car, pose, linear, angular)?;
+            }
+        }
         let mut controls: Vec<Controls> = Vec::with_capacity(cars);
         for (i, (car, driver)) in multi.cars.iter().zip(&mut drivers).enumerate() {
             controls.push(match driver {
@@ -722,6 +776,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 brake: 1.,
                 ..Default::default()
             };
+        }
+        for (i, c) in controls.iter_mut().enumerate() {
+            if let Some(r) = control_replay.get(&(multi.ticks, i)) {
+                *c = *r;
+            }
         }
         // GRID_SPIN_CAR0: car 0 gets full lock with the handbrake (spin and
         // recovery check).

@@ -703,6 +703,27 @@ impl MultiRuntime {
         Ok(())
     }
 
+    /// Diagnostic: put car `i` at `pose` with the given linear and angular
+    /// velocity, keeping its wheel and suspension state (a captured field
+    /// state injected mid-run, FIRST_CORNER_LIVE §18).
+    pub fn set_moving_state(
+        &mut self,
+        i: usize,
+        pose: [f32; 16],
+        linear: [f32; 4],
+        angular: [f32; 4],
+    ) -> Result<(), Error> {
+        if i >= self.cars.len() || self.retired[i].is_some() {
+            return Err(Error("no racing car to re-place"));
+        }
+        let placement =
+            self.cars[i].moving_placement(&self.world.groups.bodies[i], pose, linear, angular)?;
+        apply_placement(&mut self.world.groups.bodies[i], &placement.physical);
+        self.cars[i].commit_placement(placement);
+        self.speeds[i] = (linear[0] * linear[0] + linear[1] * linear[1] + linear[2] * linear[2]).sqrt();
+        Ok(())
+    }
+
     /// Test set-up: put car `i` at `pose` at rest in the shared world.
     #[cfg(test)]
     pub(crate) fn set_pose_at_rest(&mut self, i: usize, pose: [f32; 16]) {
