@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F693](log/F0693.md) | 2026-11-02 | Shibuya route 0 first-corner rise bisected: seed spread from a tick-1 steering difference; slide steering follows the ported law |
 | [F692](log/F0692.md) | 2026-11-02 | Captured first-corner state injected into the port: contact and tyres reproduce the original |
 | [F691](log/F0691.md) | 2026-11-02 | Continuous collision against route boxes and round primitives (AE34B0): the step-size question answered |
 | [F690](log/F0690.md) | 2026-11-02 | Start-line matrix after F681: Yokohama Docks fields pass the drift-flag bases; Shibuya 0 losses predate F680 |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F636](log/F0636.md) | 2026-10-28 | Phone: 60 FPS cap and 60 Hz refresh by default |
 | [F635](log/F0635.md) | 2026-10-28 | Owner playtest: Shibuya start lane change, keyboard cockpit wheel |
 | [F634](log/F0634.md) | 2026-10-28 | Playable 33ae510a4984 with F627-F633, portable copy and APKs 127ecf49439f |
-| [F633](log/F0633.md) | 2026-10-28 | Track scenery levels of detail as in the original (Washington buildings) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

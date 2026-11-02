@@ -376,8 +376,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // controls and behaviour, and the car pairs in contact.
     // GRID_FIELD_DETAIL=1: the behaviour column also carries the planned
     // offset, line error, line and governor targets, heading error, contact
-    // type, arc, alongside slots, body slip (degrees), yaw rate and gear
-    // (Behaviour/o../e../lt../gt../h../c../arc../L../R../b../w../g..).
+    // type, arc, alongside slots, body slip (degrees), yaw rate, gear and wheels in contact
+    // (Behaviour/o../e../lt../gt../h../c../arc../L../R../b../w../g../a..).
     let field_detail = std::env::var_os("GRID_FIELD_DETAIL").is_some();
     let mut field_trace = match std::env::var("GRID_FIELD_TRACE") {
         Ok(path) => {
@@ -1038,7 +1038,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .atan2(p[8] * v[0] + p[10] * v[2])
                             .to_degrees();
                         format!(
-                            "{:?}/o{:.2}/e{:.2}/lt{:.1}/gt{:.1}/h{:.3}/c{}/arc{:.1}/L{}/R{}/b{slip:.1}/w{:.2}/g{}",
+                            "{:?}/o{:.2}/e{:.2}/lt{:.1}/gt{:.1}/h{:.3}/c{}/arc{:.1}/L{}/R{}/b{slip:.1}/w{:.2}/g{}/a{}",
                             m.behaviour,
                             m.offset,
                             m.line_error,
@@ -1050,7 +1050,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             slot(m.alongside[0]),
                             slot(m.alongside[1]),
                             car.angular_velocity()[1],
-                            car.gear()
+                            car.gear(),
+                            car.wheels_in_contact().iter().filter(|&&c| c).count()
                         )
                     }
                     Driver::Ai(ai) if Some(i) != parked_car => {

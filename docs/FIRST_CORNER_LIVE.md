@@ -743,3 +743,60 @@ near the centre. A second, independent lead is the AI's steering in a slide: the
 outside car countersteers at about 12° body slip, and the port's does so only past 30°.
 Next: compare the AI steering path's slide correction against its decompile. Run A gives a
 reproducible case without the owner.
+
+## 19. Shibuya route 0: the F649–F679 "rise" is seed spread; the outside car's slide steering follows the ported law (F693)
+
+**Bisect [V port].** Setup as F690 (collision-sweep): Shibuya 0, 10/11/12 cars, seeds 0–5,
+props on, no reference car, prepush characteristics and deformation parameters, scored by
+`local/corners/score.py`. Each revision's release `grid-opponent-race` was built in a
+separate worktree (`local/bisect-shibuya`; scripts `local/corners2/shib/bis.sh`, `more.sh`):
+
+| revision | lost (seeds 0–5) | contacts |
+|---|---:|---:|
+| 6ff01747 (F649) | 6 | 27,672 |
+| 2b82716b (F659) | 3 | 26,560 |
+| 8efcc24d (F662) | 17 | 38,765 |
+
+8efcc24d already gives ea1688db's 17 and 38,765. Its only simulation change is the in-air
+steering blend (0x77AC50, all four wheel contact words +0xC0 zero).
+
+**How the blend changes Shibuya [V port].** No car is airborne in the race before tick 567
+(seed 0, 12 cars, `/a` in the detail trace), but every car is "airborne" on tick 1. Right
+after the grid placement no suspension pass has run, so every wheel's contact word is still
+0. The blend then gives a steering of 0 (the slip angle at rest) instead of the ground law's
+−0.06…−0.26. The two revisions' traces first differ at tick 1 (steering only), then in
+speed by 0.001 m/s at tick 2, and the field diverges from there.
+
+**Seed spread [V port].** Lost cars per seed, seeds 0–17 (each the sum over 10, 11 and 12 cars):
+
+| revision | per seed | lost in 54 runs |
+|---|---|---:|
+| 2b82716b | 0 0 0 3 0 0 9 0 7 0 0 0 0 0 2 0 8 0 | 29 |
+| 8efcc24d | 14 0 0 3 0 0 6 0 9 0 0 7 0 0 1 0 4 0 | 44 |
+
+The losses cluster on a few seeds. Seeds 6, 8 and 16 lose 4–9 cars in both binaries; seeds
+0 and 11 change sides. So the 6 → 17 on seeds 0–5 is one seed (0) moving, not a regression.
+Shibuya 0 has a standing first-corner loss rate of about 0.5–0.8 cars per run in both. At
+seed 0 on current main (12 cars), cars 2 and 3 run in RaceStart in contact from tick 500 at
+38–42 m/s and spin at tick 600 (car 2: slip 13° → 80°, yaw +0.3 → +3.1 rad/s at full right
+lock). Cars 0, 1 and 4 leave the ground for 7–9 ticks over the crest at arc 236–250.
+
+The tick-1 "airborne" state is a harness start difference. The original runs physics through
+the countdown, so the wheels are in contact before the AI steers; `grid-opponent-race`
+without `GRID_GRID_HOLD` steers from the first tick. It is not changed here: it only moves
+seeds around.
+
+**Outside car's slide steering (F692 follow-up) [V port].** In §18's run A the outside car's
+steering equals the ported law (2.7·heading error − 0.4·yaw rate) / 0.576 on every sampled
+tick. It holds full right lock because its heading error grows to −0.87 rad while its yaw
+rate stays at −0.7…−1.5 rad/s. The law alone gives about +0.6 rad (more than full lock)
+toward countersteer at the original's −1.5 rad/s. The original's outside car at steer about 0
+therefore implies a heading error near −0.22 rad. Even with the original's controls (run B)
+the port's outside car yaws at −0.7…−0.9 rad/s against the original's −1.3…−1.5. So no
+threshold or recovery step differs (stSlideFactor is 0 and inert, AI_DRIVER_RESEARCH §5).
+The difference is the outside car's yaw response in the contact. The injected wheel and
+suspension state (left from the port's own run) is the first suspect.
+
+Next: Shibuya 0 seeds 6, 8 and 16 (losses in both binaries) as the reproducible first-corner
+cases for row 93's start, and the outside car's yaw response with a fully settled injection
+(inject several ticks before and let the wheels settle).
