@@ -32,6 +32,12 @@ fn print(tree: &pssg::Tree<'_>, node: usize, depth: usize) {
             .map_or("?".into(), |d| String::from_utf8_lossy(d.name).into_owned());
         line += &format!(" {name}={}", value(a.value));
     }
+    // A TRANSFORM or bind matrix: 16 big-endian floats, translation last.
+    if matches!(tree.name(node), b"TRANSFORM" | b"INVERSEBINDMATRIX") && n.data.is_some_and(|d| d.len() == 64) {
+        let d = n.data.unwrap_or_default();
+        let f: Vec<f32> = d.chunks(4).map(|w| f32::from_be_bytes(w.try_into().unwrap())).collect();
+        line += &format!(" {f:?}");
+    }
     println!("{line}");
     for &c in &n.children {
         print(tree, c, depth + 1);

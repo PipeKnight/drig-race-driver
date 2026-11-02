@@ -553,6 +553,7 @@ description is the first header found. Rows with a single file are validators wi
 |---|---|---|---|
 | alongside_capture | Alongside squeeze capture for the original (FIRST_CORNER_LIVE section 13, rows 30/31). | [alongside_capture.py](alongside_capture.py) | [FIRST_CORNER_LIVE](../docs/FIRST_CORNER_LIVE.md) |
 | car_collision | Compare native car collision geometry, source bounds and saved live description words. | [validate_car_collision.py](validate_car_collision.py) | [CAR_COLLISION](../docs/CAR_COLLISION.md) |
+| float_audit_all | Runs `grid-app --float-audit` (backlog row 102, docs/FLOATING_AUDIT.md) over every route folder with a track.jpk; one TSV and log per route plus a summary line each, in … | [float_audit_all.sh](float_audit_all.sh) | [FIDELITY_BACKLOG](../docs/FIDELITY_BACKLOG.md) |
 | geometry_provider | Advanced-pose provider versus complete original retained geometry stages. | [validate_geometry_provider.py](validate_geometry_provider.py) |  |
 | geometry_provider | Audit every provider/legacy/native byte, source request and prior regression. | [audit_geometry_provider.py](audit_geometry_provider.py) |  |
 | ground_placement | Conditional original numeric placement versus Rust using controlled plane queries. | [build_ground_placement_probe.cmd](build_ground_placement_probe.cmd), [probe_ground_placement.c](probe_ground_placement.c), [validate_ground_placement.py](validate_ground_placement.py) | [GROUND_PLACEMENT](../docs/GROUND_PLACEMENT.md) |

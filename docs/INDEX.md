@@ -383,6 +383,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [DLAA_INPUT_CONTRACT.md](DLAA_INPUT_CONTRACT.md) DLAA input contract follow-up — G202, 20 October2026.
 - [DLAA_PRESET_RESEARCH.md](DLAA_PRESET_RESEARCH.md) Supported DLAA preset hint experiment — G203, 20 October2026.
 - [EDGE_ATLAS_DRY_RESPONSE.md](EDGE_ATLAS_DRY_RESPONSE.md) Optional dry response in mixed edge atlases — 19October2026.
+- [FLOATING_AUDIT.md](FLOATING_AUDIT.md) Floating and untextured track pieces: the all-route audit (row 102) — Owner's request (F657): on Washington some pieces hang in the air and part of a kerb seems slightly above the road.
 - [LAMP_REFLECTOR_RESEARCH.md](LAMP_REFLECTOR_RESEARCH.md) Lamp reflector material research — Initial19 October2026 static purchased-resource observations.
 - [MUSIC_RESEARCH.md](MUSIC_RESEARCH.md) Race music: codec, stem manager and port sizing (research) — Static analysis of `local/compatibility/grid-unpacked.exe` (cache `local/re-cache`) and of the purchased …
 - [NATIVE_DLAA.md](NATIVE_DLAA.md) Optional native-resolution DLAA — 19 October2026.

@@ -1,4 +1,5 @@
 mod object_materials;
+mod float_audit;
 #[cfg(not(target_os = "android"))]
 mod coverage_probe;
 #[cfg(not(target_os = "android"))]
@@ -1913,6 +1914,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut paint_response_explicit = false;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
+    let mut float_audit_out: Option<PathBuf> = None;
     let mut body_contacts = profile.body_contacts.clone();
     let mut body_events = profile.body_events.clone();
     let mut deformation = profile.deformation.clone();
@@ -2067,6 +2069,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     args.next()
                         .ok_or("--body-contacts needs a private CD01 path or derive")?,
                 ));
+            }
+            "--float-audit" => {
+                float_audit_out = Some(args.next().ok_or("--float-audit needs local/OUT.tsv")?.into())
             }
             "--drive-ticks" => {
                 drive_ticks = Some(args.next().ok_or("missing tick count")?.parse::<u64>()?)
@@ -3762,6 +3767,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if track && !collision && graphics.enhanced() && graphics.source_trees {
         source_trees::append(&root, &route, &mut car, graphics.foliage_coverage, graphics.tree_sheet_colours)?;
+    }
+    if let Some(out) = &float_audit_out {
+        if !track || collision {
+            return Err("--float-audit requires a track scene".into());
+        }
+        return float_audit::run(&root, &route, &car.parts, &car.bindings, &car.textures, out);
     }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F685](F0685.md) | 2026-11-02 | All-route floating and texture audit; hidden damage pieces, raised pavement and mounted boards triaged (row 102) |
 | [F684](F0684.md) | 2026-11-02 | Drivers' suit and helmet colours from the livery's driver_suit |
 | [F683](F0683.md) | 2026-11-02 | Nürburgring grid-start capture: the original's leader slows by side contact |
 | [F682](F0682.md) | 2026-11-02 | Camera FOV setting; cockpit view 10 degrees wider by default (owner request, row 103) |
