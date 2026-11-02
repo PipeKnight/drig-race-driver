@@ -5,6 +5,7 @@
     prepass_io,
     pbr_bindings,
     pbr_types,
+    pbr_functions,
     pbr_functions::prepare_world_normal,
     pbr_prepass_functions,
     mesh_view_bindings::view,
@@ -31,6 +32,10 @@ fn raw_source_alpha(in: prepass_io::VertexOutput) -> f32 {
 }
 
 fn coverage_guard(in: prepass_io::VertexOutput) {
+#ifdef VISIBILITY_RANGE_DITHER
+    // Ornament level fades (ornament_lod.rs), as Bevy's own fragments do.
+    pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
+#endif
 #ifdef OBJECT_AUX_CLIP_CSM_HALF
     if raw_source_alpha(in) < 0.5 { discard; }
 #endif

@@ -87,14 +87,15 @@ pub(crate) fn def_name(d: &ShaderDefVal) -> &str {
     }
 }
 fn forbidden(defs: &[ShaderDefVal]) -> bool {
-    const BAD: [&str; 10] = [
+    // VISIBILITY_RANGE_DITHER is admitted: both shaders apply Bevy's dither
+    // (ornament level fades).
+    const BAD: [&str; 9] = [
         "MAY_DISCARD",
         "PREMULTIPLY_ALPHA",
         "OIT_ENABLED",
         "PREPASS_PIPELINE",
         "DEFERRED_PREPASS",
         "FORWARD_DECAL",
-        "VISIBILITY_RANGE_DITHER",
         "MESHLET_MESH_MATERIAL_PASS",
         "READS_VIEW_TRANSMISSION_TEXTURE",
         "BLEND_PREMULTIPLIED_ALPHA",
@@ -207,8 +208,8 @@ fn specialize_main_one(d: &mut RenderPipelineDescriptor) -> Result<(), &'static 
         || remaps(&d.vertex.shader_defs) != 0 || remaps(&f.shader_defs) != 0 {
         return Err("source cheap coverage needs actual1x colour/no hardware A2C");
     }
-    const BAD: [&str; 8] = ["PREMULTIPLY_ALPHA", "OIT_ENABLED", "PREPASS_PIPELINE", "DEFERRED_PREPASS",
-        "FORWARD_DECAL", "VISIBILITY_RANGE_DITHER", "MESHLET_MESH_MATERIAL_PASS", "READS_VIEW_TRANSMISSION_TEXTURE"];
+    const BAD: [&str; 7] = ["PREMULTIPLY_ALPHA", "OIT_ENABLED", "PREPASS_PIPELINE", "DEFERRED_PREPASS",
+        "FORWARD_DECAL", "MESHLET_MESH_MATERIAL_PASS", "READS_VIEW_TRANSMISSION_TEXTURE"];
     if d.vertex.shader_defs.iter().chain(&f.shader_defs).any(|v| BAD.contains(&def_name(v))) {
         return Err("unsupported source cheap main variant");
     }
@@ -227,8 +228,8 @@ fn specialize_auxiliary(d: &mut RenderPipelineDescriptor, key: MeshPipelineKey) 
     if f.shader != AUX_SHADER || d.multisample.count != 1 || d.multisample.alpha_to_coverage_enabled {
         return Err("auxiliary coverage requires custom fragment/actual1x/no A2C");
     }
-    const BAD: [&str; 7] = ["DEFERRED_PREPASS", "BINDLESS", "MESHLET_MESH_MATERIAL_PASS",
-        "VISIBILITY_RANGE_DITHER", "STANDARD_MATERIAL_NORMAL_MAP", "PREMULTIPLY_ALPHA", "OIT_ENABLED"];
+    const BAD: [&str; 6] = ["DEFERRED_PREPASS", "BINDLESS", "MESHLET_MESH_MATERIAL_PASS",
+        "STANDARD_MATERIAL_NORMAL_MAP", "PREMULTIPLY_ALPHA", "OIT_ENABLED"];
     if d.vertex.shader_defs.iter().chain(&f.shader_defs).any(|v| BAD.contains(&def_name(v))) {
         return Err("unsupported source auxiliary layout");
     }

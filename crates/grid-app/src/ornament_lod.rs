@@ -11,11 +11,18 @@
 //! 1 at every distance inside D (0x96EC80 pass 0x401): it casts from the
 //! shadow layer, which no camera draws, while another level is shown.
 //!
+//! The original switches levels and culls at D at once. The port fades each
+//! change over [`FADE_SECONDS`] instead (owner, 2026-11-02: nothing should
+//! appear in view): the old and the new level are drawn with Bevy's
+//! complementary dither (`VisibilityRange`), so every pixel shows one of
+//! them, and an instance entering or leaving D dithers in or out. A camera
+//! cut switches at once. `GRID_ORNAMENT_FADE=0` keeps the hard switch.
+//!
 //! Level entities are not merged by `static_batch`: a merged mesh would be
 //! rebuilt whenever one of its instances changes level. Common build;
 //! `GRID_ORNAMENT_LOD=0` keeps every ornament at level 0 (comparisons).
 use bevy::{
-    camera::visibility::{RenderLayers, VisibilitySystems},
+    camera::visibility::{RenderLayers, VisibilityRange, VisibilitySystems},
     prelude::*,
     transform::TransformSystems,
 };
@@ -28,8 +35,107 @@ const SCENERY_OVERLAP: f32 = 20.;
 /// `lod_distance_00..02` of a prototype without a record (0x9522F0).
 pub const DEFAULT_DISTANCES: [f32; 3] = [30., 60., 100.];
 
+/// Length of a level change or of an appearance at D, seconds [authored].
+const FADE_SECONDS: f32 = 0.4;
+/// A camera move this long in one frame is a cut: levels switch at once.
+const CUT_METRES: f32 = 20.;
+/// Width of the dither ramps in [`fade_range`], metres: so wide that the
+/// camera distance (under 30 km) moves the dither level by under 0.5.
+const RAMP: f32 = 1.0e6;
+/// Dither steps of Bevy's crossfade (`visibility_range_dither`).
+const STEPS: f32 = 16.;
+
 pub fn enabled() -> bool {
     std::env::var("GRID_ORNAMENT_LOD").map_or(true, |v| v != "0")
+}
+
+pub fn fade_enabled() -> bool {
+    std::env::var("GRID_ORNAMENT_FADE").map_or(true, |v| v != "0")
+}
+
+/// The range a level entity carries: fully drawn (`step` 0 of a fade-out),
+/// or `step` of 16 into a fade-in (`appearing`) or a fade-out. The ramps
+/// start at negative distances [`RAMP`] wide, so the dither step does not
+/// depend on the camera distance, and only 33 distinct ranges exist (Bevy
+/// never reuses a range's GPU slot). An entity carries one only while it
+/// fades: Bevy checks every ranged entity each frame and re-extracts all of
+/// them when one changes, and the dither variant discards, which costs the
+/// main pass its early depth test (F703). Bevy re-specializes a mesh's
+/// pipeline only when its `Mesh3d` or material changes, so adding or removing
+/// the range marks `Mesh3d` changed: a dither variant left without a range
+/// discards every fragment.
+pub fn fade_range(appearing: bool, step: u8) -> VisibilityRange {
+    let shift = f32::from(step.min(16)) / STEPS * RAMP;
+    if appearing {
+        VisibilityRange {
+            start_margin: -shift..RAMP - shift,
+            end_margin: 10. * RAMP..11. * RAMP,
+            use_aabb: false,
+        }
+    } else {
+        VisibilityRange {
+            start_margin: -3. * RAMP..-2. * RAMP,
+            end_margin: -shift..RAMP - shift,
+            use_aabb: false,
+        }
+    }
+}
+
+/// A level change in progress: `from` dithers out while `to` dithers in,
+/// `t` from 0 to 1 (1: done, only `to` drawn).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fade {
+    from: u8,
+    to: u8,
+    t: f32,
+}
+
+impl Fade {
+    const NONE: Self = Self { from: NONE, to: NONE, t: 1. };
+
+    /// Step to `target` for a frame of `step` (fraction of the fade).
+    fn advance(&mut self, target: u8, step: f32, cut: bool) {
+        if cut {
+            *self = Self { from: target, to: target, t: 1. };
+        } else if target == self.to {
+            self.t = (self.t + step).min(1.);
+        } else if target == self.from && self.t < 1. {
+            // Back to the level that was fading out: reverse.
+            *self = Self { from: self.to, to: target, t: (1. - self.t + step).min(1.) };
+        } else {
+            // A new change: from the level that shows most now.
+            let from = if self.t >= 0.5 { self.to } else { self.from };
+            *self = Self { from, to: target, t: step.min(1.) };
+        }
+    }
+
+    /// How `level` is drawn: `None` hidden, else (appearing, dither step).
+    fn draw(&self, level: u8) -> Option<(bool, u8)> {
+        let step = (self.t * STEPS).round() as u8;
+        if self.t >= 1. || self.from == self.to {
+            (level == self.to).then_some((false, 0))
+        } else if level == self.to {
+            Some((true, step))
+        } else if level == self.from {
+            Some((false, step))
+        } else {
+            None
+        }
+    }
+
+    /// The instance's presence fading in or out across D, as [`Self::draw`].
+    fn presence(&self) -> Option<(bool, u8)> {
+        let step = (self.t * STEPS).round() as u8;
+        if self.t < 1. && self.from == NONE {
+            Some((true, step))
+        } else if self.t < 1. && self.to == NONE {
+            Some((false, step))
+        } else if self.to == NONE {
+            None
+        } else {
+            Some((false, 0))
+        }
+    }
 }
 
 /// One prototype: `lod_distance_00..02`, its level count and whether it is
@@ -66,6 +172,10 @@ pub struct Lods {
     /// Per instance this frame: the level shown (`NONE` when culled) and
     /// whether it is inside D.
     shown: Vec<u8>,
+    /// Per instance: the fade between the drawn levels.
+    fades: Vec<Fade>,
+    /// The camera position of the last frame (cut detection).
+    eye: Option<Vec3>,
 }
 
 const NONE: u8 = u8::MAX;
@@ -108,6 +218,8 @@ impl Lods {
         );
         Self {
             shown: vec![NONE; levels.instances.len()],
+            fades: vec![Fade::NONE; levels.instances.len()],
+            eye: None,
             types: levels.types,
             instances: levels.instances,
         }
@@ -178,47 +290,115 @@ pub fn level(kind: &Type, v: f32) -> u8 {
 fn select(
     mut lods: ResMut<Lods>,
     camera: Query<(&GlobalTransform, &Projection), With<crate::ViewerCamera>>,
-    mut parts: Query<(&OrnamentLevel, &mut Visibility, Option<&mut RenderLayers>)>,
+    mut parts: Query<(
+        Entity,
+        &OrnamentLevel,
+        Option<&mut Mesh3d>,
+        &mut Visibility,
+        Option<&mut RenderLayers>,
+        Option<&mut VisibilityRange>,
+    )>,
+    mut commands: Commands,
+    time: Option<Res<Time>>,
+    mut frame: Local<u64>,
 ) {
-    let Some((eye, Projection::Perspective(lens))) = camera.iter().next() else {
+    let Some((view, projection @ Projection::Perspective(lens))) = camera.iter().next() else {
         return;
     };
-    let eye = eye.translation();
+    let eye = view.translation();
     let k = REFERENCE_HALF_FOV.tan() / (lens.fov * 0.5).tan();
     let lods = &mut *lods;
-    for (instance, shown) in lods.instances.iter().zip(&mut lods.shown) {
+    let cut = lods.eye.is_none_or(|last| last.distance(eye) > CUT_METRES) || !fade_enabled();
+    lods.eye = Some(eye);
+    let step = time.map_or(0., |t| t.delta_secs()) / FADE_SECONDS;
+    *frame += 1;
+    let trace = trace_enabled().then(|| projection.get_clip_from_view() * view.to_matrix().inverse());
+    for ((instance, shown), fade) in lods.instances.iter().zip(&mut lods.shown).zip(&mut lods.fades) {
         let kind = &lods.types[instance.kind as usize];
         let v = metric(instance.min, instance.max, eye, k, kind.distances[2]);
-        *shown = level(kind, v);
+        let new = level(kind, v);
+        if let Some(clip_from_world) = trace
+            && new != *shown
+            && *frame > 1
+        {
+            trace_change(*frame, instance, kind, *shown, new, eye, lens.fov, clip_from_world);
+        }
+        *shown = new;
+        fade.advance(new, step, cut);
     }
     let caster = RenderLayers::layer(0);
     let shadow_only = crate::car_batch::shadow_layer();
-    for (part, mut visibility, layers) in &mut parts {
-        let shown = lods.shown[part.instance as usize];
-        let colour = shown == part.level;
-        match layers {
-            // The shadow level: drawn inside D, by the camera only while it
-            // is the colour level.
-            Some(mut layers) => {
-                visibility.set_if_neq(if shown == NONE {
-                    Visibility::Hidden
-                } else {
-                    Visibility::Inherited
-                });
-                let want = if colour { &caster } else { &shadow_only };
-                if layers.clone().without(crate::car_reflections::LAYER) != *want {
-                    *layers = want.clone();
-                }
-            }
-            None => {
-                visibility.set_if_neq(if colour {
-                    Visibility::Inherited
-                } else {
-                    Visibility::Hidden
-                });
+    for (entity, part, mesh, mut visibility, layers, range) in &mut parts {
+        let fade = lods.fades[part.instance as usize];
+        let colour = fade.draw(part.level);
+        // The shadow level is drawn inside D, by the camera only while it is
+        // a colour level; otherwise it fades with the instance's presence.
+        let drawn = if layers.is_some() { colour.or(fade.presence()) } else { colour };
+        visibility.set_if_neq(if drawn.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+        if let Some(mut layers) = layers {
+            let want = if colour.is_some() { &caster } else { &shadow_only };
+            if layers.clone().without(crate::car_reflections::LAYER) != *want {
+                *layers = want.clone();
             }
         }
+        match (range, drawn) {
+            (Some(mut range), Some((appearing, step))) if appearing || step > 0 => {
+                range.set_if_neq(fade_range(appearing, step));
+            }
+            (None, Some((appearing, step))) if appearing || step > 0 => {
+                commands.entity(entity).insert(fade_range(appearing, step));
+                if let Some(mut mesh) = mesh {
+                    mesh.set_changed();
+                }
+            }
+            (Some(_), _) => {
+                commands.entity(entity).remove::<VisibilityRange>();
+                if let Some(mut mesh) = mesh {
+                    mesh.set_changed();
+                }
+            }
+            (None, _) => {}
+        }
     }
+}
+
+/// `GRID_ORNAMENT_LOD_TRACE=1`: print each on-screen level change (research).
+fn trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("GRID_ORNAMENT_LOD_TRACE").is_ok_and(|v| v == "1"))
+}
+
+/// One level change of an instance whose box centre is in the view: its
+/// distance and its box diagonal in pixels of a 1080-row view.
+#[allow(clippy::too_many_arguments)]
+fn trace_change(frame: u64, instance: &Instance, kind: &Type, from: u8, to: u8, eye: Vec3, fov: f32, clip_from_world: Mat4) {
+    let centre = (instance.min + instance.max) * 0.5;
+    let clip = clip_from_world * centre.extend(1.);
+    if clip.w <= 0. {
+        return;
+    }
+    let ndc = clip.truncate() / clip.w;
+    if ndc.x.abs() > 1.1 || ndc.y.abs() > 1.1 {
+        return;
+    }
+    let distance = (centre - eye).length().max(0.1);
+    let pixels = (instance.max - instance.min).length() / distance / (2. * (fov * 0.5).tan()) * 1080.;
+    let name = |l: u8| if l == NONE { "none".to_string() } else { l.to_string() };
+    println!(
+        "ornament_change frame={frame} kind={} from={} to={} distance={distance:.1} far={:.0} levels={} scenery={} pixels={pixels:.0} ndc={:.2},{:.2}",
+        instance.kind,
+        name(from),
+        name(to),
+        kind.distances[2],
+        kind.levels,
+        u8::from(kind.scenery),
+        ndc.x,
+        ndc.y
+    );
 }
 
 #[cfg(test)]
@@ -239,7 +419,56 @@ mod tests {
     }
 
     #[test]
+    fn a_level_change_fades_over_the_fade_time() {
+        let mut fade = Fade::NONE;
+        fade.advance(2, 0.25, true);
+        assert_eq!(fade.draw(2), Some((false, 0)));
+        // 2 -> 1 over four frames: 1 dithers in while 2 dithers out.
+        fade.advance(1, 0.25, false);
+        assert_eq!((fade.draw(1), fade.draw(2), fade.draw(0)), (Some((true, 4)), Some((false, 4)), None));
+        fade.advance(1, 0.25, false);
+        fade.advance(1, 0.25, false);
+        fade.advance(1, 0.25, false);
+        assert_eq!((fade.draw(1), fade.draw(2)), (Some((false, 0)), None));
+        // Back halfway: reversed, not restarted.
+        fade.advance(2, 0.25, false);
+        fade.advance(2, 0.25, false);
+        fade.advance(1, 0.25, false);
+        assert_eq!(fade, Fade { from: 2, to: 1, t: 0.75 });
+        // Leaving D fades the presence out, a cut switches at once.
+        fade.advance(NONE, 0.5, false);
+        assert_eq!(fade.presence(), Some((false, 8)));
+        fade.advance(1, 0., true);
+        assert_eq!(fade.draw(1), Some((false, 0)));
+    }
+
+    #[test]
+    fn fade_ranges_give_the_dither_step_at_any_distance() {
+        // Bevy's get_visibility_range_dither_level, on the CPU.
+        let dither = |r: &VisibilityRange, d: f32| -> i32 {
+            let (offset, a, b) = if d >= r.end_margin.start {
+                (0, r.end_margin.start, r.end_margin.end)
+            } else {
+                (-16, r.start_margin.start, r.start_margin.end)
+            };
+            offset + (((d - a) / (b - a) * 16.).round() as i32).clamp(0, 16)
+        };
+        for d in [0., 1., 250., 7000., 25000.] {
+            for step in 0..=16u8 {
+                let s = i32::from(step);
+                assert_eq!(dither(&fade_range(true, step), d), s - 16, "in {step} at {d}");
+                assert_eq!(dither(&fade_range(false, step), d), s, "out {step} at {d}");
+                assert!(fade_range(true, step).is_visible_at_all(d));
+                // The last fade-out step is culled outright.
+                assert_eq!(fade_range(false, step).is_visible_at_all(d), step < 16);
+            }
+        }
+        assert!(!fade_range(false, 0).is_abrupt());
+    }
+
+    #[test]
     fn levels_follow_the_attribute_distances() {
+
         let plain = Type {
             scenery: false,
             ..building()

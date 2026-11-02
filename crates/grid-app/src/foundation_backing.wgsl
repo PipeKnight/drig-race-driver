@@ -2,12 +2,17 @@
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
+    pbr_functions,
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
     decal::clustered::apply_decals,
 }
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
+#ifdef VISIBILITY_RANGE_DITHER
+    // Ornament level fades (ornament_lod.rs), as Bevy's own fragments do.
+    pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
+#endif
     // Specialize removes ONLY ALPHA_TO_COVERAGE remap define; hardware A2C stays on.
     var pbr = pbr_input_from_standard_material(in, is_front);
     let raw_alpha = pbr.material.base_color.a;
