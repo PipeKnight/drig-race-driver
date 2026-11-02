@@ -171,3 +171,42 @@ covered:
 - detached car panels and wheels, which turn off after 1 s (VISUAL_DAMAGE_PARTS_RESEARCH);
 - breakables that Washington route 0 does not have (boards, cushions);
 - what exactly the owner saw. A screenshot or position from the owner would settle that.
+
+## Things in the air during races: god-ray cards and grass without land (2026-11-02)
+
+Two things the owner saw floating had sources the instance audit did not cover. Both are fixed
+in the shared loading path for every route.
+
+- **Black "drops" on Washington** (owner screenshots 29-32 and 35, FIDELITY_BACKLOG row 107).
+  - Reproduced on a8cef46b9294: Viper, 12-car race, autopilot, tick 4100. A static render from
+    the same camera shows them too, so they are static geometry. `--geometry-ray` names
+    `ornament/0/!hOB`, material `objects/godray_tree!0`.
+  - Its shader group is `god_rays_single_sided.fx`; `god_rays.fx` appears on 7 tracks and the
+    single-sided variant on 4. The shaderpack draws both alpha-blended (`SRC_ALPHA`,
+    `ONE_MINUS_SRC_ALPHA`) with `object_light_shafts.cg.fp_light_shafts`. In the original they
+    are faint light shafts coloured from shader constants.
+  - The port drew them as plain textured objects, so the dark `godrays4.tga` appeared as black
+    spindles.
+  - `object_materials::light_shaft_materials` now lists them. `append_objects` counts them
+    (`omitted_light_shaft_draws`) and does not draw them.
+  - Open: a light-shaft shader port (fragment program not disassembled).
+- **Flecks in the air on Okutama, and the black void with floating buildings on Washington**
+  (screenshot 33, row 108).
+  - Ground-cover grass (`ground_detail.rs`) is scattered on the triangles of `grass.grs`.
+    Those triangles follow the terrain in `land.pssg`.
+  - `land.pssg` was drawn only in the enhanced preset, which only Donington route 0 allows. So
+    on every other route the grass on land hung in the air. Washington's buildings stand on
+    land and hung above the empty riverbed area, which showed the clear colour.
+  - Land and its layered infield are now drawn on every preset. `land_has_draws` skips Milan's
+    and Shibuya's land files, which hold no render instances.
+  - `water.fx` draws (sea and rivers, 7 tracks: a normal map and constants `deepColour`,
+    `shallowColour`, `reflectionColour`, Fresnel bias and power, and bump scroll) have no port.
+    They are counted (`omitted_water_draws`, with their bounds) instead of failing the load, so
+    Washington's river now shows its bed. Water stays open in row 108.
+
+The audit now also covers ground cover (`grass_patch` rows). For every painted `grass.grs`
+vertex (any density above 0) it measures the gap to the nearest of the collision and the drawn
+surfaces below it. A vertex with nothing below is checked upwards: a surface up to 29 m above
+means the vertex is buried, not floating. Each patch with vertices more than 0.25 m above every
+surface gets a row: the centroid, the largest gap and the count. The summary line adds
+`grass_vertices` and `grass_raised`.

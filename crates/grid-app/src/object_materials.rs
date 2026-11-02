@@ -19,6 +19,24 @@ pub(crate) fn glass_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTr
     Ok(result)
 }
 
+/// `god_rays*.fx` light-shaft cards (Washington's `godray_tree`): the
+/// shaderpack draws them alpha-blended with `fp_light_shafts`, a colour from
+/// the shader constants, not the texture. Drawn as plain textured objects
+/// they are black spindles in the sky (owner, 2026-11-02); the port has no
+/// light-shaft shader, so they are counted and not drawn.
+pub(crate) fn light_shaft_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeSet<String>> {
+    let mut result = BTreeSet::new();
+    for i in 0..tree.nodes.len() {
+        if tree.name(i) == b"SHADERINSTANCE"
+            && tree.string(i, b"shaderGroup")?.starts_with(b"#god_rays")
+        {
+            let id = String::from_utf8_lossy(tree.string(i, b"id")?);
+            result.insert(format!("objects/{id}"));
+        }
+    }
+    Ok(result)
+}
+
 /// Saved object_simple_mesh normal, velocity/depth, shadow and cheap passes
 /// all specify cullFaceType=NONE. Match the material's source family, not names.
 /// Other families retain their existing culling policy.

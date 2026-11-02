@@ -389,7 +389,8 @@ pub fn install(
     rgb_overrides: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut source = read_source(root, route)?;
-    if land {
+    // Milan's and Shibuya's land.pssg hold no render instances.
+    if land && super::land_has_draws(root, route)? {
         let land = read_package(root, route, "land.pssg")?;
         merge(&mut source, land, "land", true);
     }
@@ -766,7 +767,7 @@ mod tests {
         ] {
             let route = Route::new(&format!("tracks/{track}/route_0")).unwrap();
             let source = read_source(root, &route).unwrap();
-            // land.pssg is drawn in enhanced only (Donington); Milan's has no
+            // land.pssg is layered in enhanced only (Donington); Milan's has no
             // static draws at all.
             let land = read_package(root, &route, "land.pssg");
             let world_mapped = source.definitions.values().filter(|d| d.controls.w > 0.).count();

@@ -22,6 +22,9 @@ const BASE_SAMPLES: usize = 16;
 /// The ray starts this far above a vertex and ends this far below it.
 const ABOVE: f32 = 1.;
 const BELOW: f32 = 30.;
+/// A painted ground-cover vertex this far above every surface carries grass
+/// in the air.
+const GRASS: f32 = 0.25;
 
 /// The vertices a mesh's indices use, and its triangles over them.
 fn referenced(mesh: &Mesh) -> (Vec<Vec3>, Vec<[u32; 3]>) {
@@ -370,10 +373,57 @@ pub fn run(
     for (material, count) in &untextured {
         writeln!(file, "untextured\t-\t{material}\t{count}\t\t\t\t\t")?;
     }
+    // Ground-cover patches (`grass.grs`): grass is scattered on these
+    // triangles, so a painted vertex above every drawn surface and the
+    // collision carries grass in the air. One row per patch with such
+    // vertices: their centroid, the largest gap and their count.
+    let (mut grass_all, mut grass_raised) = (0, 0);
+    let grs = root.join(route.track_file("grass.grs"));
+    if grs.is_file() {
+        let patches = grid_formats::ground_cover::read_patches(&std::fs::read(grs)?)?;
+        for (i, patch) in patches.iter().enumerate() {
+            let (mut sum, mut count, mut worst) = (Vec3::ZERO, 0, 0f32);
+            for (p, d) in patch.positions.iter().zip(&patch.densities) {
+                if d.iter().all(|&v| v <= 0.) {
+                    continue;
+                }
+                let v = Vec3::from_array(*p);
+                let collision = ground(&track, v)?.map(|g| v.y - g);
+                let surface = drawn.below(v).map(|g| v.y - g);
+                grass_all += 1;
+                let mut gap = match (collision, surface) {
+                    (Some(a), Some(b)) => a.min(b),
+                    (Some(a), None) | (None, Some(a)) => a,
+                    (None, None) => f32::INFINITY,
+                };
+                // Nothing under it: a surface up to `BELOW` over it buries
+                // the vertex (hidden grass) rather than lifting it.
+                if gap.is_infinite() {
+                    let up = v + Vec3::Y * (BELOW - ABOVE);
+                    let over = [ground(&track, up)?, drawn.below(up)];
+                    if let Some(g) = over.into_iter().flatten().reduce(f32::max) {
+                        gap = v.y - g;
+                    }
+                }
+                if gap > GRASS {
+                    (sum, count, worst) = (sum + v, count + 1, worst.max(gap));
+                }
+            }
+            grass_raised += count;
+            if count > 0 {
+                let c = sum / count as f32;
+                writeln!(
+                    file,
+                    "grass_patch\t{i}\tgrass.grs\t-\t{:.2}\t{:.2}\t{:.2}\t{worst:.3}\t{count}",
+                    c.x, c.y, c.z
+                )?;
+            }
+        }
+    }
     let (route_all, route_raised) = vertices.get("route").copied().unwrap_or_default();
     let (track_all, track_raised) = vertices.get("track").copied().unwrap_or_default();
     println!(
-        "float_audit route={} instances={} held={} floating={floating} sunk={sunk} no_ground={unknown} route_vertices={route_all} route_raised={route_raised} track_vertices={track_all} track_raised={track_raised} untextured_materials={} touch={TOUCH}",
+        "float_audit route={} instances={} held={} floating={floating} sunk={sunk} no_ground={unknown} route_vertices={route_all} route_raised={route_raised} track_vertices={track_all} track_raised={track_raised} grass_vertices={grass_all} grass_raised={grass_raised} untextured_materials={} touch={TOUCH}",
         route.path(),
         instances.len(),
         held.iter().filter(|&&h| h).count(),

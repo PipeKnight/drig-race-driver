@@ -696,9 +696,29 @@ fn load_package(
     let mut triangle_count = 0;
     let mut fallback_count = 0;
     let mut omitted_draws = 0;
+    // `water.fx` (land.pssg sea and lakes: a normal map and constants, no
+    // diffuse) has no port yet; its draws are counted, not drawn.
+    let water: std::collections::BTreeSet<&[u8]> = if track {
+        (material::read_constants(&tree)?.into_iter())
+            .filter(|s| s.group == b"water.fx")
+            .map(|s| s.shader)
+            .collect()
+    } else {
+        Default::default()
+    };
+    let mut omitted_water = 0;
+    let mut water_bounds = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     for draw in draws {
         if track && !include_batches && draw.material == b"batchmaterial" {
             omitted_draws += 1;
+            continue;
+        }
+        if water.contains(draw.material) {
+            omitted_water += 1;
+            for p in &sources[draw.source].positions[draw.vertices.clone()] {
+                water_bounds.0 = water_bounds.0.min(Vec3::from_array(*p));
+                water_bounds.1 = water_bounds.1.max(Vec3::from_array(*p));
+            }
             continue;
         }
         let source = &sources[draw.source];
@@ -795,7 +815,7 @@ fn load_package(
         }
     }
     println!(
-        "scene track={track} LOD={lod} draws={} omitted_unresolved_batch_draws={omitted_draws} triangles={triangle_count} normal_fallback_draws={fallback_count} bounds={:?}..{:?} textures={}",
+        "scene track={track} LOD={lod} draws={} omitted_unresolved_batch_draws={omitted_draws} omitted_water_draws={omitted_water} water_bounds={water_bounds:?} triangles={triangle_count} normal_fallback_draws={fallback_count} bounds={:?}..{:?} textures={}",
         parts.len(),
         bounds.0,
         bounds.1,
@@ -829,21 +849,26 @@ fn load_package(
     }
     Ok(car)
 }
+/// Whether the route's land.pssg has render instances (Milan's and
+/// Shibuya's have none).
+fn land_has_draws(root: &Path, route: &Route) -> Result<bool, Box<dyn std::error::Error>> {
+    let bytes = read(&root.join(route.track_file("land.pssg")))?;
+    let tree = pssg::read_tree(&bytes)?;
+    Ok((0..tree.nodes.len()).any(|i| tree.name(i) == b"RENDERSTREAMINSTANCE"))
+}
+
 fn append_land(
     root: &Path,
     route: &Route,
     model: &CarModel,
     car: &mut Car,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let land = load_package(
-        root,
-        (route, model),
-        "LOD0_",
-        true,
-        false,
-        &route.track_file("land.pssg"),
-        false,
-    )?;
+    let file = route.track_file("land.pssg");
+    if !land_has_draws(root, route)? {
+        println!("source_land appended=false source=land.pssg reason=no-render-instances");
+        return Ok(());
+    }
+    let land = load_package(root, (route, model), "LOD0_", true, false, &file, false)?;
     let draws = land.parts.len();
     for mut part in land.parts {
         part.name = format!("land/{}", part.name);
@@ -1011,6 +1036,8 @@ fn append_objects(
     };
     car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
     car.object_two_sided_materials.extend(object_materials::two_sided_materials(&tree)?);
+    let light_shafts = object_materials::light_shaft_materials(&tree)?;
+    let mut omitted_light_shafts = 0;
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     // First instance index of each prototype.
@@ -1082,6 +1109,10 @@ fn append_objects(
         }
         let source = &sources[draw.source];
         let name = format!("objects/{}", String::from_utf8(draw.material.to_vec())?);
+        if light_shafts.contains(&name) {
+            omitted_light_shafts += 1;
+            continue;
+        }
         if !car.bindings.contains_key(&name) {
             return Err(format!("unresolved object diffuse binding {name}").into());
         }
@@ -1171,7 +1202,7 @@ fn append_objects(
         }
     }
     println!(
-        "objects static_sources={} placed_draws={draw_count} unique_geometry_vertices={triangles} static_placements={} total_header_instances={} omitted_entity_instances={} textures={}",
+        "objects static_sources={} placed_draws={draw_count} omitted_light_shaft_draws={omitted_light_shafts} unique_geometry_vertices={triangles} static_placements={} total_header_instances={} omitted_entity_instances={} textures={}",
         sources.len(),
         placements
             .prototypes
@@ -3762,7 +3793,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if track && !collision {
         append_route_split(&root, &route, &player_car, &mut car)?;
     }
-    if track && !collision && graphics.enhanced() && graphics.source_land {
+    if track && !collision && graphics.source_land {
         append_land(&root, &route, &player_car, &mut car)?;
     }
     if track && !collision && graphics.enhanced() && graphics.source_trees {
@@ -4586,9 +4617,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
     }
     // The route's layered road and infield on every preset (docs/SKY.md);
-    // land.pssg is appended in enhanced only.
+    // land.pssg and its layered infield on every preset too (ground cover
+    // lies on it, F699).
     if graphics.layered_track && track && !collision {
-        let land = graphics.enhanced() && graphics.source_land;
+        let land = graphics.source_land;
         track_surface::install(&mut app, &root, &route, land, surface_rgb_override.as_deref())?;
     }
     if graphics.reflection_mode == 3 {
