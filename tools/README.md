@@ -29,9 +29,11 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [log_entry.py](log_entry.py) | Project log entries in log/: create, check and renumber them, regenerate the indexes. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [prepush.ps1](prepush.ps1) | Pre-push checks, scaled to what the branch changed (docs/TOOLCHAIN.md "Pre-push tiers"). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [prune_build_dirs.ps1](prune_build_dirs.ps1) | Delete cargo build dirs under C:\cargo-build that no live checkout uses. | [DISK_USAGE](../docs/DISK_USAGE.md) |
+| [rebuild_macos.py](rebuild_macos.py) | Rebuild fresh origin/main as a private macOS DMG without changing the current checkout. | [MACOS](../docs/MACOS.md) |
 | [release_playable.ps1](release_playable.ps1) | The coordinator's playable release: merge origin/main, rebuild the PC prototype, refresh the portable copy, build both private APKs and draft the log entry … | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [seed_build_dir.ps1](seed_build_dir.ps1) | Seed this checkout's empty cargo build dir from another checkout's build dir. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [split_project_log.py](split_project_log.py) | Split the old single-file PROJECT_LOG.md into one file per entry under log/. |  |
+| [tests/test_rebuild_macos.py](tests/test_rebuild_macos.py) | Exercise rebuild isolation and cleanup with real Git repos and a simulated compiler. |  |
 | [time_build.ps1](time_build.ps1) | Time one build or test command and record the machine load while it runs. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [update_prototype.ps1](update_prototype.ps1) | (no header comment) | [PROJECT_RELOCATION_PLAN](../docs/PROJECT_RELOCATION_PLAN.md) |
 

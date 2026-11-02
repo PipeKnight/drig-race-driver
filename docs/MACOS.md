@@ -1,11 +1,53 @@
 # Native macOS build
 
 Build the Rust engine on a Mac and package it as a code-only `DRIG.app`.
+The optional private portable mode embeds your purchased game files and creates a DMG.
 Original GRID files are not needed to compile or package the application.
 They are needed to open the event menu and drive. This does not convert or run
 the original Windows executable.
 
 ## Prerequisites and build
+
+### One-click rebuild from fresh main
+
+On the owner's Mac, double-click **Rebuild GRID.command** in the checkout root.
+It fetches `origin/main`, freezes its exact revision in a temporary detached
+clone, builds the native release and packages a new private portable DMG with
+the preserved `local/macos-portable/source/Grid.reference` resources and the
+DRIG icon. It does not switch, reset or stash the current branch, install over
+a running game, publish a release, or alter the original game folder.
+
+Results appear in `local/macos-rebuilds/<time>-<revision>-<unique-id>/`:
+the DMG, SHA-256 sidecar, `build.json` provenance/status and `build.log`.
+Each run uses a new directory; previous successful builds remain available.
+Temporary sources, app staging and compilation artifacts are removed after
+success or failure. A failed run retains diagnostics and removes its partial
+image. First compilation may take several minutes.
+
+```sh
+python3 -I tools/rebuild_macos.py --dry-run
+python3 -I tools/rebuild_macos.py
+python3 -I tools/rebuild_macos.py --code-only
+python3 -I tools/rebuild_macos.py --game-root "/absolute/path/to/Grid"
+python3 -I tools/rebuild_macos.py --keep-cache
+```
+
+`--dry-run` fetches and checks the current main/toolchain/resources/free space
+without compiling. `--code-only` omits original game data. `--keep-cache` retains
+`local/macos-build-cache/target` to speed later builds; omit it for automatic
+cleanup. Both modes are local only. A lock prevents two instances of this
+rebuild script from compiling at the same time. If main pins a Rust version not
+installed on this Mac, the error prints the required rustup installation command.
+Packaging uses the maintained local helper/icon and the frozen main revision's
+engine, project license and font license; `build.json` records the engine source.
+
+If the separate game source folder has been deleted to save disk space, its
+resources can be recovered from a previous private DMG: copy `DRIG.app` out of
+that image and pass `--game-root "/path/to/DRIG.app/Contents/Resources/Grid"`.
+Remove that extra copy after the next build finishes. Public engine-only images
+do not contain these resources.
+
+### Manual build
 
 - Xcode Command Line Tools (`xcode-select --install` if absent).
 - Rust 1.99.0, as pinned in `rust-toolchain.toml`; Python 3 for packaging.
@@ -30,8 +72,52 @@ The Windows-only linker setting in `.cargo/config.toml` does not affect macOS.
 
 The bundle is ad-hoc signed for local use; no paid Apple developer account is
 needed. It is not a notarized distribution build or a universal Intel/ARM app.
-Fonts and shaders are embedded in the engine; no original assets are bundled.
+Fonts and shaders are embedded in the engine; by default no original assets are bundled.
 Rebuild the bundle when its running instance has exited.
+The packaging helper includes `crates/grid-app/assets/macos/DRIG.icns` as the
+application icon when present; its generated source image is `DRIG.png` beside it.
+
+For a public code-only app, the first ordinary launch asks for the user's own
+Windows GRID 2008 installation folder. Its location is saved as `game-root.txt`
+in the user data directory; `game-location.ini` supplies that location to the
+menu and race. Remove `game-root.txt` to select a different folder next time.
+Explicit command-line launches keep their arguments and do not open the picker.
+No original game files are copied into a code-only app.
+
+## Private portable app and DMG
+
+To embed your purchased Windows GRID installation and create a compressed disk
+image, use a fresh output directory under the repository's ignored `local/`:
+
+```sh
+python3 -I tools/build_macos.py \
+  --game-root "/absolute/path/to/Grid" \
+  --output-dir local/macos-private/stage \
+  --dmg local/macos-private/GRID-macos.dmg
+```
+
+`--no-build` can reuse a release binary you have just built. The complete game
+folder, including `grid.exe`, is copied into `Contents/Resources/Grid` using
+APFS copy-on-write clones. The original executable is read for parameter tables,
+not executed. Use an APFS workspace for this packaging path. Existing private
+bundles and DMGs are not overwritten; choose a fresh destination for a new build.
+
+The launcher discovers the embedded game relative to itself, so moving the app
+does not depend on the source folder, Steam, Rust or this checkout.
+Open the image and drag `DRIG.app` to Applications
+or another local folder, then double-click it. This is a private build containing
+proprietary game resources: do not upload the image or application to GitHub.
+
+Settings, saves, caches and launch logs remain in
+`~/Library/Application Support/GRID Reassembly/`; the app bundle stays read-only.
+For isolated diagnostics, `GRID_DATA_DIR` overrides that directory. With no
+arguments the launcher opens Race Day; explicit arguments allow bounded checks
+such as `--headless --drive --drive-ticks 1000`. `build.json` inside Resources
+records the source revision, architecture and whether game data is embedded.
+
+The DMG contains the complete app and a shortcut to Applications. Its checksum
+is verified after creation. Signing is local/ad-hoc; this is not an Apple-notarized
+release and it is not a combined Intel/Apple Silicon build.
 
 ## Checks before downloading the game
 

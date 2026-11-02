@@ -59,7 +59,8 @@ FAMILY_TOPICS = [
 GROUPS = [
     ("Process: log, indexes, pre-push, release, builds and disk", [
         r"tools/(log_entry|split_project_log|index_files)\.py", r"tools/prepush\.ps1", r"tools/release_playable",
-        r"tools/update_prototype", r"tools/build_gate", r"tools/build_seed", r"tools/build_macos", r"tools/seed_build_dir",
+        r"tools/update_prototype", r"tools/build_gate", r"tools/build_seed", r"tools/build_macos",
+        r"tools/rebuild_macos", r"tools/tests/test_rebuild_macos", r"tools/seed_build_dir",
         r"tools/prune_build_dirs", r"tools/dedup_hardlinks", r"tools/disk_report", r"tools/time_build",
         r"tools/install_", r"tools/identity\.tsv", r"tools/build_lock", r"tools/.*lock.*\.ps1"]),
     ("Android", [r"android", r"tools/push_android"]),

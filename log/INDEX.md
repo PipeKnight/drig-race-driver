@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F700](F0700.md) | 2026-11-02 | Publish macOS rebuild scripts and engine-only preview |
 | [F699](F0699.md) | 2026-11-02 | Black drops and floating grass: god-ray cards not drawn as objects, land on every preset, water counted (rows 102, 107, 108) |
 | [F698](F0698.md) | 2026-11-02 | Car glass: transparent items sort by their current position; the windscreen no longer shows over the rear window |
 | [F697](F0697.md) | 2026-11-02 | Body events after a wake: the solved contact count, not the sum of both collections (Donington chaos world error) |
