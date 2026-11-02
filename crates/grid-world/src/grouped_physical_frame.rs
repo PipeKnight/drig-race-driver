@@ -67,7 +67,7 @@ fn store_matrix(row: &mut [u32], offset: usize, value: Matrix) {
 /// (+0x400 = -1), the velocities are zeroed and the force (B0FCD0), torque
 /// (B0FD10) and impulse (B0FC90) accumulators cleared. The timer stays at
 /// turnOffTime and the island links stay.
-fn sleep_body(groups: &mut contact_groups::Output, i: usize) {
+pub(crate) fn sleep_body(groups: &mut contact_groups::Output, i: usize) {
     let list = groups.bodies[i][0x400 / 4] as usize;
     if list > 1 {
         return;

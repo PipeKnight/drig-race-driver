@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F697](log/F0697.md) | 2026-11-02 | Body events after a wake: the solved contact count, not the sum of both collections (Donington chaos world error) |
 | [F696](log/F0696.md) | 2026-11-02 | Playable a8cef46b9294 with DLAA and APKs a8cef46b9294 |
 | [F695](log/F0695.md) | 2026-11-02 | Old APKs are deleted when new ones are built |
 | [F694](log/F0694.md) | 2026-11-02 | Release gate: paint-specular test missed the reflections field |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F640](log/F0640.md) | 2026-10-29 | macOS smoke FPS drops and Retina native render: owner logs recorded |
 | [F639](log/F0639.md) | 2026-10-29 | Backlog rows 95-96 (wreck sound loop, lost-wheel hub) and the owner's game unmuted |
 | [F638](log/F0638.md) | 2026-10-29 | Playable f48d1dc27f6a with DLAA and APKs f48d1dc27f6a |
-| [F637](log/F0637.md) | 2026-10-28 | Playable 83566e33e135 and APKs 8cfd3c3a4b7d with the phone 60 FPS cap |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

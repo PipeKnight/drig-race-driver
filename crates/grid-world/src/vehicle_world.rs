@@ -330,20 +330,18 @@ fn calculate_owned(
     if let Some(registration) = registration.as_deref_mut() {
         registration.owner = manager.job.state.owner.vehicle.clone();
     }
-    let mut active_contacts = manager.contacts.used;
-    let world = if let Some(geometry) = geometry {
+    // The solved prefix of the returned pool. A wake collects the geometry
+    // again (B184F0), so the provider's call lengths would count the first
+    // collection too and reach stale slots.
+    let (world, active_contacts) = if let Some(geometry) = geometry {
         let mut slots = input.world.groups.contacts.clone();
         slots[..manager.contacts.slots.len()].copy_from_slice(&manager.contacts.slots);
-        let mut provider = |bodies: &mut [contact_groups::Body], remaining| {
-            let contacts = geometry(bodies, remaining)?;
-            active_contacts += contacts.len();
-            Ok(contacts)
-        };
+        let mut provider = |bodies: &mut [contact_groups::Body], remaining| geometry(bodies, remaining);
         if let Some(registration) = registration.as_deref_mut() {
             // One registration slot per body; further bodies do not deform.
             let mut registrations = vec![Some(registration)];
             registrations.extend((1..previous.groups.bodies.len()).map(|_| None));
-            physical_world::advance_with_deformation(
+            physical_world::advance_with_deformation_counted(
                 &previous,
                 &slots,
                 manager.contacts.used,
@@ -352,7 +350,7 @@ fn calculate_owned(
                 &mut registrations,
             )?
         } else {
-            physical_world::advance_with_geometry_provider(
+            physical_world::advance_with_geometry_provider_counted(
                 &previous,
                 &slots,
                 manager.contacts.used,
@@ -361,12 +359,13 @@ fn calculate_owned(
             )?
         }
     } else {
-        physical_world::advance_with_pool(
+        let world = physical_world::advance_with_pool(
             &previous,
             &manager.contacts.slots,
             manager.contacts.used,
             &input.shapes,
-        )?
+        )?;
+        (world, manager.contacts.used)
     };
     let mut car = manager.job.state;
     if let Some(registration) = registration.as_deref_mut() {

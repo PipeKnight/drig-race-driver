@@ -132,6 +132,54 @@ pub fn advance_with_deformation(
     )
 }
 
+/// [`advance_with_geometry_provider`] with the number of solved contacts at
+/// the front of the returned pool: the external prefix and the provider's
+/// last collection, after B184F0's second pass dropped the pairs of bodies
+/// still asleep. The provider may run twice in one tick (a wake), so its
+/// own call lengths do not give it; the slots after it keep earlier ticks'
+/// bytes.
+pub fn advance_with_geometry_provider_counted(
+    previous: &grouped_physical_frame::Output,
+    slots: &[contact_groups::Contact],
+    external_count: usize,
+    shapes: &[contact_groups::Shape],
+    mut provider: impl FnMut(
+        &mut [contact_groups::Body],
+        usize,
+    ) -> Result<Vec<contact_groups::Contact>, Error>,
+) -> Result<(grouped_physical_frame::Output, usize), Error> {
+    advance_counted(
+        previous.clone(),
+        Some(slots.to_vec()),
+        external_count,
+        shapes,
+        external_count,
+        Some(&mut provider),
+        &mut [],
+    )
+}
+
+/// [`advance_with_deformation`] with the solved contact count, as
+/// [`advance_with_geometry_provider_counted`].
+pub fn advance_with_deformation_counted(
+    previous: &grouped_physical_frame::Output,
+    slots: &[contact_groups::Contact],
+    external_count: usize,
+    shapes: &[contact_groups::Shape],
+    provider: &mut grouped_physical_frame::GeometryProvider<'_>,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
+) -> Result<(grouped_physical_frame::Output, usize), Error> {
+    advance_counted(
+        previous.clone(),
+        Some(slots.to_vec()),
+        external_count,
+        shapes,
+        external_count,
+        Some(provider),
+        registrations,
+    )
+}
+
 /// `advance_with_deformation` consuming the world (see
 /// `advance_with_geometry_provider_in`).
 pub fn advance_with_deformation_in(
@@ -155,7 +203,7 @@ pub fn advance_with_deformation_in(
 /// `slots`: the contact pool to step with; `None` takes the world's own.
 #[allow(clippy::too_many_arguments)]
 fn advance_owned(
-    mut previous: grouped_physical_frame::Output,
+    previous: grouped_physical_frame::Output,
     slots: Option<Vec<contact_groups::Contact>>,
     used: usize,
     shapes: &[contact_groups::Shape],
@@ -163,6 +211,21 @@ fn advance_owned(
     provider: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
     registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<grouped_physical_frame::Output, Error> {
+    advance_counted(previous, slots, used, shapes, external_count, provider, registrations)
+        .map(|(world, _)| world)
+}
+
+/// [`advance_owned`] with the number of solved contacts at the pool's front.
+#[allow(clippy::too_many_arguments)]
+fn advance_counted(
+    mut previous: grouped_physical_frame::Output,
+    slots: Option<Vec<contact_groups::Contact>>,
+    used: usize,
+    shapes: &[contact_groups::Shape],
+    external_count: usize,
+    provider: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
+) -> Result<(grouped_physical_frame::Output, usize), Error> {
     // The retained pool's capacity; `None` steps with the pool itself.
     let capacity = previous.groups.contacts.len();
     let mut slots = match slots {
@@ -252,7 +315,7 @@ fn advance_owned(
     slots[..active.len()].copy_from_slice(&active);
     out.groups.contacts = slots;
     out.pool_used = 0;
-    Ok(out)
+    Ok((out, active.len()))
 }
 
 pub fn calculate_steps(
@@ -432,6 +495,38 @@ mod tests {
         assert_eq!(out.manager.ends, manager.ends);
         assert_eq!(out.manager.cached_pair, manager.cached_pair);
         assert_eq!(out.manager.cached_material, manager.cached_material);
+    }
+
+    #[test]
+    fn a_wake_collects_again_and_the_count_holds_only_the_last_collection() {
+        let mut previous = completed();
+        previous.groups.contacts.resize(4, [0; 32]);
+        grouped_physical_frame::sleep_body(&mut previous.groups, 1);
+        let mut c = [0; 0x80 / 4];
+        c[1] = 1;
+        c[2] = 2;
+        c[0xc / 4] = 0x01000001;
+        c[0x3c / 4] = f32::MAX.to_bits();
+        c[0x64 / 4] = 1f32.to_bits();
+        let mut slots = previous.groups.contacts.clone();
+        slots[0] = c;
+        // A single-body contact of the sleeping body (id 2) with the ground.
+        let mut ground = c;
+        ground[1] = 2;
+        let mut calls = Vec::new();
+        let (out, active) =
+            advance_with_geometry_provider_counted(&previous, &slots, 1, &[], |_, remaining| {
+                calls.push(remaining);
+                // The first collection meets the sleeping body 2 and wakes it
+                // (B184F0); the second finds one contact.
+                Ok(if calls.len() == 1 { vec![ground; 2] } else { vec![ground] })
+            })
+            .unwrap();
+        assert_eq!(calls.len(), 2);
+        // The external prefix and the second collection, not 1 + 2 + 1.
+        assert_eq!(active, 2);
+        assert_eq!(out.groups.contacts.len(), slots.len());
+        assert!(out.groups.bodies[1][0x400 / 4] != contact_groups::ASLEEP);
     }
 
     #[test]

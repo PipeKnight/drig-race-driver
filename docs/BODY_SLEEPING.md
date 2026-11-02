@@ -69,6 +69,24 @@ uses an asleep body's current pose when an awake body touches it.
 Between ticks `grouped_physical_frame::wake` links a woken island into the carried world's heads
 (world[7 + selector], world[9 + selector]).
 
+**Contacts after a wake (F697).** When a contact wakes a sleeper, the tick has two collections. The
+second replaces the first, and its pairs with bodies still asleep are dropped. So the solved pool is
+the external prefix plus the second collection, and the original's body events see only those
+contacts [D, from the B184F0/AD7110 order above].
+
+- Until F697, `vehicle_world` (the solo car with prop pieces) added up the provider's call lengths.
+  After a wake its count therefore also included the first collection.
+- `physical_world` returns the pool at full capacity, and the slots after the solved prefix hold
+  earlier ticks' bytes. The over-count reached into those slots:
+  - **When the count was larger than the pool:** the body-event check stopped the run with
+    `unsupported body event pool or query ownership` (Donington chaos-prop seeds, F697);
+  - **otherwise:** the car's body events and `last_active_contacts` (the soak's contact readers)
+    read stale contacts as current ones.
+- Since F697, `advance_with_geometry_provider_counted` / `advance_with_deformation_counted` return
+  the length of the solved prefix, and `vehicle_world` uses it.
+- `multi` and `source_vehicle` already kept only the last call's records (`recorded.clear()`, an
+  assigned count).
+
 ## 5. Port (F541)
 
 - `dynamic_props::body_settings` passes the piece's turnOffTime (was FLT_MAX); the grouped frame no

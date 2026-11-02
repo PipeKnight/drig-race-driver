@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F697](F0697.md) | 2026-11-02 | Body events after a wake: the solved contact count, not the sum of both collections (Donington chaos world error) |
 | [F696](F0696.md) | 2026-11-02 | Playable a8cef46b9294 with DLAA and APKs a8cef46b9294 |
 | [F695](F0695.md) | 2026-11-02 | Old APKs are deleted when new ones are built |
 | [F694](F0694.md) | 2026-11-02 | Release gate: paint-specular test missed the reflections field |

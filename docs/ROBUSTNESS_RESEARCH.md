@@ -397,8 +397,14 @@ substeps, a swept test or a different exit face? Answered from the master projec
       contact and a box contact that points down.
     - It never gets a box record of its own (road records only): its start pose does not touch
       a box, and the ray cast finds none.
-    - [I] The box is probably a damaged-state static shape that the same break enabled. This is
-      not traced. It is counted, not passed (row 88).
+    - F697 trace [V]:
+      - The box is intact `tyrewall_black_yok` box 1855, not a damaged-state shape.
+      - The piece starts the step at y 607.17, clear of the wall.
+      - The ordinary contact solve of that step moves it to y 606.76 (0.42 m down), 0.52 m under
+        the wall's bottom face.
+      - The sweep runs before the solve, so this is the family of pieces driven down in one step
+        by a hit (F351). Piece/car pairs are not swept (row 10).
+      - It is counted, not passed (row 88).
   - **Identities:** solo, 12-car and 12-car-df unchanged.
     - derby-df changes: 5347e4a3 → 11dd8743.
     - With the box sweep switched off (temporary switch) it hashes as main, so the refactor is
