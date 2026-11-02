@@ -127,6 +127,7 @@ pub struct DriverJoint(usize);
 
 /// Appends the driver's body to the cockpit parts and returns the driver,
 /// or `None` when the cockpit has no `D_bip_position` or no Neutral pose.
+#[allow(clippy::too_many_arguments)] // The cockpit's parts, as read once.
 pub fn append(
     root: &Path,
     stem: &str,
@@ -135,6 +136,7 @@ pub fn append(
     car: &mut Car,
     animated: Option<&crate::interior_anim::Interior>,
     reach: Option<(&crate::reach::Setup, &crate::reach::Lever)>,
+    suit: Option<&crate::suit::Tints>,
 ) -> Result<Option<Driver>, Box<dyn Error>> {
     let Some(seat) = crate::cockpit::named(interior, b"NODE", b"D_bip_position") else {
         return Ok(None);
@@ -143,7 +145,16 @@ pub fn append(
     if !anims.is_file() {
         return Ok(None);
     }
-    let Model { joints, skin: skin_joints, inverse_bind, instances, textures } = Model::read(root)?;
+    let model = Model::read(root)?;
+    // The player's suit colours (0x861C50), baked into the diffuse.
+    let mut tinted = std::collections::BTreeMap::new();
+    for instance in model.instances.iter().filter(|i| i.slot == HEADLESS_SLOT) {
+        if let (Some(texture), Some(dds)) = (&instance.texture, suit.and_then(|t| model.tinted(instance, t))) {
+            tinted.insert(texture.clone(), dds);
+        }
+    }
+    let Model { joints, skin: skin_joints, inverse_bind, instances, mut textures, .. } = model;
+    textures.extend(tinted);
     for instance in instances.into_iter().filter(|i| i.slot == HEADLESS_SLOT) {
         let material = format!("car0/interior/driver/{}", instance.shader);
         if let Some(texture) = &instance.texture {
@@ -271,6 +282,9 @@ pub struct Model {
     pub instances: Vec<Instance>,
     /// The diffuse textures by id, as DDS.
     pub textures: std::collections::BTreeMap<String, Vec<u8>>,
+    /// The diffuse and TTintColourMask textures of the tinted shaders,
+    /// decoded (crate::suit).
+    levels: std::collections::BTreeMap<String, crate::suit::Levels>,
 }
 
 /// One skinned instance (body, helmet or visor of an `_xN` set).
@@ -281,6 +295,9 @@ pub struct Instance {
     pub shader: String,
     /// The shader's TDiffuseAlphaMap texture id.
     pub texture: Option<String>,
+    /// The shader's TTintColourMask texture id (body and helmet; the visor's
+    /// triangles all lie on black, docs/COCKPIT.md "Suit tint").
+    pub mask: Option<String>,
     pub mesh: Mesh,
 }
 
@@ -304,14 +321,19 @@ impl Model {
         let meshes = mesh::read_object_meshes(&tree)?;
         let skin = scene::read_skin(&tree, &meshes, b"body_x4")?;
         let mut diffuse = std::collections::BTreeMap::new();
+        let mut masks = std::collections::BTreeMap::new();
         for b in material::read_texture_bindings(&tree)? {
             if b.sampler == b"TDiffuseAlphaMap" && b.container.is_none() {
                 diffuse.insert(b.shader, b.texture);
+            }
+            if b.sampler == b"TTintColourMask" && b.container.is_none() {
+                masks.insert(b.shader, b.texture);
             }
         }
         let utf8 = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
         let mut instances = Vec::new();
         let mut needed = Vec::new();
+        let mut tinted = Vec::new();
         for &(id, shader, source) in &skin.instances {
             let source = &meshes[source];
             let (bound, weights) = source.skin_weights.as_ref().expect("read_skin checked the weights");
@@ -329,27 +351,46 @@ impl Model {
             geometry.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, weights.clone());
             geometry.insert_indices(Indices::U16(source.indices.clone()));
             let texture = diffuse.get(shader).copied();
-            if let Some(t) = texture.filter(|t| !needed.contains(t)) {
-                needed.push(t);
+            let mask = texture.and(masks.get(shader).copied());
+            for t in [texture, mask].into_iter().flatten() {
+                if !needed.contains(&t) {
+                    needed.push(t);
+                }
+            }
+            if let (Some(t), Some(m)) = (texture, mask) {
+                tinted.extend([t, m]);
             }
             instances.push(Instance {
                 id: utf8(id),
                 slot: lod_slot(id),
                 shader: utf8(shader),
                 texture: texture.map(utf8),
+                mask: mask.map(utf8),
                 mesh: geometry,
             });
         }
-        let textures = (texture::read_named(&tree, &needed)?.into_iter())
-            .map(|t| (utf8(t.id), t.validated_dds().0))
-            .collect();
+        let found = texture::read_named(&tree, &needed)?;
+        let mut levels = std::collections::BTreeMap::new();
+        for t in found.iter().filter(|t| tinted.contains(&t.id)) {
+            levels.insert(utf8(t.id), crate::suit::decode(t).ok_or("driver tint texture undecodable")?);
+        }
+        let textures = found.into_iter().map(|t| (utf8(t.id), t.validated_dds().0)).collect();
         Ok(Model {
             joints,
             skin: skin.joints.iter().map(|j| index[j]).collect(),
             inverse_bind: skin.inverse_bind.iter().map(Mat4::from_cols_array).collect(),
             instances,
             textures,
+            levels,
         })
+    }
+
+    /// `instance`'s diffuse with the suit `tints` baked in, as DDS; `None`
+    /// for an instance without a mask.
+    pub fn tinted(&self, instance: &Instance, tints: &crate::suit::Tints) -> Option<Vec<u8>> {
+        let diffuse = self.levels.get(instance.texture.as_ref()?)?;
+        let mask = self.levels.get(instance.mask.as_ref()?)?;
+        Some(crate::suit::tinted_dds(diffuse, mask, tints))
     }
 
     /// The model-frame joint transforms of a car's "Neutral" seat pose
@@ -754,7 +795,7 @@ mod tests {
             ornament_lods: Default::default(),
             reflections: Default::default(),
         };
-        let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY).unwrap();
+        let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY, None).unwrap();
         let (driver, clips) = (cockpit.driver.unwrap(), cockpit.interior.unwrap());
         let drawn: Vec<_> = car.parts.iter().filter(|p| p.name.starts_with("interior/driver/")).collect();
         assert_eq!(drawn.len(), 1);
@@ -837,7 +878,7 @@ mod tests {
             ornament_lods: Default::default(),
             reflections: Default::default(),
         };
-        let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY).unwrap();
+        let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY, None).unwrap();
         let reach = cockpit.reach.unwrap();
         let expected = Setup {
             gear_right: true,
@@ -927,7 +968,7 @@ mod tests {
                 ornament_lods: Default::default(),
                 reflections: Default::default(),
             };
-            let cockpit = match crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY) {
+            let cockpit = match crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY, None) {
                 Ok(c) => c,
                 Err(e) => {
                     println!("{stem}: no cockpit ({e})");

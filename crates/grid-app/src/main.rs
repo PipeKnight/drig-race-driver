@@ -132,6 +132,7 @@ mod car_batch;
 mod car_lod;
 mod static_batch;
 mod stereo;
+mod suit;
 mod foliage_mips;
 mod fps_counter;
 mod front_end;
@@ -1728,6 +1729,13 @@ fn livery_count(root: &Path, model: &CarModel) -> usize {
         .take_while(|&i| root.join(model.livery(i)).is_file())
         .count()
 }
+/// Opponent `k`'s livery index: the series entry's, else its own shipped
+/// livery (01, 02, ...; the player keeps 00).
+fn opponent_livery(root: &Path, model: &CarModel, series_liveries: &[Option<usize>], k: usize) -> usize {
+    let count = livery_count(root, model).max(1);
+    series_liveries.get(k - 1).copied().flatten().filter(|&i| i < count).unwrap_or(k % count)
+}
+
 /// Livery package `livery_NN` of field model `m`, keyed like its textures.
 fn load_livery(
     root: &Path,
@@ -3773,15 +3781,31 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         append_car(&root, &lod, &mut car, model, &player_car, 0)?;
         // The cockpit of the player only (0x6138D0), when driving.
         if driving.is_some() {
-            match cockpit::append(&root, player_car.stem(), &mut car, model) {
+            let opponents = driving.as_ref().and_then(|d| d.opponents.as_ref()).map_or(&[][..], |o| &o.multi.cars[1..]);
+            let stems: Vec<&str> = (1..=opponents.len()).map(|k| field.models[field.car_model[k]].stem()).collect();
+            // Each car's suit from its livery (docs/COCKPIT.md "Suit tint"):
+            // the player wears livery 00.
+            let liveries: Vec<String> = std::iter::once(format!("{}_00", player_car.stem()))
+                .chain((1..=opponents.len()).map(|k| {
+                    let model = &field.models[field.car_model[k]];
+                    format!("{}_{:02}", model.stem(), opponent_livery(&root, model, &series_liveries, k))
+                }))
+                .collect();
+            let suits = suit::read(&root, &liveries).unwrap_or_else(|error| {
+                eprintln!("driver suits skipped: {error}");
+                vec![None; liveries.len()]
+            });
+            println!(
+                "driver_suits liveries={liveries:?} tinted={}",
+                suits.iter().filter(|s| s.is_some()).count()
+            );
+            match cockpit::append(&root, player_car.stem(), &mut car, model, suits[0].as_ref()) {
                 Ok(c) => cockpit = Some(c),
                 Err(error) => eprintln!("cockpit skipped: {error}"),
             }
             // The drivers seen from outside, the opponents' included.
-            let opponents = driving.as_ref().and_then(|d| d.opponents.as_ref()).map_or(&[][..], |o| &o.multi.cars[1..]);
-            let stems: Vec<&str> = (1..=opponents.len()).map(|k| field.models[field.car_model[k]].stem()).collect();
             let offsets: Vec<Mat4> = opponents.iter().map(model_offset).collect();
-            match exterior_driver::prepare(&root, &stems, &offsets) {
+            match exterior_driver::prepare(&root, &stems, &offsets, suits) {
                 Ok(p) => exterior_drivers = p,
                 Err(error) => eprintln!("exterior drivers skipped: {error}"),
             }
@@ -3803,13 +3827,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             for k in 1..opponents.multi.cars.len() {
                 let m = field.car_model[k];
                 let model = &field.models[m];
-                let count = livery_count(&root, model).max(1);
-                let index = series_liveries
-                    .get(k - 1)
-                    .copied()
-                    .flatten()
-                    .filter(|&i| i < count)
-                    .unwrap_or(k % count);
+                let index = opponent_livery(&root, model, &series_liveries, k);
                 car.liveries.push(load_livery(&root, model, m, index)?);
             }
             println!(

@@ -663,7 +663,7 @@ mod tests {
                 ornament_lods: Default::default(),
                 reflections: Default::default(),
             };
-            let Ok(cockpit) = crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY) else { continue };
+            let Ok(cockpit) = crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY, None) else { continue };
             let dash = &cockpit.dash;
             cockpits += 1;
             lit += usize::from(!dash.backlit.is_empty());

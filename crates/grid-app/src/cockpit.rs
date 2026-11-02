@@ -392,7 +392,7 @@ pub struct InteriorPart;
 /// texture keys under `car0/interior/`), placed by `anchor` like the body's
 /// parts. Draws of other shader groups than interior.fx, interior_alpha.fx,
 /// interior_windscreen.fx, mirror.fx, lcd_text.fx and motec.fx are skipped.
-pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Cockpit, Box<dyn Error>> {
+pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4, suit: Option<&crate::suit::Tints>) -> Result<Cockpit, Box<dyn Error>> {
     let file = |stem: &str, ext: &str| root.join(format!("interiors/{stem}/int_{stem}.{ext}"));
     let stem = if file(stem, "pssg").is_file() { stem } else { "n12" };
     let bytes = read(&file(stem, "pssg"))?;
@@ -508,7 +508,7 @@ pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4) -> Result<Co
         (Some(s), Some(a)) => Some(crate::reach::Lever::load(&tree, a, s.kind)?),
         _ => None,
     };
-    let driver = crate::driver::append(root, stem, &tree, anchor, car, animated.as_ref(), setup.as_ref().zip(lever.as_ref()))?;
+    let driver = crate::driver::append(root, stem, &tree, anchor, car, animated.as_ref(), setup.as_ref().zip(lever.as_ref()), suit)?;
     let wheel = animated.as_ref().is_some_and(|a| ["steering_wheel", "D_Lhand_Dummy", "D_Rhand_Dummy"].iter().all(|n| a.node(n).is_some()));
     let reach = match (setup, lever, driver.as_ref().and_then(|d| d.reach_lengths())) {
         (Some(setup), Some(lever), Some(lengths)) => Some(crate::reach::Reach { setup, lever, lengths, steering: wheel }),

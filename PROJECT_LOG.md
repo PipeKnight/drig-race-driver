@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F684](log/F0684.md) | 2026-11-02 | Drivers' suit and helmet colours from the livery's driver_suit |
 | [F683](log/F0683.md) | 2026-11-02 | Nürburgring grid-start capture: the original's leader slows by side contact |
 | [F682](log/F0682.md) | 2026-11-02 | Camera FOV setting; cockpit view 10 degrees wider by default (owner request, row 103) |
 | [F681](log/F0681.md) | 2026-10-31 | Close-drift flags take no contact outside the drift formats (row 104) |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F627](log/F0627.md) | 2026-10-27 | Cockpit: steering wheel turned by the interior Steering clip, NeAnim reader |
 | [F626](log/F0626.md) | 2026-10-27 | Faster pre-push: Clippy first, one lock hold per gate, pass cache, per-circuit race tests |
 | [F625](log/F0625.md) | 2026-10-27 | Cockpit: rear-view mirror rendered as the original (512x128 every frame), cost at the phone's resolution |
-| [F624](log/F0624.md) | 2026-10-27 | Speech part 3 step 3: championship and career values |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

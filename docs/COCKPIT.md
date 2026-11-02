@@ -365,8 +365,9 @@ Not verified: the digit orientation against the original's screen (font strip or
   - the legs, then the arms, are solved (`ik::reach`) with this frame's FK;
   - the joints are written as children of the body part.
 - Not ported:
-  - breathing and face clips;
-  - the suit tint (TTintColourMask, tintColour1..3);
+  - breathing: `driver_breathcf_wc` (four sources, 0.7/0.7/0.7/0 s) advances every frame, but what feeds it was not traced (private `findings.txt` §2);
+  - face clips: no effect in the port's configuration. 0x85DA80 plays the blink (clip 141, every U(4, 7) s) and the second face clip (142, every U(7, 15) s) only at animation level 0 [D]. On the medium set no driver reaches level 0 (its cap is 0), the head-cam driver is at level 1, and its `_x2` model has no head; only ultra (characterQuality 4) and the replay set give the focus driver level 0 in views without DisableDriverHead (F684);
+  - the suit tint: ported, see "Suit tint";
   - the drivers seen through the windows and in the opponents' cars: ported, see "Drivers outside the head-cam".
 
 Checks:
@@ -374,7 +375,7 @@ Checks:
 - `lacetti_hands_reach_the_wheel_dummies` (ignored, GRID_GAME_ROOT): one drawn part (`_x2`), 80 joints and 75 skin joints. At s = −1, −0.5, 0, 0.5 and 1 both hands are within 1 mm and 1e-3 rad of their dummies.
 - Renders (Lacetti, `local/cam/render/driver*`): gloved hands on the rim at rest and following it to both locks (`driver/turns.png`). Chase_close, chase_far, bonnet and bumper: 0 px against F630.
 
-Not verified: the suit colours without the tint and the arm shape against a capture of the original.
+Not verified: the suit colours and the arm shape against a capture of the original.
 
 ## Drivers outside the head-cam
 
@@ -413,7 +414,7 @@ Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/exterio
   - The opponents' animators find no steering, gear, handbrake or pedal nodes, so they hold the Neutral pose [D; I: rests on the attach order, a live check is open].
 - **Passes** (0x84A810): the player's driver draws in the colour, shadow and reflection passes; the opponents' in the colour pass only.
   - In the exterior views the player's driver follows the body's damage deformation (0x8494C0); the opponents' never do.
-- **Tints:** the opponents' suits are tinted from `driver_suit.tint1..3` through `vehicle_livery.driver_suit_id`, on the body and helmet shaders.
+- **Tints:** every driver's suit and helmet, the player's included, are tinted from its livery's suit (see "Suit tint").
 
 ### The port (`exterior_driver.rs`)
 
@@ -431,7 +432,6 @@ Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/exterio
 - `GRID_EXTERIOR_DRIVERS=0` leaves them out (comparisons).
 - Not ported:
   - the vehicleDrivers option (the port uses medium), the replay and front-end sets, and ultra's level-0 animation (lean and leg IK);
-  - the suit tints (all drivers draw the untinted suit, as the head-cam);
   - the player driver's damage deformation;
   - whether the drivers appear in the car reflection cube (F670, off by default) was not checked;
   - the cars without a driver (vehicle +0x3910, meaning open).
@@ -445,3 +445,26 @@ Checks:
   - chase_close turned 69° to the side (free look): the driver seated behind the cage, helmet under the roof (`r_ext_side_zoom.png`);
   - twelve cars from grid slot 12, tick 30: the changed pixels lie only in the cabins of the player's car and the cars ahead (`r_ext_opp30_mask.png`); log `exterior_drivers ... opponents=11 posed=11`, `seats=12`.
 - Not measured: the frame cost (twelve drivers of 200 to 1082 triangles; the opponents' are static meshes without joints).
+
+## Suit tint
+
+Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/suit_tint.txt` and `suit_tint/` (static analysis by a subagent, the shader programs disassembled with `tools/disassemble_packed_grid_shader.py`; the original was not launched).
+
+### What the original does
+
+- **Shader** [D]: the body pass `character.cg.fp_new_body` and the helmet passes `fp_new_head` / `fp_new_head_cheap` compute, with m = TTintColourMask.rgb at the mesh UV,
+  albedo = diffuse.rgb · saturate(tintColour1 · m.r + tintColour2 · m.g + tintColour3 · m.b + saturate(1 − (m.r + m.g + m.b))).
+  - So red mask texels take tint 1, green tint 2, blue tint 3, black ones keep the diffuse; alpha is the diffuse alpha. Specular and fog come after, untinted. The multiply is in gamma space.
+  - Registers: body c17..c19 (mask s4), head c19/c21/c23 (s5), head_cheap c16..c18 (s2).
+  - [V] The masks' R, G and B regions do not overlap (body: 29 % R, 6 % G, 32 % B, 34 % black). The visor shares the helmet's mask, but every visor triangle lies on black.
+- **Data** [V]: `driver_suit` (database.bin, 23 rows): `id`, `name`, `tint1..3` as "R,G,B" in 0..255 (0x5F5240 parses and scales by 1/255). `vehicle_livery.driver_suit_id` picks the suit: 224 of 343 liveries use 0 (white), the ten `_hero` liveries 1. Lacetti `lac_00` wears 5 "nevada" (201,0,44 / 0,0,0 / 0,0,0).
+- **Code** [D]: the race loader 0x6138D0 builds each car's DriverInfo in 0x60E310 (tints by 0x84D260); 0x860AC0 keeps them in the driver record (+0x40/+0x50/+0x60); 0x861C50 (player) and 0x862300 (opponents) set tintColour1..3 (w = 1) on the body and head shader groups through 0x84E610. The player has no separate rule: a `_user` livery with the car descriptor's flag +0x1A4 takes the three packed custom colours (+0x198..+0x1A0), the same words the car's livery colours use [I: the team colours]; a `_user` livery without it gets suit 0.
+
+### The port (`suit.rs`)
+
+- `suit::read` finds each car's livery `file_string` (`<stem>_NN`: the player's 00, the opponents' as their livery textures, `opponent_livery` in main.rs) in `vehicle_livery` and returns its suit; a livery not in the database keeps the untinted diffuse.
+- `suit::tinted_dds` bakes the formula into the diffuse once per suit, every mip level (the mask's level of the same size, else its base at the nearest texel), as a BGRA8 DDS. Baking the 8-bit gamma-space diffuse is the original's gamma-space multiply; filtering the product instead of its factors differs only at mask edges [I].
+- The head-cam's driver gets the player's suit (`driver::append`); the exterior drivers one material per shader and suit (`exterior_driver::spawn`).
+- Not ported: the `_user` custom colours (the port has no `_user` livery).
+
+Checks: `suit::tests` (the formula; the shipped suits with GRID_GAME_ROOT); renders against F682: bonnet and bumper 0 px, the chase views only inside the rear window, the head-cam only on the arms (red and black for Lacetti livery 00), twelve cars only in the cabins (F684).

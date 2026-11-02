@@ -41,7 +41,7 @@ const HEADLESS: u32 = 1;
 /// A car type's Neutral pose, shared by its cars.
 type Neutral = std::sync::Arc<Vec<Mat4>>;
 /// One car type's baked meshes: slot, mesh, shader.
-type Baked = Vec<(u32, Handle<Mesh>, String)>;
+type Baked = Vec<(u32, Handle<Mesh>, usize)>;
 
 /// The caps of levels 0..4 of a character LOD set (cap 5 is never read).
 pub type Caps = [i32; 5];
@@ -105,11 +105,19 @@ pub struct Pending {
     /// Opponent cars: index, model-frame placement (the car's model offset),
     /// Neutral pose; `None` when the car has no driver clips.
     opponents: Vec<(usize, Mat4, Option<Neutral>)>,
+    /// Each car's suit colours (crate::suit), the player's first.
+    suits: Vec<Option<crate::suit::Tints>>,
 }
 
 /// Reads the model, the caps and each opponent's Neutral pose. `stems` and
-/// `offsets` list the opponents (cars 1..), the player excluded.
-pub fn prepare(root: &Path, stems: &[&str], offsets: &[Mat4]) -> Result<Option<Pending>, Box<dyn Error>> {
+/// `offsets` list the opponents (cars 1..), the player excluded; `suits`
+/// every car's suit, the player's first.
+pub fn prepare(
+    root: &Path,
+    stems: &[&str],
+    offsets: &[Mat4],
+    suits: Vec<Option<crate::suit::Tints>>,
+) -> Result<Option<Pending>, Box<dyn Error>> {
     if std::env::var("GRID_EXTERIOR_DRIVERS").is_ok_and(|v| v == "0") {
         return Ok(None);
     }
@@ -129,7 +137,7 @@ pub fn prepare(root: &Path, stems: &[&str], offsets: &[Mat4]) -> Result<Option<P
         opponents.len(),
         opponents.iter().filter(|o| o.2.is_some()).count()
     );
-    Ok(Some(Pending { model, caps, opponents }))
+    Ok(Some(Pending { model, caps, opponents, suits }))
 }
 
 /// One driver: its car, its placement in the car's model frame, its root
@@ -209,21 +217,27 @@ fn spawn(
     commands.remove_resource::<Pending>();
     let model = &pending.model;
     // The car material path's rule for interior parts (as the head-cam's
-    // driver): the diffuse map, roughness 0.7, opaque, back faces culled.
+    // driver): the diffuse map, roughness 0.7, opaque, back faces culled;
+    // one material per shader and suit (0x861C50, 0x862300).
     let mut by_shader = BTreeMap::new();
-    for instance in &model.instances {
-        by_shader.entry(instance.shader.clone()).or_insert_with(|| {
-            let texture = (instance.texture.as_ref())
-                .and_then(|t| model.textures.get(t))
-                .and_then(|dds| crate::ground_effect_assets::image(dds, true).ok())
-                .map(|image| images.add(image));
-            materials.add(StandardMaterial {
-                base_color_texture: texture,
-                perceptual_roughness: 0.7,
-                ..default()
+    let mut material = |instance: &crate::driver::Instance, suit: Option<crate::suit::Tints>| {
+        by_shader
+            .entry((instance.shader.clone(), suit))
+            .or_insert_with(|| {
+                let tinted = suit.and_then(|t| model.tinted(instance, &t));
+                let texture = (tinted.as_ref())
+                    .or_else(|| instance.texture.as_ref().and_then(|t| model.textures.get(t)))
+                    .and_then(|dds| crate::ground_effect_assets::image(dds, true).ok())
+                    .map(|image| images.add(image));
+                materials.add(StandardMaterial {
+                    base_color_texture: texture,
+                    perceptual_roughness: 0.7,
+                    ..default()
+                })
             })
-        });
-    }
+            .clone()
+    };
+    let suit = |car: usize| pending.suits.get(car).copied().flatten();
     let mut slots: Vec<u32> = model.instances.iter().map(|i| i.slot).collect();
     slots.sort_unstable();
     slots.dedup();
@@ -248,7 +262,7 @@ fn spawn(
                 .spawn((
                     Name::new(format!("driver/exterior/{}", instance.id)),
                     Mesh3d(meshes.add(instance.mesh.clone())),
-                    MeshMaterial3d(by_shader[&instance.shader].clone()),
+                    MeshMaterial3d(material(instance, suit(0))),
                     SkinnedMesh { inverse_bindposes: inverse.clone(), joints: skin.clone() },
                     // The bind-pose bounds do not follow the seated pose.
                     NoFrustumCulling,
@@ -272,19 +286,19 @@ fn spawn(
         let Some(runtime) = cars.and_then(|c| c.get(*car)) else { continue };
         let set = baked.entry(std::sync::Arc::as_ptr(neutral)).or_insert_with(|| {
             let skin = skin_of(neutral);
-            (model.instances.iter())
-                .filter(|i| i.slot <= COARSEST as u32)
-                .filter_map(|i| Some((i.slot, meshes.add(bake(&i.mesh, &skin)?), i.shader.clone())))
+            (model.instances.iter().enumerate())
+                .filter(|(_, i)| i.slot <= COARSEST as u32)
+                .filter_map(|(n, i)| Some((i.slot, meshes.add(bake(&i.mesh, &skin)?), n)))
                 .collect()
         });
         let pose = Mat4::from_cols_array(&runtime.pose());
         let root = commands.spawn((Name::new(format!("driver/car{car}")), Transform::from_matrix(pose * *rest), Visibility::Visible)).id();
         let parts = (set.iter())
-            .map(|(slot, mesh, shader)| {
+            .map(|(slot, mesh, n)| {
                 let e = commands
                     .spawn((
                         Mesh3d(mesh.clone()),
-                        MeshMaterial3d(by_shader[shader].clone()),
+                        MeshMaterial3d(material(&model.instances[*n], suit(*car))),
                         NotShadowCaster,
                         Transform::default(),
                         Visibility::Hidden,
