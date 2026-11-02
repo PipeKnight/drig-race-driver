@@ -376,7 +376,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // controls and behaviour, and the car pairs in contact.
     // GRID_FIELD_DETAIL=1: the behaviour column also carries the planned
     // offset, line error, line and governor targets, heading error, contact
-    // type and arc (Behaviour/o../e../lt../gt../h../c../arc..).
+    // type, arc, alongside slots, body slip (degrees), yaw rate and gear
+    // (Behaviour/o../e../lt../gt../h../c../arc../L../R../b../w../g..).
     let field_detail = std::env::var_os("GRID_FIELD_DETAIL").is_some();
     let mut field_trace = match std::env::var("GRID_FIELD_TRACE") {
         Ok(path) => {
@@ -843,9 +844,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             for (a, o, n, p, pen, force, tokens) in multi.contacts_with(body) {
                 line += &format!(
-                    " | {a}-{} n={:.2},{:.2},{:.2} y={:.2} pen={pen:.3} f={force:.0} t={}",
+                    " | {a}-{} n={:.2},{:.2},{:.2} p={:.2},{:.2},{:.2} pen={pen:.3} f={force:.0} t={}",
                     o.map_or("s".into(), |o| o.to_string()),
-                    n[0], n[1], n[2], p[1],
+                    n[0], n[1], n[2], p[0], p[1], p[2],
                     if o.is_none() {
                         multi.cars[0].track().shape_name(tokens[1].wrapping_sub(1)).unwrap_or("?").to_string()
                     } else {
@@ -971,8 +972,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let behaviour = match &drivers[i] {
                     Driver::Ai(ai) if Some(i) != parked_car && field_detail => {
                         let m = &ai.telemetry;
+                        // Body slip (degrees, velocity against the forward axis, pose
+                        // row 2) and yaw rate, as FIRST_CORNER_LIVE §16 reads them
+                        // from the original's capture.
+                        let slip = (p[8] * v[2] - p[10] * v[0])
+                            .atan2(p[8] * v[0] + p[10] * v[2])
+                            .to_degrees();
                         format!(
-                            "{:?}/o{:.2}/e{:.2}/lt{:.1}/gt{:.1}/h{:.3}/c{}/arc{:.1}/L{}/R{}",
+                            "{:?}/o{:.2}/e{:.2}/lt{:.1}/gt{:.1}/h{:.3}/c{}/arc{:.1}/L{}/R{}/b{slip:.1}/w{:.2}/g{}",
                             m.behaviour,
                             m.offset,
                             m.line_error,
@@ -982,7 +989,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             m.contact,
                             m.arc,
                             slot(m.alongside[0]),
-                            slot(m.alongside[1])
+                            slot(m.alongside[1]),
+                            car.angular_velocity()[1],
+                            car.gear()
                         )
                     }
                     Driver::Ai(ai) if Some(i) != parked_car => {

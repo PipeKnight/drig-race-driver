@@ -639,3 +639,53 @@ contact (full counter-lock and a 1.6 rad heading error, then both run off). The 
 speed in its slide; the port spins. The next comparison is the contact response: the port's yaw
 and slip of the pinned car against the 8–14° and −1.5 rad/s here. Nothing in the port was
 changed.
+
+## 17. The pinned contact, port against original (F686)
+
+Tools: `GRID_FIELD_DETAIL=1` now also writes body slip `b` (degrees, velocity against the
+pose's forward row 2) and yaw rate `w` (rad/s) and gear `g`. `GRID_SINK_TRACE` prints each
+contact's full point. Port run: Nürburgring 0, seed 1, 12 Lacettis, race manager on (reference
+car 11), props, characteristics, deformation parameters (§15's losing case). Evidence:
+`local/corners2/pin/` (s1.*, s1b.* with the contact dump, one.sh, show.py). Original: §16's capture,
+steering read at +E30 (`decode_field.py` had read +E3C, which repeats the throttle; fixed in
+the local copy).
+
+| | pinned (inside) car | outside car |
+|---|---|---|
+| original, before contact | slip −3…−10°, yaw −1.2…−1.5 rad/s, steer −0.5…−1.0, 27.3 → 25.9 m/s | slip −5…−9°, yaw −1.1…−1.5 |
+| original, in contact (0.4 s) | slip −8…−14°, yaw −1.4…−1.8 (unchanged), steer −1.0, 27 → 16.5 m/s | yaw −1.5 → −0.6 at first touch, slip −11…−14°, steer −0.1…+0.2 (countersteer), 27 → 24 m/s |
+| port, before contact | slip −6…−9°, yaw −1.3…−1.4, steer −1.0, 27.6 → 28.1 m/s | slip −5…−8°, yaw −0.5…−0.7 |
+| port, in contact | yaw −1.39 → −0.06 in one tick, slip → 0…+1.5°, steer −1.0, 28 → 32 m/s | yaw −0.73 → +0.27, slip → −0.5…−3°, steer −1.0, 27 → 32 m/s |
+
+**[V port]** The first touch (tick 909) is one impulse summing 1867 on car 0. It lands at 1.0–1.7 m
+behind car 0's centre on its flank (lateral −0.9 m), with car 1 2.6 m behind and 1.79 m across.
+It stops car 0's yaw in that tick: an angular impulse of about 2700 for a Δω of 1.33 rad/s, a yaw
+inertia near 2000 kg·m², consistent rigid-body numbers. The lateral closing speed before it is
+6.6 m/s. Afterwards the pair runs locked 1.78 m apart (the Lacettis' combined half-widths are
+1.82 m) with forces of 10–60 per tick. Both cars are at full lock with almost no slip, which is
+understeer, and they gain speed to 32 m/s in 2nd.
+
+**[O]** In the original the outside car is 2.2 m behind and 1.6–1.7 m across for 0.4 s. That is
+about 0.3 m nearer than the BMWs' combined half-widths of 1.89 m, and no third car is within 6 m.
+The pinned car's yaw is not disturbed. Both cars stay in a 10–14° slide, and the pinned car
+loses 11 m/s at full throttle.
+
+**Ruled out [V].** Gearing: the maximum speed per gear in the port matches the original's
+Lacetti (2nd 34.8 against 33.5 m/s, 3rd 44.6 against 44.5, 4th 55.2 against 55.2). The engine
+is the same in 2nd at 27–32 m/s.
+
+**Open [I].** Two things differ, and one run cannot separate cause from geometry.
+- Where the first touch lands: 1.4 m behind the centre in the port, near the centre in the original.
+- How deep the cars go: 0.04 m in the port, about 0.3 m held for 0.4 s in the original.
+
+A deformed collision hull (DEFORMED_COLLISION_GEOMETRY) or the outside car's tapered front corner
+would both let the original's cars overlap further. A different lever arm alone would explain why
+the original's pinned car keeps its yaw. The port's contact solver and deformation path are
+verified against the original instruction by instruction on supplied inputs (MAIN_CONTACT_RESPONSE,
+DEFORMED_COLLISION_GEOMETRY). No step was found that departs from its decompile, so nothing was
+changed.
+
+What would settle it: an original capture of the two cars' contact records during a pinned
+contact, meaning the contact points, the solved impulses (+0x3C) and the collision-hull state.
+Alternatively, a port run started from the captured poses and velocities of §16 at t = 17.2 s.
+The port cannot yet start from a captured field state.
