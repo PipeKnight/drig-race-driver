@@ -586,3 +586,56 @@ of such a start (CAPTURE_BACKLOG row 1); the 0x799630 squeeze log needs a loggin
 not stop the game (FastResume is not honoured by headless x32dbg, §13). No per-track change was
 made.
 
+
+## 16. Nürburgring start from the grid: the original's leader slows by side contact (F683)
+
+**Run of 2026-11-02 [O original].** The owner set up the research copy (SHA-256 b1da1b2d…):
+Race Day, Touring Cars, Chevrolet Lacetti, Nürburgring GP, 12 cars, grid back, difficulty
+Normal, all assists on, and paused about 0.6 s after the go (AI cars at 7–9 m/s, still in their
+grid rows). The run was unattended, with no x32dbg. The 19 user files were snapshotted with the
+game running and were hash-identical after it closed, so nothing had to be restored. The manager
+scan (`-ScanLimitBytes 268435456`) found 12 cars, the player (kind 0) in grid slot 11.
+`capture_grid_field.py` sampled for 40 s from the unpause: 3076 rows, median frame dt 15.7 ms,
+p90 16.8 ms (about 60 Hz; compared per arc, not per frame). The launch groups at the first
+rows (BMW 9.35 m/s in slots 0, 1, 5, 6, 7; Lacetti 7.1–7.2 m/s in 2, 3, 4, 8, 9, 10) give the same
+field as F662 (`--cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`, the player a Lacetti).
+Race Day cannot give an all-Lacetti field (it draws BMW and Lacetti), and Jarama is not on the
+Touring Cars Race Day list (§8), so the all-Lacetti cases of §15 were not capturable this way.
+Evidence: `local/driving/nb-grid-20261102/` (field.dec.tsv, lat.tsv, spd.py, slip.py).
+
+**Leader's apex speed [O].** Grid slot 0 (capture car 1) has its minimum speed of 16.5 m/s at
+arc 704 (16.9 at arc 700). The F662 sample had 16.8 m/s at arc 697, so the two runs agree. Speed
+by arc for the front row:
+
+| arc (m) | 650 | 680 | 690 | 700 | 710 | 760 |
+|---|---:|---:|---:|---:|---:|---:|
+| original, slot 0 | 32.1 | 27.2 | 22.9 | 16.9 | 17.6 | 24.2 |
+| original, slot 1 | 33.4 | 27.7 | 24.0 | 24.0 | 23.9 | 27.7 |
+| port s0, slot 0 | 33.4 | 27.6 | 26.2 | 25.3 | 23.8 | 25.4 |
+| port s0, slot 1 | 35.5 | 26.7 | 26.5 | 25.9 | 22.4 | 25.4 |
+
+The port rows come from F662's runs on the same field (`local/driving/along-20261030/port/`);
+seeds 1–5 give slot 0 18.5–25.4 m/s at arc 700.
+
+**How the original loses the speed [O].** Slot 0 brakes from arc 640 to 662 and is at full
+throttle with no brake from arc 669 on. Between arc 680 and 704 it crosses from +2.5 m to −1.6 m
+(it had been the inside car at +7.7 m) while slot 1 walks from 0 to −5 m beside it. From
+t = 17.4 s to 17.8 s slot 1 sits 1.64–1.70 m to slot 0's left and 2.2 m behind, a constant gap
+narrower than the car, which is resting side contact. During it slot 0 slides at 8–14° body slip
+(velocity against the body's forward axis, matrix row 2), yawing at −1.5 rad/s, and sheds
+27 → 16.5 m/s at full throttle. Slot 1 keeps 24 m/s, and both continue; no car is lost.
+
+**Port on the same field [V port, F662 runs].** The front row also comes close (lateral 0.7–1.2 m
+apart), but slot 0 is 2.8–4.3 m ahead of slot 1 when they meet and crosses further, to −4 m at
+arc 700, in front of slot 1, so it is never pinned and keeps 23–26 m/s.
+
+**What this settles [I].** The original's inside car does land on the outside car at this apex,
+as §15's port runs do. The original's leader takes the apex slowly because of that contact and
+its slide, not because of a lower planned speed: there is no braking or lift through arc 669–704.
+So the 16.8 m/s of §13–§15 is not a speed target the port misses. What differs is the geometry of
+the meeting: the original's slot 0 is about 1 m less ahead at arc 690 and stays pinned, while the
+port's slot 0 gets clear. The losses in §15's all-Lacetti runs are a different outcome of the same
+contact (full counter-lock and a 1.6 rad heading error, then both run off). The original scrubs
+speed in its slide; the port spins. The next comparison is the contact response: the port's yaw
+and slip of the pinned car against the 8–14° and −1.5 rad/s here. Nothing in the port was
+changed.

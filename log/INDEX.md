@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F683](F0683.md) | 2026-11-02 | Nürburgring grid-start capture: the original's leader slows by side contact |
 | [F682](F0682.md) | 2026-11-02 | Camera FOV setting; cockpit view 10 degrees wider by default (owner request, row 103) |
 | [F681](F0681.md) | 2026-10-31 | Close-drift flags take no contact outside the drift formats (row 104) |
 | [F680](F0680.md) | 2026-10-31 | Box contacts beside long barrier boxes: an inconsistent distance result, the mesh frame and the pair direction (row 99) |
