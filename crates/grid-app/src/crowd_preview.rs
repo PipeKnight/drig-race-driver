@@ -1,4 +1,5 @@
-//! Static USA grandstand billboard diagnostic, NOT recovered crowd animation/LOD.
+//! Legacy USA grandstand diagnostic plus shared static-card helpers.
+//! General static population consumer: crowd_billboards; no recovered animation/LOD.
 //! Bounded diagnostic. Source positions/sex/group are retained.
 //! Source palette variant0/colourSet0 and fixed CRT-draw fixture5000 chosen explicitly.
 //! Actual global RNG, timing and pose are not recovered.
@@ -29,6 +30,8 @@ pub enum Mode {
     OneKeyMid,
     OneKeyRight,
     OneKeySweep,
+    PopulationControl,
+    PopulationBillboards,
 }
 impl Mode {
     pub fn parse(s: &str) -> Result<Self, &'static str> {
@@ -36,6 +39,8 @@ impl Mode {
             "off" => Ok(Self::Off),
             "control" => Ok(Self::Control),
             "static-billboards" => Ok(Self::StaticBillboards),
+            "population-control" => Ok(Self::PopulationControl),
+            "population-billboards" => Ok(Self::PopulationBillboards),
             "one-neutral-actor" => Ok(Self::OneNeutralActor),
             "one-arm-pose" => Ok(Self::OneArmPose),
             "one-key-hypothesis" => Ok(Self::OneKeyHypothesis),
@@ -44,9 +49,12 @@ impl Mode {
             "one-key-right" => Ok(Self::OneKeyRight),
             "one-key-sweep" => Ok(Self::OneKeySweep),
             _ => Err(
-                "--crowd-preview needs off, control, static-billboards, one-neutral-actor, one-arm-pose, one-key-hypothesis or one-key-left/mid/right/sweep",
+                "--crowd-preview needs off, control, static-billboards, population-control, population-billboards, one-neutral-actor, one-arm-pose, one-key-hypothesis or one-key-left/mid/right/sweep",
             ),
         }
+    }
+    pub(crate) fn is_population(self) -> bool {
+        matches!(self, Self::PopulationControl | Self::PopulationBillboards)
     }
     #[allow(clippy::too_many_arguments)]
     pub fn validate(
@@ -62,25 +70,25 @@ impl Mode {
         if self != Self::Off
             && !(baseline
                 && static_reference
-                && detroit8
+                && (detroit8 || self.is_population())
                 && lod0
                 && render
                 && frames.is_some_and(|n| (1..=600).contains(&n))
                 && no_perf)
         {
             return Err(
-                "--crowd-preview requires bounded baseline Detroit route8 static LOD0 reference; no drive/perf/headless/collision",
+                "--crowd-preview requires bounded baseline static LOD0 reference; legacy/actor fixtures also require Detroit route8; no drive/perf/headless/collision",
             );
         }
         Ok(())
     }
 }
 #[derive(Clone, Debug)]
-struct Spec {
-    uv: [f32; 4],
-    dimensions: [f32; 2],
-    colours: [Vec4; 3],
-    instance_scale: [f32; 2],
+pub(crate) struct Spec {
+    pub(crate) uv: [f32; 4],
+    pub(crate) dimensions: [f32; 2],
+    pub(crate) colours: [Vec4; 3],
+    pub(crate) instance_scale: [f32; 2],
 }
 #[derive(Clone, Debug)]
 struct Row {
@@ -135,7 +143,7 @@ fn one<'d, 'a>(
 // Explicit source-draw fixture, NOT replay of the original global CRT RNG.
 // 0x986990 packs width in low half and height in high half; finite positive
 // normal scales only. Its first branch uses x87, its second branch uses SSE.
-fn source_scale_fixture(height_range: f32, width_range: f32) -> [f32; 2] {
+pub(crate) fn source_scale_fixture(height_range: f32, width_range: f32) -> [f32; 2] {
     const DRAW: f32 = 5000.;
     const RATIO: f32 = f32::from_bits(0x38d1b717);
     fn truncate_half_normal(v: f32) -> f32 {
@@ -461,23 +469,33 @@ pub(crate) fn flash_fixture_anchors(
 }
 
 const SHADER: Handle<Shader> = uuid_handle!("3f1983b1-35cd-4ea7-986e-22b81999f3a2");
-type CrowdMaterial = ExtendedMaterial<StandardMaterial, Tint>;
+pub(crate) type CrowdMaterial = ExtendedMaterial<StandardMaterial, Tint>;
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct Tint {
     #[texture(100)]
     #[sampler(101)]
-    map: Handle<Image>,
+    pub(crate) map: Handle<Image>,
     #[uniform(102)]
-    colour0: Vec4,
+    pub(crate) colour0: Vec4,
     #[uniform(103)]
-    colour1: Vec4,
+    pub(crate) colour1: Vec4,
     #[uniform(104)]
-    colour2: Vec4,
+    pub(crate) colour2: Vec4,
 }
 impl MaterialExtension for Tint {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
     }
+}
+pub(crate) fn install_shader(app: &mut App) -> AnyResult<()> {
+    app.world_mut().resource_mut::<Assets<Shader>>().insert(
+        SHADER.id(),
+        Shader::from_wgsl(
+            include_str!("crowd_preview.wgsl"),
+            "grid_crowd_preview.wgsl",
+        ),
+    )?;
+    Ok(())
 }
 pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     if !matches!(
@@ -497,13 +515,7 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     ) {
         return Ok(());
     }
-    app.world_mut().resource_mut::<Assets<Shader>>().insert(
-        SHADER.id(),
-        Shader::from_wgsl(
-            include_str!("crowd_preview.wgsl"),
-            "grid_crowd_preview.wgsl",
-        ),
-    )?;
+    install_shader(app)?;
     if prepared.mode == Mode::OneKeySweep {
         app.get_sub_app_mut(bevy::render::RenderApp).ok_or("sweep renderer absent")?
             .add_systems(bevy::render::ExtractSchedule, extract_sweep);
@@ -516,16 +528,19 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     Ok(())
 }
 #[derive(Default)]
-struct Batch {
-    p: Vec<[f32; 3]>,
-    n: Vec<[f32; 3]>,
-    uv: Vec<[f32; 2]>,
-    indices: Vec<u32>,
+pub(crate) struct Batch {
+    pub(crate) p: Vec<[f32; 3]>,
+    pub(crate) n: Vec<[f32; 3]>,
+    pub(crate) uv: Vec<[f32; 2]>,
+    pub(crate) indices: Vec<u32>,
 }
 fn card(batch: &mut Batch, row: &Row, s: &Spec, eye: Vec3) -> Result<(), &'static str> {
-    let d = eye - row.position;
+    card_values(batch, row.position, s, eye)
+}
+pub(crate) fn card_values(batch: &mut Batch, position: Vec3, s: &Spec, eye: Vec3) -> Result<(), &'static str> {
+    let d = eye - position;
     let len = d.x.hypot(d.z);
-    if !row.position.is_finite() || !eye.is_finite() || !d.is_finite() || !len.is_finite() {
+    if !position.is_finite() || !eye.is_finite() || !d.is_finite() || !len.is_finite() {
         return Err("nonfinite static crowd card basis");
     }
     if len < 0.0001 {
@@ -564,7 +579,7 @@ fn card(batch: &mut Batch, row: &Row, s: &Spec, eye: Vec3) -> Result<(), &'stati
     .enumerate()
     {
         let position =
-            row.position + right * x * s.instance_scale[0] + Vec3::Y * y * s.instance_scale[1];
+            position + right * x * s.instance_scale[0] + Vec3::Y * y * s.instance_scale[1];
         // Authored curved-normal approximation, not source backlight/fog.
         let normal = (forward + right * (4. * x.signum())).normalize();
         // Finite basis alone does not prevent scaled corner/addition overflow.

@@ -741,3 +741,64 @@ section31, and grid-app crowd_sound. It already consumes route crowd cells and
 ReactiveCrowd events; visual animation is not a prerequisite for that playback.
 Gasps/recoil and original RNG remain separately documented audio limits. This
 audit adds no audio, rendered crowd, clock or default-policy change.
+
+## Shared static billboard consumer (G358, default off)
+
+The new population-control and population-billboards diagnostics consume the
+shared regional/generic catalogue for any applicable Route. Track dataset
+userdata selects the atlas context; the shared OrganismPlugin/typeDefs role
+selects definitions. Route placements retain their original source coordinates,
+cells, orientation pair, opaque scalar and group/record identity. There is no
+track-name admission list or atlas-filename guess. Saved material sampler roles
+resolve the local diffuse/tint IDs; selected IDs must be unique.
+
+One source record selects the first declared map, variant and colour set and
+produces at most one card. This is an explicit deterministic diagnostic policy,
+not recovered native RNG. A present malformed selected entry fails; an absent
+billboard stance remains an explicit unsupported group, not a replacement actor.
+Static placements can select standing or seated rectangles. Moving/skinned
+records remain named/count-reported and are not fabricated as standing people.
+
+Private source-data inspection accounts for16165/6849/15421 supported cards on
+Euro/USA/Japan fixtures,27 unsupported officials and3 moving records. These are
+preparation counts, not observed active rendering. The consumer batches by
+material and source cell but does not implement native cell/LOD selection.
+It shares the existing diffuse/tint shader, A2C and card arithmetic. The old
+4667-row preview, neutral fixture and flash ordinals remain a separate adapter.
+
+New population modes require bounded baseline static rendering and actual
+MSAA4. Native-AA3 is refused early because graphics::configure sets MsaaOff;
+ordinary settings and legacy mode admission are unchanged. Cards face the
+initial camera only. Native facing/sway, dynamic camera updates, animation,
+reference/clock, variety, LOD/culling and normal/default rollout remain open.
+The runtime geometry/material/alpha result and performance need GPU validation.
+
+Seven CPU controls exercise actual dataset selection, real camera configuration,
+selected texture uniqueness, three-region purchased preparation/source bits and
+one-record accounting despite alternative definitions. The grid-app gate now passes643 tests including all seven controls and actual PostStartup ECS mesh/material/image publication for three regions. This does not exercise MaterialPlugin or GPU visibility. See G358 for exact checks and the retained first Clippy failure. Private source-only reviews and proposals63/65 are under
+local/handoff/drafts/crowd-standing-consumer*/; those source reviews did not access the original process. The separately authorized live snapshot is described below.
+
+### Authorized current child graph snapshot
+
+The owner-opened Detroit process was authenticated afresh and a bounded read-only
+snapshot captured12645bytes. The sampled bank index0 contains34 typed nodes:
+ROOT,23JOINT,9ordinary NODE helpers and1SKIN. Exact names/types/parents and all34
+local matrices match saved cr_male_usa.pssg bit-for-bit after endian conversion;
+its23 ordered inverse binds also match. Female/marshall comparisons differ,
+so this identifies the sampled saved template rather than only generic topology.
+
+The current actor traversal contains ROOT and SKIN only. Its23 class-authenticated
+joint references are distinct from that bank's refs and external to both walked
+graphs. Their names/locals were not followed; both skins share the same skeleton.
+Do not treat the two-node walk as the complete animated actor or substitute bank
+locals for actor locals. Sampled-bank membership does not prove producing-bank
+history, reference initialization, selected output or clock units. Locals were
+read once, not atomically. An allowed mutable job word changed during capture;
+structural bracket equality is not whole-object equality or a time-unit proof.
+
+The owner closed the original afterward; no settings were changed and no input,
+process writes, suspend or target code calls were used. Exact private receipts:
+local/graphics/original-crowd-children59/run01/ and offline analysis68 under
+local/handoff/drafts/crowd-child-analysis68/. Any further external-joint capture
+needs a fresh authenticated session; this snapshot's heap addresses are not
+reusable evidence of a later process.
