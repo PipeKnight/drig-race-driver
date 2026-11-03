@@ -145,6 +145,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F722](log/F0722.md) | 2026-11-03 | Tree cards blend two atlas views as the original does |
 | [F721](log/F0721.md) | 2026-11-03 | Tree cards lit like the original's impostor program |
 | [F720](log/F0720.md) | 2026-11-03 | Ten idle worktrees retired; real versus Explorer disk sizes |
 | [F719](log/F0719.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
@@ -204,7 +205,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F665](log/F0665.md) | 2026-10-31 | Cockpit: driver g-force lean |
 | [F664](log/F0664.md) | 2026-10-30 | Cockpit: gear-change and handbrake reaches, lever, H-pattern knob |
 | [F663](log/F0663.md) | 2026-10-30 | Okutama loads: a template without an initial behaviour places an empty entity, as the original |
-| [F662](log/F0662.md) | 2026-10-31 | Race manager settles most first-corner matrix losses; original Nürburgring first corner captured; in-air steering blend |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

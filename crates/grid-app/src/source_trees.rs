@@ -443,13 +443,23 @@ mod tests {
             let eye = Vec3::new(5., 2., -3.) + Vec3::new(angle.cos(), 0., angle.sin()) * 40.;
             atlas_view(world, eye)
         };
-        // a = atan2(d.z, d.x): x = -4a/pi, view round(x) + 2 (mod 8).
-        assert_eq!(at(0.), 2);
-        assert_eq!(at(std::f32::consts::FRAC_PI_4), 1);
-        assert_eq!(at(-std::f32::consts::FRAC_PI_2), 4);
-        assert_eq!(at(std::f32::consts::PI - 0.01), 6);
-        let views: BTreeSet<_> = (0..64).map(|i| at(i as f32 / 64. * std::f32::consts::TAU)).collect();
+        // a = atan2(d.z, d.x): x = -4a/pi, view floor(x + 2) (mod 8) blended
+        // into the next by frac(x).
+        let near = |(view, weight): (u32, f32), expected: u32, w: f32| view == expected && (weight - w).abs() < 1e-3;
+        assert!(near(at(0.), 2, 0.));
+        assert!(near(at(std::f32::consts::FRAC_PI_8), 1, 0.5));
+        assert!(near(at(-std::f32::consts::FRAC_PI_2), 4, 0.));
+        assert!(near(at(std::f32::consts::PI - 0.01), 6, 0.0127));
+        let views: BTreeSet<_> = (0..64).map(|i| at(i as f32 / 64. * std::f32::consts::TAU).0).collect();
         assert_eq!(views.len(), 8);
+        // Continuous: the shown mixture moves less than one view between
+        // neighbouring angles, also across a view boundary.
+        for i in 0..512 {
+            let mix = |(view, weight): (u32, f32)| view as f32 + weight;
+            let (a, b) = (mix(at(i as f32 / 512. * std::f32::consts::TAU)), mix(at((i + 1) as f32 / 512. * std::f32::consts::TAU)));
+            let step = (b - a).rem_euclid(8.);
+            assert!(step.min(8. - step) < 0.1, "{i}: {a} -> {b}");
+        }
     }
     #[test]
     fn sheet_offsets_face_each_centre_without_camera_pitch_or_roll() {
@@ -803,15 +813,20 @@ fn sheet_expanded(
     let right = Vec3::Y.cross(toward_eye).try_normalize().unwrap_or(Vec3::X);
     expanded(center, offset, right, Vec3::Y, inverse, scale)
 }
-/// The atlas view of an impostor card (`tree_lowlod` VS): with `d` towards
-/// the eye, `a = atan2(d . v6, d . v4)` and `x = -4a/pi`, the original blends
-/// view `ceil(x) + 1` into the next by `frac(x)`; the port shows the nearest,
-/// `round(x) + 2` modulo 8. `v4`/`v6` taken as the tree's X and Z axes [I].
-fn atlas_view(world: Mat4, eye: Vec3) -> u32 {
+/// The atlas views of an impostor card (`tree_lowlod` VS): with `d` towards
+/// the eye, `a = atan2(d . v6, d . v4)` and `x = -4a/pi`, the original shows
+/// view `ceil(x) + 1` (modulo 8, by the sampler's wrap) blended into the next
+/// by `frac(x)`: here view `floor(x + 2)` and the weight of the next one.
+/// `v4`/`v6` taken as the tree's X and Z axes [I].
+fn atlas_view(world: Mat4, eye: Vec3) -> (u32, f32) {
     let d = (eye - world.w_axis.truncate()).normalize_or_zero();
     let (v4, v6) = (world.x_axis.truncate().normalize_or_zero(), world.z_axis.truncate().normalize_or_zero());
-    let x = -4. * d.dot(v6).atan2(d.dot(v4)) / std::f32::consts::PI;
-    (x.round() as i32 + 2).rem_euclid(8) as u32
+    let p = -4. * d.dot(v6).atan2(d.dot(v4)) / std::f32::consts::PI + 2.;
+    ((p.floor() as i32).rem_euclid(8) as u32, p - p.floor())
+}
+fn blend_views() -> bool {
+    static BLEND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *BLEND.get_or_init(|| std::env::var("GRID_CARD_BLEND").map_or(true, |v| v != "0"))
 }
 pub fn install(app: &mut App) {
     visibility_census::install(app);
@@ -1124,7 +1139,16 @@ fn present(
                 put(vertices, i * source.layout.stride + at, point.to_array());
             }
             if let (Some(atlas), Some(uv_at)) = (&source.atlas, source.layout.offset(Mesh::ATTRIBUTE_UV_0)) {
-                let shift = atlas_view(facing.world, camera.translation) as f32 / 8.;
+                // View A in UV0; the weight of the next view in UV1.x
+                // (tree_cards.wgsl blends them; UV1's offsets are only read
+                // on the CPU).
+                // GRID_CARD_BLEND=0: the nearest view alone (F721), for review.
+                let (view, weight) = match atlas_view(facing.world, camera.translation) {
+                    (view, weight) if !blend_views() => ((view + u32::from(weight >= 0.5)) % 8, 0.),
+                    shown => shown,
+                };
+                let shift = view as f32 / 8.;
+                let weight_at = source.layout.offset(Mesh::ATTRIBUTE_UV_1);
                 // The original lights each view from its baked normal atlas.
                 // AUTHORED: the port gives each corner the radial normal the
                 // full tree's leaves use (from the crown's centre: towards the
@@ -1140,6 +1164,9 @@ fn present(
                 let normal_at = source.layout.offset(Mesh::ATTRIBUTE_NORMAL);
                 for (i, uv) in atlas.iter().enumerate() {
                     put(vertices, i * source.layout.stride + uv_at, [uv[0] + shift, uv[1]]);
+                    if let Some(at) = weight_at {
+                        put(vertices, i * source.layout.stride + at, [weight, 0.]);
+                    }
                     if let Some(at) = normal_at {
                         let o = (Vec2::from_array(source.offsets[i]) - middle) / half;
                         let radial = toward + right * o.x + Vec3::Y * o.y;

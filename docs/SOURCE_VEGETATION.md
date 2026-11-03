@@ -150,8 +150,13 @@ fit: Washington `large_tree` keeps 12 full trees and 150 cards).
   (`Type::impostor`): a card turned to the eye throws the wrong shape from the sun and darkened
   the road under it [AUTHORED for trees: the original's tree shadow pass 0x97A250 is not traced].
   `GRID_ORNAMENT_LOD=0` keeps the full trees everywhere.
-- Cards are expanded on the CPU about world up like the tree sheets, show the nearest atlas view
-  (`round(x) + 2` mod 8, `v4`/`v6` taken as the tree's X and Z axes [I]) instead of blending two,
+- Cards are expanded on the CPU about world up like the tree sheets and blend two atlas views as
+  the original does (`tree_lowlod.cg.vp` [V static]: view `ceil(x) + 1` at U offset
+  `view / 8` plus the card's own U, the next view one eighth further, wrapping with the sampler;
+  weight `frac(x)`; the pixel program lerps both colour and alpha and both decoded normals by it).
+  The CPU writes view A into UV0 and the weight into UV1.x each frame (`v4`/`v6` taken as the
+  tree's X and Z axes [I]); `tree_cards.wgsl` samples both views, also in the depth/motion
+  prepass so its alpha test matches,
   and are lit per corner with the radial normal the full tree's leaves use (towards the eye,
   tilted out to the card's side and up or down) [AUTHORED; the original reads a baked normal
   atlas and adds `LightWrap` and `InvFoliageDensity` (0.3) in `tree_lowlod_shadowed.cg.fp`].
@@ -176,7 +181,19 @@ fit: Washington `large_tree` keeps 12 full trees and 150 cards).
   Mean foliage value, full trees / F718 cards / card lighting (`local/r48/*-cmp6.png`): Spa 30
   right 37.8 / 27.4 / 35.3, left 39.9 / 25.3 / 33.0; Spa 75 41.1 / 26.7 / 33.1; Washington
   53.1 / 44.1 / 49.2 and 61.2 / 52.9 / 51.9. The remaining gap is open (the atlas bakes the
-  crown's self-shading; the original blends two views, the port shows the nearest).
+  crown's self-shading).
+- View blend checks (`local/r49/`): a unit test sweeps the eye around a card in 512 steps and
+  finds the shown mixture (view + weight) moving under 0.1 view per step, also across view
+  boundaries. A sideways truck of the Spa 75 view in 0.5 m steps (`t-blend-*`, `t-snap-*`;
+  `GRID_CARD_BLEND=0` restores the nearest view for review): with the nearest view, the left card
+  tree has an extra jump at step 3 (9,831 pixels changing by more than 50 per channel against a
+  trend of about 9,000), absent with the blend; over the run the blend changes 10-20% fewer
+  pixels abruptly. Brightness (`*-blend.png`) is unchanged: Spa 30 34.8 / 33.4, Spa 75 33.0,
+  Washington 49.1 / 51.9.
+- Cost of the card material (blend and lighting) against the plain one (`GRID_CARD_LIGHTING=0`,
+  same binary, interleaved, uncapped, `local/r49/v-*.log`; the machine was busy, floors 9.5 and
+  12 ms): Washington 9.48 / 9.46 / 9.94 plain, 10.13 / 9.66 / 9.63 card; Spa 12.08 / 12.07 / 11.80
+  plain, 12.07 / 12.45 / 12.42 card: up to +0.6 ms, within the run-to-run spread.
 - Hidden facing entities are no longer rewritten each frame.
 - Checks (private `local/r46/`): `w-shafts-ab.png`, `spa30-ab.png`, `haruna48-ab.png` (full trees
   everywhere | level switch); `c-x0-vs-n.png` (Washington cards, close crop);

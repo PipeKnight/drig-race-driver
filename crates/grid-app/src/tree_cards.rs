@@ -1,7 +1,9 @@
-//! The original's impostor-card lighting on the forest's `_x2` cards
-//! (`tree_lowlod_shadowed.cg.fp`, docs/SOURCE_VEGETATION.md): each card
-//! texel's normal comes from the card's baked normal atlas, bent towards the
-//! sun by `LightWrap`, and its N.L is lifted by `InvFoliageDensity`.
+//! The original's impostor-card shading on the forest's `_x2` cards
+//! (`tree_lowlod.cg.vp`, `tree_lowlod_shadowed.cg.fp`,
+//! docs/SOURCE_VEGETATION.md): two neighbouring atlas views blended by the
+//! eye's angle (colour, alpha and normal), each texel's normal from the
+//! card's baked normal atlas, bent towards the sun by `LightWrap`, and its
+//! N.L lifted by `InvFoliageDensity`.
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     pbr::{ExtendedMaterial, MaterialExtension},
@@ -27,6 +29,10 @@ impl MaterialExtension for CardLight {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
     }
+    // The depth and motion prepasses test the same blended alpha.
+    fn prepass_fragment_shader() -> ShaderRef {
+        SHADER.into()
+    }
 }
 
 /// What the forest loader found for its cards.
@@ -44,7 +50,8 @@ pub struct Cards {
 const FRAME_SIGN: f32 = 1.;
 
 pub fn install(app: &mut App, cards: Cards) {
-    if cards.parts.is_empty() {
+    // GRID_CARD_LIGHTING=0 keeps the cards on the plain material (F718), for review.
+    if cards.parts.is_empty() || std::env::var("GRID_CARD_LIGHTING").is_ok_and(|v| v == "0") {
         return;
     }
     app.world_mut()
