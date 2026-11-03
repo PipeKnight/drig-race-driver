@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F724](F0724.md) | 2026-11-03 | Facing trees keep their expanded bounds; no culling at the screen edge |
 | [F723](F0723.md) | 2026-11-03 | Playable 170678e6ce36 for the PC and both APKs; release test-order and F-range fixes |
 | [F722](F0722.md) | 2026-11-03 | Tree cards blend two atlas views as the original does |
 | [F721](F0721.md) | 2026-11-03 | Tree cards lit like the original's impostor program |

@@ -5260,7 +5260,11 @@ fn setup(
             if let Some(source) = &facing
                 && let Some(entity) = &mut entity
             {
-                entity.insert(source.placed(matrix));
+                // The drawn quads reach `radius` past the collapsed centres in
+                // the mesh asset; Bevy would recompute the bounds from those
+                // centres on every `Mesh3d` change (spawn, ornament fades)
+                // and cull a tree whose centre leaves the frustum.
+                entity.insert((source.placed(matrix), bevy::camera::visibility::NoAutoAabb));
             }
             if decal_materials.contains(&part.material)
                 && let Some(entity) = &mut entity

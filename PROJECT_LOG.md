@@ -145,6 +145,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F724](log/F0724.md) | 2026-11-03 | Facing trees keep their expanded bounds; no culling at the screen edge |
 | [F723](log/F0723.md) | 2026-11-03 | Playable 170678e6ce36 for the PC and both APKs; release test-order and F-range fixes |
 | [F722](log/F0722.md) | 2026-11-03 | Tree cards blend two atlas views as the original does |
 | [F721](log/F0721.md) | 2026-11-03 | Tree cards lit like the original's impostor program |
@@ -204,7 +205,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F667](log/F0667.md) | 2026-10-31 | Crowds ported: NormalCrowd/GrandStandCrowd on the crowd cells, excited by ReactiveCrowd (backlog row 70) |
 | [F666](log/F0666.md) | 2026-10-31 | Head-cam mouse look-around, an owner-requested deviation (backlog row 101) |
 | [F665](log/F0665.md) | 2026-10-31 | Cockpit: driver g-force lean |
-| [F664](log/F0664.md) | 2026-10-30 | Cockpit: gear-change and handbrake reaches, lever, H-pattern knob |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -204,3 +204,6 @@ fit: Washington `large_tree` keeps 12 full trees and 150 cards).
   trees on and off both run at the ~6.06 ms floor on Washington and Spa (before the switch:
   +2.2..4.3 ms and +1.2..2.3 ms). With the full trees casting the shadows (`local/r48/u-*.log`):
   Washington off 6.07 / 6.06, on 6.19 / 6.10 ms; Spa off 6.06 / 6.14, on 6.79 / 6.65 ms.
+- Bounds (F724): facing, sheet and card entities carry their Aabb grown by the largest quad
+  offset and `NoAutoAabb`; without it Bevy recomputes the box from the collapsed centres on
+  every `Mesh3d` change and culls trees whose centres leave the view while leaves are on screen.
