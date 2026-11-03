@@ -145,3 +145,74 @@ correction, texture sRGB state or the selected merge render-target domain.
 The next direct edge is the selected merge's actual input-handle resolver and
 binder. Private source proofs: `postprocess-next03/` and
 `postprocess-provider-association04/` under `local/handoff/drafts/`.
+
+## Runtime graph, sampler aliases and output configuration
+
+A bounded follow-up closes the declaration-to-runtime association, while actual
+image attachments and their colour domains remain unresolved. The saved Type2
+connections are still the selected resource contract: blur.out feeds inColour,
+bloom.out feeds inBloom, and softening.out feeds inSoftening. These names are
+XML graph aliases, rather than three hardcoded CPU texture bindings.
+
+The generic BlockUnitInput reader preserves each alias and sampler name.
+The runtime compiler at `0x008CA010` consumes a normalized description and creates
+stages, maps input/output declarations, resolves external resources, wires
+internal connections and propagates output configurations. Stage creation
+`0x0089B440` consumes the declared shader-group name and optional factory name.
+The selected CheapFinalMerge declaration supplies its shader name and no
+explicit factory. This is a concrete source path from the saved declaration
+to a runtime stage; it is not evidence of live quality or transition selection.
+
+Input mapping `0x008C0950` retains separate runtime strings for graph alias
+and shader sampler. Thus the selected inColour/sampler0, inBloom/sampler1 and
+inSoftening/sampler2 associations reach runtime port records. Connection wiring
+resolves producer and consumer stages and their named ports. Setter
+`0x00883830` writes the consumer input's linked producer-output pointer and
+clears its external-source pointer. That link identifies a runtime output port;
+it is not yet the texture handle subsequently bound for drawing.
+
+Output configuration resolution `0x008BE120` follows the output declaration's
+referenced input. For a linked input it inherits the producer output's dimension
+and format words; for an external input it obtains those words from the
+resolved external resource. Helper `0x008B3320` applies nonzero explicit width
+and height overrides, otherwise source scale followed by truncation toward
+zero, and preserves format unless an override is specified. Numeric 0x23 acts
+as an unspecified-format sentinel in this code; no D3D or DXGI enum name is
+inferred from its value.
+
+The selected merge output's config=inColour therefore has a real runtime
+inheritance path. Its source reader defaults the two scales to one on that
+path. This establishes where dimensions and format come from, but not their
+actual values in an active frame. It does not prove Rgba8, Rgba16Float, window
+size, padded extents, sRGB state or the viewport/sampler dimension uploads.
+
+## Default-factory association and remaining boundary
+
+The normal PostProcessPlugin resource callback passes its builder to
+`0x00728670`, which parses a description, creates a group and invokes the
+runtime build route. The group's stored builder is the same object whose
+factory field is consulted by stage creation. Builder constructor
+`0x008AC4B0` initializes its default-factory pointer at +0x108 to zero.
+
+Stage creation may use a registered default factory at that field, or a generic
+fallback when it is null. The actual active factory for selected CheapFinalMerge
+has not been proved: constructor initialization does not establish that no
+later writer or callback changes it. The fallback must remain conditional
+source evidence. A nearby controller interface was checked and rejected as a
+factory lead because its first target is an adjust-this destructor thunk.
+
+The remaining source boundary is the actual default-factory registration,
+then that selected implementation's output-image allocation and per-frame
+port-to-sampler binding. Render-target and sampler sRGB/colour-domain state,
+active chain/quality policy and luminance history remain open. These runtime
+roles do not justify replacing the current authored grade or adding an unused
+source-metadata module. Row 77 remains open; no kernel, Cargo/GPU validation or
+original-process observation was performed for this follow-up.
+
+Private evidence is retained in `postprocess-input-resolver70/`,
+`postprocess-instantiation71/` and `postprocess-default-factory72/` under
+`local/handoff/drafts/`. One shared-master decompile of `0x008CAFC0` completed;
+other retained proofs use exact master method bounds or explicitly labelled,
+table-authenticated instruction windows. Heuristic disassembly overruns were
+rejected and preserved as limitations; neighboring functions are not proof of
+the selected runtime path. The existing shader and scalar research was reused.
