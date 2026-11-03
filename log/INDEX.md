@@ -616,6 +616,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G358](G0358.md) | 2026-11-03 | Shared regional static crowd billboard consumer |
 | [G356](G0356.md) | 2026-11-03 | Shared source headlight point diagnostic |
 | [G355](G0355.md) | 2026-11-03 | Crowd typed clone and update readiness contracts |
 | [G354](G0354.md) | 2026-11-03 | Source road response and lighting specular binding contracts |

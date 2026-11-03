@@ -12,6 +12,7 @@ mod foundation_backing;
 mod foundation_backing_audit;
 mod crowd_population;
 mod crowd_preview;
+mod crowd_billboards;
 mod crowd_rig;
 mod flash_fixture;
 mod flash_preview;
@@ -2892,6 +2893,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
     }
+    crowd_billboards::validate_view(crowd_preview, &graphics)?;
     crowd_preview.validate(
         !graphics.enhanced(),
         reference && !drive && !headless && !collision && !from_menu
@@ -2902,7 +2904,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         std::env::var_os("GRID_PERF_TEST").is_none(),
     )?;
     // Baseline camera retains Bevy's MSAA4; startup asserts the actual component.
-    // Existing crowd admission above enforces exact route/static/render/frame scope.
+    // General population modes keep bounded static/render scope; legacy fixtures retain their route guard.
     crowd_flash_preview.validate(crowd_preview, graphics.benchmark_frames,
         !graphics.enhanced() && graphics.anti_aliasing == 0, graphics.reflection_mode == 0)?;
     if crowd_flash_preview != flash_preview::Mode::Off && capture_orbit_rate.is_some() {
@@ -4715,7 +4717,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         println!("object_coverage mode={:?} target={} mapping=Bevy-A2c-remap-or-Mask35-authored-thickness source_parity=false samples_required={} aa={}", graphics.object_coverage, object_materials::COVERAGE_TARGET, if graphics.enhanced() { 1 } else { 4 }, graphics.anti_aliasing);
         app.add_systems(PostStartup, object_materials::assert_coverage_msaa);
     }
-    if crowd_preview != crowd_preview::Mode::Off {
+    if crowd_preview.is_population() {
+        let prepared = crowd_billboards::prepare(&root, &route, crowd_preview)?;
+        crowd_billboards::install(&mut app, prepared)?;
+    } else if crowd_preview != crowd_preview::Mode::Off {
         let prepared = crowd_preview::prepare(&root, &route, crowd_preview)?;
         let flash = if crowd_flash_preview != flash_preview::Mode::Off {
             let anchors = crowd_preview::flash_fixture_anchors(&root, &prepared)?;
