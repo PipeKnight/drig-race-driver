@@ -266,3 +266,25 @@ Next compare this typed source data to the actual loader's part/joint placement,
 then close presentation and projector shader inputs before world illumination.
 The earlier provisional root/pose helpers remain unapplied. Reflections, solar
 shadows, cockpit and render-performance policies are unchanged.
+
+
+### G363: bounded authored illumination consumer and actual Fill audit
+
+The default-off headlight trial consumes the shared vehicle-light State, model
+anchor and presented vehicle transform. Origin uses P*M*C; beam direction/up use
+the prepared source frame through P. Six actual ECS/data tests cover transformed
+anchors, independent slots/fade, Replay suppression and six purchased model
+descriptors. These fixtures do not prove the original eight-slot runtime loader
+association, source projector optics, photometry or rendered beam quality.
+The SpotLight cone/range/lumens are explicitly authored trial parameters.
+
+One purchased Environment/Fill/Timeline Rust fixture reports the currently
+consumed conversion, without deriving new units: Haruna day ambient1093.2759
+and back1132.9448; ForcedNight ambient9993.379 and back7953.389. Baseline direct
+sun remains white18000lux. The inverse raw-sun-peak conversion can therefore
+amplify night Fill. Saved scales are not a license to multiply raw RGB again:
+static packing and effective Timeline binding must be resolved separately.
+This is CPU evidence of current behavior, not original night renderer parity.
+Combined-feature Clippy, six consumer tests and this single fixture passed;
+full package checks and production driving/render validation remain separate.
+Private receipts: local/graphics/night-headlight-consumer01/cpu02.

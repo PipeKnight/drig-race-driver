@@ -1134,3 +1134,59 @@ mod scoped_display_preferences_tests {
         assert_eq!(probe.post_saturation_override,Settings::default().post_saturation_override);
     }
 }
+
+#[cfg(test)]
+mod night_fill_consumed_fixture_tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires absolute GRID_GAME_ROOT; reports actual purchased Environment/Timeline/Fill, CPU only"]
+    fn purchased_night_day_and_timeline_report_actual_consumed_fill_without_new_units() {
+        use grid_tools::{environment::Environment, route::Route, time_of_day::{Mode, Timeline}};
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").expect("absolute GRID_GAME_ROOT required"));
+        assert!(root.is_absolute());
+        let baseline = Settings::default();
+        for (route_path, mode, lighting_file) in [
+            ("tracks/japan/haruna/route_0", Mode::None, "tracks/japan/haruna/lighting.xml"),
+            ("tracks/japan/haruna/route_1", Mode::ForcedNight, "tracks/japan/haruna/route_1/lighting.xml"),
+            ("tracks/europe/le_mans/route_0", Mode::Timeline, "tracks/europe/le_mans/lighting.xml"),
+        ] {
+            let route = Route::new(route_path).unwrap();
+            let environment = Environment::for_route(&root, &route).unwrap();
+            assert_eq!(environment.mode(), mode);
+            assert_eq!(environment.lighting_file.replace('\\', "/"), lighting_file);
+            let input = std::fs::read(root.join(&environment.lighting_file)).unwrap();
+            let sun_adaptation = grid_formats::track_lighting::read_sun_colour(&input).unwrap();
+            let source = &environment.lighting;
+            let raw_sun = source.rgb("backlight_suncolour").unwrap();
+            let raw_back = source.rgb("backlight_backcolour").unwrap();
+            let raw_ambient = source.rgb("backlight_ambientcolour").unwrap();
+            let scales = ["backlight_sunscale", "backlight_scale", "backlight_ambientscale"].map(|key| source.scalar(key));
+            let fill = Fill::from_lighting(source, baseline.sun_illuminance(), false).unwrap();
+            assert!(raw_sun.into_iter().chain(raw_back).chain(raw_ambient).all(|v| v.is_finite() && v >= 0.));
+            assert!(fill.ambient_brightness.is_finite() && fill.back_lux.is_finite());
+            // A counterfactual scale edit checks the ACTUAL existing consumer, not a copied formula.
+            // Static XML packing overwrites scales in the selected original path; dynamic binding is separate.
+            let mut changed_scales = source.clone();
+            for key in ["backlight_sunscale", "backlight_scale", "backlight_ambientscale"] {
+                changed_scales.params.insert(key.into(), "16".into());
+            }
+            let same = Fill::from_lighting(&changed_scales, baseline.sun_illuminance(), false).unwrap();
+            assert_eq!(fill.ambient, same.ambient);
+            assert_eq!(fill.back, same.back);
+            assert_eq!(fill.ambient_brightness.to_bits(), same.ambient_brightness.to_bits());
+            assert_eq!(fill.back_lux.to_bits(), same.back_lux.to_bits());
+            println!("night_fill_fixture static_route={route_path} mode={mode:?} lighting={} source_sha256={} raw_sun={raw_sun:?} raw_back={raw_back:?} raw_ambient={raw_ambient:?} raw_saved_scales={scales:?} parser_sun_adaptation={sun_adaptation:?} baseline_sun_colour={:?} baseline_sun_lux={} actual_fill={fill:?} effective_original_uniform=UNRESOLVED source_units=dimensionless bevy_units=authored_existing",
+                environment.lighting_file, grid_tools::private_parameters::hex(&grid_tools::private_parameters::sha256(&input)), baseline.sun_colour(), baseline.sun_illuminance());
+            if mode == Mode::Timeline {
+                let timeline = Timeline::load(&root, &route).unwrap().expect("Le Mans timeline required");
+                for (clock, t, wanted) in [("1500", 15.0 / 24.0, false), ("0000", 0.0, true)] {
+                    let values = timeline.values(t);
+                    assert_eq!(timeline.flag("enableHeadlights", t), Some(wanted));
+                    let fields: Vec<_> = values.iter().filter(|(key, _)| key.starts_with("backlight_") || matches!(**key, "enableheadlights" | "luminancefactor" | "luminancefactorheadcam" | "shadow_strength")).collect();
+                    assert!(fields.iter().all(|(_, value)| value.is_finite()));
+                    println!("night_fill_fixture timeline_clock={clock} t={t} raw_dynamic_fields={fields:?} wanted={wanted} dynamic_to_effective_sun_binding=UNRESOLVED no_dynamic_Fill_constructed=true");
+                }
+            }
+        }
+    }
+}
