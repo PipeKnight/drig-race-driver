@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F711](F0711.md) | 2026-11-03 | Row 99 recheck on main: the Le Mans route 0 R10 branch at 8,689 m and the route sweep hold |
 | [F710](F0710.md) | 2026-11-03 | Barrier strips at impact: skinned damage meshes blend over their pieces' joints; the anchor offset is the body frame |
 | [F709](F0709.md) | 2026-11-03 | track.vis decoded; Okutama raised grass is out of route reach; read_sun reads every lighting file |
 | [F708](F0708.md) | 2026-11-03 | Car LOD level fades and remaining pop sources |
