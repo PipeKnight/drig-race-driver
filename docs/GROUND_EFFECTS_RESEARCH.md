@@ -389,6 +389,21 @@ output in the main checkout's `local/tyre-smoke/`).
   - lit by N·L with the sun, plus the screen-space shadow mask;
   - no wind input [V].
   - Instances regenerate when the camera moves more than 10 m (`97EDE0`).
+- Patch selection per route (F707, open):
+  - [D] `96C250` → `959200` takes the candidate patches from a list on the view object
+    (`+4` pointer to 8-byte entries with a u16 patch index at `+4`, `+8` count). A patch is
+    kept when its centre lies within the draw distance; the kept ones are sorted by distance.
+    The scatter then covers every triangle of a kept patch at the triangle plane's height, with
+    no route or road-surface test. Only patches on the view's list are ever scattered.
+  - [V] Each route's `track.vis` ("visgen test data (x360?)", version 2) holds seven u32 counts
+    at offset 40. The fourth equals the track's `grass.grs` patch count: Okutama 943 (routes
+    0 and 1), Donington 1054, Washington 388.
+  - [I] So the per-route visibility data covers every grass patch, and the original likely
+    hides patches per route through it. That would explain the port's raised grass on Okutama
+    routes 1, 2, 4 and 5 (verges of road the route does not use).
+  - Not traced: who fills the view's list, and the `track.vis` layout after the header
+    (route 0 is 1,689,920 bytes, route 1 2,202,480). The port still scatters every patch within
+    draw distance on every route.
 - [V] Terrain detail:
   - The Donington grass terrain (`track_surface_simple.fx`, `land.pssg` `track_infield.fx`)
     lerps two 512² diffuse maps on vertex colour and tiles UV0 every ~4 m.
