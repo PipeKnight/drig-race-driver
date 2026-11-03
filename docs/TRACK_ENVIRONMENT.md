@@ -207,3 +207,62 @@ Timeline off/on/off against event-only scheduling. Receipts are retained in
 not a full-suite gate or playable rebuild. No application/GPU run, projector,
 street-light renderer, rendered road contribution or optical/parity completion
 is implied.
+
+## Source headlight preparation diagnostic (G356)
+
+The source front-point writer0x00904440 selects a complete pair of part codes:
+108/114 (`light_glass_fl/fr`), then107/113 (`light_pod_fl/fr`). It does not mix
+one glass and one pod. If neither pair is complete it retains original defaults
+(+/-.75,.60000002384,2.20000004768,1). A selected point is the saved node bounds
+midpoint plus its transform translation, with W=1; no extra bound rotation is
+inserted by this writer. Named TRANSFORM/BOUNDINGBOX schema and the relevant
+node inheritance were checked, rather than interpreting arbitrary draw bounds.
+
+Description parsing0x009EFB30 zeroes its record. Only inside a present PARTS
+branch it initializes z offset=.2 and y=0, then reads m_light_ray_z_offset and
+m_light_ray_y_offset. An absent attribute preserves that branch default; absent
+PARTS leaves zero-initialized fields. The per-car accessor0x00988F10 reads its
+owner's description link; it is not a singleton manager getter.
+
+The selected source projector preparation0x00736020 averages the cached pair,
+adds those y/z offsets and transforms the point through its indexed component
+matrix. It also prepares a normalized local direction (0,modeY,.99620002508,0)
+and perpendicular direction; source modes supply modeY=-.45 or-.8. This pins a
+source frame construction, not Bevy cone/range/intensity. The0xB0 packed record
+per accepted car does not establish a physical emitter count. Other values60/110
+must not be called meters or used as photometric calibration without their
+actual shader contract.
+
+### Consumed saved-data tool
+
+`tools/diagnose_headlight_points.py` reuses existing binxml/PSSG readers and
+reports canonical LOD0 saved nodes, selected pair/default provenance, PARTS
+presence/attribute provenance, midpoint and raw-model point with offsets.
+Inputs are an explicit absolute --game-root and repeatable --model stems;
+there is no model policy list. Output is create-new JSON under ignored local/.
+--self-test needs no game assets. Selected malformed/nonfinite/inverted data
+fails instead of silently selecting another semantic fallback. This strict
+finite domain is diagnostic admission, not proof of original CRT parsing.
+
+The source runtime part lookup selects first non-null among eight slots;
+canonical LOD0 selection in this tool does not execute or prove that registration
+order. Current Car.scene/model_offset and presentation/replay association remain
+unverified. Do not apply model_offset twice, use rawRuntime.pose as a universal
+render root, or describe this report as a world-space lamp. No dead metadata
+fields were added to Car and no beam renderer/default was changed.
+
+Actual CPU run:14authored controls passed and six model reports completed with
+12stable input-file identities. Lacetti/BMW/Saleen/R10/787 select canonical glass
+pairs; STK uses the original default pair. These are representative fixtures,
+not implementation exceptions or complete model coverage. Offset storage is
+castf32, midpoint computation uses Pythonf64; no CRT/SIMD/native bit parity.
+Duplicate consumed offset attributes are rejected using preserved binary XML
+rows before ElementTree can collapse them. Unrelated metadata remains untouched.
+Optimized Python is refused so reader/self-test assertions cannot disappear.
+Private result local/graphics/headlight-data01/diagnostic02.json and source
+proof local/handoff/drafts/headlight-optics58/ retain exact hashes/limitations.
+
+Next compare this typed source data to the actual loader's part/joint placement,
+then close presentation and projector shader inputs before world illumination.
+The earlier provisional root/pose helpers remain unapplied. Reflections, solar
+shadows, cockpit and render-performance policies are unchanged.
