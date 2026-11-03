@@ -141,6 +141,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F712](log/F0712.md) | 2026-11-03 | Baseline draws no source forest on any track; branch baseline-trees prepared |
 | [F711](log/F0711.md) | 2026-11-03 | Row 99 recheck on main: the Le Mans route 0 R10 branch at 8,689 m and the route sweep hold |
 | [F710](log/F0710.md) | 2026-11-03 | Barrier strips at impact: skinned damage meshes blend over their pieces' joints; the anchor offset is the body frame |
 | [F709](log/F0709.md) | 2026-11-03 | track.vis decoded; Okutama raised grass is out of route reach; read_sun reads every lighting file |
@@ -200,7 +201,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F655](log/F0655.md) | 2026-10-30 | Washington pack tick profile: piece islands, not car contacts or basic boxes |
 | [F654](log/F0654.md) | 2026-10-30 | Opponent dents: parallel projection, batched parts stay in the main world |
 | [F653](log/F0653.md) | 2026-10-30 | Barrier collision sweep: basic entities collide (fences, armco, walls on every route) |
-| [F652](log/F0652.md) | 2026-10-30 | Sun shadows: casters culled per cascade by receiver, shadow passes timed, the original's cascades traced |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
