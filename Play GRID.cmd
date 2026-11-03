@@ -41,7 +41,7 @@ echo Gamepad: D-pad or left stick, A select, B back.
 echo In the race: Up/W throttle, Down/S brake, Left/A and Right/D steer, Space handbrake,
 echo Escape or P pause menu. Results Continue or Exit returns to the menu.
 echo Private diagnostic log: %GRID_PLAY_LOG%
-"target\release\grid-app.exe" --menu %GRID_ROOT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
+"target\release\grid-app.exe" --menu --tone-map reinhard --post-saturation 0.9 %GRID_ROOT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
 set "GRID_PLAY_EXIT=%ERRORLEVEL%"
 echo Prototype exited with code %GRID_PLAY_EXIT%.
 echo Log saved to %GRID_PLAY_LOG%.

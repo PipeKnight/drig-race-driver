@@ -342,6 +342,9 @@ pub struct Settings {
     pub frame_latency: Option<std::num::NonZero<u32>>,
     /// `[video] shadows`: off, low, medium, high or ultra (shadow_layout.rs).
     pub shadows: Option<crate::shadow_layout::Quality>,
+    /// Optional general main-view display preferences; absent preserves current preset.
+    pub tone_map: Option<String>,
+    pub post_saturation: Option<f32>,
     /// `[camera] cockpit_fov`, `bonnet_fov`, `chase_fov`: degrees added to
     /// the original's FOV (camera::Fov, owner deviation row 103).
     pub cockpit_fov: Option<i32>,
@@ -627,6 +630,16 @@ impl Settings {
                 }
                 ("video", "frame_latency") => {
                     self.frame_latency = Some(crate::render_scale::frame_latency(value).map_err(at)?)
+                }
+                ("video", "tone_map") => {
+                    let mut display = crate::graphics::Settings::default();
+                    display.tone_map(value).map_err(|e| at(e.into()))?;
+                    self.tone_map = Some(value.into());
+                }
+                ("video", "post_saturation") => {
+                    let mut display = crate::graphics::Settings::default();
+                    display.post_saturation(value).map_err(|e| at(e.into()))?;
+                    self.post_saturation = display.post_saturation_override;
                 }
                 ("video", "shadows") => {
                     self.shadows = Some(crate::shadow_layout::Quality::parse(value).map_err(at)?)
@@ -1476,5 +1489,36 @@ mod coverage_provenance_tests {
         std::fs::remove_file(dir.join("settings.ini")).unwrap();
         std::fs::remove_dir(dir).unwrap();
         assert_eq!(Settings::default().loaded_file_count,0);
+    }
+}
+
+#[cfg(test)]
+mod shared_display_preferences_tests {
+    use super::*;
+    #[test]
+    fn actual_preferences_parse_apply_cli_override_and_video_save_preserve_display() {
+        let mut profile=Settings::default();
+        assert!(profile.tone_map.is_none() && profile.post_saturation.is_none());
+        profile.apply("[video]\ntone_map = reinhard\npost_saturation = 0.9\n",Path::new(".")).unwrap();
+        let mut graphics=crate::graphics::Settings::default();
+        graphics.display_preferences(&profile, true).unwrap();
+        assert_eq!(graphics.tone_map_override,Some(bevy::core_pipeline::tonemapping::Tonemapping::Reinhard));
+        assert_eq!(graphics.post_saturation_override,Some(0.9));
+        graphics.tone_map("agx").unwrap(); graphics.post_saturation("0.7").unwrap();
+        assert_eq!(graphics.tone_map_override,Some(bevy::core_pipeline::tonemapping::Tonemapping::AgX));
+        assert_eq!(graphics.post_saturation_override,Some(0.7));
+        for value in ["NaN","inf","-0.1","2.1","invalid"] {
+            assert!(profile.apply(&format!("[video]\npost_saturation={value}\n"),Path::new(".")).is_err());
+            assert_eq!(profile.post_saturation,Some(0.9));
+        }
+        assert!(profile.apply("[video]\ntone_map=invalid\n",Path::new(".")).is_err());
+        assert_eq!(profile.tone_map.as_deref(),Some("reinhard"));
+        let dir=std::env::temp_dir().join(format!("grid-display75-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap(); let file=dir.join("settings.ini");
+        std::fs::write(&file,"[video]\ntone_map=reinhard\npost_saturation=0.9\n").unwrap();
+        save_video(&file,&crate::front_end::Video::from_settings(&profile)).unwrap();
+        let mut saved=Settings::default(); saved.apply(&std::fs::read_to_string(&file).unwrap(),&dir).unwrap();
+        assert_eq!(saved.tone_map,profile.tone_map); assert_eq!(saved.post_saturation,profile.post_saturation);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
