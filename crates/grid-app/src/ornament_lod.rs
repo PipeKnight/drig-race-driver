@@ -36,9 +36,9 @@ const SCENERY_OVERLAP: f32 = 20.;
 pub const DEFAULT_DISTANCES: [f32; 3] = [30., 60., 100.];
 
 /// Length of a level change or of an appearance at D, seconds [authored].
-const FADE_SECONDS: f32 = 0.4;
+pub const FADE_SECONDS: f32 = 0.4;
 /// A camera move this long in one frame is a cut: levels switch at once.
-const CUT_METRES: f32 = 20.;
+pub const CUT_METRES: f32 = 20.;
 /// Width of the dither ramps in [`fade_range`], metres: so wide that the
 /// camera distance (under 30 km) moves the dither level by under 0.5.
 const RAMP: f32 = 1.0e6;
@@ -60,10 +60,8 @@ pub fn fade_enabled() -> bool {
 /// never reuses a range's GPU slot). An entity carries one only while it
 /// fades: Bevy checks every ranged entity each frame and re-extracts all of
 /// them when one changes, and the dither variant discards, which costs the
-/// main pass its early depth test (F703). Bevy re-specializes a mesh's
-/// pipeline only when its `Mesh3d` or material changes, so adding or removing
-/// the range marks `Mesh3d` changed: a dither variant left without a range
-/// discards every fragment.
+/// main pass its early depth test (F703); [`respecialize_ranged`] keeps the
+/// pipeline in step. Car levels fade with it too (`car_batch`).
 pub fn fade_range(appearing: bool, step: u8) -> VisibilityRange {
     let shift = f32::from(step.min(16)) / STEPS * RAMP;
     if appearing {
@@ -84,17 +82,17 @@ pub fn fade_range(appearing: bool, step: u8) -> VisibilityRange {
 /// A level change in progress: `from` dithers out while `to` dithers in,
 /// `t` from 0 to 1 (1: done, only `to` drawn).
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Fade {
+pub(crate) struct Fade {
     from: u8,
     to: u8,
     t: f32,
 }
 
 impl Fade {
-    const NONE: Self = Self { from: NONE, to: NONE, t: 1. };
+    pub(crate) const NONE: Self = Self { from: NONE, to: NONE, t: 1. };
 
     /// Step to `target` for a frame of `step` (fraction of the fade).
-    fn advance(&mut self, target: u8, step: f32, cut: bool) {
+    pub(crate) fn advance(&mut self, target: u8, step: f32, cut: bool) {
         if cut {
             *self = Self { from: target, to: target, t: 1. };
         } else if target == self.to {
@@ -110,7 +108,7 @@ impl Fade {
     }
 
     /// How `level` is drawn: `None` hidden, else (appearing, dither step).
-    fn draw(&self, level: u8) -> Option<(bool, u8)> {
+    pub(crate) fn draw(&self, level: u8) -> Option<(bool, u8)> {
         let step = (self.t * STEPS).round() as u8;
         if self.t >= 1. || self.from == self.to {
             (level == self.to).then_some((false, 0))
@@ -178,7 +176,7 @@ pub struct Lods {
     eye: Option<Vec3>,
 }
 
-const NONE: u8 = u8::MAX;
+pub(crate) const NONE: u8 = u8::MAX;
 
 #[derive(Component)]
 pub struct OrnamentLevel {
@@ -205,6 +203,34 @@ pub fn install(app: &mut App) {
             .after(TransformSystems::Propagate)
             .before(VisibilitySystems::VisibilityPropagate),
     );
+    // After every range change of the frame (ornaments here, car levels before
+    // transform propagation, drivers in Update) and before Bevy decides which
+    // meshes to re-specialize this frame (`check_entities_needing_specialization`
+    // follows this system); one frame late, the mesh discards for a frame.
+    app.add_systems(
+        PostUpdate,
+        respecialize_ranged
+            .after(select)
+            .after(TransformSystems::Propagate)
+            .before(bevy::mesh::mark_3d_meshes_as_changed_if_their_assets_changed),
+    );
+}
+
+/// Bevy 0.19 re-specializes a mesh's pipeline only when its `Mesh3d` or
+/// material changes (`check_entities_needing_specialization`), not when a
+/// `VisibilityRange` is added or removed. A dither variant left without a
+/// range reads no range and discards the whole mesh (F703), so every insert
+/// and removal marks the entity's `Mesh3d` changed.
+fn respecialize_ranged(
+    mut meshes: Query<&mut Mesh3d>,
+    added: Query<Entity, Added<VisibilityRange>>,
+    mut removed: RemovedComponents<VisibilityRange>,
+) {
+    for entity in added.iter().chain(removed.read()) {
+        if let Ok(mut mesh) = meshes.get_mut(entity) {
+            mesh.set_changed();
+        }
+    }
 }
 
 impl Lods {
@@ -293,7 +319,6 @@ fn select(
     mut parts: Query<(
         Entity,
         &OrnamentLevel,
-        Option<&mut Mesh3d>,
         &mut Visibility,
         Option<&mut RenderLayers>,
         Option<&mut VisibilityRange>,
@@ -328,7 +353,7 @@ fn select(
     }
     let caster = RenderLayers::layer(0);
     let shadow_only = crate::car_batch::shadow_layer();
-    for (entity, part, mesh, mut visibility, layers, range) in &mut parts {
+    for (entity, part, mut visibility, layers, range) in &mut parts {
         let fade = lods.fades[part.instance as usize];
         let colour = fade.draw(part.level);
         // The shadow level is drawn inside D, by the camera only while it is
@@ -351,15 +376,9 @@ fn select(
             }
             (None, Some((appearing, step))) if appearing || step > 0 => {
                 commands.entity(entity).insert(fade_range(appearing, step));
-                if let Some(mut mesh) = mesh {
-                    mesh.set_changed();
-                }
             }
             (Some(_), _) => {
                 commands.entity(entity).remove::<VisibilityRange>();
-                if let Some(mut mesh) = mesh {
-                    mesh.set_changed();
-                }
             }
             (None, _) => {}
         }
@@ -367,7 +386,7 @@ fn select(
 }
 
 /// `GRID_ORNAMENT_LOD_TRACE=1`: print each on-screen level change (research).
-fn trace_enabled() -> bool {
+pub fn trace_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("GRID_ORNAMENT_LOD_TRACE").is_ok_and(|v| v == "1"))
 }

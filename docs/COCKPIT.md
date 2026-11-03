@@ -384,6 +384,8 @@ Not verified: the suit colours and the arm shape against a capture of the origin
 
 ## Drivers outside the head-cam
 
+The original switches a driver's meshes within one frame. The port fades an opponent driver's level change over 0.4 s like the car's (F708, CAR_LOD "Fades"); the player's driver switches at once.
+
 Private notes: worktree camera-dynamics-11a55d `local/cam/cockpit/driver/exterior_drivers.txt` (static analysis; the original was not launched).
 
 ### What the original does [D unless marked]

@@ -139,6 +139,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F708](log/F0708.md) | 2026-11-03 | Car LOD level fades and remaining pop sources |
 | [F707](log/F0707.md) | 2026-11-03 | Okutama grass per route: track.vis covers every grass patch; baseline-sun crops for the owner |
 | [F706](log/F0706.md) | 2026-11-03 | Water and light shafts read the route's own lighting.xml (Haruna night routes) |
 | [F705](log/F0705.md) | 2026-11-03 | Water and light shafts ported from the original's programs (rows 108, 107) |
@@ -198,7 +199,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F651](log/F0651.md) | 2026-10-30 | First-corner matrix with breakable props; start-line routes; flag bases |
 | [F650](log/F0650.md) | 2026-10-30 | Cockpit: the wheel follows the front wheels' applied steering (row 94) |
 | [F649](log/F0649.md) | 2026-10-30 | Shibuya start swerve: the start racing line before the start line |
-| [F648](log/F0648.md) | 2026-10-30 | Collision and damage loops no longer hold after a wreck, the race end or a pause (backlog row 95) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

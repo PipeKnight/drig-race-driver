@@ -13,10 +13,14 @@
 //! [D, I: docs/COCKPIT.md], so their poses are baked into static meshes once.
 //! They cast no shadow (0x84A810 draws them in the colour pass only).
 //!
+//! The original switches a driver's meshes within one frame; here an
+//! opponent driver's level change fades like the car's (`ornament_lod::Fade`,
+//! F708). The player's driver and a camera cut switch at once.
+//!
 //! `GRID_EXTERIOR_DRIVERS=0` leaves them out (comparisons).
 use crate::driver::Model;
 use bevy::{
-    camera::visibility::NoFrustumCulling,
+    camera::visibility::{NoFrustumCulling, VisibilityRange},
     light::NotShadowCaster,
     mesh::{
         VertexAttributeValues,
@@ -335,6 +339,8 @@ fn present(
     camera: Query<(&Transform, &Projection), With<crate::ViewerCamera>>,
     mut transforms: Query<&mut Transform, Without<crate::ViewerCamera>>,
     mut visibility: Query<&mut Visibility>,
+    (mut commands, ranged, time): (Commands, Query<Has<VisibilityRange>>, Option<Res<Time>>),
+    (mut fades, mut last_eye): (Local<Vec<crate::ornament_lod::Fade>>, Local<Option<Vec3>>),
 ) {
     let (Some(driving), Some(drivers)) = (driving, drivers) else {
         return;
@@ -363,19 +369,36 @@ fn present(
     }
     let levels = levels(&metres, drivers.caps);
     let own = cameras.as_ref().map_or(crate::camera::OwnCar::Whole, |c| c.own_car());
-    for (seat, level) in drivers.seats.iter().zip(levels) {
+    let cut = !crate::ornament_lod::fade_enabled()
+        || last_eye.is_none_or(|last| last.distance(eye.translation) > crate::ornament_lod::CUT_METRES);
+    *last_eye = Some(eye.translation);
+    let step = time.map_or(0., |t| t.delta_secs()) / crate::ornament_lod::FADE_SECONDS;
+    fades.resize(drivers.seats.len(), crate::ornament_lod::Fade::NONE);
+    for ((seat, level), fade) in drivers.seats.iter().zip(levels).zip(fades.iter_mut()) {
         let shown = seat.car != 0 || own == crate::camera::OwnCar::Whole;
         let chosen = match level {
             Some(_) if seat.car == 0 && cameras.as_ref().is_some_and(|c| c.driver_head_hidden()) => Some(HEADLESS),
             Some(l) => slot(l, &drivers.slots),
             None => None,
         };
+        let target = chosen.filter(|_| shown).map_or(crate::ornament_lod::NONE, |s| s as u8);
+        fade.advance(target, step, cut || seat.car == 0);
+        let drawn: Vec<_> = seat.meshes.iter().map(|&(s, _)| fade.draw(s as u8)).collect();
         if let Ok(mut v) = visibility.get_mut(seat.root) {
-            v.set_if_neq(if shown && chosen.is_some() { Visibility::Inherited } else { Visibility::Hidden });
+            v.set_if_neq(if drawn.iter().any(Option::is_some) { Visibility::Inherited } else { Visibility::Hidden });
         }
-        for &(s, e) in &seat.meshes {
+        for (&(_, e), drawn) in seat.meshes.iter().zip(drawn) {
             if let Ok(mut v) = visibility.get_mut(e) {
-                v.set_if_neq(if Some(s) == chosen { Visibility::Inherited } else { Visibility::Hidden });
+                v.set_if_neq(if drawn.is_some() { Visibility::Inherited } else { Visibility::Hidden });
+            }
+            match drawn {
+                Some((appearing, step)) if appearing || step > 0 => {
+                    commands.entity(e).try_insert(crate::ornament_lod::fade_range(appearing, step));
+                }
+                _ if ranged.get(e).unwrap_or(false) => {
+                    commands.entity(e).try_remove::<VisibilityRange>();
+                }
+                _ => {}
             }
         }
     }

@@ -31,6 +31,12 @@
 //! its LOD0 parts. An opponent with a part off its place (a loose or detached
 //! panel) stays at LOD0 (AUTHORED: the low files have the panels, but how the
 //! original moves them is not traced).
+//!
+//! The original switches a car's level within one frame (0x8F4F30). Here a
+//! level change (by distance, or to LOD0 for a loose panel) fades over `ornament_lod::FADE_SECONDS` with
+//! Bevy's dither, the old level following the car until it is gone (owner,
+//! 2026-11-03: nothing should appear in view; F708). A camera cut switches at
+//! once; `GRID_ORNAMENT_FADE=0` keeps the hard switch.
 use crate::static_batch::{ATTRIBUTES, MAX_VERTICES, Part, build, supported};
 use bevy::{
     asset::AssetEventSystems,
@@ -200,6 +206,10 @@ struct CarBatches {
     posed: Vec<u8>,
     /// Opponent parts drawn on their own (wheels, glass): car, level, entity.
     extras: Vec<(usize, u8, Entity)>,
+    /// Per car (slot): the level fading out while [`Self::shown`] fades in.
+    fades: Vec<Option<LevelFade>>,
+    /// The camera position of the last frame (cut detection).
+    eye: Option<Vec3>,
     /// Cars with a [`ShadowBody`].
     shadow_cars: HashSet<usize>,
     /// Car-frames per level shown, level changes and time in [`refresh`],
@@ -212,6 +222,15 @@ struct CarBatches {
     /// Rebuilds for a deformed member mesh only, and the time of all.
     reshaped: u64,
     rebuild_ns: u64,
+}
+
+/// A car's level change in progress: `from` dithers out while the shown
+/// level dithers in, `t` from 0 to 1; `step` is the dither step last set.
+#[derive(Clone, Copy)]
+struct LevelFade {
+    from: u8,
+    t: f32,
+    step: u8,
 }
 
 type Candidate = (
@@ -275,6 +294,7 @@ fn refresh(
     materials: Res<Assets<StandardMaterial>>,
     mut events: MessageReader<AssetEvent<Mesh>>,
     own: OwnCarView,
+    time: Option<Res<Time>>,
 ) {
     let state = &mut *state;
     // A view that hides some of the player car draws its parts on their own
@@ -360,6 +380,11 @@ fn refresh(
         .collect();
     state.shown.resize(anchors.len(), 0);
     state.posed.resize(anchors.len(), 0);
+    state.fades.resize(anchors.len(), None);
+    let eye = camera.single().ok().map(|(t, _)| t.translation);
+    let cut = !crate::ornament_lod::fade_enabled()
+        || state.eye.zip(eye).is_none_or(|(a, b)| a.distance(b) > crate::ornament_lod::CUT_METRES);
+    state.eye = eye;
     // The level whose loose parts were posed last frame is shown now; the
     // other levels' loose parts stop being posed.
     for (slot, pose) in poses.iter().enumerate() {
@@ -367,12 +392,34 @@ fn refresh(
         let Some(pose) = pose.filter(|_| state.shown[slot] != level) else {
             continue;
         };
+        let old = state.shown[slot];
         state.shown[slot] = level;
         state.level_changes += 1;
+        // The change fades; a change during a fade drops that fade's old level.
+        let from = (!cut).then_some(old);
+        state.fades[slot] = from.map(|from| LevelFade { from, t: 0., step: u8::MAX });
+        if crate::ornament_lod::trace_enabled()
+            && let Ok((eye, Projection::Perspective(lens))) = camera.single()
+        {
+            // Research: where the car is on screen (`GRID_ORNAMENT_LOD_TRACE=1`).
+            let p = eye.to_matrix().inverse().transform_point3(pose.w_axis.truncate());
+            let half = (lens.fov * 0.5).tan();
+            println!(
+                "car_level_change frame={} slot={slot} from={old} to={level} faded={} distance={:.1} ndc={:.2},{:.2}",
+                state.frames,
+                from.is_some(),
+                -p.z,
+                p.x / (-p.z * half * lens.aspect_ratio),
+                p.y / (-p.z * half)
+            );
+        }
         let car = state.groups.iter().find(|g| g.slot == slot).map(|g| g.car);
         for group in state.groups.iter().filter(|g| g.slot == slot) {
             for &batch in &group.batches {
-                show(&mut commands, batch, group.level == level);
+                if Some(group.level) != from {
+                    show(&mut commands, batch, group.level == level);
+                    unrange(&mut commands, batch);
+                }
                 if group.level == level
                     && let Ok((mut transform, ..)) = batches.get_mut(batch)
                 {
@@ -381,12 +428,56 @@ fn refresh(
             }
         }
         for &(_, part_level, entity) in state.extras.iter().filter(|e| Some(e.0) == car) {
+            if Some(part_level) == from {
+                continue;
+            }
             show(&mut commands, entity, part_level == level);
+            unrange(&mut commands, entity);
             if part_level != level
                 && let Ok(mut entity) = commands.get_entity(entity)
             {
                 entity.try_insert(Unposed);
             }
+        }
+    }
+    // Fades in progress: the old and the shown level dither, complementary.
+    let step = time.map_or(0., |t| t.delta_secs()) / crate::ornament_lod::FADE_SECONDS;
+    for slot in 0..state.fades.len() {
+        let Some(fade) = state.fades[slot].as_mut() else {
+            continue;
+        };
+        fade.t = if cut { 1. } else { (fade.t + step).min(1.) };
+        let (from, to, done) = (fade.from, state.shown[slot], fade.t >= 1.);
+        let dither = (fade.t * 16.).round() as u8;
+        if !done && dither == fade.step {
+            continue;
+        }
+        fade.step = dither;
+        let car = state.groups.iter().find(|g| g.slot == slot).map(|g| g.car);
+        let batches_of = state
+            .groups
+            .iter()
+            .filter(|g| g.slot == slot)
+            .flat_map(|g| g.batches.iter().map(move |&b| (g.level, b, false)));
+        let extras_of = state.extras.iter().filter(|e| Some(e.0) == car).map(|&(_, l, e)| (l, e, true));
+        for (level, entity, extra) in batches_of.chain(extras_of) {
+            let Ok(mut entity) = commands.get_entity(entity) else {
+                continue;
+            };
+            if level == from && done {
+                entity.try_insert(RenderLayers::layer(HIDDEN_LAYER));
+                entity.try_remove::<VisibilityRange>();
+                if extra {
+                    entity.try_insert(Unposed);
+                }
+            } else if level == to && done {
+                entity.try_remove::<VisibilityRange>();
+            } else if level == from || level == to {
+                entity.try_insert(crate::ornament_lod::fade_range(level == to, dither));
+            }
+        }
+        if done {
+            state.fades[slot] = None;
         }
     }
     let levels = select_levels(&state.groups, anchors.len(), &poses, &held, &state.posed, camera.single().ok());
@@ -468,8 +559,10 @@ fn refresh(
             rebuild(&mut commands, group, pose, shown, &mut meshes, &mut batches);
             state.rebuild_ns += start.elapsed().as_nanos() as u64;
         }
-        // Batches of a level the car does not show keep their pose.
-        if let Some(pose) = pose.filter(|_| state.shown[group.slot] == group.level) {
+        // Batches of a level the car does not show keep their pose; a level
+        // fading out still follows the car.
+        let fading = state.fades.get(group.slot).copied().flatten().is_some_and(|f| f.from == group.level);
+        if let Some(pose) = pose.filter(|_| state.shown[group.slot] == group.level || fading) {
             let next = Transform::from_matrix(pose);
             for &batch in &group.batches {
                 if let Ok((mut transform, ..)) = batches.get_mut(batch) {
@@ -679,6 +772,14 @@ fn register(
 
 /// Draws `entity` (no layer: the default one) or moves it to the hidden
 /// layer. The entity may be gone with its scene.
+/// Ends a level fade on `entity` (`ornament_lod::respecialize_ranged`
+/// re-specializes its pipeline).
+fn unrange(commands: &mut Commands, entity: Entity) {
+    if let Ok(mut entity) = commands.get_entity(entity) {
+        entity.try_remove::<VisibilityRange>();
+    }
+}
+
 fn show(commands: &mut Commands, entity: Entity, visible: bool) {
     let Ok(mut entity) = commands.get_entity(entity) else {
         return;

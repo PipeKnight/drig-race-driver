@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F708](F0708.md) | 2026-11-03 | Car LOD level fades and remaining pop sources |
 | [F707](F0707.md) | 2026-11-03 | Okutama grass per route: track.vis covers every grass patch; baseline-sun crops for the owner |
 | [F706](F0706.md) | 2026-11-03 | Water and light shafts read the route's own lighting.xml (Haruna night routes) |
 | [F705](F0705.md) | 2026-11-03 | Water and light shafts ported from the original's programs (rows 108, 107) |
