@@ -254,6 +254,101 @@ struct Field {
     models: Vec<CarModel>,
     car_model: Vec<usize>,
 }
+/// Prepared from the already loaded per-model car namespaces. No asset fallback.
+#[derive(Debug, PartialEq, Eq)]
+struct TreadSource {
+    key: String,
+    parts: usize,
+    missing_tangents: usize,
+    texture_present: bool,
+}
+impl TreadSource {
+    fn ready(&self) -> bool {
+        self.parts > 0 && self.missing_tangents == 0 && self.texture_present
+    }
+}
+/// Aggregate car identity comes only from append_car's carN namespace.
+/// A standalone car scene has one explicitly unnamespaced player model0.
+fn tread_part_model(track: bool, material: &str) -> Option<usize> {
+    if material.rsplit('/').next()?.trim() != "Tyre Tread" {
+        return None;
+    }
+    if track {
+        part_model(material)
+    } else {
+        (material.trim() == "Tyre Tread").then_some(0)
+    }
+}
+fn tread_sources(car: &Car, field: &Field) -> Result<Vec<TreadSource>, String> {
+    let mut sources: Vec<_> = field
+        .models
+        .iter()
+        .enumerate()
+        .map(|(m, model)| {
+            let texture = model.texture("tread_tm_nm");
+            let key = if car.track || m != 0 {
+                format!("{}{texture}", model_prefix(m))
+            } else {
+                texture
+            };
+            let texture_present = car.textures.contains_key(&key);
+            TreadSource {
+                key,
+                parts: 0,
+                missing_tangents: 0,
+                texture_present,
+            }
+        })
+        .collect();
+    for part in &car.parts {
+        let Some(m) = tread_part_model(car.track, &part.material) else {
+            continue;
+        };
+        let source = sources.get_mut(m).ok_or_else(|| {
+            format!(
+                "Tyre Tread model index {m} absent from Field: {:?}",
+                part.material
+            )
+        })?;
+        source.parts += 1;
+        source.missing_tangents +=
+            usize::from(part.mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_none());
+    }
+    Ok(sources)
+}
+
+/// Prepare the same per-model linear images used by the material consumer.
+fn upload_tread_normals(
+    car: &Car,
+    field: &Field,
+    graphics: &graphics::Settings,
+    images: &mut Assets<Image>,
+) -> Vec<Option<Handle<Image>>> {
+    let tread_sources =
+        tread_sources(car, field).expect("loaded tread namespaces must reference Field models");
+    tread_sources.iter().enumerate().map(|(model, source)| {
+        if !graphics.enhanced() || !graphics.tread_normals { return None; }
+        if !source.ready() {
+            println!("tread_normal active=false model={model} key={:?} parts={} missing_tangents={} texture_present={} reason=source-not-ready",source.key,source.parts,source.missing_tangents,source.texture_present);
+            return None;
+        }
+        let dds = car.textures.get(&source.key).expect("prepared tread texture remains present");
+        let image=texture_upload::image_linear(dds,graphics.sampler(false),RenderAssetUsages::default()).expect("validated linear tread normal DDS");
+        println!("tread_normal active=true srgb=false format={:?} frame=orthonormalized-source approximate=true model={model} key={:?}",image.texture_descriptor.format,source.key);
+        Some(images.add(image))
+    }).collect()
+}
+fn bind_tread_normal(
+    track: bool,
+    material_name: &str,
+    normals: &[Option<Handle<Image>>],
+    material: &mut StandardMaterial,
+) {
+    if let Some(model) = tread_part_model(track, material_name) {
+        material.normal_map_texture = normals.get(model).cloned().flatten();
+    }
+}
+
 #[derive(Resource)]
 struct Capture {
     path: PathBuf,
@@ -4857,32 +4952,7 @@ fn setup(
         texture_handles.insert(name.clone(), images.add(image));
     }
     let mut material_handles = BTreeMap::new();
-    let tread_ready = car
-        .parts
-        .iter()
-        .filter(|p| {
-            p.material
-                .strip_prefix("car0/")
-                .unwrap_or(&p.material)
-                .trim()
-                == "Tyre Tread"
-        })
-        .all(|p| p.mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_some());
-    let tread_texture = field.models[0].texture("tread_tm_nm");
-    let tread_key = if car.track {
-        format!("car0/{tread_texture}")
-    } else {
-        tread_texture
-    };
-    let tread_normal = if graphics.enhanced() && graphics.tread_normals && tread_ready {
-        car.textures.get(&tread_key).map(|dds| {
-            let image=texture_upload::image_linear(dds,graphics.sampler(false),RenderAssetUsages::default()).expect("validated linear tread normal DDS");
-            println!("tread_normal active=true srgb=false format={:?} frame=orthonormalized-source approximate=true",image.texture_descriptor.format);
-            images.add(image)
-        })
-    } else {
-        None
-    };
+    let tread_normals = upload_tread_normals(&car, &field, &graphics, &mut images);
     let lamp_normal = lamp_materials::upload_normal(&car, graphics.lamp_reflectors, graphics.lamp_lenses, &mut images, graphics.sampler(false));
     commands.insert_resource(lamp_materials::Prepared(lamp_normal));
     if graphics.lamp_signals != lamp_signals::Mode::Off {
@@ -5030,9 +5100,7 @@ fn setup(
                         material.reflectance = graphics.window_reflectance;
                     }
                 }
-                if name == "Tyre Tread" && (!track || part.material.starts_with("car0/")) {
-                    material.normal_map_texture = tread_normal.clone();
-                }
+                bind_tread_normal(track, &part.material, &tread_normals, &mut material);
                 materials.add(material)
             })
             .clone();
@@ -8713,5 +8781,282 @@ mod driving_tests {
             failures.push(format!("{stem}: collision sound without contact, peak {collision}"));
         }
         failures
+    }
+
+    #[test]
+    #[ignore = "requires purchased absolute GRID_GAME_ROOT; real car namespaces, CPU only"]
+    fn purchased_mixed_model_tread_sources_do_not_leak_keys_or_readiness() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required; never skip"),
+        );
+        assert!(root.is_absolute() && root.is_dir());
+        let models = vec![
+            CarModel::default(),
+            CarModel::new("bmw").unwrap(),
+            CarModel::new("stk").unwrap(),
+        ];
+        let mut car = load(&root, &Route::default(), &models[0], "LOD0_", false, false).unwrap();
+        let bare = tread_sources(
+            &car,
+            &Field {
+                models: vec![models[0].clone()],
+                car_model: vec![0],
+            },
+        )
+        .unwrap();
+        assert_eq!(bare.len(), 1);
+        assert_eq!(bare[0].key, "lac_tread_tm_nm.tga");
+        assert!(
+            bare[0].ready(),
+            "existing bare Lacetti source must remain ready"
+        );
+        // Reuse a real loaded Car allocation, then construct the aggregate with
+        // the actual append_car producer rather than hand-authored part names.
+        car.parts.clear();
+        car.textures.clear();
+        car.bindings.clear();
+        car.low_lods.clear();
+        car.reflections.clear();
+        car.track = true;
+        for (m, model) in models.iter().enumerate() {
+            append_car(&root, "LOD0_", &mut car, Mat4::IDENTITY, model, m).unwrap();
+        }
+        let field = Field {
+            models,
+            car_model: vec![0, 1, 2, 1],
+        };
+        let original = tread_sources(&car, &field).unwrap();
+        assert_eq!(original.len(), field.models.len()); // three models, four slots
+        assert_eq!(
+            original.iter().map(|s| s.key.as_str()).collect::<Vec<_>>(),
+            [
+                "car0/lac_tread_tm_nm.tga",
+                "car1/bmw_tread_tm_nm.tga",
+                "car2/stk_tread_tm_nm.tga"
+            ]
+        );
+        assert!(
+            original[0].ready(),
+            "existing aggregate Lacetti source must remain ready"
+        );
+        assert!(original.iter().all(|s| s.parts > 0 && s.texture_present));
+        // Keep source admission visible; the consumer controls below require
+        // the verified Lac/BMW positives and unchanged STK refusal.
+        eprintln!("actual mixed-model tread sources: {original:?}");
+
+        // These invoke both production consumers with actual Assets in a CPU
+        // World. No renderer/window/plugins or copied binding formula.
+        fn consume(car: &Car, field: &Field, settings: &graphics::Settings) -> App {
+            let mut app = App::new();
+            app.insert_resource(Assets::<Image>::default())
+                .insert_resource(Assets::<StandardMaterial>::default());
+            let normals = upload_tread_normals(
+                car,
+                field,
+                settings,
+                &mut app.world_mut().resource_mut::<Assets<Image>>(),
+            );
+            let names: std::collections::BTreeSet<_> = car
+                .parts
+                .iter()
+                .filter(|p| {
+                    tread_part_model(car.track, &p.material).is_some()
+                        || p.material == "car0/Tyre Wall"
+                })
+                .map(|p| p.material.as_str())
+                .collect();
+            for name in names {
+                // A ready peer's seeded handle must be cleared for an
+                // unready tread, but untouched for an unrelated material.
+                let mut material = StandardMaterial {
+                    normal_map_texture: normals[0].clone(),
+                    ..default()
+                };
+                bind_tread_normal(car.track, name, &normals, &mut material);
+                let handle = app
+                    .world_mut()
+                    .resource_mut::<Assets<StandardMaterial>>()
+                    .add(material);
+                app.world_mut()
+                    .spawn((Name::new(name.to_owned()), MeshMaterial3d(handle)));
+            }
+            app
+        }
+        fn bound(app: &mut App, name: &str) -> Option<Handle<Image>> {
+            let world = app.world_mut();
+            let handle = world
+                .query::<(&Name, &MeshMaterial3d<StandardMaterial>)>()
+                .iter(world)
+                .find(|(n, _)| n.as_str() == name)
+                .unwrap()
+                .1
+                .0
+                .clone();
+            world
+                .resource::<Assets<StandardMaterial>>()
+                .get(&handle)
+                .unwrap()
+                .normal_map_texture
+                .clone()
+        }
+        let enhanced = graphics::Settings {
+            preset: graphics::Preset::Enhanced,
+            tread_normals: true,
+            ..default()
+        };
+        // Decode each own source independently: equal consumer output alone
+        // could itself be the leakage bug, so cannot establish this control.
+        let source_base = |key: &str| {
+            let image = Image::from_buffer(
+                &car.textures[key],
+                bevy::image::ImageType::Extension("dds"),
+                bevy::image::CompressedImageFormats::BC,
+                false,
+                bevy::image::ImageSampler::Default,
+                RenderAssetUsages::default(),
+            )
+            .unwrap();
+            assert_eq!(image.texture_descriptor.format, TextureFormat::Bc1RgbaUnorm);
+            assert_eq!((image.width(), image.height()), (512, 256));
+            image.data.unwrap()[..65536].to_vec()
+        };
+        let source_lac_base = source_base(&original[0].key);
+        let source_bmw_base = source_base(&original[1].key);
+        assert_eq!(
+            source_lac_base, source_bmw_base,
+            "own source base maps really match"
+        );
+        let mut actual = consume(&car, &field, &enhanced);
+        let lac = bound(&mut actual, "car0/Tyre Tread").expect("Lac source admitted");
+        let bmw = bound(&mut actual, "car1/Tyre Tread").expect("BMW source admitted");
+        assert_ne!(lac.id(), bmw.id());
+        assert!(
+            bound(&mut actual, "car2/Tyre Tread").is_none(),
+            "STK source frame refusal unchanged"
+        );
+        assert_eq!(bound(&mut actual, "car0/Tyre Wall"), Some(lac.clone()));
+        let images = actual.world().resource::<Assets<Image>>();
+        assert_eq!(images.len(), 2);
+        let lac_image = images.get(&lac).unwrap();
+        let bmw_image = images.get(&bmw).unwrap();
+        assert_eq!(
+            lac_image.texture_descriptor.format,
+            TextureFormat::Bc1RgbaUnorm
+        );
+        assert_eq!(
+            bmw_image.texture_descriptor.format,
+            TextureFormat::Bc1RgbaUnorm
+        );
+        assert_eq!((lac_image.width(), lac_image.height()), (512, 256));
+        assert_eq!((bmw_image.width(), bmw_image.height()), (512, 256));
+        // Actual source base maps are identical, so a byte-only positive
+        // comparison could hide a cross-model leak. Distinguish below.
+        assert_eq!(&lac_image.data.as_ref().unwrap()[..65536], &source_lac_base);
+        assert_eq!(&bmw_image.data.as_ref().unwrap()[..65536], &source_bmw_base);
+        let lac_data = lac_image.data.clone();
+        let lac_mips = lac_image.texture_descriptor.mip_level_count;
+        let block = [0x00, 0xf8, 0, 0, 0, 0, 0, 0]; // authored red BC1
+        let sentinel = texture::Texture {
+            id: b"authored-namespace-control",
+            width: 4,
+            height: 4,
+            format: texture::Format::Bc1,
+            declared_mip_levels: 1,
+            base_blocks: &block,
+            remaining_data: &block,
+        }
+        .validated_dds()
+        .0;
+        let saved_bmw = car
+            .textures
+            .insert(original[1].key.clone(), sentinel)
+            .unwrap();
+        let mut distinct = consume(&car, &field, &enhanced);
+        let own_lac = bound(&mut distinct, "car0/Tyre Tread").unwrap();
+        let own_bmw = bound(&mut distinct, "car1/Tyre Tread").unwrap();
+        assert_ne!(own_lac.id(), own_bmw.id());
+        let images = distinct.world().resource::<Assets<Image>>();
+        assert_eq!(images.len(), 2);
+        assert_eq!(images.get(&own_lac).unwrap().data, lac_data);
+        assert_eq!(
+            images
+                .get(&own_lac)
+                .unwrap()
+                .texture_descriptor
+                .mip_level_count,
+            lac_mips
+        );
+        let image = images.get(&own_bmw).unwrap();
+        assert_eq!((image.width(), image.height()), (4, 4));
+        assert_eq!(image.texture_descriptor.format, TextureFormat::Bc1RgbaUnorm);
+        assert_eq!(image.texture_descriptor.mip_level_count, 2);
+        assert_eq!(&image.data.as_ref().unwrap()[..8], &block);
+        car.textures.insert(original[1].key.clone(), saved_bmw);
+        for settings in [
+            graphics::Settings {
+                preset: graphics::Preset::Baseline,
+                ..enhanced
+            },
+            graphics::Settings {
+                tread_normals: false,
+                ..enhanced
+            },
+        ] {
+            let mut disabled = consume(&car, &field, &settings);
+            assert_eq!(disabled.world().resource::<Assets<Image>>().len(), 0);
+            for name in ["car0/Tyre Tread", "car1/Tyre Tread", "car2/Tyre Tread"] {
+                assert!(bound(&mut disabled, name).is_none());
+            }
+        }
+
+        // Losing only BMW's image cannot bind Lacetti's or change either peer.
+        assert!(car.textures.remove(&original[1].key).is_some());
+        let missing_texture = tread_sources(&car, &field).unwrap();
+        assert_eq!(missing_texture[0], original[0]);
+        assert_eq!(missing_texture[2], original[2]);
+        let mut missing = consume(&car, &field, &enhanced);
+        assert!(bound(&mut missing, "car0/Tyre Tread").is_some());
+        assert!(bound(&mut missing, "car1/Tyre Tread").is_none());
+        assert!(bound(&mut missing, "car2/Tyre Tread").is_none());
+        assert_eq!(missing.world().resource::<Assets<Image>>().len(), 1);
+        assert!(!missing_texture[1].ready());
+        assert!(!missing_texture[1].texture_present);
+        assert_eq!(missing_texture[1].parts, original[1].parts);
+        assert_eq!(
+            missing_texture[1].missing_tangents,
+            original[1].missing_tangents
+        );
+        // Remove STK frames without assuming its original source admitted any.
+        for part in car
+            .parts
+            .iter_mut()
+            .filter(|p| tread_part_model(true, &p.material) == Some(2))
+        {
+            part.mesh.remove_attribute(Mesh::ATTRIBUTE_TANGENT);
+        }
+        let missing_frame = tread_sources(&car, &field).unwrap();
+        assert_eq!(missing_frame[0], original[0]);
+        assert_eq!(missing_frame[1], missing_texture[1]);
+        assert!(!missing_frame[2].ready());
+        assert!(missing_frame[2].texture_present);
+        assert_eq!(missing_frame[2].parts, original[2].parts);
+        assert_eq!(missing_frame[2].missing_tangents, missing_frame[2].parts);
+        car.parts
+            .retain(|p| tread_part_model(true, &p.material) != Some(2));
+        let no_parts = tread_sources(&car, &field).unwrap();
+        assert_eq!(no_parts[2].parts, 0);
+        assert!(!no_parts[2].ready());
+        assert!(no_parts[2].texture_present); // no vacuous all() readiness
+        // A car namespace outside Field is an explicit error, never model0.
+        car.parts
+            .iter_mut()
+            .find(|p| tread_part_model(true, &p.material) == Some(0))
+            .unwrap()
+            .material = "car99/Tyre Tread".into();
+        assert!(
+            tread_sources(&car, &field)
+                .unwrap_err()
+                .contains("model index 99 absent")
+        );
     }
 }
