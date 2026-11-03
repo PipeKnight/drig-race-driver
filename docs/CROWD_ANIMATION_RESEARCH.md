@@ -741,3 +741,28 @@ section31, and grid-app crowd_sound. It already consumes route crowd cells and
 ReactiveCrowd events; visual animation is not a prerequisite for that playback.
 Gasps/recoil and original RNG remain separately documented audio limits. This
 audit adds no audio, rendered crowd, clock or default-policy change.
+
+### Shared instanced-stream layout
+
+The shared initializer `0x00B9ADE0` computes each stream's byte size from the
+actual format record, stores cumulative offsets and assigns a common stride.
+Applied to the five established crowd instance descriptors, it gives:
+
+| Stream | Byte offset | Byte size |
+|---|---:|---:|
+| Instanced0 | 0 | 12 |
+| Instanced1 | 12 | 8 |
+| Instanced2 | 20 | 4 |
+| Instanced3 | 24 | 4 |
+| Instanced4 | 28 | 4 |
+
+The resulting instance stride is 32 bytes. Instanced3 uses the native
+`uint_color_argb` format record and occupies bytes 24–27. This is a shared CPU
+layout/allocation contract, not a recovered GPU channel interpretation. It does
+not establish component normalization or the writer connecting saved
+`textureShift` to the shader input; no quarter-atlas UV rule follows. Animation
+clock, reference initialization and native pose/LOD policy remain separate.
+
+Exact 229-byte instruction evidence, shared-master cache hash and descriptor
+arithmetic receipt: `local/handoff/drafts/crowd-interleaved-layout86/`;
+format identity: `local/handoff/drafts/crowd-native-format75/`.
