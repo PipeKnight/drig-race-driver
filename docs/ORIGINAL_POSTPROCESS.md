@@ -1,0 +1,147 @@
+# Original GRID final-colour merge contracts
+
+Static resource and instruction evidence for the original postprocessing chain;
+not a completed renderer port or proof of live effect selection. G348, 2 November 2026.
+
+## Selected resources and current engine gap
+
+The saved ordinary `type2.xml` root selects **CheapFinalMerge**. The saved
+`type2_noblur.xml` root selects **FinalMergeNoBlur**. An available block called
+Merge2ColourBalance is not thereby the selected final pass. The purchased
+`postprocess/shaders/postprocess.nefx` resolves both selected effects to loose SM3
+pixel programs, with `vignette.vsh/main_singlePixelOffset` as their vertex program;
+these are not entries in the common packed shader collection.
+
+The ordinary merge takes blurred scene, bloom and softening. The no-blur merge
+uses unblurred scene and additionally samples the green channel of speedLum's
+output, with point filtering for that luminance input. The other three inputs use
+linear filtering. Saved output inheritance does not establish runtime target
+formats, sRGB state, active quality preset or transition selection.
+
+Current enhanced rendering uses authored Bevy exposure, tonemapping and bloom.
+The optional TrackGrade runs after tonemapping and explicitly converts its input
+through sRGB for grading. Its current entry point also loads Donington's named
+effect instead of resolving a general selected-track chain. These adaptations
+must not be presented as the original merge. In particular, changing an arbitrary
+bloom or tint multiplier cannot close this gap.
+
+## Finite-input shader algebra
+
+Let W=(0.212500006,0.715399981,0.0720999986), with prepared mix amounts kC/kB/kS.
+The ordinary pass computes:
+
+```
+A = scene*kC + softening*kS
+C = A + bloom*kB*saturate(1-dot(A,W))
+```
+
+The no-blur pass first computes S=scene*kC and reads luminance L from the green
+channel. Its exposure factor is L, except when toggleThreshold>0 and L>1:
+
+```
+weight = saturate(max(S.r,S.g,S.b)-lumThreshold)*lumThresholdScale
+factor = 1 + weight*(L-1)
+A = S*factor + softening*kS
+C = A + bloom*kB*max(1-dot(A,W),0)
+```
+
+Threshold scale multiplies **after** saturation. The no-blur bloom gate has no
+upper cap, unlike the ordinary gate. Softening follows the thresholded scene.
+Both then desaturate toward dot(C,W), multiply by prepared tint, blend toward
+vignette colour using a smoothed radial factor, apply contrast and brightness,
+and clamp only to the upper maxbrightness value. Output alpha is one. Neither
+selected pixel program contains a gamma operation or a lower/nonnegative clamp.
+This does not prove gamma is absent elsewhere in the original pipeline.
+
+These equations describe finite-input algebra. Original partial-precision
+instructions and different LRP/MAD and smoothstep associations are not bit-parity
+contracts, and exceptional-value behavior has not been established. Original
+half-texel sampling and vertex clip-position corrections also require deliberate
+adaptation rather than copying offsets into Bevy fullscreen coordinates.
+
+## One verified preparation edge: tint
+
+The selected object's constructor at `0x00747C50` creates a parameter subobject
+at offset +8. Registration/initialization at `0x00745DC0` gives tintAmount at
+parameter+0x24 and packed tintColour at parameter+0x28. Update `0x00747D60`
+normalizes unsigned colour bytes by its binary32 reciprocal of 255. Instructions
+`0x00748358..0x0074839D` prepare:
+
+```
+preparedTint = 1 + tintAmount*(normalizedColour-1)
+```
+
+Binding method `0x00748450` maps preMultipliedTint to that prepared field; the
+selected ordinary pixel program consumes c9, and no-blur consumes c10. This
+supports the current lerp algebra for tint alone; it does not validate its
+post-tonemap colour domain. Constructor amount zero yields neutral tint, but is
+not proof of active effect defaults or XML override/interpolation behavior.
+
+## Next boundary and retained evidence
+
+Before a normal-path port: resolve upstream luminance preparation,
+selected-route effect and chain policy, and actual input/output colour domains.
+A small future merge kernel can take explicit prepared samples/uniforms; no new
+general render-graph framework is needed. Arithmetic tests, uniform-binding
+controls and real rendered comparisons would establish different things; none
+has been run for a new implementation here. Row 77 remains open.
+
+Private shader resources and full disassemblies stay outside public source:
+`local/handoff/drafts/postprocess-next01/selected-merges01/` and `tint-binder01/`.
+The three selected loose programs were disassembled once with the existing tool,
+Python 3.14.4 and Microsoft-signed d3dcompiler_47.dll 10.0.26100.9606. Source files,
+methods, complete bindings, hashes and the corrected tint address are pinned in
+those packets. An independent instruction review confirmed the finite algebra
+and its precision limits. No original process, new GPU test or default rendering
+change was performed for this research.
+
+## Contrast and vignette preparation (G348 continuation)
+
+Named registration `0x00745DC0`, preparation `0x00747D60` and binder
+`0x00748450`, joined to the selected shader constant tables, establish:
+
+- Contrast passes directly from object+0x18 to CheapFinalMerge PS c6 or
+  FinalMergeNoBlur PS c7. Brightness passes from object+0x1C to c8 or c9.
+  The saved key is misspelled `brighness`; the binder uses `brightness`.
+- `vignetteParams1 = (scaleX, scaleY, -0.0-offsetX, offsetY)`;
+  `vignetteParams2 = (rotation, 0, 0, 0)`. These bind shared vertex c1/c2;
+  vignetteShape binds c0. The negative-zero source constant matters for bit claims.
+- Saved vignetteTransition is a scalar tau. The prepared shader vector is
+  `(1/tau, 1-1/tau, 0, 0)`, binding Cheap PS c13 or no-blur PS c14.
+  Source DIVSS has no local epsilon or clamp; upstream domain admission is unknown.
+- Both selected pixel programs consume only prepared vignetteColourTL.rgb,
+  normalized from unsigned packed bytes. Other corner colours/link flags and
+  vignetteBlendMode exist in common metadata but are not consumed by these two
+  programs. A four-corner gradient cannot be inferred from their presence.
+
+For finite inputs, the selected programs form radial=saturate(dot(q,q)),
+z=saturate(radial/tau+1-1/tau), and vignette weight=amount*z*z*(3-2*z).
+The shared vertex prepares q with rotation, signed offsets, independent scales,
+shape and its retained binary32 0.89 constant. Original instruction association,
+SINCOS and partial precision remain relevant; these equations are not bit parity.
+
+Constructor contrast=1, brightness=0, amount=0 and transition=1 establish only
+initialization, not active XML overrides, interpolation or live uploaded values.
+No new kernel, arithmetic test or rendered comparison was run here. Full static
+bindings, signs, instructions, input hashes and limitations remain private in
+`local/handoff/drafts/postprocess-next02/`. Live chain/route selection, viewport
+and sampler dimension preparation, scene/bloom/softening/luminance inputs and
+render-target/sRGB domains remain open.
+
+## Dimension-provider association limit (G348 continuation)
+
+A bounded named-binding follow-up located dimension setter `0x0072A920`:
+it forms sampler0Dim from two unsigned input words and ones, then sampler0IDim
+through RCPPS plus one refinement. Constructor `0x00733A70` installs its table;
+caller `0x0073AA00` constructs it and invokes initializer `0x00733B80`.
+That actual initializer resolves named depth-prepass resources and motion slots.
+This establishes a concrete construction route, not its association with the
+selected CheapFinalMerge/FinalMergeNoBlur inputs or exclusive subsystem usage.
+The formal class and concrete input descriptor remain unresolved.
+
+Separately, viewportDimensions is registered as semantic index 40; its numeric
+producer is not established. Neither route proves window dimensions, a .4/W,H
+correction, texture sRGB state or the selected merge render-target domain.
+The next direct edge is the selected merge's actual input-handle resolver and
+binder. Private source proofs: `postprocess-next03/` and
+`postprocess-provider-association04/` under `local/handoff/drafts/`.

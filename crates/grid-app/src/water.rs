@@ -71,6 +71,14 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
     let file = route.track_file("land.pssg");
     let bytes = super::read(&root.join(&file))?;
     let tree = pssg::read_tree(&bytes)?;
+    if scene::is_empty_optional_static_package(&tree)? {
+        return Ok(Source {
+            definitions: BTreeMap::new(),
+            draws: Vec::new(),
+            textures: BTreeMap::new(),
+            environment: None,
+        });
+    }
     let mut definitions = BTreeMap::new();
     for s in material::read_constants(&tree)? {
         if s.group != b"water.fx" {
@@ -156,10 +164,6 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
 }
 
 pub fn install(app: &mut App, root: &Path, route: &Route) -> Result<(), Box<dyn std::error::Error>> {
-    // Milan's and Shibuya's land.pssg hold no render instances.
-    if !super::land_has_draws(root, route)? {
-        return Ok(());
-    }
     let mut source = read_source(root, route)?;
     if source.draws.is_empty() {
         return Ok(());
@@ -240,4 +244,31 @@ fn spawn(
         ));
     }
     println!("water spawned draws={count} materials={} reflection=source-sky-cube-64 authored_cube=true", handles.len());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_optional_land_water_adapter_preserves_empty_and_nonempty_sources() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"),
+        );
+        for path in [grid_tools::route::SHIBUYA, grid_tools::route::MILAN] {
+            let route = Route::new(path).unwrap();
+            let source = read_source(&root, &route).unwrap();
+            assert!(source.definitions.is_empty(), "{path}");
+            assert!(source.draws.is_empty(), "{path}");
+            assert!(source.textures.is_empty(), "{path}");
+            assert!(source.environment.is_none(), "{path}");
+        }
+        let route = Route::new("tracks/usa/detroit/route_8").unwrap();
+        let source = read_source(&root, &route).unwrap();
+        assert!(!source.definitions.is_empty());
+        assert!(!source.draws.is_empty());
+        assert!(!source.textures.is_empty());
+        assert!(source.environment.is_none());
+    }
 }

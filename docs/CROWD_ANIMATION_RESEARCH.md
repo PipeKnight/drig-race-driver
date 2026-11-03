@@ -433,3 +433,254 @@ The eight proposed arithmetic controls in the private constraints note are not
 implemented or run. Shared lookups/cache and bounded instruction windows were
 reused; no new decompilation, original process or GPU run was needed. Evidence:
 `local/handoff/drafts/crowd-clock-contract29/`.
+
+## Authenticated scene provider and target names (G346)
+
+On 30 October 2026 a fresh owner-started Detroit reference session supplied a
+bounded read-only snapshot of one job-owned crowd actor. The reader authenticated
+executable path/hash, exact process creation time and selected live code, then
+followed the named OrganismPlugin registry entry through its manager, job actor
+membership, controller and receiver. Before/after pointer associations agreed;
+these external multiword reads remain non-atomic. No original function was called.
+
+The actual receiver's scene provider installed vtable `0x00D39734`. Its type query
+at `0x00AC55E0` is the six-byte constant return of descriptor `0x00EC24D0`.
+Registration `0x00C7C4D0` and factory `0x00AC5650` link that descriptor and table to
+`NeAnimDefaultSceneBinding`; the runtime descriptor/name and source getter
+`0x00AC4810` were also checked. A shared-master decompilation request for the tiny
+query returned MISS, so the type proof uses its exact instructions and registration,
+not invented pseudocode or a native virtual-function invocation.
+
+For this actor, selector zero's flattened group count and all three current pose
+buffer counts were 35. The name reader followed the source interned-string lookup
+`0x00AFF440`, preserving exact bytes and order, then checked regular non-null target
+node names. Thirty-one slots had matching non-null targets; four entries named
+Point01 or MATTS CAMERA were null. Repeated names remain repeated source slots.
+This is not a universal skeleton size, a palette-index zip, or evidence that all
+crowd actors use this provider. No matrices or prior-local/reference values were
+read, and the buffer actually forwarded by the running callback remains unknown.
+
+The same snapshot retained raw timer fields after checking its known type: request
+and mapped output both had bits `0x3CFB9303`; input extent and mapped span both
+`0x3D088889`; offset and repeat count were zero, and the two policy bytes were one.
+These are one observed instance's raw fields. They do not identify seconds,
+playback speed, clip duration, pause behavior or production clock defaults.
+
+Private evidence, retained in full:
+`local/graphics/original-crowd-provider32/`, with capture-provider01.json,
+capture-selector02.json and capture-names-timer03.json (2276, 2835 and 5467 requested
+bytes respectively). The reviewed readers and static type proof are under
+`local/handoff/drafts/crowd-binding-capture32/`, `crowd-provider-identity33/` and
+`crowd-binding-capture34/`. This closes a concrete provider/name association;
+rendered animation and native pose parity remain open.
+
+## Source of the crowd job scalar (G346, 2 November 2026)
+
+The previously missing job store is now identified. Constructor `0x0076EA20`
+allocates the concrete job, installs vtable `0x00CF5A98` and inserts it into the
+manager job vector. Scheduler `0x00764700` loads argument five at `0x00764875` and
+stores that unchanged float at job+0x0C at `0x0076487A`, before either queued or
+direct dispatch. Argument four separately supplies job+0x50; conflating these two
+inputs would give the animation timer the wrong scalar.
+
+Caller `0x005C8970` resolves the named OrganismPlugin and forwards plugin+0xA4 as
+argument five. Its virtual+0x18 callback `0x00639EA0` copies its own first argument
+unchanged into that field at `0x0063A034`. Static initializer `0x00C782C0` registers
+the plugin and its concrete table. Combined with the existing update research:
+
+`plugin callback arg1 -> plugin+A4 -> scheduler arg5 -> job+0C -> 76D420 -> 74F720 -> ACAC50`.
+
+No arithmetic conversion occurs on this forwarding route. The indirect lifecycle
+dispatcher that supplies the callback argument has not been identified. Registry
+xref/list-construction evidence does not prove an update call, and physics frame
+clock units cannot be transferred to this independent path. Units and pause/replay
+scaling therefore remain unknown; Packet::sample keeps its explicit bank coordinate.
+No clock API or renderer elapsed-time fallback is introduced. Private source/cache
+proof and bounded negative dispatcher audit: `local/handoff/drafts/crowd-clock-producer35/`,
+`crowd-clock-producer36/` and `crowd-clock-dispatch37/`. No new original session or
+native execution was needed for this static continuation.
+
+## Concrete controller setup and initial slot buffers (G346 continuation)
+
+Actual caller `0x0076F6CE` inside `0x0076EA20` invokes controller setup
+`0x00763160` with the definition and actor+0x1D8 scene pointer. The earlier
+actor setup `0x0075D630` stores its third argument unchanged at that scene field.
+The controller creates the authenticated NeAnimDefaultSceneBinding and
+NeAnimDefaultSlotArrayOutput; definition adapter `0x00AC4900`, scene-list adapter
+`0x00AC4FF0` and receiver adapter `0x00AC6170` supply their actual inputs.
+Provider and receiver virtual+0x28 calls select the known marker rebuild methods.
+This establishes a concrete setup path rather than a merely compatible factory.
+
+Setup queries the dynamic selector-zero slot count through `0x00AC8720`, creates
+three headers and explicitly zeros every slot value (16 bytes) and weight
+(4 bytes). These are setup-time zeros, not identity quaternions or a per-frame
+node reset. The value/weight storage comes from caller manager pools; live
+snapshots previously showed aliasing. Independent persistent pose storage for
+every actor, scratch lifetime and concurrency policy are not established.
+
+The scene originates in a prior bank creation/clone callback. Its child local
+matrices and exact reference-pose semantics remain unknown. Preserve explicit
+prior locals in receiver experiments; neither root identity nor zeroed slot data
+justifies manufacturing a bind pose. Clock units, active forwarded buffer, native
+pose parity and production crowd animation remain open. Private retained source
+proof: `local/handoff/drafts/crowd-controller-setup39/` (Python 3.14.4,
+Capstone 5.0.6, shared cached master/PE, no new original process or decompilation).
+
+
+## Current bank identity confirmed (3 November 2026, G346)
+
+An owner-authorized read-only snapshot of the original Detroit race confirmed
+three current crowd-bank tables at `0x00D46A80`, each with slot+0x1C targeting
+`0x00BA11C0`. Their installed table bytes match the pinned analysis executable.
+The selected actor scene also equals its current selector-zero provider scene;
+identity and association brackets agree. The capture requested3215bytes total,
+including352new bytes, without suspending or modifying the process.
+
+This closes the previous conditional bank-type boundary. It does not identify
+which bank originally produced that actor, recover construction history, prove
+reference child locals or establish clock units. Continue with the authenticated
+clone method before choosing a reference pose. Detroit is only a reference: the
+production path must consume shared crowd formats and per-track placement/LOD
+data wherever present, and needs representative cross-track validation.
+Private evidence: `local/graphics/original-crowd-bank42/`; capture/review/pins:
+`local/handoff/drafts/crowd-bank-capture42/`.
+
+
+### General renderer coverage contract
+
+The existing shared placement reader was checked against97route files; this is
+format coverage, not restored crowds. The current preview still hardcodes USA
+resources, seated groups and Detroit route8. Removing its route guard alone
+would retain those omissions and is not a general fix.
+
+A shared consumer must resolve the track-level organism dataset and definitions,
+then the current route-level placements. Preserve regional aliases, variants and
+standing/seated/leaning groups; report unresolved or unsupported groups instead
+of silently dropping them. Donington0, Shibuya0 and Detroit8 are representative
+validation fixtures, never a production whitelist. Moving paths, source LOD,
+cloth, native timing and full posed rendering remain separate open boundaries.
+Private source/cache audit: `local/handoff/drafts/crowd-cross-track-coverage01/`.
+
+Shibuya track metadata was subsequently read directly: its explicit resources
+select `cr_jpn_billboard`, `cr_male_jpn` and `cr_female_jpn`, alongside shared
+animation, camera-flash and marshall resources. This closes the filename/alias
+gap for that dataset. It contains no regional-definition/platform/LOD selector;
+do not infer the runtime definition-selection rule from filenames. The typed
+resolver and automatic selection producer remain open. See coverage01
+`SHIBUYA_DATASET_ADDENDUM.md` in private evidence.
+
+
+### Confirmed local-matrix copy stage
+
+Offline continuation of the captured ROOTNODE route reaches the common typed
+clone path. The copy helper transfers all64bytes of the existing source local
+matrix at+0x50, then recursively dispatches each child through its own class.
+Attachment and deferred-reference/finalization hooks follow. This proves a copy
+stage, not final bind/reference semantics for every child or a per-frame reset.
+Actual source-bank child classes, prior template state, active output and clock
+units remain open. Preserve explicit prior locals in receiver experiments.
+
+| Address | Observed role in this bounded source chain |
+|---|---|
+| `0x00BA11C0` | Common clone wrapper and later fix-up dispatch |
+| `0x00BA0260` | Per-node virtual copy dispatch |
+| `0x00BBCBA0` | ROOTNODE copy callback |
+| `0x00BA0690` | Common node copy setup |
+| `0x00BA12D0` | Local-matrix copy and recursive child construction |
+| `0x00BA1280` | Child attachment and virtual hooks |
+| `0x00BA1410` | Bounded adapter/map support in the clone path |
+| `0x00BA09B0` | Deferred-reference/finalization work |
+| `0x00741080` | ROOTNODE slot+0x20 returns zero; other classes unproven |
+
+Private source proof and capture verification:
+`local/handoff/drafts/crowd-bank-clone43/`. Python3.14.4 and existing Capstone5.0.6
+used the pinned PE and shared master function extents; no new decompilation or
+original access was required. No rendered-animation compatibility is claimed.
+
+
+## Shared regional context and definition lookup (G346 continuation)
+
+The concrete OrganismPlugin resource callback at `0x0064A730` derives its
+regional context from resource userdata containing the case-sensitive word
+`billboard`, rather than a track name or filename. Under its initialized
+lifecycle, the shipped billboard aliases select Europe, USA and Japan; an
+empty/undefined suffix becomes `europe`. This does not establish malformed or
+repeated-resource lifecycle behaviour. Initialization is `0x006524D0`.
+
+For type definitions, the call at0x0064AA44 into `0x00759B10` supplies separate
+`generic` and regional definition contexts, plus `generic` LOD and map contexts.
+Named-table resolvers `0x00771280`, `0x007712D0` and `0x00771320` use source
+case-insensitive comparison. Runtime distance/budget scheduling remains open.
+
+Inside the parser, each instanceMap crowdDef name is looked up in the regional
+set first, then generic if the set or name is missing. `0x00771070` compares
+the full name and selects the first match within that set. One whole definition
+index is stored; this branch does not merge generic and regional fields. An
+absent attribute or both misses retains an unresolved index. No other region
+is searched. Shipped ASCII case behaviour is established; non-ASCII CRT locale
+policy is not. Duplicate rejection in an independent loader must be labelled
+authored admission rather than native first-match compatibility.
+
+The retained metadata has30generic instance maps: for each inspected regional
+context eight use regional definitions and22need generic definitions. These
+are metadata-resolution counts, not runtime population counts. A regional-only
+resolver would omit generic officials/crew roles and cannot be the shared
+solution. Unknown/unresolved groups and alternate variants must remain visible
+to the caller; no silent omission or field merge.
+
+Private source evidence: `local/handoff/drafts/crowd-definition-producer44/`
+and `local/handoff/drafts/crowd-definition-resolution45/`. These bounded offline
+findings use existing PE/master caches and prove no rendered animation, clock
+units, child reference pose, runtime LOD or complete all-track compatibility.
+
+
+### Concrete update dispatcher, clock units still open
+
+The list owner at table0x00D08490 has virtual+0x04=`0x008841A0`. This dispatcher
+reads an incoming double through a pointer, converts it to float and forwards
+it to plugin virtual+0x18 for a ready plugin whose record has no named override.
+The resulting argument joins the earlier source chain through0x00639EA0,
+plugin+0xA4 and the concrete animation job. No time-unit factor is present in
+this conversion; the caller still determines the unit.
+
+The literal-directed purchased `system/renderpriority.xml` explicitly contains
+the ordinary OrganismPlugin update entry, followed by separately named
+postAnimationUpdate and jobSync entries. List construction distinguishes the
+ordinary virtual callback from named overrides. Successful loading and runtime
+state gates remain prerequisites; no live callback hit was observed here.
+
+`0x008A23A0` constructs the list owner, `0x008AF080` selects configuration
+categories and `0x008A2470` builds plugin/override records. Only the first three
+known table entries were attributed; adjacent data was not assumed part of it.
+The indirect scheduler caller and incoming double producer remain unknown.
+A similar physics task ABI or plausible float magnitude does not establish
+crowd seconds, pause/replay scaling or a fixed-step fallback. Private exact
+source/configuration proof: `local/handoff/drafts/crowd-clock-dispatch46/`.
+
+
+## Shared typed metadata preparation (G352, local)
+
+`grid-app/src/crowd_population.rs` now contains the common dataset and
+definition resolver. It uses the existing XML graph, binary definitions and
+placement readers; it does not introduce another XML parser, track whitelist
+or elapsed-time animation policy. Explicit primary/fallback context applies
+the recovered regional-first whole-definition lookup. Supported ASCII name
+comparison follows source order; unsupported comparison domains and unsafe
+selected resource references remain explicit admission failures.
+
+Complete source documents, unknown metadata, map/variant alternatives and
+unresolved/moving groups remain available to the caller. Metadata accounting
+is separate from rendering and does not duplicate source actors when several
+map or texture alternatives exist. Shared default/region callback lifecycle is
+not automatically modeled by the explicit-context API.
+
+The existing bounded preview consumes this resolver instead of substring
+resource matching and an independent USA definition traversal. Its diagnostic
+route/mode limits, numerical policy, selected subset and renderer remain
+unchanged. This is a real consumer of common preparation, not restored normal
+all-track animated crowds. On the fresh integrated source, all27authored/purchased metadata tests and
+the existing numeric/atlas/row control pass. Combined-feature Clippy and the
+full1388-test gate, four identities and24soak scenarios also pass; this does
+not establish rendered animation or native clock/pose/LOD compatibility.
+Private review/pins: `local/handoff/drafts/crowd-metadata-consumer46/`; actual
+applied hashes and checks: `local/graphics/crowd-metadata01/`.

@@ -30,3 +30,9 @@ The first targeted session should address a concrete missing dependency, such as
 Keep proprietary recordings and runtime state under ignored `local/`; publish independently authored methodology and findings in Markdown. Link each successful or failed session from [PROJECT_LOG.md](../PROJECT_LOG.md), with the executable/resource identity, setup, evidence paths, limitations and next question.
 
 No immediate owner action is required. Offline integration work can continue. When owner help becomes useful, provide an armed capture and a precise maneuver rather than asking for unguided driving.
+
+## Original GRID automation convention (owner, 30 October 2026)
+
+Launch the existing research working copy directly: `C:/Users/debros/tools/grid-research/grid-compat/grid.exe`. Do not navigate Steam to start reference work. For menu and driving input, reuse the established timed AutoHotkey scripts rather than short Computer Use key presses: the latter have repeatedly failed to register in this game. This is an explicit owner preference. Continue asking permission before taking desktop control when availability has not already been granted.
+
+Current session-owned examples are `local/graphics/original-stadium02/windowed01/replay-camera.ps1` and its adjacent `.ahk`; keep these private. Use a fresh session identity (PID, executable path/hash and creation time), explicit bounded action/hold duration and saved input log. Never reuse historical process IDs, run duplicate hotkey servers, or send input while the owner is driving. Preserve and restore exact user settings around temporary windowed runs; leave the Steam reference installation unchanged.

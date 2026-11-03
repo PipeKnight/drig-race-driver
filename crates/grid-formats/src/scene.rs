@@ -40,6 +40,103 @@ const IDENTITY: [f32; 16] = [
 pub fn read_static_draws<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>]) -> Result<Vec<Draw<'a>>> {
     read_scene_draws(tree, meshes, Subset::Static, None)
 }
+/// Conservative empty-package admission for OPTIONAL static supplements only.
+/// Required geometry readers stay strict. Unknown content takes their normal
+/// validation path; it is never reclassified from an error into an empty scene.
+/// This authored metadata-only subset is not a universal PSSG schema claim.
+pub fn is_empty_optional_static_package(tree: &Tree<'_>) -> Result<bool> {
+    for (i, n) in tree.nodes.iter().enumerate() {
+        let attributes: &[&[u8]] = match tree.name(i) {
+            b"ROOT" | b"PSSGDATABASE" => &[b"creator", b"creationMachine", b"creationDate", b"scale", b"up"],
+            b"LIBRARY" => &[b"type"],
+            b"ROOTNODE" | b"NODE" => &[b"id", b"nickname", b"stopTraversal"],
+            b"TRANSFORM" | b"BOUNDINGBOX" => &[],
+            _ => return Ok(false),
+        };
+        for a in &n.attributes {
+            let Some(name) = tree.framing.schema.iter().flat_map(|e| &e.attributes)
+                .find(|d| d.id == a.id).map(|d| d.name) else {
+                return Ok(false);
+            };
+            if !attributes.contains(&name) {
+                return Ok(false);
+            }
+            // Type eligibility is checked without propagating malformed metadata:
+            // later unsupported content must still delegate unchanged.
+            if name == b"type" && tree.string(i, name).is_ok_and(|v| v != b"NODE") {
+                return Ok(false);
+            }
+        }
+    }
+    // Only the FULLY eligible metadata-only subset gets extra validation.
+    for (i, n) in tree.nodes.iter().enumerate() {
+        for a in &n.attributes {
+            let name = tree.framing.schema.iter().flat_map(|e| &e.attributes)
+                .find(|d| d.id == a.id).unwrap().name;
+            match name {
+                b"scale" | b"up" => {
+                    let data = tree.attribute(i, name)?;
+                    if data.len() != 12 || data.as_chunks::<4>().0.iter()
+                        .any(|b| !f32::from_be_bytes(*b).is_finite()) {
+                        return fail(n.offset, "invalid empty-package vector metadata");
+                    }
+                }
+                b"stopTraversal" => {
+                    if tree.integer(i, name)? > 1 {
+                        return fail(n.offset, "invalid empty-package traversal flag");
+                    }
+                }
+                _ => {
+                    tree.string(i, name)?;
+                }
+            }
+        }
+    }
+    let mut roots = 0;
+    for (i, n) in tree.nodes.iter().enumerate() {
+        let parent = n.parent.map(|p| tree.name(p));
+        match tree.name(i) {
+            b"ROOT" | b"PSSGDATABASE" if i == 0 && parent.is_none() => {}
+            b"LIBRARY" if matches!(parent, Some(b"ROOT" | b"PSSGDATABASE")) => {}
+            b"ROOTNODE" | b"NODE" => {
+                let rooted = tree.name(i) == b"ROOTNODE";
+                if !(if rooted {
+                    matches!(parent, Some(b"ROOT" | b"PSSGDATABASE" | b"LIBRARY"))
+                } else {
+                    matches!(parent, Some(b"ROOTNODE" | b"NODE"))
+                }) {
+                    return fail(n.offset, "invalid empty-package scene hierarchy");
+                }
+                roots += usize::from(rooted);
+                tree.string(i, b"id")?;
+                node_matrix(tree, i)?;
+                if n.children.iter().filter(|&&c| tree.name(c) == b"BOUNDINGBOX").count() > 1 {
+                    return fail(n.offset, "duplicate empty-package bounding box");
+                }
+            }
+            b"TRANSFORM" if matches!(parent, Some(b"ROOTNODE" | b"NODE")) => {
+                // node_matrix checks exactly one finite affine local transform.
+            }
+            b"BOUNDINGBOX" if matches!(parent, Some(b"ROOTNODE" | b"NODE")) => {
+                let data = n.data.ok_or(crate::Error { offset: n.offset, message: "empty-package bounds absent" })?;
+                if data.len() != 24 {
+                    return fail(n.offset, "empty-package bounds must be six floats");
+                }
+                let bounds: [f32; 6] = std::array::from_fn(|j|
+                    f32::from_be_bytes(data[j * 4..j * 4 + 4].try_into().unwrap()));
+                if bounds.iter().any(|v| !v.is_finite()) || (0..3).any(|j| bounds[j] > bounds[j + 3]) {
+                    return fail(n.offset, "invalid empty-package bounds");
+                }
+            }
+            _ => return fail(n.offset, "invalid empty-package metadata ancestry"),
+        }
+    }
+    if roots == 0 {
+        return fail(0, "empty optional package lacks a scene root");
+    }
+    Ok(true)
+}
+
 /// Object-library closest LOD: direct children of LODVISIBLERENDERNODE only.
 /// Lower LOD lists and physics/damage branches remain unselected.
 pub fn read_object_draws<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>]) -> Result<Vec<Draw<'a>>> {

@@ -10,6 +10,7 @@ mod foundation_front;
 mod foundation_front_audit;
 mod foundation_backing;
 mod foundation_backing_audit;
+mod crowd_population;
 mod crowd_preview;
 mod crowd_rig;
 mod flash_fixture;
@@ -111,6 +112,8 @@ mod temporal_colour;
 mod thin_motion;
 #[cfg(feature = "dlaa")]
 mod native_dlaa;
+#[cfg(feature = "dlaa")]
+mod opaque_conservative_motion;
 mod particles;
 mod pause_menu;
 mod post_race;
@@ -143,6 +146,7 @@ mod texture_cache;
 mod touge_event;
 mod demolition_event;
 mod le_mans_event;
+mod vehicle_lights;
 mod texture_overrides;
 mod surface_rgb;
 mod texture_upload;
@@ -851,14 +855,6 @@ fn load_package(
     }
     Ok(car)
 }
-/// Whether the route's land.pssg has render instances (Milan's and
-/// Shibuya's have none).
-fn land_has_draws(root: &Path, route: &Route) -> Result<bool, Box<dyn std::error::Error>> {
-    let bytes = read(&root.join(route.track_file("land.pssg")))?;
-    let tree = pssg::read_tree(&bytes)?;
-    Ok((0..tree.nodes.len()).any(|i| tree.name(i) == b"RENDERSTREAMINSTANCE"))
-}
-
 fn append_land(
     root: &Path,
     route: &Route,
@@ -866,8 +862,10 @@ fn append_land(
     car: &mut Car,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = route.track_file("land.pssg");
-    if !land_has_draws(root, route)? {
-        println!("source_land appended=false source=land.pssg reason=no-render-instances");
+    let bytes = read(&root.join(&file))?;
+    let tree = pssg::read_tree(&bytes)?;
+    if scene::is_empty_optional_static_package(&tree)? {
+        println!("source_land appended=false draws=0 source={file} reason=valid-empty-optional-package physics=unchanged");
         return Ok(());
     }
     let land = load_package(root, (route, model), "LOD0_", true, false, &file, false)?;
@@ -3175,6 +3173,25 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if graphics.dlaa_reset_every_frame && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive || drive_ticks.is_none() || output.is_none()) {
         return Err("--dlaa-history reset-every-frame requires enhanced native DLAA scripted driving with --drive-ticks and --render".into());
     }
+    #[cfg(feature = "dlaa")]
+    let opaque_conservative_requested = {
+        let requested = opaque_conservative_motion::requested()?;
+        if std::env::var_os("GRID_OPAQUE_REPLAY_AUDIT").is_some()
+            && (!requested || temporal_audit_tick != Some(1652) || temporal_colour_tick != Some(1652)
+                || graphics.width != 1920 || graphics.height != 1080) {
+            return Err("replay fragment audit requires candidate On plus both temporal audits1652 at native1920x1080".into());
+        }
+        if requested && (!drive || collision || headless || drive_ticks.is_none() || output.is_none()
+            || graphics.anti_aliasing != 3 || graphics.thin_motion_antenna
+            || matches!(graphics.reflection_mode, 1 | 2)) {
+            return Err("shared opaque MV diagnostic requires bounded rendered native DLAA forward driving with old thin-motion off".into());
+        }
+        requested
+    };
+    #[cfg(not(feature = "dlaa"))]
+    if std::env::var_os("GRID_OPAQUE_CONSERVATIVE_MOTION").is_some() || std::env::var_os("GRID_OPAQUE_REPLAY_AUDIT").is_some() {
+        return Err("shared opaque MV diagnostic requires the dlaa feature".into());
+    }
     if graphics.thin_motion_antenna && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive) {
         return Err("--thin-motion antenna requires enhanced driving with native --aa dlaa".into());
     }
@@ -4191,6 +4208,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(feature = "dlaa")]
     native_dlaa::install(&mut app);
+    #[cfg(feature = "dlaa")]
+    if opaque_conservative_requested {
+        opaque_conservative_motion::install(&mut app)?;
+    }
     if let (Some(tick), Some(directory)) = (temporal_audit_tick, temporal_audit_directory) {
         temporal_audit::install(&mut app, tick, &directory, temporal_centre)?;
     }
@@ -4495,6 +4516,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         cockpit::install(&mut app);
         exterior_driver::install(&mut app);
         track_environment::install(&mut app, &root, &route);
+        vehicle_lights::install(&mut app, mode, field.car_model.len());
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);
@@ -4839,13 +4861,14 @@ fn setup(
                 == "Tyre Tread"
         })
         .all(|p| p.mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_some());
+    let tread_texture = field.models[0].texture("tread_tm_nm");
     let tread_key = if car.track {
-        "car0/lac_tread_tm_nm.tga"
+        format!("car0/{tread_texture}")
     } else {
-        "lac_tread_tm_nm.tga"
+        tread_texture
     };
     let tread_normal = if graphics.enhanced() && graphics.tread_normals && tread_ready {
-        car.textures.get(tread_key).map(|dds| {
+        car.textures.get(&tread_key).map(|dds| {
             let image=texture_upload::image_linear(dds,graphics.sampler(false),RenderAssetUsages::default()).expect("validated linear tread normal DDS");
             println!("tread_normal active=true srgb=false format={:?} frame=orthonormalized-source approximate=true",image.texture_descriptor.format);
             images.add(image)

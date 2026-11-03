@@ -608,6 +608,14 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G352](G0352.md) | 2026-11-03 | Shared crowd metadata resolution and diagnostic consumer |
+| [G351](G0351.md) | 2026-11-03 | General optional empty land package admission |
+| [G350](G0350.md) | 2026-11-02 | General night-light activation and optical anchor audit |
+| [G349](G0349.md) | 2026-11-02 | Model-scoped tread normal texture lookup |
+| [G348](G0348.md) | 2026-11-02 | Original final-merge shader and tint preparation contracts |
+| [G347](G0347.md) | 2026-11-02 | Routine graphics evidence cleanup and bounded retention |
+| [G346](G0346.md) | 2026-10-30 | Authenticated original crowd provider and reference automation convention |
+| [G345](G0345.md) | 2026-10-30 | General opaque conservative motion-vector diagnostic |
 | [G344](G0344.md) | 2026-10-30 | Recover selected crowd packet range and timer mapping |
 | [G343](G0343.md) | 2026-10-30 | Observe actual opaque and shadow CPU submissions without changing draw IDs |
 | [G342](G0342.md) | 2026-10-30 | Share ordinary L4 S4 sampling for crowd animation |

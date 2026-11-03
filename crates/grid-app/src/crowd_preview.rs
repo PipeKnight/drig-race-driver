@@ -13,6 +13,7 @@ use bevy::{
 };
 use grid_formats::{binxml, crowd_placements, pssg, texture};
 use grid_tools::route::Route;
+use super::crowd_population;
 use std::{collections::BTreeMap, error::Error, path::Path};
 type AnyResult<T> = Result<T, Box<dyn Error>>;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -148,9 +149,7 @@ fn source_scale_fixture(height_range: f32, width_range: f32) -> [f32; 2] {
     let width = 1. + ((r * 2.) - 1.) * width_range;
     [truncate_half_normal(width), truncate_half_normal(height)]
 }
-fn spec(d: &binxml::Document<'_>, definition: &str) -> AnyResult<Spec> {
-    let (country, _) = one(d, 0, "crowdDefSet", Some("usa"))?;
-    let (def, _) = one(d, country, "crowdDef", Some(definition))?;
+fn spec(d: &binxml::Document<'_>, def: usize) -> AnyResult<Spec> {
     let (_, scale_stance) = one(d, def, "stance", Some("sitting"))?;
     let height_range = float(scale_stance, "randomHeightScale")?;
     let width_range = float(scale_stance, "randomWidthScale")?;
@@ -195,23 +194,34 @@ fn spec(d: &binxml::Document<'_>, definition: &str) -> AnyResult<Spec> {
         instance_scale,
     })
 }
-fn verify_set(d: &binxml::Document<'_>, id: &str, map: &str, def: &str) -> AnyResult<()> {
-    // Resolve source instanceSet -> generic PC instanceMap -> USA crowdDef.
-    let sets = 0; // instanceSet elements are direct crowdDefs root children.
-    let (set, _) = one(d, sets, "instanceSet", Some(id))?;
-    let (_, m) = one(d, set, "map", Some(map))?;
-    let _ = m;
-    let (maps, _) = d
-        .elements
-        .iter()
-        .enumerate()
-        .find(|(_, e)| e.name == "instanceMapGroup" && attr(e, "name").ok() == Some("generic"))
-        .ok_or("PC crowd maps absent")?;
-    let (_, m) = one(d, maps, "instanceMap", Some(map))?;
-    if attr(m, "crowdDef")? != def || attr(m, "stance")? != "sitting" {
+fn fixture_group<'m, 'p, 'asset>(
+    groups: &'m [crowd_population::PreparedGroup<'p, 'asset>], name: &[u8],
+) -> AnyResult<&'m crowd_population::PreparedGroup<'p, 'asset>> {
+    let mut matches = groups.iter().filter(|g| g.source.instance_set == name);
+    let group = matches.next().ok_or("grandstand source group absent")?;
+    if matches.next().is_some() { return Err("duplicate grandstand source group".into()); }
+    Ok(group)
+}
+fn fixture_template<'a>(
+    group: &'a crowd_population::PreparedGroup<'_, '_>,
+    map_name: &str,
+    definition: &str,
+) -> AnyResult<&'a crowd_population::Template> {
+    let crowd_population::Resolution::StaticTemplates(templates) = &group.resolution else {
+        return Err("grandstand metadata unresolved or moving".into());
+    };
+    let [template] = templates.as_slice() else {
+        return Err("grandstand diagnostic requires exactly one map".into());
+    };
+    if template.map_name != map_name
+        || template.definition_name != definition
+        || template.definition_set != "usa"
+        || template.definition_origin != crowd_population::DefinitionOrigin::Primary
+        || template.stance_name != "sitting"
+    {
         return Err("grandstand instance map changed".into());
     }
-    Ok(())
+    Ok(template)
 }
 fn preflight_selected_rows(current: usize, additional: usize) -> Result<(), &'static str> {
     if current.checked_add(additional).is_none_or(|n| n > 100_000) {
@@ -223,30 +233,58 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
     if route.path() != "tracks/usa/detroit/route_8" {
         return Err("crowd preview only Detroit route8".into());
     }
-    // This narrow adapter requires the pinned text XML dataset references
-    // before using the selected USA source resources.
-    let data = std::fs::read_to_string(root.join(route.track_file("organism_track_dataset.xml")))?;
+    // Explicit USA/generic context is this bounded diagnostic fixture, not an
+    // automatic region producer. Normal setup remains untouched when Off.
+    let dataset_graph = grid_tools::tyre_smoke::read_xml(
+        &root.join(route.track_file("organism_track_dataset.xml")),
+    )?;
+    let bindings = crowd_population::dataset(&dataset_graph)?;
+    let defs = std::fs::read(root.join("anims/crowdDefs.xml"))?;
+    let doc = binxml::read(&defs)?;
+    let placements = std::fs::read(root.join(route.file("crowd_standing.bin")))?;
+    let catalogue = crowd_placements::read(&placements)?;
+    let metadata = crowd_population::prepare(
+        &catalogue, &doc, &bindings.pssg,
+        crowd_population::DefinitionSelection::Exact {
+            primary_definition_set: Some("usa"),
+            fallback_definition_set: Some("generic"),
+            map_group: "generic",
+            billboard_userdata: "billboardusa",
+        },
+    )?;
+    // Retain the diagnostic's exact expected resource contract, without a
+    // text-layout-dependent substring check or general filename whitelist.
     for (file, user) in [
         ("cr_us_billboard.pssg", "billboardusa"),
         ("cr_male_usa.pssg", "maleVariant0"),
         ("cr_female_usa.pssg", "femaleVariant0"),
     ] {
-        if !data.lines().any(|l| {
-            l.contains(&format!("/data/anims/{file}"))
-                && l.contains(&format!("userdata=\"{user}\""))
-        }) {
+        if metadata.dataset_resources.get(user).map(|r| r.relative_path.as_str())
+            != Some(format!("anims/{file}").as_str())
+        {
             return Err("Detroit USA dataset changed".into());
         }
     }
-    let defs = std::fs::read(root.join("anims/crowdDefs.xml"))?;
-    let doc = binxml::read(&defs)?;
-    verify_set(&doc, "m_gr", "maleSit", "crowdMale")?;
-    verify_set(&doc, "f_gr", "femaleSit", "crowdFemale")?;
-    let specs = [spec(&doc, "crowdMale")?, spec(&doc, "crowdFemale")?];
-    let placements = std::fs::read(root.join(route.file("crowd_standing.bin")))?;
-    let catalogue = crowd_placements::read(&placements)?;
+    let male = fixture_template(fixture_group(&metadata.groups, b"m_gr")?, "maleSit", "crowdMale")?;
+    let female = fixture_template(fixture_group(&metadata.groups, b"f_gr")?, "femaleSit", "crowdFemale")?;
+    if male.billboard != female.billboard {
+        return Err("grandstand atlas bindings differ".into());
+    }
+    let specs = [
+        spec(metadata.definitions, male.definition_element)?,
+        spec(metadata.definitions, female.definition_element)?,
+    ];
+    println!(
+        "crowd_metadata source={} resolved_static={} unresolved_static={} moving={} dataset_records={} primary={:?} fallback={:?} map_group={} billboard={} rendered_policy=diagnostic-grandstand-only",
+        metadata.source.total_instances, metadata.resolved_static_records,
+        metadata.unresolved_static_records, metadata.unsupported_moving_records,
+        bindings.source.children.len(), metadata.context.primary_definition_set,
+        metadata.context.fallback_definition_set, metadata.context.map_group,
+        metadata.context.billboard_userdata,
+    );
     let mut rows = Vec::new();
-    for g in &catalogue.groups {
+    for group in &metadata.groups {
+        let g = group.source;
         let sex = match g.instance_set {
             b"m_gr" => 0,
             b"f_gr" => 1,
@@ -308,7 +346,7 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
             total: catalogue.total_instances,
         });
     }
-    let atlas = std::fs::read(root.join("anims/cr_us_billboard.pssg"))?;
+    let atlas = std::fs::read(root.join(&male.billboard.relative_path))?;
     let tree = pssg::read_tree(&atlas)?;
     let named = texture::read_named(&tree, &[b"cr_US_billboard_d.tga", b"cr_US_billboard_m.tga"])?;
     let d = named
