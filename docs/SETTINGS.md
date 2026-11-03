@@ -185,7 +185,8 @@ The common automatic smoke selector remains unchanged, including HDR/MSAA4 and
 DLAA/HDR1 attachment domains. Explicit native research profiles keep their own
 narrow admission. Source-only policy/CPU controls do not establish GPU rendering
 or visual equivalence: see G360 for actual gate and representative A/B outcomes.
-Both Play GRID.cmd and Play GRID DLAA.cmd pass
---tone-map reinhard --post-saturation 0.9 through their existing menu path.
-Default publication and actual representative checks are recorded in G360;
-this does not reproduce the old enhanced EV13 lighting/grade screenshot.
+Normal Play GRID.cmd and Play GRID DLAA.cmd keep the baseline display defaults;
+no Reinhard or saturation override is forced. The owner preferred that image in
+the matched comparison (G362). The two optional display controls remain available
+for deliberate experiments. Their exact settings alone do not reproduce the
+older enhanced EV13 lighting/grade screenshot.
