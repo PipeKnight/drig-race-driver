@@ -72,7 +72,7 @@ pub fn append(
     car: &mut Car,
     coverage: bool,
     sheet_colours: bool,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<super::tree_cards::Cards, Box<dyn Error>> {
     let bytes = read(&root.join(route.track_file("trees.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_static_meshes(&tree)?;
@@ -138,7 +138,15 @@ pub fn append(
         .map(|i| tree.string(i, b"id"))
         .collect::<grid_formats::Result<_>>()?;
     let mut diffuse = BTreeMap::new();
+    // The cards' normal atlases and lighting constants (tree_cards.rs).
+    let mut card_normals = BTreeMap::new();
     for b in material::read_texture_bindings(&tree)? {
+        if b.sampler == b"TNormalMap" && cards.contains(b.shader) {
+            if b.container != Some(b"treestextures.pssg".as_slice()) || card_normals.insert(b.shader, b.texture).is_some() {
+                return Err("unsupported or duplicate card normal binding".into());
+            }
+            continue;
+        }
         if b.sampler != b"TDiffuseAlphaMap" {
             continue;
         }
@@ -148,6 +156,17 @@ pub fn append(
             return Err("unsupported or duplicate tree diffuse binding".into());
         }
     }
+    // Unsaved constants read as 0 (Washington's `LOD!0`) [AUTHORED].
+    let card_constants: BTreeMap<_, _> = material::read_constants(&tree)?
+        .into_iter()
+        .filter(|c| cards.contains(c.shader))
+        .map(|c| {
+            let scalar = |name: &[u8]| c.values.get(name).and_then(|v| v.first().copied()).unwrap_or(0.);
+            (c.shader, (scalar(b"LightWrap"), scalar(b"InvFoliageDensity")))
+        })
+        .collect();
+    let mut tree_cards = super::tree_cards::Cards::default();
+    let mut needed_normals = BTreeSet::new();
     let (mut count, mut triangles, mut closest_draws) = (0usize, 0usize, 0usize);
     let mut matched = BTreeSet::new();
     let mut needed = BTreeSet::new();
@@ -302,6 +321,11 @@ pub fn append(
                 },
                 id = std::str::from_utf8(d.id)?
             );
+        if let Some(&normal) = card_normals.get(d.material) {
+            let (wrap, density) = card_constants.get(d.material).copied().unwrap_or((0., 0.));
+            tree_cards.parts.insert(part_name.clone(), (format!("trees/{}", std::str::from_utf8(normal)?), wrap, density));
+            needed_normals.insert(normal);
+        }
         if lod {
             let first = first_instance[prototype];
             level_parts.push((part_name.clone(), (level, (first..first + matrices.len() as u32).collect())));
@@ -341,6 +365,13 @@ pub fn append(
         }
         images.insert(key, dds);
     }
+    let normal_names: Vec<_> = needed_normals.into_iter().collect();
+    for t in texture::read_named(&textures, &normal_names)? {
+        tree_cards.normals.insert(format!("trees/{}", std::str::from_utf8(t.id)?), t.validated_dds().0);
+    }
+    if tree_cards.parts.values().any(|(key, ..)| !tree_cards.normals.contains_key(key)) {
+        return Err("tree card normal atlas unresolved".into());
+    }
     if bindings.values().any(|key| !images.contains_key(key)) {
         return Err("tree diffuse texture unresolved".into());
     }
@@ -362,11 +393,13 @@ pub fn append(
         "source_tree_sheets draws={sheet_draws} triangles={sheet_triangles} expansion=cylindrical-world-up orientation=main-camera saved_rgb={sheet_colours} physics=unchanged"
     );
     println!(
-        "source_trees enabled=true prototypes={} instances={} library_draws={library_draws} closest_draws={closest_draws} placed_draws={count} triangles={triangles} textures={} bounds={world_min:?}..{world_max:?} lod={} tree_attributes_missing={missing} wind=false physics=unchanged alpha=authored-mask05 sampler=existing-repeat",
+        "source_trees enabled=true prototypes={} instances={} library_draws={library_draws} closest_draws={closest_draws} placed_draws={count} triangles={triangles} textures={} bounds={world_min:?}..{world_max:?} lod={} tree_attributes_missing={missing} card_parts={} card_parts_with_normal_atlas={} wind=false physics=unchanged alpha=authored-mask05 sampler=existing-repeat",
         matched.len(),
         placements.total_instances,
         images.len(),
-        if lod { "source-x0-x2-distance" } else { "source-x0" }
+        if lod { "source-x0-x2-distance" } else { "source-x0" },
+        parts.iter().filter(|p| p.name.starts_with("trees/card/")).count(),
+        tree_cards.parts.len()
     );
     car.parts.extend(parts);
     car.ornament_lods.types.extend(levels.types);
@@ -374,7 +407,7 @@ pub fn append(
     car.ornament_lods.parts.extend(levels.parts);
     car.bindings.extend(bindings);
     car.textures.extend(images);
-    Ok(())
+    Ok(tree_cards)
 }
 
 #[cfg(test)]
@@ -544,7 +577,11 @@ mod tests {
             reflections: Default::default(),
             piece_skins: Default::default(),
         };
-        append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
+        let tree_cards = append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
+        // Cards with a normal atlas get the original's card lighting (tree_cards.rs).
+        assert!(tree_cards.parts.keys().all(|name| name.starts_with("trees/card/")));
+        assert!(tree_cards.parts.values().all(|(key, ..)| tree_cards.normals.contains_key(key)));
+        println!("donington card parts with normal atlas: {}", tree_cards.parts.len());
         // 21 closest (`_x0`) draws and the six species' `_x2` impostor cards.
         assert_eq!(car.parts.len(), 27);
         let cards = car.parts.iter().filter(|p| p.name.starts_with("trees/card/")).count();

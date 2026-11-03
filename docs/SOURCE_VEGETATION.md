@@ -161,6 +161,22 @@ fit: Washington `large_tree` keeps 12 full trees and 150 cards).
   changed nothing; the radial normals lift the side-lit Spa views and darken Washington slightly.
   The cause is open: the atlas bakes the crown's own shading, and the original's card lighting
   is not ported.
+- Card lighting (`tree_cards.rs`, `tree_cards.wgsl`; the follow-up to the colour check):
+  `tree_lowlod_shadowed.cg.fp` [V static] reads a per-view normal atlas (`TNormalMap`, bound per
+  card material in `treestextures.pssg`, same layout as the diffuse atlas), builds the light in
+  the card's frame (level axis towards the eye, its cross with up, up), bends the atlas normal
+  towards the sun, `N = normalize(n + L * LightWrap)`, and lights with
+  `sat(N.L + InvFoliageDensity) * sun * shadow + back * (1 - N.L) / 2 + ambient`. Saved values:
+  LightWrap 0.3-0.5, InvFoliageDensity 0.3 (Washington's `LOD!0` saves none: 0 [AUTHORED]).
+  The port samples the atlas at the card's UV, gives Bevy the bent normal and adds the
+  `+InvFoliageDensity` lift of the sun term itself; back and ambient stay the F716 fill's lights.
+  The atlas X axis sign is set from the render [I]: with it Spa's side-lit conifer cards are
+  bright on the sun's side like the full trees; the other sign lights the far side
+  (`local/r48/spa30-zoom.png`). Cards without a normal atlas keep the radial corner normals.
+  Mean foliage value, full trees / F718 cards / card lighting (`local/r48/*-cmp6.png`): Spa 30
+  right 37.8 / 27.4 / 35.3, left 39.9 / 25.3 / 33.0; Spa 75 41.1 / 26.7 / 33.1; Washington
+  53.1 / 44.1 / 49.2 and 61.2 / 52.9 / 51.9. The remaining gap is open (the atlas bakes the
+  crown's self-shading; the original blends two views, the port shows the nearest).
 - Hidden facing entities are no longer rewritten each frame.
 - Checks (private `local/r46/`): `w-shafts-ab.png`, `spa30-ab.png`, `haruna48-ab.png` (full trees
   everywhere | level switch); `c-x0-vs-n.png` (Washington cards, close crop);

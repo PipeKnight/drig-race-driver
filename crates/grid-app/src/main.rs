@@ -133,6 +133,7 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod tree_cards;
 mod speech_sound;
 mod car_batch;
 mod car_lod;
@@ -3962,10 +3963,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         return float_audit::run(&root, &route, &car.parts, &car.bindings, &car.textures, out);
     }
+    let mut tree_cards = tree_cards::Cards::default();
     // After the audit, which covers the track's own placements; the forest
     // is drawn on every preset (it was an enhanced-only pilot before).
     if track && !collision && graphics.source_trees {
-        source_trees::append(&root, &route, &mut car, graphics.foliage_coverage, graphics.tree_sheet_colours)?;
+        tree_cards = source_trees::append(&root, &route, &mut car, graphics.foliage_coverage, graphics.tree_sheet_colours)?;
     }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))
@@ -4668,6 +4670,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     ornament_lod::install(&mut app);
     if track && graphics.source_trees {
         source_trees::install(&mut app);
+        tree_cards::install(&mut app, std::mem::take(&mut tree_cards));
     }
     #[cfg(feature = "dlaa")]
     if graphics.thin_motion_antenna {
