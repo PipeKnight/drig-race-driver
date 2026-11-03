@@ -154,8 +154,8 @@ if ($mtCode -eq 1) {
 }
 if ($mtCode -ne 0) { throw "release: git merge-tree failed ($mtCode): $($mt -join ' | ')" }
 $newCommits = (Invoke-Git log --format='%h %s' "$preHead..$upstream")
-# A commit's own F number: "F531: ..." or "... (F530)"; earlier playable entries are not merged work.
-$fNumbers = @($newCommits | Where-Object { $_ -notmatch '^\S+ F\d+: playable' } | ForEach-Object { if ($_ -match '^\S+ F(\d+):' -or $_ -match '\(F(\d+)\)\s*$') { [int]$Matches[1] } } | Sort-Object -Unique)
+# A commit's own F number: "F722 ...", "F531: ..." or "... (F530)"; earlier playable entries are not merged work.
+$fNumbers = @($newCommits | Where-Object { $_ -notmatch '^\S+ F\d+:? playable' } | ForEach-Object { if ($_ -match '^\S+ F(\d+)[: ]' -or $_ -match '\(F(\d+)\)\s*$') { [int]$Matches[1] } } | Sort-Object -Unique)
 $fRange = if ($fNumbers.Count -gt 1) { "F$($fNumbers[0])-F$($fNumbers[-1])" } elseif ($fNumbers.Count) { "F$($fNumbers[0])" } else { 'none' }
 if (-not $NoPrototype -and (Get-RunningFrom (Join-Path $root 'target\release\grid-app.exe')).Count) { throw 'release: the prototype (target\release\grid-app.exe) is running; keep it open and release after it exits' }
 if (-not $NoPortable -and (Get-RunningFrom (Join-Path $portable 'target\release\grid-app.exe')).Count) { throw 'release: the portable copy is running; release after it exits' }
@@ -340,7 +340,9 @@ if (-not $NoTestOrder -and $apks.Count -and (Test-Path -LiteralPath $testOrderPa
             $at = U '\u0432'
             $now = Get-Date
             $text = [regex]::Replace($text, "$updated \d\d\.\d\d\.\d{4} $at \d\d:\d\d", "$updated $($now.ToString('dd.MM.yyyy')) $at $($now.ToString('HH:mm'))")
-            $text = [regex]::Replace($text, "(\b)$oldRev(\s*\(F\d+)" + [char]0x2013 + "F\d+\)", { param($m) "$apkRev$($m.Groups[2].Value)$([char]0x2013)$(if ($fNumbers.Count) { "F$($fNumbers[-1])" } else { 'F?' }))" })
+            # Only the header's "New build <rev> (Fa-Fb)"; older "New in <rev>" sections keep their names.
+            $newBuild = U '\u041d\u043e\u0432\u0430\u044f \u0441\u0431\u043e\u0440\u043a\u0430 '
+            $text = [regex]::Replace($text, "($newBuild)$oldRev(\s*\(F\d+)" + [char]0x2013 + "F\d+", { param($m) "$($m.Groups[1].Value)$apkRev$($m.Groups[2].Value)$([char]0x2013)$(if ($fNumbers.Count) { "F$($fNumbers[-1])" } else { 'F?' })" })
             # Same bundled data as the previous APK: no data copy when installed over it either.
             $prevJson = Join-Path $apkDir "grid-$oldRev-bundled-PRIVATE-$($apks[0].Suffix)-debug.apk.json"
             if (Test-Path -LiteralPath $prevJson) {
