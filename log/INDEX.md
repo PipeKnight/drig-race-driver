@@ -619,6 +619,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 | [G356](G0356.md) | 2026-11-03 | Shared source headlight point diagnostic |
 | [G355](G0355.md) | 2026-11-03 | Crowd typed clone and update readiness contracts |
 | [G354](G0354.md) | 2026-11-03 | Source road response and lighting specular binding contracts |
+| [G353](G0353.md) | 2026-11-03 | Per-model tread map binding for mixed vehicle fields |
 | [G352](G0352.md) | 2026-11-03 | Shared crowd metadata resolution and diagnostic consumer |
 | [G351](G0351.md) | 2026-11-03 | General optional empty land package admission |
 | [G350](G0350.md) | 2026-11-02 | General night-light activation and optical anchor audit |
