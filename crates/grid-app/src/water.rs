@@ -12,7 +12,7 @@ use bevy::{
     render::render_resource::AsBindGroup,
     shader::ShaderRef,
 };
-use grid_formats::{material, mesh, pssg, scene, texture, track_environment};
+use grid_formats::{material, mesh, pssg, scene, texture};
 use grid_tools::route::Route;
 use std::{collections::BTreeMap, path::Path};
 
@@ -186,7 +186,7 @@ fn sky_cube(root: &Path, route: &Route) -> Result<Image, Box<dyn std::error::Err
     let bytes = super::read(&root.join(&file))?;
     let tree = pssg::read_tree(&bytes)?;
     let sky = grid_formats::sky::read(&tree).map_err(|e| format!("{file}: {e}"))?;
-    let lighting = track_environment::read_lighting(&super::read(&root.join(route.track_file("lighting.xml")))?)?;
+    let lighting = grid_tools::environment::Environment::for_route(root, route)?.lighting;
     let tone = [
         lighting.scalar("skyscale").unwrap_or(1.).clamp(0., 16.),
         lighting.scalar("skygamma").unwrap_or(1.).clamp(0.01, 16.),

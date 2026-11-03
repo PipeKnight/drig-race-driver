@@ -139,6 +139,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F706](log/F0706.md) | 2026-11-03 | Water and light shafts read the route's own lighting.xml (Haruna night routes) |
 | [F705](log/F0705.md) | 2026-11-03 | Water and light shafts ported from the original's programs (rows 108, 107) |
 | [F704](log/F0704.md) | 2026-11-03 | Playable e5e885362a85 for the PC (no APKs) |
 | [F703](log/F0703.md) | 2026-11-02 | Ornament level and draw-distance fades (owner pop report) |
@@ -198,7 +199,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F649](log/F0649.md) | 2026-10-30 | Shibuya start swerve: the start racing line before the start line |
 | [F648](log/F0648.md) | 2026-10-30 | Collision and damage loops no longer hold after a wreck, the race end or a pause (backlog row 95) |
 | [F647](log/F0647.md) | 2026-10-30 | Cockpit: pedals and the general interior clip animator |
-| [F646](log/F0646.md) | 2026-10-30 | Playable dc4408b43366 with DLAA and APKs dc4408b43366 |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

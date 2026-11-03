@@ -12,7 +12,7 @@ use bevy::{
     render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError},
     shader::ShaderRef,
 };
-use grid_formats::{material, pssg, track_environment};
+use grid_formats::{material, pssg};
 use grid_tools::route::Route;
 use std::{collections::BTreeMap, path::Path};
 
@@ -65,7 +65,7 @@ pub fn install(app: &mut App, root: &Path, route: &Route) -> Result<(), Box<dyn 
     if shaders.is_empty() {
         return Ok(());
     }
-    let lighting = track_environment::read_lighting(&super::read(&root.join(route.track_file("lighting.xml")))?)?;
+    let lighting = grid_tools::environment::Environment::for_route(root, route)?.lighting;
     let track_colour = Vec3::from(lighting.rgb("lightShaft_colour").unwrap_or([1.; 3]));
     let strength = lighting.scalar("lightShaft_strength").unwrap_or(1.);
     let density = lighting.scalar("lightShaft_density").unwrap_or(1.);
