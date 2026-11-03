@@ -65,3 +65,13 @@ after the warm-up.
 
 Private, `local/blink/`: traces `t60.log` (before), `t60-fix*.log` (after), captures `w-*`,
 `x-*`, and the detector `blinks.py`. Results are in F726.
+
+
+## Diagnostic final capture readiness (G365)
+
+The final offscreen Screenshot request now waits until Warmup is absent or Done.
+The prior180-frame capture threshold alone could coincide with the black cover
+or temporary all-level visibility. Update observes Done on the frame following
+PostUpdate restoration/cover removal. This does not disable or retune warm-up.
+Temporal/motion readback protocols still require their own ready-frame admission;
+waiting only for the final PNG does not validate earlier sampled buffers.

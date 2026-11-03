@@ -631,6 +631,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G365](G0365.md) | 2026-11-04 | Wait for pipeline warm-up before final diagnostic captures |
+| [G364](G0364.md) | 2026-11-03 | Resolve source night-lighting coefficients through the existing renderer clock |
 | [G363](G0363.md) | 2026-11-03 | Validate the shared source-point headlight illumination consumer |
 | [G362](G0362.md) | 2026-11-03 | Restore normal tonemapping after owner visual comparison |
 | [G361](G0361.md) | 2026-11-03 | Record the shared interleaved crowd stream layout |

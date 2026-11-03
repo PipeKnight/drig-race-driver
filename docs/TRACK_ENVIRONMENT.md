@@ -288,3 +288,29 @@ This is CPU evidence of current behavior, not original night renderer parity.
 Combined-feature Clippy, six consumer tests and this single fixture passed;
 full package checks and production driving/render validation remain separate.
 Private receipts: local/graphics/night-headlight-consumer01/cpu02.
+
+
+### G364: effective static and timeline coefficients
+
+The selected original binding keeps packed bytes and scale separately. Static
+completion replaces the saved scale with max(1,R,G,B), packs normalized RGB
+using255 and truncation. Timeline RGB registration instead uses256; its byte
+writer adds.5, truncates and clamps0..255. Independent scale curves update the
+separate scalar. Reconstruction uses byte*(f32 1/255)*current scale. Absent
+timeline keys preserve initialized bytes/derived scales, including individual
+missing channels. Raw XML remains immutable provenance. The selected source
+edges are741520/9ACE90/730F90 and742B00; private binder95 pins actual constants.
+
+A bounded default-off renderer trial consumes that resolution through the same
+LeMansEvent timeline/time used by sky and source activation. It updates actual
+sun/back colour and illuminance, ambient and existing sourcePhong colour under
+one explicitly supplied authored coefficient-to-Bevy unit. There is no new
+clock or route/model policy. It preserves transforms, shadows, source lobe
+weights/direction and reflection/IBL behavior. Existing static directions and
+baked IBL remain limitations for a complete night/time-of-day feature.
+
+Static f64 arithmetic is not an x87-80bit oracle. Existing interpolation time
+precision and extreme/subnormal values remain separate limits. Three-family
+metadata admission passed for23 purchased lighting files, not all render paths.
+Eleven new tests are proposed; compilation, actual ECS results and matched
+night/day/headlight renders must be recorded before claiming success.

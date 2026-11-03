@@ -113,6 +113,33 @@ pub struct Surface {
     #[uniform(117)]
     phong_direction: Vec4,
 }
+
+/// Bounded shared-lighting diagnostic only. Existing sourcePhong semantics,
+/// weights, source directions, textures and material controls are preserved.
+pub(crate) fn set_trial_phong_colour(materials: &mut Assets<SurfaceMaterial>, colour: [f32; 3]) -> usize {
+    let mut count=0;
+    for (_, material) in materials.iter_mut() {
+        if material.extension.phong_light.w > 0. {
+            material.extension.phong_light = Vec3::from_array(colour).extend(material.extension.phong_light.w);
+            count+=1;
+        }
+    }
+    count
+}
+#[cfg(test)]
+pub(crate) fn trial_fixture() -> SurfaceMaterial {
+    SurfaceMaterial {base: StandardMaterial::default(),extension: Surface {
+        first: default(),second: default(),macro_map: default(),skids:default(),
+        scales:Vec4::ZERO,controls:Vec4::ZERO,skid_colour:Vec4::ZERO,skid_colour2:Vec4::ZERO,
+        dry_ground:Vec4::ZERO,sampling:Vec4::ZERO,rgb_filter:Vec4::ZERO,phong:Vec4::ZERO,
+        phong_light:Vec4::new(3.,2.,1.,1.),phong_direction:Vec4::new(0.2,0.8,0.1,0.),
+    }}
+}
+#[cfg(test)]
+pub(crate) fn trial_snapshot(material:&SurfaceMaterial)->(Vec4,Vec4) {
+    (material.extension.phong_light,material.extension.phong_direction)
+}
+
 impl MaterialExtension for Surface {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
