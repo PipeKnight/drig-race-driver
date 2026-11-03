@@ -97,3 +97,59 @@ Original GRID sampler addressing remains unproved. Current engine setup uses
 ClampToEdge with linear filters; that configuration is not an original-state
 capture. Raw results and prior incorrect UV/sign prose are preserved with
 transparent corrections in the private comparison53/admission50 packets.
+
+## Full saved-basis diagnostic (G357, default off)
+
+GRID_SAVED_TREAD_BASIS=1 selects a bounded rigid-forward diagnostic. It preserves
+independent source T/B/N plus the normal mask through the actual loader and tyre
+refinement; it does not lower the ordinary .95 tangent-reduction guard or invent
+missing frames. Existing geometry/UV/index policy and original source-vertex bits
+are preserved by tested consumer controls. The ordinary enhanced-profile guards
+remain, so this is not all-model/track runtime completion.
+
+A small app-owned material transports centroid raw basis and the ordinary mask,
+decodes the source RGB convention and supplies a normalized basis result to Bevy
+PBR. Normalizing that result is an explicit lighting adaptation: original raw
+length survives its selected source lighting path. Current linear/clamp sampling
+is retained; original sampler state stays unknown. Rigid lit opaque UV0 domains
+are admitted; Explicit --ao off is required: SSAO implicitly adds NormalPrepass, so AO-on is refused before app setup. Normal/deferred prepass, skin/morph, bindless and other unsupported contexts are refused. Stock depth/MV/shadow position paths are inherited.
+
+Original StandardMaterial identity remains available to existing LOD and overlay
+queries. Mapped material events update the derived material under the same handle;
+no per-frame blanket copy or reflection/LOD algorithm retuning is introduced.
+Arbitrary later entity-material rebinds remain unsupported. Raw streams cost40
+bytes/vertex plus varyings and mapped assets; performance is unmeasured.
+
+Actual combined-feature Clippy and11new CPU controls pass, plus the existing
+mixed-model upload/assignment and body-mask fixture controls. The tests exercise
+raw source attachment, actual refinement, geometry/bit preservation, rigid-domain
+refusal, material ownership, event updates and explicit negative states. Initial
+namespace/fixture compile errors and three Clippy lints were retained and fixed.
+No GPU or image-quality conclusion follows from these CPU controls.
+
+### Real stock WGSL composition without a renderer
+
+A native library test obtains actual compiled embedded shader bytes through
+public Bevy plugins and the in-memory asset reader. RenderPlugin explicitly uses
+backends=None; no RenderApp/RenderDevice, window or App run/update is permitted.
+Only the source-guarded MeshRenderPlugin finish registers the missing library.
+No private paths, registry files, new dependencies or build profile are needed.
+Ordinary Android library inclusion remains source-identical; Android execution
+was not tested. Moving the test to the native library avoids the main unit-test
+crate for focused --lib shader checks.
+
+The actual composer caught a fragment+dither error: a bare imported function
+renamed a same-named local field declaration, but not member access. Namespacing
+only the function import/call fixes that root cause while retaining field,
+varying, stock assignment and discard. DitherOff/On each now compose actual VS/FS;
+an authored malformed shader is independently rejected. All four compositions
+and Clippy pass in check06. F708's ordinary LOD-dither policy is preserved.
+
+This is parsing/import/composition with declared abstract desktop features.
+Release Bevy uses a nonvalidating composer; full Naga validation, VS/FS linkage,
+vertex/bind-group layouts, actual backend support, visible fades, replay behaviour
+and quality remain unverified. Report COMPOSED_NOT_GPU_VALIDATED, never a pipeline
+pass. Current executable is not rebuilt or switched; the feature stays off.
+Private exact failures/fixes/source hashes: local/graphics/tread-saved-basis01/;
+review packets tread-saved-basis55/, integration61/ and tread-dither-namespace61/
+under local/handoff/drafts/.

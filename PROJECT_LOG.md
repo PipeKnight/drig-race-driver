@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G357 (LOCAL default-off diagnostic): full saved tread basis preserves geometry/source bits;11CPU controls+consumer fixtures and four actual embedded WGSL compositions pass after recorded fixes. Package gate PASS648tests/Clippy; fresh-main integration and full Naga/GPU/layout/quality unsupported contexts remain open. No ordinary profile enablement.
 - G356 (LOCAL): shared source headlight point diagnostic uses original pair/default/offset rules;14controls and6model data reports PASS. Runtime slot/loader/presentation join and beam optics remain open; no illumination change.
 - G355 (LOCAL research): registered crowd NODE/JOINTNODE copy and finalise/update eligibility documented; existing rig preserves helper locals. Actual clock consumer/current child state still unknown. No renderer/reset/audio change.
 - G354 (LOCAL research): common road-response and lighting specular-colour contracts documented. Infield/scalars do not identify grass; saved material response composition remains open. No appearance change.

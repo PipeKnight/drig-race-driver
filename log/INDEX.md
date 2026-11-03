@@ -616,6 +616,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G357](G0357.md) | 2026-11-03 | Full saved tread basis diagnostic and consumer compatibility |
 | [G356](G0356.md) | 2026-11-03 | Shared source headlight point diagnostic |
 | [G355](G0355.md) | 2026-11-03 | Crowd typed clone and update readiness contracts |
 | [G354](G0354.md) | 2026-11-03 | Source road response and lighting specular binding contracts |

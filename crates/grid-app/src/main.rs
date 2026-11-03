@@ -50,6 +50,7 @@ mod ambience_sound;
 mod collision_sound;
 mod crowd_sound;
 mod car_materials;
+mod saved_tread_basis;
 mod car_reflection_overlay;
 mod car_reflections;
 mod lamp_materials;
@@ -869,6 +870,9 @@ fn load_package(
         {
             mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
         }
+        if !track && draw.material == b"Tyre Tread" && saved_tread_basis::enabled()
+            && let Err(error) = saved_tread_basis::attach(&mut mesh, source, draw.vertices.clone())
+        { println!("saved_tread_basis source_refused={error} material=TyreTread"); }
         parts.push(Part {
             name: String::from_utf8(draw.id.to_vec())?,
             joint: String::from_utf8(draw.joint.to_vec())?,
@@ -1830,6 +1834,9 @@ fn low_lod(
             {
                 mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
             }
+            if name == "Tyre Tread" && saved_tread_basis::enabled()
+                && let Err(error) = saved_tread_basis::attach(&mut mesh, source, draw.vertices.clone())
+            { println!("saved_tread_basis low_source_refused={error} lod={level}"); }
             low.parts.push((
                 level,
                 Part {
@@ -1947,7 +1954,23 @@ fn manual_base_mip_zero_admitted(
         && !graphics.dlaa_reset_every_frame
 }
 
+// Normal-prepass consumers (including SSAO's required component) are outside this diagnostic.
+fn saved_tread_basis_admitted(
+    graphics: &graphics::Settings,
+    headless: bool,
+    collision: bool,
+    rendered: bool,
+    drive_ticks: Option<u64>,
+) -> bool {
+    graphics.enhanced() && graphics.tread_normals && !graphics.ambient_occlusion
+        && !headless && !collision && rendered
+        && !matches!(graphics.reflection_mode, 1 | 2)
+        && (drive_ticks.is_some_and(|n| (1..=1800).contains(&n))
+            || graphics.benchmark_frames.is_some_and(|n| (1..=600).contains(&n)))
+}
+
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let saved_tread_requested = saved_tread_basis::requested()?;
     println!("prototype_build revision={BUILD_REVISION}");
     // Settings files first (docs/SETTINGS.md); the flags below override them.
     let profile = settings::load(&args)?;
@@ -4104,6 +4127,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("fixed-step/motion-orbit diagnostics require --drive and --render".into());
     }
+    if saved_tread_requested
+        && !saved_tread_basis_admitted(&graphics, headless, collision, output.is_some(), drive_ticks)
+    { return Err("saved tread basis diagnostic requires bounded rendered enhanced forward setup with normal-detail tread and --ao off (NormalPrepass unsupported)".into()); }
     if graphics.capture_timeout_seconds.is_some() && output.is_none() {
         return Err("--capture-timeout requires --render".into());
     }
@@ -4308,6 +4334,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.video_refresh_hz());
     }
+    if saved_tread_requested { saved_tread_basis::install(&mut app); }
     #[cfg(feature = "dlaa")]
     native_dlaa::install(&mut app);
     #[cfg(feature = "dlaa")]
@@ -4953,6 +4980,21 @@ fn setup(
     }
     let mut material_handles = BTreeMap::new();
     let tread_normals = upload_tread_normals(&car, &field, &graphics, &mut images);
+    let saved_tread_maps: Vec<Option<Handle<Image>>> = if saved_tread_basis::enabled() {
+        let tread_sources = tread_sources(&car,&field).expect("same loaded source namespace contract");
+        tread_sources.iter().enumerate().map(|(model, source)| {
+            let parts: Vec<_> = car.parts.iter().filter(|p| tread_part_model(car.track, &p.material) == Some(model)).collect();
+            if parts.is_empty() || !source.texture_present || !parts.iter().all(|p| saved_tread_basis::ready(&p.mesh)) {
+                println!("saved_tread_basis source_ready=false model={model} key={:?} parts={} texture_present={} reason=raw-source-not-ready stock-material-retained=true",source.key,parts.len(),source.texture_present);
+                return None;
+            }
+            println!("saved_tread_basis source_ready=true model={model} key={:?} basis=raw-N-T-B mask=one-minus-source-red srgb=false shader_parity=false",source.key);
+            Some(tread_normals[model].clone().unwrap_or_else(|| {
+                let dds = &car.textures[&source.key];
+                images.add(texture_upload::image_linear(dds,graphics.sampler(false),RenderAssetUsages::default()).expect("same own-model linear source normal"))
+            }))
+        }).collect()
+    } else { Vec::new() };
     let lamp_normal = lamp_materials::upload_normal(&car, graphics.lamp_reflectors, graphics.lamp_lenses, &mut images, graphics.sampler(false));
     commands.insert_resource(lamp_materials::Prepared(lamp_normal));
     if graphics.lamp_signals != lamp_signals::Mode::Off {
@@ -5456,6 +5498,16 @@ fn setup(
                 }
             }
         }
+    }
+    if saved_tread_basis::enabled() {
+        let mappings = material_handles.iter()
+            .chain(livery_materials.iter().map(|((_, key), handle)| (key, handle)))
+            .chain(occluded_liveries.iter().map(|((_, key), handle)| (key, handle)))
+            .filter_map(|(key, handle)| {
+                let model=tread_part_model(track,key)?;
+                Some((handle.id(),saved_tread_maps.get(model)?.clone()?))
+            }).collect();
+        commands.insert_resource(saved_tread_basis::Bindings(mappings));
     }
     // The reflecting car materials' saved controls (docs/CAR_REFLECTIONS.md).
     // Opponents' livery copies keep their part's controls and take their own
@@ -7092,6 +7144,39 @@ fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGrou
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+
+    #[test]
+    fn saved_tread_admission_refuses_the_actual_ssao_required_normal_prepass() {
+        // Exercise the REAL enhanced camera configuration and Bevy required components,
+        // not a second implementation of the admission predicate.
+        for ao in [true, false] {
+            let settings = graphics::Settings {
+                preset: graphics::Preset::Enhanced,
+                ambient_occlusion: ao,
+                ..default()
+            };
+            let mut world=World::new();
+            let camera=world.spawn(Camera3d::default()).id();
+            let mut media=Assets::<bevy::light::atmosphere::ScatteringMedium>::default();
+            let mut queue=bevy::ecs::world::CommandQueue::default();
+            {
+                let mut commands=Commands::new(&mut queue,&world);
+                graphics::configure(&mut commands,camera,&settings,&mut media);
+            }
+            queue.apply(&mut world);
+            let needs_normal=world.entity(camera).contains::<bevy::core_pipeline::prepass::NormalPrepass>();
+            assert_eq!(needs_normal,ao,"actual SSAO implicit NormalPrepass contract");
+            assert_eq!(saved_tread_basis_admitted(&settings,false,false,true,Some(1)),!needs_normal);
+        }
+        // Default AO stays ON; only the explicit diagnostic rejects this context.
+        assert!(graphics::Settings::default().ambient_occlusion);
+        let allowed=graphics::Settings {preset:graphics::Preset::Enhanced,ambient_occlusion:false,..default()};
+        assert!(saved_tread_basis_admitted(&allowed,false,false,true,Some(1800)));
+        for ticks in [None,Some(0),Some(1801)] {
+            assert!(!saved_tread_basis_admitted(&allowed,false,false,true,ticks));
+        }
+        assert!(!saved_tread_basis_admitted(&allowed,false,false,false,Some(1)));
+    }
 
     #[test]
     fn ornament_distances_read_like_sscanf() {

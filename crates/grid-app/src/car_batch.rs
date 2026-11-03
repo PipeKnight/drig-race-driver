@@ -236,7 +236,7 @@ struct LevelFade {
 type Candidate = (
     Entity,
     &'static Mesh3d,
-    &'static MeshMaterial3d<StandardMaterial>,
+    AnyOf<(&'static MeshMaterial3d<StandardMaterial>, &'static crate::saved_tread_basis::Base)>,
     Option<&'static crate::OpponentPart>,
     Option<&'static crate::MovingPart>,
     Option<&'static crate::track_surface::SourcePart>,
@@ -638,6 +638,7 @@ fn register(
 ) -> bool {
     let before = groups.iter().map(|g| g.members.len()).sum::<usize>();
     for (entity, mesh, material, opponent, moving, source, lod, special) in added {
+        let Some(material) = crate::saved_tread_basis::standard(material.0, material.1) else { continue; };
         // Player-only view/probe policies retain these exact source entities.
         // A model prefix alone does not identify an opponent as the player.
         if opponent.is_none() && source.is_some_and(|p| p.0.starts_with("car0/")) {

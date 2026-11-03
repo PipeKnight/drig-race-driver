@@ -294,7 +294,7 @@ fn follow(
     parts: Query<
         (
             Entity,
-            &MeshMaterial3d<StandardMaterial>,
+            AnyOf<(&MeshMaterial3d<StandardMaterial>, &crate::saved_tread_basis::Base)>,
             &Mesh3d,
             Option<&RenderLayers>,
             Option<&HasOverlay>,
@@ -304,6 +304,7 @@ fn follow(
             Without<OverlayOf>,
             Or<(
                 Changed<MeshMaterial3d<StandardMaterial>>,
+                Changed<crate::saved_tread_basis::Base>,
                 Changed<Mesh3d>,
                 Changed<RenderLayers>,
             )>,
@@ -317,6 +318,7 @@ fn follow(
         return;
     };
     for (entity, material, mesh, layers, existing, original) in &parts {
+        let Some(material) = crate::saved_tread_basis::standard(material.0, material.1) else { continue; };
         // A cracked pane's material is a copy of its intact one with the
         // crack map (damage_parts).
         let source = original.map_or(material.id(), |o| o.0.id());
