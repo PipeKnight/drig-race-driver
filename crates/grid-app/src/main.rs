@@ -2567,9 +2567,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 graphics.tone_map(&args.next().ok_or("--tone-map needs agx or reinhard")?)?;
             }
             "--post-saturation" => {
-                let value: f32 = args.next().ok_or("--post-saturation needs 0..2")?.parse()?;
-                if !value.is_finite() || !(0.0..=2.0).contains(&value) { return Err("post saturation must be finite 0..2".into()); }
-                graphics.post_saturation_override = Some(value);
+                graphics.post_saturation(&args.next().ok_or("--post-saturation needs 0..2")?)?;
             }
             "--exposure" => {
                 graphics.exposure(&args.next().ok_or("--exposure needs EV100")?)?;
@@ -2771,8 +2769,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
-                println!("--post-saturation 0..2: optional single-variable authored-grade diagnostic; enhanced only, temperature/tint unchanged, not combinable with track grade.");
-                println!("--tone-map agx|reinhard: enhanced main-view display diagnostic; absent/AgX preserve the current mode; Reinhard requires authored-grade rendered reference/bounded driving or ordinary interactive driving. Not original GRID grading.");
+                println!("--post-saturation 0..2: optional main-view display preference; baseline opts into HDR, exposure/temperature/tint unchanged; no track grade.");
+                println!("--tone-map agx|reinhard: main-view display preference; absent preserves preset, explicit baseline opts into HDR; rendered reference/bounded driving or ordinary interactive driving. Not original GRID grading.");
                 println!("--temporal-centre X,Y: bounded diagnostic ROI centre; default tracks the car, requires a temporal audit.");
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
@@ -2889,22 +2887,30 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("{}", event.log_line());
     }
-    let bounded_tone_scene = if drive { drive_ticks.is_some() } else { reference };
-    let rendered_tone_scene = output.is_some() && bounded_tone_scene;
-    // Admit ordinary Window driving; other input/capture/clock validation
-    // remains independent.
-    let manual_tone_scene = drive && output.is_none() && drive_ticks.is_none() && !headless;
+    // Persisted play preferences never configure controlled tools, captures or probes.
+    // This uses parsed mode state, not car/route/profile identity or a filename whitelist.
+    let display_research = reference || smoke_policy_explicit || native_smoke_arm.is_some()
+        || source_haze || include_batches || start_view || window_sort_explicit || car_transparent_sort
+        || surface_specular_explicit || paint_response_explicit
+        || reflection_calibration || graphics.reflection_mode == 3 || graphics.moving_probe
+        || graphics.track_grade || graphics.window_pilot != window_response::Mode::Off
+        || graphics.object_coverage != object_materials::CoverageMode::Off
+        || foundation_front != foundation_front::Mode::Off || foundation_backing != foundation_backing::Mode::Off
+        || crowd_preview != crowd_preview::Mode::Off || crowd_flash_preview != flash_preview::Mode::Off
+        || geometry_pixel.is_some() || temporal_audit_tick.is_some() || temporal_colour_tick.is_some()
+        || window_phase_target.is_some() || oit_capacity_target.is_some() || window_transition_script.is_some()
+        || motion_sequence.is_some() || graphics.benchmark_frames.is_some()
+        || graphics.dlaa_reset_every_frame || graphics.thin_motion_antenna || graphics.ground_edge_pilot
+        || capture_orbit_rate.is_some() || render_fixed_step || eye.is_some() || target.is_some()
+        || texture_override_path.is_some() || surface_rgb_override.is_some() || audio_check
+        || profile.diagnostics != settings::Diagnostics::default();
+    let ordinary_display_preferences = graphics::ordinary_display_context(
+        drive, output.is_some(), drive_ticks.is_some(), headless, collision, display_research);
+    graphics.display_preferences(&profile, ordinary_display_preferences)?;
     let nondefault_tone_map = graphics.tone_map_override.is_some_and(|tone|
         tone != bevy::core_pipeline::tonemapping::Tonemapping::AgX);
-    if (graphics.tone_map_override.is_some() && !graphics.enhanced())
-        || (nondefault_tone_map && (graphics.track_grade || collision
-            || !(rendered_tone_scene || manual_tone_scene)))
-    {
-        return Err("--tone-map requires enhanced graphics; nondefault modes require authored-grade rendered reference/bounded driving or ordinary interactive driving".into());
-    }
-    if graphics.post_saturation_override.is_some() && (!graphics.enhanced() || graphics.track_grade) {
-        return Err("--post-saturation requires enhanced authored grade; do not combine with --grade track".into());
-    }
+    // Supervised bounded races use the same GPU Window camera as ordinary driving.
+    graphics.validate_display_context(drive, output.is_some(), drive_ticks.is_some(), reference, collision, headless)?;
     if graphics.motion_shutter > 0. && (!graphics.enhanced() || !drive || collision) {
         return Err("--motion-shutter requires enhanced non-collision driving".into());
     }

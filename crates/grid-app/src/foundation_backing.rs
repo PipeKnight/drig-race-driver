@@ -102,17 +102,27 @@ fn forbidden(defs: &[ShaderDefVal]) -> bool {
     ];
     defs.iter().any(|d| BAD.contains(&def_name(d)))
 }
+/// Preserve the stock forward colour domain. HDR stays linear for camera postprocessing;
+/// non-HDR keeps stock in-shader postlighting and hardware sRGB attachment encoding.
+fn forward_colour(target: &ColorTargetState, defs: &[ShaderDefVal]) -> Result<(), &'static str> {
+    if !matches!(target.format, TextureFormat::Rgba8UnormSrgb | TextureFormat::Rgba16Float)
+        || target.write_mask != ColorWrites::ALL {
+        return Err("source coverage needs RGBA8sRGB or HDR16F/all colour lanes");
+    }
+    if target.format == TextureFormat::Rgba16Float && has_def(defs, "TONEMAP_IN_SHADER") {
+        return Err("HDR source coverage must retain linear stock postlighting; no in-shader tonemap");
+    }
+    Ok(())
+}
 fn attachment(d: &RenderPipelineDescriptor) -> Result<(), &'static str> {
     let f = d.fragment.as_ref().ok_or("no fragment")?;
     if f.targets.len() != 1 {
         return Err("one colour target required");
     }
     let t = f.targets[0].as_ref().ok_or("no colour target")?;
-    if t.format != TextureFormat::Rgba8UnormSrgb
-        || t.write_mask != ColorWrites::ALL
-        || d.multisample.count != 4
-    {
-        return Err("native sRGB/all lanes/MSAA4 required");
+    forward_colour(t, &f.shader_defs)?;
+    if d.multisample.count != 4 {
+        return Err("source raw coverage requires MSAA4");
     }
     let z = d.depth_stencil.as_ref().ok_or("no scene depth")?;
     if z.format != TextureFormat::Depth32Float
@@ -202,9 +212,9 @@ fn specialize_main_one(d: &mut RenderPipelineDescriptor) -> Result<(), &'static 
     source_depth(d)?;
     let f = d.fragment.as_ref().ok_or("no main fragment")?;
     let t = f.targets.first().and_then(Option::as_ref).ok_or("no main colour")?;
+    forward_colour(t, &f.shader_defs)?;
     if d.multisample.count != 1 || d.multisample.alpha_to_coverage_enabled
         || f.shader != SHADER || f.targets.len() != 1 || t.write_mask != ColorWrites::ALL
-        || !matches!(t.format, TextureFormat::Rgba8UnormSrgb | TextureFormat::Rgba16Float)
         || remaps(&d.vertex.shader_defs) != 0 || remaps(&f.shader_defs) != 0 {
         return Err("source cheap coverage needs actual1x colour/no hardware A2C");
     }
@@ -944,7 +954,7 @@ mod tests {
         d.fragment.as_mut().unwrap().targets[0]
             .as_mut()
             .unwrap()
-            .format = TextureFormat::Rgba16Float;
+            .format = TextureFormat::Rgba8Unorm;
         cases.push(d);
         let mut d = pipe();
         d.depth_stencil = None;
@@ -1104,4 +1114,55 @@ mod tests {
         let mut unsupported = base.clone(); unsupported.emissive = LinearRgba::WHITE;
         assert!(source_material(&unsupported).is_err());
     }
+    #[test]
+    fn shared_forward_coverage_accepts_hdr4_and_retains_exact_raw_a2c_state() {
+        for format in [TextureFormat::Rgba8UnormSrgb,TextureFormat::Rgba16Float] {
+            let mut d=pipe();
+            d.fragment.as_mut().unwrap().targets[0].as_mut().unwrap().format=format;
+            // Real non-HDR meshes may tone-map in the fragment; HDR meshes must not.
+            if format==TextureFormat::Rgba8UnormSrgb {
+                d.vertex.shader_defs.push("TONEMAP_IN_SHADER".into());
+                d.fragment.as_mut().unwrap().shader_defs.push("TONEMAP_IN_SHADER".into());
+            }
+            d.primitive.cull_mode=None;
+            d.depth_stencil.as_mut().unwrap().bias.constant=17;
+            let mut expected=d.clone();
+            expected.vertex.shader_defs.retain(|v|def_name(v)!="ALPHA_TO_COVERAGE");
+            expected.fragment.as_mut().unwrap().shader_defs.retain(|v|def_name(v)!="ALPHA_TO_COVERAGE");
+            expected.fragment.as_mut().unwrap().targets[0].as_mut().unwrap().blend=Some(source_blend());
+            specialize_source(&mut d,MeshPipelineKey::NONE).unwrap();
+            assert_eq!(d,expected);
+            assert!(d.multisample.alpha_to_coverage_enabled);
+            assert!(actual_pipeline(&d,true));
+            // No new colour conversion define, alpha remap, quarter discard or sample-mask backend.
+            assert!(!has_def(&d.fragment.as_ref().unwrap().shader_defs,"OBJECT_COVERAGE_QUARTER"));
+        }
+    }
+
+    #[test]
+    fn hdr_colour_domain_mismatch_and_unsupported_targets_refuse_without_mutation() {
+        for samples in [1,4] {
+            let mut hdr=pipe();
+            hdr.primitive.cull_mode=None;
+            hdr.fragment.as_mut().unwrap().targets[0].as_mut().unwrap().format=TextureFormat::Rgba16Float;
+            if samples==1 {
+                hdr.multisample.count=1; hdr.multisample.alpha_to_coverage_enabled=false;
+                hdr.vertex.shader_defs=vec!["MAY_DISCARD".into()];
+                hdr.fragment.as_mut().unwrap().shader_defs=hdr.vertex.shader_defs.clone();
+            }
+            let mut admitted=hdr.clone();
+            specialize_source(&mut admitted,MeshPipelineKey::NONE).unwrap();
+            assert_eq!(admitted.fragment.as_ref().unwrap().targets[0].as_ref().unwrap().format,TextureFormat::Rgba16Float);
+            assert_eq!(has_def(&admitted.fragment.as_ref().unwrap().shader_defs,"OBJECT_COVERAGE_QUARTER"),samples==1);
+            let mut bad=hdr.clone(); bad.fragment.as_mut().unwrap().shader_defs.push("TONEMAP_IN_SHADER".into());
+            let old=bad.clone(); assert!(specialize_source(&mut bad,MeshPipelineKey::NONE).is_err()); assert_eq!(bad,old);
+            for format in [TextureFormat::Rgba8Unorm,TextureFormat::Rg16Float,TextureFormat::Bgra8UnormSrgb] {
+                let mut bad=hdr.clone();bad.fragment.as_mut().unwrap().targets[0].as_mut().unwrap().format=format;
+                let old=bad.clone(); assert!(specialize_source(&mut bad,MeshPipelineKey::NONE).is_err()); assert_eq!(bad,old);
+            }
+            let mut bad=hdr;bad.fragment.as_mut().unwrap().targets[0].as_mut().unwrap().write_mask=ColorWrites::RED;
+            let old=bad.clone();assert!(specialize_source(&mut bad,MeshPipelineKey::NONE).is_err());assert_eq!(bad,old);
+        }
+    }
+
 }

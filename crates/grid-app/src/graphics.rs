@@ -326,6 +326,42 @@ impl Settings {
         Ok(())
     }
 
+    pub fn post_saturation(&mut self, value: &str) -> Result<(), &'static str> {
+        let value = value.parse::<f32>().map_err(|_| "post saturation must be finite 0..2")?;
+        if !value.is_finite() || !(0.0..=2.0).contains(&value) {
+            return Err("post saturation must be finite 0..2");
+        }
+        self.post_saturation_override = Some(value);
+        Ok(())
+    }
+
+    /// Actual scene context: a bounded supervisor still owns the ordinary GPU window.
+    pub fn validate_display_context(&self, driving: bool, capture: bool, bounded: bool, reference: bool, collision: bool, headless: bool) -> Result<(), &'static str> {
+        let rendered = capture && if driving { bounded } else { reference };
+        let windowed_driving = driving && !capture && !headless;
+        self.validate_display_scene(rendered, windowed_driving, collision, headless)
+    }
+
+    pub fn validate_display_scene(&self, rendered: bool, manual: bool, collision: bool, headless: bool) -> Result<(), &'static str> {
+        let explicit = self.tone_map_override.is_some() || self.post_saturation_override.is_some();
+        if explicit && (self.track_grade || collision || headless || !(rendered || manual)) {
+            return Err("display overrides require rendered reference/bounded driving or ordinary interactive driving; no track grade, collision or headless context");
+        }
+        Ok(())
+    }
+
+    /// Resolve persisted preferences only after parsing CLI/context. Existing fields are CLI authority.
+    /// Controlled captures/tools retain preset defaults unless CLI explicitly requested display changes.
+    pub fn display_preferences(&mut self, profile: &crate::settings::Settings, ordinary: bool) -> Result<(), &'static str> {
+        let tone_from_preferences = ordinary && self.tone_map_override.is_none() && profile.tone_map.is_some();
+        let saturation_from_preferences = ordinary && self.post_saturation_override.is_none() && profile.post_saturation.is_some();
+        if tone_from_preferences && let Some(value) = &profile.tone_map { self.tone_map(value)?; }
+        if saturation_from_preferences && let Some(value) = profile.post_saturation { self.post_saturation(&value.to_string())?; }
+        println!("graphics_display_preferences ordinary={} tone_from_preferences={} saturation_from_preferences={} controlled_context_preferences_ignored={}", ordinary, tone_from_preferences, saturation_from_preferences,
+            !ordinary && (profile.tone_map.is_some() || profile.post_saturation.is_some()));
+        Ok(())
+    }
+
     pub fn race_number(&mut self, value: &str) -> Result<(), &'static str> {
         let number = grid_formats::car_decals::Number::parse(value).map_err(|_| "race number needs 1..3 decimal digits")?;
         self.player_race_number = Some(number);
@@ -509,7 +545,7 @@ pub fn configure(
         if settings.enhanced() {
             format!("{tone_map:?}")
         } else {
-            "Bevy-default".to_owned()
+            "retained-or-explicit-see-graphics_display".to_owned()
         }
     );
     if !settings.enhanced() {
@@ -524,6 +560,7 @@ pub fn configure(
             ));
             println!("graphics_aa mode=3 hdr=true msaa=off depth_prepass=true motion_prepass=true scope=main-view baseline_display=preserved");
         }
+        configure_display(commands, camera, settings);
         return;
     }
     if let Some(fog) = settings.saved_fog {
@@ -642,11 +679,47 @@ pub fn configure(
             settings.ssr_thickness
         );
     }
+    configure_display(commands, camera, settings);
     if let Some(grade) = settings.saved_grade {
         commands
             .entity(camera)
             .insert(super::track_grade::TrackGrade::from(grade));
     }
+}
+
+
+/// Shared admission for persisted playable preferences, deliberately separate from explicit CLI admission.
+pub fn ordinary_display_context(driving: bool, capture: bool, scripted: bool, headless: bool, collision: bool, research: bool) -> bool {
+    driving && !capture && !scripted && !headless && !collision && !research
+}
+
+/// Mutate only the requested baseline display fields, after pending camera setup.
+/// No HDR/default change when neither option is present. Enhanced keeps its authored setup.
+fn configure_display(commands: &mut Commands, camera: Entity, settings: &Settings) {
+    let baseline = !settings.enhanced();
+    let tone = settings.tone_map_override;
+    let saturation = settings.post_saturation_override;
+    commands.queue(move |world: &mut World| {
+        let mut view = world.entity_mut(camera);
+        if baseline && (tone.is_some() || saturation.is_some()) {
+            view.insert(Hdr);
+            if let Some(tone) = tone { view.insert(tone); }
+            if let Some(value) = saturation {
+                if let Some(mut grade) = view.get_mut::<ColorGrading>() {
+                    grade.global.post_saturation = value;
+                } else {
+                    view.insert(ColorGrading {
+                        global: ColorGradingGlobal { post_saturation: value, ..default() },
+                        ..default()
+                    });
+                }
+            }
+        }
+        println!("graphics_display scope=main-view baseline={} hdr={} tone={:?} post_saturation={:?} exposure_ev100={:?} msaa={:?} tone_override={} saturation_override={} lighting=unchanged authored=true",
+            baseline, view.contains::<Hdr>(), view.get::<Tonemapping>(),
+            view.get::<ColorGrading>().map(|g|g.global.post_saturation),
+            view.get::<Exposure>().map(|e|e.ev100), view.get::<Msaa>(), tone.is_some(), saturation.is_some());
+    });
 }
 
 
@@ -874,5 +947,188 @@ mod graphics_settings_tests {
             }
         }
         assert_eq!(files, 20);
+    }
+}
+
+#[cfg(test)]
+mod shared_display_tests {
+    use super::*;
+    fn configured(aa: u8, tone: Option<&str>, saturation: Option<&str>, enhanced: bool) -> World {
+        let mut world=World::new();
+        world.insert_resource(GlobalAmbientLight { brightness: 321., ..default() });
+        world.insert_resource(DirectionalLightShadowMap { size: 1024 });
+        let camera=world.spawn((Camera3d::default(), Tonemapping::default(), Exposure {ev100:9.5}, ColorGrading {
+            global:ColorGradingGlobal {temperature:0.17,tint:0.23,post_saturation:0.73,..default()},..default()
+        },Msaa::Sample4)).id();
+        let other=world.spawn((Camera2d, Tonemapping::Reinhard)).id();
+        let mut settings=Settings {anti_aliasing:aa,preset:if enhanced {Preset::Enhanced}else{Preset::Baseline},ambient_occlusion:!enhanced,..default()};
+        if let Some(t)=tone {settings.tone_map(t).unwrap();}
+        if let Some(s)=saturation {settings.post_saturation(s).unwrap();}
+        let mut media=Assets::<ScatteringMedium>::default();
+        let mut queue=bevy::ecs::world::CommandQueue::default();
+        configure(&mut Commands::new(&mut queue,&world),camera,&settings,&mut media);
+        queue.apply(&mut world);
+        if !enhanced { assert!(media.is_empty()); }
+        assert_eq!(*world.entity(other).get::<Tonemapping>().unwrap(),Tonemapping::Reinhard);
+        assert!(!world.entity(other).contains::<Hdr>());
+        world.insert_resource(TestCamera(camera));
+        world
+    }
+    #[derive(Resource)] struct TestCamera(Entity);
+    #[test]
+    fn baseline_actual_configure_preserves_none_and_changes_only_explicit_display_fields() {
+        for aa in [1,3] { for (tone,sat) in [(None,None),(Some("reinhard"),None),(None,Some("0.9")),(Some("reinhard"),Some("0.9"))] {
+            let world=configured(aa,tone,sat,false);
+            let view=world.entity(world.resource::<TestCamera>().0);
+            assert_eq!(*view.get::<Tonemapping>().unwrap(),if tone.is_some(){Tonemapping::Reinhard}else{Tonemapping::TonyMcMapface});
+            assert_eq!(view.get::<ColorGrading>().unwrap().global.post_saturation,if sat.is_some(){0.9}else{0.73});
+            assert_eq!(view.get::<ColorGrading>().unwrap().global.temperature,0.17);
+            assert_eq!(view.get::<ColorGrading>().unwrap().global.tint,0.23);
+            assert_eq!(view.get::<Exposure>().unwrap().ev100,9.5);
+            assert_eq!(view.contains::<Hdr>(),aa==3 || tone.is_some() || sat.is_some());
+            assert_eq!(*view.get::<Msaa>().unwrap(),if aa==3{Msaa::Off}else{Msaa::Sample4});
+            assert_eq!(view.contains::<bevy::core_pipeline::prepass::DepthPrepass>(),aa==3);
+            assert_eq!(view.contains::<bevy::core_pipeline::prepass::MotionVectorPrepass>(),aa==3);
+            assert!(!view.contains::<Bloom>()); assert!(!view.contains::<AtmosphereSettings>());
+            assert!(!view.contains::<ScreenSpaceAmbientOcclusion>());
+            assert_eq!(world.resource::<GlobalAmbientLight>().brightness,321.);
+            assert_eq!(world.resource::<DirectionalLightShadowMap>().size,1024);
+        }}
+    }
+    #[test]
+    fn windowed_scripted_display_uses_actual_camera_and_keeps_unsupported_guards() {
+        for enhanced in [false, true] {
+            let mut settings = Settings { preset: if enhanced { Preset::Enhanced } else { Preset::Baseline }, ..default() };
+            settings.tone_map("reinhard").unwrap();
+            settings.post_saturation("0.9").unwrap();
+            // Both menu/career supervisors append a bound without a capture target.
+            // A bound changes termination, not the actual Window rendering context.
+            for bounded in [false, true] {
+                settings.validate_display_context(true, false, bounded, false, false, false).unwrap();
+                for aa in [1, 3] {
+                    let world = configured(aa, Some("reinhard"), Some("0.9"), enhanced);
+                    let view = world.entity(world.resource::<TestCamera>().0);
+                    assert!(view.contains::<Hdr>());
+                    assert_eq!(*view.get::<Tonemapping>().unwrap(), Tonemapping::Reinhard);
+                    assert_eq!(view.get::<ColorGrading>().unwrap().global.post_saturation, 0.9);
+                    assert_eq!(*view.get::<Msaa>().unwrap(), if enhanced || aa == 3 { Msaa::Off } else { Msaa::Sample4 });
+                }
+            }
+            // Existing capture-reference/bounded-drive support stays admitted.
+            settings.validate_display_context(false, true, false, true, false, false).unwrap();
+            settings.validate_display_context(true, true, true, true, false, false).unwrap();
+            for context in [
+                (false, false, false, false, false, false), // static non-driving window
+                (false, true, false, false, false, false), // non-reference capture
+                (true, true, false, true, false, false),   // unbounded capture
+                (true, false, true, false, true, false),   // collision remains refused
+                (true, false, true, false, false, true),   // headless remains refused
+            ] {
+                let (drive, capture, bounded, reference, collision, headless) = context;
+                assert!(settings.validate_display_context(drive, capture, bounded, reference, collision, headless).is_err());
+            }
+            settings.track_grade = true;
+            assert!(settings.validate_display_context(true, false, true, false, false, false).is_err());
+        }
+    }
+
+    #[test]
+    fn enhanced_actual_configure_keeps_authored_defaults_and_explicit_overrides() {
+        for explicit in [false,true] {
+            let world=configured(1,explicit.then_some("reinhard"),explicit.then_some("0.81"),true);
+            let view=world.entity(world.resource::<TestCamera>().0);
+            assert_eq!(*view.get::<Tonemapping>().unwrap(),if explicit{Tonemapping::Reinhard}else{Tonemapping::AgX});
+            assert_eq!(view.get::<ColorGrading>().unwrap().global.post_saturation,if explicit{0.81}else{0.9});
+            assert_eq!(view.get::<ColorGrading>().unwrap().global.temperature,0.012);
+            assert_eq!(view.get::<ColorGrading>().unwrap().global.tint,-0.003);
+            assert_eq!(view.get::<Exposure>().unwrap().ev100,Settings::default().exposure_ev100);
+            assert!(view.contains::<Hdr>() && view.contains::<Bloom>());
+            assert_eq!(*view.get::<Msaa>().unwrap(),Msaa::Off);
+        }
+    }
+}
+
+#[cfg(test)]
+mod shared_display_admission_tests {
+    use super::*;
+    #[test]
+    fn consumed_scene_guard_admits_both_presets_and_keeps_diagnostic_isolation() {
+        for preset in [Preset::Baseline,Preset::Enhanced] {
+            let mut settings=Settings {preset,..default()};
+            assert!(settings.validate_display_scene(false,false,true,true).is_ok());
+            settings.tone_map("reinhard").unwrap(); settings.post_saturation("0.9").unwrap();
+            assert!(settings.validate_display_scene(true,false,false,false).is_ok());
+            assert!(settings.validate_display_scene(false,true,false,false).is_ok());
+            for (rendered,manual,collision,headless) in [(false,false,false,false),(true,false,true,false),(true,false,false,true)] {
+                assert!(settings.validate_display_scene(rendered,manual,collision,headless).is_err());
+            }
+            settings.track_grade=true;
+            assert!(settings.validate_display_scene(true,false,false,false).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod shared_display_smoke_admission_tests {
+    #[test]
+    fn normal_display_preferences_preserve_actual_automatic_smoke_admission() {
+        let mut profile=crate::settings::Settings::default();
+        profile.apply("[video]\ntone_map=reinhard\npost_saturation=0.9\n",std::path::Path::new(".")).unwrap();
+        let mut settings=super::Settings::default();
+        settings.display_preferences(&profile, true).unwrap();
+        settings.validate_display_scene(false,true,false,false).unwrap();
+        for args in [vec!["--drive","--tone-map","reinhard","--post-saturation","0.9"], vec!["--drive","--aa","dlaa","--tone-map","reinhard","--post-saturation","0.9"]] {
+            let explicit=args.iter().any(|arg|crate::smoke_boundary::explicit_policy_arg(arg));
+            assert!(!explicit);
+            assert!(crate::smoke_boundary::automatic_selected(true,true,true,true,explicit));
+            let mut research=args.clone(); research.extend(["--smoke-boundary","off"]);
+            assert!(!crate::smoke_boundary::automatic_selected(true,true,true,true,research.iter().any(|arg|crate::smoke_boundary::explicit_policy_arg(arg))));
+            assert!(crate::smoke_boundary::explicit_policy_arg("--temporal-audit"));
+            assert!(crate::smoke_boundary::explicit_policy_arg("--temporal-colour-audit"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod scoped_display_preferences_tests {
+    use super::*;
+    #[test]
+    fn consumed_resolver_preserves_per_field_cli_authority_and_controlled_defaults() {
+        let mut profile=crate::settings::Settings::default();
+        profile.apply("[video]\ntone_map=reinhard\npost_saturation=0.9\n",std::path::Path::new(".")).unwrap();
+        for ordinary in [false,true] { for cli_tone in [false,true] { for cli_saturation in [false,true] {
+            let mut settings=Settings::default();
+            if cli_tone {settings.tone_map("agx").unwrap();}
+            if cli_saturation {settings.post_saturation("0.7").unwrap();}
+            settings.display_preferences(&profile,ordinary).unwrap();
+            assert_eq!(settings.tone_map_override,if cli_tone {Some(Tonemapping::AgX)} else if ordinary {Some(Tonemapping::Reinhard)} else {None});
+            assert_eq!(settings.post_saturation_override,if cli_saturation {Some(0.7)} else if ordinary {Some(0.9)} else {None});
+            if !ordinary && !cli_tone && !cli_saturation {
+                // Same consumed guard as main: unrelated headless/tool/collision no longer poisoned.
+                assert!(settings.validate_display_scene(false,false,true,true).is_ok());
+                assert!(settings.validate_display_scene(true,false,false,false).is_ok());
+            }
+            if !ordinary && (cli_tone || cli_saturation) {
+                assert!(settings.validate_display_scene(false,false,true,true).is_err());
+                // Explicit CLI captures remain supported; preferences do not override them.
+                assert!(settings.validate_display_scene(true,false,false,false).is_ok());
+            }
+        }}}
+        for context in [(true,false,false,false,false,false), (true,true,false,false,false,false),
+            (true,false,true,false,false,false), (true,false,false,true,false,false),
+            (true,false,false,false,true,false), (true,false,false,false,false,true),
+            (false,false,false,false,false,false)] {
+            let (drive,capture,scripted,headless,collision,research)=context;
+            let ordinary=ordinary_display_context(drive,capture,scripted,headless,collision,research);
+            let mut resolved=Settings::default(); resolved.display_preferences(&profile,ordinary).unwrap();
+            assert_eq!(resolved.tone_map_override.is_some(),context==(true,false,false,false,false,false));
+            assert_eq!(resolved.post_saturation_override.is_some(),context==(true,false,false,false,false,false));
+            if !ordinary { assert!(resolved.validate_display_scene(false,false,collision,headless).is_ok()); }
+        }
+        let mut probe=Settings::default(); probe.display_preferences(&profile,false).unwrap();
+        assert!(probe.tone_map_override.is_none() && probe.post_saturation_override.is_none());
+        // Native probe receives no inherited display fields; its existing exclusion checks remain intact.
+        assert_eq!(probe.tone_map_override,Settings::default().tone_map_override);
+        assert_eq!(probe.post_saturation_override,Settings::default().post_saturation_override);
     }
 }

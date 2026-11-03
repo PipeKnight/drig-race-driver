@@ -911,7 +911,7 @@ pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
     while i < args.len() {
         if matches!(
             args[i].as_str(),
-            "--game-root" | "--data-dir" | "--settings" | "--aa"
+            "--game-root" | "--data-dir" | "--settings" | "--aa" | "--tone-map" | "--post-saturation"
         ) && i + 1 < args.len()
         {
             out.extend_from_slice(&args[i..i + 2]);
@@ -1639,5 +1639,17 @@ mod tests {
         s.apply(&text, Path::new("d")).unwrap();
         assert_eq!(saved(&s.event), c);
         assert!(text.starts_with("# mine\n[osd]\nfps = on\n"));
+    }
+}
+
+#[cfg(all(test,not(target_os="android")))]
+mod shared_display_forwarding_tests {
+    #[test]
+    fn shared_menu_career_supervisor_filter_roundtrips_display_order() {
+        let input:Vec<String>=["--tone-map","agx","--post-saturation","1","--render","x.png","--tone-map","reinhard","--post-saturation","0.9","--aa","dlaa"].into_iter().map(String::from).collect();
+        let forwarded=super::passed_on(&input);
+        let expected:Vec<String>=["--tone-map","agx","--post-saturation","1","--tone-map","reinhard","--post-saturation","0.9","--aa","dlaa"].into_iter().map(String::from).collect();
+        assert_eq!(forwarded,expected); assert_eq!(super::passed_on(&forwarded),expected);
+        assert!(super::passed_on(&["--tone-map".into()]).is_empty());
     }
 }

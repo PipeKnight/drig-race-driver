@@ -154,3 +154,38 @@ CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_direct
 | Play GRID Drift Battle Istanbul Reverse.cmd | `settings/drift-battle-istanbul-reverse.ini` | Drift Battle on Istanbul Park route_3 (istanbul_int_r) |
 
 Changes in behaviour: BP01 and DF01 are now always derived from `grid.exe` instead of being used only when `local\*.bin` existed (the bytes are equal on this PC). The game folder argument is optional. `local\assists.txt`, `GRID_PLAY_ASSISTS`, `GRID_PLAY_INPUT`, `GRID_PLAY_OPPONENTS` and `GRID_PLAY_GRID` still work; the launcher turns them into command-line flags. Equivalent without any variables: `target\release\grid-app.exe --settings settings\race.ini`.
+
+## Shared main-view display preferences (G360)
+
+The working normal-display path accepts --tone-map agx|reinhard and
+--post-saturation 0..2 without enabling the enhanced profile. Explicit baseline
+display processing opts the main camera into HDR, preserving its existing
+exposure, other grading fields, lighting, AA and prepass ownership. No overrides
+preserve the preset's components. Enhanced retains its authored defaults;
+these options do not reproduce original GRID grading or change probe/UI cameras.
+
+Optional normal-game preferences:
+
+```ini
+[video]
+tone_map = reinhard
+post_saturation = 0.9
+```
+
+Each explicit CLI field wins independently. Stored display preferences apply
+only to ordinary interactive driving; captures, scripted/headless tools and
+parsed research/probe contexts retain controlled defaults. Captures can request
+the two CLI fields explicitly. Invalid settings syntax still errors. Existing
+video-save operations retain these keys, and the shared menu/career supervisor
+forwards both valued CLI options to the race. No new display UI selector is
+implied. Saturation0.9 is the original preferred enhanced value, not an additional
+recent reduction.
+
+The common automatic smoke selector remains unchanged, including HDR/MSAA4 and
+DLAA/HDR1 attachment domains. Explicit native research profiles keep their own
+narrow admission. Source-only policy/CPU controls do not establish GPU rendering
+or visual equivalence: see G360 for actual gate and representative A/B outcomes.
+Both Play GRID.cmd and Play GRID DLAA.cmd pass
+--tone-map reinhard --post-saturation 0.9 through their existing menu path.
+Default publication and actual representative checks are recorded in G360;
+this does not reproduce the old enhanced EV13 lighting/grade screenshot.
