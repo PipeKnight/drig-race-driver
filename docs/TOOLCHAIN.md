@@ -85,7 +85,7 @@ tree_placements take the workspace tier. The grid-tools library is always full (
 and trait impls in any module can reach the race tool without a path to it). The decision
 table is in the header of `tools/prepush.ps1`; when unsure it goes up a tier.
 
-Render smoke (F713). No test draws through the GPU, so F710's wgpu validation error (a skinned
+Render smoke (F714). No test draws through the GPU, so F710's wgpu validation error (a skinned
 mesh layout without a skin bind group, every grid-app render) passed the crate tier. When grid-app
 is in the crate tier, and in the workspace and full tiers, the gate builds the release grid-app
 (`build-grid-app`) and renders one offscreen frame of Washington route 0 with the Donington scene

@@ -20,7 +20,6 @@ use std::{collections::BTreeMap, path::Path};
 const INTACT: &str = "dynamic/intact/";
 /// An entity placement and its breakable index, if breakable.
 pub(crate) type Placement = ([f32; 16], Option<usize>);
-type Untagged = (Added<Name>, Without<IntactProp>, Without<PropPiece>);
 type JointFilter = (Without<PropPiece>, Without<IntactProp>);
 const PIECE: &str = "dynamic/piece/";
 
@@ -227,8 +226,8 @@ pub(crate) struct PieceSkin {
 /// Gives the skinned piece part `entity` its joints and skin in the command
 /// flush that spawns it. A mesh with joint attributes drawn without its skin
 /// fails wgpu validation (the prepass pipeline's skinned layout against the
-/// plain mesh bind group); F710 attached the skin a frame later in [`tag`],
-/// which never runs in static scenes.
+/// plain mesh bind group); F710 attached the skin a frame later in a tag
+/// system that ran only in drive scenes.
 pub(crate) fn attach_skin(commands: &mut Commands, entity: Entity, skin: &PieceSkin) {
     let joints: Vec<Entity> = (skin.joints.iter())
         .map(|&(spec, rest)| {
@@ -260,27 +259,28 @@ pub(crate) struct PropPiece {
     pub(crate) rest: Mat4,
 }
 
-/// Tag the spawned prop parts by name (pieces start hidden).
-pub(crate) fn tag(mut commands: Commands, parts: Query<(Entity, &Name, &Transform), Untagged>) {
-    for (entity, name, transform) in &parts {
-        if let Some(rest) = name.as_str().strip_prefix(INTACT) {
-            if let Some(b) = rest.split('/').next().and_then(|v| v.parse().ok()) {
-                commands.entity(entity).insert(IntactProp(b));
-            }
-        } else if let Some(rest) = name.as_str().strip_prefix(PIECE) {
-            let mut fields = rest.split('/');
-            if let (Some(Ok(breakable)), Some(Ok(spec))) =
-                (fields.next().map(str::parse), fields.next().map(str::parse))
-            {
-                commands.entity(entity).insert((
-                    PropPiece {
-                        breakable,
-                        spec,
-                        rest: transform.to_matrix(),
-                    },
-                    Visibility::Hidden,
-                ));
-            }
+/// Tags a prop part by name as it is spawned, in every scene: intact props
+/// get [`IntactProp`], pieces [`PropPiece`] and start hidden. Before F715 a
+/// tag system ran only in drive scenes, so static renders drew every piece
+/// over its intact prop.
+pub(crate) fn tag(entity: &mut EntityCommands, name: &str, transform: &Transform) {
+    if let Some(rest) = name.strip_prefix(INTACT) {
+        if let Some(b) = rest.split('/').next().and_then(|v| v.parse().ok()) {
+            entity.insert(IntactProp(b));
+        }
+    } else if let Some(rest) = name.strip_prefix(PIECE) {
+        let mut fields = rest.split('/');
+        if let (Some(Ok(breakable)), Some(Ok(spec))) =
+            (fields.next().map(str::parse), fields.next().map(str::parse))
+        {
+            entity.insert((
+                PropPiece {
+                    breakable,
+                    spec,
+                    rest: transform.to_matrix(),
+                },
+                Visibility::Hidden,
+            ));
         }
     }
 }

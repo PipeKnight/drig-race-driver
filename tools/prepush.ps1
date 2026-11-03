@@ -18,7 +18,7 @@ Tiers (each also runs the ones above it):
              when that tool exists.
   crate      the changed leaf crates only: their release tests with --include-ignored, and
              release Clippy -D warnings for them; for grid-app also the render smoke (one
-             offscreen frame of the release grid-app, F713).
+             offscreen frame of the release grid-app, F714).
   workspace  the release test suite of the whole workspace with --include-ignored, the
              workspace release Clippy -D warnings and the render smoke.
   full       workspace + rebuild grid-opponent-race and grid-soak, the identity check against
@@ -64,9 +64,10 @@ that set (pure presentation readers such as the ETC2 decoder) take the workspace
 
 Order and lock: sanity, Clippy, (workspace and full: grid-app build, render smoke), (full:
 race/soak build, identity), tests, (crate grid-app: grid-app build, render smoke), (full:
-grid-soak quick). The cheap checks that fail most come first. The render smoke (F713) draws one offscreen frame through the GPU, which no test does: a
-non-zero exit or a caught wgpu error fails it. The build lock (tools\build_lock.ps1) is taken once
-for the Clippy..tests stretch and given back before grid-soak quick or after a failure.
+grid-soak quick). The cheap checks that fail most come first. The render smoke (F714) draws one
+offscreen frame through the GPU, which no test does: a non-zero exit or a caught wgpu error fails
+it. The build lock (tools\build_lock.ps1) is taken once for the Clippy..tests stretch and given back
+before grid-soak quick or after a failure.
 
 Pass cache: a gate that passed records its code key in C:\cargo-build\prepush-cache (machine-wide).
 A later run with the same key, i.e. the same content of every non-documentation path, the same
@@ -285,7 +286,7 @@ if ($tier -eq 1) {
 }
 if ($tier -ge 2) { Add-Step 'clippy-workspace' 'cargo' 'clippy --release --workspace --all-targets -- -D warnings' }
 # No test draws through the GPU, so a wgpu validation error in grid-app's renderer (F710's skinned
-# layout without a skin bind group, F713) passed every tier. One offscreen frame of Washington
+# layout without a skin bind group, F714) passed every tier. One offscreen frame of Washington
 # route 0 with the Donington scene objects, looking at skinned armco (10-60 s; the start view has
 # no skinned mesh in frame and passed the faulty F710 build).
 $renderArgs = '--route tracks/usa/washington/route_0 --scene donington --camera 214,2.4,874 --look-at 223,1.0,893'
@@ -520,7 +521,7 @@ function Invoke-Identity([string]$Log) {
     return [int]($failed -ne 0)
 }
 
-# One offscreen frame (F713). Fails on a non-zero exit, a caught rendering error (Bevy logs wgpu
+# One offscreen frame (F714). Fails on a non-zero exit, a caught rendering error (Bevy logs wgpu
 # validation errors so) or no picture after 5 minutes.
 function Invoke-RenderSmoke([string]$Log) {
     $app = Join-Path (Get-TargetDir) 'release\grid-app.exe'

@@ -4597,7 +4597,6 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     drive_actions,
                     free_look::update,
                     drive_present,
-                    dynamic_props::tag,
                     dynamic_props::present,
                     dynamic_props::float_check,
                 )
@@ -5205,6 +5204,9 @@ fn setup(
             {
                 let id = entity.id();
                 dynamic_props::attach_skin(&mut entity.commands(), id, skin);
+            }
+            if let Some(entity) = &mut entity {
+                dynamic_props::tag(entity, &part.name, &Transform::from_matrix(transform));
             }
             if let Some(entity) = &mut entity {
                 if let Some(source_material) = &source_material {

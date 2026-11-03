@@ -142,6 +142,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F715](log/F0715.md) | 2026-11-03 | Dynamic prop parts tagged at spawn; static scenes hide unbroken pieces |
 | [F714](log/F0714.md) | 2026-11-03 | F710 skinned-mesh render regression fixed; prepush render smoke |
 | [F713](log/F0713.md) | 2026-11-03 | Ornament shadows fade across D (shadow proxies) |
 | [F712](log/F0712.md) | 2026-11-03 | Baseline draws no source forest on any track; branch baseline-trees prepared |
@@ -201,7 +202,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F658](log/F0658.md) | 2026-10-30 | Pack tick candidates: piece contacts already parallel, piece-island parallelism stopped |
 | [F657](log/F0657.md) | 2026-10-30 | Owner playtest Viper Washington: car reflections, cockpit mouse look, floating track pieces (rows 100-102) |
 | [F656](log/F0656.md) | 2026-10-30 | Location ambience ported: the track's AutoPlay field around the player (backlog row 70) |
-| [F655](log/F0655.md) | 2026-10-30 | Washington pack tick profile: piece islands, not car contacts or basic boxes |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
