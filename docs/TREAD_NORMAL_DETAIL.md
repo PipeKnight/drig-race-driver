@@ -21,3 +21,91 @@ The new low close-up reveals excessive livery washout with authored layered mate
 Normal mip completeness, finer tyre texture resolution, original mask updates, source-binormal exact representation and body/detail materials remain open. Upscaling workflow/tool provenance: [TEXTURE_UPSCALING.md](TEXTURE_UPSCALING.md).
 
 Follow-up: [clearcoat prepass repair](CLEARCOAT_PREPASS.md) resolves the low-angle washout with a matched stock/fixed GPU comparison. Latest source483941155483 retains tread normals and passes the same240tick motion/handling comparison. The problem was missing geometric coat-normal initialization in the active prepass path, so strength-only art tuning was insufficient. Private release manifest `validation-clearcoat01.json` records the final executable and images.
+
+
+## General model binding and explicit basis limits (3 November 2026, G353)
+
+Tread preparation now keeps an independent source key, admitted mesh-frame
+readiness and optional linear normal image for each Field model. Vehicle slots
+resolve through their existing model namespaces; no other model supplies a
+missing image or frame. The shared path preserves the existing authored basis
+admission, material response, sampler, shader and profile guards.
+
+Real load/append_car CPU controls use three models and four slots, including
+missing-image/frame/parts and invalid-model cases. Combined-feature Clippy and
+the exact source control pass; the required grid-app gate passes636tests and
+Clippy. This does not verify actual GPU binding, shaded response or lowLOD
+readiness for every model.
+
+| Selected LOD0 source | Tread vertex occurrences | Native N/T/B | Minimum admitted-basis alignment | Occurrences below.95 |
+|---|---:|---|---:|---:|
+| Lacetti |720|present, finite, nonzero|.9887001|0|
+| BMW |720|present, finite, nonzero|.9723601|0|
+| STK |540|present, finite, nonzero|.8221446|252|
+
+All selected masks are ff00ffff. STK therefore lacks the prepared Bevy tangent
+attribute because of substantial original binormal skew, not absent native
+vectors or mask rejection. The all-or-none helper refuses each of its four
+draws. Keep the.95authored adaptation limit until a reviewed common basis
+representation is available; lowering it is not a general source-correct fix.
+The numeric audit used decoded source floats and Pythonf64, corroborated by
+the actual Rust prepared-frame results; it is not an image-error measurement.
+
+A further shader-scope check finds the saved car.fx primary pixel-program ID
+differs from the earlier selected paint pixel program. The shared vertex
+program independently transforms T/B/N, but this alone does not establish the
+exact active tread pixel decode/pass. Do not generalize paint-PS findings into
+tread-PS parity. Full saved-basis, refinement, material-cache/prepass and actual
+shader-selection compatibility remain open.
+
+Private evidence: `local/graphics/tread-per-model01/`,
+`local/handoff/drafts/tread-admission50/` and `tread-full-basis51/`.
+
+### Actual CPU upload and material consumers
+
+The same production upload and normal-image assignment now have small shared
+helpers called by setup and the purchased regression. A fresh headless
+App/Assets fixture inspects actual Image and StandardMaterial assets through
+MeshMaterial3d handles. It verifies separate model handles, linear BC1 data,
+unchanged mips, missing-map clearing and both disabled controls. A distinct
+independently authored BMW DDS in memory catches cross-model payload leakage;
+the purchased Lacetti/BMW base maps happen to be byte-identical, so equality
+alone would hide that defect. Source files are never modified by this control.
+STK's existing frame refusal and unrelated material assignment are preserved.
+
+The exact consumer regression and combined-feature all-target Clippy pass
+(local/graphics/tread-per-model01/check02): one test, no renderer/window/GPU.
+This exercises actual CPU consumers, not the complete setup/spawn/render queues
+or visible shader contribution. Representative rendered acceptance remains open.
+
+### Saved basis and sampler qualifications
+
+The exact saved non-paint car.fx pixel program has now been disassembled for the
+selected Lacetti primary pass. Its tangent-space decode normalizes the decoded
+sample, sums the independently transformed T/B/N vectors, then uses that result
+in lighting without an intervening normalization. This is saved-pass evidence,
+not a live pass observation or a BMW/STK shader association. Normalized Bevy PBR
+input remains an explicit adaptation. See private source-contract52 in
+local/handoff/drafts/tread-full-basis51/.
+
+A bounded CPU comparison53 samples only36/4/27 distinct base-mip texels for
+Lacetti/BMW/STK at source vertex UVs. BMW's720UV occurrences lie outside0..1;
+the declared clamp sampler reaches only four BMW edge texels. Its small numeric
+delta cannot establish general filter or visual accuracy. The source helper
+still refuses all four STK draws; its orthonormal comparison is counterfactual.
+Original GRID sampler addressing remains unproved. Current engine setup uses
+ClampToEdge with linear filters; that configuration is not an original-state
+capture. Raw results and prior incorrect UV/sign prose are preserved with
+transparent corrections in the private comparison53/admission50 packets.
+
+### Mixed-field runtime integration
+
+A bounded four-slot/three-model runtime reaches tick300 and exits0 on Vulkan
+RTX4070. Exact linear tread uploads are independently active for Lacetti/BMW;
+STK retains its four-draw numeric readiness refusal. The final PNG decodes at
+1280x720 and the scene is coherent. This uses ordinary stock normals with the
+new full-basis diagnostic disabled. Other wheels are not close in that view;
+there is no per-wheel appearance, fullbasis GPU or all-track rendering claim.
+The artifact includes G353 and separate default-off G357 source; see G353's
+exact source/artifact/failed-preflight/independent-review provenance rather
+than treating it as an isolated-parent executable or a performance benchmark.
