@@ -241,3 +241,9 @@ The prepared byte-preserving undo is blocked by automatic approval review under
 the owner's original-installation no-touch rule; explicit owner approval remains
 required. Do not treat cleanup as fully resolved until that correction is handled.
 All targets, SHA and actual reports remain in the private G278 cleanup evidence.
+
+## 11. Idle worktrees and real sizes (3 November 2026)
+
+Explorer and `tools/disk_report.ps1` count every NTFS hard link in full, so `local/` looked like 80 GB while it held 29.7 GB on disk (`local/behavior`: 68.7 GB logical, 15.0 GB physical after the hard-link dedup). Reports give the physical size as well, counting each file id once.
+
+Finished sessions' worktrees are retired, not kept: once a session has had no activity for 7 days, has no tracked changes and no commits outside origin/main, the weekly report lists it, and after the owner's OK the coordinator zips its `local/` into `local/worktree-evidence/<name>/local.zip` (files up to 50 MB, no exe/pdb/so/apk/dll/spool, with a `NOT-COPIED.tsv` manifest and `local/handoff/` unzipped), prunes its build dir, removes the worktree and archives the session. The first run retired ten worktrees and freed 31 GB (F-entry "Ten idle worktrees retired").

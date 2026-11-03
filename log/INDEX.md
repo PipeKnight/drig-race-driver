@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F720](F0720.md) | 2026-11-03 | Ten idle worktrees retired; real versus Explorer disk sizes |
 | [F719](F0719.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
 | [F718](F0718.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
 | [F717](F0717.md) | 2026-11-03 | Baseline track and infield specular from the original programs' Phong lobe |
