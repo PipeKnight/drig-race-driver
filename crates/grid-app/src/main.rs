@@ -214,7 +214,7 @@ struct Car {
     /// Reflecting materials' saved controls, keyed like the parts' materials
     /// (docs/CAR_REFLECTIONS.md).
     reflections: BTreeMap<String, car_reflection_overlay::Controls>,
-    /// Skinned breakable pieces' joints (`dynamic_props::PieceSkins`).
+    /// Skinned breakable pieces' joints, by part name (`dynamic_props::attach_skin`).
     piece_skins: BTreeMap<String, dynamic_props::PieceSkin>,
 }
 /// A model's `_lowLOD.pssg` for its opponents.
@@ -4917,7 +4917,7 @@ fn setup(
         std::collections::HashMap::new();
     let mut piece_parts = 0;
     let ornament_levels = std::mem::take(&mut car.ornament_lods);
-    commands.insert_resource(dynamic_props::PieceSkins(std::mem::take(&mut car.piece_skins)));
+    let piece_skins = std::mem::take(&mut car.piece_skins);
     let ornament_shadows = !ornament_levels.parts.is_empty();
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
@@ -5132,6 +5132,12 @@ fn setup(
             } else {
                 None
             };
+            if let Some(entity) = &mut entity
+                && let Some(skin) = piece_skins.get(&part.name)
+            {
+                let id = entity.id();
+                dynamic_props::attach_skin(&mut entity.commands(), id, skin);
+            }
             if let Some(entity) = &mut entity {
                 if let Some(source_material) = &source_material {
                     entity.insert(MeshMaterial3d(source_material.clone()));

@@ -67,8 +67,8 @@ Exit code 0 when every check passed.
 | Tier | Runs | Chosen for |
 |---|---|---|
 | docs | no cargo: `git diff --check` (conflict markers fail, whitespace is listed), relative Markdown links on added lines must exist (links into `local/` are skipped), changed `.ps1` files must parse, changed `.py` files must parse, `tools/log_entry.py check` when that tool exists | `docs/`, `log/`, `*.md`, LICENSE, .git* files, launchers `*.cmd` (the build gate smoke-runs them), `android/` (no cargo check covers it: build an APK), `tools/` scripts that no Rust code names (comments do not count) |
-| crate | that crate's release tests with `--include-ignored` and `cargo clippy --release -p CRATE --all-targets -- -D warnings` | `crates/grid-app/**` and `settings/**` (grid-app's tests read the profiles); `crates/grid-probes/**` (Clippy only); grid-tools binaries other than grid-opponent-race and grid-soak; grid-formats `tests/`/`examples/` |
-| workspace | the whole release test suite and workspace Clippy | grid-formats modules the simulation cannot reach; a `tools/` file named by Rust code outside comments |
+| crate | that crate's release tests with `--include-ignored` and `cargo clippy --release -p CRATE --all-targets -- -D warnings`; for grid-app also the render smoke (below) | `crates/grid-app/**` and `settings/**` (grid-app's tests read the profiles); `crates/grid-probes/**` (Clippy only); grid-tools binaries other than grid-opponent-race and grid-soak; grid-formats `tests/`/`examples/` |
+| workspace | the whole release test suite, workspace Clippy and the render smoke | grid-formats modules the simulation cannot reach; a `tools/` file named by Rust code outside comments |
 | full | workspace + `cargo build --release -p grid-tools --bin grid-opponent-race --bin grid-soak`, the identity check against `tools/identity.tsv`, `grid-soak quick` | `crates/grid-world/**`, the grid-tools library and its race/soak binaries, sim-reachable grid-formats modules and `lib.rs`, Cargo.lock, Cargo.toml files, build.rs, rust-toolchain, `.cargo/`, `tools/identity.tsv`, and any path the table does not name |
 
 Why these rules. The crate graph is grid-formats → grid-tools → grid-app and grid-world →
@@ -84,6 +84,16 @@ reachable; only action_map, etc2, graphics_grade, language, skidmarks, track_lig
 tree_placements take the workspace tier. The grid-tools library is always full (inherent impls
 and trait impls in any module can reach the race tool without a path to it). The decision
 table is in the header of `tools/prepush.ps1`; when unsure it goes up a tier.
+
+Render smoke (F713). No test draws through the GPU, so F710's wgpu validation error (a skinned
+mesh layout without a skin bind group, every grid-app render) passed the crate tier. When grid-app
+is in the crate tier, and in the workspace and full tiers, the gate builds the release grid-app
+(`build-grid-app`) and renders one offscreen frame of Washington route 0 with the Donington scene
+objects, looking at skinned armco (`--camera 214,2.4,874 --look-at 223,1.0,893`; `render-smoke`,
+10-60 s, picture in the run folder). The faulty F710 build fails it (exit 1, three caught
+rendering errors); it passed `--view start`, which has no skinned mesh in frame. A non-zero
+exit, a "Caught rendering error" line, no picture or no exit within 5 minutes fails it. It
+covers the first frame of the static viewer only, not driving or breaking props.
 
 Not covered by any tier, as before: the Android build (`tools\build_android.ps1 -Clippy` checks
 the `cfg(target_os = "android")` code) and the real app (`tools\build_gate.ps1`).

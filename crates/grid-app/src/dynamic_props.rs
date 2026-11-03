@@ -224,9 +224,25 @@ pub(crate) struct PieceSkin {
     joints: Vec<(Option<usize>, Mat4)>,
 }
 
-/// The skinned piece parts' joints, by part name.
-#[derive(Resource, Default)]
-pub(crate) struct PieceSkins(pub(crate) BTreeMap<String, PieceSkin>);
+/// Gives the skinned piece part `entity` its joints and skin in the command
+/// flush that spawns it. A mesh with joint attributes drawn without its skin
+/// fails wgpu validation (the prepass pipeline's skinned layout against the
+/// plain mesh bind group); F710 attached the skin a frame later in [`tag`],
+/// which never runs in static scenes.
+pub(crate) fn attach_skin(commands: &mut Commands, entity: Entity, skin: &PieceSkin) {
+    let joints: Vec<Entity> = (skin.joints.iter())
+        .map(|&(spec, rest)| {
+            let joint = PieceJoint { breakable: skin.breakable, spec, rest };
+            commands.spawn((joint, Transform::from_matrix(rest))).id()
+        })
+        .collect();
+    let inverse_bind = skin.inverse_bind.clone();
+    commands.queue(move |world: &mut World| {
+        let inverse_bindposes = (world.resource_mut::<Assets<SkinnedMeshInverseBindposes>>())
+            .add(SkinnedMeshInverseBindposes::from(inverse_bind));
+        world.entity_mut(entity).insert((SkinnedMesh { inverse_bindposes, joints }, NoFrustumCulling));
+    });
+}
 
 /// A joint of a skinned piece part; it follows its piece's body.
 #[derive(Component)]
@@ -244,30 +260,9 @@ pub(crate) struct PropPiece {
     pub(crate) rest: Mat4,
 }
 
-/// Tag the spawned prop parts by name (pieces start hidden); a skinned piece
-/// part gets its joints.
-pub(crate) fn tag(
-    mut commands: Commands,
-    parts: Query<(Entity, &Name, &Transform), Untagged>,
-    skins: Option<Res<PieceSkins>>,
-    mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
-) {
+/// Tag the spawned prop parts by name (pieces start hidden).
+pub(crate) fn tag(mut commands: Commands, parts: Query<(Entity, &Name, &Transform), Untagged>) {
     for (entity, name, transform) in &parts {
-        if let Some(skin) = skins.as_ref().and_then(|s| s.0.get(name.as_str())) {
-            let joints = (skin.joints.iter())
-                .map(|&(spec, rest)| {
-                    let joint = PieceJoint { breakable: skin.breakable, spec, rest };
-                    commands.spawn((joint, Transform::from_matrix(rest))).id()
-                })
-                .collect();
-            commands.entity(entity).insert((
-                SkinnedMesh {
-                    inverse_bindposes: bindposes.add(SkinnedMeshInverseBindposes::from(skin.inverse_bind.clone())),
-                    joints,
-                },
-                NoFrustumCulling,
-            ));
-        }
         if let Some(rest) = name.as_str().strip_prefix(INTACT) {
             if let Some(b) = rest.split('/').next().and_then(|v| v.parse().ok()) {
                 commands.entity(entity).insert(IntactProp(b));

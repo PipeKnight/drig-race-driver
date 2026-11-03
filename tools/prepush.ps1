@@ -17,9 +17,10 @@ Tiers (each also runs the ones above it):
              .ps1 files must parse, changed .py files must parse, and tools/log_entry.py check
              when that tool exists.
   crate      the changed leaf crates only: their release tests with --include-ignored, and
-             release Clippy -D warnings for them.
-  workspace  the release test suite of the whole workspace with --include-ignored and the
-             workspace release Clippy -D warnings.
+             release Clippy -D warnings for them; for grid-app also the render smoke (one
+             offscreen frame of the release grid-app, F713).
+  workspace  the release test suite of the whole workspace with --include-ignored, the
+             workspace release Clippy -D warnings and the render smoke.
   full       workspace + rebuild grid-opponent-race and grid-soak, the identity check against
              tools/identity.tsv and grid-soak quick: the AGENTS.md "Check levels" gate.
 
@@ -61,8 +62,10 @@ crate::/super:: references in both directions (a module the reachable code uses,
 that uses reachable code, since it could add impls to reachable types). Only modules outside
 that set (pure presentation readers such as the ETC2 decoder) take the workspace tier.
 
-Order and lock: sanity, Clippy, (full: race/soak build, identity), tests, (full: grid-soak quick).
-The cheap checks that fail most come first. The build lock (tools\build_lock.ps1) is taken once
+Order and lock: sanity, Clippy, (workspace and full: grid-app build, render smoke), (full:
+race/soak build, identity), tests, (crate grid-app: grid-app build, render smoke), (full:
+grid-soak quick). The cheap checks that fail most come first. The render smoke (F713) draws one offscreen frame through the GPU, which no test does: a
+non-zero exit or a caught wgpu error fails it. The build lock (tools\build_lock.ps1) is taken once
 for the Clippy..tests stretch and given back before grid-soak quick or after a failure.
 
 Pass cache: a gate that passed records its code key in C:\cargo-build\prepush-cache (machine-wide).
@@ -281,6 +284,15 @@ if ($tier -eq 1) {
     }
 }
 if ($tier -ge 2) { Add-Step 'clippy-workspace' 'cargo' 'clippy --release --workspace --all-targets -- -D warnings' }
+# No test draws through the GPU, so a wgpu validation error in grid-app's renderer (F710's skinned
+# layout without a skin bind group, F713) passed every tier. One offscreen frame of Washington
+# route 0 with the Donington scene objects, looking at skinned armco (10-60 s; the start view has
+# no skinned mesh in frame and passed the faulty F710 build).
+$renderArgs = '--route tracks/usa/washington/route_0 --scene donington --camera 214,2.4,874 --look-at 223,1.0,893'
+if ($tier -ge 2 -or $crates -contains 'grid-app') {
+    Add-Step 'build-grid-app' 'cargo' 'build --release -p grid-app --bin grid-app'
+    Add-Step 'render-smoke' 'render' "grid-app $renderArgs --render"
+}
 if ($tier -ge 3) {
     Add-Step 'build-race-soak' 'cargo' 'build --release -p grid-tools --bin grid-opponent-race --bin grid-soak'
     Add-Step 'identity' 'identity' 'grid-opponent-race solo, 12-car, 12-car DF+AI vs tools/identity.tsv'
@@ -508,6 +520,29 @@ function Invoke-Identity([string]$Log) {
     return [int]($failed -ne 0)
 }
 
+# One offscreen frame (F713). Fails on a non-zero exit, a caught rendering error (Bevy logs wgpu
+# validation errors so) or no picture after 5 minutes.
+function Invoke-RenderSmoke([string]$Log) {
+    $app = Join-Path (Get-TargetDir) 'release\grid-app.exe'
+    $png = Join-Path $Out 'render-smoke.png'
+    Remove-Item -LiteralPath $png -ErrorAction SilentlyContinue
+    $env:GRID_CMDLINE = "`"$app`" --game-root `"$($private.GRID_GAME_ROOT)`" $renderArgs --render `"$png`" > `"$Log`" 2>&1"
+    try { $proc = Start-Process -FilePath $env:ComSpec -ArgumentList '/d /c %GRID_CMDLINE%' -NoNewWindow -PassThru; $null = $proc.Handle }
+    finally { Remove-Item Env:\GRID_CMDLINE -ErrorAction SilentlyContinue }
+    if (-not $proc.WaitForExit(300000)) {
+        Get-CimInstance Win32_Process -Filter "ParentProcessId=$($proc.Id)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        Add-Content -LiteralPath $Log -Value 'render-smoke: no exit after 5 minutes'
+        return 1
+    }
+    $code = $proc.ExitCode
+    $errors = @(Select-String -LiteralPath $Log -SimpleMatch 'Caught rendering error').Count
+    $picture = Test-Path -LiteralPath $png
+    Add-Content -LiteralPath $Log -Value "render-smoke: exit $code, caught rendering errors $errors, picture $picture"
+    if ($code -ne 0 -or $errors -or -not $picture) { return 1 }
+    return 0
+}
+
 $results = New-Object System.Collections.Generic.List[object]
 $started = Get-Date
 $cargo = (Get-Command cargo).Source
@@ -532,6 +567,7 @@ foreach ($s in $steps) {
         'sanity' { $code = Invoke-Sanity $log }
         'cargo' { $code = Invoke-Logged $log $cargo $s.Command }
         'identity' { $code = Invoke-Identity $log }
+        'render' { $code = Invoke-RenderSmoke $log }
         'soak' {
             $env:GRID_AI_CHARACTERISTICS = $characteristics
             $soak = Join-Path (Get-TargetDir) 'release\grid-soak.exe'
