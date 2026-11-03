@@ -44,6 +44,8 @@ const NAMES: &[&str] = &[
     "TEMPLATESHAPEBOX",
     "TEMPLATECLOTH",
     "TEMPLATEENTITYLINK",
+    "LIBRARY",
+    "BOUNDINGBOX",
 ];
 const ATTRS: &[&str] = &[
     "id",
@@ -92,6 +94,8 @@ const ATTRS: &[&str] = &[
     "shell",
     "phantom",
     "length",
+    "scale",
+    "up",
 ];
 
 fn u(value: u32) -> Vec<u8> {
@@ -117,6 +121,9 @@ fn node(name: &str, attrs: &[(&str, Vec<u8>)], payload: Vec<u8>) -> Vec<u8> {
     b
 }
 fn file(payload: Vec<u8>) -> Vec<u8> {
+    file_with_root_attributes(payload, &[])
+}
+fn file_with_root_attributes(payload: Vec<u8>, attributes: &[(&str, Vec<u8>)]) -> Vec<u8> {
     let mut b = b"PSSG".to_vec();
     b.extend(u(0));
     b.extend(u(ATTRS.len() as u32));
@@ -132,7 +139,7 @@ fn file(payload: Vec<u8>) -> Vec<u8> {
             }
         }
     }
-    b.extend(node("ROOT", &[], payload));
+    b.extend(node("ROOT", attributes, payload));
     let size = b.len() as u32 - 8;
     b[4..8].copy_from_slice(&size.to_be_bytes());
     b
@@ -739,7 +746,7 @@ fn composes_static_parent_and_child_transforms_in_row_vector_order() {
         &[("id", text("parent"))],
         [transform(parent), render].concat(),
     );
-    let bytes = file(
+    let bytes = file_with_root_attributes(
         [
             node(
                 "ROOTNODE",
@@ -749,8 +756,10 @@ fn composes_static_parent_and_child_transforms_in_row_vector_order() {
             node("SHADERINSTANCE", &[("id", text("paint"))], vec![]),
         ]
         .concat(),
+        &[("scale", vec![0; 4]), ("up", vec![0; 4])],
     );
     let tree = pssg::read_tree(&bytes).unwrap();
+    assert!(!grid_formats::scene::is_empty_optional_static_package(&tree).unwrap());
     let meshes = [scene_mesh()];
     let draws = grid_formats::scene::read_static_draws(&tree, &meshes).unwrap();
     assert_eq!(draws[0].indices, [2, 3, 4]);
@@ -1324,4 +1333,82 @@ fn preserves_non_dominant_elbow_influences_without_changing_rigid_or_static_mode
         1.0 + offsets[rigid[0].skin_indices.as_ref().unwrap()[0] as usize]
     );
     assert!(mesh::read_four_weight_mesh(&tree, b"missing").is_err());
+}
+
+// Authored empty optional scene; no purchased bytes copied into the fixture.
+fn optional_empty_scene(transform: [f32; 16], bounds: Vec<u8>, extra: Vec<u8>) -> Vec<u8> {
+    optional_empty_scene_with_root_attributes(transform, bounds, extra, &[])
+}
+fn optional_empty_scene_with_root_attributes(transform: [f32; 16], bounds: Vec<u8>, extra: Vec<u8>, attributes: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let local = node("TRANSFORM", &[], transform.into_iter().flat_map(f32::to_be_bytes).collect());
+    let mut payload = local;
+    payload.extend(node("BOUNDINGBOX", &[], bounds));
+    let root = node("ROOTNODE", &[("id", text("empty-root"))], payload);
+    let mut library = root;
+    library.extend(extra);
+    file_with_root_attributes(node("LIBRARY", &[], library), attributes)
+}
+
+#[test]
+fn optional_metadata_empty_does_not_weaken_required_geometry() {
+    let identity = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
+    let bytes = optional_empty_scene(identity, vec![0; 24], vec![]);
+    let tree = pssg::read_tree(&bytes).unwrap();
+    assert!(grid_formats::scene::is_empty_optional_static_package(&tree).unwrap());
+    let sources = mesh::read_meshes(&tree).unwrap();
+    assert!(sources.is_empty());
+    assert!(grid_formats::scene::read_static_draws(&tree, &sources).is_err());
+    // Root metadata appears BEFORE later rendering/unknown nodes in preorder.
+    // Nonempty packages must delegate before validating odd legacy metadata.
+    for key in ["scale", "up"] {
+        let bad = [(key, vec![0; 4])];
+        let metadata_only = optional_empty_scene_with_root_attributes(identity, vec![0; 24], vec![], &bad);
+        let tree = pssg::read_tree(&metadata_only).unwrap();
+        assert!(grid_formats::scene::is_empty_optional_static_package(&tree).is_err());
+        for extra in [
+            node("SHADERINSTANCE", &[("id", text("unsupported"))], vec![]),
+            node("LIBRARY", &[("type", text("TEXTURE"))], vec![]),
+        ] {
+            let nonempty = optional_empty_scene_with_root_attributes(identity, vec![0; 24], extra, &bad);
+            let tree = pssg::read_tree(&nonempty).unwrap();
+            assert!(!grid_formats::scene::is_empty_optional_static_package(&tree).unwrap());
+        }
+    }
+    let mut nonfinite = identity;
+    nonfinite[12] = f32::NAN;
+    for malformed in [
+        optional_empty_scene(nonfinite, vec![0; 24], vec![]),
+        optional_empty_scene(identity, vec![0; 20], vec![]),
+    ] {
+        let tree = pssg::read_tree(&malformed).unwrap();
+        assert!(grid_formats::scene::is_empty_optional_static_package(&tree).is_err());
+    }
+    // Unresolved nonempty geometry must continue to fail on its normal path.
+    let bytes = optional_empty_scene(identity, vec![0; 24], node("RENDERDATASOURCE", &[], vec![]));
+    let tree = pssg::read_tree(&bytes).unwrap();
+    assert!(!grid_formats::scene::is_empty_optional_static_package(&tree).unwrap());
+    assert!(mesh::read_meshes(&tree).is_err());
+    // Metadata-like unknown/rendering content must not disappear as empty.
+    let bytes = optional_empty_scene(identity, vec![0; 24], node("SHADERINSTANCE", &[("id", text("unsupported"))], vec![]));
+    let tree = pssg::read_tree(&bytes).unwrap();
+    assert!(!grid_formats::scene::is_empty_optional_static_package(&tree).unwrap());
+    assert!(pssg::read_tree(&bytes[..bytes.len() - 1]).is_err());
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+fn purchased_optional_land_empty_is_not_nonempty_land_admission() {
+    let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"));
+    for (track, empty) in [("japan/shibuya", true), ("europe/donington", false), ("usa/detroit", false)] {
+        let bytes = std::fs::read(root.join(format!("tracks/{track}/land.pssg"))).unwrap();
+        let tree = pssg::read_tree(&bytes).unwrap();
+        assert_eq!(grid_formats::scene::is_empty_optional_static_package(&tree).unwrap(), empty, "{track}");
+        if empty {
+            let meshes = mesh::read_meshes(&tree).unwrap();
+            assert!(meshes.is_empty());
+            assert!(grid_formats::scene::read_static_draws(&tree, &meshes).is_err());
+        }
+        // Nonempty packages retain all existing geometry/material validation;
+        // Detroit water support is deliberately not claimed by this check.
+    }
 }

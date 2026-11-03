@@ -329,12 +329,12 @@ pub fn install(app: &mut App) {
 /// (0x736020, the focus car without delay), otherwise when the track turns
 /// the car lights on at the start (0x596440 → 0xA08DA0). The lighting
 /// file's `headlights` (0x602FE0) is 0 on every shipped track.
-fn backlight_on(environment: Option<&crate::track_environment::TrackEnvironment>, le_mans: Option<&crate::le_mans_event::LeMansEvent>) -> bool {
+fn backlight_on(environment: Option<&crate::track_environment::TrackEnvironment>, lights: Option<&crate::vehicle_lights::State>) -> bool {
     use grid_tools::time_of_day::Mode;
     let Some(environment) = environment else { return false };
     match environment.0.mode() {
         Mode::ForcedNight => true,
-        Mode::Timeline => le_mans.is_some_and(|e| e.headlights.intensity() > 0.),
+        Mode::Timeline => lights.is_some_and(|s| s.headlights.intensity() > 0.),
         Mode::None => environment.0.vehicle_lights(),
     }
 }
@@ -348,7 +348,7 @@ fn backlight(
     cockpit: Option<Res<crate::cockpit::Cockpit>>,
     running: Option<Res<Running>>,
     environment: Option<Res<crate::track_environment::TrackEnvironment>>,
-    le_mans: Option<Res<crate::le_mans_event::LeMansEvent>>,
+    lights: Option<Res<crate::vehicle_lights::State>>,
     parts: Query<(&Name, &MeshMaterial3d<StandardMaterial>), With<crate::cockpit::InteriorPart>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -362,7 +362,7 @@ fn backlight(
     if running.is_none() || dash.backlit.is_empty() {
         return;
     }
-    let on = backlight_on(environment.as_deref(), le_mans.as_deref());
+    let on = backlight_on(environment.as_deref(), lights.as_deref());
     // The constructor's state is off with the file values, as drawn.
     if *state == Some(on) || (state.is_none() && !on && dash.backlit.iter().all(|b| b.file == 0.)) {
         *state = Some(on);

@@ -85,7 +85,7 @@ The previous G310 motion/depth and HDR rectangles missed the antenna, so their
 broad car-body motion pass could not diagnose this feature. A fresh, centred
 1920x1080 native-DLAA run uses the delivered G340 executable eb5076621cbb and
 unchanged enhanced settings, normal history and Motion shutter 1/32. Raw depth,
-velocity and paired HDR share actual GPU frame793/tick1652. Thirty PNG requests
+velocity and paired HDR share actual GPU frame 793 / tick 1652. Thirty PNG requests
 also complete; PNG0000 has the same requested tick, but a frozen PNG-to-GPU
 transaction is not established. Private evidence and input hashes are under
 `local/graphics/antenna-current01/run01/receipt.json`.
@@ -121,3 +121,66 @@ INCONCLUSIVE, unchanged in `runtime02/temporal-join.json`; no automatic repeat o
 relaxed acceptance is used. A separately labelled approximate offline comparison
 may quantify the effect of the arithmetic difference, but cannot turn this into
 an exact-view/history proof.
+
+## General opaque conservative-MV experiment (G345, November 2026)
+
+The new default-off bounded experiment reuses the stock opaque prepass phase,
+its registered draw ID, material bindings, batching and geometry. A scoped
+view/render-frame/thread token selects an independently derived conservative
+motion-only pipeline; unknown draw/shader/attachment domains refuse the entire
+view. Depth remains read-only. The registered RawAux quarter-clip shader has a
+separately checked ABI; there is no car-part name whitelist or copied geometry.
+This is a diagnostic candidate, not the normal renderer or a completed fix.
+
+After feature Clippy, nine focused tests and release compilation, a fresh native
+Off/On pair using EXE `34ae3c89` passes eleven strict input controls. Actual raw/HDR
+frame 793 / tick 1652 has exact poses, matrices, pre-Early HDR, depth and probe inputs;
+16,276 raw motion pixels change with positive replay/selector evidence. Those
+counters prove selection, not actual GPU draw counts or performance.
+
+The quality result is negative. Extra antenna traces remain: selected HDR trace
+contrast improves only about 3.3%, with mixed primary-shaft and moving PNG changes.
+The fixed foreground roof mask also fails its supplementary 0.05 pixel control at
+one sample (0.05403 pixel). A broad retained body volume has 93 motion samples above
+0.5 pixel on On versus zero on Off; the maximum is 1,377.34 pixels at (873, 672). These
+outliers cannot be dismissed by an aggregate body-volume pass. The corresponding
+rigid reconstructed point has positive previous/current clip W, but the actual
+fragment's varyings and primitive were not captured. Numerical extrapolation,
+wrong writer and other hypotheses are not established causes.
+
+Private immutable evidence:
+`local/graphics/opaque-conservative01/raw-aux-runtime01/`, with
+`antenna-analysis01/` and `foreground-analysis01/` (including localization).
+No default promotion, visual fix, FPS or all-device compatibility follows.
+
+A single-transaction fragment diagnostic adds an RGBA32 target beside the
+unchanged RG16 motion output to observe actual current/previous clip W, pipeline
+token and an optional existing instance index. It preserves the original vertex
+stage, motion formula and alpha/material decisions. Fourteen focused CPU tests
+and feature Clippy pass on the revised source; GPU attribution remains pending.
+The earlier attempt is retained as a failed capture, not substituted evidence.
+
+That attempt exposed an independent diagnostic clock bug: Snapshot records its
+frame in PostUpdate, while Bevy's Last increments FrameCount before render
+extraction. Equating those two counters rejected the intended transaction. The
+revised guard uses exact extracted source frame/tick/view for written/readback
+identity, preserving the separate render-frame selector and exact ROI. No frame
+increment, tolerance or camera check removal is used. Its regression executes the
+actual FrameCountPlugin and rejects stale frame/view/tick/ROI stamps; this is CPU
+clock-identity proof, not a successful GPU join or an antenna-quality improvement.
+
+The fixed-clock capture subsequently completes successfully (EXE `074aa1d6`).
+All eleven strict reference controls pass, including bitwise whole-ROI motion and
+depth, exact pre-Early HDR, matrices and recorded driving/probe inputs. Metadata
+records render frame794 separately from source frame793/tick1652. Offline parsing
+joins the source and MRT packet and identifies the final pipeline writer.
+
+At (873,672), actual current/previous clip W are0.236192/5.123018; the retained
+visible-depth rigid reconstruction gives4.257018/4.256505. At (881,553), actual W
+are4.930382/4.930031. Both writers use the known stock StandardMaterial pipeline;
+GPU output-instance indices70/66 are not CPU input indices, objects or primitive
+IDs. All these W values are finite and positive, so a near-zero previous-W or
+behind-camera explanation is not supported at these two centres. Actual writer
+geometry and interpolation remain open. Broad post-HDR differences are retained;
+input correspondence is not visual parity or an antenna fix. Full evidence:
+`local/graphics/opaque-conservative01/replay-fragment-runtime02/`.

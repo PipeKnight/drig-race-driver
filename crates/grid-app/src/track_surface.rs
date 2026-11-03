@@ -149,13 +149,13 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
     Ok(source)
 }
 
-fn read_package(
+fn read_optional_package(
     root: &Path,
     route: &Route,
     package: &str,
 ) -> Result<Source, Box<dyn std::error::Error>> {
     let file = route.track_file(package);
-    read_bytes(&super::read(&root.join(&file))?).map_err(|e| format!("{file}: {e}").into())
+    read_optional_bytes(&super::read(&root.join(&file))?).map_err(|e| format!("{file}: {e}").into())
 }
 
 /// Adds `other`'s materials and draws under `namespace/`, as main.rs names
@@ -185,8 +185,15 @@ fn merge(source: &mut Source, other: Source, namespace: &str, own_textures: bool
     }
 }
 
-fn read_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error>> {
+fn read_optional_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error>> {
     let tree = pssg::read_tree(bytes)?;
+    if scene::is_empty_optional_static_package(&tree)? {
+        return Ok(Source {
+            definitions: BTreeMap::new(),
+            draws: BTreeMap::new(),
+            textures: BTreeMap::new(),
+        });
+    }
     read_surfaces(&tree, &tree)
 }
 
@@ -389,9 +396,8 @@ pub fn install(
     rgb_overrides: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut source = read_source(root, route)?;
-    // Milan's and Shibuya's land.pssg hold no render instances.
-    if land && super::land_has_draws(root, route)? {
-        let land = read_package(root, route, "land.pssg")?;
+    if land {
+        let land = read_optional_package(root, route, "land.pssg")?;
         merge(&mut source, land, "land", true);
     }
     if let Some(manifest) = rgb_overrides {
@@ -769,7 +775,7 @@ mod tests {
             let source = read_source(root, &route).unwrap();
             // land.pssg is layered in enhanced only (Donington); Milan's has no
             // static draws at all.
-            let land = read_package(root, &route, "land.pssg");
+            let land = read_optional_package(root, &route, "land.pssg");
             let world_mapped = source.definitions.values().filter(|d| d.controls.w > 0.).count();
             let without_macro = source.definitions.values().filter(|d| d.controls.z < 0.).count();
             println!(
@@ -810,5 +816,18 @@ mod tests {
         // 0.25, not 0.5. The source clamps in the vertex program.
         let midpoint = (mask([255, 0, 0, 0])[1] + mask([255, 0, 255, 0])[1]) / 2.;
         assert_eq!(midpoint, 0.25);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_empty_land_surface_adapter_returns_no_resources() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"),
+        );
+        let bytes = std::fs::read(root.join("tracks/japan/shibuya/land.pssg")).unwrap();
+        let surface = read_optional_bytes(&bytes).unwrap();
+        assert!(surface.definitions.is_empty());
+        assert!(surface.draws.is_empty());
+        assert!(surface.textures.is_empty());
     }
 }

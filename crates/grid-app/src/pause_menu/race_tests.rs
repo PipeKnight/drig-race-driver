@@ -764,6 +764,7 @@ fn a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress() {
             vec![lac; OPPONENTS + 1],
             Timeline::load(root, &route).unwrap(),
         ))
+        .insert_resource(crate::vehicle_lights::State::new(Mode::Timeline, OPPONENTS + 1, None))
         .add_systems(Update, crate::le_mans_event::tick.after(crate::drive_tick));
         while post(&app).stage == Stage::Hidden {
             app.update();
@@ -806,5 +807,272 @@ fn a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress() {
         assert_eq!(post(&app).stage, Stage::Results);
         let view = post(&app).view(&rows, &Labels::default());
         assert_eq!(view.table[1][2], "1440:00.000");
+    });
+}
+
+
+// Activation-only fixtures reuse the actual purchased driving field. No second
+// vehicle initializer, clock implementation, or headlight fade formula.
+fn activation_field(app: &mut App) -> usize {
+    let driving = app.world().resource::<Driving>();
+    let cars: Vec<_> = std::iter::once(driving.runtime.car().clone())
+        .chain(
+            driving
+                .opponents
+                .as_ref()
+                .unwrap()
+                .multi
+                .cars
+                .iter()
+                .skip(1)
+                .map(|c| c.car().clone()),
+        )
+        .collect();
+    let mut models = Vec::new();
+    let car_model = cars
+        .into_iter()
+        .map(|car| {
+            if let Some(i) = models.iter().position(|c| *c == car) {
+                i
+            } else {
+                models.push(car);
+                models.len() - 1
+            }
+        })
+        .collect();
+    let field = crate::Field { models, car_model };
+    let slots = field.car_model.len();
+    app.insert_resource(field);
+    slots
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn shared_activation_ordinary_modes_mixed_slots_pause_and_zero_tick_restart() {
+    use crate::vehicle_lights::State;
+    use bevy::ecs::system::RunSystemOnce;
+    use grid_tools::time_of_day::Mode;
+    big_stack(|| {
+        let mut app = race_app_with(grid_tools::route::DONINGTON, &["lac", "bmw"], 2, false);
+        let slots = activation_field(&mut app);
+        assert_eq!(slots, OPPONENTS + 1);
+        assert_eq!(app.world().resource::<crate::Field>().models.len(), 2);
+        assert_eq!(
+            app.world().resource::<crate::Field>().car_model,
+            [0, 1, 0, 1]
+        );
+        // This fixture runs drive_tick in Update, so use the ACTUAL updater in
+        // Update too. A production FixedUpdate-only install would be vacuous here.
+        app.insert_resource(State::new(Mode::None, slots, Some(false)))
+            .add_systems(Update, crate::vehicle_lights::tick.after(crate::drive_tick));
+        for _ in 0..8 {
+            app.update();
+        }
+        assert!(ticks(&app) > 0);
+        let day = app.world().resource::<State>().headlights.clone();
+        assert_eq!(day.delays().len(), slots);
+        assert_eq!(day.intensity(), 0.);
+        assert!((0..slots).all(|i| day.car(i).is_none()));
+        app.insert_resource(State::new(Mode::None, slots, Some(true)));
+        for _ in 0..8 {
+            app.update();
+        }
+        let markers = app.world().resource::<State>();
+        assert_eq!(markers.marker_lights, Some(true));
+        assert_eq!(markers.headlights, day); // marker flag never creates beams
+
+        app.insert_resource(State::new(Mode::ForcedNight, slots, Some(false)));
+        let initial = app.world().resource::<State>().headlights.clone();
+        assert_eq!(initial.intensity(), 1.);
+        assert!((0..slots).any(|i| initial.car(i).is_some()));
+        app.update();
+        assert_eq!(app.world().resource::<State>().headlights, initial);
+        tap(&mut app, KeyCode::Escape);
+        assert!(app.world().resource::<Driving>().paused);
+        let frozen_tick = ticks(&app);
+        let frozen = app.world().resource::<State>().headlights.clone();
+        for _ in 0..12 {
+            app.update();
+        }
+        assert_eq!(ticks(&app), frozen_tick);
+        assert_eq!(app.world().resource::<State>().headlights, frozen);
+
+        // Reset through the real restart, then repeat at tick0, keeping physics
+        // out so segment1/tick0 -> segment2/tick0 is actually observed.
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_scope(|world, mut driving: Mut<Driving>| {
+                    let mut trial = world.resource_mut::<time_trial::Trial>();
+                    crate::restart(&mut driving, Some(&mut trial));
+                });
+            assert_eq!(ticks(&app), 0);
+            let segment = app.world().resource::<Driving>().segment;
+            assert!(app.world().resource::<State>().segment_changed(segment));
+            app.world_mut()
+                .run_system_once(crate::vehicle_lights::tick)
+                .unwrap();
+            let state = app.world().resource::<State>();
+            assert!(
+                !state.segment_changed(segment),
+                "actual updater must consume same-zero segment reset"
+            );
+            assert_eq!(state.headlights, initial);
+        }
+    });
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn shared_activation_real_timeline_off_on_off_matches_event_only_and_freezes_during_fade() {
+    use crate::{le_mans_event::LeMansEvent, vehicle_lights::State};
+    use grid_tools::time_of_day::{Mode, Timeline};
+    big_stack(|| {
+        const LIMIT: f64 = 40.;
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let route = grid_tools::route::Route::new(grid_tools::route::LE_MANS).unwrap();
+        let db = grid_tools::read_database(root).unwrap();
+        let make = |ordinary_updater: bool| {
+            let mut app = race_app_with(route.path(), &["lac", "bmw"], 8, true);
+            let slots = activation_field(&mut app);
+            {
+                let mut driving = app.world_mut().resource_mut::<Driving>();
+                let opponents = driving.opponents.as_mut().unwrap();
+                opponents.standings = opponents.standings.clone().with_time_limit(LIMIT);
+            }
+            app.world_mut().resource_mut::<time_trial::Trial>().state =
+                grid_tools::time_trial::State::new(
+                    99,
+                    f64::from(grid_tools::source_vehicle::DELTA),
+                    crate::START_SEQUENCE_SECONDS,
+                )
+                .unwrap()
+                .with_time_limit(LIMIT)
+                .unwrap();
+            let field = app.world().resource::<crate::Field>();
+            let classes = field
+                .car_model
+                .iter()
+                .map(|&m| grid_tools::series::lemans_class(&db, &field.models[m]).unwrap())
+                .collect();
+            app.insert_resource(LeMansEvent::new(
+                Some(LIMIT),
+                Mode::Timeline,
+                classes,
+                Timeline::load(root, &route).unwrap(),
+            ))
+            .insert_resource(State::new(Mode::Timeline, slots, None))
+            .add_systems(Update, crate::le_mans_event::tick.after(crate::drive_tick));
+            if ordinary_updater {
+                app.add_systems(Update, crate::vehicle_lights::tick.after(crate::drive_tick));
+            }
+            app
+        };
+        // Previous event-only scheduling is the control. Both sides execute
+        // actual event/clock/fade code; no copied historical formula oracle.
+        let mut event_only = make(false);
+        let mut shared = make(true);
+        let slots = shared.world().resource::<crate::Field>().car_model.len();
+        let delays = shared
+            .world()
+            .resource::<State>()
+            .headlights
+            .delays()
+            .to_vec();
+        let mut phase = 0;
+        let mut paused_during_fade = false;
+        for _ in 0..3000 {
+            event_only.update();
+            shared.update();
+            assert_eq!(ticks(&event_only), ticks(&shared));
+            let a = event_only.world().resource::<State>();
+            let b = shared.world().resource::<State>();
+            assert_eq!(
+                a.headlights, b.headlights,
+                "ordinary updater must not double-step event-owned fade"
+            );
+            assert_eq!(b.headlights.delays(), delays.as_slice());
+            let ea = event_only.world().resource::<LeMansEvent>();
+            let eb = shared.world().resource::<LeMansEvent>();
+            assert_eq!(ea.time_of_day, eb.time_of_day);
+            let race_time = shared
+                .world()
+                .resource::<time_trial::Trial>()
+                .race_time(ticks(&shared));
+            assert_eq!(
+                ea.hud(race_time, a.headlights.intensity()),
+                eb.hud(race_time, b.headlights.intensity())
+            );
+            let lit = (0..slots).any(|i| b.headlights.car(i).is_some());
+            match (phase, lit) {
+                (0, false) => {}
+                (0, true) => phase = 1,
+                (1, false) => phase = 2,
+                _ => {}
+            }
+            let partial = (0..slots).any(|i| b.headlights.car(i).is_some_and(|w| w > 0. && w < 1.));
+            if partial && !paused_during_fade {
+                let frozen = b.headlights.clone();
+                let at = ticks(&shared);
+                tap(&mut event_only, KeyCode::Escape);
+                tap(&mut shared, KeyCode::Escape);
+                assert!(shared.world().resource::<Driving>().paused);
+                for _ in 0..12 {
+                    event_only.update();
+                    shared.update();
+                }
+                assert_eq!(ticks(&shared), at);
+                assert_eq!(ticks(&event_only), at);
+                assert_eq!(shared.world().resource::<State>().headlights, frozen);
+                assert_eq!(event_only.world().resource::<State>().headlights, frozen);
+                tap(&mut event_only, KeyCode::Enter);
+                tap(&mut shared, KeyCode::Enter);
+                assert!(!shared.world().resource::<Driving>().paused);
+                paused_during_fade = true;
+            }
+            if phase == 2 {
+                break;
+            }
+        }
+        assert_eq!(
+            phase, 2,
+            "actual saved Le Mans curve must produce off -> on -> off within bounded run"
+        );
+        assert!(
+            paused_during_fade,
+            "must observe a genuinely changing projector fade, not a static endpoint"
+        );
+        assert_eq!(digest(&event_only), digest(&shared));
+        assert_eq!(
+            shared.world().resource::<State>().headlights.delays().len(),
+            slots
+        );
+        // The event path must consume segment changes too, including a second
+        // actual restart while ticks remain0 (its old last_tick is already0).
+        use bevy::ecs::system::RunSystemOnce;
+        for app in [&mut event_only, &mut shared] {
+            for _ in 0..2 {
+                app.world_mut()
+                    .resource_scope(|world, mut driving: Mut<Driving>| {
+                        let mut trial = world.resource_mut::<time_trial::Trial>();
+                        crate::restart(&mut driving, Some(&mut trial));
+                    });
+                assert_eq!(ticks(app), 0);
+                let segment = app.world().resource::<Driving>().segment;
+                app.world_mut()
+                    .run_system_once(crate::le_mans_event::tick)
+                    .unwrap();
+                let state = app.world().resource::<State>();
+                assert!(!state.segment_changed(segment));
+                assert_eq!(state.headlights.delays(), delays.as_slice());
+                assert_eq!(state.headlights.intensity(), 0.);
+                assert_eq!(
+                    grid_tools::time_of_day::clock_text(
+                        app.world().resource::<LeMansEvent>().time_of_day
+                    ),
+                    "15:00:00"
+                );
+            }
+        }
     });
 }

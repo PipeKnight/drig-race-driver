@@ -40,6 +40,8 @@ struct AuditView;
 struct AuditOnce(bool);
 #[derive(Clone, Resource, ExtractResource)]
 pub(crate) struct Audit {
+    #[cfg(feature = "dlaa")]
+    companion: Option<super::opaque_conservative_motion::replay_audit::Signals>,
     tick: u64,
     centre: Option<Vec2>,
     directory: PathBuf,
@@ -52,10 +54,16 @@ pub(crate) struct Audit {
 }
 impl Audit {
     pub(crate) fn ready(&self) -> bool {
-        self.complete.load(Ordering::Acquire)
+        let complete = self.complete.load(Ordering::Acquire);
+        #[cfg(feature = "dlaa")]
+        let complete = complete && self.companion.as_ref().is_none_or(|c| c.ready());
+        complete
     }
     pub(crate) fn failed(&self) -> bool {
-        self.failed.load(Ordering::Acquire)
+        let failed = self.failed.load(Ordering::Acquire);
+        #[cfg(feature = "dlaa")]
+        let failed = failed || self.companion.as_ref().is_some_and(|c| c.failed());
+        failed
     }
 }
 #[derive(Clone)]
@@ -76,6 +84,7 @@ struct Snapshot {
     previous_body: Mat4,
 }
 type AuditInputs = (
+    Entity,
     &'static ViewPrepassTextures,
     &'static ExtractedView,
     Option<&'static TemporalJitter>,
@@ -93,7 +102,12 @@ struct Parameters {
     extent: UVec4,
 }
 // Called after renderer plugins, only for an explicit private scripted capture.
-pub fn install(app: &mut App, tick: u64, directory: &Path, centre: Option<Vec2>) -> std::io::Result<()> {
+pub fn install(
+    app: &mut App,
+    tick: u64,
+    directory: &Path,
+    centre: Option<Vec2>,
+) -> std::io::Result<()> {
     if !(1..=1_000_000).contains(&tick) || app.get_sub_app(RenderApp).is_none() {
         return Err(std::io::Error::other(
             "temporal audit requires a bounded positive tick and renderer",
@@ -123,7 +137,11 @@ pub fn install(app: &mut App, tick: u64, directory: &Path, centre: Option<Vec2>)
         .world_mut()
         .resource_mut::<Assets<ShaderBuffer>>()
         .add(buffer);
+    #[cfg(feature = "dlaa")]
+    let companion = super::opaque_conservative_motion::replay_audit::install(app, tick, directory)?;
     app.insert_resource(Audit {
+        #[cfg(feature = "dlaa")]
+        companion,
         tick,
         centre,
         directory: directory.to_owned(),
@@ -206,6 +224,13 @@ fn compute(
     queue: Res<RenderQueue>,
     buffers: Res<RenderAssets<GpuShaderBuffer>>,
     views: Query<AuditInputs, With<AuditView>>,
+    #[cfg(feature = "dlaa")] companion: Option<
+        Res<super::opaque_conservative_motion::replay_audit::Audit>,
+    >,
+    #[cfg(feature = "dlaa")] companion_state: Option<
+        Res<super::opaque_conservative_motion::replay_audit::GpuState>,
+    >,
+    #[cfg(feature = "dlaa")] images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
 ) {
     if state.tick < audit.tick || audit.submitted.load(Ordering::Acquire) || audit.failed() {
         return;
@@ -213,7 +238,7 @@ fn compute(
     let Some(compiled) = cache.get_compute_pipeline(pipeline.id) else {
         return;
     };
-    let Ok((prepass, view, jitter, previous)) = views.single() else {
+    let Ok((view_entity, prepass, view, jitter, previous)) = views.single() else {
         return;
     };
     let (Some(motion), Some(depth), Some(previous), Some(buffer)) = (
@@ -309,6 +334,28 @@ fn compute(
         .collect::<Vec<_>>()
         .try_into()
         .expect("fixed parameter header");
+    #[cfg(feature = "dlaa")]
+    if let (Some(companion), Some(state)) = (companion.as_deref(), companion_state.as_deref())
+        && let Err(error) = super::opaque_conservative_motion::replay_audit::capture(
+            companion,
+            state,
+            &mut context,
+            &queue,
+            &images,
+            &buffers,
+            view_entity,
+            header,
+            &metadata,
+            &cache,
+        )
+    {
+        super::opaque_conservative_motion::replay_audit::capture_failed(companion, error);
+        fail(&audit, error);
+        return;
+    }
+
+    #[cfg(not(feature = "dlaa"))]
+    let _ = view_entity;
     *audit.frozen.lock().unwrap_or_else(|e| e.into_inner()) = Some(Frozen {
         header,
         text: metadata,
@@ -387,4 +434,62 @@ fn readback(
         Err(error) => fail(&audit, &error),
     }
     commands.entity(event.entity).despawn();
+}
+
+// Shared exact request latch; no second camera/body snapshot or matrix computation.
+#[cfg(feature = "dlaa")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SourceTransaction {
+    pub(crate) source_frame: u32,
+    pub(crate) source_tick: u64,
+}
+#[cfg(feature = "dlaa")]
+pub(crate) fn replay_request(world: &World) -> Result<Option<SourceTransaction>, &'static str> {
+    let Some(audit) = world.get_resource::<Audit>() else {
+        return Err("raw-audit-absent");
+    };
+    let Some(state) = world.get_resource::<Snapshot>() else {
+        return Err("raw-snapshot-absent");
+    };
+    if audit.submitted.load(Ordering::Acquire) || state.tick < audit.tick {
+        return Ok(None);
+    }
+    if audit.failed() || state.tick != audit.tick {
+        return Err("exact-audit-source-tick-missed");
+    }
+    // Snapshot.frame is captured in PostUpdate; renderer FrameCount is extracted after Last.
+    // Keep the source transaction authoritative instead of equating these two clock domains.
+    Ok(Some(SourceTransaction {
+        source_frame: state.frame,
+        source_tick: state.tick,
+    }))
+}
+
+#[cfg(all(test, feature = "dlaa"))]
+pub(crate) fn test_audit_clock_app() -> App {
+    fn snapshot_fixture(frame: Res<FrameCount>, audit: Res<Audit>, mut state: ResMut<Snapshot>) {
+        *state = Snapshot {
+            frame: frame.0,
+            tick: audit.tick,
+            current_body: Mat4::IDENTITY,
+            previous_body: Mat4::IDENTITY,
+        };
+    }
+    let mut app = App::new();
+    app.add_plugins(bevy::diagnostic::FrameCountPlugin)
+        .insert_resource(Audit {
+            companion: None,
+            tick: 1652,
+            centre: Some(Vec2::new(960., 540.)),
+            directory: PathBuf::new(),
+            buffer: Handle::default(),
+            submitted: Arc::default(),
+            readback_queued: false,
+            complete: Arc::default(),
+            failed: Arc::default(),
+            frozen: Arc::default(),
+        })
+        .init_resource::<Snapshot>()
+        .add_systems(PostUpdate, snapshot_fixture);
+    app
 }

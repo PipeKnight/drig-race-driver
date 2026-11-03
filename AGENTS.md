@@ -8,6 +8,8 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 
 ## Fix scope and root causes
 
+- Owner reaffirmed on 3 November 2026: design every fix and feature for all applicable tracks, cars and asset variants through shared mechanisms and data. Never make a track/car-specific implementation the intended solution. A particular track/car is only a diagnostic or validation fixture; temporary narrow probes must remain explicitly experimental and cannot be delivered as general completion.
+
 - Prefer general fixes that address the root cause. Do not present a car/track-specific whitelist, opt-in launcher, or symptom workaround as completion of a general defect. Narrow experiments are useful for diagnosis, but keep them explicitly temporary, document their limits, and carry the verified solution into the shared normal path. Validate representative affected configurations before claiming broad correctness (owner instruction, 2026-10-29).
 
 ## Durable records

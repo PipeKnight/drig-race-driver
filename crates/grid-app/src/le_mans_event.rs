@@ -5,7 +5,7 @@
 //! - The race clock runs 24 h of day in the real time limit from 15:00 [V];
 //!   on the Le Mans route outside a time-limited race it stays at 15:00.
 //! - Headlights follow `enableHeadlights` with the original's fade and
-//!   per-car delays [V]; this module only keeps their state, logs it and
+//!   per-car delays [V]; shared vehicle_lights owns the fade; this module logs it and
 //!   shows it on its HUD line. Drawing the lights, sky, sun and fog is the
 //!   graphics side (docs/LE_MANS.md §3.5 lists the hand-off).
 //! - Results [V 0x4EC820]: every car by progress (estimated cars times their
@@ -14,7 +14,7 @@
 //!   `1440:00.000`). The Class column comes from the series event
 //!   (`post_race::CarClasses`, F413).
 use bevy::prelude::*;
-use grid_tools::time_of_day::{self, Headlights, Mode, Timeline};
+use grid_tools::time_of_day::{self, Mode, Timeline};
 
 #[derive(Resource)]
 pub(crate) struct LeMansEvent {
@@ -28,7 +28,6 @@ pub(crate) struct LeMansEvent {
     /// progress adjustment.
     pub classes: Vec<grid_tools::series::LeMansClass>,
     pub timeline: Option<Timeline>,
-    pub headlights: Headlights,
     /// Current time of day (day fraction).
     pub time_of_day: f64,
     lights_on: Option<bool>,
@@ -44,20 +43,12 @@ impl LeMansEvent {
         classes: Vec<grid_tools::series::LeMansClass>,
         timeline: Option<Timeline>,
     ) -> Self {
-        // AUTHORED: the per-car delays come from a fixed generator (the
-        // original draws them with its C runtime rand at race init).
-        let mut seed = 0x1e3a_u32;
-        let headlights = Headlights::new(mode, classes.len().max(1), || {
-            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-            (seed >> 16) as u8
-        });
         Self {
             limit,
             scale: limit.map(time_of_day::clock_scale),
             mode,
             classes,
             timeline,
-            headlights,
             time_of_day: time_of_day::day_fraction(0., None),
             lights_on: None,
             last_hour: None,
@@ -97,9 +88,9 @@ impl LeMansEvent {
     }
 
     /// HUD line: clock, time remaining, headlights.
-    pub fn hud(&self, race_time: Option<f64>) -> String {
+    pub fn hud(&self, race_time: Option<f64>, headlight_intensity: f64) -> String {
         let clock = time_of_day::clock_text(self.time_of_day);
-        let lights = if self.headlights.intensity() > 0. { "  lights on" } else { "" };
+        let lights = if headlight_intensity > 0. { "  lights on" } else { "" };
         match (self.limit, self.scale) {
             (Some(limit), Some(scale)) => {
                 let left = (limit - race_time.unwrap_or(0.)).max(0.) * scale;
@@ -135,9 +126,9 @@ pub(crate) fn spawn_hud(mut commands: Commands) {
     ));
 }
 
-pub(crate) fn show_hud(event: Res<LeMansEvent>, trial: Option<Res<crate::time_trial::Trial>>, driving: Res<crate::Driving>, mut text: Query<&mut Text, With<LeMansHud>>) {
+pub(crate) fn show_hud(event: Res<LeMansEvent>, lights: Res<crate::vehicle_lights::State>, trial: Option<Res<crate::time_trial::Trial>>, driving: Res<crate::Driving>, mut text: Query<&mut Text, With<LeMansHud>>) {
     let race_time = trial.as_ref().and_then(|t| t.race_time(driving.runtime.ticks));
-    let line = event.hud(race_time);
+    let line = event.hud(race_time, lights.headlights.intensity());
     for mut t in &mut text {
         if t.0 != line {
             t.0 = line.clone();
@@ -150,10 +141,11 @@ pub(crate) fn tick(
     driving: Res<crate::Driving>,
     trial: Option<Res<crate::time_trial::Trial>>,
     mut event: ResMut<LeMansEvent>,
+    mut lights: ResMut<crate::vehicle_lights::State>,
 ) {
     let ticks = driving.runtime.ticks;
     let advanced = ticks.saturating_sub(event.last_tick);
-    let restarted = ticks < event.last_tick;
+    let restarted = ticks < event.last_tick || lights.segment_changed(driving.segment);
     event.last_tick = ticks;
     if advanced == 0 && !restarted {
         return;
@@ -178,14 +170,13 @@ pub(crate) fn tick(
         Mode::ForcedNight => true,
         Mode::None => false,
     };
-    let dt = advanced as f64 * f64::from(grid_tools::source_vehicle::DELTA);
     let since_start = race_time.unwrap_or(0.);
-    event.headlights.step(wanted, since_start, dt);
-    let on = event.headlights.intensity() > 0.;
+    lights.advance(driving.segment, ticks, wanted, since_start);
+    let on = lights.headlights.intensity() > 0.;
     let hour = (t * 24.) as u32;
     if event.lights_on != Some(on) || event.last_hour != Some(hour) {
-        let lit = (0..event.classes.len().max(1))
-            .filter(|&i| event.headlights.car(i).is_some())
+        let lit = (0..lights.headlights.delays().len())
+            .filter(|&i| lights.headlights.car(i).is_some())
             .count();
         log_line!(
             "drive_time_of_day version=1 segment={} tick={ticks} clock={} day={} headlights={} intensity={:.3} cars_lit={lit} sky={:?}",
@@ -193,7 +184,7 @@ pub(crate) fn tick(
             time_of_day::clock_text(t),
             time_of_day::is_day(t),
             if on { "on" } else { "off" },
-            event.headlights.intensity(),
+            lights.headlights.intensity(),
             event
                 .timeline
                 .as_ref()
@@ -251,10 +242,10 @@ mod tests {
             vec![class("gt1", 3, 0.92)],
             None,
         );
-        assert_eq!(event.hud(Some(0.)), "Le Mans 15:00:00  remaining 24:00:00");
-        assert_eq!(event.hud(Some(360.)), "Le Mans 15:00:00  remaining 12:00:00");
+        assert_eq!(event.hud(Some(0.), 0.), "Le Mans 15:00:00  remaining 24:00:00");
+        assert_eq!(event.hud(Some(360.), 0.), "Le Mans 15:00:00  remaining 12:00:00");
         let lap_race = LeMansEvent::new(None, Mode::Timeline, vec![], None);
-        assert_eq!(lap_race.hud(Some(500.)), "Le Mans 15:00:00");
+        assert_eq!(lap_race.hud(Some(500.), 0.), "Le Mans 15:00:00");
     }
 
     #[test]

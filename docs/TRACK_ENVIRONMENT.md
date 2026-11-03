@@ -172,3 +172,38 @@ Read `Res<TrackEnvironment>`:
 - The loader's search order for route versus track `lighting.xml` and `sky.pssg` (F515 uses route first for both, docs/SKY.md §2).
 - The vehicle-light branch order.
 - Where the ambience `condition` / `timeOfDay` XML lives: packed, or unused.
+
+## 5. Headlight renderer boundary (G350, 2 November 2026)
+
+The earlier per-slot Headlights state was hosted by LeMansEvent. Ordinary
+ForcedNight routes do not install that event, so night sky/environment selection
+alone cannot provide shared beam activation. A general lighting adapter must
+preserve the existing Timeline/clock authority and per-slot delays, handle pause
+and restart once, and distinguish vehicle_lights tail/side markers from beams.
+
+Source/API review finds that stock SpotLight can illuminate existing forward
+PBR road materials. This is not a tested light implementation. Curve strengths
+are not automatically lumens, and source optical anchors, cone, range, cookie
+projection and photometry remain unresolved. No new shadow/reflection or
+performance policy follows from this feasibility finding.
+
+Private metadata survey: six representative cars and eighteen source packages.
+Five provide named front lamp joints; selected STK packages do not. Their joint
+translations are almost zero while lamp geometry is near the nose; those
+translations cannot serve as source projector positions. Mazda787 pod/glass
+draws overlap and must not create duplicate emitters. The complete survey is
+`local/handoff/drafts/night-lamp-inventory03/`, with activation plan in
+`night-headlight-state02/`. These are bounded observations, not an all-car light
+implementation or original optical-parity proof.
+
+The local G350 change separates activation into shared vehicle_lights State,
+with actual field slots and a single retained event-clock update. On 3 November
+2026, the actual 642-file freeze passed combined-feature all-target Clippy
+(`dlaa,paint-specular`, warnings denied) and both named ignored ECS tests:
+2 passed, 0 failed, 0 ignored. These exercise ordinary modes and separate marker
+state, mixed slots, pause and zero-tick segment restart, plus the saved Le Mans
+Timeline off/on/off against event-only scheduling. Receipts are retained in
+`local/graphics/night-activation01/check01/`; this was a filtered CPU check,
+not a full-suite gate or playable rebuild. No application/GPU run, projector,
+street-light renderer, rendered road contribution or optical/parity completion
+is implied.
