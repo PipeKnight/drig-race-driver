@@ -3731,3 +3731,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00988F10	vehicle_owner_description	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Returns per-car owner+44C description link, not singleton manager.
 0x008F5700	vehicle_component_part_first_present	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		First non-null among eight slots for exact part code; canonical LOD0 ordering not proved.
 0x00BA0FF0	node_read_transform_bounds	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Named TRANSFORM and BOUNDINGBOX reader establishes +50 matrix/+D0,+E0 bound vectors.
+0x008CA010	postprocess_compile_runtime_from_description	func	not ported	docs/ORIGINAL_POSTPROCESS.md:158	G359	[D]		The normalized description enters stage creation, port mapping, external binding, wiring and output-config resolution.
+0x0089B440	postprocess_create_shader_stage	func	not ported	docs/ORIGINAL_POSTPROCESS.md:161	G359	[D]		Resolve declared shader group and optional/default factory; generic fallback remains conditional until active registration is proved.
+0x008C0950	postprocess_map_runtime_port_declarations	func	not ported	docs/ORIGINAL_POSTPROCESS.md:166	G359	[D]		Preserve distinct graph alias and shader sampler strings in runtime input records.
+0x00883830	postprocess_link_input_to_output_port	func	not ported	docs/ORIGINAL_POSTPROCESS.md:170	G359	[D]		Set consumer input linked producer-output pointer and clear external source; does not itself bind an image.
+0x008BE120	postprocess_resolve_output_configuration	func	not ported	docs/ORIGINAL_POSTPROCESS.md:174	G359	[D]		Propagate dimension/format words through config-referenced input; active format and sRGB remain unknown.
+0x008B3320	postprocess_apply_output_config_overrides	func	not ported	docs/ORIGINAL_POSTPROCESS.md:177	G359	[D]		Apply explicit dimensions or scale/truncate and optional internal format override; do not infer D3D enum from sentinel0x23.
+0x008AC4B0	postprocess_builder_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:195	G359	[D]		Initialize builder including defaultfactory+108 to zero; later active factory remains unproved.
