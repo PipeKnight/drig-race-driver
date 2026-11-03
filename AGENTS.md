@@ -12,6 +12,8 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 
 - Prefer general fixes that address the root cause. Do not present a car/track-specific whitelist, opt-in launcher, or symptom workaround as completion of a general defect. Narrow experiments are useful for diagnosis, but keep them explicitly temporary, document their limits, and carry the verified solution into the shared normal path. Validate representative affected configurations before claiming broad correctness (owner instruction, 2026-10-29).
 
+- On 3 November 2026 the owner requested more frequent visual comparisons. Prefer matched before/after images for graphics changes, especially around proposed visual defaults; label the difference and keep camera/scene conditions comparable. Use the latest matched feedback when an older experiment used different lighting or grading. Optional visual feedback does not stop independent technical work.
+
 ## Durable records
 
 - Read `PROJECT_LOG.md` (the short state file) at the start of work. Entries are one file each in `log/` (`log/F0512.md` holds F512); grep `log/` for details (`grep -rn "F512 " log/`, `grep -rln "Redgate" log/`), never read all of it. `log/INDEX.md` lists every entry in one line.
