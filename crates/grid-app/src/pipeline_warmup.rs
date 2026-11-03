@@ -75,6 +75,12 @@ pub struct Warmup {
 }
 
 impl Warmup {
+    /// The cover was removed and temporary visibility/range changes restored.
+    /// Update consumers observe this on the frame after PostUpdate completion.
+    pub fn ready(&self) -> bool {
+        self.phase == Phase::Done
+    }
+
     /// Every ornament level is drawn (`ornament_lod::select`).
     pub fn showing_all(&self) -> bool {
         matches!(self.phase, Phase::Plain | Phase::Dither)
@@ -274,10 +280,12 @@ mod tests {
         // Nothing to warm before the scene exists.
         frame(&mut app);
         assert_eq!(phase(&app), Phase::Scene);
+        assert!(!app.world().resource::<Warmup>().ready());
         app.world_mut().spawn(crate::ViewerCamera);
         let mesh = app.world_mut().spawn(Mesh3d(Handle::default())).id();
         frame(&mut app);
         assert_eq!(phase(&app), Phase::Plain);
+        assert!(!app.world().resource::<Warmup>().ready());
         assert_eq!(covers(&mut app), 1);
         frame(&mut app);
         assert!(app.world().get::<NoFrustumCulling>(mesh).is_some());
@@ -297,8 +305,10 @@ mod tests {
             frame(&mut app);
         }
         assert_eq!(phase(&app), Phase::Plain);
+        assert!(!app.world().resource::<Warmup>().ready());
         frame(&mut app);
         assert_eq!(phase(&app), Phase::Dither);
+        assert!(!app.world().resource::<Warmup>().ready());
         frame(&mut app);
         assert!(app.world().get::<VisibilityRange>(mesh) == Some(&crate::ornament_lod::fade_range(false, 0)));
 
@@ -308,11 +318,13 @@ mod tests {
             frame(&mut app);
         }
         assert_eq!(phase(&app), Phase::Dither);
+        assert!(!app.world().resource::<Warmup>().ready());
         counters.0[0].store(0, Ordering::Relaxed);
         for _ in 0..=QUIET_FRAMES {
             frame(&mut app);
         }
         assert_eq!(phase(&app), Phase::Restore);
+        assert!(!app.world().resource::<Warmup>().ready());
         frame(&mut app);
         assert!(app.world().get::<VisibilityRange>(mesh).is_none());
         assert!(app.world().get::<NoFrustumCulling>(mesh).is_none());
@@ -323,6 +335,57 @@ mod tests {
             frame(&mut app);
         }
         assert_eq!(phase(&app), Phase::Done);
+        assert!(app.world().resource::<Warmup>().ready());
         assert_eq!(covers(&mut app), 0);
     }
+    #[test]
+    fn actual_offscreen_capture_waits_for_postupdate_cover_removal_but_missing_warmup_is_ready() {
+        use bevy::render::view::screenshot::Screenshot;
+        fn capture_app() -> App {
+            let mut app = App::new();
+            app.add_message::<bevy::app::AppExit>()
+                .insert_resource(crate::graphics::Settings::default())
+                .insert_resource(crate::Capture {
+                    path: "local/UNWRITTEN-capture-warmup-regression.png".into(),
+                    target: Some(Handle::default()),
+                    frames: 179,
+                    requested: false,
+                    started: std::time::Instant::now(),
+                })
+                .add_systems(Update, crate::capture);
+            app
+        }
+        // A missing resource preserves the existing no-warmup capture contract.
+        let mut absent = capture_app();
+        absent.update();
+        assert!(absent.world().resource::<crate::Capture>().requested);
+        assert_eq!(absent.world_mut().query::<&Screenshot>().iter(absent.world()).count(), 1);
+
+        let mut app = capture_app();
+        let camera = app.world_mut().spawn(crate::ViewerCamera).id();
+        app.world_mut().spawn(Mesh3d(Handle::default()));
+        let cover = app.world_mut().spawn((Node::default(), UiTargetCamera(camera))).id();
+        app.insert_resource(Counters::default())
+            .insert_resource(Warmup {
+                phase: Phase::Restore,
+                quiet: QUIET_FRAMES - 1,
+                cover: Some(cover),
+                ..default()
+            })
+            .add_systems(PostUpdate, step);
+        // Actual capture(Update) runs before actual step(PostUpdate). This frame
+        // reaches Done and flushes the cover despawn, but cannot request an image.
+        app.update();
+        assert!(!app.world().resource::<crate::Capture>().requested);
+        assert!(app.world().resource::<Warmup>().ready());
+        assert!(app.world().get_entity(cover).is_err());
+        assert_eq!(app.world_mut().query::<&Screenshot>().iter(app.world()).count(), 0);
+        // Only the following Update can queue Screenshot, with no cover entity.
+        app.update();
+        assert!(app.world().resource::<crate::Capture>().requested);
+        assert!(app.world().get_entity(cover).is_err());
+        assert_eq!(app.world_mut().query::<&Screenshot>().iter(app.world()).count(), 1);
+        // No RenderApp/GPU/ScreenshotCaptured event: no image or file is written.
+    }
+
 }

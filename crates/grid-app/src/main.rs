@@ -150,6 +150,8 @@ mod demolition_event;
 mod le_mans_event;
 mod vehicle_lights;
 mod headlight_pilot;
+mod effective_lighting;
+mod source_light_trial;
 mod texture_overrides;
 mod surface_rgb;
 mod texture_upload;
@@ -1953,6 +1955,7 @@ fn manual_base_mip_zero_admitted(
 
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let headlight_lumens = headlight_pilot::requested()?;
+    let source_lighting_units = source_light_trial::requested()?;
     println!("prototype_build revision={BUILD_REVISION}");
     // Settings files first (docs/SETTINGS.md); the flags below override them.
     let profile = settings::load(&args)?;
@@ -3368,7 +3371,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     && skid_order==skid_marks::OrderMode::Off && skid_reflectance.is_none()
                     && smoke_compositor==smoke_compositor::Mode::Off && smoke_ct==smoke_ct_neutral::Mode::Off
                     && !motion_phase_map && motion_phase_profile==smoke_pilot::Profile::Derby120,
-                scene_pilots_off:headlight_lumens.is_none() && foundation_front==foundation_front::Mode::Off && foundation_backing==foundation_backing::Mode::Off
+                scene_pilots_off:source_lighting_units.is_none() && headlight_lumens.is_none() && foundation_front==foundation_front::Mode::Off && foundation_backing==foundation_backing::Mode::Off
                     && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
                     && graphics.object_coverage==object_materials::CoverageMode::Off && !graphics.double_fence_wire
                     && !source_haze && !reflection_calibration && !include_batches && !audio_check
@@ -3953,6 +3956,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             };
             field.car_model.push(m);
         }
+    }
+    if source_lighting_units.is_some() {
+        let linear_fill = std::env::var("GRID_BASELINE_FILL").map_or(true, |v| v == "linear");
+        source_light_trial::validate_context(drive, reference, headless, collision, (output.is_some() && track, drive_ticks), &graphics, linear_fill)?;
     }
     let mut headlight_preparation = if let Some(lumens) = headlight_lumens {
         if !drive || !reference || headless || collision || output.is_none()
@@ -4670,6 +4677,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         exterior_driver::install(&mut app);
         track_environment::install(&mut app, &root, &route);
         vehicle_lights::install(&mut app, mode, field.car_model.len());
+        if let Some(units) = source_lighting_units { source_light_trial::install(&mut app, &graphics, units)?; }
         if let Some(p) = headlight_preparation.take() { headlight_pilot::install(&mut app, p, mode)?; }
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
@@ -5594,6 +5602,7 @@ fn setup(
             },
         ))
         .id();
+    commands.entity(sun).insert(source_light_trial::SourceSun);
     if ornament_shadows {
         commands.insert_resource(ornament_lod::Lods::new(ornament_levels));
     }
@@ -5620,6 +5629,7 @@ fn setup(
                 ..default()
             },
             Transform::from_rotation(sun.rotation * Quat::from_rotation_x(std::f32::consts::PI)),
+            source_light_trial::SourceBack,
         ));
     } else {
         commands.insert_resource(GlobalAmbientLight {
@@ -5694,7 +5704,7 @@ fn capture(
     mut exit: MessageWriter<AppExit>,
     driving: Option<Res<Driving>>,
     benchmark: Option<Res<graphics_benchmark::Benchmark>>,
-    probe: Option<Res<scene_probe::Cube>>,
+    (probe, warmup): (Option<Res<scene_probe::Cube>>, Option<Res<pipeline_warmup::Warmup>>),
     graphics: Res<graphics::Settings>,
     (motion, crowd_sweep): (Option<Res<motion_capture::Motion>>, Option<Res<crowd_preview::Sweep>>),
     motion_phase: Option<Res<skid_phase_ledger::Audit>>,
@@ -5792,6 +5802,7 @@ fn capture(
         return;
     }
     if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
+        && warmup.as_ref().is_none_or(|warm| warm.ready())
         && crowd_sweep.as_ref().is_none_or(|s| s.finished())
         && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
         && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
