@@ -145,6 +145,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F726](log/F0726.md) | 2026-11-03 | Pipeline warm-up at the race start: no objects missing while their pipeline compiles |
 | [F725](log/F0725.md) | 2026-11-03 | Near full trees: edge-vanish evidence for F724 |
 | [F724](log/F0724.md) | 2026-11-03 | Facing trees keep their expanded bounds; no culling at the screen edge |
 | [F723](log/F0723.md) | 2026-11-03 | Playable 170678e6ce36 for the PC and both APKs; release test-order and F-range fixes |
@@ -204,7 +205,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F669](log/F0669.md) | 2026-10-31 | A wheel on a material without mechanics reads the original's initializer record (row 9) |
 | [F668](log/F0668.md) | 2026-10-31 | Jarama route 1 autopilot finishes again; known-failing asset test restored |
 | [F667](log/F0667.md) | 2026-10-31 | Crowds ported: NormalCrowd/GrandStandCrowd on the crowd cells, excited by ReactiveCrowd (backlog row 70) |
-| [F666](log/F0666.md) | 2026-10-31 | Head-cam mouse look-around, an owner-requested deviation (backlog row 101) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

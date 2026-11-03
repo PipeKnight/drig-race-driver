@@ -276,7 +276,7 @@ pub fn install(app: &mut App) {
 /// dithers in the shadow map like the colour fade (owner 2026-11-03: nothing
 /// should appear in view; F713); the part itself casts none meanwhile. Level
 /// changes keep the shadow level, so only crossings of D need one.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn shadow_proxies(
     lods: Res<Lods>,
     mut state: ResMut<ShadowProxies>,
@@ -295,14 +295,18 @@ fn shadow_proxies(
     standard: Res<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<ShadowMaterial>>,
     mut commands: Commands,
+    warm: Option<Res<crate::pipeline_warmup::Warmup>>,
 ) {
     let state = &mut *state;
+    // Pipeline warm-up: every shadow-level part casts through a step-0 proxy.
+    let warming = warm.is_some_and(|w| w.proxies());
     for (part, level, mesh, material, transform, shadowless) in &parts {
         let fade = lods.fades[level.instance as usize];
         let step = match fade.presence() {
             Some((appearing, step)) if (appearing || step > 0) && !(shadowless && !state.proxies.contains_key(&part)) => {
                 Some(step.min(31) as u32 | if appearing { 32 } else { 0 })
             }
+            _ if warming && (!shadowless || state.proxies.contains_key(&part)) => Some(0),
             _ => None,
         };
         match (step, state.proxies.get(&part).copied()) {
@@ -447,7 +451,7 @@ pub fn level(kind: &Type, v: f32) -> u8 {
 }
 
 #[allow(clippy::type_complexity)]
-fn select(
+pub(crate) fn select(
     mut lods: ResMut<Lods>,
     camera: Query<(&GlobalTransform, &Projection), With<crate::ViewerCamera>>,
     mut parts: Query<(
@@ -460,6 +464,7 @@ fn select(
     mut commands: Commands,
     time: Option<Res<Time>>,
     mut frame: Local<u64>,
+    warm: Option<Res<crate::pipeline_warmup::Warmup>>,
 ) {
     let Some((view, projection @ Projection::Perspective(lens))) = camera.iter().next() else {
         return;
@@ -487,7 +492,19 @@ fn select(
     }
     let caster = RenderLayers::layer(0);
     let shadow_only = crate::car_batch::shadow_layer();
+    // Pipeline warm-up (behind a cover): every level is drawn and casts; the
+    // warm-up owns the ranges meanwhile.
+    let warming = warm.is_some_and(|w| w.showing_all());
     for (entity, part, mut visibility, layers, range) in &mut parts {
+        if warming {
+            visibility.set_if_neq(Visibility::Inherited);
+            if let Some(mut layers) = layers
+                && layers.clone().without(crate::car_reflections::LAYER) != caster
+            {
+                *layers = caster.clone();
+            }
+            continue;
+        }
         let fade = lods.fades[part.instance as usize];
         let colour = fade.draw(part.level);
         // The shadow level is drawn inside D, by the camera only while it is

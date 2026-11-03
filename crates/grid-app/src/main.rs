@@ -86,6 +86,7 @@ mod graphics;
 mod graphics_benchmark;
 mod perf_test;
 mod perf_timing;
+mod pipeline_warmup;
 mod gpu_passes;
 #[cfg(feature = "profile")]
 mod span_profile;
@@ -4270,14 +4271,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 (graphics.width, graphics.height),
             )?;
         }
-        println!("capture_pipeline_compilation synchronous=true scope=offscreen-only");
+        let synchronous = !pipeline_warmup::capture_async();
+        println!("capture_pipeline_compilation synchronous={synchronous} scope=offscreen-only");
         app.add_plugins(with_profile(
             DefaultPlugins
                 // A capture's frame counter must not outrun background shader
                 // compilation. Interactive windows keep Bevy's async default.
                 .set(bevy::render::RenderPlugin {
                     render_creation: texture_upload::render_creation(),
-                    synchronous_pipeline_compilation: true,
+                    synchronous_pipeline_compilation: synchronous,
                     ..default()
                 })
                 .set(WindowPlugin {
@@ -4723,6 +4725,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     perf_timing::install(&mut app);
     asset_counts::install(&mut app);
+    pipeline_warmup::install(&mut app);
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
     if gpu_passes::enabled() {

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F726](F0726.md) | 2026-11-03 | Pipeline warm-up at the race start: no objects missing while their pipeline compiles |
 | [F725](F0725.md) | 2026-11-03 | Near full trees: edge-vanish evidence for F724 |
 | [F724](F0724.md) | 2026-11-03 | Facing trees keep their expanded bounds; no culling at the screen edge |
 | [F723](F0723.md) | 2026-11-03 | Playable 170678e6ce36 for the PC and both APKs; release test-order and F-range fixes |
