@@ -103,6 +103,15 @@ pub struct Surface {
     // Alpha stays on original taps.
     #[uniform(114)]
     rgb_filter: Vec4,
+    // The source Phong lobe: PhongPower, Fresnel min, max, power (all 0: none).
+    #[uniform(115)]
+    phong: Vec4,
+    // specularColour as radiance per unit lobe; W 1 replaces Bevy's specular.
+    #[uniform(116)]
+    phong_light: Vec4,
+    // specularDirection, toward the light.
+    #[uniform(117)]
+    phong_direction: Vec4,
 }
 impl MaterialExtension for Surface {
     fn fragment_shader() -> ShaderRef {
@@ -115,6 +124,7 @@ impl MaterialExtension for Surface {
 
 struct Definition {
     dry_ground: Vec4,
+    phong: Vec4,
     textures: [String; 4],
     scales: Vec4,
     controls: Vec4,
@@ -213,6 +223,7 @@ fn read_surfaces(
             continue;
         };
         let world_mapped = group_ref == b"#track_infield_wsm.fx";
+        let reflective = group_ref == b"#track_surface_reflective.fx";
         let id = tree.string(i, b"id")?;
         let group = (0..tree.nodes.len())
             .find(|&j| {
@@ -279,7 +290,26 @@ fn read_surfaces(
         let has_macro = macro_map.is_some();
         let macro_map = macro_map.unwrap_or_else(|| first.clone());
         let skids = texture_name(b"TSkidsMap");
+        // The pixel programs' direct specular: pow(sat(dot(reflect(I, N),
+        // specularDirection)), PhongPower) * lerp(FresnelMin, FresnelMax,
+        // pow_sat(1 + dot(I, N), FresnelPower)). track_infield_wsm.cg.fp
+        // takes FresnelMax alone; track_surface_reflective.cg.fp has no lobe
+        // (its ReflectionMap is not ported).
+        let phong = if reflective {
+            Vec4::ZERO
+        } else if world_mapped {
+            let max = scalar(b"FresnelMax")?;
+            Vec4::new(scalar(b"PhongPower")?, max, max, 1.)
+        } else {
+            Vec4::new(
+                scalar(b"PhongPower")?,
+                scalar(b"FresnelMin")?,
+                scalar(b"FresnelMax")?,
+                scalar(b"FresnelPower")?,
+            )
+        };
         let definition = Definition {
+            phong,
             dry_ground: Vec4::new(
                 dry_ground_layer(&first, !skidded),
                 dry_ground_layer(&second, !skidded),
@@ -628,6 +658,13 @@ pub(crate) fn attach(
                             } else { 0. },
                         ),
                         rgb_filter: Vec4::new(settings.asphalt_filter_strength, grazing_gain.unwrap_or(0.), 0., 0.),
+                        phong: d.phong,
+                        phong_light: settings.baseline_specular.map_or(Vec4::ZERO, |p| {
+                            Vec4::new(p.colour[0], p.colour[1], p.colour[2], 1.)
+                        }),
+                        phong_direction: settings.baseline_specular.map_or(Vec4::ZERO, |p| {
+                            Vec3::from_array(p.direction_to_light).normalize().extend(0.)
+                        }),
                         controls: d.controls,
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
@@ -665,10 +702,11 @@ pub(crate) fn attach(
     }
     println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(
-        "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} specular={:?} uv1=true masks=linear-ARGB-to-RGBA",
+        "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} specular={:?} source_phong={} uv1=true masks=linear-ARGB-to-RGBA",
         source.draws.len(),
         handles.len(),
-        settings.surface_specular
+        settings.surface_specular,
+        settings.baseline_specular.is_some()
     );
     if attached != source.draws.len() {
         warn!(
@@ -778,8 +816,10 @@ mod tests {
             let land = read_optional_package(root, &route, "land.pssg");
             let world_mapped = source.definitions.values().filter(|d| d.controls.w > 0.).count();
             let without_macro = source.definitions.values().filter(|d| d.controls.z < 0.).count();
+            // Every road and infield material saves its Phong constants.
+            let phong = source.definitions.values().filter(|d| d.phong.x > 0.).count();
             println!(
-                "surface {track} materials={} draws={} textures={} wsm={world_mapped} no_macro={without_macro} land={}",
+                "surface {track} materials={} draws={} textures={} wsm={world_mapped} no_macro={without_macro} phong={phong} land={}",
                 source.definitions.len(),
                 source.draws.len(),
                 source.textures.len(),

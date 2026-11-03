@@ -7,6 +7,7 @@
 #import bevy_pbr::{prepass_io::{VertexOutput, FragmentOutput}, pbr_deferred_functions::deferred_output}
 #else
 #import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing}}
+#import bevy_pbr::{pbr_types::PbrInput, mesh_view_bindings::lights, mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT, mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT, shadows::fetch_directional_shadow}
 #endif
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var first: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var first_sampler: sampler;
@@ -24,6 +25,9 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> dry_ground: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(113) var<uniform> sampling: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(114) var<uniform> rgb_filter: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(115) var<uniform> phong: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(116) var<uniform> phong_light: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(117) var<uniform> phong_direction: vec4<f32>;
 
 // Independently authored dry response confined to the audited ground band.
 // Source RGB/alpha, road/line texels and the existing layer blend are preserved.
@@ -33,6 +37,45 @@ fn ground_weight(code: f32, uv: vec2<f32>) -> f32 {
     }
     return code;
 }
+
+#ifndef PREPASS_PIPELINE
+// track_surface_simple.cg.fp (and the infield programs): the direct specular
+// added to the lit albedo. I runs from the eye; `alpha` is the mixed diffuse
+// alpha, `ao` the macro AO. The source's screen shadow mask becomes the sun's
+// shadow map: the brightest directional light is the sun.
+fn source_specular(pbr: PbrInput, alpha: f32, ao: f32) -> vec3<f32> {
+    if phong.z <= 0.0 {
+        return vec3(0.0);
+    }
+    let I = normalize(pbr.world_position.xyz - view.world_position);
+    let N = pbr.N;
+    let i_n = dot(I, N);
+    let fresnel = mix(phong.y, phong.z, saturate(pow(max(1.0 + i_n, 0.0), phong.w)));
+    let R = I - 2.0 * i_n * N;
+    let lobe = pow(saturate(dot(R, phong_direction.xyz)), phong.x);
+    var sun = 0u;
+    var brightest = -1.0;
+    for (var i = 0u; i < lights.n_directional_lights; i = i + 1u) {
+        let c = lights.directional_lights[i].color.rgb;
+        if max(c.r, max(c.g, c.b)) > brightest {
+            brightest = max(c.r, max(c.g, c.b));
+            sun = i;
+        }
+    }
+    var shadow = 1.0;
+    if brightest > 0.0 && (pbr.flags & MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+            && (lights.directional_lights[sun].flags & DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+        let view_z = dot(vec4(
+            view.view_from_world[0].z,
+            view.view_from_world[1].z,
+            view.view_from_world[2].z,
+            view.view_from_world[3].z
+        ), pbr.world_position);
+        shadow = fetch_directional_shadow(sun, pbr.world_position, pbr.world_normal, view_z, pbr.frag_coord.xy);
+    }
+    return lobe * phong_light.rgb * alpha * fresnel * ao * 4.0 * shadow;
+}
+#endif
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
@@ -115,8 +158,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 #ifdef PREPASS_PIPELINE
     return deferred_output(in, pbr);
 #else
+    // The source lobe replaces Bevy's: F0 = 0 also zeroes its F90 and the
+    // ambient specular. track_surface_reflective has no lobe, only its
+    // unported ReflectionMap: Bevy's response stays in for it.
+    var specular = vec3(0.0);
+    if phong_light.w > 0.0 && phong.x > 0.0 {
+        pbr.material.reflectance = vec3(0.0);
+        specular = source_specular(pbr, clamp(layer.a, 0.0, 1.0), ao) * view.exposure;
+    }
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr);
+    out.color = vec4(out.color.rgb + specular, out.color.a);
     out.color = main_pass_post_lighting_processing(pbr, out.color);
     return out;
 #endif

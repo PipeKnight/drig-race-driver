@@ -3421,6 +3421,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             _ => return Err("GRID_BASELINE_FILL needs linear, gamma or off".into()),
         };
         println!("baseline_fill mode={mode} fill={:?}", graphics.baseline_fill);
+        // GRID_BASELINE_SPECULAR: source (default) or bevy, Bevy's own
+        // reflectance (owner review). Same colour decoding as the fill.
+        graphics.baseline_specular = match std::env::var("GRID_BASELINE_SPECULAR").as_deref() {
+            Ok("bevy") => None,
+            Ok("source") | Err(_) => graphics::Phong::from_lighting(&environment.lighting, graphics.sun_illuminance(), mode == "gamma"),
+            _ => return Err("GRID_BASELINE_SPECULAR needs source or bevy".into()),
+        };
+        println!("baseline_specular phong={:?}", graphics.baseline_specular);
     }
     if source_haze {
         if !graphics.enhanced() || (!track && !drive) {

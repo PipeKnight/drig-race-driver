@@ -142,6 +142,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F717](log/F0717.md) | 2026-11-03 | Baseline track and infield specular from the original programs' Phong lobe |
 | [F716](log/F0716.md) | 2026-11-03 | Baseline sun from the route's lighting.xml plus the original's back/ambient fill (owner's decision) |
 | [F715](log/F0715.md) | 2026-11-03 | Dynamic prop parts tagged at spawn; static scenes hide unbroken pieces |
 | [F714](log/F0714.md) | 2026-11-03 | F710 skinned-mesh render regression fixed; prepush render smoke |
@@ -201,7 +202,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F660](log/F0660.md) | 2026-10-31 | Car reflections: the original's environment map and the plan |
 | [F659](log/F0659.md) | 2026-10-30 | Long Beach route 1 leader: squeezed outside into a closing exit; line probe limits |
 | [F658](log/F0658.md) | 2026-10-30 | Pack tick candidates: piece contacts already parallel, piece-island parallelism stopped |
-| [F657](log/F0657.md) | 2026-10-30 | Owner playtest Viper Washington: car reflections, cockpit mouse look, floating track pieces (rows 100-102) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
