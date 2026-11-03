@@ -2069,8 +2069,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0095D880		func	not ported	docs/TRACK_LOD.md:191		[O]		0x95D880 (append to the level's instance buffer).
 0x0095FCE0	look_at	func	crates/grid-app/src/sky.rs:87 grid-app::sky::look_at ; crates/grid-tools/src/time_of_day.rs:223 grid-tools::time_of_day::sky_textures ; crates/grid-formats/src/sky.rs:8 grid-formats::sky	docs/LE_MANS.md:217 ; docs/SKY.md:58	F515 F430 G130	[V]	sky_textures	The look at day fraction `t` [V 0x95FCE0, 0x9ACE90]: slots from | note: merge retained additional port provenance: crates/grid-app/src/sky.rs:86 grid-app::sky::look_at
 0x0095FE90		func	not ported	docs/CAR_LOD.md:102 ; docs/SUN_SHADOWS.md:28	F616	[O]		the track/world list through 0x95FE90;
-0x00961640		func	not ported	docs/TRACK_LOD.md:399				0095CD90, 00961640, 009637C0, 00952B30, 009521E0, 0064ADB0, 0064B100, 0064C7E0, 00898EB0,
-0x009637C0		func	not ported	docs/TRACK_LOD.md:399				0095CD90, 00961640, 009637C0, 00952B30, 009521E0, 0064ADB0, 0064B100, 0064C7E0, 00898EB0,
+0x00961640	tree_attributes_write_debug	func	not ported	docs/SOURCE_VEGETATION.md ; docs/TRACK_LOD.md:399		[O]		writes tree_attributes_%d_out.xml (docs/SOURCE_VEGETATION.md)
+0x009637C0	tree_attributes_read	func	crates/grid-app/src/source_trees.rs	docs/SOURCE_VEGETATION.md ; docs/TRACK_LOD.md:399		[O]		tree_attributes.xml: 0x48-byte records, lod_distance_00..02 at +0x30 (docs/SOURCE_VEGETATION.md)
 0x00963BA0		func	not ported	docs/FLOATING_AUDIT.md:127	F689			and passes the matrix unchanged to 0x963BA0. Neither function makes a ground or collision
 0x00963D90	crowd_audio_Cell	func	crates/grid-tools/src/crowd_audio.rs:34 grid-tools::crowd_audio::Cell	docs/AUDIO_RESEARCH.md:1900			Cell	A visual crowd cell as the audio sees it (0x963D90, 0x97A630).
 0x00965790	metric	func	crates/grid-app/src/ornament_lod.rs:229 grid-app::ornament_lod::metric	docs/TRACK_LOD.md:16	F633	[O]		line to its centre, warped by the camera's FOV (0x965790), and draws the
@@ -2089,11 +2089,12 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0096F420		label	not ported	docs/LE_MANS.md:245	F430 G130			inside 0x0096F3C0; exposure target 0xE5EBE8, renderer branches 0x96F420 / 0x971A20 in mode 1,
 0x0096FBC0		func	not ported	docs/TRACK_LOD.md:16		[O]		Selection rule** (0x96FBC0 -> 0x965790 -> 0x96EC80, ranges from 0x95D2A0) [O]:
 0x00971A20		func	not ported	docs/LE_MANS.md:245 ; docs/TYRE_SMOKE_RESEARCH.md:1184				returns a signed byte. The same query serves `0x971A20` and `0x97A630` (vegetation renderers).
+0x00972500	tree_lod_select	func	crates/grid-app/src/ornament_lod.rs	docs/SOURCE_VEGETATION.md	F718	[O]		per tree instance: v from 0x965790 (far = lod_distance_02), two levels with fade ranges +0x94..+0xA8
 0x00977200		func	crates/grid-formats/src/ground_cover.rs:3 grid-formats::ground_cover					See docs/GROUND_EFFECTS_RESEARCH.md (loader 97EAB0, sprites 977200).
 0x00977500		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:366	F706	[D]		[D] Scatter `977500 → 96CFA0 → 95BC90 → 95AF90`:
 0x00979430	REFERENCE_HALF_FOV	func	crates/grid-app/src/ornament_lod.rs:31 grid-app::ornament_lod::REFERENCE_HALF_FOV	docs/TRACK_LOD.md:189 ; docs/CAR_LOD.md:102 ; docs/SUN_SHADOWS.md:31		[O]		Reference FOV of the distances: 55 degrees (0x979430, tan(0.47996554)).
 0x00979590		func	not ported	docs/TRACK_LOD.md:189 ; docs/SUN_SHADOWS.md:31				other passes 0x5BCEA0, 0x5EA6A0, 0x5EC880) -> 0x979430 (static instances) / 0x979590 (second
-0x0097A160		func	not ported	docs/CAR_LOD.md:102 ; docs/SUN_SHADOWS.md:32		[I]		trees (0x97A160, 0x97A250).
+0x0097A160	tree_pass_collect	func	crates/grid-app/src/ornament_lod.rs	docs/SOURCE_VEGETATION.md ; docs/CAR_LOD.md:102 ; docs/SUN_SHADOWS.md:32		[O]		tree pass: FOV factor k, then 0x972500 per instance (docs/SOURCE_VEGETATION.md)
 0x0097A250		func	not ported	docs/SUN_SHADOWS.md:32				trees (0x97A160, 0x97A250).
 0x0097A630		func	crates/grid-tools/src/crowd_audio.rs:34 grid-tools::crowd_audio::Cell	docs/AUDIO_RESEARCH.md:1902 ; docs/TYRE_SMOKE_RESEARCH.md:1184		[I]		A visual crowd cell as the audio sees it (0x963D90, 0x97A630).
 0x0097CE80		func	not ported	docs/TRACK_LOD.md:67		[O]		("Too many LODs found", 0x97CE80) and level count = `lodCount + 1` [O].

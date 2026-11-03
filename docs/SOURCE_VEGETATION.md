@@ -104,3 +104,70 @@ F360 adds a replay camera writer in Update after live drive presentation. Source
 The recovered treesheet VS forwards saved vertex colour v3.rgb into o1.xyz; its fragment shader multiplies lit diffuse by that RGB. Alpha instead uses diffuse alpha times instance v7.w, not saved vertex alpha. The three saved distant blocks contain exactly two opaque greys:139 at the bottom offsets and201 at positive vertical offsets. Across2922 bottom and2922 top vertices these values were previously discarded. Private tree-vertex-colors01.json pins trees.pssg SHA03d486ac... and all27saved colour blocks. This establishes a missing source gradient, not a complete original lighting model. Ordinary foliage colours may have a different binding and are deliberately excluded.
 
 New opt-in `--trees coverage-shaded` selects the same coverage mips/geometry as coverage, adding only raw RGB/255 vertex tint to distant sheets. No speculative sRGB conversion; alpha stays1, so coverage and shadow silhouettes remain unchanged. Bevy applies it through PBR base colour, whereas the original multiplies its wrapped/backlit diffuse output; this is an adaptation, not radiometric equivalence. Source backlight constants, instance tint, normal textures and per-pass billboard orientation remain open. Default coverage and normal launchers retain the existing image. Four source-tree release tests pass including actual saved gradients and replay orientation; paired GPU checks follow.
+
+## Forest on every preset, with the original's level switch (2026-11-03)
+
+The pilot ran only on the enhanced preset, which admits Donington route 0 alone, so every other
+track drew no trees (Washington's god-ray cards then stood in open air). The forest is now drawn
+on every preset and route by default with the owner-preferred leaf coverage (`--trees coverage`);
+`--trees off` leaves it out, and the native smoke diagnostic requires it off. All 18 track folders
+ship `trees.pssg` and a `trees.bin` per route. The phone draws it too (its only cut is resolution).
+
+### Levels in the data [O]
+
+- Each species' `ROOTNODE` holds a `lod` node with a `<species>_x0` NODE (trunk, branches and
+  facing foliage: the full tree) and a `<species>_x2` RENDERNODE: one quad (4 vertices) with
+  shader group `#foliage_billboard.fx`. The distant-forest species (`distant_tree*`) have `_x0`
+  only, itself a tree sheet.
+- The route's `tree_attributes.xml` gives each species `lod_distance_00..02` and
+  `instance_buffer_max_00..02` (Washington `large_tree`: 30 / 150 / 940 m, buffers 12 / 20 / 150;
+  `distant_tree01`: 20 / 100 / 900 m, buffers 30 / 1 / 1). Read by 0x9637C0 into 0x48-byte
+  records (distances at +0x30); `lodQuality` "trees" folds the buffer counts together; a flag at
+  manager +0x1EC multiplies `lod_distance_00/01` by 6 (not traced).
+- The `_x2` quad is an eight-view impostor (`tree_lowlod.cg.vp`): its corners sit on the centre
+  with signed offsets in UV1, expanded about a per-instance axis towards the eye; with `d` towards
+  the eye, `a = atan2(d . v6, d . v4)`, `x = -4a/pi`, the pixel program blends atlas view
+  `ceil(x) + 1` into the next by `frac(x)` (atlases are 8 views of 128x256 or 64x256). Its alpha is
+  the blended atlas alpha times vertex alpha (`tree_lowlod_shadowed.cg.fp`).
+
+### Selection [O except where marked]
+
+The tree pass 0x97A160 computes the ornament FOV factor `k` and calls 0x972500 per instance, which
+takes `v` from the ornament metric 0x965790 with `far = lod_distance_02` (type +0x4C) and draws one
+level while `+0x94 < v < +0xA0` (fading in from +0x94 to +0x98, out from +0x9C to +0xA0) and the
+other from `+0xA4` (fading in to +0xA8); a species without the second geometry (+0xF0 == 0) draws
+one level fading in at +0x94. Which code fills +0x94..+0xC0 is not traced. [I] The full tree is
+level 0 inside `lod_distance_00` and the card level 1 out to `lod_distance_02` (the buffer maxima
+fit: Washington `large_tree` keeps 12 full trees and 150 cards).
+
+### Port (`source_trees.rs`, `ornament_lod.rs`)
+
+- Trees join the ornament levels: one type per placed species with the route's distances, an
+  instance per placement (the species bounds placed), `_x0` draws at level 0 and `_x2` cards at
+  level 1. Each switch, and each appearance at `lod_distance_02`, fades over 0.4 s with the
+  ornament dither (F703, F713). Shadows follow the ornament rule (one level casts inside D,
+  through the fading proxy at D), but a tree casts through its full tree, not its card
+  (`Type::impostor`): a card turned to the eye throws the wrong shape from the sun and darkened
+  the road under it [AUTHORED for trees: the original's tree shadow pass 0x97A250 is not traced].
+  `GRID_ORNAMENT_LOD=0` keeps the full trees everywhere.
+- Cards are expanded on the CPU about world up like the tree sheets, show the nearest atlas view
+  (`round(x) + 2` mod 8, `v4`/`v6` taken as the tree's X and Z axes [I]) instead of blending two,
+  and are lit per corner with the radial normal the full tree's leaves use (towards the eye,
+  tilted out to the card's side and up or down) [AUTHORED; the original reads a baked normal
+  atlas and adds `LightWrap` and `InvFoliageDensity` (0.3) in `tree_lowlod_shadowed.cg.fp`].
+- Card colour check (`local/r48/*-cmp.png`, full trees | first switch | this; mean foliage value):
+  cards stay darker than the full trees they replace, by 0-35% (Spa 30: 39.9 full, 25.3 cards
+  on the left, 37.8 / 27.4 on the right; Washington 53.1 / 44.1). Diffuse transmission on cards
+  changed nothing; the radial normals lift the side-lit Spa views and darken Washington slightly.
+  The cause is open: the atlas bakes the crown's own shading, and the original's card lighting
+  is not ported.
+- Hidden facing entities are no longer rewritten each frame.
+- Checks (private `local/r46/`): `w-shafts-ab.png`, `spa30-ab.png`, `haruna48-ab.png` (full trees
+  everywhere | level switch); `c-x0-vs-n.png` (Washington cards, close crop);
+  `switch-large_tree.png` (one `large_tree` at 40, 44, 50, 56 m from its trunk; the switch is at
+  30 m from the near side of its box, about 48 m here; the 50 m frame looks into a
+  `distant_tree01` sheet 16 m from the camera, the same without the switch).
+- Cost (uncapped windowed drive on the start grid, 1280x800, RTX 4070; F718): with the switch,
+  trees on and off both run at the ~6.06 ms floor on Washington and Spa (before the switch:
+  +2.2..4.3 ms and +1.2..2.3 ms). With the full trees casting the shadows (`local/r48/u-*.log`):
+  Washington off 6.07 / 6.06, on 6.19 / 6.10 ms; Spa off 6.06 / 6.14, on 6.79 / 6.65 ms.

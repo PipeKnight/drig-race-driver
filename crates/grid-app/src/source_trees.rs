@@ -16,18 +16,54 @@ use std::{
     path::Path,
 };
 
-fn closest(tree: &pssg::Tree<'_>, node: usize) -> bool {
+/// The level of a draw: 0 under the species' `_x0` node (full geometry), 1
+/// under its `_x2` node (the card); `None` for other nodes.
+fn level_of(tree: &pssg::Tree<'_>, node: usize) -> Option<u8> {
     let mut parent = tree.nodes[node].parent;
     while let Some(i) = parent {
-        if tree.name(i) == b"NODE" && tree.string(i, b"id").is_ok_and(|s| s.ends_with(b"_x0")) {
-            return true;
+        // `_x0` is a NODE over the trunk and foliage nodes, `_x2` a RENDERNODE.
+        if matches!(tree.name(i), b"NODE" | b"RENDERNODE")
+            && let Ok(id) = tree.string(i, b"id")
+        {
+            if id.ends_with(b"_x0") {
+                return Some(0);
+            }
+            if id.ends_with(b"_x2") {
+                return Some(1);
+            }
         }
         if tree.name(i) == b"ROOTNODE" {
             break;
         }
         parent = tree.nodes[i].parent;
     }
-    false
+    None
+}
+
+/// `tree_attributes.xml` (0x9637C0): `lod_distance_00..02` by species name.
+fn tree_distances(root: &Path, route: &Route) -> Result<BTreeMap<String, [f32; 3]>, Box<dyn Error>> {
+    let path = root.join(route.file("tree_attributes.xml"));
+    let mut distances = BTreeMap::new();
+    if !path.is_file() {
+        return Ok(distances);
+    }
+    let bytes = read(&path)?;
+    let document = grid_formats::binxml::read(&bytes)?;
+    for element in document.elements.iter().filter(|e| e.name == "tree_attributes") {
+        let field = |key: &str| element.attributes.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+        let Some(name) = field("name") else { continue };
+        let mut d = super::ornament_lod::DEFAULT_DISTANCES;
+        for (i, value) in d.iter_mut().enumerate() {
+            if let Some(v) = field(&format!("lod_distance_0{i}")).and_then(|v| v.trim().parse::<f32>().ok())
+                && v.is_finite()
+                && v > 0.
+            {
+                *value = v;
+            }
+        }
+        distances.insert(name.to_owned(), d);
+    }
+    Ok(distances)
 }
 
 pub fn append(
@@ -42,9 +78,13 @@ pub fn append(
     let sources = mesh::read_static_meshes(&tree)?;
     let draws = scene::read_static_draws(&tree, &sources)?;
     let library_draws = draws.len();
-    let selected: BTreeSet<_> = (0..tree.nodes.len())
-        .filter(|&i| tree.name(i) == b"RENDERSTREAMINSTANCE" && closest(&tree, i))
-        .map(|i| tree.string(i, b"id"))
+    // Both levels with the original's distance switch (ornament_lod), else
+    // the closest level everywhere (GRID_ORNAMENT_LOD=0).
+    let lod = super::ornament_lod::enabled();
+    let selected: BTreeMap<_, u8> = (0..tree.nodes.len())
+        .filter(|&i| tree.name(i) == b"RENDERSTREAMINSTANCE")
+        .filter_map(|i| level_of(&tree, i).filter(|&l| l == 0 || lod).map(|l| (i, l)))
+        .map(|(i, l)| Ok((tree.string(i, b"id")?, l)))
         .collect::<grid_formats::Result<_>>()?;
     let bytes = read(&root.join(route.file("trees.bin")))?;
     let placements = tree_placements::read(&bytes)?;
@@ -77,9 +117,23 @@ pub fn append(
                 && tree.string(i, b"shaderGroup").is_ok_and(|s| {
                     matches!(
                         s,
-                        b"#facing_foliage.fx" | b"#foliage.fx" | b"#treesheet_foliage.fx"
+                        b"#facing_foliage.fx"
+                            | b"#foliage.fx"
+                            | b"#treesheet_foliage.fx"
+                            | b"#foliage_billboard.fx"
                     )
                 })
+        })
+        .map(|i| tree.string(i, b"id"))
+        .collect::<grid_formats::Result<_>>()?;
+    // The `_x2` impostor cards (`tree_lowlod` VS): one quad turned to the eye
+    // about the tree's up axis, showing one of eight views of an atlas.
+    let cards: BTreeSet<_> = (0..tree.nodes.len())
+        .filter(|&i| {
+            tree.name(i) == b"SHADERINSTANCE"
+                && tree
+                    .string(i, b"shaderGroup")
+                    .is_ok_and(|v| v == b"#foliage_billboard.fx")
         })
         .map(|i| tree.string(i, b"id"))
         .collect::<grid_formats::Result<_>>()?;
@@ -103,11 +157,52 @@ pub fn append(
     let mut bindings = BTreeMap::new();
     let mut world_min = Vec3::splat(f32::INFINITY);
     let mut world_max = Vec3::splat(f32::NEG_INFINITY);
-    for d in draws {
-        if !selected.contains(d.id) {
-            continue;
+    // Level types and instances, appended after the ornaments' (one type per
+    // placed species; an instance's box is the species bounds placed).
+    let distances = tree_distances(root, route)?;
+    let (kind_base, instance_base) = (car.ornament_lods.types.len() as u32, car.ornament_lods.instances.len() as u32);
+    let mut levels = super::ornament_lod::Levels::default();
+    let mut first_instance = BTreeMap::new();
+    let mut missing = 0;
+    if lod {
+        let mut next = instance_base;
+        for (k, p) in placements.prototypes.iter().enumerate() {
+            let name = std::str::from_utf8(p.name)?;
+            let has_card = draws.iter().any(|d| {
+                d.prototype == Some(format!("{name} Root").as_bytes())
+                    && selected.get(d.id) == Some(&1)
+            });
+            levels.types.push(super::ornament_lod::Type {
+                distances: distances.get(name).copied().unwrap_or_else(|| {
+                    missing += 1;
+                    super::ornament_lod::DEFAULT_DISTANCES
+                }),
+                levels: 1 + u8::from(has_card),
+                scenery: false,
+                impostor: has_card,
+            });
+            let [x0, y0, z0, x1, y1, z1] = p.bounds;
+            let (a, b) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
+            let (lo, hi) = (a.min(b), a.max(b));
+            for instance in &p.instances {
+                let m = Mat4::from_cols_array(&instance.transform);
+                let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+                for c in 0..8 {
+                    let w = m.transform_point3(Vec3::select(BVec3::new(c & 1 != 0, c & 2 != 0, c & 4 != 0), hi, lo));
+                    (min, max) = (min.min(w), max.max(w));
+                }
+                levels.instances.push(super::ornament_lod::Instance { kind: kind_base + k as u32, min, max });
+            }
+            first_instance.insert(format!("{name} Root"), next);
+            next += p.instances.len() as u32;
         }
-        closest_draws += 1;
+    }
+    let mut level_parts = Vec::new();
+    for d in draws {
+        let Some(&level) = selected.get(d.id) else {
+            continue;
+        };
+        closest_draws += usize::from(level == 0);
         let prototype = std::str::from_utf8(d.prototype.ok_or("tree draw prototype absent")?)?;
         let Some(p) = by_name.get(prototype) else {
             continue;
@@ -194,24 +289,36 @@ pub fn append(
         }
         count += matrices.len();
         triangles += geometry.indices().unwrap().len() / 3 * matrices.len();
-        parts.push(Part {
-            name: format!(
+        let part_name = format!(
                 "trees/{}{id}",
                 if facing.contains(d.material) {
                     "facing/"
+                } else if cards.contains(d.material) {
+                    "card/"
                 } else if sheets.contains(d.material) {
                     "sheet/"
                 } else {
                     ""
                 },
                 id = std::str::from_utf8(d.id)?
-            ),
+            );
+        if lod {
+            let first = first_instance[prototype];
+            level_parts.push((part_name.clone(), (level, (first..first + matrices.len() as u32).collect())));
+        }
+        parts.push(Part {
+            name: part_name,
             joint: String::new(),
             material: name,
             mesh: geometry,
             matrices,
             wheel: None,
         });
+    }
+    for (name, entry) in level_parts {
+        if car.ornament_lods.parts.contains_key(&name) || levels.parts.insert(name.clone(), entry).is_some() {
+            return Err(format!("duplicate tree level draw {name}").into());
+        }
     }
     if matched.len() != placements.prototypes.len() || parts.is_empty() {
         return Err("tree placement prototype lacks closest source geometry".into());
@@ -255,12 +362,16 @@ pub fn append(
         "source_tree_sheets draws={sheet_draws} triangles={sheet_triangles} expansion=cylindrical-world-up orientation=main-camera saved_rgb={sheet_colours} physics=unchanged"
     );
     println!(
-        "source_trees enabled=true prototypes={} instances={} library_draws={library_draws} closest_draws={closest_draws} placed_draws={count} triangles={triangles} textures={} bounds={world_min:?}..{world_max:?} lod=source-x0 wind=false physics=unchanged alpha=authored-mask05 sampler=existing-repeat",
+        "source_trees enabled=true prototypes={} instances={} library_draws={library_draws} closest_draws={closest_draws} placed_draws={count} triangles={triangles} textures={} bounds={world_min:?}..{world_max:?} lod={} tree_attributes_missing={missing} wind=false physics=unchanged alpha=authored-mask05 sampler=existing-repeat",
         matched.len(),
         placements.total_instances,
-        images.len()
+        images.len(),
+        if lod { "source-x0-x2-distance" } else { "source-x0" }
     );
     car.parts.extend(parts);
+    car.ornament_lods.types.extend(levels.types);
+    car.ornament_lods.instances.extend(levels.instances);
+    car.ornament_lods.parts.extend(levels.parts);
     car.bindings.extend(bindings);
     car.textures.extend(images);
     Ok(())
@@ -291,6 +402,21 @@ mod tests {
                 .abs()
                 < 0.00001
         );
+    }
+    #[test]
+    fn atlas_view_follows_the_eye_around_the_tree_in_eighths() {
+        let world = Mat4::from_translation(Vec3::new(5., 0., -3.));
+        let at = |angle: f32| {
+            let eye = Vec3::new(5., 2., -3.) + Vec3::new(angle.cos(), 0., angle.sin()) * 40.;
+            atlas_view(world, eye)
+        };
+        // a = atan2(d.z, d.x): x = -4a/pi, view round(x) + 2 (mod 8).
+        assert_eq!(at(0.), 2);
+        assert_eq!(at(std::f32::consts::FRAC_PI_4), 1);
+        assert_eq!(at(-std::f32::consts::FRAC_PI_2), 4);
+        assert_eq!(at(std::f32::consts::PI - 0.01), 6);
+        let views: BTreeSet<_> = (0..64).map(|i| at(i as f32 / 64. * std::f32::consts::TAU)).collect();
+        assert_eq!(views.len(), 8);
     }
     #[test]
     fn sheet_offsets_face_each_centre_without_camera_pitch_or_roll() {
@@ -419,14 +545,26 @@ mod tests {
             piece_skins: Default::default(),
         };
         append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
-        assert_eq!(car.parts.len(), 21);
+        // 21 closest (`_x0`) draws and the six species' `_x2` impostor cards.
+        assert_eq!(car.parts.len(), 27);
+        let cards = car.parts.iter().filter(|p| p.name.starts_with("trees/card/")).count();
+        assert_eq!(cards, 6);
         let facing: Vec<_> = car
             .parts
             .iter()
             .filter_map(|p| FacingSource::from_mesh(&p.name, &p.mesh))
             .collect();
-        assert_eq!(facing.len(), 7);
-        assert_eq!(facing.iter().filter(|f| f.cylindrical).count(), 3);
+        assert_eq!(facing.len(), 7 + cards);
+        assert_eq!(facing.iter().filter(|f| f.cylindrical).count(), 3 + cards);
+        assert_eq!(facing.iter().filter(|f| f.atlas.is_some()).count(), cards);
+        // Every part is a level of one species' instances (ornament_lod).
+        let levels = &car.ornament_lods;
+        assert_eq!(levels.types.len(), 9);
+        assert_eq!(levels.types.iter().filter(|t| t.levels == 2).count(), 6);
+        assert_eq!(levels.instances.len(), 646);
+        assert!(car.parts.iter().all(|p| levels.parts.get(&p.name).is_some_and(|(level, instances)| {
+            *level == u8::from(p.name.starts_with("trees/card/")) && instances.len() == p.matrices.len()
+        })));
         for part in car
             .parts
             .iter()
@@ -510,8 +648,10 @@ mod tests {
                 .values()
                 .all(|key| car.textures.contains_key(key))
         );
+        let types = car.ornament_lods.types.len();
         assert!(append(Path::new(&root), &Route::default(), &mut car, false, true).is_err());
-        assert_eq!(car.parts.len(), 21);
+        assert_eq!(car.parts.len(), 27);
+        assert_eq!(car.ornament_lods.types.len(), types);
     }
 }
 
@@ -522,6 +662,9 @@ mod tests {
 #[derive(Clone)]
 pub struct FacingSource {
     cylindrical: bool,
+    /// Impostor cards: each vertex's UV0 in the atlas's first view; the
+    /// view shown is chosen per placement each frame.
+    atlas: Option<Vec<[f32; 2]>>,
     centers: Vec<[f32; 3]>,
     offsets: Vec<[f32; 2]>,
     /// The mesh's packed vertex buffer; presentation rewrites only POSITION
@@ -531,10 +674,19 @@ pub struct FacingSource {
 }
 impl FacingSource {
     pub fn from_mesh(name: &str, mesh: &Mesh) -> Option<Self> {
-        let cylindrical = name.starts_with("trees/sheet/");
+        let card = name.starts_with("trees/card/");
+        let cylindrical = card || name.starts_with("trees/sheet/");
         if !cylindrical && !name.starts_with("trees/facing/") {
             return None;
         }
+        let atlas = if card {
+            let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) else {
+                return None;
+            };
+            Some(uvs.clone())
+        } else {
+            None
+        };
         let Some(VertexAttributeValues::Float32x3(centers)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
@@ -547,6 +699,7 @@ impl FacingSource {
         assert_eq!(centers.len(), offsets.len(), "validated foliage streams");
         Some(Self {
             cylindrical,
+            atlas,
             centers: centers.clone(),
             offsets: offsets.clone(),
             packed: std::sync::Arc::new(mesh.create_packed_vertex_buffer_data()),
@@ -612,6 +765,16 @@ fn sheet_expanded(
     let toward_eye = Vec3::new(eye.x - world_center.x, 0., eye.z - world_center.z);
     let right = Vec3::Y.cross(toward_eye).try_normalize().unwrap_or(Vec3::X);
     expanded(center, offset, right, Vec3::Y, inverse, scale)
+}
+/// The atlas view of an impostor card (`tree_lowlod` VS): with `d` towards
+/// the eye, `a = atan2(d . v6, d . v4)` and `x = -4a/pi`, the original blends
+/// view `ceil(x) + 1` into the next by `frac(x)`; the port shows the nearest,
+/// `round(x) + 2` modulo 8. `v4`/`v6` taken as the tree's X and Z axes [I].
+fn atlas_view(world: Mat4, eye: Vec3) -> u32 {
+    let d = (eye - world.w_axis.truncate()).normalize_or_zero();
+    let (v4, v6) = (world.x_axis.truncate().normalize_or_zero(), world.z_axis.truncate().normalize_or_zero());
+    let x = -4. * d.dot(v6).atan2(d.dot(v4)) / std::f32::consts::PI;
+    (x.round() as i32 + 2).rem_euclid(8) as u32
 }
 pub fn install(app: &mut App) {
     visibility_census::install(app);
@@ -854,12 +1017,15 @@ mod census_tests {
     }
 }
 
+/// A facing draw, its mesh and whether the level switch hides it.
+type FacingDraw<'a> = (Entity, Ref<'a, Facing>, Ref<'a, Mesh3d>, Option<&'a InheritedVisibility>);
+
 /// Re-faces every billboard toward the camera each frame. The vertex bytes are
 /// written over the mesh's GPU allocation (mesh_stream); the asset keeps its
 /// source vertices, so Bevy does not reallocate and repack it every frame.
 fn present(
     camera: Query<&Transform, With<super::ViewerCamera>>,
-    foliage: Query<(Entity, Ref<Facing>, Ref<Mesh3d>)>,
+    foliage: Query<FacingDraw>,
     stream: Res<MeshStream>,
     mut census: Local<Option<FacingCensus>>,
     mut visibility: Option<ResMut<visibility_census::Census>>,
@@ -879,7 +1045,12 @@ fn present(
     if let Some(visibility) = visibility.as_deref_mut() { visibility.camera(camera); }
     let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
     let keys = census.keys_active().then(|| facing_keys(right, up, camera.translation));
-    for (entity, facing, handle) in &foliage {
+    for (entity, facing, handle, inherited) in &foliage {
+        // A hidden level (ornament_lod) keeps its last vertices; it is
+        // rewritten on its first shown frame.
+        if inherited.is_some_and(|v| !v.get()) {
+            continue;
+        }
         let source = &facing.source;
         let Some(at) = source.layout.offset(Mesh::ATTRIBUTE_POSITION) else {
             if keys.is_some() { census.0.as_mut().unwrap().no_position += 1; }
@@ -914,6 +1085,31 @@ fn present(
                     )
                 };
                 put(vertices, i * source.layout.stride + at, point.to_array());
+            }
+            if let (Some(atlas), Some(uv_at)) = (&source.atlas, source.layout.offset(Mesh::ATTRIBUTE_UV_0)) {
+                let shift = atlas_view(facing.world, camera.translation) as f32 / 8.;
+                // The original lights each view from its baked normal atlas.
+                // AUTHORED: the port gives each corner the radial normal the
+                // full tree's leaves use (from the crown's centre: towards the
+                // eye, tilted out to its side and up or down), so a card the
+                // sun lights from the side or behind keeps the tree's shading.
+                let toward = camera.translation - facing.world.w_axis.truncate();
+                let toward = Vec3::new(toward.x, 0., toward.z).try_normalize().unwrap_or(Vec3::Z);
+                let right = Vec3::Y.cross(toward);
+                let (low, high) = source.offsets.iter().fold((Vec2::MAX, Vec2::MIN), |(lo, hi), o| {
+                    (lo.min(Vec2::from_array(*o)), hi.max(Vec2::from_array(*o)))
+                });
+                let (middle, half) = ((low + high) / 2., ((high - low) / 2.).max(Vec2::splat(1e-6)));
+                let normal_at = source.layout.offset(Mesh::ATTRIBUTE_NORMAL);
+                for (i, uv) in atlas.iter().enumerate() {
+                    put(vertices, i * source.layout.stride + uv_at, [uv[0] + shift, uv[1]]);
+                    if let Some(at) = normal_at {
+                        let o = (Vec2::from_array(source.offsets[i]) - middle) / half;
+                        let radial = toward + right * o.x + Vec3::Y * o.y;
+                        let normal = facing.inverse.transform_vector3(radial).try_normalize().unwrap_or(Vec3::Z);
+                        put(vertices, i * source.layout.stride + at, normal.to_array());
+                    }
+                }
             }
         });
         if let Some(visibility) = visibility.as_deref_mut() { visibility.produced(entity, &facing, &handle); }

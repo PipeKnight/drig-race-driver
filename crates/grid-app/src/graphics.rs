@@ -78,7 +78,8 @@ pub struct Settings {
     pub thin_motion_antenna: bool,
     pub ground_edge_pilot: bool,
     pub source_land: bool,
-    /// Source forest pilot; off until same-view GPU validation.
+    /// The route's source forest (`trees.pssg`, `trees.bin`), on by default;
+    /// `--trees off` leaves it out.
     pub source_trees: bool,
     pub player_race_number: Option<grid_formats::car_decals::Number>,
     pub source_race_numbers: bool,
@@ -124,7 +125,8 @@ pub struct Settings {
     pub shadow_distance_metres: f32,
     /// `[video] shadows` with the original's layout (shadow_layout.rs).
     pub shadow_quality: super::shadow_layout::Quality,
-    /// Optional authored coverage-preserving leaf alpha mips; source remains default.
+    /// Authored coverage-preserving leaf alpha mips (`--trees coverage`, the
+    /// default); `--trees source` keeps the source mips.
     pub foliage_coverage: bool,
     pub clearcoat_prepass_fix: bool,
     pub tread_normals: bool,
@@ -181,7 +183,7 @@ impl Default for Settings {
             thin_motion_antenna: false,
             ground_edge_pilot: false,
             source_land: true,
-            source_trees: false,
+            source_trees: true,
             player_race_number: None,
             source_race_numbers: false,
             source_body_occlusion: false,
@@ -207,7 +209,7 @@ impl Default for Settings {
             grass_soft_alpha: true,
             shadow_distance_metres: 250.,
             shadow_quality: super::shadow_layout::Quality::High,
-            foliage_coverage: false,
+            foliage_coverage: true,
             clearcoat_prepass_fix: true,
             tread_normals: true,
             layered_car: true,

@@ -171,13 +171,15 @@ impl Fade {
     }
 }
 
-/// One prototype: `lod_distance_00..02`, its level count and whether it is
-/// in the `scenery` category.
+/// One prototype: `lod_distance_00..02`, its level count, whether it is
+/// in the `scenery` category and whether its last level is an impostor
+/// card turned to the eye (trees), which cannot cast the sun's shadow.
 #[derive(Clone, Debug)]
 pub struct Type {
     pub distances: [f32; 3],
     pub levels: u8,
     pub scenery: bool,
+    pub impostor: bool,
 }
 
 /// One placed instance: its type and world box.
@@ -220,14 +222,15 @@ pub struct OrnamentLevel {
 }
 
 impl Levels {
-    /// The level that casts the type's shadow: level 1 when it has one.
+    /// The level that casts the type's shadow: level 1 when it has one,
+    /// unless that is an impostor.
     pub fn shadow_level(&self, instance: u32) -> u8 {
         shadow_level(&self.types[self.instances[instance as usize].kind as usize])
     }
 }
 
 fn shadow_level(kind: &Type) -> u8 {
-    u8::from(kind.levels >= 2)
+    u8::from(kind.levels >= 2 && !kind.impostor)
 }
 
 pub fn install(app: &mut App) {
@@ -560,6 +563,7 @@ mod tests {
             distances: [100., 300., 700.],
             levels: 3,
             scenery: true,
+            impostor: false,
         }
     }
 
@@ -621,6 +625,7 @@ mod tests {
 
         let plain = Type {
             scenery: false,
+            impostor: false,
             ..building()
         };
         assert_eq!(at(&plain, 50.), 0);
@@ -653,12 +658,15 @@ mod tests {
             distances: [100., 9999., 400.],
             levels: 2,
             scenery: false,
+            impostor: false,
         };
         assert_eq!(range(&kind, 1), [0., 0.75, 0.]);
         assert_eq!(shadow_level(&kind), 1);
-        let single = Type { levels: 1, ..kind };
+        let single = Type { levels: 1, ..kind.clone() };
         assert_eq!(range(&single, 0), [0., 1., 0.]);
         assert_eq!(shadow_level(&single), 0);
+        // A tree's card faces the eye: the full tree casts.
+        assert_eq!(shadow_level(&Type { impostor: true, ..kind }), 0);
     }
 
     #[test]

@@ -144,6 +144,8 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F719](log/F0719.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
+| [F718](log/F0718.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
 | [F717](log/F0717.md) | 2026-11-03 | Baseline track and infield specular from the original programs' Phong lobe |
 | [F716](log/F0716.md) | 2026-11-03 | Baseline sun from the route's lighting.xml plus the original's back/ambient fill (owner's decision) |
 | [F715](log/F0715.md) | 2026-11-03 | Dynamic prop parts tagged at spawn; static scenes hide unbroken pieces |
@@ -202,8 +204,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F662](log/F0662.md) | 2026-10-31 | Race manager settles most first-corner matrix losses; original Nürburgring first corner captured; in-air steering blend |
 | [F661](log/F0661.md) | 2026-10-31 | Light clustering skipped without clusterables; minimap marker order fixed |
 | [F660](log/F0660.md) | 2026-10-31 | Car reflections: the original's environment map and the plan |
-| [F659](log/F0659.md) | 2026-10-30 | Long Beach route 1 leader: squeezed outside into a closing exit; line probe limits |
-| [F658](log/F0658.md) | 2026-10-30 | Pack tick candidates: piece contacts already parallel, piece-island parallelism stopped |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

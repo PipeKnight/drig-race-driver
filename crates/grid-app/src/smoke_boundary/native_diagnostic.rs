@@ -350,6 +350,8 @@ mod tests {
             clearcoat_prepass_fix: false,
             smooth_wheel_motion: false,
             source_land: false,
+            source_trees: false,
+            foliage_coverage: false,
             ..Default::default()
         }
     }
@@ -547,7 +549,7 @@ mod tests {
     }
     #[test]
     fn real_graphics_fields_reject_legacy_mask_temporal_and_surface_hazards_for_all_arms() {
-        let changes: [fn(&mut graphics::Settings); 13] = [
+        let changes: [fn(&mut graphics::Settings); 14] = [
             |g| g.anti_aliasing = 1,
             |g| g.reflection_mode = 0,
             |g| g.layered_car = true,
@@ -560,6 +562,7 @@ mod tests {
             |g| g.motion_shutter = 0.1,
             |g| g.dlaa_reset_every_frame = true,
             |g| g.source_land = true,
+            |g| g.source_trees = true,
             |g| g.surface_specular = track_surface::Specular::SourceBase,
         ];
         for change in changes {

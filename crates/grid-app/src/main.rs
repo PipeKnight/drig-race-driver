@@ -1090,6 +1090,7 @@ fn ornament_types(
             distances: d,
             levels: levels.get(root_name.as_slice()).copied().unwrap_or(1),
             scenery: category == Some(b"scenery".as_slice()),
+            impostor: false,
         });
         let [x0, y0, z0, x1, y1, z1] = p.bounds;
         let (a, b) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
@@ -3955,14 +3956,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if track && !collision && graphics.source_land {
         append_land(&root, &route, &player_car, &mut car)?;
     }
-    if track && !collision && graphics.enhanced() && graphics.source_trees {
-        source_trees::append(&root, &route, &mut car, graphics.foliage_coverage, graphics.tree_sheet_colours)?;
-    }
     if let Some(out) = &float_audit_out {
         if !track || collision {
             return Err("--float-audit requires a track scene".into());
         }
         return float_audit::run(&root, &route, &car.parts, &car.bindings, &car.textures, out);
+    }
+    // After the audit, which covers the track's own placements; the forest
+    // is drawn on every preset (it was an enhanced-only pilot before).
+    if track && !collision && graphics.source_trees {
+        source_trees::append(&root, &route, &mut car, graphics.foliage_coverage, graphics.tree_sheet_colours)?;
     }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))
