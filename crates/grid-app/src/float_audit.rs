@@ -262,6 +262,9 @@ pub fn run(
     // route split, and the track scene itself as the baseline.
     let mut vertices = BTreeMap::<&str, (usize, usize)>::new();
     let mut untextured = BTreeMap::<&str, usize>::new();
+    // Light-shaft cards are light in the air by design (light_shafts.rs).
+    let objects = std::fs::read(root.join(route.track_file("objects.pssg")))?;
+    let light_shafts = super::object_materials::light_shaft_materials(&grid_formats::pssg::read_tree(&objects)?)?;
     let mut drawn = Drawn::default();
     for part in parts.iter().filter(|p| !p.material.starts_with("objects/")) {
         for matrix in &part.matrices {
@@ -282,7 +285,7 @@ pub fn run(
         };
         // Damage pieces stay hidden until their prop breaks; then they follow
         // their physics bodies, so their rest pose is not a placement.
-        if part.name.starts_with("dynamic/piece/") {
+        if part.name.starts_with("dynamic/piece/") || light_shafts.contains(&part.material) {
             continue;
         }
         let (local, triangles) = referenced(&part.mesh);

@@ -1,4 +1,6 @@
 mod object_materials;
+mod water;
+mod light_shafts;
 mod float_audit;
 #[cfg(not(target_os = "android"))]
 mod coverage_probe;
@@ -697,7 +699,7 @@ fn load_package(
     let mut fallback_count = 0;
     let mut omitted_draws = 0;
     // `water.fx` (land.pssg sea and lakes: a normal map and constants, no
-    // diffuse) has no port yet; its draws are counted, not drawn.
+    // diffuse) is drawn by water.rs; its draws are counted here.
     let water: std::collections::BTreeSet<&[u8]> = if track {
         (material::read_constants(&tree)?.into_iter())
             .filter(|s| s.group == b"water.fx")
@@ -1037,7 +1039,7 @@ fn append_objects(
     car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
     car.object_two_sided_materials.extend(object_materials::two_sided_materials(&tree)?);
     let light_shafts = object_materials::light_shaft_materials(&tree)?;
-    let mut omitted_light_shafts = 0;
+    let mut light_shaft_draws = 0;
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     // First instance index of each prototype.
@@ -1109,10 +1111,6 @@ fn append_objects(
         }
         let source = &sources[draw.source];
         let name = format!("objects/{}", String::from_utf8(draw.material.to_vec())?);
-        if light_shafts.contains(&name) {
-            omitted_light_shafts += 1;
-            continue;
-        }
         if !car.bindings.contains_key(&name) {
             return Err(format!("unresolved object diffuse binding {name}").into());
         }
@@ -1123,6 +1121,19 @@ fn append_objects(
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, source.positions.clone());
         if !source.texcoords.is_empty() {
             mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, source.texcoords.clone());
+        }
+        // light_shafts.rs scrolls dust on UV1 and fades by vertex alpha.
+        if light_shafts.contains(&name) {
+            light_shaft_draws += 1;
+            let dust = source.additional_texcoords.first().cloned()
+                .unwrap_or_else(|| source.texcoords.clone());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, dust);
+            let alpha: Vec<[f32; 4]> = if source.colors_argb.is_empty() {
+                vec![[1.; 4]; source.positions.len()]
+            } else {
+                source.colors_argb.iter().map(|&[a, r, g, b]| [r, g, b, a].map(|c| f32::from(c) / 255.)).collect()
+            };
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, alpha);
         }
         mesh.insert_indices(Indices::U16(draw.indices));
         if source.normals.is_empty() || source.nonfinite_normals != 0 {
@@ -1202,7 +1213,7 @@ fn append_objects(
         }
     }
     println!(
-        "objects static_sources={} placed_draws={draw_count} omitted_light_shaft_draws={omitted_light_shafts} unique_geometry_vertices={triangles} static_placements={} total_header_instances={} omitted_entity_instances={} textures={}",
+        "objects static_sources={} placed_draws={draw_count} light_shaft_draws={light_shaft_draws} unique_geometry_vertices={triangles} static_placements={} total_header_instances={} omitted_entity_instances={} textures={}",
         sources.len(),
         placements
             .prototypes
@@ -4615,6 +4626,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if graphics.layered_track && track && !collision {
         let land = graphics.source_land;
         track_surface::install(&mut app, &root, &route, land, surface_rgb_override.as_deref())?;
+    }
+    // land.pssg's water.fx draws, which load_package leaves out (row 108).
+    if track && !collision && graphics.source_land {
+        water::install(&mut app, &root, &route)?;
+    }
+    // objects.pssg's god-ray cards (row 107).
+    if track {
+        light_shafts::install(&mut app, &root, &route)?;
     }
     if graphics.reflection_mode == 3 {
         if !graphics.enhanced()

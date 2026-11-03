@@ -157,6 +157,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F705](log/F0705.md) | 2026-11-03 | Water and light shafts ported from the original's programs (rows 108, 107) |
 | [F704](log/F0704.md) | 2026-11-03 | Playable e5e885362a85 for the PC (no APKs) |
 | [F703](log/F0703.md) | 2026-11-02 | Ornament level and draw-distance fades (owner pop report) |
 | [F702](log/F0702.md) | 2026-11-02 | Invisible barriers: anchor-only entity renderables draw their enclosing root's intact LOD on every route |
@@ -216,7 +217,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F648](log/F0648.md) | 2026-10-30 | Collision and damage loops no longer hold after a wreck, the race end or a pause (backlog row 95) |
 | [F647](log/F0647.md) | 2026-10-30 | Cockpit: pedals and the general interior clip animator |
 | [F646](log/F0646.md) | 2026-10-30 | Playable dc4408b43366 with DLAA and APKs dc4408b43366 |
-| [F645](log/F0645.md) | 2026-10-30 | Tyre smoke drawn at half resolution with the original's soft fade |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

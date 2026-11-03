@@ -385,6 +385,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [EDGE_ATLAS_DRY_RESPONSE.md](EDGE_ATLAS_DRY_RESPONSE.md) Optional dry response in mixed edge atlases — 19October2026.
 - [FLOATING_AUDIT.md](FLOATING_AUDIT.md) Floating and untextured track pieces: the all-route audit (row 102) — Owner's request (F657): on Washington some pieces hang in the air and part of a kerb seems slightly above the road.
 - [LAMP_REFLECTOR_RESEARCH.md](LAMP_REFLECTOR_RESEARCH.md) Lamp reflector material research — Initial19 October2026 static purchased-resource observations.
+- [LIGHT_SHAFTS.md](LIGHT_SHAFTS.md) Light shafts: the god-ray cards (row 107) — Owner's report (2026-11-02, Washington, screenshots 29-32, 35): long black "drops" in the air.
 - [MUSIC_RESEARCH.md](MUSIC_RESEARCH.md) Race music: codec, stem manager and port sizing (research) — Static analysis of `local/compatibility/grid-unpacked.exe` (cache `local/re-cache`) and of the purchased …
 - [NATIVE_DLAA.md](NATIVE_DLAA.md) Optional native-resolution DLAA — 19 October2026.
 - [PER_VIEW_FOLIAGE.md](PER_VIEW_FOLIAGE.md) Per-view foliage in shadows, reflections and temporal inputs — 19October2026.
@@ -393,3 +394,4 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [SUN_SHADOWS.md](SUN_SHADOWS.md) Sun shadows: the original's cascades and the port's — How the original renders its sun shadows (cascade count, map size, caster selection) and how the port's Bevy cascades …
 - [TEMPORAL_AA_DIAGNOSTICS.md](TEMPORAL_AA_DIAGNOSTICS.md) Temporal-AA input audit (implementation design, not a completed fix) — 19 October2026.
 - [TEMPORAL_COLOUR_AUDIT.md](TEMPORAL_COLOUR_AUDIT.md) Paired HDR temporal-colour audit — G201, 20 October 2026.
+- [WATER.md](WATER.md) Water: the original's water.fx and its port (row 108) — Owner's report (2026-11-02, Washington, screenshot 33): a black void where the river is.

@@ -22,8 +22,8 @@ pub(crate) fn glass_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTr
 /// `god_rays*.fx` light-shaft cards (Washington's `godray_tree`): the
 /// shaderpack draws them alpha-blended with `fp_light_shafts`, a colour from
 /// the shader constants, not the texture. Drawn as plain textured objects
-/// they are black spindles in the sky (owner, 2026-11-02); the port has no
-/// light-shaft shader, so they are counted and not drawn.
+/// they are black spindles in the sky (owner, 2026-11-02); light_shafts.rs
+/// gives them the light-shaft material.
 pub(crate) fn light_shaft_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeSet<String>> {
     let mut result = BTreeSet::new();
     for i in 0..tree.nodes.len() {

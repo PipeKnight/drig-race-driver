@@ -59,6 +59,7 @@ pub fn audit(car: &super::Car, camera: Transform, size: Vec2, pixel: Vec2) {
                         triangle,
                         det > 0.,
                         [a, b, c],
+                        (part, *ix),
                         (world - raw)
                             .to_cols_array()
                             .into_iter()
@@ -74,11 +75,19 @@ pub fn audit(car: &super::Car, camera: Transform, size: Vec2, pixel: Vec2) {
         "geometry_ray pixel={pixel:?} size={size:?} eye={origin:?} direction={direction:?} fov={fov} hits={} scope=selected-CPU-triangles-not-GPU-visibility",
         hits.len()
     );
-    for (distance, name, material, instance, triangle, front, points, trs_error) in
+    for (distance, name, material, instance, triangle, front, points, (part, ix), trs_error) in
         hits.iter().take(30)
     {
+        // Source normals and UVs of the hit triangle's corners (shading checks).
+        let corner = |attribute| match part.mesh.attribute(attribute) {
+            Some(VertexAttributeValues::Float32x3(v)) => format!("{:?}", ix.map(|i| v[i])),
+            Some(VertexAttributeValues::Float32x2(v)) => format!("{:?}", ix.map(|i| v[i])),
+            _ => "none".into(),
+        };
         println!(
-            "geometry_hit distance={distance} draw={name:?} material={material:?} instance={instance} triangle={triangle} front={front} vertices={points:?} trs_max_error={trs_error}"
+            "geometry_hit distance={distance} draw={name:?} material={material:?} instance={instance} triangle={triangle} front={front} vertices={points:?} normals={} uv={} trs_max_error={trs_error}",
+            corner(Mesh::ATTRIBUTE_NORMAL),
+            corner(Mesh::ATTRIBUTE_UV_0)
         );
     }
 }

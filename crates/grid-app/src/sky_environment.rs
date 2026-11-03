@@ -123,7 +123,20 @@ pub fn bake(
     tex: &Texture<'_>,
     tone: [f32; 2],
 ) -> Result<Image, &'static str> {
-    if tone.iter().any(|v| !v.is_finite())
+    bake_sized(positions, uvs, indices, tex, tone, 256)
+}
+
+/// [`bake`] at `size` texels per face (water.rs: 64).
+pub fn bake_sized(
+    positions: &[[f32; 3]],
+    uvs: &[[f32; 2]],
+    indices: &[u16],
+    tex: &Texture<'_>,
+    tone: [f32; 2],
+    size: u32,
+) -> Result<Image, &'static str> {
+    if !(1..=1024).contains(&size)
+        || tone.iter().any(|v| !v.is_finite())
         || !(0.0..=16.).contains(&tone[0])
         || !(0.01..=16.).contains(&tone[1])
         || tex.format != Format::Bc1
@@ -168,16 +181,15 @@ pub fn bake(
             ((s + 0.055) / 1.055).powf(2.4)
         }
     });
-    const SIZE: u32 = 256;
-    let mut pixels = Vec::with_capacity((SIZE * SIZE * 6 * 4) as usize);
+    let mut pixels = Vec::with_capacity((size * size * 6 * 4) as usize);
     let (mut hits, mut upper_misses) = (0, 0);
     for face in 0..6 {
-        for y in 0..SIZE {
-            for x in 0..SIZE {
+        for y in 0..size {
+            for x in 0..size {
                 let d = direction(
                     face,
-                    (x as f32 + 0.5) / SIZE as f32,
-                    (y as f32 + 0.5) / SIZE as f32,
+                    (x as f32 + 0.5) / size as f32,
+                    (y as f32 + 0.5) / size as f32,
                 );
                 let nearest = triangles
                     .iter()
@@ -197,16 +209,16 @@ pub fn bake(
             }
         }
     }
-    if upper_misses > SIZE * SIZE / 100 {
+    if upper_misses > size * size / 100 {
         return Err("source sky leaves excessive upper-hemisphere holes");
     }
     println!(
-        "source_sky_ibl cube=256 faces=6 source_hits={hits} upper_misses={upper_misses} lower_fill=authored-ground radiometry=authored"
+        "source_sky_ibl cube={size} faces=6 source_hits={hits} upper_misses={upper_misses} lower_fill=authored-ground radiometry=authored"
     );
     let mut image = Image::new(
         Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width: size,
+            height: size,
             depth_or_array_layers: 6,
         },
         TextureDimension::D2,
