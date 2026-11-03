@@ -22,11 +22,46 @@
 //! rebuilt whenever one of its instances changes level. Common build;
 //! `GRID_ORNAMENT_LOD=0` keeps every ornament at level 0 (comparisons).
 use bevy::{
+    asset::uuid_handle,
     camera::visibility::{RenderLayers, VisibilityRange, VisibilitySystems},
+    light::NotShadowCaster,
+    mesh::MeshTag,
+    pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
+    render::render_resource::AsBindGroup,
+    shader::ShaderRef,
     transform::TransformSystems,
 };
 use std::collections::HashMap;
+
+const SHADOW_SHADER: Handle<Shader> = uuid_handle!("3e9a5c71-0b8d-4f26-9a47-c5d1e2f80b64");
+/// A shadow-level part's shadow while its instance crosses D (`shadow_proxies`).
+type ShadowMaterial = ExtendedMaterial<StandardMaterial, ShadowFade>;
+
+/// Bevy 0.19's shadow pass takes no visibility-range dither
+/// (`specialize_shadows` never sets `VISIBILITY_RANGE_DITHER`), so a fading
+/// instance casts through a proxy whose prepass dithers by its mesh tag
+/// (`ornament_shadow_fade.wgsl`).
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+struct ShadowFade {
+    #[uniform(100)]
+    marker: Vec4,
+}
+
+impl MaterialExtension for ShadowFade {
+    // The prepass pipeline defines VERTEX_OUTPUT_INSTANCE_INDEX itself.
+    fn prepass_fragment_shader() -> ShaderRef {
+        SHADOW_SHADER.into()
+    }
+}
+
+/// Per shadow-level part fading across D: its proxy and whether the part
+/// cast no shadow before (then it keeps none).
+#[derive(Resource, Default)]
+struct ShadowProxies {
+    proxies: HashMap<Entity, (Entity, bool)>,
+    materials: HashMap<AssetId<StandardMaterial>, Option<Handle<ShadowMaterial>>>,
+}
 
 /// Reference FOV of the distances: 55 degrees (0x979430, tan(0.47996554)).
 const REFERENCE_HALF_FOV: f32 = 0.479_965_54;
@@ -203,6 +238,24 @@ pub fn install(app: &mut App) {
             .after(TransformSystems::Propagate)
             .before(VisibilitySystems::VisibilityPropagate),
     );
+    if app.get_sub_app(bevy::render::RenderApp).is_some() {
+        app.world_mut()
+            .resource_mut::<Assets<Shader>>()
+            .insert(
+                SHADOW_SHADER.id(),
+                Shader::from_wgsl(include_str!("ornament_shadow_fade.wgsl"), "grid_ornament_shadow_fade.wgsl"),
+            )
+            .expect("ornament shadow fade shader");
+        app.add_plugins(MaterialPlugin::<ShadowMaterial>::default())
+            .init_resource::<ShadowProxies>()
+            .add_systems(
+                PostUpdate,
+                shadow_proxies
+                    .run_if(resource_exists::<Lods>)
+                    .after(select)
+                    .before(VisibilitySystems::VisibilityPropagate),
+            );
+    }
     // After every range change of the frame (ornaments here, car levels before
     // transform propagation, drivers in Update) and before Bevy decides which
     // meshes to re-specialize this frame (`check_entities_needing_specialization`
@@ -214,6 +267,84 @@ pub fn install(app: &mut App) {
             .after(TransformSystems::Propagate)
             .before(bevy::mesh::mark_3d_meshes_as_changed_if_their_assets_changed),
     );
+}
+
+/// A shadow-level part whose instance crosses D casts through a proxy that
+/// dithers in the shadow map like the colour fade (owner 2026-11-03: nothing
+/// should appear in view; F713); the part itself casts none meanwhile. Level
+/// changes keep the shadow level, so only crossings of D need one.
+#[allow(clippy::type_complexity)]
+fn shadow_proxies(
+    lods: Res<Lods>,
+    mut state: ResMut<ShadowProxies>,
+    parts: Query<
+        (
+            Entity,
+            &OrnamentLevel,
+            &Mesh3d,
+            Option<&MeshMaterial3d<StandardMaterial>>,
+            &GlobalTransform,
+            Has<NotShadowCaster>,
+        ),
+        With<RenderLayers>,
+    >,
+    mut tags: Query<&mut MeshTag>,
+    standard: Res<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ShadowMaterial>>,
+    mut commands: Commands,
+) {
+    let state = &mut *state;
+    for (part, level, mesh, material, transform, shadowless) in &parts {
+        let fade = lods.fades[level.instance as usize];
+        let step = match fade.presence() {
+            Some((appearing, step)) if (appearing || step > 0) && !(shadowless && !state.proxies.contains_key(&part)) => {
+                Some(step.min(31) as u32 | if appearing { 32 } else { 0 })
+            }
+            _ => None,
+        };
+        match (step, state.proxies.get(&part).copied()) {
+            (Some(tag), Some((proxy, _))) => {
+                if let Ok(mut current) = tags.get_mut(proxy) {
+                    current.set_if_neq(MeshTag(tag));
+                }
+            }
+            (Some(tag), None) => {
+                let Some(source) = material else { continue };
+                let entry = state.materials.entry(source.0.id()).or_insert_with(|| {
+                    let mut base = standard.get(&source.0)?.clone();
+                    // The fragment must run to dither: an opaque caster becomes
+                    // a mask that keeps every texel; a blended one casts none.
+                    base.alpha_mode = match base.alpha_mode {
+                        AlphaMode::Opaque => AlphaMode::Mask(0.),
+                        AlphaMode::Mask(cutoff) => AlphaMode::Mask(cutoff),
+                        AlphaMode::AlphaToCoverage => AlphaMode::Mask(0.5),
+                        _ => return None,
+                    };
+                    Some(materials.add(ShadowMaterial { base, extension: ShadowFade { marker: Vec4::ONE } }))
+                });
+                let Some(handle) = entry.clone() else { continue };
+                let proxy = commands
+                    .spawn((
+                        Mesh3d(mesh.0.clone()),
+                        MeshMaterial3d(handle),
+                        transform.compute_transform(),
+                        MeshTag(tag),
+                        crate::car_batch::shadow_layer(),
+                    ))
+                    .id();
+                commands.entity(part).insert(NotShadowCaster);
+                state.proxies.insert(part, (proxy, shadowless));
+            }
+            (None, Some((proxy, was_shadowless))) => {
+                commands.entity(proxy).despawn();
+                if !was_shadowless {
+                    commands.entity(part).remove::<NotShadowCaster>();
+                }
+                state.proxies.remove(&part);
+            }
+            (None, None) => {}
+        }
+    }
 }
 
 /// Bevy 0.19 re-specializes a mesh's pipeline only when its `Mesh3d` or
@@ -572,5 +703,68 @@ mod tests {
         let _ = app.world_mut().remove_resource::<Lods>();
         app.world_mut().run_schedule(PostUpdate);
         assert_eq!(*app.world().get::<Visibility>(part).unwrap(), Visibility::Hidden);
+    }
+
+    #[test]
+    fn a_shadow_crossing_d_casts_through_a_dithered_proxy() {
+        // The renderer half (MaterialPlugin, shader) is left out; the system
+        // runs as `install` orders it when a RenderApp exists.
+        let mut app = App::new();
+        install(&mut app);
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ShadowMaterial>>()
+            .init_resource::<ShadowProxies>()
+            .insert_resource(Time::<()>::default())
+            .add_systems(PostUpdate, shadow_proxies.run_if(resource_exists::<Lods>).after(select));
+        let material = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+        let camera = app.world_mut().spawn((
+            crate::ViewerCamera,
+            GlobalTransform::from_translation(Vec3::new(-705., 0.5, 0.5)),
+            Projection::Perspective(PerspectiveProjection {
+                fov: REFERENCE_HALF_FOV * 2., ..default()
+            }),
+        )).id();
+        // The shadow level of a three-level building is level 1.
+        let part = app.world_mut().spawn((
+            OrnamentLevel { instance: 0, level: 1 },
+            Mesh3d(Handle::default()),
+            MeshMaterial3d(material),
+            GlobalTransform::IDENTITY,
+            RenderLayers::layer(0),
+        )).id();
+        app.insert_resource(Lods::new(Levels {
+            types: vec![building()],
+            instances: vec![Instance { kind: 0, min: Vec3::ZERO, max: Vec3::ONE }],
+            parts: HashMap::new(),
+        }));
+        let frame = |app: &mut App| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+            app.world_mut().run_schedule(PostUpdate);
+        };
+        let proxies = |app: &mut App| {
+            app.world_mut().query::<(&MeshTag, &MeshMaterial3d<ShadowMaterial>)>().iter(app.world()).map(|(t, _)| t.0).collect::<Vec<_>>()
+        };
+        // Outside D: nothing casts.
+        frame(&mut app);
+        assert!(proxies(&mut app).is_empty());
+
+        // Crossing D (not a cut): the part stops casting and the proxy dithers in.
+        *app.world_mut().get_mut::<GlobalTransform>(camera).unwrap() =
+            GlobalTransform::from_translation(Vec3::new(-695., 0.5, 0.5));
+        frame(&mut app);
+        let tags = proxies(&mut app);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0] & 32, 32, "appearing");
+        assert!(tags[0] & 31 > 0 && tags[0] & 31 < 16);
+        assert!(app.world().get::<NotShadowCaster>(part).is_some());
+        frame(&mut app);
+        assert!(proxies(&mut app)[0] & 31 > tags[0] & 31);
+
+        // At the end of the fade the part casts again and the proxy is gone.
+        for _ in 0..4 {
+            frame(&mut app);
+        }
+        assert!(proxies(&mut app).is_empty());
+        assert!(app.world().get::<NotShadowCaster>(part).is_none());
     }
 }

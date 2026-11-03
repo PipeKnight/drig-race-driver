@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F713](F0713.md) | 2026-11-03 | Ornament shadows fade across D (shadow proxies) |
 | [F712](F0712.md) | 2026-11-03 | Baseline draws no source forest on any track; branch baseline-trees prepared |
 | [F711](F0711.md) | 2026-11-03 | Row 99 recheck on main: the Le Mans route 0 R10 branch at 8,689 m and the route sweep hold |
 | [F710](F0710.md) | 2026-11-03 | Barrier strips at impact: skinned damage meshes blend over their pieces' joints; the anchor offset is the body frame |
