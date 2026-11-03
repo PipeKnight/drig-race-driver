@@ -379,13 +379,20 @@ pub fn run(
     // Ground-cover patches (`grass.grs`): grass is scattered on these
     // triangles, so a painted vertex above every drawn surface and the
     // collision carries grass in the air. One row per patch with such
-    // vertices: their centroid, the largest gap and their count.
-    let (mut grass_all, mut grass_raised) = (0, 0);
+    // vertices: their centroid, the largest gap, their count, the nearest
+    // of them to the route's gate line and how many lie within the farthest
+    // ground-cover draw distance (`ground_cover.xml`) of it. The grass file
+    // is shared by the track's routes; farther vertices are never drawn
+    // while racing this route.
+    let (mut grass_all, mut grass_raised, mut grass_near) = (0, 0, 0);
     let grs = root.join(route.track_file("grass.grs"));
     if grs.is_file() {
         let patches = grid_formats::ground_cover::read_patches(&std::fs::read(grs)?)?;
+        let line = gate_line(root, route)?;
+        let reach = draw_distance(root, route)?;
         for (i, patch) in patches.iter().enumerate() {
             let (mut sum, mut count, mut worst) = (Vec3::ZERO, 0, 0f32);
+            let (mut nearest, mut near) = (f32::INFINITY, 0);
             for (p, d) in patch.positions.iter().zip(&patch.densities) {
                 if d.iter().all(|&v| v <= 0.) {
                     continue;
@@ -410,14 +417,18 @@ pub fn run(
                 }
                 if gap > GRASS {
                     (sum, count, worst) = (sum + v, count + 1, worst.max(gap));
+                    let away = distance_to_line(&line, v);
+                    nearest = nearest.min(away);
+                    near += usize::from(away < reach);
                 }
             }
             grass_raised += count;
+            grass_near += near;
             if count > 0 {
                 let c = sum / count as f32;
                 writeln!(
                     file,
-                    "grass_patch\t{i}\tgrass.grs\t-\t{:.2}\t{:.2}\t{:.2}\t{worst:.3}\t{count}",
+                    "grass_patch\t{i}\tgrass.grs\t-\t{:.2}\t{:.2}\t{:.2}\t{worst:.3}\t{count}\t{nearest:.1}\t{near}",
                     c.x, c.y, c.z
                 )?;
             }
@@ -426,11 +437,60 @@ pub fn run(
     let (route_all, route_raised) = vertices.get("route").copied().unwrap_or_default();
     let (track_all, track_raised) = vertices.get("track").copied().unwrap_or_default();
     println!(
-        "float_audit route={} instances={} held={} floating={floating} sunk={sunk} no_ground={unknown} route_vertices={route_all} route_raised={route_raised} track_vertices={track_all} track_raised={track_raised} grass_vertices={grass_all} grass_raised={grass_raised} untextured_materials={} touch={TOUCH}",
+        "float_audit route={} instances={} held={} floating={floating} sunk={sunk} no_ground={unknown} route_vertices={route_all} route_raised={route_raised} track_vertices={track_all} track_raised={track_raised} grass_vertices={grass_all} grass_raised={grass_raised} grass_raised_in_reach={grass_near} untextured_materials={} touch={TOUCH}",
         route.path(),
         instances.len(),
         held.iter().filter(|&&h| h).count(),
         untextured.len()
     );
     Ok(())
+}
+
+/// The route's gate centres in order (`progress_track.xml`), closed for a
+/// circuit. Empty when the route has no progress file.
+fn gate_line(root: &Path, route: &Route) -> Result<Vec<Vec3>, Box<dyn std::error::Error>> {
+    use grid_formats::{binxml, progress};
+    let path = root.join(route.file("progress_track.xml"));
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let progress = progress::read(&binxml::read(&super::read(&path)?)?)?;
+    let mut line: Vec<Vec3> = progress
+        .gates
+        .iter()
+        .map(|g| (Vec3::from_array(g.left) + Vec3::from_array(g.right)) / 2.)
+        .collect();
+    if progress.kind == progress::TrackKind::Circuit
+        && let Some(&first) = line.first()
+    {
+        line.push(first);
+    }
+    Ok(line)
+}
+
+/// The farthest ground-cover draw distance (`ground_cover.xml`), or the
+/// code default 150 m without the file.
+fn draw_distance(root: &Path, route: &Route) -> Result<f32, Box<dyn std::error::Error>> {
+    use grid_formats::{binxml, ground_cover};
+    let path = root.join(route.track_file("ground_cover.xml"));
+    let lods = if path.is_file() {
+        ground_cover::read_distances(&binxml::read(&super::read(&path)?)?)?.lods
+    } else {
+        [150., 0., 0., 0.]
+    };
+    Ok(lods.into_iter().fold(0., f32::max))
+}
+
+/// Distance from `p` to the polyline; infinite for an empty line.
+fn distance_to_line(line: &[Vec3], p: Vec3) -> f32 {
+    if let [only] = line {
+        return only.distance(p);
+    }
+    line.windows(2)
+        .map(|w| {
+            let d = w[1] - w[0];
+            let t = ((p - w[0]).dot(d) / d.length_squared().max(1e-6)).clamp(0., 1.);
+            (w[0] + d * t).distance(p)
+        })
+        .fold(f32::INFINITY, f32::min)
 }

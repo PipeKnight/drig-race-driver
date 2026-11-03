@@ -50,6 +50,15 @@ An additional isolated Unicorn2.1.4 run executes the original context-write inst
 
 The opt-in `--sun source` pilot reads bounded finite heightangle/rotationangle from the selected track lighting.xml (enhanced currently restricts this to Lacetti/Donington). `--sun authored` remains the default. It maps the recovered towards-light vector into Bevy's local -Z emission; vertical poles use a different up vector to avoid an undefined look-at. Direction only is transferred: sunlight strength/colour, sky/ground radiance, exposure, foliage response, original independent specular direction and weather interpolation remain separate. No promise of original radiometric matching. Static/drive GPU acceptance is pending; no launcher default changed.
 
+F709: `read_sun` and `read_sun_colour` fell back to nothing on every lighting file but
+Donington's ("unexpected lighting structure": binary XML or a `WEATHER` element). They now fall
+back to the general `track_environment::read_lighting` reader when the strict text reader rejects
+the structure (duplicates are still rejected), and `--sun source` reads the route's own lighting
+file where one exists (Haruna's night routes), as the sky and water do. An ignored data test reads
+the sun of all 23 shipped `lighting.xml` files. `--sun source` still needs enhanced graphics,
+which are Donington-only, so on other tracks it stays unavailable; the graphics launchers
+(Donington) are unchanged.
+
 Targeted release checks: four track_lighting tests pass (including purchased XML), and the renderer test verifies emission sign and finite transforms at both vertical poles; 1pass/0fail. Baseline transform equality is checked. Latest-main replay integration source84d681d, SHA2564fda8151aa63d4138a3127cc02a938cc323459bf956f25023c0671a6dc194a42, build2m28s: offscreen Instant Replay after1200ticks inspected, normal shader startup and only the known nil gamepad UUID warning. Physical exits match the earlier forest control. This view faces the pits and does not establish distant-forest appearance during replay. Full merged checks and source-sun paired captures are in progress.
 
 

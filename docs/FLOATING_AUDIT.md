@@ -210,3 +210,10 @@ surfaces below it. A vertex with nothing below is checked upwards: a surface up 
 means the vertex is buried, not floating. Each patch with vertices more than 0.25 m above every
 surface gets a row: the centroid, the largest gap and the count. The summary line adds
 `grass_vertices` and `grass_raised`.
+
+F709 adds two columns to each `grass_patch` row: the nearest raised vertex's distance to the
+route's gate line (`progress_track.xml` gate centres, closed on circuits) and the number of
+raised vertices within the farthest `ground_cover.xml` draw distance of it. The summary line
+adds `grass_raised_in_reach`. `grass.grs` is shared by a track's routes, so a short route
+reports raised grass it never comes near: Okutama routes 1, 2, 4 and 5 have none in reach
+(docs/TRACK_VIS.md).

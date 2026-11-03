@@ -3288,7 +3288,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if !graphics.enhanced() || (!track && !drive) {
             return Err("--sun source requires an enhanced track scene".into());
         }
-        let bytes = read(&root.join(route.track_file("lighting.xml")))?;
+        // The route's own lighting file where it has one (Haruna's night
+        // routes), as the sky and water read it.
+        let file = grid_tools::environment::Environment::for_route(&root, &route)?.lighting_file;
+        let bytes = read(&root.join(file))?;
         let sun = grid_formats::track_lighting::read_sun(&bytes)?;
         println!("source_sun angles={sun:?} direction_to_light={:?} mapping=source-basis radiometry=authored", sun.direction_to_light());
         graphics.saved_sun = Some(sun);

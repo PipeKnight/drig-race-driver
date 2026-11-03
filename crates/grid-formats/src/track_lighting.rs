@@ -177,8 +177,20 @@ impl Sun {
     }
 }
 
+/// The sun's parameters: the strict text reader where it applies, else the
+/// general `lighting.xml` reader (binary XML, `WEATHER` and other elements on
+/// every track but Donington).
+fn sun_parameters(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
+    match parameters(bytes) {
+        Err(e) if e.message == "unexpected lighting structure" => {
+            Ok(crate::track_environment::read_lighting(bytes)?.params)
+        }
+        other => other,
+    }
+}
+
 pub fn read_sun(bytes: &[u8]) -> Result<Sun> {
-    let values = parameters(bytes)?;
+    let values = sun_parameters(bytes)?;
     let angle = |name: &str| -> Result<f32> {
         let value = values
             .get(name)
@@ -206,7 +218,7 @@ pub fn read_sun(bytes: &[u8]) -> Result<Sun> {
 /// the independently authored renderer's lux setting. No gamma conversion is
 /// inferred from these values; the renderer must label its interpretation.
 pub fn read_sun_colour(bytes: &[u8]) -> Result<[f32; 3]> {
-    let values = parameters(bytes)?;
+    let values = sun_parameters(bytes)?;
     let text = values.get("backlight_suncolour").ok_or(Error {
         offset: 0,
         message: "sun colour absent",
@@ -290,6 +302,14 @@ pub fn read_particle_light(bytes: &[u8]) -> Result<ParticleLight> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sun_reads_lighting_files_with_other_elements() {
+        let xml = r#"<lighting><param heightangle="20"/><param rotationangle="30"/><param backlight_suncolour="2 1 0.5"/><WEATHER rainfall="0"/></lighting>"#;
+        assert!(parameters(xml.as_bytes()).is_err());
+        let sun = read_sun(xml.as_bytes()).unwrap();
+        assert_eq!((sun.height_degrees, sun.rotation_degrees), (20., 30.));
+        assert_eq!(read_sun_colour(xml.as_bytes()).unwrap(), [1., 0.5, 0.25]);
+    }
     #[test]
     fn sun_angles_follow_source_basis_and_reject_bad_inputs() {
         for (height, rotation, expected) in [
@@ -421,6 +441,29 @@ mod tests {
             .is_err()
         );
         assert!(read_sky(b"<!DOCTYPE lighting><lighting/>").is_err());
+    }
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_every_lighting_file_has_a_sun() {
+        fn walk(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(&path, found);
+                } else if path.file_name().is_some_and(|n| n == "lighting.xml") {
+                    found.push(path);
+                }
+            }
+        }
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let mut files = Vec::new();
+        walk(&std::path::Path::new(&root).join("tracks"), &mut files);
+        assert!(files.len() >= 23, "{}", files.len());
+        for file in files {
+            let bytes = std::fs::read(&file).unwrap();
+            read_sun(&bytes).unwrap_or_else(|e| panic!("{}: {e:?}", file.display()));
+            read_sun_colour(&bytes).unwrap_or_else(|e| panic!("{}: {e:?}", file.display()));
+        }
     }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
