@@ -1144,6 +1144,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00743543		label	crates/grid-formats/src/track_lighting.rs:239 grid-formats::track_lighting::ParticleLight					inside 0x00743220; 0x743543) submits as `pfxSunColour`, `pfxPreMultipliedAmbientColour` and
 0x00743550	lighting_uniform_back_colour	label	not ported	docs/SOURCE_SKY_LIGHTING.md	G330	[V]		Selected dispatcher reads context+C lighting owner +1C0 RGB and +B0 W for backlightColour.
 0x0074369C	lighting_uniform_ambient_colour	label	not ported	docs/SOURCE_SKY_LIGHTING.md	G330	[V]		Selected dispatcher reads context+C lighting owner +1D0 RGB and W1 for backlightAmbientColour.
+0x00743750	lighting_specular_vector_publisher	func	not ported	docs/ROAD_MATERIAL_RESPONSE.md	G354	[A]		Advisory selected-block name; source50/51, road applicability/active GPU/material composition unproved.
 0x007456F0	allocate_skid_pool_slots	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:156		[D]		[D] Pool allocator `7456F0` calls constructor `741D70` once per newly allocated
 0x00745DC0	colour_balance_parameter_registration_initialization	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G348	[D]		Contrast/brightness/tint/vignette registration and constructor values; active overrides/defaults unknown
 0x00747C50	colour_balance_prepared_object_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G348	[D]		Parameter subobject at +8; concrete prepared object constructor
