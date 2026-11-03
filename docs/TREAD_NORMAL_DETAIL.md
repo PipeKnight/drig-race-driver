@@ -21,3 +21,135 @@ The new low close-up reveals excessive livery washout with authored layered mate
 Normal mip completeness, finer tyre texture resolution, original mask updates, source-binormal exact representation and body/detail materials remain open. Upscaling workflow/tool provenance: [TEXTURE_UPSCALING.md](TEXTURE_UPSCALING.md).
 
 Follow-up: [clearcoat prepass repair](CLEARCOAT_PREPASS.md) resolves the low-angle washout with a matched stock/fixed GPU comparison. Latest source483941155483 retains tread normals and passes the same240tick motion/handling comparison. The problem was missing geometric coat-normal initialization in the active prepass path, so strength-only art tuning was insufficient. Private release manifest `validation-clearcoat01.json` records the final executable and images.
+
+
+## General model binding and explicit basis limits (3 November 2026, G353)
+
+Tread preparation now keeps an independent source key, admitted mesh-frame
+readiness and optional linear normal image for each Field model. Vehicle slots
+resolve through their existing model namespaces; no other model supplies a
+missing image or frame. The shared path preserves the existing authored basis
+admission, material response, sampler, shader and profile guards.
+
+Real load/append_car CPU controls use three models and four slots, including
+missing-image/frame/parts and invalid-model cases. Combined-feature Clippy and
+the exact source control pass; the required grid-app gate passes636tests and
+Clippy. This does not verify actual GPU binding, shaded response or lowLOD
+readiness for every model.
+
+| Selected LOD0 source | Tread vertex occurrences | Native N/T/B | Minimum admitted-basis alignment | Occurrences below.95 |
+|---|---:|---|---:|---:|
+| Lacetti |720|present, finite, nonzero|.9887001|0|
+| BMW |720|present, finite, nonzero|.9723601|0|
+| STK |540|present, finite, nonzero|.8221446|252|
+
+All selected masks are ff00ffff. STK therefore lacks the prepared Bevy tangent
+attribute because of substantial original binormal skew, not absent native
+vectors or mask rejection. The all-or-none helper refuses each of its four
+draws. Keep the.95authored adaptation limit until a reviewed common basis
+representation is available; lowering it is not a general source-correct fix.
+The numeric audit used decoded source floats and Pythonf64, corroborated by
+the actual Rust prepared-frame results; it is not an image-error measurement.
+
+A further shader-scope check finds the saved car.fx primary pixel-program ID
+differs from the earlier selected paint pixel program. The shared vertex
+program independently transforms T/B/N, but this alone does not establish the
+exact active tread pixel decode/pass. Do not generalize paint-PS findings into
+tread-PS parity. Full saved-basis, refinement, material-cache/prepass and actual
+shader-selection compatibility remain open.
+
+Private evidence: `local/graphics/tread-per-model01/`,
+`local/handoff/drafts/tread-admission50/` and `tread-full-basis51/`.
+
+### Actual CPU upload and material consumers
+
+The same production upload and normal-image assignment now have small shared
+helpers called by setup and the purchased regression. A fresh headless
+App/Assets fixture inspects actual Image and StandardMaterial assets through
+MeshMaterial3d handles. It verifies separate model handles, linear BC1 data,
+unchanged mips, missing-map clearing and both disabled controls. A distinct
+independently authored BMW DDS in memory catches cross-model payload leakage;
+the purchased Lacetti/BMW base maps happen to be byte-identical, so equality
+alone would hide that defect. Source files are never modified by this control.
+STK's existing frame refusal and unrelated material assignment are preserved.
+
+The exact consumer regression and combined-feature all-target Clippy pass
+(local/graphics/tread-per-model01/check02): one test, no renderer/window/GPU.
+This exercises actual CPU consumers, not the complete setup/spawn/render queues
+or visible shader contribution. Representative rendered acceptance remains open.
+
+### Saved basis and sampler qualifications
+
+The exact saved non-paint car.fx pixel program has now been disassembled for the
+selected Lacetti primary pass. Its tangent-space decode normalizes the decoded
+sample, sums the independently transformed T/B/N vectors, then uses that result
+in lighting without an intervening normalization. This is saved-pass evidence,
+not a live pass observation or a BMW/STK shader association. Normalized Bevy PBR
+input remains an explicit adaptation. See private source-contract52 in
+local/handoff/drafts/tread-full-basis51/.
+
+A bounded CPU comparison53 samples only36/4/27 distinct base-mip texels for
+Lacetti/BMW/STK at source vertex UVs. BMW's720UV occurrences lie outside0..1;
+the declared clamp sampler reaches only four BMW edge texels. Its small numeric
+delta cannot establish general filter or visual accuracy. The source helper
+still refuses all four STK draws; its orthonormal comparison is counterfactual.
+Original GRID sampler addressing remains unproved. Current engine setup uses
+ClampToEdge with linear filters; that configuration is not an original-state
+capture. Raw results and prior incorrect UV/sign prose are preserved with
+transparent corrections in the private comparison53/admission50 packets.
+
+## Full saved-basis diagnostic (G357, default off)
+
+GRID_SAVED_TREAD_BASIS=1 selects a bounded rigid-forward diagnostic. It preserves
+independent source T/B/N plus the normal mask through the actual loader and tyre
+refinement; it does not lower the ordinary .95 tangent-reduction guard or invent
+missing frames. Existing geometry/UV/index policy and original source-vertex bits
+are preserved by tested consumer controls. The ordinary enhanced-profile guards
+remain, so this is not all-model/track runtime completion.
+
+A small app-owned material transports centroid raw basis and the ordinary mask,
+decodes the source RGB convention and supplies a normalized basis result to Bevy
+PBR. Normalizing that result is an explicit lighting adaptation: original raw
+length survives its selected source lighting path. Current linear/clamp sampling
+is retained; original sampler state stays unknown. Rigid lit opaque UV0 domains
+are admitted; Explicit --ao off is required: SSAO implicitly adds NormalPrepass, so AO-on is refused before app setup. Normal/deferred prepass, skin/morph, bindless and other unsupported contexts are refused. Stock depth/MV/shadow position paths are inherited.
+
+Original StandardMaterial identity remains available to existing LOD and overlay
+queries. Mapped material events update the derived material under the same handle;
+no per-frame blanket copy or reflection/LOD algorithm retuning is introduced.
+Arbitrary later entity-material rebinds remain unsupported. Raw streams cost40
+bytes/vertex plus varyings and mapped assets; performance is unmeasured.
+
+Actual combined-feature Clippy and11new CPU controls pass, plus the existing
+mixed-model upload/assignment and body-mask fixture controls. The tests exercise
+raw source attachment, actual refinement, geometry/bit preservation, rigid-domain
+refusal, material ownership, event updates and explicit negative states. Initial
+namespace/fixture compile errors and three Clippy lints were retained and fixed.
+No GPU or image-quality conclusion follows from these CPU controls.
+
+### Real stock WGSL composition without a renderer
+
+A native library test obtains actual compiled embedded shader bytes through
+public Bevy plugins and the in-memory asset reader. RenderPlugin explicitly uses
+backends=None; no RenderApp/RenderDevice, window or App run/update is permitted.
+Only the source-guarded MeshRenderPlugin finish registers the missing library.
+No private paths, registry files, new dependencies or build profile are needed.
+Ordinary Android library inclusion remains source-identical; Android execution
+was not tested. Moving the test to the native library avoids the main unit-test
+crate for focused --lib shader checks.
+
+The actual composer caught a fragment+dither error: a bare imported function
+renamed a same-named local field declaration, but not member access. Namespacing
+only the function import/call fixes that root cause while retaining field,
+varying, stock assignment and discard. DitherOff/On each now compose actual VS/FS;
+an authored malformed shader is independently rejected. All four compositions
+and Clippy pass in check06. F708's ordinary LOD-dither policy is preserved.
+
+This is parsing/import/composition with declared abstract desktop features.
+Release Bevy uses a nonvalidating composer; full Naga validation, VS/FS linkage,
+vertex/bind-group layouts, actual backend support, visible fades, replay behaviour
+and quality remain unverified. Report COMPOSED_NOT_GPU_VALIDATED, never a pipeline
+pass. Current executable is not rebuilt or switched; the feature stays off.
+Private exact failures/fixes/source hashes: local/graphics/tread-saved-basis01/;
+review packets tread-saved-basis55/, integration61/ and tread-dither-namespace61/
+under local/handoff/drafts/.

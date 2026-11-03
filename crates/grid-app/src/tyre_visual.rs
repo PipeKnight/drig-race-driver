@@ -44,6 +44,14 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
         }
         _ => return Err("invalid tyre tangent stream"),
     };
+    let raw_present = [crate::saved_tread_basis::RAW_T,crate::saved_tread_basis::RAW_B,crate::saved_tread_basis::RAW_NM].iter().any(|a|mesh.attribute(*a).is_some());
+    let mut raw = if raw_present {
+        if !crate::saved_tread_basis::ready(mesh){return Err("incomplete saved tread basis");}
+        let Some(VertexAttributeValues::Float32x3(t))=mesh.attribute(crate::saved_tread_basis::RAW_T) else{unreachable!()};
+        let Some(VertexAttributeValues::Float32x3(b))=mesh.attribute(crate::saved_tread_basis::RAW_B) else{unreachable!()};
+        let Some(VertexAttributeValues::Float32x4(nm))=mesh.attribute(crate::saved_tread_basis::RAW_NM) else{unreachable!()};
+        Some((t.clone(),b.clone(),nm.clone()))
+    } else {None};
     if positions.iter().chain(&normals).any(|v| !v.is_finite())
         || uvs.iter().any(|v| !v.is_finite())
     {
@@ -111,6 +119,11 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
                             .extend(ts[a as usize].w)
                     });
                     let i = positions.len() as u32;
+                    if let Some((ts,bs,nms))=&mut raw {
+                        ts.push(std::array::from_fn(|k|(ts[a as usize][k]+ts[b as usize][k])*0.5));
+                        bs.push(std::array::from_fn(|k|(bs[a as usize][k]+bs[b as usize][k])*0.5));
+                        nms.push(std::array::from_fn(|k|(nms[a as usize][k]+nms[b as usize][k])*0.5));
+                    }
                     positions.push(p);
                     normals.push(n);
                     uvs.push(uv);
@@ -126,6 +139,9 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
         }
         indices = next;
     }
+    if let Some((ts,bs,nms))=&raw
+        && !crate::saved_tread_basis::valid_streams(ts,bs,nms,positions.len())
+    {return Err("refined saved basis became invalid");}
     let after = indices.len() / 3;
     mesh.insert_attribute(
         Mesh::ATTRIBUTE_POSITION,
@@ -154,6 +170,11 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
                 .map(|v| v.to_array())
                 .collect::<Vec<_>>(),
         );
+    }
+    if let Some((t,b,nm))=raw {
+        mesh.insert_attribute(crate::saved_tread_basis::RAW_T,t);
+        mesh.insert_attribute(crate::saved_tread_basis::RAW_B,b);
+        mesh.insert_attribute(crate::saved_tread_basis::RAW_NM,nm);
     }
     Ok((before, after))
 }
