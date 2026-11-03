@@ -416,6 +416,7 @@ mod tests {
             low_lods: Vec::new(),
             ornament_lods: Default::default(),
             reflections: Default::default(),
+            piece_skins: Default::default(),
         };
         append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
         assert_eq!(car.parts.len(), 21);

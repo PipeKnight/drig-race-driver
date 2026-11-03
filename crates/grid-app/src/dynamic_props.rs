@@ -6,7 +6,11 @@
 use crate::{Car, Driving, Part};
 use bevy::{
     asset::RenderAssetUsages,
-    mesh::{Indices, PrimitiveTopology},
+    camera::visibility::NoFrustumCulling,
+    mesh::{
+        Indices, PrimitiveTopology, VertexAttributeValues,
+        skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
+    },
     prelude::*,
 };
 use grid_formats::{mesh, pssg, scene};
@@ -17,6 +21,7 @@ const INTACT: &str = "dynamic/intact/";
 /// An entity placement and its breakable index, if breakable.
 pub(crate) type Placement = ([f32; 16], Option<usize>);
 type Untagged = (Added<Name>, Without<IntactProp>, Without<PropPiece>);
+type JointFilter = (Without<PropPiece>, Without<IntactProp>);
 const PIECE: &str = "dynamic/piece/";
 
 /// Breakable catalog of the route, or none when the route has no route props
@@ -89,9 +94,73 @@ pub(crate) fn append_pieces(
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let mut drawn = 0;
     let mut missing = 0;
+    let mut skinned = 0;
     // One index of the object library for every piece (F445).
     let renderables = scene::Renderables::new(objects, sources);
     for (b, breakable) in catalog.breakables.iter().enumerate() {
+        // The damage renderable's skinned meshes, drawn whole and blended
+        // over the pieces' joints; their per-joint draws are skipped below.
+        let mut skin_ids = Vec::new();
+        if let Ok(r) = &renderables {
+            for renderable in breakable.pieces.iter().map(|p| p.renderable.as_str()).collect::<std::collections::BTreeSet<_>>() {
+                let anchors: Vec<&[u8]> = (breakable.pieces.iter())
+                    .filter(|p| p.renderable == renderable)
+                    .map(|p| p.anchor.as_bytes())
+                    .collect();
+                let specs: Vec<usize> = (0..breakable.pieces.len())
+                    .filter(|&s| breakable.pieces[s].renderable == renderable)
+                    .collect();
+                let Ok(skins) = r.skins_in(renderable.as_bytes(), &anchors) else {
+                    continue;
+                };
+                for skin in skins {
+                    skin_ids.push(skin.id);
+                    let joints: Vec<(Option<usize>, Mat4)> = (skin.joints.iter())
+                        .map(|j| {
+                            let rest = scene::compose(&j.to_root, &breakable.placement);
+                            (j.anchor.map(|a| specs[a]), Mat4::from_cols_array(&rest))
+                        })
+                        .collect();
+                    // The part follows the first piece with a joint (pieces
+                    // go live together when their breakable breaks).
+                    let Some(spec) = joints.iter().find_map(|j| j.0) else {
+                        continue;
+                    };
+                    let material = format!("objects/{}", String::from_utf8(skin.material.to_vec())?);
+                    if !car.bindings.contains_key(&material) {
+                        return Err(format!("unresolved piece material {material}").into());
+                    }
+                    let source = &sources[skin.source];
+                    let Some((bound, weights)) = &source.skin_weights else {
+                        continue;
+                    };
+                    let mut mesh = draw_mesh(source, source.indices.clone());
+                    mesh.insert_attribute(
+                        Mesh::ATTRIBUTE_JOINT_INDEX,
+                        VertexAttributeValues::Uint16x4(bound.iter().map(|j| j.map(u16::from)).collect()),
+                    );
+                    mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, weights.clone());
+                    let name = format!("{PIECE}{b}/{spec}/{}/{}", skin.source, String::from_utf8_lossy(skin.id));
+                    car.piece_skins.insert(
+                        name.clone(),
+                        PieceSkin {
+                            breakable: b,
+                            inverse_bind: skin.joints.iter().map(|j| Mat4::from_cols_array(&j.inverse_bind)).collect(),
+                            joints,
+                        },
+                    );
+                    car.parts.push(Part {
+                        name,
+                        material,
+                        mesh,
+                        matrices: vec![Mat4::from_cols_array(&breakable.placement)],
+                        wheel: None,
+                        joint: String::new(),
+                    });
+                    skinned += 1;
+                }
+            }
+        }
         for (s, piece) in breakable.pieces.iter().enumerate() {
             let Ok(draws) = renderables
                 .as_ref()
@@ -112,7 +181,7 @@ pub(crate) fn append_pieces(
                 continue;
             }
             drawn += 1;
-            for draw in draws {
+            for draw in draws.into_iter().filter(|d| !skin_ids.contains(&d.id)) {
                 let source = &sources[draw.source];
                 let material = format!("objects/{}", String::from_utf8(draw.material.to_vec())?);
                 if !car.bindings.contains_key(&material) {
@@ -132,7 +201,7 @@ pub(crate) fn append_pieces(
         }
     }
     println!(
-        "dynamic_props breakables={} drawn_pieces={drawn} pieces_without_draws={missing} kept_static={:?}",
+        "dynamic_props breakables={} drawn_pieces={drawn} pieces_without_draws={missing} skinned_meshes={skinned} kept_static={:?}",
         catalog.breakables.len(),
         catalog.unported
     );
@@ -146,6 +215,27 @@ pub(crate) struct PropScript(pub(crate) grid_tools::dynamic_props::PropPursuit);
 #[derive(Component)]
 pub(crate) struct IntactProp(pub(crate) usize);
 
+/// A skinned damage mesh's joints (tyre walls, Armco sections, flags).
+pub(crate) struct PieceSkin {
+    breakable: usize,
+    inverse_bind: Vec<Mat4>,
+    /// Per skin joint: its piece, if under one, and its world matrix at the
+    /// intact placement.
+    joints: Vec<(Option<usize>, Mat4)>,
+}
+
+/// The skinned piece parts' joints, by part name.
+#[derive(Resource, Default)]
+pub(crate) struct PieceSkins(pub(crate) BTreeMap<String, PieceSkin>);
+
+/// A joint of a skinned piece part; it follows its piece's body.
+#[derive(Component)]
+pub(crate) struct PieceJoint {
+    breakable: usize,
+    spec: Option<usize>,
+    rest: Mat4,
+}
+
 #[derive(Component)]
 pub(crate) struct PropPiece {
     pub(crate) breakable: usize,
@@ -154,9 +244,30 @@ pub(crate) struct PropPiece {
     pub(crate) rest: Mat4,
 }
 
-/// Tag the spawned prop parts by name (pieces start hidden).
-pub(crate) fn tag(mut commands: Commands, parts: Query<(Entity, &Name, &Transform), Untagged>) {
+/// Tag the spawned prop parts by name (pieces start hidden); a skinned piece
+/// part gets its joints.
+pub(crate) fn tag(
+    mut commands: Commands,
+    parts: Query<(Entity, &Name, &Transform), Untagged>,
+    skins: Option<Res<PieceSkins>>,
+    mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
+) {
     for (entity, name, transform) in &parts {
+        if let Some(skin) = skins.as_ref().and_then(|s| s.0.get(name.as_str())) {
+            let joints = (skin.joints.iter())
+                .map(|&(spec, rest)| {
+                    let joint = PieceJoint { breakable: skin.breakable, spec, rest };
+                    commands.spawn((joint, Transform::from_matrix(rest))).id()
+                })
+                .collect();
+            commands.entity(entity).insert((
+                SkinnedMesh {
+                    inverse_bindposes: bindposes.add(SkinnedMeshInverseBindposes::from(skin.inverse_bind.clone())),
+                    joints,
+                },
+                NoFrustumCulling,
+            ));
+        }
         if let Some(rest) = name.as_str().strip_prefix(INTACT) {
             if let Some(b) = rest.split('/').next().and_then(|v| v.parse().ok()) {
                 commands.entity(entity).insert(IntactProp(b));
@@ -189,7 +300,9 @@ pub(crate) fn present(
     driving: Option<Res<Driving>>,
     mut intact: Query<(&IntactProp, &mut Visibility), Without<PropPiece>>,
     mut pieces: Query<(&PropPiece, &mut Transform, &mut Visibility), Without<IntactProp>>,
+    mut joints: Query<(&PieceJoint, &mut Transform), JointFilter>,
     mut logged: Local<usize>,
+    mut moved: Local<std::collections::BTreeSet<usize>>,
 ) {
     let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::PropPresent);
     let Some(driving) = driving else {
@@ -245,6 +358,26 @@ pub(crate) fn present(
             }
         }
     }
+    // Joints of live breakables follow their pieces; those of a breakable
+    // that stopped being live (a restart) go back to rest once.
+    let moving: std::collections::BTreeSet<usize> = live.keys().map(|&(b, _)| b).collect();
+    if moving.is_empty() && moved.is_empty() {
+        return;
+    }
+    for (joint, mut transform) in &mut joints {
+        if !moving.contains(&joint.breakable) && !moved.contains(&joint.breakable) {
+            continue;
+        }
+        let at = match joint.spec.and_then(|s| live.get(&(joint.breakable, s)).map(|now| (s, now))) {
+            Some((s, now)) => {
+                let start = pose(&props.catalog.breakables[joint.breakable].pieces[s].pose);
+                *now * start.inverse() * joint.rest
+            }
+            None => joint.rest,
+        };
+        transform.set_if_neq(Transform::from_matrix(at));
+    }
+    *moved = moving;
 }
 
 /// Diagnostic `GRID_FLOAT_CHECK=local/OUT.tsv` (backlog row 102): every 60

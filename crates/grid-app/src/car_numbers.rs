@@ -465,6 +465,7 @@ mod tests {
             low_lods: Vec::new(),
             ornament_lods: Default::default(),
             reflections: Default::default(),
+            piece_skins: Default::default(),
         };
         let before = car.textures.clone();
         let banks_before = car.liveries.clone();

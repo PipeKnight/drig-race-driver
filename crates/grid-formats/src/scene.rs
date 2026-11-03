@@ -306,23 +306,8 @@ impl<'t, 'a> Renderables<'t, 'a> {
     /// the one NODE of that id under `root`; other renderables may reuse the
     /// id (Nürburgring tyre walls name their tyres `tyre01_obj_01` and on).
     pub fn draws_in(&self, root: &[u8], node: &[u8]) -> Result<Vec<Draw<'a>>> {
-        let root = match (self.nodes.get(root), self.bundles.get(root)) {
-            (Some(n), None) | (None, Some(n)) if n.len() == 1 => n[0],
-            _ => return fail(0, "expected one selected renderable node"),
-        };
-        let under = |n: usize| {
-            let mut ancestor = Some(n);
-            while ancestor.is_some_and(|a| a != root) {
-                ancestor = ancestor.and_then(|a| self.tree.nodes[a].parent);
-            }
-            ancestor.is_some()
-        };
-        let candidates = (self.nodes.get(node).into_iter().flatten())
-            .chain(self.suffixed.get(node).into_iter().flatten());
-        let node = match candidates.filter(|&&n| under(n)).collect::<Vec<_>>()[..] {
-            [one] => *one,
-            _ => return fail(0, "expected one node under the renderable root"),
-        };
+        let root = self.root(root)?;
+        let node = self.anchor(root, node)?;
         let mut instances = Vec::new();
         let mut stack = self.tree.nodes[node].children.clone();
         while let Some(n) = stack.pop() {
@@ -346,37 +331,59 @@ impl<'t, 'a> Renderables<'t, 'a> {
         Ok(result)
     }
 
-    /// The triangles of `root`'s skinned meshes (SKINNODE, network
-    /// `skinTransformLocal`) whose main joint is a JOINTNODE at or under
-    /// `node`, one draw per joint, in `root`'s frame: a bind-space vertex goes
-    /// through the joint's INVERSEBINDMATRIX, then the joint's and its
-    /// ancestors' transforms up to `root`. Tyre walls, Armco sections and
-    /// flags keep their damage geometry in such a mesh (F566). AUTHORED
-    /// approximation: the original blends up to four joints per vertex
-    /// (Armco rails bend smoothly); here each triangle follows one joint
-    /// (its vertices' main joint, [`crate::mesh::read_object_meshes`]), exact
-    /// at the bind pose and with seams once the pieces separate.
-    fn skin_draws(&self, root: usize, node: usize) -> Result<Vec<Draw<'a>>> {
+    /// The one NODE or BUNDLENODE named `id`.
+    fn root(&self, id: &[u8]) -> Result<usize> {
+        match (self.nodes.get(id), self.bundles.get(id)) {
+            (Some(n), None) | (None, Some(n)) if n.len() == 1 => Ok(n[0]),
+            _ => fail(0, "expected one selected renderable node"),
+        }
+    }
+
+    /// The one NODE named `id` (or `id!N`) under `root`.
+    fn anchor(&self, root: usize, id: &[u8]) -> Result<usize> {
+        let candidates = (self.nodes.get(id).into_iter().flatten())
+            .chain(self.suffixed.get(id).into_iter().flatten());
+        match candidates.filter(|&&n| self.at_or_under(n, root)).collect::<Vec<_>>()[..] {
+            [one] => Ok(*one),
+            _ => fail(0, "expected one node under the renderable root"),
+        }
+    }
+
+    fn at_or_under(&self, node: usize, ancestor: usize) -> bool {
+        let mut at = Some(node);
+        while at.is_some_and(|a| a != ancestor) {
+            at = at.and_then(|a| self.tree.nodes[a].parent);
+        }
+        at.is_some()
+    }
+
+    /// The skinned meshes of the renderable `root` with each joint's piece:
+    /// the position in `anchors` (a breakable's piece anchors, as for
+    /// [`Self::draws_in`]) of the anchor the joint is at or under. Drawn
+    /// blended, these replace the per-joint split of [`Self::draws_in`]
+    /// (F710: an Armco rail's triangles separated into slivers once its
+    /// pieces moved).
+    pub fn skins_in(&self, root: &[u8], anchors: &[&[u8]]) -> Result<Vec<RootSkin<'a>>> {
+        let root = self.root(root)?;
+        let anchors: Vec<usize> = anchors.iter().map(|a| self.anchor(root, a)).collect::<Result<_>>()?;
+        let mut skins = self.root_skins(root)?;
+        for joint in skins.iter_mut().flat_map(|s| s.joints.iter_mut()) {
+            joint.anchor = anchors.iter().position(|&a| self.at_or_under(joint.node, a));
+        }
+        Ok(skins)
+    }
+
+    /// `root`'s skinned meshes (SKINNODE, network `skinTransformLocal`) with
+    /// their joints in `root`'s frame. Sources the object reader did not read
+    /// are left out.
+    fn root_skins(&self, root: usize) -> Result<Vec<RootSkin<'a>>> {
         let tree = self.tree;
-        let descendants = |from: usize| {
-            let mut out = Vec::new();
-            let mut stack = vec![from];
-            while let Some(n) = stack.pop() {
-                out.push(n);
-                stack.extend(tree.nodes[n].children.iter().rev());
-            }
-            out
-        };
-        let under_node = |mut n: usize| loop {
-            if n == node {
-                break true;
-            }
-            match tree.nodes[n].parent {
-                Some(p) if n != root => n = p,
-                _ => break false,
-            }
-        };
-        let in_root = descendants(root);
+        let mut in_root = Vec::new();
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            in_root.push(n);
+            stack.extend(tree.nodes[n].children.iter().rev());
+        }
         let mut result = Vec::new();
         for &skin in in_root.iter().filter(|&&n| tree.name(n) == b"SKINNODE") {
             let children = &tree.nodes[skin].children;
@@ -402,6 +409,22 @@ impl<'t, 'a> Renderables<'t, 'a> {
             if joints.len() != inverse.len() {
                 return fail(tree.nodes[skin].offset, "skin joint and bind matrix counts differ");
             }
+            let mut skin_joints = Vec::new();
+            for (&joint, &inverse_bind) in joints.iter().zip(&inverse) {
+                let mut to_root = IDENTITY;
+                let mut a = joint;
+                loop {
+                    to_root = compose(&to_root, &matrix(tree, a)?);
+                    if a == root {
+                        break;
+                    }
+                    a = tree.nodes[a].parent.ok_or(crate::Error {
+                        offset: tree.nodes[a].offset,
+                        message: "skin joint outside its root",
+                    })?;
+                }
+                skin_joints.push(SkinJoint { id: tree.string(joint, b"id")?, node: joint, to_root, inverse_bind, anchor: None });
+            }
             for &instance in children.iter().filter(|&&c| tree.name(c) == b"MODIFIERNETWORKINSTANCE") {
                 if !tree.string(instance, b"network")?.ends_with(b"#skinTransformLocal") {
                     continue;
@@ -412,9 +435,9 @@ impl<'t, 'a> Renderables<'t, 'a> {
                     continue;
                 };
                 let mesh = &self.meshes[source];
-                let Some(bound) = &mesh.skin_indices else {
+                if mesh.skin_indices.is_none() || mesh.skin_weights.is_none() {
                     return fail(tree.nodes[instance].offset, "skinned source without joints");
-                };
+                }
                 let material = tree.string(instance, b"shader")?.strip_prefix(b"#").ok_or(crate::Error {
                     offset: tree.nodes[instance].offset,
                     message: "expected local skin shader",
@@ -422,51 +445,83 @@ impl<'t, 'a> Renderables<'t, 'a> {
                 if !self.context.shaders.contains(material) {
                     return fail(tree.nodes[instance].offset, "unresolved skin shader");
                 }
-                for (j, &joint) in joints.iter().enumerate() {
-                    if !under_node(joint) {
-                        continue;
-                    }
-                    // A triangle follows the main joint of two of its
-                    // vertices, else of its first.
-                    let main = |t: &[u16; 3]| {
-                        let [a, b, c] = t.map(|v| bound[v as usize]);
-                        if a == b || a == c { a } else if b == c { b } else { a }
-                    };
-                    let indices: Vec<u16> = (mesh.indices.as_chunks::<3>().0.iter())
-                        .filter(|t| main(t) == j as f32)
-                        .flatten()
-                        .copied()
-                        .collect();
-                    if indices.is_empty() {
-                        continue;
-                    }
-                    let mut chain = IDENTITY;
-                    let mut a = joint;
-                    loop {
-                        chain = compose(&chain, &matrix(tree, a)?);
-                        if a == root {
-                            break;
-                        }
-                        a = tree.nodes[a].parent.ok_or(crate::Error {
-                            offset: tree.nodes[a].offset,
-                            message: "skin joint outside its root",
-                        })?;
-                    }
-                    result.push(Draw {
-                        id: tree.string(instance, b"id")?,
-                        joint: tree.string(joint, b"id")?,
-                        material,
-                        source,
-                        prototype: None,
-                        vertices: 0..mesh.positions.len(),
-                        indices,
-                        transform: compose(&inverse[j], &chain),
-                    });
-                }
+                result.push(RootSkin { id: tree.string(instance, b"id")?, material, source, joints: skin_joints.clone() });
             }
         }
         Ok(result)
     }
+
+    /// The triangles of `root`'s skinned meshes whose main joint is a
+    /// JOINTNODE at or under `node`, one draw per joint, in `root`'s frame: a
+    /// bind-space vertex goes through the joint's INVERSEBINDMATRIX, then the
+    /// joint's and its ancestors' transforms up to `root`. Tyre walls, Armco
+    /// sections and flags keep their damage geometry in such a mesh (F566).
+    /// AUTHORED approximation: the original blends up to four joints per
+    /// vertex (Armco rails bend smoothly); here each triangle follows one
+    /// joint (its vertices' main joint, [`crate::mesh::read_object_meshes`]),
+    /// exact at the bind pose and with seams once the pieces separate. grid-app
+    /// draws the pieces blended ([`Self::skins_in`]).
+    fn skin_draws(&self, root: usize, node: usize) -> Result<Vec<Draw<'a>>> {
+        let mut result = Vec::new();
+        for skin in self.root_skins(root)? {
+            let mesh = &self.meshes[skin.source];
+            let bound = mesh.skin_indices.as_ref().expect("root_skins checked the joints");
+            for (j, joint) in skin.joints.iter().enumerate() {
+                if !self.at_or_under(joint.node, node) {
+                    continue;
+                }
+                // A triangle follows the main joint of two of its
+                // vertices, else of its first.
+                let main = |t: &[u16; 3]| {
+                    let [a, b, c] = t.map(|v| bound[v as usize]);
+                    if a == b || a == c { a } else if b == c { b } else { a }
+                };
+                let indices: Vec<u16> = (mesh.indices.as_chunks::<3>().0.iter())
+                    .filter(|t| main(t) == j as f32)
+                    .flatten()
+                    .copied()
+                    .collect();
+                if indices.is_empty() {
+                    continue;
+                }
+                result.push(Draw {
+                    id: skin.id,
+                    joint: joint.id,
+                    material: skin.material,
+                    source: skin.source,
+                    prototype: None,
+                    vertices: 0..mesh.positions.len(),
+                    indices,
+                    transform: compose(&joint.inverse_bind, &joint.to_root),
+                });
+            }
+        }
+        Ok(result)
+    }
+}
+
+/// A skinned mesh of a renderable root (a SKINNODE's `skinTransformLocal`
+/// instance): the damage geometry of tyre walls, Armco sections and flags,
+/// each vertex blended over up to four joints ([`crate::mesh::Mesh::skin_weights`]).
+pub struct RootSkin<'a> {
+    pub id: &'a [u8],
+    pub material: &'a [u8],
+    pub source: usize,
+    /// In skin order: a vertex's joint numbers index this list.
+    pub joints: Vec<SkinJoint<'a>>,
+}
+
+#[derive(Clone)]
+pub struct SkinJoint<'a> {
+    pub id: &'a [u8],
+    node: usize,
+    /// The joint's and its ancestors' transforms up to the root.
+    pub to_root: [f32; 16],
+    /// Bind space to the joint.
+    pub inverse_bind: [f32; 16],
+    /// With [`Renderables::skins_in`]: the piece anchor the joint is at or
+    /// under.
+    pub anchor: Option<usize>,
 }
 
 /// Mesh sources by id and the tree's shader instance ids.

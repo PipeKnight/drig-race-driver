@@ -25,7 +25,7 @@ fn dump(tree: &pssg::Tree<'_>, node: usize, depth: usize, out: &mut String) {
         String::from_utf8_lossy(tree.name(node)),
         id
     ));
-    for &child in tree.nodes[node].children.iter().take(12) {
+    for &child in tree.nodes[node].children.iter().take(64) {
         dump(tree, child, depth + 1, out);
     }
 }
@@ -57,6 +57,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let e = placements.entry(renderable.node).or_default();
                 e.0 += 1;
                 *e.1.entry(entity.template).or_default() += 1;
+            }
+        }
+        if let Ok(near) = std::env::var("GRID_NEAR") {
+            let v: Vec<f32> = near.split(',').filter_map(|s| s.parse().ok()).collect();
+            let [x, z, r] = v[..] else {
+                return Err("GRID_NEAR=X,Z,RADIUS".into());
+            };
+            for entity in &entities {
+                let t = &entity.transform;
+                if (t[12] - x).hypot(t[14] - z) > r {
+                    continue;
+                }
+                // Each renderable: its node, body node and shape centres.
+                let nodes: Vec<_> = (entity.renderables.iter())
+                    .map(|n| {
+                        let shapes: Vec<_> = (n.shapes.iter())
+                            .map(|s| format!("({:.3}, {:.3}, {:.3})", s.transform[12], s.transform[13], s.transform[14]))
+                            .collect();
+                        format!(
+                            "{} body_node={} shapes={}",
+                            String::from_utf8_lossy(n.node),
+                            String::from_utf8_lossy(n.body_node),
+                            shapes.join(" ")
+                        )
+                    })
+                    .collect();
+                out.push_str(&format!(
+                    "near {} {} at ({:.1}, {:.1}, {:.1}) renderables={nodes:?}\n",
+                    String::from_utf8_lossy(entity.template),
+                    String::from_utf8_lossy(entity.id),
+                    t[12],
+                    t[13],
+                    t[14]
+                ));
             }
         }
         if let Ok(find) = std::env::var("GRID_FIND") {

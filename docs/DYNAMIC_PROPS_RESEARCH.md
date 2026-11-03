@@ -501,10 +501,19 @@ Port:
   draw per joint at or under the anchor: the triangles whose vertices' main joint (two of three,
   else the first) is that joint, with transform inverse bind x joint-to-root chain. Inverse bind
   matrices with float noise in the last column (tyre walls, about 1e-8) are cleaned.
-- AUTHORED approximation: the original blends up to four joints per vertex. Here a triangle
-  follows one joint. This is exact while the pieces are at their bind pose, and leaves seams
-  where an Armco rail bends or pieces separate. Proper blend skinning in grid-app (joint matrices
-  from the piece bodies) is not done.
+- Until F710 grid-app drew these per-joint draws: a triangle followed one joint, exact at the
+  bind pose. Once a broken Armco rail bent, its triangles separated into slivers: the owner's
+  "white strips" when a barrier is hit (Washington, 2026-11-02; reproduced on Donington,
+  `armco_white_main:0`, break at tick 7819).
+- Blend skinning (F710): `Renderables::skins_in(renderable, anchors)` returns each skinned
+  instance of the damage renderable with, per skin joint, its transform to the root, its
+  inverse bind matrix and the piece anchor it is at or under. grid-app draws each instance once
+  as a Bevy skinned mesh (four joints and weights per vertex, as stored) and skips the
+  per-joint draws of those instances. One joint entity per skin joint starts at its intact
+  world pose (placement x joint-to-root) and follows its piece body exactly as a piece part
+  does (`present`: now x start^-1 x rest). The part is shown with its first jointed piece.
+  At rest the blended vertices match the per-joint split to 1 mm (test
+  `skinned_damage_meshes_blend_to_their_pieces_at_rest`, five tracks).
 
 After the change, all 353 drawable pieces draw on their bodies: round pieces are centred and fill
 their cylinder or sphere, box pieces' mesh centres lie in their box, and every draw's material

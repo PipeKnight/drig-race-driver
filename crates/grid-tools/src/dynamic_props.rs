@@ -3075,6 +3075,93 @@ mod tests {
         assert!(failures.is_empty(), "{} of {} pieces fail", failures.len(), checked + failures.len());
     }
 
+    /// grid-app draws a damage renderable's skinned meshes blended over their
+    /// joints (`Renderables::skins_in`, F710; the per-joint split left
+    /// slivers once an Armco rail bent). Every weighted joint follows a
+    /// piece, the weights sum to one, and at rest each blended vertex sits
+    /// where the per-joint split drew it.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn skinned_damage_meshes_blend_to_their_pieces_at_rest() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let mut failures = Vec::new();
+        let mut skins = 0;
+        for (track, routes) in [
+            ("europe/nurburgring", 0..4),
+            ("usa/detroit", 0..10),
+            ("europe/le_mans", 0..2),
+            ("europe/donington", 0..4),
+            ("usa/washington", 0..10),
+        ] {
+            let mut seen = std::collections::BTreeSet::new();
+            let first = Route::new(&format!("tracks/{track}/route_0")).unwrap();
+            let bytes = std::fs::read(root.join(first.track_file("objects.pssg"))).unwrap();
+            let tree = pssg::read_tree(&bytes).unwrap();
+            let sources = grid_formats::mesh::read_object_meshes(&tree).unwrap();
+            let renderables = grid_formats::scene::Renderables::new(&tree, &sources).unwrap();
+            for r in routes {
+                let route = Route::new(&format!("tracks/{track}/route_{r}")).unwrap();
+                let props = Props::read_route(root, &route).unwrap();
+                let catalog = Catalog::read(root, &route, &props).unwrap();
+                for b in catalog.breakables.iter().filter(|b| seen.insert(b.template.clone())) {
+                    let groups: std::collections::BTreeSet<&str> =
+                        b.pieces.iter().map(|p| p.renderable.as_str()).collect();
+                    for renderable in groups {
+                        let anchors: Vec<&[u8]> = (b.pieces.iter())
+                            .filter(|p| p.renderable == renderable)
+                            .map(|p| p.anchor.as_bytes())
+                            .collect();
+                        let found = match renderables.skins_in(renderable.as_bytes(), &anchors) {
+                            Ok(found) => found,
+                            Err(e) => {
+                                failures.push(format!("{track} {}: {}", b.template, e.message));
+                                continue;
+                            }
+                        };
+                        for skin in found {
+                            skins += 1;
+                            let what = format!("{track} {} {}", b.template, String::from_utf8_lossy(skin.id));
+                            let source = &sources[skin.source];
+                            let (bound, weights) = source.skin_weights.as_ref().unwrap();
+                            let at = |j: usize, v: [f32; 3]| {
+                                let joint = &skin.joints[j];
+                                let m = grid_formats::scene::compose(&joint.inverse_bind, &joint.to_root);
+                                grid_formats::scene::transform_point(&m, v)
+                            };
+                            for (v, (&p, (joints, w))) in source.positions.iter().zip(bound.iter().zip(weights)).enumerate() {
+                                if (w.iter().sum::<f32>() - 1.).abs() > 1e-3 {
+                                    failures.push(format!("{what} vertex {v}: weights {w:?}"));
+                                    break;
+                                }
+                                let mut blended = [0.; 3];
+                                for (&j, &weight) in joints.iter().zip(w).filter(|(_, w)| **w > 0.) {
+                                    if skin.joints[j as usize].anchor.is_none() {
+                                        failures.push(format!("{what}: joint {j} under no piece"));
+                                    }
+                                    let q = at(j as usize, p);
+                                    (0..3).for_each(|k| blended[k] += weight * q[k]);
+                                }
+                                let main = source.skin_indices.as_ref().unwrap()[v] as usize;
+                                let split = at(main, p);
+                                if (0..3).any(|k| (blended[k] - split[k]).abs() > 1e-3) {
+                                    failures.push(format!("{what} vertex {v}: blended {blended:?} split {split:?}"));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        failures.dedup();
+        for f in &failures {
+            eprintln!("{f}");
+        }
+        assert!(skins > 10, "{skins}");
+        assert!(failures.is_empty(), "{} failures over {skins} skins", failures.len());
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn donington_breakables_follow_the_shape_behaviours() {

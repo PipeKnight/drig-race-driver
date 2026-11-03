@@ -214,6 +214,8 @@ struct Car {
     /// Reflecting materials' saved controls, keyed like the parts' materials
     /// (docs/CAR_REFLECTIONS.md).
     reflections: BTreeMap<String, car_reflection_overlay::Controls>,
+    /// Skinned breakable pieces' joints (`dynamic_props::PieceSkins`).
+    piece_skins: BTreeMap<String, dynamic_props::PieceSkin>,
 }
 /// A model's `_lowLOD.pssg` for its opponents.
 #[derive(Default)]
@@ -841,6 +843,7 @@ fn load_package(
         low_lods: Vec::new(),
         ornament_lods: Default::default(),
         reflections: Default::default(),
+        piece_skins: Default::default(),
     };
     if !track {
         for shader in material::read_constants(&tree)? {
@@ -1583,6 +1586,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         low_lods: Vec::new(),
         ornament_lods: Default::default(),
         reflections: Default::default(),
+        piece_skins: Default::default(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -4913,6 +4917,7 @@ fn setup(
         std::collections::HashMap::new();
     let mut piece_parts = 0;
     let ornament_levels = std::mem::take(&mut car.ornament_lods);
+    commands.insert_resource(dynamic_props::PieceSkins(std::mem::take(&mut car.piece_skins)));
     let ornament_shadows = !ornament_levels.parts.is_empty();
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
@@ -7260,6 +7265,7 @@ mod driving_tests {
                         low_lods: Vec::new(),
                         ornament_lods: Default::default(),
                         reflections: Default::default(),
+                        piece_skins: Default::default(),
                     };
                     append_route_split(root, &route, &model, &mut car)
                         .unwrap_or_else(|e| panic!("{}: {e}", route.path()));

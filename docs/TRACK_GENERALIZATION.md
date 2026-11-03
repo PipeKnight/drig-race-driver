@@ -136,6 +136,11 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
   explicit pairs included; an empty renderable without a root is still an
   error on Donington and omitted with a count elsewhere
   (`grid-empty-renderables`).
+  The anchor NODE's own transform is not applied (F710): it equals the rigid
+  body's first collision-shape centre in the entity frame (cushion (-0.022,
+  0.467, 0), tyre stack (0.636, 0.491, -0.003); the anchor is the body frame,
+  `body_node`), the root's LOD node is identity, and the float audit finds
+  these entities resting on the ground; the offset would lift a cushion 0.47 m.
 
 ## Open items
 

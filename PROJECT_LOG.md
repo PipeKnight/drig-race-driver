@@ -140,6 +140,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F710](log/F0710.md) | 2026-11-03 | Barrier strips at impact: skinned damage meshes blend over their pieces' joints; the anchor offset is the body frame |
 | [F709](log/F0709.md) | 2026-11-03 | track.vis decoded; Okutama raised grass is out of route reach; read_sun reads every lighting file |
 | [F708](log/F0708.md) | 2026-11-03 | Car LOD level fades and remaining pop sources |
 | [F707](log/F0707.md) | 2026-11-03 | Okutama grass per route: track.vis covers every grass patch; baseline-sun crops for the owner |
@@ -199,7 +200,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F653](log/F0653.md) | 2026-10-30 | Barrier collision sweep: basic entities collide (fences, armco, walls on every route) |
 | [F652](log/F0652.md) | 2026-10-30 | Sun shadows: casters culled per cascade by receiver, shadow passes timed, the original's cascades traced |
 | [F651](log/F0651.md) | 2026-10-30 | First-corner matrix with breakable props; start-line routes; flag bases |
-| [F650](log/F0650.md) | 2026-10-30 | Cockpit: the wheel follows the front wheels' applied steering (row 94) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

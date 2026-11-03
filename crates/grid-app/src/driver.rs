@@ -794,6 +794,7 @@ mod tests {
             low_lods: Vec::new(),
             ornament_lods: Default::default(),
             reflections: Default::default(),
+            piece_skins: Default::default(),
         };
         let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY, None).unwrap();
         let (driver, clips) = (cockpit.driver.unwrap(), cockpit.interior.unwrap());
@@ -877,6 +878,7 @@ mod tests {
             low_lods: Vec::new(),
             ornament_lods: Default::default(),
             reflections: Default::default(),
+            piece_skins: Default::default(),
         };
         let cockpit = crate::cockpit::append(&root, "lac", &mut car, Mat4::IDENTITY, None).unwrap();
         let reach = cockpit.reach.unwrap();
@@ -967,6 +969,7 @@ mod tests {
                 low_lods: Vec::new(),
                 ornament_lods: Default::default(),
                 reflections: Default::default(),
+                piece_skins: Default::default(),
             };
             let cockpit = match crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY, None) {
                 Ok(c) => c,
