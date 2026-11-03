@@ -3727,3 +3727,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00BA0CC0	node_read_transform	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Named TRANSFORM reader into source-local+50; isolated call does not prove byte-order implementation.
 0x00618000	node_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common node copy setup plus64-byte source-local/child stage.
 0x00BBC930	jointnode_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common local/child copy stage then no-op joint extension; current bank child identity remains unknown.
+0x00904440	vehicle_prepare_front_light_points	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Atomic glass pair then pod pair then original defaults; saved bounds midpoint plus node translation, not arbitrary draw AABB.
+0x00988F10	vehicle_owner_description	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Returns per-car owner+44C description link, not singleton manager.
+0x008F5700	vehicle_component_part_first_present	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		First non-null among eight slots for exact part code; canonical LOD0 ordering not proved.
+0x00BA0FF0	node_read_transform_bounds	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Named TRANSFORM and BOUNDINGBOX reader establishes +50 matrix/+D0,+E0 bound vectors.
