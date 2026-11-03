@@ -3718,3 +3718,12 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00F60A14		global	not ported	docs/TYRE_SMOKE_RESEARCH.md:1193				NORMAL (element `0xF60A14`, `0x88C221`): four constant corner normals (±1, ±1, 1)/√3
 0x00F60A20		global	not ported	docs/TYRE_SMOKE_RESEARCH.md:1191				TEXCOORD0 (element `0xF60A20`, `0x88BA7C`): atlas UVs; a second texture-coordinate set gets
 0x00FB1FA0		global	not ported	docs/PHYSICAL_RESPONSE.md:38				`tools/probe_physical_response.c` maps the pinned private analysis PE, uses aligned owned rows/manager/body workspace and recovered ABI bridges, then execute...
+0x008840B0	plugin_list_finalise	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Configured ordinary finalise state2 -> callback+14 -> successful AL promotes state3; not actor readiness.
+0x0064AC60	organism_finalise	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Null manager can return success; otherwise forwards saved job-setup result, not transactional helper success.
+0x007704E0	crowd_prepare_jobs	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Calls known job setup and returns its saved AL; other helper results not combined.
+0x008BA1F0	task_pending_append	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Bounded 0x28-byte pending append only; no task invocation or clock unit.
+0x00BA14B0	node_registered_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Registered NODE factory; constructor installs D46070.
+0x00BCE540	jointnode_registered_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Registered JOINTNODE factory installs D49348; BBCB00 is derived, not this factory.
+0x00BA0CC0	node_read_transform	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Named TRANSFORM reader into source-local+50; isolated call does not prove byte-order implementation.
+0x00618000	node_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common node copy setup plus64-byte source-local/child stage.
+0x00BBC930	jointnode_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common local/child copy stage then no-op joint extension; current bank child identity remains unknown.

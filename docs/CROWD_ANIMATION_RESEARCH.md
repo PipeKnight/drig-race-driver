@@ -684,3 +684,60 @@ full1388-test gate, four identities and24soak scenarios also pass; this does
 not establish rendered animation or native clock/pose/LOD compatibility.
 Private review/pins: `local/handoff/drafts/crowd-metadata-consumer46/`; actual
 applied hashes and checks: `local/graphics/crowd-metadata01/`.
+
+## Typed child copy and update lifecycle (G355)
+
+Registered NODE and JOINTNODE classes now have concrete source factories and
+copy callbacks: NODE factory0x00BA14B0 installs table0x00D46070; registered
+JOINTNODE factory0x00BCE540 installs0x00D49348. Their readers reach the named
+TRANSFORM field and their copy callbacks use the common source-local copy stage.
+Both identified slot+0x20 finalizers return zero. The earlier derived factory
+0x00BBCB00 is not the registered JOINTNODE factory.
+
+Three selected dataset-referenced rigs each contain23nonidentity joint locals
+and9nonidentity ordinary helper locals. Preserving only palette joints or
+resetting these children to identity would discard saved transforms. The
+existing diagnostic rig already retains these locals and resolves the ordered
+named skin palette separately; no missing preservation bug was found there.
+Its ordinary-helper/inverse-order numeric controls were inspected, not rerun
+for this source-only audit. Selected graph counts are not all-regional limits.
+
+This identifies source schema and copy stages, not the current bank's child
+classes, source-at-clone history, SKINNODE/derived-class fixups or native
+per-frame reference initialization. ROOTNODE hooks also maintain typed lists;
+these observations are not an all-graph no-mutation proof. Do not replace saved
+locals with inverse binds or introduce a blanket reset policy. Private exact
+factories, table slots, schema, asset graph hashes and consumer audit:
+local/handoff/drafts/crowd-node-reference56/.
+
+### Finalise success and scheduled plugin updates
+
+Pre-registration0x006030F0 passes the actual plugin-list owner to0x008840B0.
+For an ordinary configured finalise record, plugin state2 invokes virtual+0x14;
+only a successful AL promotes state to3, the established update-eligibility gate.
+The actual OrganismPlugin callback0x0064AC60 can succeed with a null manager, so
+state3 does not imply actors or animation jobs exist. With a manager,0x007704E0
+forwards the established job setup result; earlier helper returns are not
+combined into a transactional success value.
+
+Registration0x005EB6A0 separately queues that same owner as phase5,
+`Plugin update`, through0x0087E2D0. Its zero-period record is0x28bytes; append
+helper0x008BA1F0 copies it into the bounded pending container. A full container
+returns failure, which these registration wrappers do not check. This is source
+control flow, not an observed runtime overflow. It does not identify the active
+execution queue, double producer, time unit, pause/replay policy or concurrency.
+
+The sole direct registration caller reaches an explicitly unassigned master
+address; read-only shared decompilation returned a recorded miss. No function
+boundary was invented from a prologue, and unrelated nearby/offset-matching
+objects were rejected. The exact missing edge remains the typed scheduler
+initialization/queue consumer and the incoming double passed to ordinary update.
+Do not join it to physics seconds by ABI resemblance. Private proofs and finite
+negative findings: crowd-lifecycle-readiness52/, crowd-task-registration53/,
+crowd-task-container54/ and crowd-outer-lifecycle55/ under local/handoff/drafts/.
+
+Crowd audio is a separate existing implementation: see [AUDIO_RESEARCH](AUDIO_RESEARCH.md),
+section31, and grid-app crowd_sound. It already consumes route crowd cells and
+ReactiveCrowd events; visual animation is not a prerequisite for that playback.
+Gasps/recoil and original RNG remain separately documented audio limits. This
+audit adds no audio, rendered crowd, clock or default-policy change.
