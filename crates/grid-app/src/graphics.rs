@@ -145,6 +145,8 @@ pub struct Settings {
     pub source_sun_colour: bool,
     pub saved_sun_colour: Option<[f32; 3]>,
     pub saved_sun: Option<grid_formats::track_lighting::Sun>,
+    /// Baseline track scenes: the original's back/ambient fill (row 109).
+    pub baseline_fill: Option<Fill>,
     pub preset: Preset,
     pub width: u32,
     pub height: u32,
@@ -220,10 +222,52 @@ impl Default for Settings {
             source_sun_colour: false,
             saved_sun_colour: None,
             saved_sun: None,
+            baseline_fill: None,
             preset: Preset::Baseline,
             width: 1280,
             height: 800,
         }
+    }
+}
+
+/// The original track shader's light besides the sun [V static,
+/// `track_surface_simple.cg.fp`]: `back * (1 - N.L) / 2 + ambient`, from
+/// lighting.xml's `backlight_backcolour` / `backlight_ambientcolour`, scaled
+/// against `backlight_suncolour`'s peak = the baseline sun's 18,000 lux.
+/// AUTHORED: as Bevy lights, `ambient + back / 2` is a uniform ambient and
+/// `back / 2` a shadowless light from opposite the sun (the original's term
+/// also dims the lit side by up to back / 2; not reproduced). `gamma`
+/// decodes the saved colours with 2.2 first (the original's shading space
+/// is unverified).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fill {
+    pub ambient: [f32; 3],
+    pub ambient_brightness: f32,
+    pub back: [f32; 3],
+    pub back_lux: f32,
+}
+
+impl Fill {
+    pub fn from_lighting(
+        lighting: &grid_formats::track_environment::Lighting,
+        sun_lux: f32,
+        gamma: bool,
+    ) -> Option<Self> {
+        let decode = |rgb: [f32; 3]| if gamma { rgb.map(|c| c.max(0.).powf(2.2)) } else { rgb };
+        let sun = decode(lighting.rgb("backlight_suncolour")?);
+        let back = decode(lighting.rgb("backlight_backcolour")?);
+        let ambient = decode(lighting.rgb("backlight_ambientcolour")?);
+        let unit = sun_lux / sun.into_iter().fold(1e-3_f32, f32::max);
+        let fill: [f32; 3] = std::array::from_fn(|i| ambient[i] + back[i] / 2.);
+        let peak = |c: [f32; 3]| c.into_iter().fold(1e-6_f32, f32::max);
+        // Bevy: a directional light gives albedo/pi * lux * N.L; the ambient
+        // gives albedo * colour * brightness.
+        Some(Self {
+            ambient: fill.map(|c| c / peak(fill)),
+            ambient_brightness: peak(fill) * unit / std::f32::consts::PI,
+            back: back.map(|c| c / peak(back)),
+            back_lux: peak(back) / 2. * unit,
+        })
     }
 }
 
@@ -346,9 +390,9 @@ impl Settings {
     }
 
     pub fn sun_transform(&self) -> Transform {
-        if self.enhanced()
-            && let Some(sun) = self.saved_sun
-        {
+        // Saved only for track scenes: --sun source (enhanced) or the
+        // baseline's lighting.xml direction.
+        if let Some(sun) = self.saved_sun {
             let direction = Vec3::from_array(sun.direction_to_light()).normalize();
             let up = if direction.dot(Vec3::Y).abs() > 0.9999 {
                 Vec3::Z
@@ -709,6 +753,7 @@ mod graphics_settings_tests {
                     < 0.000001
             );
         }
+        settings.saved_sun = None;
         settings.preset = Preset::Baseline;
         assert_eq!(settings.sun_transform(), authored);
     }

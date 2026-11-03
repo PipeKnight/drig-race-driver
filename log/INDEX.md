@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F716](F0716.md) | 2026-11-03 | Baseline sun from the route's lighting.xml plus the original's back/ambient fill (owner's decision) |
 | [F715](F0715.md) | 2026-11-03 | Dynamic prop parts tagged at spawn; static scenes hide unbroken pieces |
 | [F714](F0714.md) | 2026-11-03 | F710 skinned-mesh render regression fixed; prepush render smoke |
 | [F713](F0713.md) | 2026-11-03 | Ornament shadows fade across D (shadow proxies) |

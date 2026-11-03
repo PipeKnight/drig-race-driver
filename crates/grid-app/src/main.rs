@@ -2006,6 +2006,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         ..default()
     };
     let mut source_haze = false;
+    let mut sun_authored = false;
     let mut reflection_calibration = false;
     let mut geometry_pixel = None;
     let mut render_fixed_step = false;
@@ -2141,6 +2142,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 };
                 graphics.source_sun = direction;
                 graphics.source_sun_colour = colour;
+                sun_authored = !direction;
             }
             "--sky-tone" => {
                 graphics.source_sky_tone = match args.next().as_deref() {
@@ -3399,6 +3401,26 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             println!("source_sun_colour normalized_rgb={rgb:?} radiometry=authored colour_space=assumed-linear");
             graphics.saved_sun_colour = Some(rgb);
         }
+    } else if !graphics.enhanced() && !sun_authored && (track || drive) && !collision {
+        // Baseline track scenes light from the track's own sun direction
+        // (lighting.xml), not one authored direction for every track: faces
+        // the original lights stood in shade (row 109, the Washington kerb).
+        // Direction only; colour and lux stay the baseline's.
+        // The route's own lighting.xml where it has one (Haruna's night
+        // routes), with the lighting the fill also reads.
+        let environment = grid_tools::environment::Environment::for_route(&root, &route)?;
+        let [height_degrees, rotation_degrees] = environment.lighting.sun().ok_or("lighting.xml sun angles missing")?;
+        let sun = grid_formats::track_lighting::Sun { height_degrees, rotation_degrees };
+        println!("baseline_sun angles={sun:?} direction_to_light={:?} source={} radiometry=baseline", sun.direction_to_light(), environment.lighting_file);
+        graphics.saved_sun = Some(sun);
+        // GRID_BASELINE_FILL: linear (default), gamma or off (owner review).
+        let mode = std::env::var("GRID_BASELINE_FILL").unwrap_or_else(|_| "linear".into());
+        graphics.baseline_fill = match mode.as_str() {
+            "off" => None,
+            "linear" | "gamma" => graphics::Fill::from_lighting(&environment.lighting, graphics.sun_illuminance(), mode == "gamma"),
+            _ => return Err("GRID_BASELINE_FILL needs linear, gamma or off".into()),
+        };
+        println!("baseline_fill mode={mode} fill={:?}", graphics.baseline_fill);
     }
     if source_haze {
         if !graphics.enhanced() || (!track && !drive) {
@@ -5545,11 +5567,30 @@ fn setup(
     } else {
         bevy::camera::visibility::RenderLayers::from_layers(&[0, cockpit::LAYER])
     });
-    commands.insert_resource(GlobalAmbientLight {
-        color: Color::WHITE,
-        brightness: 450.0,
-        ..default()
-    });
+    if let Some(fill) = graphics.baseline_fill {
+        commands.insert_resource(GlobalAmbientLight {
+            color: Color::linear_rgb(fill.ambient[0], fill.ambient[1], fill.ambient[2]),
+            brightness: fill.ambient_brightness,
+            ..default()
+        });
+        // From opposite the sun, without shadows.
+        let sun = graphics.sun_transform();
+        commands.spawn((
+            DirectionalLight {
+                illuminance: fill.back_lux,
+                color: Color::linear_rgb(fill.back[0], fill.back[1], fill.back[2]),
+                shadow_maps_enabled: false,
+                ..default()
+            },
+            Transform::from_rotation(sun.rotation * Quat::from_rotation_x(std::f32::consts::PI)),
+        ));
+    } else {
+        commands.insert_resource(GlobalAmbientLight {
+            color: Color::WHITE,
+            brightness: 450.0,
+            ..default()
+        });
+    }
     let camera = commands
         .spawn((
             Camera3d::default(),
