@@ -13,6 +13,8 @@ mod foundation_backing_audit;
 mod crowd_population;
 mod crowd_preview;
 mod crowd_rig;
+mod crowd_pose;
+mod crowd_selected_clip;
 mod flash_fixture;
 mod flash_preview;
 // Source reference viewer and serial driving prototype. A plain comment, not
@@ -2206,6 +2208,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut native_smoke_capture_profile = None;
     let mut native_smoke_script_flags = native_smoke::ScriptFlags::default();
     let mut crowd_preview = crowd_preview::Mode::Off;
+    let mut crowd_actor_context:Option<String>=None;
+    let mut crowd_actor_target:Option<String>=None;
+    let mut crowd_bank_coordinate:Option<String>=None;
+    let mut crowd_actor_performance:Option<String>=None;
+    let mut crowd_actor_draw:Option<String>=None;
     let mut crowd_flash_preview = flash_preview::Mode::Off;
     let mut foundation_front = foundation_front::Mode::Off;
     let mut foundation_backing = foundation_backing::Mode::Off;
@@ -2641,6 +2648,26 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     &args.next().ok_or("--window-transitions needs FRAME:C,FRAME:R,...")?,
                 )?);
             }
+            "--crowd-actor-context" => {
+                if crowd_actor_context.is_some(){return Err("duplicate --crowd-actor-context".into());}
+                crowd_actor_context=Some(args.next().ok_or("--crowd-actor-context needs an explicit value")?);
+            }
+            "--crowd-actor-target" => {
+                if crowd_actor_target.is_some(){return Err("duplicate --crowd-actor-target".into());}
+                crowd_actor_target=Some(args.next().ok_or("--crowd-actor-target needs an explicit value")?);
+            }
+            "--crowd-bank-coordinate" => {
+                if crowd_bank_coordinate.is_some(){return Err("duplicate --crowd-bank-coordinate".into());}
+                crowd_bank_coordinate=Some(args.next().ok_or("--crowd-bank-coordinate needs an explicit value")?);
+            }
+            "--crowd-actor-performance" => {
+                if crowd_actor_performance.is_some(){return Err("duplicate --crowd-actor-performance".into());}
+                crowd_actor_performance=Some(args.next().ok_or("--crowd-actor-performance needs an explicit value")?);
+            }
+            "--crowd-actor-draw" => {
+                if crowd_actor_draw.is_some(){return Err("duplicate --crowd-actor-draw".into());}
+                crowd_actor_draw=Some(args.next().ok_or("--crowd-actor-draw needs an explicit value")?);
+            }
             "--crowd-preview" => {
                 crowd_preview = crowd_preview::Mode::parse(&args.next().ok_or("--crowd-preview needs a mode")?)?;
             }
@@ -2971,6 +2998,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--smoke-boundary grouped-live: opt-in solo baseline AA0/sky BMW Istanbul route_0 keyboard fix using existing five smoke groups after transparency; interactive Window or bounded --render, no screenshot ledger/native DLAA/general-car admission. Cold/empty/unsupported frames retain ordinary draws; unexpected post-mask skip is a reported failure.");
                 println!("--smoke-boundary grouped-live-derby: explicit baseline AA1/MSAA4 STK Detroit route_8/sub0 11AI/six laps/back-grid/damage only; ordinary Window or exact900/30/350x120 image fixture, SkidOff, other pilots off; no default promotion/native-AA/menu admission.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
+                println!("--crowd-preview selected-source-control|selected-source-pose: general explicit-source actor diagnostic through existing renderer, bounded baseline/reference/LOD0/MSAA4. Requires ALL: --crowd-actor-context PRIMARY,FALLBACK,MAPGROUP,BILLBOARD_USERDATA (- explicitly absent set); --crowd-actor-target GROUP,MAP,PLACEMENT,SKIN,MODIFIER,VARIANT,COLOURSET; --crowd-bank-coordinate FLOAT; --crowd-actor-performance default|0..15; --crowd-actor-draw U32. No source clock, Delta/mirror or orientation parity. Quote comma values containing spaces.");
                 println!("--crowd-flash-preview off|control|frozen-pulse: default-off authored three-anchor static Detroit crowd flash diagnostic; requires --crowd-preview static-billboards, baseline MSAA4, --reflections sky and bounded rendered reference. No source clock or scene lights.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
                 println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
@@ -3174,13 +3202,17 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
     }
     crowd_preview.validate(
-        !graphics.enhanced(),
+        !graphics.enhanced() && graphics.anti_aliasing != 3,
         reference && !drive && !headless && !collision && !from_menu
             && smoke_compositor == smoke_compositor::Mode::Off
             && graphics.object_coverage == object_materials::CoverageMode::Off,
         route.path() == "tracks/usa/detroit/route_8" && route.subroute() == 0,
         lod == "LOD0_", output.is_some(), graphics.benchmark_frames,
         std::env::var_os("GRID_PERF_TEST").is_none(),
+    )?;
+    let selected_actor_request=crowd_preview::selected_request_from_cli(
+        crowd_preview,crowd_actor_context.as_deref(),crowd_actor_target.as_deref(),
+        crowd_bank_coordinate.as_deref(),crowd_actor_performance.as_deref(),crowd_actor_draw.as_deref(),
     )?;
     // Baseline camera retains Bevy's MSAA4; startup asserts the actual component.
     // Existing crowd admission above enforces exact route/static/render/frame scope.
@@ -5090,7 +5122,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         app.add_systems(PostStartup, object_materials::assert_coverage_msaa);
     }
     if crowd_preview != crowd_preview::Mode::Off {
-        let prepared = crowd_preview::prepare(&root, &route, crowd_preview)?;
+        let prepared = if let Some(request)=selected_actor_request.as_ref() {
+            crowd_preview::prepare_with_request(&root, &route, crowd_preview, Some(request))?
+        } else {
+            crowd_preview::prepare(&root, &route, crowd_preview)?
+        };
         let flash = if crowd_flash_preview != flash_preview::Mode::Off {
             let anchors = crowd_preview::flash_fixture_anchors(&root, &prepared)?;
             Some(flash_preview::prepare(&root, crowd_flash_preview, &anchors)?)
