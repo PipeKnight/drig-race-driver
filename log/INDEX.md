@@ -631,6 +631,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G375](G0375.md) | 2026-11-04 | Resolve shipped crowd playback and postprocess source-slot selection |
 | [G374](G0374.md) | 2026-11-04 | Join temporal input captures to actual effective CPU mesh candidates |
 | [G373](G0373.md) | 2026-11-04 | Lamp palette identity and postprocess parameter contracts |
 | [G372](G0372.md) | 2026-11-04 | Recover shared car emissive atlas and typed sampler association |

@@ -320,3 +320,64 @@ preparation algebra. It does not establish interpolation, effective resource
 overlay/selection, clock units or the correct render colour domain. Evidence:
 local/handoff/drafts/postprocess-typed-parameters138/. No new decompile was
 needed; all retained method windows end at their actual return/padding.
+
+
+## Resource role order and timeline destinations (G375)
+
+Actual processing callback0x00733500 distinguishes XML chain descriptions from
+binary effect descriptions. For binary descriptions it requires the resource's
+allocator to equal the owner's TEMPORARY allocator, then compares the resource
+role with exact global/global_override strings. Global fills pending+0x84/+0x88
+only when empty; other roles fill+0x8C/+0x90 only when empty; global_override
+writes+0x94/+0x98. The role callback and later completion callback together prove
+fixed application order global -> other -> global_override, subject to their
+existing nonnull/query gates. This is independent of resource arrival order.
+The second payload word is not established as length; a separate resource field
+supplies the trailing-NUL offset.
+
+Both purchased postprocess datasets, ordinary and no-blur, associate effects.xml
+with role global and request one extra byte. Neither declares the override file.
+Its existence does not prove it loads, and other is not yet proved to be the
+track description. Generated track/override requests remain an explicit gap.
+
+The first flag's selected virtual0x008A76A0 requests an effect-registry clear.
+Any nonzero effect+0xA0 rejects it with status13 before cleanup; the deserializer
+ignores this return and continues parsing. Thus global loading is not proved
+an unconditional successful replacement transaction. On admitted clearing the
+routine calls effect lifecycle methods, releases backing and clears indices/map.
+The semantic owner of the guard field remains unresolved.
+
+Calls0x00895FB0(2,0)/(3,1) select groups by effect ID and pass the second argument
+to their virtual+8. The selected ColourBalance group implementation0x00746230
+uses byte+0x64 as a one-time registration latch. Its ten named registrations
+forward the incoming0/1 as a destination slot to0x0098D1D0. The latter
+retains pointers to scalar/packed-colour storage in two slots; it does not read
+or reset their values. The apparent receiver helper0x0098CE10 simply returns
+the shared registry address. Do not call these operations effect enable/disable,
+exposure enums or per-frame interpolation.
+
+The registry's actual writer is the already researched day/night timeline
+manager, as documented below. Active effect selection, output GPU colour
+domains and exposure history remain open. No renderer,
+normal grade or source asset changes accompany these source contracts. Private
+evidence: local/handoff/drafts/postprocess-resource-order142/,
+postprocess-clear143/ and postprocess-source-slots144/.
+
+### Actual day/night writer, reusing existing clock research
+
+The registry address0x00E85FE0 is the day/night timeline manager already in
+[LE_MANS](LE_MANS.md). Existing0x009ACE90/0x009ACFB0 evidence and the actual
+0x0090D5A0 runtime branches close this join. The two registered pointers are
+destinations, not source values to blend. With keys present, the same sampled
+curve writes both destinations: scalar floats directly, bytes with the source
+round/clamp rule, booleans with a strict threshold. With no keys it performs
+no target write, preserving the XML-loaded values. The valid finite-input
+interpolation contract and clock remain those of the existing time-of-day port.
+
+All ten ColourBalance registration names occur in the purchased Le Mans
+timeline; attribute occurrence counts are not expanded key counts or evidence
+of successful live loading. Static XML values, optional timeline writes and
+prepared shader values are distinct stages. This does not identify the active
+effect/chain, port GPU colour-domain or establish that the separate timeline
+luminance output is the final-merge exposure texture. Private evidence:
+local/handoff/drafts/postprocess-timeline145/. No new Java or renderer change.
