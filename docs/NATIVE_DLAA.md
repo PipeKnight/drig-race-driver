@@ -334,3 +334,43 @@ passes. Actual evidence (including the initial Clippy failure and corrected
 run): local/graphics/antenna-source-projection01/. No GPU/window run was needed;
 the normal app executable remained unchanged. Publication gate is recorded in
 G378 rather than inferred from the diagnostic self-check.
+
+
+## Matched creation-hint experiment: no default change (G379)
+
+A private, typed process-start experiment compared library-default, J and K
+creation hints through a minimal owned dlss_wgpu4.0.0 seam. It used the existing
+SDK310.5.3, one actual feature artifact32f315d6/EXEb5f94d354ded38d360f81a1a2e78b9c9e0fd0c3fe8f41a54fae054ae07c36066,
+without updating Bevy/SDK or editing shared registry sources. The normal control
+made no preset setter/getter call. J/K required explicit native DLAA and refused
+mixed SR/RR contexts; each process froze its policy before SDK initialization.
+
+All three real zero-window runs passed the strict two-RAW/four-HDR/header,
+actual consecutive native-history/body, warm-up and current-CPU-geometry joins.
+Source frames793/794, ticks1652/1654, camera matrices, physics, all current mesh
+shape/world rows and thirty PNG request stamps matched across arms. There was
+exactly one successful1920x1080 context receipt per process: default no setter
+and no echo; J echoed10; K echoed11. These are parameter/creation receipts,
+not proof of the active internal model or GPU dispatch. The existing SDK update
+thread also means a runtime DLL hash alone cannot pin possible internal models.
+
+Before-AA HDR RGB was bit-identical across all three arms for both frames.
+After-AA J differed from default in549184/551301 RGB components (mean absolute
+linear differences0.001995/0.001952); K differed slightly, means0.0000491/0.0000480.
+These are difference measurements, not quality scores. Native-pixel crops and
+motion context show stronger antenna trails under J; K looks close to default
+and does not solve the reported trail. No default hint/model equivalence is
+inferred from that resemblance. The motion PNGs remain separate visual context,
+not an exact postMotion join to the frozen before/after-AA HDR transaction.
+
+Therefore neither hint is promoted and the experimental bridge is not added to
+main solely for this unsuccessful quality trial. Its final source patch, hashes,
+local branch codex/grid-graphics-dlaa-hints/32f315d6 and all failed/passing build
+receipts are retained privately for reproduction. Publishing that source later
+would still require its dependency-changing FULL gate; that gate was not run
+for the declined code. This documentation-only result uses the docs gate.
+
+Actual evidence: local/graphics/dlaa-creation-hint01/{native01,native02,native03,
+native04,matched01}/ and local/handoff/drafts/dlaa-creation-hint-negative159/.
+Matched native-pixel frame00/frame29 PNGs and thirty-frame GIF were shown to the
+owner from matched01/review/. Antenna/thin-coverage quality remains open.
