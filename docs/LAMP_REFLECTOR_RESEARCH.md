@@ -218,3 +218,50 @@ lamp-signal controls including576 source-fade cases and the DDS identity.
 These are CPU association/consumer checks, not new GPU glow or native sampler
 gamma/radiometry proof. Source section-state/activation and owned intact/cracked
 handle-family work remain open.
+
+## Semantic sections and saved palette identity (G373)
+
+The source render-record builder0x008FC9F0 reads five semantic-part tables
+at0x00D0D270/0x00D0D2A0/0x00D0D2D0/0x00D0D300/0x00D0D330. Bounded reads
+confirm twelve DWORDs per table: six records with two members each. Their
+ordering agrees with the existing source-derived damage grouping. The front
+records cover three left and three right sections; each rear role table orders
+left/right, second left/right, third left/right. Semantic part enums select
+nodes through the per-LOD table at context+0x4B0; they are NOT palette IDs.
+For example, a selected rear section has semantic enum143 but saved palette63.
+Do not substitute enum values or array positions for shader identifiers.
+
+The serialized-class route now closes the identity boundary structurally [D].
+Registration0x00C80530 associates MATRIXPALETTEJOINTNODE with factory0x00BBCB00
+and descriptor0x00F64900. Property table0x00E54EBC registers jointID using key
+storage0x00F647F0. The factory initializes field+0xF8 to-1 and installs table
+0x00D48320; its+0x0C entry points exactly to reader0x00BBC6C0. That reader
+passes the registered jointID key and destination this+0xF8 to the property
+reader, returning status6 when the required value is missing. Writer0x00BBC650
+uses the same key/field. One shared-master read-only decompile returned MISS;
+registry, vtable and aligned instructions establish this result, not pseudocode.
+
+The already recovered0x009024C0 takes this field from selected runtime nodes,
+converts it to float and supplies Parts IDs. The selected vertex program uses
+floor(SkinIndices) for its matrix lookup but compares the full saved value
+against Parts. The current rigid draw reader already requires all saved
+SkinIndices in a draw to equal the parent jointID. Retaining that checked
+integer would preserve the existing accepted identity without parsing names
+or assuming mixed per-vertex sections. No live-uniform or weighted-variant
+compatibility is claimed by this structural proof.
+
+Source state ordering also matters: ancestry failure zeroes intensity first;
+a broken physical cluster then overrides its present sections to-1. Pod and
+glass collections have separate modal defaults and at most ten nondefault
+exceptions. The comparator's tie ordering remains unresolved. Per-slot input
+contexts are real source objects; a model texture namespace is not a car-slot
+state owner. Semantic-node table population, live activation, intact/cracked
+handle ownership, LOD, reset and replay remain required before general glow.
+No suffix whitelist, tab trimming or universal material-wide state replaces
+these missing joins. Four extra source entries have an unresolved role and
+are not silently classified as normal lamps.
+
+Private evidence: local/handoff/drafts/lamp-section-identity131/ and
+lamp-table-writer135/, with pinned PE SHA256
+aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514.
+No original process, window or game asset was changed.
