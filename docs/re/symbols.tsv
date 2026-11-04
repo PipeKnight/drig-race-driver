@@ -736,6 +736,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x006138D0		func	crates/grid-app/src/main.rs:3845 grid-app::main (in run) ; crates/grid-app/src/cockpit.rs:3 grid-app::cockpit	docs/LOADER_RESEARCH.md:25 ; docs/CAMERA_VIEWS.md:275 ; docs/COCKPIT.md:466	F684	[D]		The cockpit of the player only (0x6138D0), when driving.
 0x00614C93		label	not ported	docs/LOADER_RESEARCH.md:25				inside 0x006138D0; | `0x006138d0` | Ref at `0x00614c93` to `cars/car_loader.xml`, string at `0x00ce67a0` | Car-loading/setup candidate; observe car ID and resolved resource pat...
 0x006174F0		func	crates/grid-tools/src/dynamic_props.rs:90 grid-tools::dynamic_props	docs/WHEEL_DETACHMENT.md:126 ; docs/SOURCE_PHYSICAL_FACTORY.md:11	F355 F206 F205	[D]		the descriptor default FLT_MAX for a loose wheel (6174F0).
+0x00618000	node_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common node copy setup plus64-byte source-local/child stage.
 0x006195F0	MAX_WORLD_BODIES	func	crates/grid-world/src/continuous.rs:32 grid-world::continuous::MAX_RECORDS ; crates/grid-world/src/lib.rs:432 grid-world::::MAX_WORLD_BODIES	docs/COLLISION_GAPS_RESEARCH.md:117 ; docs/WORLD_STEPPING_RESEARCH.md:23 ; docs/DYNAMIC_PROPS_RESEARCH.md:152	F402 F317 F285	[D]	MAX_RECORDS MAX_WORLD_CONTACTS	Collision world +0x958, `maxContinuousCollisions` (config +0x3C, 0x6195F0
 0x00619AD0		func	not ported	docs/TRACK_LOD.md:401				00619AD0, 00951E40, 0095D2A0, 00951C40, 0095D880, 0095D5D0, 0095D200, 00951CB0, 009514F0,
 0x00619DA0		func	not ported	docs/LACETTI_GRAPHICS_MATERIALS.md:97				not a function entry in the master analysis; Research corrections retained: the first analyzed-containing query failed because no analyzed function covered0x61a255; Ghidra nevertheless returned process ...
@@ -850,6 +851,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00649E90	field	func	crates/grid-tools/src/career/field.rs:111 grid-tools::career::field::field	docs/SERIES.md:546		[V]		index 0, as 0x649E90 does) [V]:
 0x0064A3F0	bonus_factor	func	crates/grid-tools/src/career/rules.rs:24 grid-tools::career::rules::RaceSettings	docs/CAREER_RESEARCH.md:247		[V]	RaceSettings	The race settings that earn extra reputation (0x64A3F0) [V].
 0x0064A730	organism_resource_context_callback	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:603		[A]		The concrete OrganismPlugin resource callback at `0x0064A730` derives its
+0x0064AC60	organism_finalise	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Null manager can return success; otherwise forwards saved job-setup result, not transactional helper success.
 0x0064ADB0		func	not ported	docs/TRACK_LOD.md:399				0095CD90, 00961640, 009637C0, 00952B30, 009521E0, 0064ADB0, 0064B100, 0064C7E0, 00898EB0,
 0x0064B100		func	not ported	docs/TRACK_LOD.md:399 ; docs/VEHICLE_STATE.md:17				0095CD90, 00961640, 009637C0, 00952B30, 009521E0, 0064ADB0, 0064B100, 0064C7E0, 00898EB0,
 0x0064BCD0	render_pass_base_ctor	func	not ported	docs/TRACK_LOD.md:290 ; docs/COCKPIT.md:38				vtable 0xCE088C) +0x48 / +0x44. The base render task (0x64BCD0) keeps near +0x40, far clip +0x44, | note: +0x10=1, +0x18=1, near 1, far 100, clear (0.14,0.11,0.06,1), +0xAC aspect scale
@@ -1102,6 +1104,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00730540	skid_commit_dispatch	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md	G338	[D]		Cached body dispatches729E90/729FE0 by emitted count. Target bodies not cached in bounded inventory; no claim about phase side effects.
 0x00730F90		func	not ported	docs/ROAD_MATERIAL_RESPONSE.md:29 ; docs/SOURCE_SKY_LIGHTING.md:47 ; docs/TYRE_SMOKE_RESEARCH.md:1247				The selected named publishers at `0x00743220` (case3) and `0x00743750` copy RGB from a lighting object field+0x1E0, append W=1 and submit `specularColour`. T...
 0x00732970	nightlights_load_configuration_and_cookie	func	not ported	docs/LE_MANS.md:209 ; docs/TRACK_ENVIRONMENT.md:319	G366	[D]		direction, range 8–20, brightness 0.8–4, parsed by 0x732970) has no; resource handler resolves headlight.dds then headlight.tga into +0x94; sampler override meanings remain open
+0x00733500	PostprocessResourceProcess	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		resource role->pending effect description slots; allocator guard
 0x00733A70	Sampler0InputProvider_construct	func	not ported	docs/ORIGINAL_POSTPROCESS.md:135	G348	[D]		through RCPPS plus one refinement. Constructor `0x00733A70` installs its table; | note: Installs CF4188 with 72A920 at virtual+10; initializes input fields. Direct caller73AA00 and virtual+0 initializer733B80 identify a depth-prepass construction route; formal registered class and exclusive use unproven.
 0x00733B80	Sampler0InputProvider_initializeDepthPrepassResources	func	not ported	docs/ORIGINAL_POSTPROCESS.md:136		[D]		caller `0x0073AA00` constructs it and invokes initializer `0x00733B80`. | note: Virtual+0 of CF4188 resolves depthPrePassQuad/depth_prepass/depthPrePassShaderInstance and prevViewProj/prevModel/motionPartition slots; conditionally invokes virtual+10 with +4 as both inputs. No selected final-merge association or exclusive-use claim.
 0x00733DE0	read_distances	func	crates/grid-formats/src/ground_cover.rs:106 grid-formats::ground_cover::read_distances	docs/GROUND_EFFECTS_RESEARCH.md:379		[I]		Code defaults when attributes are absent are 150/40/20/10 and 0.7 (733DE0).
@@ -1110,6 +1113,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00735740		func	not ported	docs/LE_MANS.md:198				`CMR6Lighting` (0x735740) registers `enableHeadlights` (bool, > 0.5),
 0x00735BD0	vehicle_lights_night_off	func	not ported	docs/COCKPIT.md:296	F678	[V]		on a forced-night or day/night route the night-lights pass (0x736020, only while the light fade F is above 0) sets each car's lights to (F − d_i)·4 > 0 with ...
 0x00736020	vehicle_lights_night_fade	func	crates/grid-app/src/dash.rs:327 grid-app::dash::backlight_on ; crates/grid-tools/src/time_of_day.rs:16 grid-tools::time_of_day	docs/COCKPIT.md:296 ; docs/LE_MANS.md:204	F678 F430 G130	[V]	backlight_on	"Backlight"): on a forced-night route always (0x736020 with the light
+0x00736E60	nightlights_upload_projector_basis_and_weights	func	not ported	docs/TRACK_ENVIRONMENT.md:319	G366	[D]		Uploads camera projector basis divided by radial cutoff and dimensionless clamped weight*2.5; source optical/working-space units separate
 0x00737D20	particle_resource_config_callback	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:357	G247	[D]		bounded follow-ups: `0x737D20`, `0x738920`, `0x738E80` and `0x62E350`; other links below
 0x00738890	particle_plugin_resolve_plugins	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1176				`0x738890` resolves two plugins by name: `DebugRendererPlugin` into +0x88 and
 0x00738920	particle_reduce_velocity_depth	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:357		[D]		bounded follow-ups: `0x737D20`, `0x738920`, `0x738E80` and `0x62E350`; other links below
@@ -1136,6 +1140,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0074167D		label	not ported	docs/DONINGTON_ATMOSPHERE.md:55				inside 0x00741520; Private evidence: fog-ghidra01/{74167d,743483}.c.txt; fog-ghidra03/731dfe.c.txt; fog-uniform-aligned01.txt; fog-lane-masks01.txt; fog-pe-strings01.txt. Broad...
 0x00741D70	construct_skid_strip	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:156		[D]		[D] Pool allocator `7456F0` calls constructor `741D70` once per newly allocated
 0x00741E10	pack_skid_bounds	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:169		[D]		shared helper `741E10` packs bounds into the packet. The inspected bodies do
+0x00742510	PostprocessDescriptionApply	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		serializer adapter to destination virtual+40; flag meaning unresolved
 0x00742B00		func	crates/grid-formats/src/track_lighting.rs:242 grid-formats::track_lighting::ParticleLight	docs/TYRE_SMOKE_RESEARCH.md:1225				0x742B00; that rounding (under 0.4 %) is not reproduced.
 0x00742C40		func	not ported	docs/VEHICLE_STATE.md:11				not a function entry in the master analysis; The plugin's first virtual method at `0x00742c40` returns `0x00e6e834`, used by the original type-validation path. That global is not established as a vehicl...
 0x00742DC0		func	not ported	docs/SOURCE_SKY_LIGHTING.md:47				Private evidence: vegetation01/light-callers01.json, light-context-writer01.txt, light-uniform-dispatch01.txt; existing shaders/track-infield-pixel01.txt and...
@@ -1149,13 +1154,13 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00743750	lighting_specular_vector_publisher	func	not ported	docs/ROAD_MATERIAL_RESPONSE.md:29		[A]		The selected named publishers at `0x00743220` (case3) and `0x00743750` copy RGB from a lighting object field+0x1E0, append W=1 and submit `specularColour`. T...
 0x007456F0	allocate_skid_pool_slots	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:156		[D]		[D] Pool allocator `7456F0` calls constructor `741D70` once per newly allocated
 0x00745DC0	colour_balance_parameter_registration_initialization	func	not ported	docs/ORIGINAL_POSTPROCESS.md:65		[D]		at offset +8. Registration/initialization at `0x00745DC0` gives tintAmount at
+0x00746230	ColourBalanceRegisterSources	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		one-time named parameter-source registration; slot0/1 not enable
 0x00747C50	colour_balance_prepared_object_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:64		[D]		The selected object's constructor at `0x00747C50` creates a parameter subobject
 0x00747D60	colour_balance_prepare_uniforms	func	not ported	docs/ORIGINAL_POSTPROCESS.md:66		[D]		parameter+0x24 and packed tintColour at parameter+0x28. Update `0x00747D60`
 0x00748358		label	not ported	docs/ORIGINAL_POSTPROCESS.md:68				inside 0x00747D60; `0x00748358..0x0074839D` prepare:
 0x00748450	colour_balance_bind_named_uniforms	func	not ported	docs/ORIGINAL_POSTPROCESS.md:74		[D]		Binding method `0x00748450` maps preMultipliedTint to that prepared field; the
 0x0074F530	crowd_select_pair_reset_timer	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:406		[D]		| `0x0074F530` | `crowd_select_pair_reset_timer`: installs the selected pair, sets extent and mapped span from the same argument, sets offset, repeat count0,...
 0x0074F620	crowd_install_three_payloads_zero_timer	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:774		[D]		Stores three named payload addresses; initializes zero timer extent/span/offset/request. Duration, ownership and clock units unknown.
-0x0074F720	crowd_advance_and_evaluate	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:160	G346	[D]		A targeted shared-master decompile of `0x0074F720` connects the selected controller timer to an evaluation entry. Both modes advance the same timer with the ...
 0x0074F720	crowd_advance_and_evaluate	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:780		[D]		Nonzero branch evaluates two-word middle and sign-selected side payloads at one mapped coordinate; finite weights1-abs(x)/abs(x), no clamp; pair producer and x writers unknown.
 0x0074F9B3		label	not ported	docs/CROWD_ANIMATION_RESEARCH.md:297				inside 0x0074F720; All twelve primary/secondary/combined buffer headers read across those four actors contain 35 slots, followed by value-array and weight-array pointers. Corre...
 0x00751970	crowd_expand_billboard_vertices	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:121		[A]		Targeted shared-cache analysis of `0x00759280` identifies the stance table used by the bounded stream writer at `0x00751970`. The table supplies packed half-...
@@ -1183,9 +1188,12 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0076CB90	crowd_select_actor_state_pair	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:791		[D]		Actor-state/bookkeeping gates may return without reconfiguration; reads candidate+1C before conditional range/pair selectors. Literal0 does not prove pose reset.
 0x0076CE00	crowd_configure_named_blend_payloads	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:772		[D]		Nonzero parsed blendSet resolves named left/middle/right payloads; zero calls state-dependent selector with literal0. Texture variant is a different type.
 0x0076D420		func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:491	G346			not a function entry in the master analysis; `plugin callback arg1 -> plugin+A4 -> scheduler arg5 -> job+0C -> 76D420 -> 74F720 -> ACAC50`.
+0x0076D520	HlaResourceRead	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		constructs resource and stores object plus +8 interface
+0x0076D650	OrganismHlaLoadForward	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		actual binary hla resource forwarding to embedded loader
 0x0076EA20	organism_construct_animation_jobs	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:479		[D]		The previously missing job store is now identified. Constructor `0x0076EA20`
 0x0076F6CE		label	not ported	docs/CROWD_ANIMATION_RESEARCH.md:505				inside 0x0076EA20; Actual caller `0x0076F6CE` inside `0x0076EA20` invokes controller setup
 0x00770000		label	not ported	docs/AI_DRIVER_RESEARCH.md:344 ; docs/AI_OVERTAKING_RESEARCH.md:61 ; docs/DISCIPLINES.md:369		[V]		inside 0x0076FD70; Drift mode in the shared pipeline** (every reader of +0xC8 in 0x770000–0x7B0000 scanned): | note: merge retained theirs comment: inside 0x0076FD70; 0x770000–0x7A8000 listed; overtake pushes incrementally) [V]. The ±1000 convention noted in | note: merge retained additional doc provenance: docs/AI_OVERTAKING_RESEARCH.md:49
+0x007704E0	crowd_prepare_jobs	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Calls known job setup and returns its saved AL; other helper results not combined.
 0x00770AB0	local	func	crates/grid-world/src/round_contacts.rs:50 grid-world::round_contacts::local	docs/BOX_CONTACTS.md:277	F506 F322 F243	[D]		0x770AB0: `v` in the frame of rows 0..2 of `m`.
 0x00770CA0	animation_restart	func	crates/grid-app/src/reach.rs:125 grid-app::reach::Timer					A NeAnim clip timer (0xACA930, 0xACAC50, 0xACAB10, 0xACACE0, 0x770CA0). | note: [D] timer t = 0, playing = 1
 0x00771070	crowd_definition_name_lookup	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:616		[A]		set first, then generic if the set or name is missing. `0x00771070` compares
@@ -1845,19 +1853,26 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00862E30	incar_record_tint2	func	not ported		F684			Symbols: 7 new rows (0x84E610, 0x84E150, 0xD023F0, 0x862E30, 0x862E50, 0x84D260, 0x5F5240), notes on 0x60E310, 0x861C50, 0x862300. | note: driver record +0x50 getter (tint 2) [D]
 0x00862E50	incar_record_tint3	func	not ported		F684			Symbols: 7 new rows (0x84E610, 0x84E150, 0xD023F0, 0x862E30, 0x862E50, 0x84D260, 0x5F5240), notes on 0x60E310, 0x861C50, 0x862300. | note: driver record +0x60 getter (tint 3) [D]
 0x00864770		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:315	F319			`864770` only permutes and negates rows: (row 1, row 0, −row 2, row 3). `63A370` then
+0x00865230	ResourceTypeNameMatches	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		resource virtual type string compared by full equality
 0x00868940		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:309				node rotation `0x868940`).
 0x00868D50		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1174				not a function entry in the master analysis; `0x875AE0`, which stores it in `mgr+0x3880` (the other writers are `0x868D50`, no direct
 0x00868D60		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:335 ; docs/TYRE_SMOKE_RESEARCH.md:304	F319	[V]		InverseView uses the camera rows (`0x886FF9`, from `setCamera 0x868D60`); | note: merge retained theirs comment: InverseView uses the camera rows (`0x886FF9`, from `setCamera 0x868D60`);
 0x00869360	Random	func	crates/grid-tools/src/tyre_smoke.rs:964 grid-tools::tyre_smoke::Random	docs/TYRE_SMOKE_RESEARCH.md:219				Original particle LCG (0x869360).
+0x0086AB10	PostprocessFloatParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		_atof and binary32 store through node+0C
+0x0086AD10	PostprocessNamedParamsRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		Param payload dispatch to matching registered nodes
 0x00871D40		func	crates/grid-app/src/replay/stream.rs:10 grid-app::replay::stream	docs/REPLAY.md:60		[D]		with overlapped unbuffered I/O at 0x871D40) created with the limit
 0x00872DF0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:215				constructor `0x892480`, emitter update `0x89F1B0`, spawn `0x890A10` (position `0x872DF0`,
 0x00873880		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:216				velocity `0x873880`), particle update `0x8A9CC0`, render `0x886BD0`; create one-shot /
 0x00875620		func	crates/grid-formats/src/kickup.rs:168 grid-formats::kickup	docs/GROUND_EFFECTS_RESEARCH.md:303 ; docs/TYRE_SMOKE_RESEARCH.md:125	F316	[V]		`agescale` initial and final width (defaults 1, emitter defaults 875620).
 0x00875AE0	particle_set_light_sampler	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1174				`0x875AE0`, which stores it in `mgr+0x3880` (the other writers are `0x868D50`, no direct
+0x00876BC0	PostprocessColourParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		four integer low bytes packed RGBA; not saturation
 0x0087E250		func	not ported	docs/FRAME_STEPPING.md:61 ; docs/LAUNCH_AND_GRID_START.md:23	F543			task records are 0x28 bytes, queued by `87E2D0` (every frame) and `87E250` (fixed period);
 0x0087E2D0		func	not ported	docs/FRAME_STEPPING.md:61 ; docs/LAUNCH_AND_GRID_START.md:22	F543			task records are 0x28 bytes, queued by `87E2D0` (every frame) and `87E250` (fixed period);
 0x0087EA50		func	not ported	docs/LAUNCH_AND_GRID_START.md:26				supplies the double to `5E7F30` was not located; a survey of `87EA50` reached OS version
+0x0087F460	PostprocessNamedEffectConstruct	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		common effect constructor installs D0655C
 0x00882EC0	tyre_smoke_stop	func	crates/grid-tools/src/tyre_smoke.rs:1051 grid-tools::tyre_smoke::stop	docs/TYRE_SMOKE_RESEARCH.md:217			stop	Stop (0x882EC0 / release 0x886840): emission ends, particles live on.
+0x00883830	postprocess_link_input_to_output_port	func	not ported	docs/ORIGINAL_POSTPROCESS.md:170	G359	[D]		Set consumer input linked producer-output pointer and clear external source; does not itself bind an image.
+0x008840B0	plugin_list_finalise	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Configured ordinary finalise state2 -> callback+14 -> successful AL promotes state3; not actor readiness.
 0x008841A0	plugin_list_update_scalar_dispatch	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:639	G346	[A]		The list owner at table0x00D08490 has virtual+0x04=`0x008841A0`. This dispatcher
 0x00886840		func	crates/grid-tools/src/tyre_smoke.rs:1051 grid-tools::tyre_smoke::stop	docs/TYRE_SMOKE_RESEARCH.md:199				Stop (0x882EC0 / release 0x886840): emission ends, particles live on.
 0x00886BD0	particle_render	func	crates/grid-app/src/tyre_smoke.rs:480 grid-app::tyre_smoke::ball_normals ; crates/grid-app/src/particles.rs:131 grid-app::particles (in build)	docs/TYRE_SMOKE_RESEARCH.md:216 ; docs/GROUND_EFFECTS_RESEARCH.md:333	F644 F319 F316	[V]	ball_normals	The original lit stream's corner normals (886BD0, normal stream branch
@@ -1888,14 +1903,19 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00890CB9		label	not ported	docs/GROUND_EFFECTS_RESEARCH.md:304		[V]		inside 0x00890A10; [V] Spawn `890A10` (`0x890CB9..0x890D32`):
 0x00890DC0	spawn_birth_light_sample	label	not ported	docs/TYRE_SMOKE_RESEARCH.md:1169	F644	[V]		inside 0x00890A10; Spawn `0x890A10` reads the particle manager's sampler `mgr+0x3880` (`0x890DC0`). When it is set,
 0x00892480		func	not ported	docs/RUNTIME_LIMITS_AUDIT.md:12 ; docs/TYRE_SMOKE_RESEARCH.md:215				Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D... | note: merge retained theirs comment: Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D...
+0x00892AA0	PostprocessParameterGroupResolve	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		lookup or registered-factory group instantiation
+0x00892B40	PostprocessEffectGroupsRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		named ParameterGroup iteration calls892AA0 then86AD10
+0x00892BC0	PostprocessEffectRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		table-authenticated Effect entry delegates892B40; decompile MISS
 0x00892E90	postprocess_resolve_external_texture	func	not ported	docs/ORIGINAL_POSTPROCESS.md:224		[D]		Returns registered external resource through the same named map; GPU image/sampler binding remains open.
 0x00893F40		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:1175				inside 0x00893CC0; callers, and the manager constructor's clear at `0x893F40`).
+0x00895FB0	PostprocessGroupsCallbackByEffectId	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		select effect+98 id then group virtual+8 argument
 0x008981B0		func	not ported	docs/RUNTIME_LIMITS_AUDIT.md:12 ; docs/TYRE_SMOKE_RESEARCH.md:214		[V]		Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D... | note: merge retained theirs comment: Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D...
 0x00898AD0		func	crates/grid-tools/src/tyre_smoke.rs:860 grid-tools::tyre_smoke (in smoke_only)	docs/TYRE_SMOKE_RESEARCH.md:214		[V]		Particle runtime (0x898DC0 system update, 0x898AD0 births, 0x89F1B0
 0x00898B7D		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:228				inside 0x00898AD0; by the system orientation, 0x898B7D–0x898C9A). Emitters emit along local +Z.
 0x00898C9A		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:228				inside 0x00898AD0; by the system orientation, 0x898B7D–0x898C9A). Emitters emit along local +Z.
 0x00898DC0		func	crates/grid-tools/src/tyre_smoke.rs:860 grid-tools::tyre_smoke (in smoke_only)	docs/TYRE_SMOKE_RESEARCH.md:214		[V]		Particle runtime (0x898DC0 system update, 0x898AD0 births, 0x89F1B0
 0x00898EB0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:126 ; docs/TRACK_LOD.md:399				0095CD90, 00961640, 009637C0, 00952B30, 009521E0, 0064ADB0, 0064B100, 0064C7E0, 00898EB0,
+0x0089B440	postprocess_create_shader_stage	func	not ported	docs/ORIGINAL_POSTPROCESS.md:161	G359	[D]		Resolve declared shader group and optional/default factory; generic fallback remains conditional until active registration is proved.
 0x0089F1B0		func	crates/grid-tools/src/tyre_smoke.rs:860 grid-tools::tyre_smoke (in smoke_only)	docs/TYRE_SMOKE_RESEARCH.md:215 ; docs/RUNTIME_LIMITS_AUDIT.md:12				Particle runtime (0x898DC0 system update, 0x898AD0 births, 0x89F1B0
 0x008A23A0	plugin_list_owner_construct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:652		[A]		`0x008A23A0` constructs the list owner, `0x008AF080` selects configuration
 0x008A2470	plugin_priority_records_build	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:653		[A]		categories and `0x008A2470` builds plugin/override records. Only the first three
@@ -1904,6 +1924,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008A5A7C		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:296	F319			inside 0x008A49A0; SpeedSpace 3, parser `0x8A5A7C`), not the billboarding type.
 0x008A5D00		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:294	F319			inside 0x008A49A0; Axis a = emitter +0x190, normalised once at parse time (`0x8A5D00..0x8A5D2F`, rsqrt plus
 0x008A5DDE		label	not ported	docs/GROUND_EFFECTS_RESEARCH.md:295		[V]		inside 0x008A49A0; [V] Parser `8A49A0` (`<agescale>` branch at `0x8A5DDE`) stores, in the emitter:
+0x008A7580	PostprocessNamedEffectCreate	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		common effect allocator/name-id registration; no name-specific class switch
+0x008A76A0	PostprocessEffectRegistryClear	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		guarded clear; status13 before cleanup if any effect+A0 nonzero
 0x008A82C0	postprocess_register_external_texture	func	not ported	docs/ORIGINAL_POSTPROCESS.md:223		[D]		Creates a separate named external-texture wrapper; wrapper+108 is not builder default-factory+108.
 0x008A98B0		func	not ported	docs/RUNTIME_LIMITS_AUDIT.md:12 ; docs/TYRE_SMOKE_RESEARCH.md:217	F318	[V]		Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D... | note: merge retained theirs comment: Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D...
 0x008A99C0	tyre_smoke_hold	func	crates/grid-tools/src/tyre_smoke.rs:1020 grid-tools::tyre_smoke::hold	docs/TYRE_SMOKE_RESEARCH.md:199 ; docs/RUNTIME_LIMITS_AUDIT.md:69		[V]	hold	Create (0x8A99C0) or re-request (0x8A9AF0) the held system for `key`
@@ -1914,10 +1936,17 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008AB458		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:280	F319			inside 0x008A9CC0; (`0x8AB458`, `0x8AB477`: initial × (1 + v·0.01) × growth^⌊25·age⌋, no factor ½) and the
 0x008AB477		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:280				inside 0x008A9CC0; (`0x8AB458`, `0x8AB477`: initial × (1 + v·0.01) × growth^⌊25·age⌋, no factor ½) and the
 0x008ABC20		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:125				Particle library: loader `0x8ABC20`, emitter defaults `0x875620`, `<emitter>` parser
+0x008AC320	PostprocessEffectSetRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		PostProcessEffects/Effect id name chain template dispatch
+0x008AC4B0	postprocess_builder_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:195	G359	[D]		Initialize builder including defaultfactory+108 to zero; later active factory remains unproved.
 0x008AF080	plugin_priority_categories_load	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:652		[A]		`0x008A23A0` constructs the list owner, `0x008AF080` selects configuration
 0x008B07A0	postprocess_register_parameter_handler	func	not ported	docs/ORIGINAL_POSTPROCESS.md:249		[D]		Normal initialization registers named parameter handlers in builder+D4; this is not the default-stage-factory writer.
+0x008B3320	postprocess_apply_output_config_overrides	func	not ported	docs/ORIGINAL_POSTPROCESS.md:177	G359	[D]		Apply explicit dimensions or scale/truncate and optional internal format override; do not infer D3D enum from sentinel0x23.
 0x008B5320		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:310		[V]		is `8B5320`; age is in seconds. `finalWidth`/`finalHeight` are **never read**.
 0x008B5710		func	not ported	docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:316				(`0x8B5710`).
+0x008BA1F0	task_pending_append	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Bounded 0x28-byte pending append only; no task invocation or clock unit.
+0x008BE120	postprocess_resolve_output_configuration	func	not ported	docs/ORIGINAL_POSTPROCESS.md:174	G359	[D]		Propagate dimension/format words through config-referenced input; active format and sRGB remain unknown.
+0x008C0950	postprocess_map_runtime_port_declarations	func	not ported	docs/ORIGINAL_POSTPROCESS.md:166	G359	[D]		Preserve distinct graph alias and shader sampler strings in runtime input records.
+0x008CA010	postprocess_compile_runtime_from_description	func	not ported	docs/ORIGINAL_POSTPROCESS.md:158	G359	[D]		The normalized description enters stage creation, port mapping, external binding, wiring and output-config resolution.
 0x008D5900		func	not ported	docs/RACE_HUD.md:238	F383	[D]		`1.6` 16:10, `1.3` 4:3, `1.2` 5:4); a name without a range (0x8D5900) changes nothing, so a 20:9
 0x008D5CB0		func	crates/grid-app/src/race_osd.rs:9 grid-app::race_osd	docs/RACE_HUD.md:236	F383	[D]		grid.exe 0x8D5CB0; no range for other aspects keeps the default layout).
 0x008EC720		func	not ported	docs/AI_PATH_OBSTACLE_SCAN.md:233				if PO.list.count < PO.list.cap(6): push_back(PO.list, entry) # 0x8EC720
@@ -1933,8 +1962,12 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008F2300	shadow_map_grid_query	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1178	F644	[V]		Sampler +4 is `0x740F90`: no ShadowMapPlugin → 1.0; otherwise `0x8F2300(x, z) > 0` → 0.0,
 0x008F2A60		func	not ported	docs/CAR_LOD.md:137 ; docs/COCKPIT.md:411		[V]		characterQuality 0 ("off") loads no driver at all, the player's included (0x8F2A60).
 0x008F2E70		func	not ported	docs/VEHICLE_STATE.md:17				not a function entry in the master analysis; Plugin creation `0x008f2e70` allocates a separate `0x5760`-byte manager and stores its pointer at plugin `+0x7c`. The consumer `0x0064b100` reads count `+0x5...
+0x008F4EE0	CarNodeFindExactName	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		case-sensitive full name; current then sibling recursion then child
 0x008F4F30	update_model_lod_nodes	func	crates/grid-app/src/camera.rs:1952 grid-app::camera::hides_player_model ; crates/grid-app/src/player_view_visibility.rs:2 grid-app::player_view_visibility	docs/CAMERA_VIEWS.md:448	G240	[D]		one-past-last model LOD; 8F4F30 disables every real LOD node.
+0x008F56C0	CarRenderLampRequestSet	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G377	[D]		write supplied byte to context+32B0
+0x008F5700	vehicle_component_part_first_present	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		First non-null among eight slots for exact part code; canonical LOD0 ordering not proved.
 0x008F7480	set_model_lod	func	crates/grid-app/src/player_view_visibility.rs:2 grid-app::player_view_visibility	docs/CAR_LOD.md:67 ; docs/CAMERA_VIEWS.md:448	G240	[D]		Original stable policy: 607BC0 -> 99C2F0 -> 9CB0B0 -> 8F7480 -> 8F4F30.
+0x008F87C0	CarSemanticLodNodesPopulate	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		exact catalogue x%d_%s -> selected root -> semantic byLOD cell
 0x008FA030		func	not ported	docs/COCKPIT.md:392		[V]		That node comes from `cars/<stem>/<stem>_anim_dummies.pssg`, cloned into each car LOD root (0x8FA030). It is the identity in all 43 files [V].
 0x008FC9F0		func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:89	G190			8FC9F0 tests both lamp group names before binding the exact TDiffuseCrackMap key.903260 supplies VDParts/VDPartsState to observed pod and other selected grou...
 0x008FF0A0		func	not ported	docs/CAR_LOD.md:22 ; docs/TRACK_LOD.md:50		[O]		not a function entry in the master analysis; `LOD%d_` string 0xD0DE88 belongs to the car loaders 0x8FF0A0/0x900560, docs/CAR_LOD.md.)
@@ -1945,6 +1978,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00901740	nefx_group_read_config	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:536		[D]		`0x901740` parses `requiresSorting` into template byte `+0x114` and shifts its priority
 0x00901F10		func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:87				The inferred pseudocode has ABI/type ambiguities, so bounded pinned-PE Capstone evidence independently checks the writer:901F10 loads the floating argument, ...
 0x00903260		func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:85				Actual PE literal candidates and Ghidra references now link car_light_glass(D0DBF0) and car_light_pod(D0DBE0) to dedicated8FC9F0/9024C0 handling;903260 also ...
+0x00904440	vehicle_prepare_front_light_points	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Atomic glass pair then pod pair then original defaults; saved bounds midpoint plus node translation, not arbitrary draw AABB.
 0x00908000		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:730				not a function entry in the master analysis; (0x908000–0x91C000), `race5b.dis` (0x5B0000–0x5D0000).
 0x00908300		func	not ported	docs/LE_MANS.md:83				All times are int64 µs. End = 24 h (0x908300(24,0,0,0)); scale = 24 h /
 0x00908450	micros	func	crates/grid-tools/src/virtual_race.rs:204 grid-tools::virtual_race::micros	docs/DISCIPLINES.md:446				results are 64-bit microseconds (0x908450 from seconds × 1e6 truncated,
@@ -2117,6 +2151,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00985050		func	not ported	docs/TRACK_LOD.md:365				| 0x00652750 | route-track init (creates OrnamentSystem +0x590 via 0x985050) |
 0x009852E8	NIGHT_SLOTS	label	crates/grid-formats/src/sky.rs:16 grid-formats::sky::NIGHT_SLOTS	docs/SKY.md:56	F515	[V]		inside 0x009851C0; those names into its slot table (0x9852E8..0x985377) and binds slots `i`
 0x00986990		func	crates/grid-app/src/crowd_preview.rs:136 grid-app::crowd_preview (in one)					0x986990 packs width in low half and height in high half; finite positive
+0x00988F10	vehicle_owner_description	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Returns per-car owner+44C description link, not singleton manager.
 0x00989490		func	not ported	docs/DEFORMATION_CONSTRUCTION.md:7 ; docs/DEFORMATION_GRID.md:65 ; docs/DEFORMATION_LAYOUT.md:3				[DEFORMATION_LAYOUT.md](DEFORMATION_LAYOUT.md) Supplied-bounds deformation layout — The independent Rust `deformation_layout` module reproduces complete orig...
 0x00989A00		func	not ported	docs/CAR_TO_CAR_DEFORMATION_RESEARCH.md:126				4. Stiffness comes from 989A00 using O's grid at the O-local point. If it is
 0x00989BF0		func	not ported	docs/DEFORMATION_GRID.md:136 ; docs/VEHICLE_SYNCHRONIZATION.md:13				The ten-entry strain ring advances modulo ten and clears its new slot. Whole `9A0A70`/`989BF0` tests its maximum: above3 enables strain; below0.5 with strain...
@@ -2127,7 +2162,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0098C560		func	not ported	docs/WHEEL_DETACHMENT.md:112				9DC270 state 4 for a wheel-like part (98C560: discs 0x12..0x15, tyres 0x2A..0x2D, wheels 0x2E..0x31,
 0x0098C5C0	SPIN_RECORD	func	crates/grid-app/src/damage_parts.rs:749 grid-app::damage_parts::SPIN_RECORD ; crates/grid-tools/src/source_vehicle.rs:1057 grid-tools::source_vehicle (in loose_wheels)	docs/WHEEL_DETACHMENT.md:114	F346	[D]		98C5C0: the lost wheel takes the spin of its axle partner. | note: merge retained theirs comment: 98C5C0: the lost wheel takes the spin of its axle partner.
 0x0098C640		func	not ported	docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:255		[I]		panels these words keep what the new record holds [I: zero; 98C640 not read], so a panel leaves
+0x0098CE10	NamedParameterRegistryAddress	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		returns shared E85FE0 registry; no arguments consumed
 0x0098CE20		func	crates/grid-tools/src/time_of_day.rs:14 grid-tools::time_of_day	docs/LE_MANS.md:182	F430 G130	[V]		evaluated linearly [V 0x9DD900, 0x98CE20, 0x9ACE90].
+0x0098D1D0	TimelineParameterDestinationsRegister	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		retain scalar or packed-colour destination pointers for day/night timeline
 0x0098D700		func	not ported	docs/CAMERA_VIEWS.md:249				+0x122 = 1**, "update every view every frame": the car attach 0x98D700 sets it and nothing clears it. The manager update 0x82C550 runs slot 11 for every entr...
 0x0098D741		label	not ported	docs/CAMERA_VIEWS.md:250				inside 0x0098D700; +0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
 0x0098D7C0		func	not ported	docs/FORCE_FEEDBACK.md:72				The car manager (`A00AE0`, every physics step, also `98D7C0`) builds a 0x210-byte snapshot for
@@ -2199,6 +2236,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0099A5E0		func	not ported	docs/SOURCE_DAMAGE_REGIONS.md:5				The original `99A5E0` loader and binary-document/accessor dispatch establish the mapping for gearbox, driveshaft, turbo, radiator and exhaust. Source center ...
 0x0099A720		func	crates/grid-tools/src/speech.rs:1369 grid-tools::speech	docs/SPEECH_AUDIO_RESEARCH.md:390				Terminally damaged: the damage status (+0x444, vehicle +0xD234) is not 7 (0x99A720).
 0x0099C050		func	not ported	docs/VEHICLE_STATE.md:17				Plugin creation `0x008f2e70` allocates a separate `0x5760`-byte manager and stores its pointer at plugin `+0x7c`. The consumer `0x0064b100` reads count `+0x5...
+0x0099C0D0	FirstFlaggedCarContextSlot	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G377	[D]		first+128C flagged slot or-1; typedflagmeaning unresolved
 0x0099C130		func	not ported	docs/CAR_LOD.md:121				| 0x99C130 | `carlodsettings.xml` parser, 9 sets x 8 caps (`+0x1A84`) and distances (`+0x1BA4`), stride 0x20 |
 0x0099C2F0	set_selected_model_enabled	func	crates/grid-app/src/camera.rs:1748 grid-app::camera::OwnCar ; crates/grid-app/src/player_view_visibility.rs:2 grid-app::player_view_visibility	docs/CAMERA_VIEWS.md:277 ; docs/CAR_LOD.md:77	G240	[I]		What a view draws of the player car (0x607BC0 per frame, 0x99C2F0,
 0x0099C300		func	crates/grid-app/src/car_reflection_overlay.rs:104 grid-app::car_reflection_overlay (in from_constants)	docs/CAR_REFLECTIONS.md:82 ; docs/LACETTI_GRAPHICS_MATERIALS.md:169		[O]		The loader's fallback scale is 1 (0x99C300).
@@ -2646,6 +2684,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00A67B30	speech_int	func	crates/grid-tools/src/speech.rs:357 grid-tools::speech::int	docs/ENGINE_AUDIO_CONTROL.md:135 ; docs/SOURCE_PHYSICAL_MATERIALS.md:14		[I]	int	0xA67B30-style integer: a leading integer, else 0 [I: atoi; `priority=""` is 0].
 0x00A67B60		func	not ported	docs/HANDLING_DAMAGE.md:63 ; docs/SOURCE_PHYSICAL_MATERIALS.md:14 ; docs/SOURCE_SKY_LIGHTING.md:23				Static shaderpack evidence (SHA256 b6b29b80...) identifies sky_main.psh.main: output RGB is (sample*skyScaleAndInvGamma.x)^skyScaleAndInvGamma.y. The sky_env...
 0x00A67B90		func	not ported	docs/FORCE_MECHANICS.md:25 ; docs/SOURCE_PHYSICAL_MATERIALS.md:14				with `ret8`; its accessors are `A67B60` (float), `A67B30` (integer), `A67B90`
+0x00A67DF0		func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:927				0xA67DF0/0xA67800 child-view access plus0xAD4780 construction show the empty
 0x00A67EA0		func	not ported	docs/HANDLING_CONFIGURATION.md:7				Original 9C5580 fills settings at mutable owner218..37F. Its actual thiscall ABI has one stack argument and ret4; the C probe represents ECX with fastcall an...
 0x00A680E0		func	not ported	docs/HANDLING_CONFIGURATION.md:7				Original 9C5580 fills settings at mutable owner218..37F. Its actual thiscall ABI has one stack argument and ret4; the C probe represents ECX with fastcall an...
 0x00A682A0	engine_audio_shift_new	func	crates/grid-tools/src/ai_pacing.rs:195 grid-tools::ai_pacing::Mt ; crates/grid-tools/src/engine_audio_shift.rs:135 grid-tools::engine_audio_shift::new ; crates/grid-tools/src/series.rs:266 grid-tools::series::Mt	docs/AUDIO_RESEARCH.md:1114 ; docs/SERIES.md:497		[V]	Mt new	standard generation and tempering (0xA682A0, 0xA68380) [V, docs/SERIES.md].
@@ -2729,6 +2768,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00A7DE00	drift_mph	func	crates/grid-tools/src/drift.rs:281 grid-tools::drift::mph ; crates/grid-app/src/replay/director.rs:252 grid-app::replay::director (in projection_weight)	docs/DISCIPLINES.md:200 ; docs/REPLAY_DIRECTOR_RESEARCH.md:118	F362	[V]	mph	m/s to mph as 0xA7DE00 computes it: × 3600 × 0.001 × 0.62137121 (x87,
 0x00A7E180		func	not ported	docs/MESH_SHAPE_CONSTRUCTOR.md:3 ; docs/SOURCE_PHYSICAL_FACTORY.md:13				12 October 2026, Europe/Kiev. `Mesh::construct_shape` reproduces complete `B460F0` / `ABC7D0` / `ABC3D0` base construction, `B444D0` mesh update, then `B23D7...
 0x00A7E2F0	pivot	func	crates/grid-world/src/phantom_post.rs:414 grid-world::phantom_post::pivot	docs/JOINTS_RESEARCH.md:391		[D]		0x7BB910: the post from the joint's world point (0xA7E2F0) and the pole
+0x00A8D700		func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:897				writes. Fresh0xAD4C20 ->0xA8D700 initialization gives it two zero weights;
 0x00A94910		func	not ported	docs/RUNTIME_LIMITS_AUDIT.md:60		[V]		| Fixed waitable lists | collision dispatch 32 | 32/64 | CF5CA8 "Waitable list is full" → A67190 → A94910 | The item is dropped and error 0x21 recorded; no c...
 0x00AB7550		func	not ported	docs/JOINTS_RESEARCH.md:405		[D]		Frame order [D], 0x5F0EE0: the world step 0xAB7550, then 0x7CA8F0, the entity breaks
 0x00AB87D0		func	not ported	docs/AI_AVOID_RECOVERY_LIVE.md:229	F306	[V]		1. 0xAB87D0 on driver + 0xA00;
@@ -2785,9 +2825,16 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00ACD610	neanim_blend_accumulate_masked	func	not ported					note: [D] masked variant of 0xACD500
 0x00ACD760	neanim_blend_evaluate	func	crates/grid-app/src/interior_anim.rs:131 grid-app::interior_anim::worlds ; crates/grid-app/src/driver.rs:27 grid-app::driver::STEER_MIN	docs/COCKPIT.md:351	F631	[D]	worlds	and the evaluator skips an entry (0xACD760 keeps weights >= 0.001). | note: [D] accumulates the blend list into slots (unnormalised weighted sum)
 0x00ACDC10		func	crates/grid-app/src/driver.rs:570 grid-app::driver (in solve)					lever and the handbrake, by the arm crossfade (0xACDC10).
+0x00ACDD00		func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:892				Registration0x76D520 ->0xACDD00 connects six definition/vocabulary records at
+0x00ACE360	HlaResourceConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		resource object holds wrapper at+20
+0x00ACEB80	HlaWrapperConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		wrapper delegate+4 initially null
 0x00AD1040		func	not ported	docs/DYNAMIC_PROPS_RESEARCH.md:331		[D]		`0xAD1040` as a separate scale.
 0x00AD12B0		func	not ported	docs/DISCIPLINES.md:526	F681	[V]		0xAD12B0) and its constraints (+0x94, 0x7D3130). `remove_joint` (0xAD9260) is the pool release
 0x00AD43D0	delegate_query_interface_eax_passthrough	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:800		[D]		Clears caller byte, calls delegate at wrapper+4 virtual+8 and passes EAX through; caller uses returned virtual+10. No concrete class or ownership ABI established.
+0x00AD4510	HlaNumericSelectionNodeBuild	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		numeric node cases use same constructors
+0x00AD4780	HlaXmlSelectionNodeBuild	func	crates/grid-tools/src/crowd_selection.rs:135 grid-tools::crowd_selection (in parse_node)			[D]		AD4780 converts childless Random to Empty before parsing distribution.
+0x00AD4CE0	HlaXmlSelectionTreeLoad	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		HighLevelAnimation/AnimSelectionTree dispatch to typed builder
+0x00AD5250	HlaFactorNodeConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		installs D3A5E4; virtual+8 target B76F10
 0x00AD6250	joint	func	crates/grid-world/src/contact_groups.rs:390 grid-world::contact_groups::joint	docs/GEOMETRIC_CONTACT_HANDOFF.md:11 ; docs/JOINTS_RESEARCH.md:124 ; docs/PHYSICAL_SCHEDULING.md:26				AD6250 for a joint: the same union, then the joint goes to the head of
 0x00AD6480	unpark	func	crates/grid-world/src/grouped_physical_frame.rs:117 grid-world::grouped_physical_frame::unpark ; crates/grid-tools/src/dynamic_props.rs:1402 grid-tools::dynamic_props::park_reference	docs/BODY_SLEEPING.md:67	F546 F541	[D]		AD6480, at the start of the tick: each parked asleep body back within
 0x00AD66A0		func	not ported	docs/PHYSICAL_TICK.md:13				[Static ownership research](PHYSICAL_SCHEDULING.md) now establishes the larger original synchronous parent AD8D70. When world+7C4 is idle, it stores incoming...
@@ -3036,6 +3083,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00B64CA7		label	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:61				inside 0x00B64C50; Further read-only research keeps the delivered9e160be pilot unchanged. The glass part-state vertex program is byte-identical to the pod vertex program (binar...
 0x00B692B0		func	not ported	docs/BODY_SLEEPING.md:252				B692B0 creates bodies and sleeps them immediately; owner unidentified.
 0x00B70000		func	not ported	docs/PHYSICAL_CONTACT_HANDOFF.md:62 ; docs/PHYSICAL_SCHEDULING.md:46	F152			not a function entry in the master analysis; The wrapper now requires the script's completion marker and absence of `REPORT SCRIPT ERROR`, retaining logs and partial evidence on failure. An optional fun...
+0x00B76EB0		func	crates/grid-tools/src/crowd_selection.rs:139 grid-tools::crowd_selection (in parse_node)					not a function entry in the master analysis; Actual E52200 names enumerate 0/1/2; B76EB0 uses rand()%N for all.
 0x00B77310		func	crates/grid-world/src/grouped_physical_frame.rs:809 grid-world::grouped_physical_frame (in calculate_impl)	docs/PHYSICAL_SCHEDULING.md:3 ; docs/BODY_SLEEPING.md:44 ; docs/CARRIED_GEOMETRIC_PHYSICS.md:17	F541 F190	[D]		B77310: a nonzero status clears the island's contacts' written-back
 0x00B77360		func	not ported	docs/PHYSICAL_SCHEDULING.md:14				The file-backed method table starts at **D42654**; its +18 slot at D4266C contains B7BEE0. Constructor **B7A9E0** calls base B77360 and installs D42654. D426...
 0x00B77490		func	crates/grid-world/src/deforming_group_frame.rs:8 grid-world::deforming_group_frame	docs/CAR_TO_CAR_DEFORMATION_RESEARCH.md:26 ; docs/CONTACT_COLLECTION.md:7 ; docs/RESPONSE_CONSUMPTION.md:3	F292 F151 F148	[V]		contacts reversed, one pending response list (B77490) and one CRT stream
@@ -3108,6 +3156,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00B8CD80	di_ffb_device_tick	func	crates/grid-app/src/force_feedback.rs:1110 grid-app::force_feedback::Damping ; crates/grid-app/src/force_feedback/windows.rs:578 grid-app::force_feedback::windows::set_force	docs/FORCE_FEEDBACK.md:217	F604 F602 F598	[D]	Damping motors set_force	not a function entry in the master analysis; vibration samples, and the DirectInput device's software damping (`B8CD80`) and XInput motor
 0x00B90000		label	not ported	docs/PHYSICAL_SCHEDULING.md:45				inside 0x00B8FF10; `physical-virtual-slot-20261010.log`: B00000–B90000 displacement survey exceeded its 2,048-result limit and was correctly rejected; partial output is not com...
 0x00B95CC0		func	not ported	docs/FRAME_STEPPING.md:64	F543			not a function entry in the master analysis; QPC and GetTickCount wrappers: `B95CC0` (seconds since start, no direct callers) and `A6BBF0`
+0x00B9ADE0	pssg_initialize_interleaved_stream_layout	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:745	G361	[A]		Shared descriptor initializer: format+4 times format+8 determines stream bytes, cumulative offsets and common stride; established crowd inputs yield stride32 and Instanced3 offset24. GPU normalization and saved-variant writer remain unproved.
 0x00B9CC90	ShaderMaterialSortStateRefresh	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Updates packed material sorting/state identity; not proof of sampler setter success.
 0x00B9CFA0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:527				not a function entry in the master analysis; | Shader-instance group reference | Registration names SHADERINSTANCE/type `0xF5F298`; schema maps `shaderGroup` to `0xF5F294`; reader at `0xB9CFA0` links it...
 0x00B9D430	pssg_resolve_shader_group_reference	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:527		[D]		| Shader-instance group reference | Registration names SHADERINSTANCE/type `0xF5F298`; schema maps `shaderGroup` to `0xF5F294`; reader at `0xB9CFA0` links it...
@@ -3120,10 +3169,13 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00BA0690	node_copy_setup	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:588	G346	[A]		| `0x00BA0690` | Common node copy setup |
 0x00BA09B0	node_clone_deferred_finalize	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:592	G346	[A]		| `0x00BA09B0` | Deferred-reference/finalization work |
 0x00BA0B80	set_node_enabled	func	not ported	docs/CAMERA_VIEWS.md:448		[D]		Suppression passes `max_lod + 1` to `0x8F7480`. This setter deliberately preserves the out-of-range selection instead of clamping it. `0x8F4F30` then disable...
+0x00BA0CC0	node_read_transform	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Named TRANSFORM reader into source-local+50; isolated call does not prove byte-order implementation.
+0x00BA0FF0	node_read_transform_bounds	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Named TRANSFORM and BOUNDINGBOX reader establishes +50 matrix/+D0,+E0 bound vectors.
 0x00BA11C0	node_clone_wrapper	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:534	G346	[A]		`0x00BA11C0`. Their installed table bytes match the pinned analysis executable.
 0x00BA1280	node_attach_child	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:590	G346	[A]		| `0x00BA1280` | Child attachment and virtual hooks |
 0x00BA12D0	node_copy_local_and_children	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:589		[A]		| `0x00BA12D0` | Local-matrix copy and recursive child construction |
 0x00BA1410	node_clone_adapter_support	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:591		[A]		| `0x00BA1410` | Bounded adapter/map support in the clone path |
+0x00BA14B0	node_registered_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Registered NODE factory; constructor installs D46070.
 0x00BA16A0	pssg_shader_group_ctor	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:528		[D]		| Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs re...
 0x00BA1770	pssg_shader_group_write_attributes	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:528		[D]		| Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs re...
 0x00BA2250	pssg_shader_group_read_attributes	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:528		[D]		| Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs re...
@@ -3134,8 +3186,13 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00BB0F90	texture_resource_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:238		[D]		Canonical constructor installs D473C8; actual named placeholder concrete class remains unproved.
 0x00BB1E40	texture_update_descriptor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:229		[D]		Updates source dimension/format-role fields and conditionally calls resource virtual+2C; no D3D/DXGI/sRGB identification.
 0x00BB3AC0	texture_prepare_cpu_backing	func	not ported	docs/ORIGINAL_POSTPROCESS.md:239		[D]		Canonical resource callback computes CPU texture-data size and allocates aligned backing; GPU image and colour-space contract unknown.
+0x00BBC650	MatrixPaletteJointWrite	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registered jointID serialization reads this+F8
+0x00BBC6C0	MatrixPaletteJointRead	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		required registered jointID read writes this+F8; aligned vtable proof; decompile MISS
+0x00BBC930	jointnode_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common local/child copy stage then no-op joint extension; current bank child identity remains unknown.
+0x00BBCB00	MatrixPaletteJointFactory	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		factory initializes F8=-1 and installs D48320
 0x00BBCBA0	root_node_copy_callback	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:587		[A]		| `0x00BBCBA0` | ROOTNODE copy callback |
 0x00BBD6F0		func	not ported		G346			Added four curated symbol rows for763160/75D630/AC4FF0/AC6170, preserving all other original rows byte-for-byte. Bank-producer40 established the first-nonnul...
+0x00BCE540	jointnode_registered_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Registered JOINTNODE factory installs D49348; BBCB00 is derived, not this factory.
 0x00BF33B0		func	not ported	docs/JOINTS_RESEARCH.md:103	F473	[D]		((1 - p r) p) 0.5 + p; acos is the CRT's (0xBF4067 and the dispatcher 0xBF33B0) as f64
 0x00BF3B60		func	not ported	docs/HANDLING_CONFIGURATION.md:7 ; docs/HANDLING_DAMAGE.md:63 ; docs/SOURCE_PHYSICAL_MATERIALS.md:57				`tools/probe_surface_mechanics.c` maps the hash-verified private PE and constructs document/view objects from validated binary-XML records. It executes the o...
 0x00BF3B70		func	not ported	docs/PHYSICAL_RESPONSE.md:3 ; docs/MAIN_CONTACT_RESPONSE.md:3 ; docs/PHYSICAL_CONTACT_HANDOFF.md:44	F153			B791B0 zeros the body-response workspace (manager +80;32bytes per body) through original BF3B70, then iterates four ordered row spans split by C4, BC, C8 and...
@@ -3187,6 +3244,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00C7DAE0	CD01_SOURCES	func	crates/grid-tools/src/private_parameters.rs:14 grid-tools::private_parameters::CD01_SOURCES	docs/CONTACT_DIRECTIONS.md:7 ; docs/MESH_CONTACT_GENERATION.md:13 ; docs/PACKED_MESH_CONTACTS.md:17	F359 F224	[V]		CD01 recipe: the 44 startup sampling directions that C7DAE0 stores at
 0x00C7E307		label	not ported	docs/CONTACT_DIRECTIONS.md:8				inside 0x00C7DAE0; The initializer only moves data.** It is 344 instructions through its first `ret` at `C7E307`:
 0x00C7F360		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:528				not a function entry in the master analysis; | Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs re...
+0x00C80530	MatrixPaletteJointRegistration	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registers class descriptor F64900 and factory BBCB00
 0x00C89000		global	not ported	docs/CONTACT_DIRECTIONS.md:25 ; docs/SOURCE_PHYSICAL_FACTORY.md:27	F359	[V]		The sources are readable in the Steam file.** All 55 words lie in `.rdata` (`0xC89000..0xDA59A4`). SteamStub 2.1 encrypts `.text`, which holds `C7DAE0`, but ...
 0x00C8911C		global	not ported	docs/DEFORMATION_GRID.md:106				Authored `tools/probe_deformation_impact.c` maps the hash-guarded analysis image and runs whole9D4970,9A26F0 and the original timer helpers. Entry-aligned `l...
 0x00C89218		global	not ported	docs/DEFORMATION_GRID.md:106				Authored `tools/probe_deformation_impact.c` maps the hash-guarded analysis image and runs whole9D4970,9A26F0 and the original timer helpers. Entry-aligned `l...
@@ -3383,6 +3441,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CF3354		global	not ported		F365	[V]		Test build [V] (deleted again, see Controls): `grid-069ae995f66c-bundled-PRIVATE-debug.apk`, 233,384,090 bytes, sha256 `71094790…f07512`, libgrid_android.so ...
 0x00CF354C	lighting_key_back_colour	global	not ported	docs/SOURCE_SKY_LIGHTING.md	G330	[D]		Literal backlight_backcolour in hash-pinned unpacked PE.
 0x00CF5004	neanim_scene_binding_field_name	global	not ported	docs/CROWD_ANIMATION_RESEARCH.md:336		[D]		`sceneBinding`. Metadata `E52084` pairs that name at `CF5004` with key
+0x00CF5A28		global	not ported	docs/CROWD_ANIMATION_RESEARCH.md:893				0xCF5A28 with name map0xE4CA4C. The actual wrapper and XML Factor-name lookup
 0x00CF5A98		vtable	not ported	docs/CROWD_ANIMATION_RESEARCH.md:480				allocates the concrete job, installs vtable `0x00CF5A98` and inserts it into the
 0x00CF5CA8		global	not ported	docs/RUNTIME_LIMITS_AUDIT.md:60		[V]		| Fixed waitable lists | collision dispatch 32 | 32/64 | CF5CA8 "Waitable list is full" → A67190 → A94910 | The item is dropped and error 0x21 recorded; no c...
 0x00CF6F08		global	crates/grid-tools/src/ai_driver.rs:1041 grid-tools::ai_driver::SPUN_HOLD_SLIP	docs/AI_AVOID_RECOVERY_RESEARCH.md:309				Spun-test hysteresis (.data 0xE4D0F0 0.1·π, 0xCF6F08 π/3, 0xE4D0EC 3 m/s).
@@ -3671,6 +3730,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00E534A0		global	not ported	docs/BOX_CONTACTS.md:29		[D]		[D] Support functions per kind (table E534A0) identify the convex kinds: 0 box
 0x00E547BC		global	not ported	docs/TYRE_SMOKE_RESEARCH.md:529				| Sorting attribute | Schema row `0xE547BC` binds `instancesRequireSorting` to ID storage `0xF5F5B0`; reader `0xBA2250` normalizes that numeric value and sto...
 0x00E547C8		global	not ported	docs/TYRE_SMOKE_RESEARCH.md:530				| Priority attribute | Schema `0xE547C8` binds `defaultRenderSortPriority` to `0xF5F5AC`; the same reader stores its saved value at group `+0x50`. |
+0x00E54EBC	MatrixPaletteJointProperties	global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		matrixPalette and jointID registered property rows
 0x00E563E0	fmod_dispatch_descriptor	global	not ported	docs/GROUND_EFFECTS_RESEARCH.md	G339	[D]		CRT descriptor named fmod; includes kernel pointer BF90F4; selected by BF90EA before intrinsic dispatcher.
 0x00E572C8	floor_fpu_control	global	not ported	docs/GROUND_EFFECTS_RESEARCH.md:153		[D]		slow path installs the initial control word `E572C8=0x173F`, whose x87 rounding
 0x00E58000		global	not ported	docs/DEFORMATION_GRID.md:33 ; docs/HANDLING_DAMAGE.md:23 ; docs/IMPACT_GENERATION.md:37				The native probe pins the private analysis PE, executes complete original functions and compares executable sections with their post-relocation snapshot. Fou...
@@ -3746,61 +3806,5 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00F60A14		global	not ported	docs/TYRE_SMOKE_RESEARCH.md:1193				NORMAL (element `0xF60A14`, `0x88C221`): four constant corner normals (±1, ±1, 1)/√3
 0x00F60A20		global	not ported	docs/TYRE_SMOKE_RESEARCH.md:1191				TEXCOORD0 (element `0xF60A20`, `0x88BA7C`): atlas UVs; a second texture-coordinate set gets
 0x00F60EB8	texture_resource_descriptor	global	not ported	docs/ORIGINAL_POSTPROCESS.md:237		[D]		Descriptor requested by named placeholder lookup; canonical table does not prove actual installed resource class.
-0x00FB1FA0		global	not ported	docs/PHYSICAL_RESPONSE.md:38				`tools/probe_physical_response.c` maps the pinned private analysis PE, uses aligned owned rows/manager/body workspace and recovered ABI bridges, then execute...
-0x008840B0	plugin_list_finalise	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Configured ordinary finalise state2 -> callback+14 -> successful AL promotes state3; not actor readiness.
-0x0064AC60	organism_finalise	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Null manager can return success; otherwise forwards saved job-setup result, not transactional helper success.
-0x007704E0	crowd_prepare_jobs	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Calls known job setup and returns its saved AL; other helper results not combined.
-0x008BA1F0	task_pending_append	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Bounded 0x28-byte pending append only; no task invocation or clock unit.
-0x00BA14B0	node_registered_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Registered NODE factory; constructor installs D46070.
-0x00BCE540	jointnode_registered_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Registered JOINTNODE factory installs D49348; BBCB00 is derived, not this factory.
-0x00BA0CC0	node_read_transform	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Named TRANSFORM reader into source-local+50; isolated call does not prove byte-order implementation.
-0x00618000	node_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common node copy setup plus64-byte source-local/child stage.
-0x00BBC930	jointnode_copy	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G355	[D]		Common local/child copy stage then no-op joint extension; current bank child identity remains unknown.
-0x00904440	vehicle_prepare_front_light_points	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Atomic glass pair then pod pair then original defaults; saved bounds midpoint plus node translation, not arbitrary draw AABB.
-0x00988F10	vehicle_owner_description	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Returns per-car owner+44C description link, not singleton manager.
-0x008F5700	vehicle_component_part_first_present	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		First non-null among eight slots for exact part code; canonical LOD0 ordering not proved.
-0x00BA0FF0	node_read_transform_bounds	func	not ported	docs/TRACK_ENVIRONMENT.md	G356	[D]		Named TRANSFORM and BOUNDINGBOX reader establishes +50 matrix/+D0,+E0 bound vectors.
-0x008CA010	postprocess_compile_runtime_from_description	func	not ported	docs/ORIGINAL_POSTPROCESS.md:158	G359	[D]		The normalized description enters stage creation, port mapping, external binding, wiring and output-config resolution.
-0x0089B440	postprocess_create_shader_stage	func	not ported	docs/ORIGINAL_POSTPROCESS.md:161	G359	[D]		Resolve declared shader group and optional/default factory; generic fallback remains conditional until active registration is proved.
-0x008C0950	postprocess_map_runtime_port_declarations	func	not ported	docs/ORIGINAL_POSTPROCESS.md:166	G359	[D]		Preserve distinct graph alias and shader sampler strings in runtime input records.
-0x00883830	postprocess_link_input_to_output_port	func	not ported	docs/ORIGINAL_POSTPROCESS.md:170	G359	[D]		Set consumer input linked producer-output pointer and clear external source; does not itself bind an image.
-0x008BE120	postprocess_resolve_output_configuration	func	not ported	docs/ORIGINAL_POSTPROCESS.md:174	G359	[D]		Propagate dimension/format words through config-referenced input; active format and sRGB remain unknown.
-0x008B3320	postprocess_apply_output_config_overrides	func	not ported	docs/ORIGINAL_POSTPROCESS.md:177	G359	[D]		Apply explicit dimensions or scale/truncate and optional internal format override; do not infer D3D enum from sentinel0x23.
-0x008AC4B0	postprocess_builder_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:195	G359	[D]		Initialize builder including defaultfactory+108 to zero; later active factory remains unproved.
-0x00B9ADE0	pssg_initialize_interleaved_stream_layout	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:745	G361	[A]		Shared descriptor initializer: format+4 times format+8 determines stream bytes, cumulative offsets and common stride; established crowd inputs yield stride32 and Instanced3 offset24. GPU normalization and saved-variant writer remain unproved.
-0x00736E60	nightlights_upload_projector_basis_and_weights	func	not ported	docs/TRACK_ENVIRONMENT.md:319	G366	[D]		Uploads camera projector basis divided by radial cutoff and dimensionless clamped weight*2.5; source optical/working-space units separate
-0x00BBC6C0	MatrixPaletteJointRead	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		required registered jointID read writes this+F8; aligned vtable proof; decompile MISS
-0x00BBC650	MatrixPaletteJointWrite	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registered jointID serialization reads this+F8
-0x00BBCB00	MatrixPaletteJointFactory	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		factory initializes F8=-1 and installs D48320
-0x00C80530	MatrixPaletteJointRegistration	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registers class descriptor F64900 and factory BBCB00
-0x00E54EBC	MatrixPaletteJointProperties	global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		matrixPalette and jointID registered property rows
 0x00F647F0	MatrixPaletteJointIdKey	global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registered jointID key storage; reader/writer share field F8
-0x00742510	PostprocessDescriptionApply	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		serializer adapter to destination virtual+40; flag meaning unresolved
-0x008AC320	PostprocessEffectSetRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		PostProcessEffects/Effect id name chain template dispatch
-0x008A7580	PostprocessNamedEffectCreate	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		common effect allocator/name-id registration; no name-specific class switch
-0x0087F460	PostprocessNamedEffectConstruct	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		common effect constructor installs D0655C
-0x00892BC0	PostprocessEffectRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		table-authenticated Effect entry delegates892B40; decompile MISS
-0x00892B40	PostprocessEffectGroupsRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		named ParameterGroup iteration calls892AA0 then86AD10
-0x0086AD10	PostprocessNamedParamsRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		Param payload dispatch to matching registered nodes
-0x00892AA0	PostprocessParameterGroupResolve	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		lookup or registered-factory group instantiation
-0x0086AB10	PostprocessFloatParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		_atof and binary32 store through node+0C
-0x00876BC0	PostprocessColourParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		four integer low bytes packed RGBA; not saturation
-0x00733500	PostprocessResourceProcess	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		resource role->pending effect description slots; allocator guard
-0x00865230	ResourceTypeNameMatches	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		resource virtual type string compared by full equality
-0x008A76A0	PostprocessEffectRegistryClear	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		guarded clear; status13 before cleanup if any effect+A0 nonzero
-0x00895FB0	PostprocessGroupsCallbackByEffectId	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		select effect+98 id then group virtual+8 argument
-0x00746230	ColourBalanceRegisterSources	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		one-time named parameter-source registration; slot0/1 not enable
-0x0098D1D0	TimelineParameterDestinationsRegister	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		retain scalar or packed-colour destination pointers for day/night timeline
-0x0098CE10	NamedParameterRegistryAddress	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		returns shared E85FE0 registry; no arguments consumed
-0x008F87C0	CarSemanticLodNodesPopulate	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		exact catalogue x%d_%s -> selected root -> semantic byLOD cell
-0x008F4EE0	CarNodeFindExactName	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		case-sensitive full name; current then sibling recursion then child
-0x0076D650	OrganismHlaLoadForward	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		actual binary hla resource forwarding to embedded loader
-0x0076D520	HlaResourceRead	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		constructs resource and stores object plus +8 interface
-0x00ACE360	HlaResourceConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		resource object holds wrapper at+20
-0x00ACEB80	HlaWrapperConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		wrapper delegate+4 initially null
-0x00AD4CE0	HlaXmlSelectionTreeLoad	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		HighLevelAnimation/AnimSelectionTree dispatch to typed builder
-0x00AD4780	HlaXmlSelectionNodeBuild	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		exact four-name map to shared node constructors
-0x00AD4510	HlaNumericSelectionNodeBuild	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		numeric node cases use same constructors
-0x00AD5250	HlaFactorNodeConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		installs D3A5E4; virtual+8 target B76F10
-0x008F56C0	CarRenderLampRequestSet	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G377	[D]		write supplied byte to context+32B0
-0x0099C0D0	FirstFlaggedCarContextSlot	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G377	[D]		first+128C flagged slot or-1; typedflagmeaning unresolved
+0x00FB1FA0		global	not ported	docs/PHYSICAL_RESPONSE.md:38				`tools/probe_physical_response.c` maps the pinned private analysis PE, uses aligned owned rows/manager/body workspace and recovered ABI bridges, then execute...
