@@ -634,6 +634,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G383](G0383.md) | 2026-11-05 | Connect selected source crowd clips to shared dynamic pose and preview consumers |
 | [G382](G0382.md) | 2026-11-05 | Use source linked packed sun colour for static track specular light |
 | [G381](G0381.md) | 2026-11-04 | Generalize lamp signal ownership and actual HIGH LOW bank admission |
 | [G380](G0380.md) | 2026-11-04 | Parse shared crowd selection trees and verify source actor inputs |

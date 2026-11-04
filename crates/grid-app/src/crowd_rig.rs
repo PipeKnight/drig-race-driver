@@ -1,17 +1,12 @@
 //! One authored neutral USA actor. No native animation/clock/LOD policy.
+use super::crowd_pose::{Node,palette_values,skin_vertex,inverse,diagnostic_quaternion_row as quaternion_row};
 use bevy::prelude::*;
 use grid_formats::{anim_packet, mesh, pssg, scene, texture};
-use std::{collections::BTreeMap, error::Error, path::Path};
+use std::{error::Error, path::Path};
 type AnyResult<T> = Result<T, Box<dyn Error>>;
 const IDENTITY: [f32; 16] = [
     1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
 ];
-#[derive(Clone)]
-struct Node {
-    name: Vec<u8>,
-    parent: Option<usize>,
-    local: [f32; 16],
-}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PoseInput {
     Neutral,
@@ -142,98 +137,6 @@ fn palettes(
 ) -> AnyResult<(Vec<[f32; 16]>, f32)> {
     palette_values(nodes, joints, inverse, true)
 }
-fn palette_values(
-    nodes: &[Node],
-    joints: &[Vec<u8>],
-    inverse: &[[f32; 16]],
-    require_neutral: bool,
-) -> AnyResult<(Vec<[f32; 16]>, f32)> {
-    if nodes.is_empty()
-        || nodes.len() > 128
-        || joints.len() != inverse.len()
-        || joints.is_empty()
-        || joints.len() > 128
-    {
-        return Err("neutral rig counts invalid".into());
-    }
-    let mut ids = BTreeMap::new();
-    for (i, n) in nodes.iter().enumerate() {
-        if ids.insert(n.name.as_slice(), i).is_some() || n.local.iter().any(|v| !v.is_finite()) {
-            return Err("duplicate/nonfinite neutral transform".into());
-        }
-    }
-    let mut worlds = Vec::with_capacity(nodes.len());
-    for start in 0..nodes.len() {
-        let mut m = IDENTITY;
-        let mut at = Some(start);
-        let mut seen = Vec::new();
-        while let Some(i) = at {
-            if i >= nodes.len() || seen.contains(&i) || seen.len() >= 128 {
-                return Err("neutral hierarchy cycle/range/depth".into());
-            }
-            seen.push(i);
-            m = scene::compose(&m, &nodes[i].local);
-            at = nodes[i].parent;
-        }
-        if m.iter().any(|v| !v.is_finite()) {
-            return Err("nonfinite neutral world".into());
-        }
-        worlds.push(m);
-    }
-    let mut result = Vec::new();
-    let mut max_error = 0f32;
-    let mut names = Vec::new();
-    for (name, ib) in joints.iter().zip(inverse) {
-        if names.contains(name) {
-            return Err("duplicate neutral palette joint".into());
-        }
-        names.push(name.clone());
-        let i = *ids
-            .get(name.as_slice())
-            .ok_or("neutral joint name missing")?;
-        let p = scene::compose(ib, &worlds[i]);
-        for (&x, &y) in p.iter().zip(&IDENTITY) {
-            if !x.is_finite() {
-                return Err("nonfinite palette".into());
-            }
-            max_error = max_error.max((x - y).abs());
-        }
-        result.push(p);
-    }
-    if require_neutral && max_error > 1e-5 {
-        return Err(format!("neutral inverse/world cancellation error {max_error}").into());
-    }
-    Ok((result, max_error))
-}
-fn skin_vertex(
-    p: [f32; 3],
-    n: [f32; 3],
-    weights: &[f32; 4],
-    joints: &[u8; 4],
-    palette: &[[f32; 16]],
-) -> AnyResult<([f32; 3], [f32; 3])> {
-    if weights.iter().any(|v| !v.is_finite()) || joints.iter().any(|&j| j as usize >= palette.len())
-    {
-        return Err("invalid retained influence".into());
-    }
-    let mut q = Vec3::ZERO;
-    let mut normal = Vec3::ZERO;
-    for (&w, &j) in weights.iter().zip(joints) {
-        let m = &palette[j as usize];
-        q += Vec3::from_array(scene::transform_point(m, p)) * w;
-        normal += Vec3::new(
-            n[0] * m[0] + n[1] * m[4] + n[2] * m[8],
-            n[0] * m[1] + n[1] * m[5] + n[2] * m[9],
-            n[0] * m[2] + n[1] * m[6] + n[2] * m[10],
-        ) * w;
-    }
-    let normal_length = normal.length_squared();
-    if !q.is_finite() || !normal.is_finite() || !normal_length.is_finite() || normal_length < 1e-12
-    {
-        return Err("unsupported neutral vertex/normal".into());
-    }
-    Ok((q.to_array(), normal.normalize().to_array()))
-}
 // Caller first validates the unchanged saved neutral rig with palettes().
 fn descendants(nodes: &[Node], target: usize) -> AnyResult<Vec<bool>> {
     if target >= nodes.len() || nodes[target].parent.is_none() {
@@ -331,21 +234,6 @@ fn pose_vertices(
     Ok((influenced, moved, maximum))
 }
 // Explicit diagnostic convention, NOT the unresolved original receiver semantics.
-fn quaternion_row(value: [f32; 4]) -> AnyResult<([f32; 16], f32)> {
-    if value.iter().any(|v| !v.is_finite()) {
-        return Err("nonfinite stored quaternion".into());
-    }
-    let norm_squared = value.iter().map(|v| v * v).sum::<f32>();
-    if !norm_squared.is_finite() || (norm_squared - 1.).abs() > 1e-3 {
-        return Err("stored quaternion outside near-unit diagnostic domain".into());
-    }
-    let q = Quat::from_xyzw(value[0], value[1], value[2], value[3]).normalize();
-    let row = Mat4::from_quat(q).to_cols_array();
-    if row.iter().any(|v| !v.is_finite()) {
-        return Err("nonfinite quaternion row".into());
-    }
-    Ok((row, norm_squared))
-}
 fn basis_error(a: &[f32; 16], b: &[f32; 16]) -> f32 {
     [0, 1, 2, 4, 5, 6, 8, 9, 10]
         .into_iter()
@@ -500,27 +388,6 @@ fn stored_forearm_row(root: &Path, rig: &Rig, coordinate: Option<StoredCoordinat
         finger_norm
     );
     Ok(row)
-}
-fn inverse(data: &[u8]) -> AnyResult<([f32; 16], f32)> {
-    if data.len() != 64 {
-        return Err("neutral inverse matrix bytes differ".into());
-    }
-    let mut m = [0.; 16];
-    for (v, b) in m.iter_mut().zip(data.as_chunks::<4>().0) {
-        *v = f32::from_be_bytes(*b);
-    }
-    if m.iter().any(|v| !v.is_finite()) {
-        return Err("nonfinite neutral inverse".into());
-    }
-    let error = [m[3], m[7], m[11], m[15] - 1.]
-        .into_iter()
-        .map(f32::abs)
-        .fold(0., f32::max);
-    if error > 1e-4 {
-        return Err("unsupported inverse affine column".into());
-    }
-    // Preserve every saved value: no clearing of tolerated affine noise.
-    Ok((m, error))
 }
 fn rig(tree: &pssg::Tree<'_>) -> AnyResult<Rig> {
     let transform_nodes: Vec<_> = (0..tree.nodes.len())

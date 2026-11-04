@@ -944,3 +944,75 @@ The old narrow rig visual is not promoted by parser compatibility. Actual
 failed/passing receipts: local/graphics/crowd-selection01/. Static packets:
 local/handoff/drafts/crowd-factor-evaluation150/, crowd-selection-mvp151/152/,
 crowd-factor-inputs153/, crowd-actor-inputs154/ and crowd-null-factor158/.
+
+
+## General explicit-coordinate actor diagnostic (source integration)
+
+The selected-source-control/selected-source-pose modes now connect the shared
+categorical Library to the existing crowd preview renderer. Five explicit CLI
+values select source context, group/map/placement, skin/modifier and variant/
+colourSet, plus bank coordinate, diagnostic Performance and caller-owned draw.
+There is no route/car/sex/23-joint whitelist or source selection default. Legacy
+modes remain controls. Partial/ambiguous source identities, nonzero textureShift
+low byte and unresolved mirroring refuse; a bank miss never selects another bank.
+
+The actual template supplies its geometry resource and dataset hla bank. The
+selected raw nameId is matched uniquely to the actual NeAnimClip.id in that bank;
+this direct diagnostic binding is source-informed, but is not the still-unclosed
+native animation-data+0x80 insertion path. The pose helper retains actual named
+hierarchy, ordered skin palette/inverse binds, all four source influences and
+modifier geometry. Counts are dynamic within explicit diagnostic128-node/joint
+safety caps. Existing skin/mesh readers provide source validation. Exact selected
+shader sampler bindings and texture-object IDs supply real diffuse/tint images;
+source variant colours feed the existing preview material.
+
+Control and Pose read the same clip/source/material. Control uses explicitly
+chosen saved source locals; Pose samples named channels at the caller's finite
+bank coordinate with an authored absolute-local policy. Both use the same
+Prepared/install/mesh/material path and authored yaw/foot anchoring. This is a
+selected-modifier diagnostic, not normal populated animated crowds, source LOD,
+orientation, Delta/reference reset, native RNG, or wall-clock playback parity.
+Baseline DLAA is refused before preparation because it changes actual MSAA to
+Off while this existing preview requires MSAA4; the actual component assertion
+remains. No ordinary lighting/material/default policy changes are included.
+
+Prepared CPU checks distinguish CLI-value admission, actual six dataset-selected
+bank skin/material imports, and one full selected Control/Pose preparation. The
+actual Donington maleVariant0 is cr_male_2.pssg, not the similarly named older
+census file cr_male.pssg. These are representative data fixtures, not production
+whitelists. Compilation, actual CPU receipts and paired rendered acceptance must
+be recorded by the integrating run; source preparation alone is not a pass.
+Private integration/review/provenance: local/handoff/drafts/crowd-selected-cli178/,
+crowd-cli-review179/ and crowd-source-stage180/.
+
+### Native Delta and time boundary
+
+The installed rawAnim schema retains Delta as copied text at field9, rather than
+parsing a pose operator. Source constructor0x00B72470 ->0x00B722D0 builds the packed
+field offsets; append0x00B726C0 stores each row as {data, table+8}. This closes the
+primary-row/proxy association: selected-state transition tests use actual
+transitionOutAnim/transitionInAnim strings; the range helper's optional byte is
+headlookat, not Delta or playback speed. Delta's later runtime consumer remains
+unverified. Literal-reference absence alone does not prove editor-only metadata.
+
+The known clip dispatcher passes mapped bank time unchanged to packet evaluation;
+0x00AC70A0 selects integer binding-array blocks and is not a time converter.
+Task helper0x008BA1F0 only capacity-checks and copies the0x28 registration record.
+It supplies neither a callback invocation nor clock units: zero registration
+period is scheduling metadata. The exact missing join is execution of that
+scheduler+0x30 phase5 Plugin update record -> owner.virtual+4/0x008841A0 and the
+producer/transforms of its supplied double pointer. Source reference/reset history
+remains separate. No guessed seconds/FPS/phase policy is needed for the explicit
+coordinate diagnostic, and none is claimed. Bounded evidence: private
+crowd-clock-delta169/, crowd-proxy-fields170/, crowd-delta-boundary171/ and
+crowd-clock-leaf181/ packets.
+
+### Malformed saved normal stream in actual crowd geometry
+
+The purchased six-bank CPU test exposed a valid referenced crowd mesh whose saved normal stream contains NaNs. In cr_female.pssg, modifier !b_f_LOD01 selects source !U: all542 vertices are referenced by2274 indices, and normals at vertices0,1,2,15 contain nonfinite words. Position, influence and UV counts match; the affected vertices participate in nondegenerate triangles. Skipping the modifier or vertices would discard real geometry.
+
+The independently authored pose adapter now follows the existing renderer policy: a complete finite saved normal stream is retained bit-for-bit; an absent/nonfinite stream is reconstructed as a whole through Bevy compute_smooth_normals from checked positions/triangle indices. Raw saved normals remain separate for diagnostics. Finite zero normals produced for degenerate or cancelling geometry propagate as zero only when the input normal itself is zero; a nonzero normal cancelled by skinning still refuses. No arbitrary direction is invented. The exact source reader remains unchanged; this is an authored render adaptation, not proof of the original repair policy. Raw proof and source/library hashes: local/handoff/drafts/crowd-normal-repair183/RAW_PROOF.json. Actual regressions and render results are recorded in G383.
+
+### G383 integrating verification
+
+The actual default-feature run passes61 crowd CPU regressions, including30 modifier instances across six dataset-selected resource banks after the shared normal repair, and the required734-test package gate/Clippy/release/Washington render. A matched1920x1080 offscreen pair then imports the same786-vertex/3468-index modifier and material through Control/Pose modes. Saved locals produce a standing T-pose; selected clip f_gs_s1_id_01 at explicitly supplied bank coordinate2 produces a coherent seated pose with crossed legs and hands on the knee. The73,974 changed RGB pixels lie entirely inside the actor ROI; background pixels are byte-identical. Both child processes complete and reap with exit0. Exact provenance, failed attempts and tool versions are retained in G383 and local/handoff/drafts/crowd-visual-review186/. This proves the bounded static clip-to-skin-to-render path, not native clock/reference/Delta, all actor modifiers per placement, full population, flashes or sound. Feet/seat contact are partially occluded and source orientation remains authored.
