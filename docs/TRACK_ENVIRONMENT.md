@@ -314,3 +314,40 @@ precision and extreme/subnormal values remain separate limits. Three-family
 metadata admission passed for23 purchased lighting files, not all render paths.
 Eleven new tests are proposed; compilation, actual ECS results and matched
 night/day/headlight renders must be recorded before claiming success.
+
+
+### Source headlight projector footprint and cookie (G366)
+
+Original producer0x00736E60 uploads camera-space origin and right/up/forward
+divided by radial cutoff R, plus dimensionless2.5*clamp(weight,0,1). Selected
+full/quick fragments form q from the visible camera-space position and that
+basis. The front gate is .5*abs(q.x)<q.z and .5*abs(q.y)<q.z; cookie UV is
+(.125*q.x/q.z+.25, -.25*q.y/q.z+.5), sampling the left atlas half. Attenuation
+is saturate(1-length(q)), not inverse square. The selected shaders saturate
+the projector sum before multiplying global light colour. Only their first
+two sets use the inspected focus-normal factor. Range110 follows a component
+identity comparison; it is not established as unconditional physics slot0.
+
+Resource handler0x00732970 tries headlight.dds then headlight.tga and stores
+the result at NightLights+94;0x0072E170 binds that same headlightMap. Purchased
+containers have a1024x512BC3 atlas. Left-half RGB agrees across both inspected
+contexts and is spatially coloured; alpha/mip data differs. Native sampler
+filter/address/sRGB semantics remain unresolved after loader state overrides.
+Load through generic track resource context, never a hardcoded track list.
+
+The current neutral-white PBR SpotLight trial remains an authored approximation:
+its circular cone and inverse-square falloff do not reproduce this contract.
+Bevy0.19.1 native light textures require pbr_light_textures plus hardware support
+and sample only red. Public extraction/custom-tag and guarded ShaderAssets
+override APIs offer a possible shared prototype, not verified implementation.
+Cookie RGB, source group saturation and selected normal policy need explicit
+handling; no physical-unit calibration or source parity follows from geometry.
+
+
+Selected road/infield and metallic-paint consumers add maskGBA to their diffuse
+sum before albedo/AO; independent solar Phong uses maskR. Paint reflection and
+sun lobes remain separate. The inspected reflective-road fragment has no mask
+binding, and chrome/glass arithmetic is unverified. A shared aggregate-RGB
+diffuse adapter is therefore the next renderer experiment; applying it to all
+PBR families is an authored adaptation, not recovered universal material parity.
+Private source proof: local/handoff/drafts/night-mask-consumers102/.
