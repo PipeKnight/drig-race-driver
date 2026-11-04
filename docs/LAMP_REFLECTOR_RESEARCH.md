@@ -128,3 +128,93 @@ Play GRID Graphics Signals DLAA.cmd is separate from unchanged existing builds a
 
 
 20 October2026 owner live check: separate Signals DLAA build brake and reverse brightness reported natural. This accepts that appearance in the tested run; unlit covers, source HDR/alpha optics, full damage ancestry and nighttime road beams remain separate unfinished items.
+
+
+## Shared general-bank matcher and sampler contract (G372)
+
+The pinned static PE resolves matcher slot0xD158C0 to0xA171A0 and binding
+visitor slots0xD16ED4/0xD16ED8 to0x9CA470/0x8ECAD0. A shared-master read-only
+batch returned decompile misses for the first two and a return1 post-callback
+for the third; bounded existing Capstone reads, not the wrapper exit status,
+establish the missing callback semantics [D].
+
+0xA171A0 admits a typed texture resource, then calls the already documented
+strstr0xA66880 on its name and supplied suffix. Matching is case-sensitive
+substring search, not a filename formula or ends-with rule. A match saves the
+resource and stops the bank enumerator. Native duplicate-bank order remains
+unknown. The owned adapter may safely accept a unique match and explicitly
+report an unsupported ambiguity rather than invent source ordering.
+
+0x9CA470 uses mode0 for all graph nodes, mode1 for names containing int_, and
+mode2 for names without that case-sensitive token. It visits the admitted
+node's materials and calls wrapper0xA66780 (__strnicmp) for strlen(filter) bytes:
+material matching is a case-insensitive PREFIX, without an end/boundary test.
+ASCII-insensitive prefixes cover observed IDs; unobserved CRT locale behavior
+must not be replaced with unrestricted Unicode folding. The five source
+filters Head Lights Pod, Rear Lights Pod, Lights Pod Matt, Head Lights Glass
+and Rear Lights Glass associate the common _lights_on. resource with
+TEmissiveMap. A shader-group-only selector would admit unrelated brake discs
+and grilles.
+
+The actual setter call uses the material+0x2C collection, sampler name, owner,
+resolved texture, lookup start0 and source descriptor0xE54754.
+0xB9EBB0/0x4B23A0 require a declared exact case-sensitive full sampler name.
+0xB9E9D0 requires definition kind3, then calls existing
+ParameterEntryStorageResolve0xB9F090 with create=(texture!=null).
+Missing definitions/backing remain errors; a nonzero texture can request a
+missing pointer-entry allocation. The value dispatcher0xB9E2A0 records kind,
+subtype and assignment serial before its descriptor-copy leaf. Its resource
+ownership implementation is not ported by this association contract.
+0xB9CC90 refreshes packed material state/sorting identity. The visitor ignores
+the setter status before marking its flag, so that flag is not proof of a bind.
+
+The installed-data census covers44 models and176 high/low geometry/general
+packages. Each of88 general banks contains exactly one case-sensitive
+_lights_on. TEXTURE candidate; high/low IDs agree, without assuming image-byte
+or bank-policy equality. The five filters select404 material records. A fresh
+case-insensitive pass adds no aliases. Every selected material declares one
+TEmissiveMap texture input (serialized ordinal16 here, never a lookup shortcut)
+while all have zero saved texture inputs. These are runtime table associations,
+not saved SHADERINPUT values. Discs is an excluded light-pod-group material in
+all88 geometry packages; Grills in22. STK has no matching source role despite
+having an atlas. Several high/low material sets differ; do not synthesize an
+absent low-LOD role.
+
+Light-named joint descendants are not a glow selector either: actual serialized
+MATRIXPALETTEJOINTNODE names use x0_ through x4_ and42 suffix variants; S15 has a
+low joint name ending in a tab. Related draws include ordinary body/trim/discs.
+Do not trim source IDs or equate their names to the native graph callback.
+Per-section palette IDs, positive/negative PartsState, live all-slot activation,
+intact/cracked material families, LOD/reset/replay, gamma and radiometry remain
+separate tasks. This source contract alone neither lights cars nor completes
+night rendering.
+
+Private evidence: local/graphics/lamp-binding01/source-callbacks01/ and
+local/handoff/drafts/lamp-binding-contract126/, lamp-bank-census127/,
+lamp-declaration-role128/. No original process/window, asset copy or source
+binary was modified.
+
+
+## Owned association adapter and existing consumer (G372)
+
+The shared lamp_association module retains source package/group, separate
+namespace and actual general-bank IDs before the loader merges them with
+livery textures. It requires the five source prefix rules and an exact declared
+texture sampler, and accepts a unique source-substring resource. Missing,
+wrong-case, wrong-type and ambiguous inputs remain explicitly unsupported.
+There is no filename synthesis or model whitelist in this adapter.
+
+High package associations are retained in the normal loader and consumed by
+the existing optional pilot's atlas lookup. The pilot's old player/Lacetti,
+twelve-section, LOD0 and daytime controls remain; they are not the intended
+final all-car activation path. The adapter-selected DDS is byte-identical to
+the prior pilot fixture. Low associations retain their own geometry/bank
+provenance and are not uploaded or substituted into existing high handles.
+The common bounded resource reader is reused.
+
+Combined-feature Clippy and ten focused tests pass: four actual-PSSG parser
+controls, the purchased88-package/404-material association fixture, and five
+lamp-signal controls including576 source-fade cases and the DDS identity.
+These are CPU association/consumer checks, not new GPU glow or native sampler
+gamma/radiometry proof. Source section-state/activation and owned intact/cracked
+handle-family work remain open.

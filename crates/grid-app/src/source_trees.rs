@@ -586,6 +586,7 @@ mod tests {
             ornament_lods: Default::default(),
             reflections: Default::default(),
             piece_skins: Default::default(),
+            lamp_associations: Default::default(),
         };
         let tree_cards = append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
         // Cards with a normal atlas get the original's card lighting (tree_cards.rs).

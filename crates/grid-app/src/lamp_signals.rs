@@ -107,19 +107,52 @@ impl Fades {
         }]
     }
 }
-pub fn validate(car: &super::Car) -> Result<(), &'static str> {
-    if !car.textures.contains_key("car0/lac_lights_on.tga")
-        || car
-            .parts
-            .iter()
-            .filter(|p| section(&p.material, &p.joint).is_some())
-            .count()
-            != 12
+fn atlas_key(car: &super::Car) -> Result<String, String> {
+    let mut keys = std::collections::BTreeSet::new();
+    for part in car
+        .parts
+        .iter()
+        .filter(|part| section(&part.material, &part.joint).is_some())
     {
+        let mut found = std::collections::BTreeSet::new();
+        for package in &car.lamp_associations {
+            if let Some(key) = package.texture_key(&part.material)? {
+                found.insert(key);
+            }
+        }
+        if found.len() != 1 {
+            return Err(format!(
+                "lamp section {:?} needs one admitted source general-bank association",
+                part.material
+            ));
+        }
+        keys.extend(found);
+    }
+    if keys.len() != 1 {
         return Err(
-            "--lamp-signals requires all12 purchased Lacetti LOD0 lamp sections and lights_on texture",
+            "existing single-atlas lamp pilot requires one resolved source resource".into(),
         );
     }
+    let key = keys.into_iter().next().expect("one source atlas");
+    if !car.textures.contains_key(&key) {
+        return Err(format!("resolved lamp resource not loaded: {key:?}"));
+    }
+    Ok(key)
+}
+pub fn validate(car: &super::Car) -> Result<(), String> {
+    // This consumer intentionally retains the old player/Lacetti/LOD0 scope.
+    if car
+        .parts
+        .iter()
+        .filter(|p| section(&p.material, &p.joint).is_some())
+        .count()
+        != 12
+    {
+        return Err(
+            "--lamp-signals still requires all12 purchased Lacetti LOD0 lamp sections".into(),
+        );
+    }
+    atlas_key(car)?;
     Ok(())
 }
 pub fn upload(
@@ -127,14 +160,15 @@ pub fn upload(
     images: &mut Assets<Image>,
     sampler: ImageSampler,
 ) -> Handle<Image> {
+    let key = atlas_key(car).expect("validated source lamp association");
     let image = super::texture_upload::image_linear(
-        &car.textures["car0/lac_lights_on.tga"],
+        &car.textures[&key],
         sampler,
         RenderAssetUsages::default(),
     )
     .expect("validated lamp emissive DDS");
     println!(
-        "lamp_signal_atlas format={:?} raw_linear=true upload=shared-helper source_sampler_gamma_unverified=true",
+        "lamp_signal_atlas source_key={key:?} format={:?} raw_linear=true upload=shared-helper source_sampler_gamma_unverified=true",
         image.texture_descriptor.format
     );
     images.add(image)
@@ -349,7 +383,7 @@ mod tests {
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn purchased_lacetti_sections_and_emissive_resource() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
-        let car = super::super::load(
+        let mut car = super::super::load(
             std::path::Path::new(&root),
             &grid_tools::route::Route::default(),
             &grid_tools::car::Car::default(),
@@ -365,6 +399,25 @@ mod tests {
             .filter(|p| section(&format!("car0/{}", p.material), &p.joint).is_some())
             .count();
         assert_eq!(count, 12);
+        let prior = car.textures["lac_lights_on.tga"].clone();
+        // Actual parsed bank/declaration evidence is consumed by the existing pilot lookup.
+        for part in &mut car.parts {
+            part.material = format!("car0/{}", part.material);
+        }
+        car.textures = car
+            .textures
+            .into_iter()
+            .map(|(id, dds)| (format!("car0/{id}"), dds))
+            .collect();
+        car.lamp_associations = car
+            .lamp_associations
+            .into_iter()
+            .map(|p| p.in_namespace("car0/"))
+            .collect();
+        validate(&car).unwrap();
+        let resolved = atlas_key(&car).unwrap();
+        assert_eq!(resolved, "car0/lac_lights_on.tga");
+        assert_eq!(car.textures[&resolved], prior);
     }
     #[test]
     fn simulation_ticks_do_not_double_advance_and_reset_clears_history() {

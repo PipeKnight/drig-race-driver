@@ -54,6 +54,7 @@ mod car_reflection_overlay;
 mod car_reflections;
 mod lamp_materials;
 mod lamp_signals;
+mod lamp_association;
 mod paint_environment;
 mod window_response;
 mod window_phase_audit;
@@ -225,12 +226,16 @@ struct Car {
     /// Reflecting materials' saved controls, keyed like the parts' materials
     /// (docs/CAR_REFLECTIONS.md).
     reflections: BTreeMap<String, car_reflection_overlay::Controls>,
+    /// Source-table general-bank associations; no live lamp-state policy.
+    lamp_associations: Vec<lamp_association::Package>,
     /// Skinned breakable pieces' joints, by part name (`dynamic_props::attach_skin`).
     piece_skins: BTreeMap<String, dynamic_props::PieceSkin>,
 }
 /// A model's `_lowLOD.pssg` for its opponents.
 #[derive(Default)]
 struct LowLod {
+    /// Own low geometry/general-bank provenance; never substituted from high.
+    lamp_association: Option<lamp_association::Package>,
     /// The shadow mesh: the coarsest level merged in the parts' rest frame
     /// ("Shadows").
     shadow: Option<Mesh>,
@@ -890,26 +895,34 @@ fn load_package(
         });
     }
     let mut textures = BTreeMap::new();
+    let mut lamp_general = None;
     let texture_paths = if track {
         vec![mesh_path.to_owned()]
     } else {
         vec![model.livery(0), model.file("_gen_high.pssg")]
     };
     for path in texture_paths {
-        let bytes = read(&root.join(path))?;
+        let bytes = read(&root.join(&path))?;
         let tree = pssg::read_tree(&bytes)?;
+        let is_general = !track && path == model.file("_gen_high.pssg");
+        let mut general_ids = Vec::new();
         for texture in texture::read_textures(&tree)? {
+            let id = String::from_utf8(texture.id.to_vec())?;
+            if is_general { general_ids.push(id.clone()); }
             let (dds, levels) = texture.validated_dds();
             println!(
                 "texture {:?} validated_mip_levels={levels}",
                 String::from_utf8_lossy(texture.id)
             );
             if textures
-                .insert(String::from_utf8(texture.id.to_vec())?, dds)
+                .insert(id, dds)
                 .is_some()
             {
                 return Err("duplicate texture ID".into());
             }
+        }
+        if is_general {
+            lamp_general = Some(lamp_association::Bank::from_ids(&path, general_ids));
         }
     }
     for part in &parts {
@@ -950,8 +963,13 @@ fn load_package(
         ornament_lods: Default::default(),
         reflections: Default::default(),
         piece_skins: Default::default(),
+        lamp_associations: Vec::new(),
     };
     if !track {
+        let bank = lamp_general.ok_or("actual general-bank metadata absent")?;
+        let association = lamp_association::Package::read(&tree, mesh_path, bank);
+        association.report();
+        car.lamp_associations.push(association);
         for shader in material::read_constants(&tree)? {
             if let Some(controls) = car_reflection_overlay::Controls::from_constants(shader.group, &shader.values) {
                 car.reflections
@@ -1694,6 +1712,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         ornament_lods: Default::default(),
         reflections: Default::default(),
         piece_skins: Default::default(),
+        lamp_associations: Vec::new(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -1746,6 +1765,11 @@ fn append_car(
         car.bindings
             .insert(format!("{prefix}{name}"), format!("{prefix}{texture}"));
     }
+    for association in source.lamp_associations {
+        let association = association.in_namespace(&prefix);
+        association.report();
+        car.lamp_associations.push(association);
+    }
     for (name, controls) in source.reflections {
         car.reflections.insert(format!("{prefix}{name}"), controls);
     }
@@ -1754,6 +1778,7 @@ fn append_car(
         car.low_lods.push(LowLod::default());
     }
     let low = low_lod(root, model, anchor, &prefix, &car.bindings);
+    if let Some(association) = &low.lamp_association { association.report(); }
     println!(
         "car_lod model={m} low_file={} shadow_triangles={} parts={}",
         model.file("_lowLOD.pssg"),
@@ -1786,6 +1811,12 @@ fn low_lod(
     let Ok(tree) = pssg::read_tree(&bytes) else {
         return low;
     };
+    low.lamp_association = Some(
+        lamp_association::Package::read(
+            &tree, &model.file("_lowLOD.pssg"),
+            lamp_association::Bank::load(root, &model.file("_gen_low.pssg")),
+        ).in_namespace(prefix),
+    );
     let Ok(sources) = mesh::read_meshes(&tree) else {
         return low;
     };
@@ -7477,6 +7508,7 @@ mod driving_tests {
                         ornament_lods: Default::default(),
                         reflections: Default::default(),
                         piece_skins: Default::default(),
+                        lamp_associations: Vec::new(),
                     };
                     append_route_split(root, &route, &model, &mut car)
                         .unwrap_or_else(|e| panic!("{}: {e}", route.path()));
