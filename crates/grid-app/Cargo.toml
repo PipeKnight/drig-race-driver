@@ -22,6 +22,8 @@ crate-type = ["cdylib"]
 dlaa = ["bevy/dlss"]
 # Optional material experiment; keep additional sampler bindings out of phone/default builds.
 paint-specular = ["bevy/pbr_specular_textures"]
+# Bounded source-cookie projector trial; normal and phone builds stay independent.
+source-projector = ["bevy/pbr_light_textures"]
 # Per-system Chrome trace of a run (docs/PERFORMANCE.md): build with
 # `--features trace`, run with TRACE_CHROME=PATH.json. Rebuilds Bevy.
 trace = ["bevy/trace_chrome"]
