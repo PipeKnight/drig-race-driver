@@ -431,7 +431,7 @@ fn place_mirror(
         return;
     }
     let centre = glass.iter().map(|(t, aabb)| t.transform_point(aabb.center.into())).sum::<Vec3>() / glass.iter().count() as f32;
-    let frame = Mat4::from_cols_array(&driving.runtime.pose()) * cockpit.anchor;
+    let frame = driving.shown_pose(0).unwrap_or(Mat4::IDENTITY) * cockpit.anchor;
     let (forward, up) = (frame.z_axis.truncate().normalize(), frame.y_axis.truncate().normalize());
     *transform = Transform::from_translation(centre + MIRROR_AHEAD * forward).looking_to(-forward, up);
 }

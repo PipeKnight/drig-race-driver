@@ -142,6 +142,7 @@ pub(crate) fn race_app_on(route: grid_tools::route::Route, models: &[&str], laps
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(trial)
         .insert_resource(Driving {
+            shown: Default::default(),
             runtime,
             geometry: Some(geometry),
             paused: false,

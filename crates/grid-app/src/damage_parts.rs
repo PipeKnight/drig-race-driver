@@ -1162,9 +1162,11 @@ fn present(
                 .clone()
         })
         .collect();
+    // Drawn with the cars between the ticks (main.rs `ShownPoses`).
     let poses: Vec<Mat4> = runtimes
         .iter()
-        .map(|r| Mat4::from_cols_array(&r.pose()))
+        .enumerate()
+        .map(|(car, r)| driving.shown_pose(car).unwrap_or_else(|| Mat4::from_cols_array(&r.pose())))
         .collect();
     for (
         entity,

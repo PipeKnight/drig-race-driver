@@ -978,6 +978,7 @@ mod sprite_visibility_reset_regression {
                     frames: 0,
                 });
                 app.insert_resource(crate::Driving {
+                    shown: Default::default(),
                     runtime,
                     geometry: None,
                     paused: false,

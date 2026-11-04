@@ -345,13 +345,7 @@ fn present(
     let (Some(driving), Some(drivers)) = (driving, drivers) else {
         return;
     };
-    let cars = driving.opponents.as_ref().map(|o| &o.multi.cars);
-    let pose = |car: usize| -> Option<Mat4> {
-        match car {
-            0 => Some(Mat4::from_cols_array(&driving.runtime.pose())),
-            k => cars.and_then(|c| c.get(k)).map(|r| Mat4::from_cols_array(&r.pose())),
-        }
-    };
+    let pose = |car: usize| -> Option<Mat4> { driving.shown_pose(car) };
     let Ok((eye, Projection::Perspective(lens))) = camera.single() else {
         return;
     };

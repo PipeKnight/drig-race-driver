@@ -625,6 +625,7 @@ mod tests {
         crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(super::super::Driving {
+            shown: Default::default(),
             notices: Vec::new(),
             handbrake_from: None,
             auto_reset: Default::default(),

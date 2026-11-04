@@ -389,8 +389,55 @@ struct ViewerCamera;
 #[derive(Component)]
 struct DrivingHud;
 
+/// What the cars are drawn at between two fixed ticks (row 116, F729). The
+/// simulation steps in fixed 16 ms ticks (62.5 Hz, F544); a frame drew the
+/// last tick's pose as it was, so at 80-100 FPS the cars and the camera moved
+/// one tick on some frames and none on others (the original steps its world
+/// once per rendered frame by the frame time, docs/FRAME_STEPPING.md). A frame
+/// now draws each car between its pose before the latest tick and its pose
+/// after it, by the fixed clock's overstep (`alpha`), one tick behind the
+/// simulation. `GRID_TICK_INTERPOLATION=0` draws the last tick (comparisons).
+struct ShownPoses {
+    /// Per car (0 the player), the pose before its latest tick.
+    previous: Vec<[f32; 16]>,
+    /// The frame's position between the last two ticks, 0..=1.
+    alpha: f32,
+}
+
+impl Default for ShownPoses {
+    /// Without `shown_alpha` (captures, headless runs, tests) the last tick
+    /// is drawn.
+    fn default() -> Self {
+        Self { previous: Vec::new(), alpha: 1. }
+    }
+}
+
+/// Translation lerped, rotation slerped; a move of more than
+/// `ornament_lod::CUT_METRES` (a reset, a teleport) is drawn at once.
+fn between_poses(previous: Mat4, now: Mat4, alpha: f32) -> Mat4 {
+    let (scale, r0, t0) = previous.to_scale_rotation_translation();
+    let (_, r1, t1) = now.to_scale_rotation_translation();
+    if alpha >= 1. || t0.distance(t1) > ornament_lod::CUT_METRES || !t0.is_finite() || !r0.is_finite() {
+        return now;
+    }
+    Mat4::from_scale_rotation_translation(scale, r0.slerp(r1, alpha), t0.lerp(t1, alpha))
+}
+
+fn tick_interpolation() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("GRID_TICK_INTERPOLATION").map_or(true, |v| v != "0"))
+}
+
+/// The frame's position between the last two fixed ticks (after the fixed loop).
+fn shown_alpha(driving: Option<ResMut<Driving>>, fixed: Option<Res<Time<Fixed>>>) {
+    if let (Some(mut driving), Some(fixed)) = (driving, fixed) {
+        driving.shown.alpha = if tick_interpolation() { fixed.overstep_fraction().clamp(0., 1.) } else { 1. };
+    }
+}
+
 #[derive(Resource)]
 struct Driving {
+    shown: ShownPoses,
     runtime: grid_tools::source_vehicle::Runtime,
     geometry: Option<grid_tools::body_geometry::BodyGeometry>,
     paused: bool,
@@ -466,6 +513,35 @@ struct OpponentPart {
     lost_with_wheel: bool,
 }
 impl Driving {
+    /// The pose of car `car` (0 the player) now.
+    fn pose_of(&self, car: usize) -> Option<[f32; 16]> {
+        match car {
+            0 => Some(self.runtime.pose()),
+            k => self.opponents.as_ref().and_then(|o| o.multi.cars.get(k)).map(|c| c.pose()),
+        }
+    }
+
+    /// The pose car `car` (0 the player) is drawn at this frame ([`ShownPoses`]).
+    pub(crate) fn shown_pose(&self, car: usize) -> Option<Mat4> {
+        let now = Mat4::from_cols_array(&self.pose_of(car)?);
+        Some(match self.shown.previous.get(car) {
+            Some(previous) => between_poses(Mat4::from_cols_array(previous), now, self.shown.alpha),
+            None => now,
+        })
+    }
+
+    /// The player's last tick step did not move it (paused, frozen, standing).
+    fn frozen(&self) -> bool {
+        self.shown.previous.first().is_none_or(|p| *p == self.runtime.pose())
+    }
+
+    /// Every car's pose before the tick about to run (or not run: then the
+    /// drawn pose stays still).
+    fn keep_previous_poses(&mut self) {
+        let cars = self.opponents.as_ref().map_or(1, |o| o.multi.cars.len().max(1));
+        self.shown.previous = (0..cars).filter_map(|car| self.pose_of(car)).collect();
+    }
+
     fn report(&self, event: &str, controls: grid_tools::source_vehicle::Controls) {
         // Performance test: Sample logging off drops the periodic samples only.
         if event == "tick" && perf_test::quiet_samples() {
@@ -3949,6 +4025,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
         );
         Some(Driving {
+            shown: ShownPoses::default(),
             runtime,
             geometry,
             paused: false,
@@ -4731,6 +4808,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         if interactive {
             cap_catch_up(&mut app);
+            // Captures step whole ticks and draw the last one as before.
+            app.add_systems(RunFixedMainLoop, shown_alpha.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop));
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
@@ -5981,6 +6060,7 @@ fn drive_tick(
     mut inputs: Option<ResMut<flashback::Inputs>>,
 ) {
     let _tick_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DriveTick);
+    driving.keep_previous_poses();
     // One queued gear edge per fixed tick, dropped when the tick does not run.
     let shift = shifts.pop();
     if driving.paused
@@ -6579,6 +6659,49 @@ fn drive_exit_log(
         }
     }
 }
+/// The camera's shots of the last two ticks: a frame draws between them by
+/// the same `alpha` as the cars ([`ShownPoses`]), so the camera and the car it
+/// follows move together on every frame.
+#[derive(Default)]
+struct ShownShots {
+    ticks: Option<(u64, u64)>,
+    previous: Option<camera::Shot>,
+    now: Option<camera::Shot>,
+}
+
+impl ShownShots {
+    fn show(&mut self, shot: camera::Shot, ticks: u64, segment: u64, still: bool, alpha: f32) -> camera::Shot {
+        let lerp = |a: &camera::Shot, b: &camera::Shot, t: f32| camera::Shot {
+            eye: a.eye.lerp(b.eye, t),
+            rotation: a.rotation.slerp(b.rotation, t),
+            fov: a.fov + (b.fov - a.fov) * t,
+            near: b.near,
+        };
+        let cut = |a: &camera::Shot| a.eye.distance(shot.eye) > ornament_lod::CUT_METRES;
+        match (self.ticks, self.now) {
+            (Some((s, t)), Some(now)) if s == segment && ticks > t && !still && !cut(&now) => {
+                // Several ticks in one frame: the shot one tick back lies on
+                // the line from the last frame's.
+                let k = (ticks - t) as f32;
+                self.previous = Some(lerp(&now, &shot, (k - 1.) / k));
+            }
+            (Some((s, t)), Some(_)) if s == segment && ticks == t && !still => {}
+            _ => self.previous = Some(shot),
+        }
+        self.ticks = Some((segment, ticks));
+        self.now = Some(shot);
+        let previous = self.previous.unwrap_or(shot);
+        if alpha >= 1. || cut(&previous) { shot } else { lerp(&previous, &shot, alpha) }
+    }
+}
+
+/// `GRID_PRESENT_TRACE=1`: one line per drawn frame with its real frame time,
+/// the tick, `alpha` and the drawn car and camera positions (row 116).
+fn present_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("GRID_PRESENT_TRACE").is_ok_and(|v| v == "1"))
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)] // Explicit Bevy resource/component ownership.
 fn drive_present(
     driving: Res<Driving>,
@@ -6619,10 +6742,11 @@ fn drive_present(
         Option<ResMut<camera::Cameras>>,
     ),
     mut refused: Local<Option<&'static str>>,
-    (mut dent_fast, mut dent_counts, mut demoted): (
+    (mut dent_fast, mut dent_counts, mut demoted, mut shots): (
         Local<Option<bool>>,
         Local<[u64; 4]>,
         Option<ResMut<car_batch::Demoted>>,
+        Local<ShownShots>,
     ),
     render_clock: (
         Option<Res<Time<Fixed>>>,
@@ -6632,9 +6756,10 @@ fn drive_present(
         Option<Res<drift_event::DriftEvent>>,
         headlight_pilot::Context<'_, '_>,
         source_projector_request::Context<'_, '_>,
+        Option<Res<Time<Real>>>,
     ),
 ) {
-    let (fixed, graphics, menu, race_hud, drift, mut headlight_context, mut source_projector_context) = render_clock;
+    let (fixed, graphics, menu, race_hud, drift, mut headlight_context, mut source_projector_context, real) = render_clock;
     headlight_pilot::begin(&mut headlight_context);
     source_projector_request::begin(&mut source_projector_context);
     // Pause menu Screen Setup (lap timer, race position, speed unit).
@@ -6699,7 +6824,7 @@ fn drive_present(
             Err(_) => {}
         }
     }
-    let pose = Mat4::from_cols_array(&driving.runtime.pose());
+    let pose = driving.shown_pose(0).unwrap_or_else(|| Mat4::from_cols_array(&driving.runtime.pose()));
     headlight_pilot::present(&mut headlight_context, 0, pose);
     source_projector_request::present(&mut source_projector_context, 0, pose);
     let remainder = if graphics.is_some_and(|g| g.enhanced() && g.smooth_wheel_motion)
@@ -6723,9 +6848,10 @@ fn drive_present(
             .multi
             .cars
             .iter()
-            .map(|car| {
+            .enumerate()
+            .map(|(k, car)| {
                 (
-                    Mat4::from_cols_array(&car.pose()),
+                    driving.shown_pose(k).unwrap_or_else(|| Mat4::from_cols_array(&car.pose())),
                     wheel_presentation::wheels(car, remainder).map(wheel_motion),
                 )
             })
@@ -6869,6 +6995,21 @@ fn drive_present(
     // Right mouse button orbits a chase view (AUTHORED free look).
     let side = if back { -1. } else { 1. };
     let shot = cameras.frame(&sample, back, look, |o| free_look::offset(free_look.as_deref(), o, side));
+    // A frozen simulation (pause, race over, scripted end) draws its last
+    // tick as the cars do; a view change cuts.
+    let still = driving.frozen() || actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView));
+    let shot = shots.show(shot, driving.runtime.ticks, driving.segment, still, driving.shown.alpha);
+    if present_trace() {
+        let car = driving.shown_pose(0).map_or(Vec3::NAN, |p| p.w_axis.truncate());
+        println!(
+            "present_frame dt_ms={:.3} tick={} alpha={:.3} car={:.3},{:.3},{:.3} eye={:.3},{:.3},{:.3}",
+            real.as_ref().map_or(0., |r| r.delta_secs_f64() * 1e3),
+            driving.runtime.ticks,
+            driving.shown.alpha,
+            car.x, car.y, car.z,
+            shot.eye.x, shot.eye.y, shot.eye.z,
+        );
+    }
     // The same gesture turns the driver's view in the head-cam (AUTHORED,
     // owner request: backlog row 101), up to 90 degrees either way.
     let inside = cameras.own_car() == camera::OwnCar::Interior;
@@ -7303,6 +7444,35 @@ mod driving_tests {
     use super::*;
 
     #[test]
+    fn cars_are_drawn_between_their_last_two_ticks() {
+        let at = |x: f32| Mat4::from_translation(Vec3::new(x, 0., 0.));
+        let x = |m: Mat4| m.w_axis.x;
+        assert_eq!(x(between_poses(at(0.), at(1.), 0.)), 0.);
+        assert!((x(between_poses(at(0.), at(1.), 0.25)) - 0.25).abs() < 1e-6);
+        assert_eq!(x(between_poses(at(0.), at(1.), 1.)), 1.);
+        // A reset or a teleport is drawn where the car now is.
+        assert_eq!(x(between_poses(at(0.), at(30.), 0.5)), 30.);
+        // Without the per-frame alpha (tests, tools) the last tick is drawn.
+        assert_eq!(ShownPoses::default().alpha, 1.);
+    }
+
+    #[test]
+    fn the_camera_is_drawn_between_the_shots_of_the_last_two_ticks() {
+        let shot = |x: f32| camera::Shot { eye: Vec3::new(x, 0., 0.), rotation: Quat::IDENTITY, fov: 1., near: None };
+        let mut shots = ShownShots::default();
+        assert_eq!(shots.show(shot(0.), 10, 0, false, 0.5).eye.x, 0.);
+        // A tick: between the two shots by alpha.
+        assert_eq!(shots.show(shot(1.), 11, 0, false, 0.25).eye.x, 0.25);
+        // A frame without a tick keeps the tick's previous shot.
+        assert_eq!(shots.show(shot(1.), 11, 0, false, 0.75).eye.x, 0.75);
+        // Two ticks in one frame: the previous shot is one tick back.
+        assert_eq!(shots.show(shot(3.), 13, 0, false, 0.5).eye.x, 2.5);
+        // A frozen simulation and a cut show the shot as it is.
+        assert_eq!(shots.show(shot(3.), 13, 0, true, 0.5).eye.x, 3.);
+        assert_eq!(shots.show(shot(40.), 14, 0, false, 0.5).eye.x, 40.);
+    }
+
+    #[test]
     fn ornament_distances_read_like_sscanf() {
         assert_eq!(scan_f32("150.0.00"), Some(150.));
         assert_eq!(scan_f32(" 1500.00"), Some(1500.));
@@ -7432,6 +7602,7 @@ mod driving_tests {
             })
             .init_resource::<DeformationPresentation>()
             .insert_resource(Driving {
+                shown: ShownPoses::default(),
                 runtime,
                 geometry: None,
                 paused: false,
@@ -7784,6 +7955,7 @@ mod driving_tests {
         app.insert_resource(assets)
             .init_resource::<DeformationPresentation>()
             .insert_resource(Driving {
+                shown: ShownPoses::default(),
                 runtime,
                 geometry: Some(geometry),
                 paused: false,
@@ -7897,6 +8069,7 @@ mod driving_tests {
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(time_trial::Trial::new(1, Mode::Wheels, false).unwrap())
             .insert_resource(Driving {
+                shown: ShownPoses::default(),
                 runtime,
                 geometry: None,
                 paused: false,
@@ -8131,6 +8304,7 @@ mod driving_tests {
         app.add_message::<AppExit>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(Driving {
+                shown: ShownPoses::default(),
                 runtime,
                 geometry,
                 paused: false,
@@ -8460,6 +8634,7 @@ mod driving_tests {
             .insert_resource(start)
             .insert_resource(trial)
             .insert_resource(Driving {
+                shown: ShownPoses::default(),
                 runtime,
                 geometry: None,
                 paused: false,
@@ -8607,6 +8782,7 @@ mod driving_tests {
             .insert_resource(start)
             .insert_resource(trial)
             .insert_resource(Driving {
+                shown: ShownPoses::default(),
                 runtime,
                 geometry: None,
                 paused: false,
@@ -8755,6 +8931,7 @@ mod driving_tests {
             .insert_resource(start.clone())
             .insert_resource(trial)
             .insert_resource(Driving {
+                shown: ShownPoses::default(),
                 runtime,
                 geometry,
                 paused: false,

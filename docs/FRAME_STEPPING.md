@@ -217,6 +217,80 @@ Reading [D]:
   over the last 800–1500 ticks.
 - Option 3 (a cheaper tick) is still what brings back 60 FPS.
 
+## 6. Drawing between ticks (backlog row 116, F729)
+
+Owner's report, 4 November 2026: "игра показывает, словно я играю в 80-100 фпс, но картинка
+рваная, словно я играю в 20-30 фпс". The FPS counter showed 80–100, but motion looked like
+20–30 FPS.
+
+Cause [O, code and trace]:
+- The simulation advances in 16 ms ticks (62.5 Hz).
+- Before the fix, a frame drew the pose of the last tick as it was: the player's car, the
+  opponents, the cockpit, the driver, the parts and the chase camera (the camera's `Clock::Tick`
+  also steps per tick).
+- Above 62.5 FPS, some frames had no new tick. The world stood still on those frames and moved a
+  whole tick on the next one.
+- At 80–100 FPS, one frame in four to six repeats the last picture, which is a beat at about
+  15–25 Hz. At 128 FPS every other frame stood still.
+- The original does not have this problem: it steps its world once per drawn frame by the real
+  frame time (section 1).
+
+Fix (`crates/grid-app/src/main.rs`; the same path serves Windows and Android):
+- Interpolation with one tick of latency.
+  - `drive_tick` keeps every car's pose before the tick (`ShownPoses`).
+  - After the fixed loop, `shown_alpha` reads `Time<Fixed>::overstep_fraction()`.
+  - `Driving::shown_pose(car)` lerps translation and slerps rotation between the two poses.
+- The users of the car poses draw `shown_pose`:
+  - the player and opponent cars, and the headlights in `drive_present`;
+  - the mirror (`cockpit.rs`);
+  - the drivers (`exterior_driver.rs`);
+  - the damage parts (`damage_parts.rs`).
+- The camera's output shot is blended the same way between the shots of the last two ticks
+  (`ShownShots`). With k ticks in one frame, the earlier shot is taken (k−1)/k of the way from
+  the last frame's shot.
+- These are drawn at once, not blended:
+  - a move of more than `ornament_lod::CUT_METRES` (a reset);
+  - a view change;
+  - a stopped simulation (pause, the end of a scripted run).
+- The simulation itself is unchanged: physics, AI and sound still read the tick state, and wheel
+  spin already used the overstep.
+- Only interactive windows interpolate. Captures, `--headless` runs and tests step whole ticks and
+  draw the last tick exactly as before.
+- Switches:
+  - `GRID_TICK_INTERPOLATION=0` draws the last tick, for comparisons;
+  - `GRID_PRESENT_TRACE=1` prints one `present_frame` line per drawn frame: the real frame time,
+    the tick, alpha, the drawn car position and the eye.
+
+Measurement: Washington, 11 opponents, autopilot, a real window at its default size (muted), the same exe (4958d9bebb25), the switch
+alternated over two rounds. The logs and `steps.py`/`plot.py` are in the worktree's
+`local/judder/`, with `steps-wa.svg`.
+- Per drawn frame, r is the car's step divided by its expected step (its speed over the
+  neighbouring 30 frames × the frame time), over frames above 5 m/s.
+- The window ran at 128 FPS: mean frame 7.8 ms, p95 8.6 ms.
+
+| Run | r mean | r sd | frames with r < 0.25 | frames with r > 1.75 | car–eye offset change per frame, sd |
+| --- | --- | --- | --- | --- | --- |
+| wa, off | 1.020 | 1.026 | 49.8 % | 1075 / 2293 | 1.45 cm |
+| wa, on | 0.997 | 0.081 | 0.5 % | 2 / 2261 | 0.89 cm |
+| wb, off | 1.022 | 1.008 | 48.6 % | 1019 / 2243 | 1.45 cm |
+| wb, on | 0.997 | 0.081 | 0.5 % | 1 / 2288 | 0.87 cm |
+
+The camera's eye gives the same figures as the car. The remaining 0.5 % are frames of the
+1–2 frame-time spikes. An earlier pair under heavier load (about 55 FPS, `win-0`/`win-1`) gave
+r sd 0.317 → 0.083.
+
+How it should look:
+- Before: the car and the scenery move in an even rhythm only when the frame rate is a multiple of
+  62.5. Otherwise, the motion stutters in a regular beat, most visibly in the scenery passing at
+  the sides and in the opponents.
+- After: every drawn frame moves by its own frame time, so 80–100 FPS look like 80–100 FPS.
+- The picture is one tick (16 ms) behind the simulation. The steering input is still read every
+  tick.
+
+Not changed:
+- The present mode is the player's choice in the video menu (Fifo, AutoVsync, AutoNoVsync).
+- AutoNoVsync can tear on a fixed-rate monitor; that is a different artefact from this judder.
+
 ## Symbols
 
 New or updated rows in `docs/re/symbols.tsv`: `5E7F30` (physics task run), `CE34EC` (its
