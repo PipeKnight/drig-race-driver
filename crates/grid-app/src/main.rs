@@ -1619,6 +1619,28 @@ fn append_entities(
     }
     Ok(())
 }
+/// Structural admission for the shared source-material renderer. No model,
+/// route, lamp mode, diagnostic token, slot count or new option participates.
+#[derive(Clone, Copy)]
+struct EnhancedMaterialContext {
+    reflection_calibration: bool,
+    track: bool,
+    drive: bool,
+    collision: bool,
+    headless: bool,
+}
+fn shared_source_material_scene(settings: &graphics::Settings, scene: EnhancedMaterialContext) -> bool {
+    settings.enhanced()
+        && settings.layered_car
+        && settings.layered_track
+        // These unrelated pilots still select diagnostic-specific sources/context.
+        && !settings.track_grade
+        && settings.paint_environment == 0.
+        && !scene.reflection_calibration
+        && (scene.track || scene.drive)
+        && !scene.collision
+        && !scene.headless
+}
 #[bevy_main]
 fn main() {
     #[cfg(target_os = "android")]
@@ -3107,8 +3129,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("surface controls (--surface-rgb-overrides/--ground-edges/--surface-mip-bias/--asphalt-soften/--asphalt-filter-strength) require an enhanced non-collision track scene with --track-materials source".into());
     }
-    if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
-        return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());
+    if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
+        return Err("lamp optics (--lamp-reflectors/--lamp-lenses) require enhanced layered Lacetti LOD0 rendering".into());
+    }
+    if graphics.lamp_signals != lamp_signals::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || collision || !(track || drive)) {
+        return Err("--lamp-signals requires enhanced layered non-collision car rendering; source receipt admission follows loading".into());
     }
     if let Some(script) = window_transition_script.as_ref()
         && (!drive || drive_ticks.is_none() || render_fps.is_none() || output.is_none()
@@ -3532,8 +3557,19 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         })
     }).transpose()?;
     let native_smoke_route_admitted=native_smoke_context.is_some_and(|c|c.matches_route(route.path(),route.subroute()));
-    if graphics.enhanced() && ((!route.is_default() && !object_coverage_dlaa && !native_smoke_route_admitted) || (!player_car.is_default() && !native_smoke_route_admitted)) {
-        return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
+    // The ordinary source-material mechanism is generic. Its actual package,
+    // material, texture and signal receipt checks remain downstream; Off and
+    // enabled signals must share the SAME renderer/context admission.
+    let shared_material_scene = shared_source_material_scene(&graphics, EnhancedMaterialContext {
+        track, drive, collision, headless, reflection_calibration,
+    });
+    // Retain historical compatibility outside the shared source-material scene;
+    // separate optic/glass/asphalt/probe diagnostic guards remain untouched.
+    if graphics.enhanced() && !shared_material_scene
+        && ((!route.is_default() && !object_coverage_dlaa && !native_smoke_route_admitted)
+            || (!player_car.is_default() && !native_smoke_route_admitted))
+    {
+        return Err("enhanced nondefault scene requires shared layered car/track materials, track/driving rendering and no collision/headless; legacy fixture compatibility is otherwise unchanged".into());
     }
     if profile.grid_back && grid_position.is_none() {
         grid_position = opponents.map(|n| n + 1);
@@ -4900,11 +4936,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         graphics_benchmark::install(&mut app, frames);
     }
     if graphics.lamp_signals != lamp_signals::Mode::Off {
-        if !(reference || drive) || route.path() != Route::default().path() {
-            return Err("--lamp-signals pilot requires a daytime Donington reference/drive scene".into());
-        }
-        lamp_signals::validate(&car)?;
-        lamp_signals::install(&mut app);
+        let prepared=lamp_signals::prepare(&root,&car,field.car_model.len().max(1))?;
+        app.insert_resource(prepared);
+        lamp_signals::install(&mut app)?;
     }
     lamp_materials::prepare_frames(&mut car, graphics.lamp_reflectors, graphics.lamp_lenses)?;
     lamp_materials::validate(&car, graphics.lamp_reflectors, graphics.lamp_lenses)?;
@@ -5142,6 +5176,7 @@ fn graphics_texture_state(images: Res<Assets<Image>>, mut emitted: Local<bool>) 
 struct PaintMaskResources<'w> {
     occlusion: ResMut<'w, body_occlusion::Prepared>,
     reflection: ResMut<'w, car_reflection_overlay::Masks>,
+    lamp_prepared: Option<Res<'w, lamp_signals::Prepared>>,
     #[cfg(feature = "paint-specular")]
     specular: ResMut<'w, body_specular::Prepared>,
 }
@@ -5201,7 +5236,7 @@ fn setup(
     let lamp_normal = lamp_materials::upload_normal(&car, graphics.lamp_reflectors, graphics.lamp_lenses, &mut images, graphics.sampler(false));
     commands.insert_resource(lamp_materials::Prepared(lamp_normal));
     if graphics.lamp_signals != lamp_signals::Mode::Off {
-        commands.insert_resource(lamp_signals::Atlas(lamp_signals::upload(&car, &mut images, graphics.sampler(false))));
+        commands.insert_resource(lamp_signals::upload(paint_masks.lamp_prepared.as_deref().expect("prepared actual lamp banks"), &mut images, graphics.sampler(false)));
     }
     let liveries = std::mem::take(&mut car.liveries);
     let mut livery_images: BTreeMap<(usize, String), Handle<Image>> = BTreeMap::new();
@@ -5237,7 +5272,7 @@ fn setup(
     // Resolve against immutable source metadata before draining/moving mesh fields.
     let admitted_lamp_sections: Vec<_> = car.parts.iter().map(|part| {
         if graphics.lamp_signals == lamp_signals::Mode::Off { None }
-        else { lamp_signals::section_for(&car, part) }
+        else { lamp_signals::receipt_for(&car, part).expect("preflight source lamp receipt") }
     }).collect();
     for (mut part, lamp_section) in car.parts.drain(..).zip(admitted_lamp_sections) {
         if graphics.enhanced()
@@ -5487,7 +5522,8 @@ fn setup(
                 && let Some(entity) = &mut entity
                 && let Some(section) = lamp_section.clone()
             {
-                entity.insert(section);
+                entity.insert(lamp_signals::runtime::Receiver::from_receipt(0,&section).expect("preflight source lamp member"));
+                lamp_signals::audit::spawned(entity,0,&section);
             }
             if let Some((level, instances)) = ornament
                 && let Some(entity) = &mut entity
@@ -5614,6 +5650,10 @@ fn setup(
                         },
                         damage_parts::Joint::new(&part.joint),
                     ));
+                    if let Some(receipt)=lamp_section.as_ref() {
+                        opponent.insert(lamp_signals::runtime::Receiver::from_receipt(car,receipt).expect("preflight source lamp member"));
+                        lamp_signals::audit::spawned(&mut opponent,car,receipt);
+                    }
                     if part.material == "car0/Tyre Wall"
                         && let Some(wheel) = part.wheel
                     {
@@ -5669,6 +5709,7 @@ fn setup(
                 continue;
             }
             for (level, part) in low.parts {
+                let lamp_receipt=if graphics.lamp_signals==lamp_signals::Mode::Off {None} else {lamp_signals::low_receipt(low.lamp_association.as_ref(),&part).expect("preflight low source lamp receipt")};
                 let bounds = part.mesh.compute_aabb().unwrap_or_default();
                 // Body parts deform with the car's field, as its LOD0 parts.
                 let deformable = part.wheel.is_none()
@@ -5710,6 +5751,10 @@ fn setup(
                         car_batch::hidden_layer(),
                         bevy::light::NotShadowCaster,
                     ));
+                    if let Some(receipt)=lamp_receipt.as_ref() {
+                        entity.insert(lamp_signals::runtime::Receiver::from_receipt(k,receipt).expect("preflight low source lamp member"));
+                        lamp_signals::audit::spawned(&mut entity,k,receipt);
+                    }
                     if own {
                         entity.insert(OpponentDeforming(DeformingPart {
                             source: part.mesh.clone(),
@@ -9455,5 +9500,56 @@ mod driving_tests {
                 .unwrap_err()
                 .contains("model index 99 absent")
         );
+    }
+}
+
+#[cfg(test)]
+mod enhanced_material_admission_tests {
+    use super::*;
+    fn settings() -> graphics::Settings {
+        graphics::Settings {
+            preset: graphics::Preset::Enhanced,
+            layered_car: true,
+            layered_track: true,
+            ..default()
+        }
+    }
+    fn scene() -> EnhancedMaterialContext {
+        EnhancedMaterialContext { track: true, drive: true, collision: false, headless: false, reflection_calibration: false }
+    }
+    #[test]
+    fn actual_shared_context_is_identical_for_off_and_live_without_model_or_route_inputs() {
+        let mut graphics=settings();
+        let ordinary=scene();
+        for mode in [lamp_signals::Mode::Off,lamp_signals::Mode::Live,
+            lamp_signals::Mode::Headlights,lamp_signals::Mode::Brake,lamp_signals::Mode::Reverse]
+        {
+            graphics.lamp_signals=mode;
+            assert!(shared_source_material_scene(&graphics,ordinary));
+            assert!(shared_source_material_scene(&graphics,EnhancedMaterialContext {track:false,..ordinary}));
+            assert!(shared_source_material_scene(&graphics,EnhancedMaterialContext {drive:false,..ordinary}));
+        }
+        // BMW/Haruna and DBR/LeMans require NO special model/route/native-smoke
+        // token: there is deliberately no such input to this actual predicate.
+    }
+    #[test]
+    fn actual_shared_context_refuses_missing_capabilities_without_mutating_settings() {
+        let graphics=settings();let ordinary=scene();
+        assert!(!shared_source_material_scene(&graphics,EnhancedMaterialContext {collision:true,..ordinary}));
+        assert!(!shared_source_material_scene(&graphics,EnhancedMaterialContext {headless:true,..ordinary}));
+        assert!(!shared_source_material_scene(&graphics,EnhancedMaterialContext {track:false,drive:false,..ordinary}));
+        let mut changed=graphics;changed.layered_car=false;
+        assert!(!shared_source_material_scene(&changed,ordinary));
+        changed=graphics;changed.layered_track=false;
+        assert!(!shared_source_material_scene(&changed,ordinary));
+        changed=graphics;changed.preset=graphics::Preset::Baseline;
+        assert!(!shared_source_material_scene(&changed,ordinary));
+        changed=graphics;changed.track_grade=true;
+        assert!(!shared_source_material_scene(&changed,ordinary));
+        changed=graphics;changed.paint_environment=0.5;
+        assert!(!shared_source_material_scene(&changed,ordinary));
+        assert!(!shared_source_material_scene(&graphics,EnhancedMaterialContext {reflection_calibration:true,..ordinary}));
+        assert_eq!(graphics.preset,graphics::Preset::Enhanced);
+        assert!(graphics.layered_car&&graphics.layered_track);
     }
 }

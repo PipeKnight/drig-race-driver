@@ -1,7 +1,13 @@
-//! Opt-in player lamp signals: recovered fades, authored Bevy emission adaptation.
-//! Source optics, beam projectors and live sampler gamma are not reconstructed.
+//! Default-off shared lamp signal adapter; source focus/sampler/photometry remain unresolved.
+use crate::lamp_association::{BankKey, Package, Receipt};
 use bevy::{asset::RenderAssetUsages, image::ImageSampler, prelude::*};
-
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+pub(crate) mod runtime;
+pub(crate) mod audit;
+use runtime::State;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -23,88 +29,13 @@ impl Mode {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    Main,
-    Brake,
-    Reverse,
-}
-#[derive(Component, Clone)]
-pub(crate) struct Section {
-    kind: Kind,
-    joint: String,
-}
-pub fn section(material: &str, joint: &str) -> Option<Section> {
-    if !matches!(
-        material,
-        "car0/Head Lights Pod"
-            | "car0/Rear Lights Pod"
-            | "car0/Head Lights Glass"
-            | "car0/Rear Lights Glass"
-    ) {
-        return None;
-    }
-    let (_, name) = joint.split_once('_')?;
-    let kind = match name {
-        "light_pod_fl" | "light_pod_fr" | "light_glass_fl" | "light_glass_fr" | "light_pod_bl"
-        | "light_pod_br" => Kind::Main,
-        "light_brake_pod_bl"
-        | "light_brake_pod_br"
-        | "light_brake_glass_bl"
-        | "light_brake_glass_br" => Kind::Brake,
-        "light_rev_pod_bl" | "light_rev_pod_br" => Kind::Reverse,
-        _ => return None,
-    };
-    Some(Section {
-        kind,
-        joint: name.to_owned(),
-    })
-}
-/// Consumed source join; existing player/12-section pilot scope remains explicit.
-pub(crate) fn section_for(car: &super::Car, part: &super::Part) -> Option<Section> {
-    let mut matched = None;
-    for package in &car.lamp_associations {
-        match package.section(part) {
-            Ok(Some(source)) => {
-                if matched.is_some() { return None; }
-                // Preserve raw source and all numeric provenance in Package; do not infer role.
-                let expected = match source.role {
-                    super::lamp_sections::Role::Front | super::lamp_sections::Role::Rear => Kind::Main,
-                    super::lamp_sections::Role::Brake => Kind::Brake,
-                    super::lamp_sections::Role::Reverse => Kind::Reverse,
-                    super::lamp_sections::Role::Combi => return None, // existing pilot has no combi channel
-                };
-                let legacy = section(&part.material, &part.joint)?;
-                if legacy.kind != expected { return None; }
-                matched = Some(legacy);
-            }
-            Ok(None) => {},
-            Err(_) => return None,
-        }
-    }
-    matched
-}
+#[derive(Resource, Default, Clone, bevy::render::extract_resource::ExtractResource)]
+pub struct Atlas(pub(crate) BTreeMap<BankKey, Handle<Image>>);
+/// Actual validated DDS retained by exact source bank, NOT a merged livery map.
 #[derive(Resource)]
-pub struct Atlas(pub Handle<Image>);
-#[derive(Resource, Default)]
-struct State {
-    fades: Fades,
-    last_tick: Option<u64>,
-}
-impl State {
-    fn step_tick(&mut self, ticks: u64, brake: bool, reverse: bool) {
-        if self.last_tick.is_some_and(|old| ticks < old) {
-            self.fades = Fades::default();
-            self.last_tick = None;
-        }
-        if self.last_tick == Some(ticks) {
-            return;
-        }
-        let dt = ticks.saturating_sub(self.last_tick.unwrap_or(ticks.saturating_sub(1))) as f32
-            * grid_tools::source_vehicle::DELTA;
-        self.fades.step(dt, [false, brake, reverse], Fades::CAPS);
-        self.last_tick = Some(ticks);
-    }
+pub(crate) struct Prepared {
+    banks: BTreeMap<BankKey, Vec<u8>>,
+    slots: usize,
 }
 #[derive(Clone, Copy, Default, Debug)]
 struct Fades([f32; 3]);
@@ -123,123 +54,162 @@ impl Fades {
             (self.0[0] + self.0[1]).min(2.),
         ]
     }
-    fn value(self, kind: Kind) -> f32 {
-        self.0[match kind {
-            Kind::Main => 0,
-            Kind::Brake => 1,
-            Kind::Reverse => 2,
-        }]
+}
+
+fn receipt_in(packages: &[Package], part: &crate::Part) -> Result<Option<Receipt>, String> {
+    let mut found = None;
+    for package in packages {
+        if let Some(receipt) = package.receipt(part)? {
+            if found.is_some() {
+                return Err("ambiguous lamp geometry package receipt".into());
+            }
+            runtime::Receiver::from_receipt(0, &receipt).map_err(str::to_owned)?;
+            found = Some(receipt);
+        }
+    }
+    Ok(found)
+}
+pub(crate) fn receipt_for(car: &crate::Car, part: &crate::Part) -> Result<Option<Receipt>, String> {
+    receipt_in(&car.lamp_associations, part)
+}
+pub(crate) fn low_receipt(
+    package: Option<&Package>,
+    part: &crate::Part,
+) -> Result<Option<Receipt>, String> {
+    match package {
+        Some(package) => receipt_in(std::slice::from_ref(package), part),
+        None => Err("low lamp geometry package unavailable".into()),
     }
 }
-fn atlas_key(car: &super::Car) -> Result<String, String> {
-    let mut keys = std::collections::BTreeSet::new();
-    for part in car
-        .parts
-        .iter()
-        .filter(|part| section_for(car, part).is_some())
-    {
-        let mut found = std::collections::BTreeSet::new();
-        for package in &car.lamp_associations {
-            if let Some(key) = package.texture_key(&part.material)? {
-                found.insert(key);
+fn receipts(car: &crate::Car) -> Result<Vec<Receipt>, String> {
+    let mut all = Vec::new();
+    for part in &car.parts {
+        if let Some(receipt) = receipt_for(car, part)? {
+            all.push(receipt);
+        }
+    }
+    for low in &car.low_lods {
+        for (_, part) in &low.parts {
+            if let Some(receipt) = low_receipt(low.lamp_association.as_ref(), part)? {
+                all.push(receipt);
             }
         }
-        if found.len() != 1 {
-            return Err(format!(
-                "lamp section {:?} needs one admitted source general-bank association",
-                part.material
-            ));
-        }
-        keys.extend(found);
     }
-    if keys.len() != 1 {
-        return Err(
-            "existing single-atlas lamp pilot requires one resolved source resource".into(),
-        );
-    }
-    let key = keys.into_iter().next().expect("one source atlas");
-    if !car.textures.contains_key(&key) {
-        return Err(format!("resolved lamp resource not loaded: {key:?}"));
-    }
-    Ok(key)
+    Ok(all)
 }
-pub fn validate(car: &super::Car) -> Result<(), String> {
-    // This consumer intentionally retains the old player/Lacetti/LOD0 scope.
-    if car
-        .parts
+fn read_bank_dds(root: &Path, key: &BankKey) -> Result<Vec<u8>, String> {
+    let bytes = crate::read(&root.join(&key.source)).map_err(|e| e.to_string())?;
+    let tree = grid_formats::pssg::read_tree(&bytes).map_err(|e| e.to_string())?;
+    let textures = grid_formats::texture::read_textures(&tree).map_err(|e| e.to_string())?;
+    let matching: Vec<_> = textures
         .iter()
-        .filter(|p| section_for(car, p).is_some())
-        .count()
-        != 12
-    {
-        return Err(
-            "--lamp-signals still requires all12 purchased Lacetti LOD0 lamp sections".into(),
+        .filter(|t| t.id == key.resource.as_bytes())
+        .collect();
+    let [texture] = matching.as_slice() else {
+        return Err(format!(
+            "actual bank {:?} resource {:?} is absent/ambiguous",
+            key.source, key.resource
+        ));
+    };
+    Ok(texture.validated_dds().0)
+}
+pub(crate) fn prepare(root: &Path, car: &crate::Car, slots: usize) -> Result<Prepared, String> {
+    if slots == 0 {
+        return Err("lamp slots require actual nonempty vehicle field".into());
+    }
+    let receipts = receipts(car)?;
+    for receipt in &receipts {
+        println!(
+            "lamp_signal_receipt geometry={:?} draw={:?} lod={} palette={} bank={:?} resource={:?} namespaced_key={:?}",
+            receipt.geometry_source,
+            receipt.section.draw,
+            receipt.section.lod,
+            receipt.section.palette,
+            receipt.bank.source,
+            receipt.bank.resource,
+            receipt.namespaced_texture
         );
     }
-    atlas_key(car)?;
-    Ok(())
+    let keys: BTreeSet<_> = receipts.iter().map(|r| r.bank.clone()).collect();
+    let mut banks = BTreeMap::new();
+    for key in keys {
+        banks.insert(key.clone(), read_bank_dds(root, &key)?);
+    }
+    println!(
+        "lamp_signal_prepare scope=shared-source-receipts slots={slots} sections={} banks={} sampler_gamma_unverified=true native_focus_unjoined=true",
+        receipts.len(),
+        banks.len()
+    );
+    Ok(Prepared { banks, slots })
 }
-pub fn upload(
-    car: &super::Car,
+pub(crate) fn upload(
+    prepared: &Prepared,
     images: &mut Assets<Image>,
     sampler: ImageSampler,
-) -> Handle<Image> {
-    let key = atlas_key(car).expect("validated source lamp association");
-    let image = super::texture_upload::image_linear(
-        &car.textures[&key],
-        sampler,
-        RenderAssetUsages::default(),
-    )
-    .expect("validated lamp emissive DDS");
-    println!(
-        "lamp_signal_atlas source_key={key:?} format={:?} raw_linear=true upload=shared-helper source_sampler_gamma_unverified=true",
-        image.texture_descriptor.format
-    );
-    images.add(image)
+) -> Atlas {
+    let mut atlas = BTreeMap::new();
+    for (key, dds) in &prepared.banks {
+        match crate::texture_upload::image_linear(
+            dds,
+            sampler.clone(),
+            RenderAssetUsages::default(),
+        ) {
+            Ok(image) => {
+                println!(
+                    "lamp_signal_atlas bank={:?} resource={:?} raw_linear=true source_sampler_gamma_unverified=true",
+                    key.source, key.resource
+                );
+                atlas.insert(key.clone(), images.add(image));
+            }
+            Err(error) => eprintln!(
+                "lamp_signal_atlas_refused bank={:?} resource={:?} reason={error:?} owned_emission_dark=true",
+                key.source, key.resource
+            ),
+        }
+    }
+    Atlas(atlas)
 }
-pub fn install(app: &mut App) {
+pub(crate) fn install(app: &mut App) -> Result<(),String> {
+    audit::install(app)?;
     app.init_resource::<State>()
-        .add_systems(PostStartup, attach.after(super::lamp_materials::attach))
-        .add_systems(FixedUpdate, tick.after(super::drive_tick))
-        .add_systems(Update, present.after(super::damage_parts::Presented));
+        .init_resource::<runtime::Owners>()
+        .add_systems(
+            PostStartup,
+            (
+                initialize.after(crate::lamp_materials::attach),
+                runtime::project,
+            )
+                .chain(),
+        )
+        .add_systems(
+            FixedUpdate,
+            tick.after(crate::drive_tick)
+                .after(crate::vehicle_lights::tick)
+                .after(crate::le_mans_event::tick),
+        )
+        .add_systems(
+            Update,
+            runtime::project.after(crate::damage_parts::Presented),
+        )
+        .add_systems(
+            PostUpdate,
+            runtime::replay_guard
+                .after(crate::replay::present)
+                .before(bevy::transform::TransformSystems::Propagate),
+        );
+    Ok(())
 }
-type PlayerSections = (With<Section>, Without<super::OpponentPart>);
-fn attach(
-    mut commands: Commands,
-    atlas: Res<Atlas>,
-    parts: Query<(Entity, &MeshMaterial3d<StandardMaterial>), PlayerSections>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    settings: Res<super::graphics::Settings>,
+fn initialize(
+    settings: Res<crate::graphics::Settings>,
+    prepared: Res<Prepared>,
     mut state: ResMut<State>,
 ) {
-    state.fades = match settings.lamp_signals {
-        Mode::Headlights => Fades([0.7, 0., 0.]),
-        Mode::Brake => Fades([0., 0.7, 0.]),
-        Mode::Reverse => Fades([0., 0., 1.]),
-        _ => Fades::default(),
-    };
-    let mut count = 0;
-    for (entity, original) in &parts {
-        let mut material = materials
-            .get(&original.0)
-            .expect("source lamp material")
-            .clone();
-        material.emissive_texture = Some(atlas.0.clone());
-        material.emissive = LinearRgba::BLACK;
-        // Authored exposure-independent adaptation, not recovered source radiometry.
-        material.emissive_exposure_weight = 0.;
-        let handle = materials.add(material);
-        commands.entity(entity).insert(MeshMaterial3d(handle));
-        count += 1;
-    }
-    println!(
-        "lamp_signals mode={:?} attached_parts={count} scope=player-only caps=[0.7,0.7,1.0] radiometry=authored-exposure-independent source_optics=false live_headlights=daytime-off",
-        settings.lamp_signals
-    );
+    state.constant(settings.lamp_signals, prepared.slots);
 }
 fn tick(
     driving: Option<Res<super::Driving>>,
     settings: Res<super::graphics::Settings>,
+    lights: Option<Res<super::vehicle_lights::State>>,
     mut state: ResMut<State>,
 ) {
     if settings.lamp_signals != Mode::Live {
@@ -248,40 +218,34 @@ fn tick(
     let Some(driving) = driving else {
         return;
     };
-    let ticks = driving.runtime.ticks;
+    let Some(lights) = lights else {
+        state.invalidate();
+        return;
+    };
     if driving.paused || driving.failure.is_some() {
         return;
     }
-    let brake = f32::from_bits(driving.runtime.state.car.owner.vehicle[0xe20 / 4]) > 0.;
-    let reverse = driving.runtime.reverse_gear();
-    let before = state.fades.0;
-    state.step_tick(ticks, brake, reverse);
-    if state.fades.0 != before {
-        println!(
-            "lamp_signal_state tick={ticks} brake={brake} reverse={reverse} levels={:?} source_input=true",
-            state.fades.0
-        );
-    }
-}
-fn present(
-    state: Res<State>,
-    damage: Option<Res<super::damage_parts::DamageParts>>,
-    parts: Query<(&Section, &MeshMaterial3d<StandardMaterial>), Without<super::OpponentPart>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    for (section, handle) in &parts {
-        let level = if damage
-            .as_ref()
-            .is_some_and(|d| d.light_smashed(0, &section.joint))
-        {
-            0.
-        } else {
-            state.fades.value(section.kind)
+    let runtimes = std::iter::once(&driving.runtime).chain(
+        driving
+            .opponents
+            .iter()
+            .flat_map(|o| o.multi.cars.iter().skip(1)),
+    );
+    let mut inputs = Vec::new();
+    for (slot, runtime) in runtimes.enumerate() {
+        let Ok(main) = lights.lamp_request(slot) else {
+            state.invalidate();
+            return;
         };
-        if let Some(mut material) = materials.get_mut(&handle.0) {
-            material.emissive = LinearRgba::rgb(level, level, level);
-        }
+        inputs.push([
+            main,
+            f32::from_bits(runtime.state.car.owner.vehicle[0xe20 / 4]) > 0.,
+            runtime.reverse_gear(),
+        ]);
     }
+    state
+        .advance(driving.segment, driving.runtime.ticks, &inputs)
+        .expect("stable actual lamp slots");
 }
 #[cfg(test)]
 mod tests {
@@ -320,145 +284,74 @@ mod tests {
         assert_eq!(hash, 0xfc3eafff8611bdb9);
     }
     #[test]
-    fn section_scope_rejects_other_cars_and_unknown_source_joints() {
-        assert!(section("car0/Rear Lights Pod", "x0_light_brake_pod_bl").is_some());
-        assert!(section("car1/Rear Lights Pod", "x0_light_brake_pod_bl").is_none());
-        assert!(section("car0/Car Body Paint", "x0_light_brake_pod_bl").is_none());
-        assert!(section("car0/Rear Lights Pod", "x0_other_light").is_none());
+    fn simulation_ticks_do_not_double_advance_and_reset_clears_history() {
+        let mut state = State::default();
+        state.advance(0, 0, &[[false, false, false]]).unwrap();
+        state.advance(0, 1, &[[false, true, false]]).unwrap();
+        assert!((state.levels(0).unwrap()[1] - 0.32).abs() < 1e-6);
+        let before = state.levels(0);
+        state.advance(0, 1, &[[false, false, true]]).unwrap();
+        assert_eq!(state.levels(0), before);
+        state.advance(0, 2, &[[false, true, false]]).unwrap();
+        state.advance(0, 3, &[[false, true, false]]).unwrap();
+        assert_eq!(state.levels(0), Some([0., 0.7, 0.]));
+        state.advance(0, 0, &[[false, false, false]]).unwrap();
+        assert_eq!(state.levels(0), Some([0.; 3]));
+        state.advance(0, 1, &[[false, false, true]]).unwrap();
+        assert!((state.levels(0).unwrap()[2] - 0.32).abs() < 1e-6);
+    }
+    #[test]
+    fn normal_default_stays_off_and_slot_admission_is_explicit() {
         assert_eq!(Mode::default(), Mode::Off);
         assert!(Mode::parse("on").is_err());
     }
     #[test]
-    fn per_section_clones_preserve_optics_and_isolate_shared_opponent() {
-        let mut app = App::new();
-        app.insert_resource(super::super::graphics::Settings {
-            lamp_signals: Mode::Brake,
-            ..default()
-        })
-        .insert_resource(Atlas(Handle::default()))
-        .init_resource::<State>()
-        .init_resource::<Assets<StandardMaterial>>()
-        .add_systems(Update, (attach, present).chain());
-        let original = StandardMaterial {
-            alpha_mode: AlphaMode::Blend,
-            base_color: Color::srgba(0.8, 0.1, 0.1, 0.4),
-            normal_map_texture: Some(Handle::default()),
-            ..default()
-        };
-        let base = app
-            .world_mut()
-            .resource_mut::<Assets<StandardMaterial>>()
-            .add(original.clone());
-        let mut entities = Vec::new();
-        for name in [
-            "x0_light_pod_bl",
-            "x0_light_brake_pod_bl",
-            "x0_light_brake_pod_bl",
-        ] {
-            entities.push(
-                app.world_mut()
-                    .spawn((
-                        section("car0/Rear Lights Pod", name).unwrap(),
-                        MeshMaterial3d(base.clone()),
-                    ))
-                    .id(),
-            );
-        }
-        app.world_mut()
-            .entity_mut(entities[2])
-            .insert(super::super::OpponentPart {
-                car: 1,
-                rest: Mat4::IDENTITY,
-                wheel: None,
-                lost_with_wheel: false,
-            });
-        app.update();
-        for (i, entity) in entities.into_iter().enumerate() {
-            let handle = &app
-                .world()
-                .get::<MeshMaterial3d<StandardMaterial>>(entity)
-                .unwrap()
-                .0;
-            if i == 2 {
-                assert_eq!(handle, &base);
+    #[ignore = "requires purchased GRID_GAME_ROOT; actual44models highLOD0+low2..5 source bank DDS admission"]
+    fn all_purchased_models_admit_actual_selected_lod_banks() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let (mut models, mut sections, mut banks) = (0, 0, 0);
+        for entry in std::fs::read_dir(root.join("cars")).unwrap() {
+            let entry = entry.unwrap();
+            let stem = entry.file_name();
+            let Some(stem) = stem.to_str() else { continue };
+            let Ok(model) = grid_tools::car::Car::new(stem) else {
+                continue;
+            };
+            if !root.join(model.file("_highLOD.pssg")).is_file() {
                 continue;
             }
-            assert_ne!(handle, &base);
-            let m = app
-                .world()
-                .resource::<Assets<StandardMaterial>>()
-                .get(handle)
-                .unwrap();
-            assert_eq!(m.base_color, original.base_color);
-            assert_eq!(m.alpha_mode, original.alpha_mode);
-            assert_eq!(m.normal_map_texture, original.normal_map_texture);
-            assert!(m.emissive_texture.is_some());
-            assert_eq!(
-                m.emissive,
-                if i == 0 {
-                    LinearRgba::BLACK
-                } else {
-                    LinearRgba::rgb(0.7, 0.7, 0.7)
-                }
-            );
+            let mut car = crate::load(
+                root,
+                &grid_tools::route::Route::default(),
+                &model,
+                "LOD0_",
+                false,
+                false,
+            )
+            .unwrap();
+            let low = crate::low_lod(root, &model, Mat4::IDENTITY, "", &car.bindings);
+            car.low_lods.push(low);
+            let admitted = receipts(&car).unwrap_or_else(|e| panic!("{stem}: {e}"));
+            let prepared = prepare(root, &car, 3).unwrap_or_else(|e| panic!("{stem}: {e}"));
+            for receipt in &admitted {
+                assert!(prepared.banks.contains_key(&receipt.bank));
+                assert_eq!(
+                    runtime::member(&receipt.section.joint, receipt.section.lod).unwrap(),
+                    receipt.section.joint.split_once('_').unwrap().1
+                );
+            }
+            sections += admitted.len();
+            banks += prepared.banks.len();
+            models += 1;
         }
-    }
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
-    fn purchased_lacetti_sections_and_emissive_resource() {
-        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
-        let mut car = super::super::load(
-            std::path::Path::new(&root),
-            &grid_tools::route::Route::default(),
-            &grid_tools::car::Car::default(),
-            "LOD0_",
-            false,
-            false,
-        )
-        .unwrap();
-        assert!(car.textures.contains_key("lac_lights_on.tga"));
-        let count = car
-            .parts
-            .iter()
-            .filter(|p| section(&format!("car0/{}", p.material), &p.joint).is_some())
-            .count();
-        assert_eq!(count, 12);
-        let prior = car.textures["lac_lights_on.tga"].clone();
-        // Actual parsed bank/declaration evidence is consumed by the existing pilot lookup.
-        for part in &mut car.parts {
-            part.material = format!("car0/{}", part.material);
-        }
-        car.textures = car
-            .textures
-            .into_iter()
-            .map(|(id, dds)| (format!("car0/{id}"), dds))
-            .collect();
-        car.lamp_associations = car
-            .lamp_associations
-            .into_iter()
-            .map(|p| p.in_namespace("car0/"))
-            .collect();
-        validate(&car).unwrap();
-        let resolved = atlas_key(&car).unwrap();
-        assert_eq!(resolved, "car0/lac_lights_on.tga");
-        assert_eq!(car.textures[&resolved], prior);
-    }
-    #[test]
-    fn simulation_ticks_do_not_double_advance_and_reset_clears_history() {
-        let mut state = State::default();
-        state.step_tick(0, false, false);
-        state.step_tick(1, true, false);
-        assert!((state.fades.0[1] - 0.32).abs() < 1e-6);
-        let before = state.fades.0;
-        state.step_tick(1, false, true);
-        assert_eq!(state.fades.0, before);
-        state.step_tick(2, true, false);
-        state.step_tick(3, true, false);
-        assert_eq!(state.fades.0, [0., 0.7, 0.]);
-        state.step_tick(0, false, false);
-        assert_eq!(state.fades.0, [0.; 3]);
-        state.step_tick(1, false, true);
-        assert!((state.fades.0[2] - 0.32).abs() < 1e-6);
-        assert_eq!(state.fades.0[1], 0.);
+        assert_eq!(
+            models, 44,
+            "purchased fixture drift, not production whitelist"
+        );
+        assert!(sections > 0 && banks > 0);
+        println!(
+            "lamp_signal_admission models={models} sections={sections} actual_banks={banks} high=LOD0 low=actual2to5 upload_render_readiness=UNVERIFIED"
+        );
     }
 }

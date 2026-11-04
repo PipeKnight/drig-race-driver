@@ -70,6 +70,19 @@ struct Binding {
     group: String,
     texture: Result<String, String>,
 }
+/// Actual bank identity; same-named high/low resources are distinct.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct BankKey {
+    pub source: String,
+    pub resource: String,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct Receipt {
+    pub bank: BankKey,
+    pub section: crate::lamp_sections::Section,
+    pub geometry_source: String,
+    pub namespaced_texture: String,
+}
 #[derive(Debug)]
 pub(crate) struct Package {
     source: String,
@@ -93,9 +106,6 @@ impl Package {
         self.sections = sections;
         self
     }
-    pub(crate) fn section(&self, part: &crate::Part) -> Result<Option<&crate::lamp_sections::Section>, String> {
-        self.section_key(&part.name, &part.joint, &part.material)
-    }
     fn section_key(&self, draw: &str, joint: &str, material: &str) -> Result<Option<&crate::lamp_sections::Section>, String> {
         let Some(raw_material) = material.strip_prefix(&self.namespace) else { return Ok(None) };
         let matches: Vec<_> = self.sections.as_ref().map_err(Clone::clone)?.iter().filter(|s| s.draw == draw && s.joint == joint && s.material == raw_material).collect();
@@ -103,6 +113,20 @@ impl Package {
         let Some(section) = matches.first() else { return Ok(None) };
         if self.texture_key(material)?.is_none() { return Ok(None) }
         Ok(Some(*section))
+    }
+    pub(crate) fn receipt(&self, part: &crate::Part) -> Result<Option<Receipt>, String> {
+        self.receipt_key(&part.name, &part.joint, &part.material)
+    }
+    fn receipt_key(&self, draw: &str, joint: &str, material: &str) -> Result<Option<Receipt>, String> {
+        let Some(section) = self.section_key(draw, joint, material)? else { return Ok(None) };
+        let raw = material.strip_prefix(&self.namespace).ok_or("lamp namespace changed")?;
+        let binding = self.materials.as_ref().map_err(Clone::clone)?.get(raw).ok_or("admitted material disappeared")?;
+        let resource = binding.texture.as_ref().map_err(Clone::clone)?.clone();
+        Ok(Some(Receipt {
+            bank: BankKey { source: self.bank.source.clone(), resource },
+            section: section.clone(), geometry_source: self.source.clone(),
+            namespaced_texture: self.texture_key(material)?.ok_or("admitted texture disappeared")?,
+        }))
     }
     pub(crate) fn in_namespace(mut self, namespace: &str) -> Self {
         self.namespace = namespace.into();
@@ -420,6 +444,9 @@ mod tests {
             .with_sections(Ok(vec![section.clone()])).in_namespace("car3/");
         let found = p.section_key("actual_draw", "x0_light_glass_fl", "car3/Head Lights Glass").unwrap().unwrap();
         assert_eq!(found, &section);
+        let receipt=p.receipt_key("actual_draw", "x0_light_glass_fl", "car3/Head Lights Glass").unwrap().unwrap();
+        assert_eq!(receipt.bank.source,"source_gen_high.pssg");assert_eq!(receipt.bank.resource,"source_lights_on.tga");
+        assert_eq!(receipt.geometry_source,"source_highLOD.pssg");assert_eq!(receipt.namespaced_texture,"car3/source_lights_on.tga");assert_eq!(receipt.section,section);
         let duplicate = package("Head Lights Glass", Some((SAMPLER,"texture")), &["source_lights_on.tga"])
             .with_sections(Ok(vec![section.clone(),section.clone()])).in_namespace("car3/");
         assert!(duplicate.section_key("actual_draw", "x0_light_glass_fl", "car3/Head Lights Glass").is_err());

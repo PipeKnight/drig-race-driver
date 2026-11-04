@@ -5,12 +5,8 @@ use grid_tools::time_of_day::{Headlights, Mode};
 #[derive(Resource)]
 pub(crate) struct State {
     pub headlights: Headlights,
-    /// Separate tail/side-marker flag; absent when environment loading failed.
-    /// It does not activate road projectors.
-    #[allow(
-        dead_code,
-        reason = "activation handoff; marker rendering is a separate task"
-    )]
+    /// Static source lamp request; absent when environment loading failed.
+    /// The lamp adapter consumes it only in static Mode::None. It does not activate road projectors.
     pub marker_lights: Option<bool>,
     mode: Mode,
     segment: u64,
@@ -30,6 +26,15 @@ impl State {
             mode,
             segment: 0,
             tick: 0,
+        }
+    }
+    /// Existing app activation adapter. Native +128C focus-owner delay override remains unjoined.
+    /// This is a boolean request, never the projector weight used as emissive strength.
+    pub(crate) fn lamp_request(&self, slot: usize) -> Result<bool, &'static str> {
+        if slot >= self.headlights.delays().len() { return Err("lamp activation slot unavailable"); }
+        match self.mode {
+            Mode::None => self.marker_lights.ok_or("source static marker initialization unavailable"),
+            Mode::Timeline | Mode::ForcedNight => Ok(self.headlights.car(slot).is_some()),
         }
     }
     pub(crate) fn segment_changed(&self, segment: u64) -> bool {
@@ -81,4 +86,21 @@ pub(crate) fn tick(
         wanted,
         ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
     );
+}
+
+#[cfg(test)]
+mod lamp_request_tests {
+    use super::*;
+    #[test]
+    fn consumed_marker_and_night_boolean_do_not_copy_projector_strength() {
+        let static_on=State::new(Mode::None,2,Some(true));
+        assert_eq!(static_on.lamp_request(0),Ok(true));assert_eq!(static_on.headlights.car(0),None);
+        assert!(static_on.lamp_request(2).is_err());
+        assert!(State::new(Mode::None,1,None).lamp_request(0).is_err());
+        let mut night=State::new(Mode::Timeline,2,Some(true));
+        assert_eq!(night.lamp_request(0),Ok(false),"night does not OR static markers");
+        night.advance(0,625,true,10.);
+        for slot in 0..2 { assert_eq!(night.lamp_request(slot).unwrap(),night.headlights.car(slot).is_some()); }
+        let before=night.headlights.delays().to_vec();let _=night.lamp_request(1);assert_eq!(night.headlights.delays(),before);
+    }
 }
