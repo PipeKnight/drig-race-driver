@@ -288,3 +288,49 @@ hits in both frames. Closest residuals are millimetres, not proof of exact
 hardware rasterization or a unique GPU primitive. All candidate/GPU-unverified
 flags remain honest; no temporal correction is introduced by this diagnostic.
 Actual receipts: local/graphics/antenna-effective-mesh01/pair01/one-case/.
+
+
+## Source-matched CPU triangle projection (G378)
+
+`grid-render-triangle-candidate PRIVATE_REQUEST.txt` is a bounded, CPU-only
+`grid-probes` binary. It reads the source through the shared PSSG/mesh/draw
+readers, requires an exact package SHA-256, explicit bundle and unique exact
+draw ID, then requires its canonical position/index hash to equal the frozen
+CURRENT CPU mesh hash. It never substitutes an unverified source rest shape.
+The canonical hash is u64-LE position/index counts, f32-LE position bits and
+canonical u32-LE indices. No source vertices, normals or UVs are printed.
+
+The private key=value request supplies `mesh`, `mesh_sha256`, `bundle`, `draw`,
+`current_shape_sha256`, actual sixteen-word `world_bits` and
+`inverse_jittered_bits`, viewport `size`, `triangles`, `pixels`, `source_frame`,
+`source_tick`, `entity`, `raw_metadata_sha256` and `cpu_summary_sha256`.
+Matrices are comma-separated decimal u32 bit words in captured column order;
+pixels are full-viewport integer centres separated by semicolons. Source-frame,
+tick and metadata hashes label provenance supplied by the caller; this binary
+does not independently reopen and authenticate the capture metadata. The
+retained request adapter performs that prior strict capture join.
+
+Reads are bounded on opened handles (16 KiB request, 64 MiB source), with at
+most32 unique triangles and32 unique pixels. Singular/nonfinite matrices,
+invalid indices, behind-eye/crossing triangles, duplicate or overbudget requests
+refuse. Projection uses authored f64 inversion of actual captured f32 inverse
+words: it is not the original forward matrix's f32 arithmetic or hardware fill
+rule. The output marks CPU candidate/GPU primitive unverified explicitly.
+`--self-check` covers known nonidentity matrix/area math, shape/index sensitivity
+and singular/nonfinite projection refusal.
+
+Actual retained requests match source drawMPJRI/meshx0_RDS,21 positions and25
+triangles, to both captured current shapes at frames793/794. All25 triangles
+have subpixel minimum altitude (perpendicular to their longest edge): ranges
+0.0709-0.7036 and0.0697-0.7029 pixels respectively. This is not a measurement of
+the complete antenna silhouette width. Across all25 triangles, centre-hit counts
+at the four selected pixels are2/2/0/0 in each frame. Near-edge f64 projection
+and the earlier f32 ray can disagree, so neither is upgraded to GPU coverage.
+No antenna correction, motion-vector change or rendering default is introduced.
+
+Changed-binary Clippy/release build, analytic self-check, both real source
+requests and six refusal cases pass; a separate full25-triangle pair also
+passes. Actual evidence (including the initial Clippy failure and corrected
+run): local/graphics/antenna-source-projection01/. No GPU/window run was needed;
+the normal app executable remained unchanged. Publication gate is recorded in
+G378 rather than inferred from the diagnostic self-check.
