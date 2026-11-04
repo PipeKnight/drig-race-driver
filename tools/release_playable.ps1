@@ -349,7 +349,7 @@ if (-not $NoTestOrder -and $apks.Count -and (Test-Path -LiteralPath $testOrderPa
                 $prevBundle = (Get-Content -LiteralPath $prevJson -Raw | ConvertFrom-Json).bundled_data.version
                 if ($prevBundle -eq $apks[0].Bundle) {
                     $builds = U '\u0441\u0431\u043e\u0440\u043a[\u0430\u0438]'
-                    $text = [regex]::Replace($text, "($builds )((?:[0-9a-f]{12}, )*[0-9a-f]{12}\b)", { param($m) if ($m.Groups[2].Value -match "$oldRev|$apkRev") { $m.Value } else { "$($m.Groups[1].Value)$oldRev, $($m.Groups[2].Value)" } })
+                    $text = [regex]::Replace($text, "(?i)($builds )((?:[0-9a-f]{12}, )*[0-9a-f]{12}\b)", { param($m) if ($m.Groups[2].Value -match "$oldRev|$apkRev") { $m.Value } else { "$($m.Groups[1].Value)$oldRev, $($m.Groups[2].Value)" } })
                     $script:bundleNote = "bundled data unchanged since $oldRev (version $($prevBundle.Substring(0, 12))); $oldRev added to the no-copy lists"
                 } else {
                     $script:bundleNote = "bundled data CHANGED since $oldRev ($($prevBundle.Substring(0, 12)) -> $($apks[0].Bundle.Substring(0, 12))): installing over an older drift build copies the data again; fix the no-copy lists in the test order by hand"
