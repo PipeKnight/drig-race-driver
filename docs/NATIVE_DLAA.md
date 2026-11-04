@@ -184,3 +184,53 @@ behind-camera explanation is not supported at these two centres. Actual writer
 geometry and interpolation remain open. Broad post-HDR differences are retained;
 input correspondence is not visual parity or an antenna fix. Full evidence:
 `local/graphics/opaque-conservative01/replay-fragment-runtime02/`.
+
+## G371 exact consecutive diagnostic readiness (2026-11-04)
+
+The optional `GRID_TEMPORAL_CONSECUTIVE=1` diagnostic requires matching raw/HDR
+capture ticks, an explicit ROI centre and normal-history native DLAA. It retains
+two actual consecutive source/render transactions, each with independent raw
+inputs and before/after EarlyPostProcess HDR buffers. The latter bracket covers
+the whole stage, not an exclusive DLSS callback receipt. Previous-view/body bits
+must match the preceding captured state; requested ticks are never retimed.
+Current raster clip bits retain Bevy ViewUniform Mat4-inverse arithmetic. A
+separate `expected_history_clip` records that camera state in the actual native
+PreviousViewData producer's Affine-inverse arithmetic. Only that declared history
+representation is compared to the following frame's actual previous-view bits;
+body bits remain exact. The five GPU matrices and raster domain are unchanged.
+
+Actual main-world warmup readiness is sampled in Update, stamped with source
+FrameCount and extracted. Missing, false or stale readiness rejects stage
+admission before consuming any latch bit; PostUpdate cover removal cannot admit
+the earlier Update. Each recorder requires its buffers before consuming a stage.
+Readback checks each independent GPU header against its frozen metadata.
+
+Combined-feature Clippy and eight CPU regressions pass (G371, including the actual
+warmup lifecycle and existing source-frame/capture tests). GPU transport and the
+antenna defect remain unverified by those tests. This diagnostic changes no
+motion-vector producer, temporal resolve or normal rendering default.
+
+The actual native PreUpdate publisher test observed twelve differing words between
+raster/history representations for one nonidentity camera on x86. Exact native
+history equality and one-word corruption refusal pass; this is a diagnostic
+arithmetic-domain finding, not proof of an antenna motion-vector defect.
+
+G371 pair02 records actual source/render frame793/794 then794/795, ticks1652/1654.
+Two raw and four HDR payloads pass exact GPU headers, sampled warmup readiness,
+source/render adjacency and actual previous-history/body joins. Raster/history
+representations differ in13/2 words in those moving frames. Native preparation
+is1920x1080 with depth/motion/normal history; exclusive native dispatch remains
+unverified. The antenna appearance is not claimed fixed by capture correctness.
+
+The bounded pair analysis selects36/35 thin depth-foreground candidates with
+explicit local bounds, without a known mesh/primitive ID. Their rigid-motion
+residual maxima are0.006907/0.011974px. Sparse raster coverage remains; selected
+shaft RGB maxima are modest, while the ROI fireflies lie elsewhere. This does
+not uniquely identify the visible trace's cause. Preserve paired input buffers
+and treat the30 motion PNGs as separate visual context, not frozen HDR joins.
+
+The pinned SDK310.5.3 guide restricts Bias Current Color support to deprecated
+Preset F and discourages it for latest models (sections3.12/3.15). Bevy currently
+hardcodes its optional bias input absent. No mask or forced preset downgrade is
+admitted by this evidence; actual internal preset remains unobserved. G371's
+final mandatory package gate passes683 tests/Clippy/build/render.

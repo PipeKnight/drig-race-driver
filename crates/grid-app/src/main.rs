@@ -1961,6 +1961,7 @@ fn manual_base_mip_zero_admitted(
 
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let headlight_lumens = headlight_pilot::requested()?;
+    let temporal_pair = temporal_audit::pair_requested()?;
     let source_lighting_units = source_light_trial::requested()?;
     let source_projector_request = source_projector_request::requested(source_lighting_units, headlight_lumens)?;
     println!("prototype_build revision={BUILD_REVISION}");
@@ -4186,6 +4187,17 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             || pixel.x >= graphics.width as f32 || pixel.y >= graphics.height as f32)
     {
         return Err("--temporal-centre requires an audit and a pixel inside the render resolution".into());
+    }
+    if temporal_pair
+        && (!cfg!(feature = "dlaa")
+            || temporal_audit_tick.is_none()
+            || temporal_audit_tick != temporal_colour_tick
+            || temporal_centre.is_none()
+            || graphics.anti_aliasing != 3
+            || graphics.dlaa_reset_every_frame
+            || std::env::var_os("GRID_OPAQUE_CONSERVATIVE_MOTION").is_some())
+    {
+        return Err("consecutive audit needs same raw/HDR tick, explicit ROI centre, normal-history native DLAA and no conservative replay".into());
     }
     let temporal_audit_directory = if let Some(tick) = temporal_audit_tick {
         if !drive || !graphics.enhanced() || output.is_none() || render_fps.is_none()

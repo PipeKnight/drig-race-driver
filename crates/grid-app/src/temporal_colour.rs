@@ -45,16 +45,17 @@ pub(crate) struct Audit {
     tick: u64,
     centre: Option<Vec2>,
     directory: PathBuf,
-    buffers: [Handle<ShaderBuffer>; 2],
-    submitted: [Arc<AtomicBool>; 2],
-    queued: [bool; 2],
+    buffers: Vec<Handle<ShaderBuffer>>,
+    submitted: Vec<Arc<AtomicBool>>,
+    queued: Vec<bool>,
     complete: Arc<AtomicU8>,
     failed: Arc<AtomicBool>,
-    frozen: Arc<Mutex<[Option<Frozen>; 2]>>,
+    frozen: Arc<Mutex<Vec<Option<Frozen>>>>,
+    pair: Option<super::temporal_audit::PairCapture>,
 }
 impl Audit {
     pub(crate) fn ready(&self) -> bool {
-        self.complete.load(Ordering::Acquire) == 3
+        self.complete.load(Ordering::Acquire) == if self.pair.is_some() { 15 } else { 3 }
     }
     pub(crate) fn failed(&self) -> bool {
         self.failed.load(Ordering::Acquire)
@@ -83,13 +84,19 @@ struct Parameters {
     extent: UVec4,
 }
 type Inputs = (
+    Entity,
     &'static ExtractedView,
     &'static ViewTarget,
     Option<&'static ColourView>,
     Option<&'static TemporalJitter>,
 );
 
-pub fn install(app: &mut App, tick: u64, directory: &Path, centre: Option<Vec2>) -> std::io::Result<()> {
+pub fn install(
+    app: &mut App,
+    tick: u64,
+    directory: &Path,
+    centre: Option<Vec2>,
+) -> std::io::Result<()> {
     if !(1..=1_000_000).contains(&tick) || app.get_sub_app(RenderApp).is_none() {
         return Err(std::io::Error::other(
             "colour audit requires bounded positive tick and renderer",
@@ -113,23 +120,28 @@ pub fn install(app: &mut App, tick: u64, directory: &Path, centre: Option<Vec2>)
             Shader::from_wgsl(include_str!("temporal_colour.wgsl"), "temporal_colour.wgsl"),
         )
         .map_err(|e| std::io::Error::other(e.to_string()))?;
-    let buffers = std::array::from_fn(|_| {
-        let mut buffer = ShaderBuffer::from(vec![UVec4::ZERO; (3 + WIDTH * HEIGHT) as usize]);
-        buffer.buffer_description.usage |= BufferUsages::COPY_SRC;
-        app.world_mut()
-            .resource_mut::<Assets<ShaderBuffer>>()
-            .add(buffer)
-    });
+    let pair = super::temporal_audit::pair_for_colour(app);
+    let count = if pair.is_some() { 4 } else { 2 };
+    let buffers = (0..count)
+        .map(|_| {
+            let mut buffer = ShaderBuffer::from(vec![UVec4::ZERO; (3 + WIDTH * HEIGHT) as usize]);
+            buffer.buffer_description.usage |= BufferUsages::COPY_SRC;
+            app.world_mut()
+                .resource_mut::<Assets<ShaderBuffer>>()
+                .add(buffer)
+        })
+        .collect();
     app.insert_resource(Audit {
         tick,
         centre,
         directory: directory.to_owned(),
         buffers,
-        submitted: std::array::from_fn(|_| Arc::default()),
-        queued: [false; 2],
+        submitted: (0..count).map(|_| Arc::default()).collect(),
+        queued: vec![false; count],
         complete: Arc::default(),
         failed: Arc::default(),
-        frozen: Arc::new(Mutex::new([None, None])),
+        frozen: Arc::new(Mutex::new(vec![None; count])),
+        pair,
     })
     .init_resource::<Snapshot>()
     .add_plugins((
@@ -142,7 +154,10 @@ pub fn install(app: &mut App, tick: u64, directory: &Path, centre: Option<Vec2>)
         PostUpdate,
         snapshot.after(bevy::transform::TransformSystems::Propagate),
     )
-    .add_systems(Update, queue_readback);
+    .add_systems(
+        Update,
+        queue_readback.after(super::temporal_audit::sample_pair_warmup),
+    );
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
         render
             .add_systems(RenderStartup, init_pipeline)
@@ -214,24 +229,26 @@ fn record<const STAGE: usize>(
     mut context: RenderContext,
     audit: Res<Audit>,
     state: Res<Snapshot>,
+    warmup: Option<Res<super::temporal_audit::PairWarmup>>,
+    render_frame: Res<FrameCount>,
     pipeline: Res<Pipeline>,
     cache: Res<PipelineCache>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     buffers: Res<RenderAssets<GpuShaderBuffer>>,
 ) {
-    let (view, target, marked, jitter) = view.into_inner();
+    let (view_entity, view, target, marked, jitter) = view.into_inner();
     if marked.is_none()
         || state.tick < audit.tick
         || audit.failed()
-        || audit.submitted[STAGE].load(Ordering::Acquire)
+        || audit
+            .submitted
+            .iter()
+            .all(|done| done.load(Ordering::Acquire))
     {
         return;
     }
-    let (Some(compiled), Some(buffer)) = (
-        cache.get_compute_pipeline(pipeline.id),
-        buffers.get(&audit.buffers[STAGE]),
-    ) else {
+    let Some(compiled) = cache.get_compute_pipeline(pipeline.id) else {
         return;
     };
     if target.main_texture_format() != TextureFormat::Rgba16Float {
@@ -239,7 +256,11 @@ fn record<const STAGE: usize>(
         return;
     }
     let size = UVec2::new(view.viewport.z, view.viewport.w);
-    let extent = size.min(UVec2::new(WIDTH, HEIGHT));
+    let extent = size.min(if audit.pair.is_some() {
+        UVec2::new(512, 384)
+    } else {
+        UVec2::new(WIDTH, HEIGHT)
+    });
     if extent.min_element() == 0 {
         fail(&audit, "zero colour extent");
         return;
@@ -256,6 +277,53 @@ fn record<const STAGE: usize>(
     let origin = (pixel - extent.as_vec2() / 2.)
         .clamp(Vec2::ZERO, (size - extent).as_vec2())
         .as_uvec2();
+    if audit.pair.is_some()
+        && audit
+            .buffers
+            .iter()
+            .any(|handle| buffers.get(handle).is_none())
+    {
+        return;
+    }
+    let frame_slot = if let Some(pair) = &audit.pair {
+        let expected_history = super::temporal_audit::expected_history_clip(
+            view.clip_from_view, &view.world_from_view,
+        );
+        if !expected_history.is_finite() {
+            fail(&audit, "nonfinite expected history clip");
+            return;
+        }
+        let stamp = super::temporal_audit::PairStamp::new(
+            state.frame,
+            state.tick,
+            render_frame.0,
+            view_entity,
+            clip,
+            expected_history,
+            state.body,
+            size,
+            origin,
+            extent,
+            jitter.map(|j| j.offset),
+        );
+        match pair.select_ready(audit.tick, stamp, 1 << STAGE, warmup.as_deref()) {
+            Ok(Some(slot)) => slot,
+            Ok(None) => return,
+            Err(error) => {
+                fail(&audit, error);
+                return;
+            }
+        }
+    } else {
+        0
+    };
+    let slot = frame_slot * 2 + STAGE;
+    if audit.submitted[slot].load(Ordering::Acquire) {
+        return;
+    }
+    let Some(buffer) = buffers.get(&audit.buffers[slot]) else {
+        return;
+    };
     let params = Parameters {
         identity: UVec4::new(
             1,
@@ -278,15 +346,20 @@ fn record<const STAGE: usize>(
     {
         let mut frozen = audit.frozen.lock().unwrap_or_else(|e| e.into_inner());
         if STAGE == 1
-            && frozen[0]
+            && frozen[frame_slot * 2]
                 .as_ref()
                 .is_none_or(|f| f.header[..3] != header[..3] || f.header[4..] != header[4..])
         {
             fail(&audit, "before/after colour frame or ROI mismatch");
             return;
         }
-        frozen[STAGE]=Some(Frozen{header,text:format!("version=1 frame={} tick={} stage={} dimensions={size:?} origin={origin:?} extent={extent:?} format={:?} jitter={:?} scope=main-HDR-around-EarlyPostProcess-before-bloom-tonemapping
+        frozen[slot]=Some(Frozen{header,text:format!("version=1 frame={} tick={} stage={} dimensions={size:?} origin={origin:?} extent={extent:?} format={:?} jitter={:?} scope=main-HDR-around-EarlyPostProcess-before-bloom-tonemapping
 ",state.frame,state.tick,STAGE+1,target.main_texture_format(),jitter.map(|j|j.offset))});
+        if audit.pair.is_some()
+            && let Some(capture) = frozen[slot].as_mut()
+        {
+            capture.text.push_str(&format!("warmup_update_sample={:?}\n", warmup.as_deref()));
+        }
     }
     let mut uniform = UniformBuffer::from(params);
     uniform.write_buffer(&device, &queue);
@@ -310,10 +383,20 @@ fn record<const STAGE: usize>(
         pass.set_bind_group(0, &bindings, &[]);
         pass.dispatch_workgroups(extent.x.div_ceil(8), extent.y.div_ceil(8), 1);
     }
-    audit.submitted[STAGE].store(true, Ordering::Release);
+    audit.submitted[slot].store(true, Ordering::Release);
 }
-fn queue_readback(mut commands: Commands, mut audit: ResMut<Audit>) {
-    for stage in 0..2 {
+fn queue_readback(
+    mut commands: Commands,
+    mut audit: ResMut<Audit>,
+    warmup: Option<Res<super::temporal_audit::PairWarmup>>,
+    frame: Res<FrameCount>,
+) {
+    if audit.pair.is_some()
+        && !super::temporal_audit::pair_transport_ready(warmup.as_deref(), frame.0)
+    {
+        return;
+    }
+    for stage in 0..audit.buffers.len() {
         if audit.submitted[stage].load(Ordering::Acquire) && !audit.queued[stage] {
             audit.queued[stage] = true;
             commands
@@ -371,7 +454,12 @@ fn readback(
         if !nonzero {
             return Err("blank HDR colour ROI".into());
         }
-        let name = if stage == 0 { "before" } else { "after" };
+        let name = if stage % 2 == 0 { "before" } else { "after" };
+        let name = if audit.pair.is_some() {
+            format!("{name}-{}", stage / 2)
+        } else {
+            name.to_owned()
+        };
         std::fs::write(audit.directory.join(format!("{name}.bin")), &event.data)
             .map_err(|e| e.to_string())?;
         std::fs::write(audit.directory.join(format!("{name}.txt")), frozen.text)

@@ -388,4 +388,88 @@ mod tests {
         // No RenderApp/GPU/ScreenshotCaptured event: no image or file is written.
     }
 
+    #[test]
+    fn consecutive_temporal_latch_and_transport_wait_for_actual_warmup_completion() {
+        use crate::temporal_audit::{
+            PairCapture, PairStamp, PairWarmup, pair_transport_ready, sample_pair_warmup,
+        };
+        use bevy::diagnostic::{FrameCount, FrameCountPlugin};
+        let mut app = App::new();
+        app.add_plugins(FrameCountPlugin)
+            .init_resource::<PairWarmup>()
+            .add_systems(Update, sample_pair_warmup);
+        let camera = app.world_mut().spawn(crate::ViewerCamera).id();
+        app.world_mut().spawn(Mesh3d(Handle::default()));
+        let cover = app
+            .world_mut()
+            .spawn((Node::default(), UiTargetCamera(camera)))
+            .id();
+        app.insert_resource(Counters::default())
+            .insert_resource(Warmup {
+                phase: Phase::Restore,
+                quiet: QUIET_FRAMES - 1,
+                cover: Some(cover),
+                ..default()
+            })
+            .add_systems(PostUpdate, step);
+        let pair = PairCapture::default();
+        let try_stage = |app: &App, stage| {
+            // FrameCount increments in Last; use the sampled Update's count.
+            let source_frame = app.world().resource::<FrameCount>().0 - 1;
+            let stamp = PairStamp::new(
+                source_frame,
+                1652,
+                source_frame + 1,
+                Entity::PLACEHOLDER,
+                Mat4::IDENTITY,
+                Mat4::IDENTITY,
+                Mat4::IDENTITY,
+                UVec2::new(1920, 1080),
+                UVec2::new(704, 348),
+                UVec2::new(512, 384),
+                Some(Vec2::ZERO),
+            );
+            pair.select_ready(1652, stamp, stage, app.world().get_resource::<PairWarmup>())
+        };
+        // Done and cover despawn happen in PostUpdate; earlier admission stays false.
+        app.update();
+        assert!(app.world().resource::<Warmup>().ready());
+        assert!(app.world().get_entity(cover).is_err());
+        for stage in [1, 2, 4] {
+            assert!(try_stage(&app, stage).is_err());
+        }
+        let previous_frame = app.world().resource::<FrameCount>().0 - 1;
+        assert!(!pair_transport_ready(
+            app.world().get_resource::<PairWarmup>(),
+            previous_frame
+        ));
+        assert!(!pair_transport_ready(None, previous_frame));
+        // Failed admission consumed no stage bits: all first-frame slots remain.
+        app.update();
+        for stage in [1, 2, 4] {
+            assert_eq!(try_stage(&app, stage), Ok(Some(0)));
+        }
+        let ready_frame = app.world().resource::<FrameCount>().0 - 1;
+        assert!(pair_transport_ready(
+            app.world().get_resource::<PairWarmup>(),
+            ready_frame
+        ));
+        assert!(!pair_transport_ready(
+            app.world().get_resource::<PairWarmup>(),
+            previous_frame
+        ));
+        // Explicit no-warmup differs from a missing extracted readiness sample.
+        let mut without_warmup = App::new();
+        without_warmup
+            .add_plugins(FrameCountPlugin)
+            .init_resource::<PairWarmup>()
+            .add_systems(Update, sample_pair_warmup);
+        without_warmup.update();
+        let no_warmup_frame = without_warmup.world().resource::<FrameCount>().0 - 1;
+        assert!(pair_transport_ready(
+            without_warmup.world().get_resource::<PairWarmup>(),
+            no_warmup_frame
+        ));
+    }
+
 }
