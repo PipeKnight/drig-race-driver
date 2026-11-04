@@ -15,7 +15,7 @@ pub(crate) struct PackedFamily {
     pub scale: f32,
 }
 impl PackedFamily {
-    fn from_static(rgb: [f32; 3]) -> Result<Self, &'static str> {
+    pub(crate) fn from_static(rgb: [f32; 3]) -> Result<Self, &'static str> {
         if !rgb.into_iter().all(|v| v.is_finite() && v >= 0.) {
             return Err("static source RGB requires finite nonnegative values");
         }
@@ -25,6 +25,10 @@ impl PackedFamily {
         let bytes = rgb.map(|c| ((f64::from(c) / f64::from(scale)) * 255.).trunc() as u8);
         Ok(Self { bytes, scale })
     }
+    /// Source specular reconstruction uses bytes/255 WITHOUT the family scale.
+    pub(crate) fn unscaled(self) -> [f32; 3] {
+        self.bytes.map(|b| f32::from(b) * (1. / 255.))
+    }
     fn effective(self) -> Result<[f32; 3], &'static str> {
         let rgb = self
             .bytes
@@ -33,6 +37,51 @@ impl PackedFamily {
             return Err("effective source RGB overflow");
         }
         Ok(rgb)
+    }
+}
+
+/// Selected730F90 specular-colour policy, distinct from physical units and
+/// static/dynamic direction ownership. Raw source Lighting remains untouched.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SpecularColour {
+    linked: bool,
+    unlinked: PackedFamily,
+}
+impl SpecularColour {
+    pub(crate) fn from_static(raw: &Lighting) -> Result<Self, &'static str> {
+        // Source726A50 initializes linked=1 before the XML reader. Its integer
+        // parser supports more malformed-prefix cases; ordinary signed32 only.
+        let linked = raw.params.get("spec_linked").map_or(Ok(true), |value| {
+            value
+                .trim()
+                .parse::<i32>()
+                .map(|v| v != 0)
+                .map_err(|_| "unsupported spec_linked integer")
+        })?;
+        // Source7411E0 initializes RGB+1E0 white;72BB40 completion packs it
+        // through742B00. Unlinked730F90 reconstructs bytes/255, NOT derivedscale.
+        let rgb = if raw.params.contains_key("specular_colour") {
+            raw.rgb("specular_colour")
+                .ok_or("invalid static specular RGB")?
+        } else {
+            [1.; 3]
+        };
+        Ok(Self {
+            linked,
+            unlinked: PackedFamily::from_static(rgb)?,
+        })
+    }
+    pub(crate) fn linked(self) -> bool {
+        self.linked
+    }
+    pub(crate) fn rgb(self, resolved_sun: PackedFamily) -> [f32; 3] {
+        // Source730FBA copies current packedSUN+2F8 to packedSPEC+310 when
+        // linked. Both modes later reconstruct with reciprocal255 only.
+        if self.linked {
+            resolved_sun.unscaled()
+        } else {
+            self.unlinked.unscaled()
+        }
     }
 }
 
@@ -410,5 +459,252 @@ mod tests {
         }
         let half = Curve::new(&[(0, 0.5), (360, 0.5)], None);
         assert_eq!((half.value(0.125) + 0.5).trunc() as u8, 1);
+    }
+    #[test]
+    fn specular_selector_missing_link_and_colour_uses_dark_sun_not_white() {
+        let mut source = source();
+        source
+            .params
+            .insert("backlight_suncolour".into(), "0.1 0.2 0.3".into());
+        let sun = PackedFamily::from_static(source.rgb("backlight_suncolour").unwrap()).unwrap();
+        let spec = SpecularColour::from_static(&source).unwrap();
+        assert!(spec.linked());
+        assert_eq!(spec.rgb(sun), sun.unscaled());
+        assert_ne!(spec.rgb(sun), [1.; 3]);
+        for saved in ["1 1 1", "1 0 0"] {
+            source.params.insert("specular_colour".into(), saved.into());
+            source.params.insert("spec_linked".into(), "1".into());
+            assert_eq!(
+                SpecularColour::from_static(&source).unwrap().rgb(sun),
+                sun.unscaled()
+            );
+        }
+    }
+    #[test]
+    fn unlinked_specular_preserves_own_packed_colour_without_derived_scale() {
+        let mut source = source();
+        source.params.insert("spec_linked".into(), "0".into());
+        source
+            .params
+            .insert("specular_colour".into(), "2 0.5 0".into());
+        let spec = SpecularColour::from_static(&source).unwrap();
+        assert!(!spec.linked());
+        for sun in [
+            PackedFamily {
+                bytes: [0; 3],
+                scale: 0.,
+            },
+            PackedFamily {
+                bytes: [255; 3],
+                scale: 100.,
+            },
+        ] {
+            assert_eq!(spec.rgb(sun), [1., 63. * (1. / 255.), 0.]);
+        }
+        source.params.remove("specular_colour");
+        assert_eq!(
+            SpecularColour::from_static(&source)
+                .unwrap()
+                .rgb(PackedFamily {
+                    bytes: [0; 3],
+                    scale: 0.
+                }),
+            [1.; 3]
+        );
+        source.params.insert("spec_linked".into(), "0.5".into());
+        assert!(SpecularColour::from_static(&source).is_err());
+    }
+    #[test]
+    fn same_resolved_timeline_sun_bytes_drive_specular_but_sun_scale_does_not() {
+        use grid_tools::time_of_day::{Curve, Timeline};
+        let source = source();
+        let packed = PackedLighting::from_static(&source).unwrap();
+        let spec = SpecularColour::from_static(&source).unwrap();
+        let scales = Timeline {
+            curves: [(
+                "backlight_sunscale".into(),
+                Curve::new(&[(0, 1.), (720, 9.)], None),
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let (a, ea) = packed.resolve(Mode::Timeline, Some(&scales), 0.).unwrap();
+        let (b, eb) = packed.resolve(Mode::Timeline, Some(&scales), 0.5).unwrap();
+        assert_ne!(ea.sun, eb.sun);
+        assert_eq!(spec.rgb(a.families[0]), spec.rgb(b.families[0]));
+        let colours = Timeline {
+            curves: [(
+                "backlight_suncolour_g".into(),
+                Curve::new(&[(0, 0.25), (720, 0.75)], None),
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let (a, _) = packed.resolve(Mode::Timeline, Some(&colours), 0.).unwrap();
+        let (b, _) = packed.resolve(Mode::Timeline, Some(&colours), 0.5).unwrap();
+        assert_eq!(spec.rgb(a.families[0])[1], 64. * (1. / 255.));
+        assert_eq!(spec.rgb(b.families[0])[1], 192. * (1. / 255.));
+        assert_eq!(a.families[0].bytes[0], packed.families[0].bytes[0]);
+        assert_eq!(b.families[0].bytes[2], packed.families[0].bytes[2]);
+        let (reset, _) = packed.resolve(Mode::Timeline, Some(&colours), 0.).unwrap();
+        assert_eq!(reset, a);
+        assert_eq!(PackedLighting::from_static(&source).unwrap(), packed);
+    }
+}
+
+#[cfg(test)]
+mod static_colour_corpus_tests {
+    use super::{PackedFamily, SpecularColour};
+
+    // Independent selected static CPU arithmetic, not x87 boundary/GPU-domain proof.
+    fn packed_bytes(rgb: [f32; 3]) -> [u8; 3] {
+        assert!(rgb.into_iter().all(|v| v.is_finite() && v >= 0.));
+        let peak = rgb.into_iter().fold(1_f32, f32::max);
+        rgb.map(|c| (f64::from(c) / f64::from(peak) * 255.).trunc() as u8)
+    }
+
+    #[test]
+    #[ignore = "requires absolute GRID_GAME_ROOT; actual 23-file static source colour CPU regression"]
+    fn purchased_23_static_specular_colours_match_selected_source_contract() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"),
+        );
+        assert!(root.is_absolute());
+        let paths = [
+            "tracks/europe/donington/lighting.xml",
+            "tracks/europe/istanbul_park/lighting.xml",
+            "tracks/europe/jarama/lighting.xml",
+            "tracks/europe/le_mans/lighting.xml",
+            "tracks/europe/milan/lighting.xml",
+            "tracks/europe/nurburgring/lighting.xml",
+            "tracks/europe/spa_francorchamps/lighting.xml",
+            "tracks/frontend/garage_01/lighting.xml",
+            "tracks/frontend/garage_02/lighting.xml",
+            "tracks/frontend/garage_03/lighting.xml",
+            "tracks/japan/haruna/lighting.xml",
+            "tracks/japan/haruna/route_1/lighting.xml",
+            "tracks/japan/haruna/route_3/lighting.xml",
+            "tracks/japan/haruna/route_6/lighting.xml",
+            "tracks/japan/haruna/route_8/lighting.xml",
+            "tracks/japan/haruna/route_9/lighting.xml",
+            "tracks/japan/okutama/lighting.xml",
+            "tracks/japan/shibuya/lighting.xml",
+            "tracks/japan/yokohama_docks/lighting.xml",
+            "tracks/usa/detroit/lighting.xml",
+            "tracks/usa/long_beach/lighting.xml",
+            "tracks/usa/san_fran/lighting.xml",
+            "tracks/usa/washington/lighting.xml",
+        ];
+        let mut flags = [0_usize; 3]; // explicit zero, explicit one, constructor-linked missing.
+        let mut complete = [0_usize; 2]; // unlinked, linked.
+        let mut partial = 0;
+        for relative in paths {
+            let path = root.join(relative);
+            let raw =
+                grid_formats::track_environment::read_lighting(&std::fs::read(&path).unwrap())
+                    .unwrap();
+            let linked = match raw.params.get("spec_linked").map(String::as_str) {
+                Some("0") => {
+                    flags[0] += 1;
+                    false
+                }
+                Some("1") => {
+                    flags[1] += 1;
+                    true
+                }
+                None => {
+                    flags[2] += 1;
+                    true
+                }
+                other => panic!("unexpected purchased flag {other:?}: {}", path.display()),
+            };
+            let selection = SpecularColour::from_static(&raw).unwrap();
+            assert_eq!(selection.linked(), linked, "{}", path.display());
+            let Some(sun) = raw.rgb("backlight_suncolour") else {
+                // Route/frontend partial files are NOT complete standalone lighting.
+                // Do not synthesize a SUN/constructor frame or claim Phong admission.
+                assert!(crate::graphics::Phong::from_lighting(&raw, 18_000., false).is_none());
+                partial += 1;
+                continue;
+            };
+            let sun_bytes = packed_bytes(sun);
+            let selected_bytes = if linked {
+                sun_bytes
+            } else {
+                // Source7411E0 explicit constructor white only when absent.
+                packed_bytes(if raw.params.contains_key("specular_colour") {
+                    raw.rgb("specular_colour").unwrap()
+                } else {
+                    [1.; 3]
+                })
+            };
+            let expected = selected_bytes.map(|v| f32::from(v) * (1. / 255.));
+            assert_eq!(
+                selection
+                    .rgb(PackedFamily::from_static(sun).unwrap())
+                    .map(f32::to_bits),
+                expected.map(f32::to_bits)
+            );
+            // SUN family scale is deliberately excluded from SPEC reconstruction.
+            for scale in [0., 1., 999.] {
+                assert_eq!(
+                    selection
+                        .rgb(PackedFamily {
+                            bytes: sun_bytes,
+                            scale
+                        })
+                        .map(f32::to_bits),
+                    expected.map(f32::to_bits)
+                );
+            }
+            let angles = if linked {
+                raw.sun()
+            } else {
+                raw.scalar("spec_heightangle")
+                    .zip(raw.scalar("spec_rotationangle"))
+                    .map(|(h, r)| [h, r])
+            };
+            for gamma in [false, true] {
+                let actual = crate::graphics::Phong::from_lighting(&raw, 18_000., gamma);
+                if angles.is_none() {
+                    assert!(actual.is_none());
+                    continue;
+                }
+                let actual = actual.expect("complete actual source must admit static Phong");
+                let decode = |v: f32| if gamma { v.max(0.).powf(2.2) } else { v };
+                let unit = 18_000. / sun.map(decode).into_iter().fold(1e-3_f32, f32::max);
+                let colour = expected.map(|v| decode(v).max(0.) * unit / std::f32::consts::PI);
+                assert_eq!(
+                    actual.colour.map(f32::to_bits),
+                    colour.map(f32::to_bits),
+                    "{} gamma={gamma}",
+                    path.display()
+                );
+                let [height_degrees, rotation_degrees] = angles.unwrap();
+                assert_eq!(
+                    actual.direction_to_light,
+                    grid_formats::track_lighting::Sun {
+                        height_degrees,
+                        rotation_degrees
+                    }
+                    .direction_to_light()
+                );
+            }
+            if angles.is_some() {
+                complete[usize::from(linked)] += 1;
+            }
+            println!(
+                "static_phong_corpus path={relative} linked={linked} packed_sun={sun_bytes:?} packed_spec={selected_bytes:?} complete={}",
+                angles.is_some()
+            );
+        }
+        assert_eq!(flags, [1, 14, 8]);
+        assert!(
+            complete.into_iter().all(|n| n > 0),
+            "both real linked/unlinked complete cases required: {complete:?}"
+        );
+        println!(
+            "static_phong_corpus files=23 flags={flags:?} complete={complete:?} partial={partial} scope=CPU_static_only"
+        );
     }
 }
