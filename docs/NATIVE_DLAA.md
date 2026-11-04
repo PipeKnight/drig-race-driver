@@ -234,3 +234,46 @@ Preset F and discourages it for latest models (sections3.12/3.15). Bevy currentl
 hardcodes its optional bias input absent. No mask or forced preset downgrade is
 admitted by this evidence; actual internal preset remains unobserved. G371's
 final mandatory package gate passes683 tests/Clippy/build/render.
+
+
+## Current effective CPU geometry at the temporal transaction (G374)
+
+An additional explicitly requested observer copies the current player-instance
+`Assets<Mesh>` positions/indices and actual propagated `GlobalTransform` during
+`ExtractSchedule`, before `AssetExtractionSystems`. It never substitutes the
+source rest mesh or reconstructs deformation from a guessed physics transform.
+`GRID_TEMPORAL_CPU_GEOMETRY_PIXELS` selects up to32 unique ROI pixel centres and
+requires the existing exact consecutive pair. With the variable absent, this
+observer and its per-frame copying are not installed.
+
+The copied geometry is retained immutably only with the matching raw capture's
+source frame, tick and exact body bits. Readback uses the existing frozen
+jittered inverse and validated raw header/depth. Compact summaries contain
+entity, unqualified source draw name, mesh asset, transform bits, current shape
+hash and all admitted CPU triangle intersections/depth residuals. Vertices and
+indices stay in process memory; no mesh asset payload is exported.
+
+This is deliberately a CPU candidate association. Material/culling/visibility,
+skinning, upload epochs and actual GPU primitive identity are not proved.
+Those flags remain false; a unique ray hit cannot upgrade them. Missing query
+components are not proof of complete model coverage. Limits are512 draws,
+200000 vertices,400000 triangles and16MiB per copied frame,32 pixels and32 hits
+per pixel. Unsupported/missing data, overbudget inputs, wrong frame/tick/body,
+invalid header and nonfinite geometry/metrics refuse rather than truncate or
+retime the capture. At most current plus two frozen copies can coexist.
+
+The prior static geometry-ray helper is factored with its arithmetic/order and
+front/back/distance policy retained. CPU tests exercise actual mutated mesh data,
+immutable ownership, real ExtractPlugin scheduling against an asset-stage
+sentinel, frame-domain and wrong-snapshot refusal, and known triangle/depth
+math. The scheduling fixture installs no RenderDevice and proves no GPU upload.
+
+Initial combined-feature Clippy and14 selected CPU regressions pass. A subsequent
+extreme-coordinate test initially rejected its ray before reaching the intended
+distance-overflow guard; that failed test is retained. The corrected projective
+fixture and final combined-feature Clippy plus14 selected CPU tests pass with
+zero failures/ignored tests. No new GPU capture or antenna correction is claimed
+by these CPU results. Private source/tests/receipts are under
+local/graphics/antenna-effective-mesh01/; proposals/review are retained under
+local/handoff/drafts/effective-mesh-observer138/,
+effective-mesh-extract-regression140/ and effective-mesh-readonly-review141/.
