@@ -843,3 +843,29 @@ link, so they cannot establish the delegate type. The bounded original reader
 remains disabled while the owner's computer is busy. This metadata narrows
 implementation priority; it adds no animated crowd or original observation.
 Private evidence: local/handoff/drafts/crowd-playback-priority141/.
+
+
+### Static HLA wrapper and selected root class (G377)
+
+The actual binary-resource path0x0064A730 checks userdata hla and invokes
+0x0076D650, forwarding to the embedded loader context and0x0076D520.
+That reader constructs an object via0x00ACE360, stores the object and its+8
+interface at data+0x78/+0x7C. Consequently the selector's interface+0x18 means
+object+0x20, not object+0x18. The latter field contains the wrapper created by
+0x00ACEB80. Its delegate+4 starts null.
+
+One actual configuration path calls0x00AD4CE0, requiring HighLevelAnimation,
+iterating AnimSelectionTree and installing the result of0x00AD4780. The other
+calls0x00AD4CB0/0x00AD4510. The two builders select the same Factor/Anim/Random
+constructors. The XML builder uses exact names through a four-entry static map;
+it does not infer a class from the resource alias. The purchased tree has one
+Factor root. Constructor0x00AD5250 installs0x00D3A5E4, whose+8 is0x00B76F10.
+This identifies a concrete evaluator for that successfully parsed tree without
+a live pointer snapshot; it does not yet port its selection behavior.
+
+Manager+0x3C versus the embedded loader-context ownership, selected configuration,
+load success, later delegate mutation and actual callback execution remain
+qualified. Clock, initial actor locals and rendering are separate open joins.
+No original access or new Ghidra process was needed. Private evidence:
+local/handoff/drafts/crowd-hla-constructor147/, crowd-hla-wrapper148/ and
+crowd-selector-classes149/.

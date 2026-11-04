@@ -330,3 +330,30 @@ Independent review found that a refused LOW mesh/present-bundle read could look
 like valid empty section metadata. That status now stays unavailable while the
 existing geometry fallback is preserved. A real low-loader synthetic-PSSG test
 distinguishes legitimately absent bundles from present unreadable ones.
+
+
+## Actual request writer and the flagged-context qualification (G377)
+
+Setter0x008F56C0 writes the supplied byte to render-context+0x32B0, initially
+false. Actual-slot wrapper0x00A04D40 and all-context wrapper0x00A08DA0 call this
+same setter. Static marker settings and night activation therefore target the
+same lamp request field. The night path derives a strict positive request from
+its elapsed-minus-delay value and separately clamps projector intensity; copying
+a normalized projector weight is not the source boolean contract.
+
+Before that test the source clears the delay for the first context selected by
+0x0099C0A0. Related0x0099C0D0 returns its actual slot or-1; uniqueness is not
+required. The selector uses context+0x128C. Its sole direct store is in
+0x00A14540; the actual caller transfers VehicleManagerPlugin+0x1C0[slot] under
+load-completion gates. The upstream byte's typed meaning remains unresolved.
+Do not rename it player, camera owner or high-detail loading just from these
+uses, and do not silently substitute slot0 or a model namespace.
+
+The app's live cameras currently sample the actual driving runtime; an authored
+adapter can resolve that reference to a field slot. This is not proof of the
+native flag's identity. Replay/static/unknown ownership must remain qualified.
+Owned intact/cracked materials, opaque batching and low-LOD readiness remain
+required for a general emission consumer. These source results introduce no
+activation, gamma or intensity default. Private evidence: lamp-activation-writer147/,
+lamp-focus-adapter148/, lamp-focus-flag151/ and lamp-state-ownership146/ under
+local/handoff/drafts/.

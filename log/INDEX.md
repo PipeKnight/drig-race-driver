@@ -631,6 +631,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G377](G0377.md) | 2026-11-04 | Recover crowd selector construction and remaining shared graphics boundaries |
 | [G376](G0376.md) | 2026-11-04 | Map source lamp sections to actual rigid draws across models and LODs |
 | [G375](G0375.md) | 2026-11-04 | Resolve shipped crowd playback and postprocess source-slot selection |
 | [G374](G0374.md) | 2026-11-04 | Join temporal input captures to actual effective CPU mesh candidates |
