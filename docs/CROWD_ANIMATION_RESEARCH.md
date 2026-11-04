@@ -766,3 +766,57 @@ clock, reference initialization and native pose/LOD policy remain separate.
 Exact 229-byte instruction evidence, shared-master cache hash and descriptor
 arithmetic receipt: `local/handoff/drafts/crowd-interleaved-layout86/`;
 format identity: `local/handoff/drafts/crowd-native-format75/`.
+
+### Named blend payloads and the concrete selector boundary
+
+[D, selected source paths] Animation-data setup `0x0076CE00` reads the actor
+controller's parsed blendSet index. A nonzero index resolves three named-map
+payload addresses and passes them to `0x0074F620`. That setter retains the
+left/middle/right addresses and initializes the existing timer with zero extent,
+span, offset and request; it enables advancement without changing stop policy.
+This does not establish usable duration, units or initial/reference pose. The
+blendSet record and textureShift variant record are distinct types.
+
+The nonzero branch of `0x0074F720` consumes each payload as two words: the first
+is the `0x00AC3D90` evaluator receiver, the second a separate argument. It always
+evaluates the middle payload and the sign-selected left or right payload at the
+same mapped timer coordinate. For finite scalar x, their weights are1-abs(x)
+and abs(x); this body does not clamp x. It selects x from controller+0x50 or+0x64
+according to byte+0x6C. Those producers and exceptional arithmetic remain open.
+The `0x00AC47B0` getter supplies the composition context to `0x00ACDC10`; the
+combined buffer is forwarded to the established slot receiver. The map pair's
+producer, ownership/type, resource support and later duration changes remain
+unresolved. A payload address is not established as a direct clip object.
+
+For index zero, setup calls `0x0076CB90` with literal zero. Its actor-state and
+selection-bookkeeping gates may return without reconfiguration before reaching
+the established range/pair selectors. It is not an unconditional pose reset.
+Its candidate routine `0x0076C640` consumes five contiguous aggregate words:
+actor+0x144,+0x150,+0x14C,+0x154,+0x158 at input+0,+4,+8,+0xC,+0x10.
+They are passed through a shared helper into animation-data+0xD0 storage lanes
++4,+8,+0x10,+0xC,+0x14 with matching resource-definition words. Their semantic
+names, assignment/predicate behavior and policy are unproven.
+
+The selector then loads resource=*[animationData+0x7C] and calls `0x00AD43D0`
+with wrapper=*[resource+0x18]. This small generic wrapper clears a caller byte
+and calls virtual+8 on delegate=*[wrapper+4]. It passes the callback's EAX
+through unchanged; its inferred void pseudocode prototype is incomplete.
+`0x0076C640` invokes virtual+0x10 on that returned object with result/iterator
+locals and obtains the candidate pointer from the pointed record's+8 word.
+`0x0076CB90` subsequently reads candidate+0x1C. No concrete delegate vtable,
+constructor, selection algorithm or randomness is identified by this wrapper.
+The next boundary is the actual installed resource/wrapper/delegate class and
+callback target, not another generic helper chosen by address proximity.
+
+These contracts join setup to selected evaluation and candidate dispatch; they
+implement no animation. Current saved captures do not cover the required
+resource pointer chain. Runtime object identity, native clock units and
+pause/replay behavior, prior/reference locals and the nonzero map-pair producer
+remain open. The bounded original-reader plan remains disabled while the owner
+computer is busy. No original read, rendered crowd or native pose comparison
+was performed for this consolidation. Private provenance: crowd-postsetup-controller90/,
+crowd-three-payload-setter91/, crowd-named-payload-consumer95/,
+crowd-state-candidate97/ and crowd-selector-interface98/ under local/handoff/drafts/.
+The97/98 source functions were each decompiled once through the shared master
+under the machine lease; this consolidation reused those results without new
+Java, decompilation, address expansion, renderer or application checks.
