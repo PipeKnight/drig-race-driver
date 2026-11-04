@@ -272,8 +272,19 @@ Initial combined-feature Clippy and14 selected CPU regressions pass. A subsequen
 extreme-coordinate test initially rejected its ray before reaching the intended
 distance-overflow guard; that failed test is retained. The corrected projective
 fixture and final combined-feature Clippy plus14 selected CPU tests pass with
-zero failures/ignored tests. No new GPU capture or antenna correction is claimed
-by these CPU results. Private source/tests/receipts are under
+zero failures/ignored tests. A fresh actual GPU pair is documented below; these
+CPU results alone claim no antenna correction. Private source/tests/receipts are under
 local/graphics/antenna-effective-mesh01/; proposals/review are retained under
 local/handoff/drafts/effective-mesh-observer138/,
 effective-mesh-extract-regression140/ and effective-mesh-readonly-review141/.
+
+The actual combined349a8cac feature artifact also completes one windowless
+native-DLAA pair: source frames793/794, ticks1652/1654, render frames794/795,
+1920x1080 with ROI704,348/512x384 and warm-up Done34. The existing exact
+RAW/HDR/history/body checks and new CPU summaries pass. All148 shared CPU
+meshes have unchanged shape hashes across this pair. The two selected shaft
+rays intersect unqualified drawMPJRI, while selected gap232,152 has zero CPU
+hits in both frames. Closest residuals are millimetres, not proof of exact
+hardware rasterization or a unique GPU primitive. All candidate/GPU-unverified
+flags remain honest; no temporal correction is introduced by this diagnostic.
+Actual receipts: local/graphics/antenna-effective-mesh01/pair01/one-case/.
