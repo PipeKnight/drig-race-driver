@@ -505,6 +505,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004B1E20		func	not ported	docs/SERIES.md:501		[I]		seeded with milliseconds (0x4B1E20) in its constructor 0x642730. [I] Original fields cannot be replayed.
 0x004B1F60		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:247				AI front wheels never get a kick-up effect (`004B1F60`), except where no AI variant exists.
 0x004B22D0		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:176				`4B22D0` leave exact float/half conversion and rounding unverified. The source's
+0x004B23A0	ShaderParameterExactNameFind	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Exact case-sensitive full parameter-name lookup; caller start index is zero.
 0x004B3960		func	not ported	docs/PHASE0.md:75 ; docs/TOOLCHAIN.md:515				| `0x004b3960` | Pseudocode contains a bounded 32-byte format helper, explicit NUL at byte 31; agrees with the observed call and instructions |
 0x004B4440		func	crates/grid-world/src/joint.rs:576 grid-world::joint (in prepare)	docs/DYNAMIC_PROPS_RESEARCH.md:330 ; docs/JOINTS_RESEARCH.md:89	F473	[D]		0x4B4440 writes the offset back clamped by the limit error.
 0x004C7F50		func	not ported	docs/RACE_HUD.md:124		[I]		`.points` = Points, only when 0x4C7F50 holds (career [I]);
@@ -1920,6 +1921,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008D5900		func	not ported	docs/RACE_HUD.md:238	F383	[D]		`1.6` 16:10, `1.3` 4:3, `1.2` 5:4); a name without a range (0x8D5900) changes nothing, so a 20:9
 0x008D5CB0		func	crates/grid-app/src/race_osd.rs:9 grid-app::race_osd	docs/RACE_HUD.md:236	F383	[D]		grid.exe 0x8D5CB0; no range for other aspects keeps the default layout).
 0x008EC720		func	not ported	docs/AI_PATH_OBSTACLE_SCAN.md:233				if PO.list.count < PO.list.cap(6): push_back(PO.list, entry) # 0x8EC720
+0x008ECAD0	CarMaterialBindingPostVisit	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Shared post-visitor returns one; cached master decompile.
 0x008EEB80		func	crates/grid-world/src/mechanical_damage.rs:8 grid-world::mechanical_damage	docs/MECHANICAL_DAMAGE.md:23				`indicators`: the HUD damage icons of FUN_008EEF60 / FUN_008EEB80.
 0x008EEF60	indicators	func	crates/grid-world/src/mechanical_damage.rs:63 grid-world::mechanical_damage::ICONS ; crates/grid-app/src/damage_hud.rs:3 grid-app::damage_hud	docs/MECHANICAL_DAMAGE.md:23 ; docs/SPEECH_CAREER_PARAMETERS.md:186	F333	[O]	ICONS	per-wheel states), driven by FUN_008EEF60 as ported in
 0x008EF250		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:185		[O]		looks up the `dialinterface` HUD object (0x8EF250, name at 0xE4EB78) and stores it at
@@ -2348,6 +2350,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x009C6360		func	not ported	docs/HANDLING_DAMAGE.md:63				9c6360 loads into object+218 via9c5750; that reader passes the same destination to9c5580. Aligned calls in9c5580 use destination+28 for suspension reader9c47...
 0x009C7E30		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:707				6. Virtual_Performance consumer 0x9C7E30 / slot `+0x4C0`.
 0x009CA3A0		func	not ported	docs/CAR_LOD.md:120				| 0x9CA3A0 | VehicleManager xml dispatch (`materials`, `damage spec`, `lod settings`) |
+0x009CA470	CarGeneralTextureBindingVisit	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Source node-mode admission and case-insensitive material-prefix visit; typed named texture setter.
 0x009CA780		func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:113 ; docs/STATIC_VIEWER.md:19	G193			The previously recovered general-bank table/conditional9CAC70->9CA780 consumer supplies stronger binding evidence than the texture name. Independent exact PE... | note: merge retained theirs comment: Car SHADERINSTANCEs contain constants but no saved diffuse/normal texture assignments. The private unpacked executable contains pointer triples `(texture suf...
 0x009CB0B0	apply_selected_model_lod_override	func	crates/grid-app/src/camera.rs:1951 grid-app::camera::hides_player_model ; crates/grid-app/src/player_view_visibility.rs:2 grid-app::player_view_visibility	docs/CAR_LOD.md:66 ; docs/CAMERA_VIEWS.md:447	G240	[D]		Stable original bumper policy: 607BC0 -> 99C2F0 -> 9CB0B0 selects
 0x009CB5B0	car_model_collect_render_entries	func	crates/grid-app/src/main.rs:1661 grid-app::main::low_lod	docs/CAR_LOD.md:79 ; docs/COCKPIT.md:35 ; docs/TYRE_SMOKE_RESEARCH.md:501	F625 F600 F339	[D]	low_lod low_lod,shadow_body vehicle_pass_submit	shadow caster as in the original (0x9CB5B0 pass 0x401), the coarsest level | note: merge retained theirs comment: | note: merge retained theirs comment: 0x0E bumper_bm, state 2 | note: merge retained theirs comment: scene-node lookup of the dangling bumper | note: merge retained theirs comment: no (presentation [I])
@@ -2579,6 +2582,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00A15580		func	crates/grid-world/src/suspension_prepare.rs:285 grid-world::suspension_prepare (in apply)	docs/SUSPENSION_CONTACT_PREPARATION.md:13 ; docs/VEHICLE_UPDATE.md:47				A15580 saves this otherwise opaque word through x87 FLD/FSTP. An
 0x00A15690		func	not ported	docs/VEHICLE_UPDATE.md:100				Further preparation recovery: `0x009bace0` predicts position and orientation during contact preparation. Preparation restores its initial full body state thr...
 0x00A15F50		func	not ported	docs/DEFORMATION_SOURCE_INITIALIZATION.md:9 ; docs/DEFORMATION_CELL_VOLUMES.md:3 ; docs/INDEX.md:198	F255			[DEFORMATION_CELL_VOLUMES.md](DEFORMATION_CELL_VOLUMES.md) Deformation cell intersection and volume — Independent Rust `deformation_volume` reproduces whole ... | note: merge retained additional doc provenance: docs/INDEX.md:191
+0x00A171A0	CarGeneralTextureMatcherVisit	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Typed texture name contains case-sensitive suffix; first encountered match stops iterator.
 0x00A17430	car_scene_submit_sort_partition	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:514	G249	[D]		Entry helper `0xA17430` reads `[[entry+0x3C]+0x3C]+0x4C`: nonzero selects context
 0x00A17550	car_scene_submit_filtered_sort_partition	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:515		[D]		`+0x08`, zero selects `+0x04`. `0xA17550` uses the same selector while filtering
 0x00A17750	digital_display_dtor	func	not ported					note: releases the two readout textures [D]
@@ -2635,6 +2639,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00A4C350		func	not ported	docs/LAUNCH_AND_GRID_START.md:25				stopwatch `C45770/C457D0`, message stopwatch `A4C350/A4BEA0`. The frame dispatcher that
 0x00A66720		func	not ported	docs/AI_OVERTAKING_RESEARCH.md:151 ; docs/FORCE_FEEDBACK.md:136 ; docs/TRACK_LOD.md:114		[D]		Donington 7 / 124. 0x980830 compares the string with `scenery` (0xA66720) and passes the result
 0x00A66760		func	not ported	docs/AUDIO_RESEARCH.md:597		[O]		45DA46, A66760 → BF5F65) and the shipped data; a 12-car headless race traced through the
+0x00A66780	CrtStrnicmpWrapper	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Wrapper to source CRT case-insensitive prefix comparison; locale semantics outside observed ASCII not established.
 0x00A66880		func	crates/grid-tools/src/entity_geometry.rs:152 grid-tools::entity_geometry::entity_in_event	docs/DISCIPLINES.md:523	F681	[V]		0xA66880; [`Route::with_drift_flags`]).
 0x00A67190		func	not ported	docs/RUNTIME_LIMITS_AUDIT.md:60		[V]		| Fixed waitable lists | collision dispatch 32 | 32/64 | CF5CA8 "Waitable list is full" → A67190 → A94910 | The item is dropped and error 0x21 recorded; no c...
 0x00A67A90		func	not ported	docs/SOURCE_PHYSICAL_MATERIALS.md:15				(boolean), and `A67A90` (attribute string). The first 13 words are the physical
@@ -3103,9 +3108,13 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00B8CD80	di_ffb_device_tick	func	crates/grid-app/src/force_feedback.rs:1110 grid-app::force_feedback::Damping ; crates/grid-app/src/force_feedback/windows.rs:578 grid-app::force_feedback::windows::set_force	docs/FORCE_FEEDBACK.md:217	F604 F602 F598	[D]	Damping motors set_force	not a function entry in the master analysis; vibration samples, and the DirectInput device's software damping (`B8CD80`) and XInput motor
 0x00B90000		label	not ported	docs/PHYSICAL_SCHEDULING.md:45				inside 0x00B8FF10; `physical-virtual-slot-20261010.log`: B00000–B90000 displacement survey exceeded its 2,048-result limit and was correctly rejected; partial output is not com...
 0x00B95CC0		func	not ported	docs/FRAME_STEPPING.md:64	F543			not a function entry in the master analysis; QPC and GetTickCount wrappers: `B95CC0` (seconds since start, no direct callers) and `A6BBF0`
+0x00B9CC90	ShaderMaterialSortStateRefresh	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Updates packed material sorting/state identity; not proof of sampler setter success.
 0x00B9CFA0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:527				not a function entry in the master analysis; | Shader-instance group reference | Registration names SHADERINSTANCE/type `0xF5F298`; schema maps `shaderGroup` to `0xF5F294`; reader at `0xB9CFA0` links it...
 0x00B9D430	pssg_resolve_shader_group_reference	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:527		[D]		| Shader-instance group reference | Registration names SHADERINSTANCE/type `0xF5F298`; schema maps `shaderGroup` to `0xF5F294`; reader at `0xB9CFA0` links it...
 0x00B9DD10		func	not ported	docs/LACETTI_GRAPHICS_MATERIALS.md:162				The9e7360 path copies the selected nine-float record, matches material names, then conditionally submits SpecularValues=[highlightPower,highlightStrength,sel...
+0x00B9E2A0	ShaderParameterTypedValueDispatch	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:129	G372	[D]		Records kind, subtype and assignment serial before source descriptor-copy dispatch; ownership leaf unported.
+0x00B9E9D0	ShaderTextureParameterAssignByIndex	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Requires definition kind3; resolves entry with creation when supplied texture is nonnull.
+0x00B9EBB0	ShaderTextureParameterAssignByName	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Resolves exact declared sampler name then forwards index, owner, texture and descriptor.
 0x00B9F090	ParameterEntryStorageResolve	func	not ported	docs/LACETTI_GRAPHICS_MATERIALS.md:461	G261	[D]		One targeted shared-master analysis of `0x00B9F090` narrows the named-vector assignment path. The collection exposes either contiguous 0x50-byte entries or a...
 0x00BA0260	node_virtual_copy_dispatch	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:586	G346	[A]		| `0x00BA0260` | Per-node virtual copy dispatch |
 0x00BA0690	node_copy_setup	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:588	G346	[A]		| `0x00BA0690` | Common node copy setup |
@@ -3360,6 +3369,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CEA758		global	not ported	docs/SPEECH_CAREER_PARAMETERS.md:41				0xCEA758: vf 0x80 = 0x63F320 (the current event), vf 0x8C = 0x6372D0 (track model id),
 0x00CEC0B8		vtable	not ported	docs/AUDIO_RESEARCH.md:1685	F589	[O]		The box [O].** The `object/messagebox=counter` widget (vtable 0xCEC0B8, constructor 0x69FF90,
 0x00CECA4C		global	crates/grid-app/src/replay/player.rs:17 grid-app::replay::player::DEAD_ZONE					Rewind/fast-forward dead zone (0xCAFCD4) and scale 1/0.9 (0xCECA4C).
+0x00CEE0FC	CarInteriorBindingNodeToken	global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:129	G372	[D]		Pinned PE literal int_ used by common binding visitor node-mode admission.
 0x00CEFE10		vtable	not ported	docs/AUDIO_RESEARCH.md:1703				The only override found, 0x6F9D70 (vtable 0xCEFE10, constructors 0x6E78A0 and 0x6EC3D0, beside the
 0x00CF1208		global	crates/grid-app/src/camera.rs:59 grid-app::camera::SPIN_TURN_COS	docs/CAMERA_VIEWS.md:81		[D]		0xE4E164) and a blended forward shorter than 0xCF1208 keeps the car frame.
 0x00CF2030		vtable	not ported	docs/TYRE_SMOKE_RESEARCH.md:1173				`0xCF2B64`) at +0x144, vtable `0xCF2030`. Resource callback `0x737D20` passes its address to
@@ -3499,6 +3509,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D1543C		global	not ported	docs/CAR_MANAGER.md:121 ; docs/CONTACT_GROUPS.md:13	F194			The registered car job uses `A0A290`, whose pointer occurs at method-table`D1543C`; no direct branch or literal occurrence of synchronous`A09A80` was found b...
 0x00D15458		global	not ported	docs/VEHICLE_POST_FORCE.md:46				Fixed file-backed globals `D16770`, `D167A4` and `D15458..68` are the identified reference values. Arbitrary runtime changes to these globals, other vehicle ...
 0x00D154B8		vtable	not ported	docs/VEHICLE_TUNING.md:31				The original `VehicleTyreTable` constructor `0x00998620` uses a three-entry vtable at `0x00d154b8`; its read method `0x009e5600` reaches parser `0x009c2dd0`....
+0x00D158C0	CarTextureMatcherVisitSlot	label	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Pinned PE callback slot points to0xA171A0.
 0x00D15D00	analog_display_vtable	vtable	not ported					note: slot3 0x9D03D0 [D]
 0x00D15D14	digital_display_vtable	vtable	not ported					note: slot2 0x9D07F0, slot3 0x99DAC0, slot4 0x99DAE0 [D]
 0x00D15D28	analog_dummy_vtable	vtable	not ported					note: slot4 0x9D0920 [D]
@@ -3508,6 +3519,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D16770		global	not ported	docs/VEHICLE_POST_FORCE.md:46				Fixed file-backed globals `D16770`, `D167A4` and `D15458..68` are the identified reference values. Arbitrary runtime changes to these globals, other vehicle ...
 0x00D16788		global	not ported	docs/PHYSICAL_POSE.md:7				B13B00 is thiscall with two aligned four-float correction pointers, `ret8`. It adds the first vector to all four pointed position lanes. It obtains the secon...
 0x00D167A4		global	not ported	docs/VEHICLE_POST_FORCE.md:46				Fixed file-backed globals `D16770`, `D167A4` and `D15458..68` are the identified reference values. Arbitrary runtime changes to these globals, other vehicle ...
+0x00D16ED4	CarTextureBindingPreVisitSlot	label	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Pinned PE callback slot points to0x9CA470.
+0x00D16ED8	CarTextureBindingPostVisitSlot	label	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Pinned PE callback slot points to0x8ECAD0.
 0x00D16FF0	backlight_visitor_vtable	vtable	not ported					note: slot1 0xA12010 [D]
 0x00D17150		global	not ported	docs/WHEEL_DETACHMENT.md:121	F355	[D]		shape by 9A8BB0 with descriptor D17150 (D17158 when car +BA4); created by A742E0.
 0x00D17158		global	not ported	docs/WHEEL_DETACHMENT.md:121				shape by 9A8BB0 with descriptor D17150 (D17158 when car +BA4); created by A742E0.

@@ -663,6 +663,7 @@ mod tests {
                 ornament_lods: Default::default(),
                 reflections: Default::default(),
                 piece_skins: Default::default(),
+                lamp_associations: Default::default(),
             };
             let Ok(cockpit) = crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY, None) else { continue };
             let dash = &cockpit.dash;
