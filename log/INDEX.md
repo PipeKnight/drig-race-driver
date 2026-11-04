@@ -631,6 +631,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G368](G0368.md) | 2026-11-04 | Trace original postprocess external texture registration and CPU backing |
 | [G367](G0367.md) | 2026-11-04 | Share model-derived headlight frames between lighting consumers |
 | [G366](G0366.md) | 2026-11-04 | Recover shared headlight projection, coloured cookie and falloff contracts |
 | [G365](G0365.md) | 2026-11-04 | Wait for pipeline warm-up before final diagnostic captures |
