@@ -151,6 +151,11 @@ mod le_mans_event;
 mod vehicle_lights;
 mod headlight_frame;
 mod headlight_pilot;
+mod source_projector_request;
+#[cfg(feature = "source-projector")]
+mod source_projector;
+#[cfg(feature = "source-projector")]
+mod source_projector_present;
 mod effective_lighting;
 mod source_light_trial;
 mod texture_overrides;
@@ -1957,6 +1962,7 @@ fn manual_base_mip_zero_admitted(
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let headlight_lumens = headlight_pilot::requested()?;
     let source_lighting_units = source_light_trial::requested()?;
+    let source_projector_request = source_projector_request::requested(source_lighting_units, headlight_lumens)?;
     println!("prototype_build revision={BUILD_REVISION}");
     // Settings files first (docs/SETTINGS.md); the flags below override them.
     let profile = settings::load(&args)?;
@@ -3372,7 +3378,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     && skid_order==skid_marks::OrderMode::Off && skid_reflectance.is_none()
                     && smoke_compositor==smoke_compositor::Mode::Off && smoke_ct==smoke_ct_neutral::Mode::Off
                     && !motion_phase_map && motion_phase_profile==smoke_pilot::Profile::Derby120,
-                scene_pilots_off:source_lighting_units.is_none() && headlight_lumens.is_none() && foundation_front==foundation_front::Mode::Off && foundation_backing==foundation_backing::Mode::Off
+                scene_pilots_off:source_lighting_units.is_none() && headlight_lumens.is_none() && source_projector_request.is_none() && foundation_front==foundation_front::Mode::Off && foundation_backing==foundation_backing::Mode::Off
                     && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
                     && graphics.object_coverage==object_materials::CoverageMode::Off && !graphics.double_fence_wire
                     && !source_haze && !reflection_calibration && !include_batches && !audio_check
@@ -3962,6 +3968,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let linear_fill = std::env::var("GRID_BASELINE_FILL").map_or(true, |v| v == "linear");
         source_light_trial::validate_context(drive, reference, headless, collision, (output.is_some() && track, drive_ticks), &graphics, linear_fill)?;
     }
+    #[cfg(feature = "source-projector")]
+    let mut source_projector_preparation = if source_projector_request.is_some() {
+        // source_lighting_units is required above, so its full context validator
+        // has just admitted bounded actual live baseline reference driving.
+        Some((headlight_frame::Preparation::load(&root, &field.models, &field.car_model)?, source_projector::load_cookie(&root, &route)?.0))
+    } else {None};
     let mut headlight_preparation = if let Some(lumens) = headlight_lumens {
         if !drive || !reference || headless || collision || output.is_none()
             || !drive_ticks.is_some_and(|n| (1..=1800).contains(&n)) {
@@ -4004,6 +4016,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         };
         append_car(&root, &lod, &mut car, model, &player_car, 0)?;
         if let Some(p) = &mut headlight_preparation { p.retain_anchor(0, model)?; }
+        #[cfg(feature = "source-projector")]
+        if let Some((p,_)) = &mut source_projector_preparation {p.retain_anchor(0,model)?;}
         // The cockpit of the player only (0x6138D0), when driving.
         if driving.is_some() {
             let opponents = driving.as_ref().and_then(|d| d.opponents.as_ref()).map_or(&[][..], |o| &o.multi.cars[1..]);
@@ -4042,6 +4056,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 let append_anchor = model_offset(&opponents.multi.cars[k]);
                 append_car(&root, &lod, &mut car, append_anchor, model, m)?;
                 if let Some(p) = &mut headlight_preparation { p.retain_anchor(m, append_anchor)?; }
+                #[cfg(feature = "source-projector")]
+                if let Some((p,_)) = &mut source_projector_preparation {p.retain_anchor(m,append_anchor)?;}
             }
             // Each opponent wears its own shipped livery (01, 02, ...); the player keeps 00.
             for k in 1..opponents.multi.cars.len() {
@@ -4606,7 +4622,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         // Le Mans: the time-limited race, its class results and the time of
         // day on the route that has one (docs/LE_MANS.md).
         let mode_result = grid_tools::time_of_day::Mode::for_route(&root, &route);
-        let mode = if headlight_preparation.is_some() {
+        let mode = if headlight_preparation.is_some() || source_projector_request.is_some() {
             mode_result.map_err(|e| format!("requested headlight pilot: source route mode unavailable: {e}"))?
         } else {
             mode_result.unwrap_or(grid_tools::time_of_day::Mode::None)
@@ -4680,6 +4696,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         vehicle_lights::install(&mut app, mode, field.car_model.len());
         if let Some(units) = source_lighting_units { source_light_trial::install(&mut app, &graphics, units)?; }
         if let Some(p) = headlight_preparation.take() { headlight_pilot::install(&mut app, p, mode)?; }
+        #[cfg(feature = "source-projector")]
+        if let Some((p,image)) = source_projector_preparation.take() {
+            let request=source_projector_request.expect("admitted explicit request");
+            let prepared=p.finish()?;
+            let image=app.world_mut().resource_mut::<Assets<Image>>().add(image);
+            source_projector_present::install(&mut app,prepared,image,mode,request.range,source_projector::Parameters {working_unit:request.units,global_colour:Vec3::from_array(request.colour)})?;
+        }
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);
@@ -6530,10 +6553,12 @@ fn drive_present(
         Option<Res<race_hud::Active>>,
         Option<Res<drift_event::DriftEvent>>,
         headlight_pilot::Context<'_, '_>,
+        source_projector_request::Context<'_, '_>,
     ),
 ) {
-    let (fixed, graphics, menu, race_hud, drift, mut headlight_context) = render_clock;
+    let (fixed, graphics, menu, race_hud, drift, mut headlight_context, mut source_projector_context) = render_clock;
     headlight_pilot::begin(&mut headlight_context);
+    source_projector_request::begin(&mut source_projector_context);
     // Pause menu Screen Setup (lap timer, race position, speed unit).
     let osd = menu
         .as_ref()
@@ -6598,6 +6623,7 @@ fn drive_present(
     }
     let pose = Mat4::from_cols_array(&driving.runtime.pose());
     headlight_pilot::present(&mut headlight_context, 0, pose);
+    source_projector_request::present(&mut source_projector_context, 0, pose);
     let remainder = if graphics.is_some_and(|g| g.enhanced() && g.smooth_wheel_motion)
         && !driving.paused
         && driving.failure.is_none()
@@ -6628,6 +6654,7 @@ fn drive_present(
             .collect();
         for (slot, (pose, _)) in cars.iter().enumerate().skip(1) {
             headlight_pilot::present(&mut headlight_context, slot, *pose);
+            source_projector_request::present(&mut source_projector_context, slot, *pose);
         }
         // Opponent body dents: re-project a car's parts when its field
         // changes. The parts are projected on the compute pool (the same

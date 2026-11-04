@@ -353,3 +353,43 @@ binding, and chrome/glass arithmetic is unverified. A shared aggregate-RGB
 diffuse adapter is therefore the next renderer experiment; applying it to all
 PBR families is an authored adaptation, not recovered universal material parity.
 Private source proof: local/handoff/drafts/night-mask-consumers102/.
+
+
+### Bounded source-cookie renderer trial (G369)
+
+The optional source-projector feature enables Bevy pbr_light_textures and a
+shared, live-only diagnostic consumer. All actual field slots reuse headlight_frame
+model descriptors, append anchors and P*M*C presentation; activation uses the
+existing vehicle_lights/LeMans clock. Explicit U, all-slot range and the named
+source-constructor RGB snapshot are required, with U matching the coherent
+source-lighting trial. No route/model whitelist or normal default is added.
+
+The guarded adapter retains both existing Bevy shader asset IDs/import metadata.
+It samples the actual route cookie's lossless left-half RGB crop, forms separate
+local direct/transmission sums, clamps each once, then applies global RGB/U and
+an authored PBR diffuse/AO response. Texture sampler/colour space, focus identity,
+first-two-light normal policy, chrome/glass and reflective-road exceptions remain
+limits. Snapshot RGB is not a live original lightColour resolver.
+
+Actual GPU cookie upload precedes activation. Missing shaders/imports use the
+native cache's two retry states; processing/module errors remain fatal.
+A bounded positive receipt joins changed import hashes, a queued-to-compiled
+Surface pipeline, LIGHT_TEXTURES and current public source-decal insertion.
+Multidraw evidence is road-family phase participation; it does not establish
+exact entity-bin membership or typed GPU-buffer/draw readback.
+
+CPU admission/asset/registration tests25 pass. A matched solo BMW/Haruna capture
+shows source-cookie illumination on road and barriers; all66 logged control rows
+match. The actual view is baseline MSAA4/HDRfalse, not native-DLAA validation.
+No original optical parity, normal-night integration or all-model completion is
+claimed. Source right-axis comparison still needs the original camera determinant;
+no unsupported horizontal cookie flip is applied. Refer to G369 for artifact
+hashes, failed startup guard correction and private matched comparison paths.
+
+
+The second matched fixture uses the native sixteen-car/six-model LeMans field,
+existing36-second clock and autopilot. Actual03:00/headlights16 logs and4636
+identical logged control rows accompany visible road/car lighting. The capture
+uses1475ticks after the actual five-second race start sequence; the earlier
+1350tick assumption was rejected and retained. These are representative live
+fixtures, not all-route/material, full-weight readback or normal-window parity.
