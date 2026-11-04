@@ -869,3 +869,78 @@ qualified. Clock, initial actor locals and rendering are separate open joins.
 No original access or new Ghidra process was needed. Private evidence:
 local/handoff/drafts/crowd-hla-constructor147/, crowd-hla-wrapper148/ and
 crowd-selector-classes149/.
+
+
+## Categorical selector and actual actor inputs (G380)
+
+Source-only continuation closes the selected Factor evaluator without a live
+original snapshot. At0xAD61A0 each supplied categorical index becomes one-hot
+weights (one1.0 lane, all others0.0). Factor callback0xB76F10 visits nonnull
+positive children in source order: no eligible child selects the declared
+fallback and sets its flag; one recurses; several produce an ordered aggregate.
+Anim callback0xB77240 returns itself. Its0xAD5440 list append stores that leaf
+at the list node's+8, and the caller consumes the resolved raw-animation index
+at leaf+0x1C. Aggregate flattening0xB76D50 preserves child order without consulting
+weights in that particular callback. These facts do not imply renderer blending
+or a general instruction to discard weights in other interfaces.
+
+Random callback0xB76EB0 uses CRT rand()%child_count for its three registered
+modes. The purchased HLA has80 Random nodes:45 empty and35 nonempty. Empty
+Random becomes Empty/null before distribution parsing. Native global RNG seed,
+shared call ordering and later actor updates are not recovered by this fact.
+
+Registration0x76D520 ->0xACDD00 connects six definition/vocabulary records at
+0xCF5A28 with name map0xE4CA4C. The actual wrapper and XML Factor-name lookup
+use that same table, so the five writer lanes can be named without proximity
+inference: actor+0x144 Player Performance(16),+0x150 Type(27),+0x14C Prop(35),
++0x154 Sex(2),+0x158 Set(2). Rig Type is descriptor0(2), omitted by those five
+writes. Fresh0xAD4C20 ->0xA8D700 initialization gives it two zero weights;
+absence therefore follows the declared Factor default in that fresh setup.
+This is not proof that no later writer can change it; never force3D as a native
+runtime fact merely because the desired visual is a skinned model.
+
+The source of four categories is also concrete:0x759B10 parses animSelector
+attributes type/gender/animSet/prop into+0x20/+0x24/+0x28/+0x2C. The selected
+instanceMap+0x3C points to that selector (not the crowdDef itself).0x76EA20
+copies those values through a setup record, and0x75D630 writes actor Type/Sex/
+Set/Prop. Missing selector supplies zeros. All27 purchased selector records
+match the recovered vocabularies. Performance uses a separate setup policy
+with literals1/2/3/4; remaining gates/thresholds/later writers are qualified.
+Actor+0x148 receives rand&3 and is not another selector factor.
+
+### Shared bounded Rust projection and the real-asset failure
+
+`grid_tools::crowd_selection::Library` reuses the existing binary XML Document.
+It preserves ordered raw-animation records and duplicate ordinals, parses
+Factor/Anim/Random/Empty, and accepts explicit named categories plus a caller-
+owned random draw. It implements the categorical projection, not the full
+multi-positive weighted interface. Game-provider override, invalid defaults,
+unknown schema and unresolved/ambiguous unique-ordinal admission refuse.
+Consumed public Document ranges are checked; depth32 and16384-node budgets
+bound malformed/cyclic caller-built inputs. This is safer authored admission,
+not original corrupt-resource pointer behavior.
+
+The first12 tests and Clippy passed, but the first actual Rust HLA run refused
+"factor branch must contain one node". The pinned84772-byte purchased file
+SHA b466797fd2eabc049c846ee79c56c88495e95e572e12f1cc9a8aeb961076b3af
+contains227 FactorValue wrappers:219 with one child and8 childless. Existing
+0xA67DF0/0xA67800 child-view access plus0xAD4780 construction show the empty
+view becomes null/Empty. The reader now accepts zero children as Empty, one as
+its parsed child, and refuses more than one; null admission consumes budget.
+This fixes the shared schema rule rather than special-casing those eight labels.
+A13th regression covers null selection/default/budget and multi-child refusal.
+
+Current13 tests, selected Clippy, probe release and actual purchased catalogue
+run pass. The catalogue is184 records/182 distinct names, with two ambiguous
+pairs retained. Four explicitly authored3D/M/F standing/seated input examples
+resolve unique ordinals183/177/175/176. They are diagnostic inputs, not observed
+native actor state. `grid-crowd-selection` is CPU-only and bounds its opened
+source read to16MiB; it uses this public Library rather than a second parser.
+
+This does not animate the crowd. Native clock/range ownership, complete live
+input evolution, clip-resource binding, prior locals, Delta/mirroring, general
+palette/skinning, renderer integration and distance variants remain separate.
+The old narrow rig visual is not promoted by parser compatibility. Actual
+failed/passing receipts: local/graphics/crowd-selection01/. Static packets:
+local/handoff/drafts/crowd-factor-evaluation150/, crowd-selection-mvp151/152/,
+crowd-factor-inputs153/, crowd-actor-inputs154/ and crowd-null-factor158/.

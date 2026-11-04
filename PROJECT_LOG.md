@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G380 (current source, publication pending): shared categorical HLA parser passes13tests/Clippy and actual184-record purchased catalogue after correcting null FactorValue handling. Native actor names/source setup linked statically; general animation/clock/pose/render integration remains open.
 - G379 (negative DLAA experiment): matched default/J/K inputs and native creation receipts pass; J worsens antenna trails, K close to default. No hint/default or dependency change delivered; thin-detail quality remains open. Final experimental source/evidence retained privately.
 - G376 (main7dbc50b8/PR32): shared exact semantic/LOD-node/palette mapper consumed by the existing guarded lamp pilot; all60 source catalogue records independently match. Clippy/29 CPU tests pass, including88packages/264bundles/2592sections; publication gate PASS699tests/Clippy/build/render; no new glow or normal default change.
 - G374 (main7dbc50b8/PR32 diagnostic): bounded current CPU mesh observer joins exact consecutive temporal captures; final combined-feature Clippy/14 CPU regressions pass, one actual native GPU candidate pair passes with148 stable CPU shapes; mandatory gate PASS699tests/Clippy/build/render. Antenna fix remains open.

@@ -894,3 +894,8 @@ test = false
 name = "grid-barrier-impact"
 path = "src/bin/grid-barrier-impact.rs"
 test = false
+
+[[bin]]
+name = "grid-crowd-selection"
+path = "src/bin/grid-crowd-selection.rs"
+test = false

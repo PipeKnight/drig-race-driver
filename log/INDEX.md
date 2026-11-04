@@ -634,6 +634,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G380](G0380.md) | 2026-11-04 | Parse shared crowd selection trees and verify source actor inputs |
 | [G379](G0379.md) | 2026-11-04 | Record matched DLAA creation-hint experiment without changing defaults |
 | [G378](G0378.md) | 2026-11-04 | Measure source-matched thin-triangle projections from frozen capture matrices |
 | [G377](G0377.md) | 2026-11-04 | Recover crowd selector construction and remaining shared graphics boundaries |
