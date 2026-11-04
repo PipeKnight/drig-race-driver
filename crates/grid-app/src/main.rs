@@ -55,6 +55,7 @@ mod car_reflections;
 mod lamp_materials;
 mod lamp_signals;
 mod lamp_association;
+mod lamp_sections;
 mod paint_environment;
 mod window_response;
 mod window_phase_audit;
@@ -786,6 +787,9 @@ fn load_package(
     } else {
         scene::read_draws(&tree, &sources, lod.as_bytes())?
     };
+    let lamp_sections = if track { Ok(Vec::new()) } else {
+        lamp_sections::read(&tree, &sources, &draws, lod.as_bytes())
+    };
     let mut bindings = BTreeMap::new();
     // A route's routesplit.pssg names the track's textures
     // (`tracksplit.pssg#...`); append_route_split resolves them.
@@ -967,7 +971,8 @@ fn load_package(
     };
     if !track {
         let bank = lamp_general.ok_or("actual general-bank metadata absent")?;
-        let association = lamp_association::Package::read(&tree, mesh_path, bank);
+        let association = lamp_association::Package::read(&tree, mesh_path, bank)
+            .with_sections(lamp_sections);
         association.report();
         car.lamp_associations.push(association);
         for shader in material::read_constants(&tree)? {
@@ -1817,13 +1822,32 @@ fn low_lod(
             lamp_association::Bank::load(root, &model.file("_gen_low.pssg")),
         ).in_namespace(prefix),
     );
-    let Ok(sources) = mesh::read_meshes(&tree) else {
-        return low;
+    let sources = match mesh::read_meshes(&tree) {
+        Ok(sources) => sources,
+        Err(error) => {
+            low.lamp_association = low.lamp_association.take().map(|package|
+                package.with_sections(Err(format!("low mesh reader unavailable: {error}"))));
+            return low;
+        }
     };
+    let mut section_metadata = Vec::new();
+    let mut section_errors = Vec::new();
     for level in 2..=5u8 {
-        let Ok(draws) = scene::read_draws(&tree, &sources, format!("LOD{level}_").as_bytes()) else {
-            continue;
+        let bundle = format!("LOD{level}_");
+        let draws = match scene::read_draws(&tree, &sources, bundle.as_bytes()) {
+            Ok(draws) => draws,
+            Err(error) => {
+                if (0..tree.nodes.len()).any(|i| tree.name(i) == b"MATRIXPALETTEBUNDLENODE"
+                    && tree.string(i, b"id").is_ok_and(|id| id == bundle.as_bytes())) {
+                    section_errors.push(format!("{bundle}: present bundle reader unavailable: {error}"));
+                }
+                continue;
+            }
         };
+        match lamp_sections::read(&tree, &sources, &draws, format!("LOD{level}_").as_bytes()) {
+            Ok(mut sections) => section_metadata.append(&mut sections),
+            Err(error) => section_errors.push(format!("LOD{level}_: {error}")),
+        }
         let mut positions: Vec<[f32; 3]> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
         for draw in &draws {
@@ -1896,6 +1920,12 @@ fn low_lod(
             mesh.compute_smooth_normals();
             low.shadow = Some(mesh);
         }
+    }
+    if let Some(package) = low.lamp_association.take() {
+        let sections = if section_errors.is_empty() { Ok(section_metadata) } else { Err(section_errors.join("; ")) };
+        let package = package.with_sections(sections);
+        package.report();
+        low.lamp_association = Some(package);
     }
     low
 }
@@ -5118,7 +5148,12 @@ fn setup(
     let ornament_levels = std::mem::take(&mut car.ornament_lods);
     let piece_skins = std::mem::take(&mut car.piece_skins);
     let ornament_shadows = !ornament_levels.parts.is_empty();
-    for mut part in car.parts.drain(..) {
+    // Resolve against immutable source metadata before draining/moving mesh fields.
+    let admitted_lamp_sections: Vec<_> = car.parts.iter().map(|part| {
+        if graphics.lamp_signals == lamp_signals::Mode::Off { None }
+        else { lamp_signals::section_for(&car, part) }
+    }).collect();
+    for (mut part, lamp_section) in car.parts.drain(..).zip(admitted_lamp_sections) {
         if graphics.enhanced()
             && graphics.smooth_tyres
             && part.wheel.is_some()
@@ -5364,7 +5399,7 @@ fn setup(
             }
             if graphics.lamp_signals != lamp_signals::Mode::Off
                 && let Some(entity) = &mut entity
-                && let Some(section) = lamp_signals::section(&part.material, &part.joint)
+                && let Some(section) = lamp_section.clone()
             {
                 entity.insert(section);
             }

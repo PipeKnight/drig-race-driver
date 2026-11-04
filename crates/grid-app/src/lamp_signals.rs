@@ -29,7 +29,7 @@ enum Kind {
     Brake,
     Reverse,
 }
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub(crate) struct Section {
     kind: Kind,
     joint: String,
@@ -59,6 +59,30 @@ pub fn section(material: &str, joint: &str) -> Option<Section> {
         kind,
         joint: name.to_owned(),
     })
+}
+/// Consumed source join; existing player/12-section pilot scope remains explicit.
+pub(crate) fn section_for(car: &super::Car, part: &super::Part) -> Option<Section> {
+    let mut matched = None;
+    for package in &car.lamp_associations {
+        match package.section(part) {
+            Ok(Some(source)) => {
+                if matched.is_some() { return None; }
+                // Preserve raw source and all numeric provenance in Package; do not infer role.
+                let expected = match source.role {
+                    super::lamp_sections::Role::Front | super::lamp_sections::Role::Rear => Kind::Main,
+                    super::lamp_sections::Role::Brake => Kind::Brake,
+                    super::lamp_sections::Role::Reverse => Kind::Reverse,
+                    super::lamp_sections::Role::Combi => return None, // existing pilot has no combi channel
+                };
+                let legacy = section(&part.material, &part.joint)?;
+                if legacy.kind != expected { return None; }
+                matched = Some(legacy);
+            }
+            Ok(None) => {},
+            Err(_) => return None,
+        }
+    }
+    matched
 }
 #[derive(Resource)]
 pub struct Atlas(pub Handle<Image>);
@@ -112,7 +136,7 @@ fn atlas_key(car: &super::Car) -> Result<String, String> {
     for part in car
         .parts
         .iter()
-        .filter(|part| section(&part.material, &part.joint).is_some())
+        .filter(|part| section_for(car, part).is_some())
     {
         let mut found = std::collections::BTreeSet::new();
         for package in &car.lamp_associations {
@@ -144,7 +168,7 @@ pub fn validate(car: &super::Car) -> Result<(), String> {
     if car
         .parts
         .iter()
-        .filter(|p| section(&p.material, &p.joint).is_some())
+        .filter(|p| section_for(car, p).is_some())
         .count()
         != 12
     {

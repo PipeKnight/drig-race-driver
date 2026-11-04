@@ -3792,3 +3792,5 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00746230	ColourBalanceRegisterSources	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		one-time named parameter-source registration; slot0/1 not enable
 0x0098D1D0	TimelineParameterDestinationsRegister	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		retain scalar or packed-colour destination pointers for day/night timeline
 0x0098CE10	NamedParameterRegistryAddress	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		returns shared E85FE0 registry; no arguments consumed
+0x008F87C0	CarSemanticLodNodesPopulate	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		exact catalogue x%d_%s -> selected root -> semantic byLOD cell
+0x008F4EE0	CarNodeFindExactName	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		case-sensitive full name; current then sibling recursion then child

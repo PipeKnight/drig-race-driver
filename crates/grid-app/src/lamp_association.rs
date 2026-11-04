@@ -76,6 +76,7 @@ pub(crate) struct Package {
     namespace: String,
     bank: Bank,
     materials: Result<BTreeMap<String, Binding>, String>,
+    sections: Result<Vec<crate::lamp_sections::Section>, String>,
 }
 impl Package {
     pub(crate) fn read(tree: &pssg::Tree<'_>, source: &str, bank: Bank) -> Self {
@@ -85,7 +86,23 @@ impl Package {
             namespace: String::new(),
             bank,
             materials,
+            sections: Ok(Vec::new()),
         }
+    }
+    pub(crate) fn with_sections(mut self, sections: Result<Vec<crate::lamp_sections::Section>, String>) -> Self {
+        self.sections = sections;
+        self
+    }
+    pub(crate) fn section(&self, part: &crate::Part) -> Result<Option<&crate::lamp_sections::Section>, String> {
+        self.section_key(&part.name, &part.joint, &part.material)
+    }
+    fn section_key(&self, draw: &str, joint: &str, material: &str) -> Result<Option<&crate::lamp_sections::Section>, String> {
+        let Some(raw_material) = material.strip_prefix(&self.namespace) else { return Ok(None) };
+        let matches: Vec<_> = self.sections.as_ref().map_err(Clone::clone)?.iter().filter(|s| s.draw == draw && s.joint == joint && s.material == raw_material).collect();
+        if matches.len() > 1 { return Err("ambiguous admitted lamp draw metadata".into()); }
+        let Some(section) = matches.first() else { return Ok(None) };
+        if self.texture_key(material)?.is_none() { return Ok(None) }
+        Ok(Some(*section))
     }
     pub(crate) fn in_namespace(mut self, namespace: &str) -> Self {
         self.namespace = namespace.into();
@@ -112,6 +129,13 @@ impl Package {
             .map_err(Clone::clone)
     }
     pub(crate) fn report(&self) {
+        if let Err(error) = &self.sections {
+            println!("lamp_section_unavailable source={:?} namespace={:?} reason={error:?} emission_admission=false", self.source, self.namespace);
+        }
+        if let Ok(sections) = &self.sections && !sections.is_empty() {
+            let identity: Vec<_> = sections.iter().map(|s| (s.semantic, s.palette, s.cluster, s.lod, s.node, s.bundle.as_str())).collect();
+            println!("lamp_section_metadata source={:?} namespace={:?} identities={identity:?} policy=unique-selected-bundle-not-native-root-order", self.source, self.namespace);
+        }
         match &self.materials {
             Err(error) => println!(
                 "lamp_association source={:?} namespace={:?} general_bank={:?} unavailable={error:?} emission_policy=false",
@@ -384,6 +408,29 @@ mod tests {
         assert_eq!(high.source, "source_highLOD.pssg");
         assert_eq!(low.source, "source_lowLOD.pssg");
         assert_ne!(high.bank.source, low.bank.source);
+    }
+    #[test]
+    fn consumed_section_namespace_keeps_raw_identity_and_material_admission() {
+        let section = crate::lamp_sections::Section {
+            semantic: 108, palette: 9, role: crate::lamp_sections::Role::Front,
+            cluster: 0, lod: 0, node: 3, bundle: "LOD0_".into(),
+            draw: "actual_draw".into(), material: "Head Lights Glass".into(), joint: "x0_light_glass_fl".into(),
+        };
+        let p = package("Head Lights Glass", Some((SAMPLER, "texture")), &["source_lights_on.tga"])
+            .with_sections(Ok(vec![section.clone()])).in_namespace("car3/");
+        let found = p.section_key("actual_draw", "x0_light_glass_fl", "car3/Head Lights Glass").unwrap().unwrap();
+        assert_eq!(found, &section);
+        let duplicate = package("Head Lights Glass", Some((SAMPLER,"texture")), &["source_lights_on.tga"])
+            .with_sections(Ok(vec![section.clone(),section.clone()])).in_namespace("car3/");
+        assert!(duplicate.section_key("actual_draw", "x0_light_glass_fl", "car3/Head Lights Glass").is_err());
+        let unavailable = package("Head Lights Glass", Some((SAMPLER,"texture")), &["source_lights_on.tga"])
+            .with_sections(Err("actual source metadata refusal".into()));
+        assert!(unavailable.section_key("actual_draw", "x0_light_glass_fl", "Head Lights Glass").is_err());
+        assert_eq!(p.section_key("actual_draw", "x0_light_glass_fl", "car2/Head Lights Glass").unwrap(), None);
+        assert_eq!(p.section_key("actual_draw", "x0_light_glass_fl\t", "car3/Head Lights Glass").unwrap(), None);
+        assert_eq!(p.section_key("different_draw", "x0_light_glass_fl", "car3/Head Lights Glass").unwrap(), None);
+        let absent = package("Head Lights Glass", None, &["source_lights_on.tga"]).with_sections(Ok(vec![section]));
+        assert!(absent.section_key("actual_draw", "x0_light_glass_fl", "Head Lights Glass").is_err());
     }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]

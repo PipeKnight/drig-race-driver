@@ -265,3 +265,68 @@ Private evidence: local/handoff/drafts/lamp-section-identity131/ and
 lamp-table-writer135/, with pinned PE SHA256
 aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514.
 No original process, window or game asset was changed.
+
+
+## Shared semantic table producer and consumed rigid sections (G376)
+
+The previously missing producer is0x008F87C0, called through0x008F89D0 before
+lamp render records are built. It clears234 semantic rows with eight LOD cells
+per row, forms exact x%d_%s names from the original catalogue, and stores lookup
+results in the cells consumed by0x008FC9F0. Comparison0x008F4EE0 uses full,
+case-sensitive NUL-terminated names. It neither trims trailing bytes nor folds
+case. All60 lamp(ID,name,role,cluster) records in the owned catalogue were
+independently compared with the five raw source tables and all catalogue
+pointers; zero mismatches, including every variant/channel.
+
+Root initialization was already researched in [CAR_LOD](CAR_LOD.md). The joined
+0x00900560 path groups named nodes, updates coarsest/finest slots and attaches
+nodes through0x00BA1280. Attachment prepends, proving runtime+0x30 first-child
+and+0x34 next-sibling. The name lookup checks current, recursively searches
+next-sibling, then descends first-child. Serialized Tree preorder is not a safe
+substitute for choosing among duplicate names. The other loader convention and
+all native mutable topology/class-copy behavior are not ported by this adapter.
+Missing individual roots do not automatically borrow another available LOD;
+the source's top-node fallback applies when no roots exist in its selected range.
+The lamp table has eight cells per semantic despite a larger root array; the
+owned selected-bundle adapter rejects unsupported LOD bounds.
+
+The new lamp_sections reader reuses actual Tree/Mesh/Draw objects for an explicit
+selected MATRIXPALETTEBUNDLENODE. It requires a unique exact full-name node,
+MATRIXPALETTEJOINTNODE class and saved integer palette ID, then verifies that
+actual draw SkinIndices agree with that ID. Duplicate/wrong-class identities
+refuse; absent names stay absent, including unmatched trailing-tab variants.
+The stricter unique-match rule is labelled as selected-bundle admission rather
+than a claim to reproduce native duplicate traversal.
+
+Existing lamp-association packages retain section records by raw draw/joint/
+material identity with their numeric ID, role, cluster, node, bundle and LOD.
+Namespace changes affect material/resource lookup, preserving raw source IDs.
+The exact G372 declared-sampler/general-bank association is a separate admission
+gate. Metadata errors remain explicit and do not reject otherwise supported
+normal car loading; the requested lamp pilot refuses unavailable metadata.
+High and low packages retain separate provenance and section availability.
+No inert numeric field or unrelated cockpit constructor changes are needed.
+
+The existing pilot consumes this join before its old section/channel controls.
+Admission is computed before draining source parts and cloned per placed entity.
+Player/Lacetti/LOD0/twelve-section restrictions and authored optical policy are
+retained. This stage does NOT generalize glow, mutate shared/cracked materials,
+change fades, light activation, LOD selection, shaders or normal visual defaults.
+Per-slot/family-owned material handles and damage/reset/replay remain the next
+functional consumer work. Accepted rigid draws can eventually consume signed
+section states per draw as an explicit adaptation, without pretending to copy
+the original modal-default/ten-exception shader packing.
+
+Source evidence: local/handoff/drafts/lamp-semantic-producer141/,
+lamp-root-closure142/, lamp-section-map144/ and lamp-catalogue-audit145/.
+Actual combined-feature Clippy and29 CPU regressions pass at
+local/graphics/lamp-section-map01/cpu02/. The actual purchased census covers
+88 packages,264 bundles and2592 rigid sections, with zero failures/ignored tests.
+Existing atlas DDS identity and temporal regressions also pass. These CPU checks
+establish neither new emitted light nor rendered compatibility; a fresh artifact
+and required publication gate remain separate.
+
+Independent review found that a refused LOW mesh/present-bundle read could look
+like valid empty section metadata. That status now stays unavailable while the
+existing geometry fallback is preserved. A real low-loader synthetic-PSSG test
+distinguishes legitimately absent bundles from present unreadable ones.
