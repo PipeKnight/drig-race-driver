@@ -3769,3 +3769,19 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008AC4B0	postprocess_builder_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:195	G359	[D]		Initialize builder including defaultfactory+108 to zero; later active factory remains unproved.
 0x00B9ADE0	pssg_initialize_interleaved_stream_layout	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:745	G361	[A]		Shared descriptor initializer: format+4 times format+8 determines stream bytes, cumulative offsets and common stride; established crowd inputs yield stride32 and Instanced3 offset24. GPU normalization and saved-variant writer remain unproved.
 0x00736E60	nightlights_upload_projector_basis_and_weights	func	not ported	docs/TRACK_ENVIRONMENT.md:319	G366	[D]		Uploads camera projector basis divided by radial cutoff and dimensionless clamped weight*2.5; source optical/working-space units separate
+0x00BBC6C0	MatrixPaletteJointRead	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		required registered jointID read writes this+F8; aligned vtable proof; decompile MISS
+0x00BBC650	MatrixPaletteJointWrite	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registered jointID serialization reads this+F8
+0x00BBCB00	MatrixPaletteJointFactory	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		factory initializes F8=-1 and installs D48320
+0x00C80530	MatrixPaletteJointRegistration	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registers class descriptor F64900 and factory BBCB00
+0x00E54EBC	MatrixPaletteJointProperties	global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		matrixPalette and jointID registered property rows
+0x00F647F0	MatrixPaletteJointIdKey	global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G373	[D]		registered jointID key storage; reader/writer share field F8
+0x00742510	PostprocessDescriptionApply	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		serializer adapter to destination virtual+40; flag meaning unresolved
+0x008AC320	PostprocessEffectSetRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		PostProcessEffects/Effect id name chain template dispatch
+0x008A7580	PostprocessNamedEffectCreate	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		common effect allocator/name-id registration; no name-specific class switch
+0x0087F460	PostprocessNamedEffectConstruct	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		common effect constructor installs D0655C
+0x00892BC0	PostprocessEffectRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		table-authenticated Effect entry delegates892B40; decompile MISS
+0x00892B40	PostprocessEffectGroupsRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		named ParameterGroup iteration calls892AA0 then86AD10
+0x0086AD10	PostprocessNamedParamsRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		Param payload dispatch to matching registered nodes
+0x00892AA0	PostprocessParameterGroupResolve	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		lookup or registered-factory group instantiation
+0x0086AB10	PostprocessFloatParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		_atof and binary32 store through node+0C
+0x00876BC0	PostprocessColourParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		four integer low bytes packed RGBA; not saturation

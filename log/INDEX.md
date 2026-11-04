@@ -631,6 +631,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G373](G0373.md) | 2026-11-04 | Lamp palette identity and postprocess parameter contracts |
 | [G372](G0372.md) | 2026-11-04 | Recover shared car emissive atlas and typed sampler association |
 | [G371](G0371.md) | 2026-11-04 | Capture exact consecutive temporal frames after actual warmup readiness |
 | [G370](G0370.md) | 2026-11-04 | Document shared crowd blend evaluators and selector interface boundary |

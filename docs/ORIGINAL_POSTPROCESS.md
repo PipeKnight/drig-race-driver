@@ -256,3 +256,67 @@ Private evidence: `local/handoff/drafts/postprocess-registration103/` and
 `postprocess-texture-identity104/`. These checks reused exact master instruction
 ranges and existing caches; no new Java, original session, GPU test or public
 renderer implementation accompanied them.
+
+## Normal effect descriptions and named parameter groups (G373)
+
+The normal host's three conditional payload pairs reach0x00742510. An actual
+shared-master decompile plus exact instructions show a serializer adapter:
+null destination fails; opening the two-word payload gates a call to destination
+virtual+0x40 with the serializer, caller flag and literal1. Normal caller flags
+are1,0,0. The payload words' concrete types and these flags' semantic names
+remain unresolved. Two later calls pass integer pairs(2,0) and(3,1); these are
+not identified exposure, bloom, quality or colour-space enums.
+
+The constructed destination's table0x00CF4938 resolves virtual+0x40 to
+0x008AC320. Its actual bounded instructions require PostProcessEffects,
+iterate Effect children, read integer id and string name, and create/reuse an
+effect object. Optional chain and template attributes follow separate lookup
+paths. First-flag virtual+0x30 and lookup-branch virtual+0x48 are observed
+calls; reset/removal meanings have not been proved. Child return values are
+not checked here, so a host success code does not establish visual application.
+
+Creator0x008A7580 constructs a common0xA4-byte object via0x0087F460 and
+registers name/id. It does not choose a different effect class by name. The
+constructor installs0x00D0655C; virtual+8 resolves0x00892BC0. A targeted
+read-only decompile of that entry returned MISS. The table-authenticated
+bounded entry checks Effect then calls0x00892B40. This helper iterates named
+ParameterGroup children, resolves each via0x00892AA0 and passes its child
+serializer to0x0086AD10. These are actual source dispatch boundaries; the
+concrete scalar/colour consumers are now identified below.
+
+Three bounded purchased XML metadata reads match this schema: global effects
+has42 children, override2, and the Donington fixture3. The same transition_blur
+name has global chain Type4 and fixture Type2. Therefore a global name alone
+cannot determine effective route settings. Actual host payload provenance,
+overlay order, active effect selection and typed parameter/curve consumers
+still need proof. The fixture is not a production route whitelist.
+
+This closes description-to-effect-to-group dispatch, not bloom, exposure,
+luminance history, timing units or GPU image/sampler colour domains. Existing
+normal grading stays unchanged. No Cargo/GPU/original-window check was needed
+for this source-only result; no visual parity or finished postprocess claim.
+Private evidence: local/handoff/drafts/postprocess-controller129/,
+postprocess-deserializer132/, postprocess-factory133/ and
+postprocess-parameters137/. The shared original PE is pinned as in G373.
+
+### Concrete scalar and colour parameter loading
+
+Bounded0x0086AD10 iterates Param children, compares each name with registered
+node names, and passes the child's payload to every matching node's virtual+8.
+Unknown names produce no write here. Group resolver0x00892AA0 first searches
+instantiated groups, then invokes a registered factory and appends its result;
+it is not merely a getter.
+
+Reused registration0x00745DC0 joins tintAmount to a scalar node with table
+0x00CF2838 and storage parameter+0x24. Its reader0x0086AB10 calls _atof then
+stores binary32. tintColour's node uses table0x00CF2844 and parameter+0x28;
+reader0x00876BC0 converts four comma/space-delimited integer tokens through
+_atol and packs their low bytes in RGBA order. Truncation is not saturation.
+Malformed input, locale and exceptional conversion behavior are not a safe
+new parser contract.
+
+This closes named XML tint payloads to the storage consumed by the documented
+preparation algebra. It does not establish interpolation, effective resource
+overlay/selection, clock units or the correct render colour domain. Evidence:
+local/handoff/drafts/postprocess-typed-parameters138/. No new decompile was
+needed; all retained method windows end at their actual return/padding.
