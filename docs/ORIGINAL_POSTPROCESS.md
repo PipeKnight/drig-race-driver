@@ -216,3 +216,43 @@ other retained proofs use exact master method bounds or explicitly labelled,
 table-authenticated instruction windows. Heuristic disassembly overruns were
 rejected and preserved as limitations; neighboring functions are not proof of
 the selected runtime path. The existing shader and scalar research was reused.
+
+## External texture registration and CPU backing
+
+The normal initializer registers its named `BackBuffer` resource through
+`0x008A82C0`. This stores the resource in a new external-texture wrapper and
+inserts that wrapper into the builder's named map. Resolver `0x00892E90`
+searches the same map and returns the resource unchanged to the already
+recovered external-port wiring. This closes the graph-name-to-resource-object
+join; per-frame image-to-sampler binding remains unresolved.
+
+The normal initialization path reaches descriptor setter `0x00BB1E40`, which
+populates the resource fields used by the existing width/height/format
+inheritance. Its two dimension inputs come through a delegated window
+interface; the selected initialization writes internal format code0xC.
+These are source preparation roles, not observed dimensions or a D3D/DXGI
+format, precision or sRGB identification. The setter conditionally dispatches
+resource virtual+0x2C after a descriptor change.
+
+Static type query `0x00B5DB70` returns descriptor `0x00F60EB8`; canonical
+constructor `0x00BB0F90` installs table `0x00D473C8`. Its virtual+0x2C entry
+`0x00BB3AC0` calculates CPU texture-data sizes, obtains backing memory through
+the existing aligned allocator and forwards pointer/size to a resource method.
+This narrows the allocation boundary to CPU backing preparation in that
+implementation. GPU image creation, upload and sampler colour-space state
+are not established by this body. The actual named `backbuffer_placeholder`
+lookup accepts the descriptor, but its concrete installed table has not been
+observed or proved by the serialized-class/constructor route; this canonical
+implementation therefore remains conditional for that resource.
+
+Two further initialization edges do not close the preceding stage-factory gap:
+`0x008B07A0` registers parameter handlers, and the+0x108 store in `0x008A82C0`
+belongs to its new external-resource wrapper rather than the builder.
+The active final-merge factory, input/output colour domains, exposure and
+luminance history, and live bloom-chain selection remain open. No runtime
+kernel/default change or rendered compatibility follows from this source join.
+
+Private evidence: `local/handoff/drafts/postprocess-registration103/` and
+`postprocess-texture-identity104/`. These checks reused exact master instruction
+ranges and existing caches; no new Java, original session, GPU test or public
+renderer implementation accompanied them.
