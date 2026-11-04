@@ -1,6 +1,6 @@
 # Source road material response contracts
 
-Static source and metadata findings for shared road response and lighting inputs; no appearance change or complete material port.
+Static source and metadata findings for shared road response and lighting inputs, including the shared G382 linked specular-colour correction; no complete material port.
 
 3 November 2026, G354. Original files, disassembly and numeric captures remain private under ignored `local/`.
 
@@ -67,13 +67,11 @@ Shibuya's 103 road materials).
 
 Every material saves `PhongPower`, `FresnelMin`, `FresnelMax` and `FresnelPower` (Haruna's road:
 5, 0.5, 1, 2; its walls 10, 0, 1, 1). `SpecScale`, `PhongColour` and `EnvironmentColour` are saved
-too but these programs take none of them. `specularColour` is lighting.xml `specular_colour`
-(the publisher above). Haruna's night lighting files (route 1 and others) save no
-`specular_colour`: the lighting constructor's defaults (`0x007411E0`) set +0x1E0..+0x1E8 to
-1, 1, 1, and the reader (`0x0072BB40`) writes the field only when the key is present, so the
-port takes white [V static; a later writer is not excluded]. `specularDirection` is not traced; lighting.xml saves `spec_linked`
-(1 on Haruna) with `spec_heightangle`/`spec_rotationangle`, read here as: linked means the sun's
-direction [I].
+too but these programs take none of them. The F717 port initially used saved
+`specular_colour`, with constructor white when absent. That describes initialization,
+not the selected calculated colour: G382 corrects it using the linked copy below.
+The existing static direction adapter uses the sun angles when linked and the explicit
+`spec_heightangle`/`spec_rotationangle` otherwise; dynamic direction ownership is unchanged.
 
 ### Port
 
@@ -91,3 +89,45 @@ direction [I].
 AUTHORED / open: the enhanced preset keeps its GGX response; `min_specular_power`,
 `max_specular_power` and `max_specular_scale` in lighting.xml have no traced consumer here; the
 reflective group's reflection map and the normal-mapped groups' normals are not ported.
+
+
+## Linked packed specular colour (G382)
+
+Existing pinned source closes the initialization-to-consumer gap left by F717.
+The XML reader `0x0072BB40` calls `0x00726A50` before reading parameters; that initializer
+sets lighting+0x275 (`spec_linked`) to 1. `0x007411E0` supplies white specular RGB when
+no `specular_colour` is saved, but the selected calculation `0x00730F90` tests +0x275:
+when linked, instruction `0x00730FBA` copies packed SUN+0x2F8 to packed SPEC+0x310,
+and the same branch copies the sun height/rotation to the specular angles. Missing
+`spec_linked` therefore retains linked mode in this examined reader/calculation path;
+missing static specular white is overwritten by packed SUN before publication.
+
+Static packing `0x00742B00` uses max(1,R,G,B), truncated bytes of RGB/peak and alpha255.
+The SUN reconstruction multiplies bytes/255 by SUNscale+0x304. In contrast,
+`0x007314B1`..`0x00731585` reconstructs SPEC RGB into +0x1E0 using bytes/255 alone:
+no SUNscale or derived static specular scale is applied. The existing publishers above
+then submit this RGB. Linked specular follows packed SUN bytes, not full effective SUN
+RGB; unlinked specular uses its independently packed saved/constructor colour.
+This does not prove exclusive writers, native GPU colour domain or x87 boundary parity.
+
+The shared static `effective_lighting::SpecularColour` selector feeds
+`graphics::Phong::from_lighting`; raw `Lighting` remains untouched. This stage preserves
+the existing authored sun-lux/raw-SUN-peak calibration, direction adapter and BRDF/shadow/
+reflection policies. The optional authored gamma adaptation packs/selects first, then
+applies pow(2.2) to the selected reconstructed colour; the historical raw-SUN calibration
+denominator is unchanged. It is not a recovered original gamma or physical-unit claim.
+The separate dynamic lighting experiment is not delivered by this static correction.
+
+Absent values use only the proved constructor defaults above. Present malformed,
+negative or nonfinite colours and unsupported noninteger `spec_linked` values are
+conservatively refused; this is not parity with the original permissive XML parser.
+The selector currently validates saved specular colour even when linked calculation
+would later overwrite it; malformed irrelevant-field compatibility is not established.
+
+Prepared regressions cover asymmetric linked/unlinked bytes, missing keys, exclusion
+of SUNscale, existing direction/unit/gamma behavior and all 23 purchased lighting files
+through the shared reader (including partial frontend/night inputs without invented
+complete frames). Their execution and rendered comparisons must be reported separately;
+preparing a test is not a passing test. Exact cache/PE evidence is private in
+`local/handoff/drafts/source-phong-night176/`; unapplied candidate/test provenance is in
+`local/handoff/drafts/source-phong-consumer177/` and `static-phong-corpus179/`.

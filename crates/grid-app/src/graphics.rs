@@ -278,11 +278,11 @@ impl Fill {
 
 /// The road and infield programs' direct specular light
 /// (track_surface_simple.cg.fp and siblings): `specularColour` from
-/// lighting.xml `specular_colour`, in the units `Fill` uses (against
+/// selected linked packed SUN or unlinked packed `specular_colour`, in Fill units (against
 /// `backlight_suncolour`'s peak = the baseline sun's lux), and the
 /// `specularDirection` it reflects toward: the sun's unless `spec_linked`
 /// is 0, then `spec_heightangle`/`spec_rotationangle` (`spec_linked` absent:
-/// the sun's, an assumption).
+/// source726A50 initializes linked=1). Colour linking also copies packedSUN.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Phong {
     /// Radiance per unit of the source lobe, before exposure.
@@ -298,12 +298,14 @@ impl Phong {
     ) -> Option<Self> {
         let decode = |rgb: [f32; 3]| if gamma { rgb.map(|c| c.max(0.).powf(2.2)) } else { rgb };
         let sun = decode(lighting.rgb("backlight_suncolour")?);
-        // Haruna's night routes save none: the lighting object's constructor
-        // (0x7411E0) sets the field (+0x1E0) to white and the reader
-        // (0x72BB40) leaves it unless the key is present.
-        let specular = decode(lighting.rgb("specular_colour").unwrap_or([1.; 3]));
+        let source=crate::effective_lighting::SpecularColour::from_static(lighting).ok()?;
+        let packed_sun=crate::effective_lighting::PackedFamily::from_static(lighting.rgb("backlight_suncolour")?).ok()?;
+        // Source packs/selects first. Gamma is an EXPLICIT authored adaptation
+        // AFTER source byte reconstruction; calibration's historical rawSun
+        // decode/order stays unchanged. No source GPU colour-domain claim.
+        let specular=decode(source.rgb(packed_sun));
         let unit = sun_lux / sun.into_iter().fold(1e-3_f32, f32::max);
-        let [height_degrees, rotation_degrees] = if lighting.scalar("spec_linked").is_none_or(|v| v != 0.) {
+        let [height_degrees, rotation_degrees] = if source.linked() {
             lighting.sun()?
         } else {
             [lighting.scalar("spec_heightangle")?, lighting.scalar("spec_rotationangle")?]
@@ -918,12 +920,13 @@ mod graphics_settings_tests {
         let pi = std::f32::consts::PI;
         let linked = Phong::from_lighting(&read("1"), 18_000., false).unwrap();
         // One unit of the source lobe = the sun colour's peak = 18,000 lux.
-        assert_eq!(linked.colour, [9_000. / pi, 4_500. / pi, 0.]);
+        assert_eq!(linked.colour, [9_000. / pi, (127. * (1. / 255.)) * 9_000. / pi, (127. * (1. / 255.)) * 9_000. / pi]);
         assert!(linked.direction_to_light[1] > 0.9999);
         let unlinked = Phong::from_lighting(&read("0"), 18_000., false).unwrap();
         assert!(unlinked.direction_to_light[0] < -0.9999);
+        assert_eq!(unlinked.colour,[9_000./pi,(127.*(1./255.))*9_000./pi,0.]);
         let gamma = Phong::from_lighting(&read("1"), 18_000., true).unwrap();
-        assert!((gamma.colour[1] - 0.5_f32.powf(2.2) * 18_000. / 2_f32.powf(2.2) / pi).abs() < 1e-2);
+        assert!((gamma.colour[1] - (127.0_f32 * (1. / 255.)).powf(2.2) * 18_000. / 2_f32.powf(2.2) / pi).abs() < 1e-2);
     }
 
     #[test]
