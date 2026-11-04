@@ -32,32 +32,14 @@ pub fn audit(car: &super::Car, camera: Transform, size: Vec2, pixel: Vec2) {
                 .collect();
             for (triangle, ix) in indices.as_chunks::<3>().0.iter().enumerate() {
                 let [a, b, c] = [points[ix[0]], points[ix[1]], points[ix[2]]];
-                let e1 = b - a;
-                let e2 = c - a;
-                let h = direction.cross(e2);
-                let det = e1.dot(h);
-                if det.abs() < 1e-8 {
-                    continue;
-                }
-                let s = origin - a;
-                let u = s.dot(h) / det;
-                if !(0. ..=1.).contains(&u) {
-                    continue;
-                }
-                let q = s.cross(e1);
-                let v = direction.dot(q) / det;
-                if v < 0. || u + v > 1. {
-                    continue;
-                }
-                let distance = e2.dot(q) / det;
-                if distance > 0. {
+                if let Some((distance, front, _)) = triangle_hit(origin, direction, [a,b,c]) {
                     hits.push((
                         distance,
                         &part.name,
                         &part.material,
                         instance,
                         triangle,
-                        det > 0.,
+                        front,
                         [a, b, c],
                         (part, *ix),
                         (world - raw)
@@ -90,6 +72,24 @@ pub fn audit(car: &super::Car, camera: Transform, size: Vec2, pixel: Vec2) {
             corner(Mesh::ATTRIBUTE_UV_0)
         );
     }
+}
+
+
+/// Reused CPU ray/triangle candidate math; not a hardware rasterization oracle.
+pub(crate) fn triangle_hit(origin:Vec3,direction:Vec3,[a,b,c]:[Vec3;3])->Option<(f32,bool,[f32;2])>{
+    let e1=b-a;
+    let e2=c-a;
+    let h=direction.cross(e2);
+    let det=e1.dot(h);
+    if det.abs()<1e-8{return None;}
+    let s=origin-a;
+    let u=s.dot(h)/det;
+    if !(0. ..=1.).contains(&u){return None;}
+    let q=s.cross(e1);
+    let v=direction.dot(q)/det;
+    if v<0. || u+v>1.{return None;}
+    let distance=e2.dot(q)/det;
+    (distance>0.).then_some((distance,det>0.,[u,v]))
 }
 
 /// Bounds of affected source geometry for repeatable texture-only viewpoints.

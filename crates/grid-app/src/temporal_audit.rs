@@ -1,5 +1,6 @@
 //! Opt-in bounded temporal input evidence; no presentation or physics feedback.
 //! One bounded raw motion/depth capture; no presentation or physics feedback.
+mod cpu_geometry;
 use bevy::{
     asset::uuid_handle,
     core_pipeline::{
@@ -74,6 +75,7 @@ impl Audit {
 struct Frozen {
     header: [u32; 12],
     text: String,
+    geometry: Option<cpu_geometry::Frozen>,
 }
 fn fail(audit: &Audit, message: &str) {
     if !audit.failed.swap(true, Ordering::AcqRel) {
@@ -158,6 +160,12 @@ pub fn install(
     let pair = pair_requested()
         .map_err(std::io::Error::other)?
         .then(PairCapture::default);
+    if let Some(points) = cpu_geometry::requested().map_err(std::io::Error::other)? {
+        if pair.is_none() {
+            return Err(std::io::Error::other("CPU geometry requires the exact consecutive pair"));
+        }
+        cpu_geometry::install(app, points).map_err(std::io::Error::other)?;
+    }
     let count = if pair.is_some() { 2 } else { 1 };
     let handles = (0..count)
         .map(|_| {
@@ -267,7 +275,7 @@ fn compute(
     audit: Res<Audit>,
     render_frame: Res<FrameCount>,
     state: Res<Snapshot>,
-    warmup: Option<Res<PairWarmup>>,
+    geometry_inputs: (Option<Res<PairWarmup>>, Option<Res<cpu_geometry::Geometry>>),
     #[cfg(feature = "dlaa")] aa: Query<AaInputs>,
     #[cfg(feature = "dlaa")] native_state: Option<Res<crate::native_dlaa::State>>,
     pipeline: Res<Pipeline>,
@@ -284,6 +292,7 @@ fn compute(
     >,
     #[cfg(feature = "dlaa")] images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
 ) {
+    let (warmup, geometry) = geometry_inputs;
     if state.tick < audit.tick
         || audit
             .submitted
@@ -352,6 +361,12 @@ fn compute(
     {
         return;
     }
+    // Freeze actual extracted CPU geometry before any pair-stage selection.
+    let frozen_geometry = match geometry.as_deref()
+        .map(|g| g.freeze(&state, inverse_jittered, size, origin)).transpose() {
+        Ok(value) => value,
+        Err(error) => { fail(&audit, &error); return; }
+    };
     let slot = if let Some(pair) = &audit.pair {
         let expected_history = expected_history_clip(view.clip_from_view, &view.world_from_view);
         if !expected_history.is_finite() {
@@ -496,6 +511,7 @@ fn compute(
     audit.frozen.lock().unwrap_or_else(|e| e.into_inner())[slot] = Some(Frozen {
         header,
         text: metadata,
+        geometry: frozen_geometry,
     });
     audit.submitted[slot].store(true, Ordering::Release);
 }
@@ -582,6 +598,9 @@ fn readback(
             frozen.text,
         )
         .map_err(|e| e.to_string())?;
+        if let Some(geometry) = frozen.geometry {
+            geometry.write(&audit.directory, slot, frozen.header, &event.data)?;
+        }
         if slot == 1
             && let Some(error) = audit.pair.as_ref().and_then(PairCapture::join_failure)
         {
