@@ -1,8 +1,7 @@
 //! Default-off live-only AUTHORED PBR headlight trial. Not source optics parity.
 use bevy::{prelude::*, transform::TransformSystems};
-use grid_formats::{binxml, pssg, scene};
 use grid_tools::{car::Car as CarModel, time_of_day::Mode};
-use std::{collections::BTreeMap, path::Path};
+use std::path::Path;
 
 pub fn requested() -> Result<Option<f32>, String> {
     match std::env::var("GRID_HEADLIGHT_PILOT_LUMENS") {
@@ -20,145 +19,9 @@ fn parse_intensity(s: &str) -> Result<f32, String> {
     }
     Ok(value)
 }
-#[derive(Clone, Debug)]
-struct Point {
-    value: Vec3,
-    provenance: &'static str,
-}
-#[derive(Clone, Default)]
-struct Candidate {
-    bounds: Vec<Vec<u8>>,
-    transforms: Vec<Vec<u8>>,
-}
-fn selected_point(n: &Candidate) -> Result<Vec3, String> {
-    let ([bounds], [matrix]) = (&n.bounds[..], &n.transforms[..]) else {
-        return Err("selected lamp requires one bounds and transform".into());
-    };
-    if bounds.len() != 24 {
-        return Err("selected lamp bounds must be six floats".into());
-    }
-    let b: [f32; 6] =
-        std::array::from_fn(|i| f32::from_be_bytes(bounds[i * 4..i * 4 + 4].try_into().unwrap()));
-    if b.iter().any(|x| !x.is_finite()) || (0..3).any(|i| b[i] > b[i + 3]) {
-        return Err("invalid selected lamp bounds".into());
-    }
-    let m = scene::decode_matrix(matrix, 0).map_err(|e| e.to_string())?;
-    let value = Vec3::new(
-        (b[0] + b[3]) * 0.5 + m[12],
-        (b[1] + b[4]) * 0.5 + m[13],
-        (b[2] + b[5]) * 0.5 + m[14],
-    );
-    if !value.is_finite() {
-        return Err("selected lamp point overflow".into());
-    }
-    Ok(value)
-}
-fn point(nodes: &BTreeMap<String, Vec<Candidate>>, offset: Vec3) -> Result<Point, String> {
-    for (kind, left, right) in [
-        (
-            "canonical-LOD0-glass-pair",
-            "x0_light_glass_fl",
-            "x0_light_glass_fr",
-        ),
-        (
-            "canonical-LOD0-pod-pair",
-            "x0_light_pod_fl",
-            "x0_light_pod_fr",
-        ),
-    ] {
-        if let (Some(l), Some(r)) = (nodes.get(left), nodes.get(right)) {
-            let ([l], [r]) = (&l[..], &r[..]) else {
-                return Err("ambiguous selected lamp pair".into());
-            };
-            let value = (selected_point(l)? + selected_point(r)?) * 0.5 + offset;
-            if !value.is_finite() {
-                return Err("lamp midpoint overflow".into());
-            }
-            return Ok(Point {
-                value,
-                provenance: kind,
-            });
-        }
-    }
-    Ok(Point {
-        value: Vec3::new(0., 0.6, 2.2) + offset,
-        provenance: "source-original-default-pair",
-    })
-}
-fn offsets(ned: &binxml::Document<'_>) -> Result<Vec3, String> {
-    let parts: Vec<_> = ned.elements.iter().filter(|e| e.name == "PARTS").collect();
-    if parts.is_empty() {
-        return Ok(Vec3::ZERO);
-    }
-    let [parts] = &parts[..] else {
-        return Err("ambiguous PARTS".into());
-    };
-    let mut result = Vec3::new(0., 0., 0.2);
-    for (key, axis) in [("m_light_ray_y_offset", 1), ("m_light_ray_z_offset", 2)] {
-        let values: Vec<_> = parts.attributes.iter().filter(|(k, _)| *k == key).collect();
-        match &values[..] {
-            [] => {}
-            [(_, text)] => {
-                let v = text
-                    .parse::<f32>()
-                    .map_err(|_| "invalid headlight offset")?;
-                if !v.is_finite() {
-                    return Err("nonfinite headlight offset".into());
-                }
-                result[axis] = v;
-            }
-            _ => return Err("duplicate consumed headlight offset".into()),
-        }
-    }
-    Ok(result)
-}
-fn descriptor(tree: &pssg::Tree<'_>, ned: &binxml::Document<'_>) -> Result<Point, String> {
-    let mut bundles = Vec::new();
-    for i in 0..tree.nodes.len() {
-        if tree.name(i) == b"MATRIXPALETTEBUNDLENODE"
-            && tree.string(i, b"id").map_err(|e| e.to_string())? == b"LOD0_"
-        {
-            bundles.push(i);
-        }
-    }
-    let [bundle] = &bundles[..] else {
-        return Err("expected one canonical LOD0 bundle".into());
-    };
-    let mut nodes: BTreeMap<String, Vec<Candidate>> = BTreeMap::new();
-    for &i in &tree.nodes[*bundle].children {
-        if tree.name(i) != b"MATRIXPALETTEJOINTNODE" {
-            continue;
-        }
-        let id = tree.string(i, b"id").map_err(|e| e.to_string())?;
-        let Ok(id) = std::str::from_utf8(id) else {
-            continue;
-        };
-        if !matches!(
-            id,
-            "x0_light_glass_fl" | "x0_light_glass_fr" | "x0_light_pod_fl" | "x0_light_pod_fr"
-        ) {
-            continue;
-        }
-        let mut n = Candidate::default();
-        for &c in &tree.nodes[i].children {
-            match tree.name(c) {
-                b"BOUNDINGBOX" => n
-                    .bounds
-                    .push(tree.nodes[c].data.unwrap_or_default().to_vec()),
-                b"TRANSFORM" => n
-                    .transforms
-                    .push(tree.nodes[c].data.unwrap_or_default().to_vec()),
-                _ => {}
-            }
-        }
-        nodes.entry(id.to_owned()).or_default().push(n);
-    }
-    point(&nodes, offsets(ned)?)
-}
 pub struct Preparation {
-    models: Vec<Point>,
-    anchors: Vec<Option<Mat4>>,
-    slots: Vec<usize>,
+    geometry: crate::headlight_frame::Preparation,
+    slots: usize,
     lumens: f32,
 }
 impl Preparation {
@@ -168,51 +31,25 @@ impl Preparation {
         slots: &[usize],
         lumens: f32,
     ) -> Result<Self, String> {
-        let models = models
-            .iter()
-            .map(|model| {
-                let high = crate::read(&root.join(model.file("_highLOD.pssg")))
-                    .map_err(|e| e.to_string())?;
-                let ned = crate::read(&root.join(model.file(".ned"))).map_err(|e| e.to_string())?;
-                descriptor(
-                    &pssg::read_tree(&high).map_err(|e| e.to_string())?,
-                    &binxml::read(&ned).map_err(|e| e.to_string())?,
-                )
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        if slots.is_empty() || slots.iter().any(|&m| m >= models.len()) {
-            return Err("invalid actual headlight Field mapping".into());
-        }
         Ok(Self {
-            anchors: vec![None; models.len()],
-            models,
-            slots: slots.to_vec(),
+            geometry: crate::headlight_frame::Preparation::load(root, models, slots)?,
+            slots: slots.len(),
             lumens,
         })
     }
     pub fn retain_anchor(&mut self, model: usize, anchor: Mat4) -> Result<(), String> {
-        let a = self
-            .anchors
-            .get_mut(model)
-            .ok_or("headlight model missing")?;
-        if a.is_some() || !anchor.is_finite() {
-            return Err("ambiguous/invalid append anchor".into());
-        }
-        *a = Some(anchor);
-        Ok(())
+        self.geometry.retain_anchor(model, anchor)
     }
 }
 #[derive(Component)]
 pub struct Projector;
 struct Slot {
     entity: Entity,
-    model: usize,
-    model_from_source: Mat4,
 }
 #[derive(Resource)]
 pub struct Pilot {
     slots: Vec<Slot>,
-    models: Vec<Point>,
+    geometry: crate::headlight_frame::Prepared,
     mode: Mode,
     lumens: f32,
 }
@@ -261,14 +98,10 @@ fn require_context(world: &World, mode: Mode, slots: usize) -> Result<(), String
     Ok(())
 }
 pub fn install(app: &mut App, preparation: Preparation, mode: Mode) -> Result<(), String> {
-    require_context(app.world(), mode, preparation.slots.len())?;
-    let anchors = preparation
-        .anchors
-        .into_iter()
-        .collect::<Option<Vec<_>>>()
-        .ok_or("missing actual append anchor")?;
+    require_context(app.world(), mode, preparation.slots)?;
+    let geometry = preparation.geometry.finish()?;
     let mut slots = Vec::new();
-    for (slot, &model) in preparation.slots.iter().enumerate() {
+    for slot in 0..geometry.len() {
         let entity = app
             .world_mut()
             .spawn((
@@ -287,16 +120,12 @@ pub fn install(app: &mut App, preparation: Preparation, mode: Mode) -> Result<()
                 Visibility::Hidden,
             ))
             .id();
-        slots.push(Slot {
-            entity,
-            model,
-            model_from_source: anchors[model],
-        });
+        slots.push(Slot { entity });
     }
-    for (model, p) in preparation.models.iter().enumerate() {
+    for (model, value, provenance) in geometry.selections() {
         println!(
             "headlight_pilot model={model} point={:?} selection={} scope=canonical-LOD0 runtime8slot_parity=false",
-            p.value, p.provenance
+            value, provenance
         );
     }
     println!(
@@ -305,7 +134,7 @@ pub fn install(app: &mut App, preparation: Preparation, mode: Mode) -> Result<()
     );
     app.insert_resource(Pilot {
         slots,
-        models: preparation.models,
+        geometry,
         mode,
         lumens: preparation.lumens,
     })
@@ -336,33 +165,20 @@ fn apply(
 ) -> Result<(), String> {
     light.intensity = 0.;
     *v = Visibility::Hidden;
-    let binding = pilot.slots.get(slot).ok_or("headlight slot absent")?;
+    pilot.slots.get(slot).ok_or("headlight slot absent")?;
     let Some(weight) = weight else {
         return Ok(());
     };
-    let y = match pilot.mode {
-        Mode::Timeline => -0.45,
-        Mode::ForcedNight => -0.8,
-        Mode::None => return Ok(()),
-    };
-    if !pose.is_finite() || !weight.is_finite() || !(0.001..=1.).contains(&weight) {
+    if pilot.mode == Mode::None {
+        return Ok(());
+    }
+    if !weight.is_finite() || !(0.001..=1.).contains(&weight) {
         return Err("invalid headlight presentation domain".into());
     }
-    let local = Vec3::new(0., y, 0.9962).normalize();
-    let direction = pose
-        .transform_vector3(local)
-        .try_normalize()
-        .ok_or("invalid headlight direction")?;
-    let up = pose
-        .transform_vector3(Vec3::new(0., local.z, -local.y))
-        .try_normalize()
-        .ok_or("invalid headlight up")?;
-    let position =
-        (pose * binding.model_from_source).transform_point3(pilot.models[binding.model].value);
-    if !position.is_finite() {
-        return Err("invalid world headlight origin".into());
-    }
-    *t = Transform::from_translation(position).looking_to(direction, up);
+    let Some(frame) = pilot.geometry.frame(slot, pose, pilot.mode)? else {
+        return Ok(());
+    };
+    *t = Transform::from_translation(frame.origin).looking_to(frame.direction, frame.up);
     light.intensity = pilot.lumens * (weight as f32);
     *v = Visibility::Inherited;
     Ok(())
@@ -414,86 +230,19 @@ fn replay_guard(replay: Option<Res<crate::replay::Replay>>, mut lights: Lights) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn candidate(x: f32) -> Candidate {
-        Candidate {
-            bounds: vec![
-                [x, 0., 0., x + 2., 2., 2.]
-                    .into_iter()
-                    .flat_map(f32::to_be_bytes)
-                    .collect(),
-            ],
-            transforms: vec![
-                Mat4::from_rotation_y(1.)
-                    .to_cols_array()
-                    .into_iter()
-                    .flat_map(f32::to_be_bytes)
-                    .collect(),
-            ],
+    fn fixture_preparation(
+        models: Vec<(Vec3, &'static str)>,
+        anchors: Vec<Option<Mat4>>,
+        slots: Vec<usize>,
+        lumens: f32,
+    ) -> Preparation {
+        Preparation {
+            slots: slots.len(),
+            geometry: crate::headlight_frame::Preparation::fixture(models, anchors, slots),
+            lumens,
         }
     }
-    fn ned(
-        attributes: Vec<(&'static str, &'static str)>,
-        present: bool,
-    ) -> binxml::Document<'static> {
-        binxml::Document {
-            strings: vec![],
-            string_padding: &[],
-            elements: if present {
-                vec![binxml::Element {
-                    name: "PARTS",
-                    value: None,
-                    attributes,
-                    children: 0..0,
-                    parent: None,
-                }]
-            } else {
-                vec![]
-            },
-        }
-    }
-    #[test]
-    fn real_point_preparation_preserves_atomic_selection_and_offset_domains() {
-        let mut n = BTreeMap::from([
-            ("x0_light_glass_fl".into(), vec![candidate(0.)]),
-            ("x0_light_glass_fr".into(), vec![candidate(2.)]),
-            ("x0_light_pod_fl".into(), vec![candidate(8.)]),
-            ("x0_light_pod_fr".into(), vec![candidate(10.)]),
-        ]);
-        let offset = offsets(&ned(vec![], true)).unwrap();
-        assert_eq!(point(&n, offset).unwrap().value, Vec3::new(2., 1., 1.2));
-        assert_eq!(offsets(&ned(vec![], false)).unwrap(), Vec3::ZERO);
-        n.get_mut("x0_light_pod_fl").unwrap()[0].bounds.clear();
-        assert!(
-            point(&n, offset).is_ok(),
-            "unselected malformed pod ignored"
-        );
-        n.remove("x0_light_glass_fr");
-        assert!(
-            point(&n, offset).is_err(),
-            "selected malformed pod rejected"
-        );
-        n.insert("x0_light_pod_fl".into(), vec![candidate(8.)]);
-        assert_eq!(
-            point(&n, offset).unwrap().provenance,
-            "canonical-LOD0-pod-pair"
-        );
-        n.remove("x0_light_pod_fr");
-        assert_eq!(
-            point(&n, offset).unwrap().provenance,
-            "source-original-default-pair"
-        );
-        assert!(
-            offsets(&ned(
-                vec![("m_light_ray_z_offset", "0"), ("m_light_ray_z_offset", "1")],
-                true
-            ))
-            .is_err()
-        );
-        assert!(offsets(&ned(vec![("m_light_ray_y_offset", "NaN")], true)).is_err());
-        for invalid in ["0", "-1", "NaN", "inf", "bad"] {
-            assert!(parse_intensity(invalid).is_err());
-        }
-    }
+
     fn environment(mode: Mode) -> crate::track_environment::TrackEnvironment {
         crate::track_environment::TrackEnvironment(grid_tools::environment::Environment {
             lighting_file: "authored-context-fixture".into(),
@@ -508,14 +257,16 @@ mod tests {
     }
     #[test]
     fn requested_installer_refuses_missing_source_context_before_spawning_and_accepts_valid_day() {
-        let preparation = || Preparation {
-            models: vec![Point {
-                value: Vec3::Z,
-                provenance: "authored-context-control",
-            }],
-            anchors: vec![Some(Mat4::IDENTITY)],
-            slots: vec![0],
-            lumens: 123.,
+        for invalid in ["0", "-1", "NaN", "inf", "bad"] {
+            assert!(parse_intensity(invalid).is_err());
+        }
+        let preparation = || {
+            fixture_preparation(
+                vec![(Vec3::Z, "authored-context-control")],
+                vec![Some(Mat4::IDENTITY)],
+                vec![0],
+                123.,
+            )
         };
         let mut app = App::new();
         assert!(
@@ -581,26 +332,12 @@ mod tests {
         let state = crate::vehicle_lights::State::new(Mode::ForcedNight, 3, Some(false));
         let old = state.headlights.clone();
         app.insert_resource(state);
-        let models = vec![
-            Point {
-                value: Vec3::Z,
-                provenance: "authored-control",
-            },
-            Point {
-                value: Vec3::X,
-                provenance: "authored-control",
-            },
-        ];
+        let models = vec![(Vec3::Z, "authored-control"), (Vec3::X, "authored-control")];
         let a = Mat4::from_translation(Vec3::Y);
         let b = Mat4::from_translation(Vec3::X * 5.);
         install(
             &mut app,
-            Preparation {
-                models,
-                anchors: vec![Some(a), Some(b)],
-                slots: vec![0, 1, 0],
-                lumens: 123.,
-            },
+            fixture_preparation(models, vec![Some(a), Some(b)], vec![0, 1, 0], 123.),
             Mode::ForcedNight,
         )
         .unwrap();
@@ -635,7 +372,14 @@ mod tests {
                 .shadow_maps_enabled
         );
         assert!(app.world().get::<ChildOf>(e0).is_none());
-        assert!(app.world().get::<Transform>(e0).unwrap().forward().dot(Vec3::new(0.,-0.8,0.9962).normalize())>0.9999);
+        assert!(
+            app.world()
+                .get::<Transform>(e0)
+                .unwrap()
+                .forward()
+                .dot(Vec3::new(0., -0.8, 0.9962).normalize())
+                > 0.9999
+        );
         app.update();
         assert_eq!(
             app.world()
@@ -694,15 +438,12 @@ mod tests {
         let state = crate::vehicle_lights::State::new(Mode::ForcedNight, 1, Some(false));
         let original_activation = state.headlights.clone();
         app.insert_resource(state);
-        let mut preparation = Preparation {
-            models: vec![Point {
-                value: Vec3::new(1., 2., 3.),
-                provenance: "authored-noncommuting-frame-control",
-            }],
-            anchors: vec![None],
-            slots: vec![0],
-            lumens: 123.,
-        };
+        let mut preparation = fixture_preparation(
+            vec![(Vec3::new(1., 2., 3.), "authored-noncommuting-frame-control")],
+            vec![None],
+            vec![0],
+            123.,
+        );
         preparation
             .retain_anchor(0, Mat4::from_translation(Vec3::new(4., -1., 2.)))
             .unwrap();
@@ -825,15 +566,12 @@ mod tests {
         app.insert_resource(state);
         install(
             &mut app,
-            Preparation {
-                models: vec![Point {
-                    value: Vec3::Z,
-                    provenance: "authored-lifecycle-control",
-                }],
-                anchors: vec![Some(Mat4::from_translation(Vec3::Y * 2.))],
-                slots: vec![0],
-                lumens: 123.,
-            },
+            fixture_preparation(
+                vec![(Vec3::Z, "authored-lifecycle-control")],
+                vec![Some(Mat4::from_translation(Vec3::Y * 2.))],
+                vec![0],
+                123.,
+            ),
             Mode::ForcedNight,
         )
         .unwrap();
@@ -920,39 +658,5 @@ mod tests {
             original_activation,
             "presentation/replay lifecycle must not advance the shared clock"
         );
-    }
-    #[test]
-    #[ignore = "requires absolute GRID_GAME_ROOT; purchased model readers, CPU only"]
-    fn purchased_all_six_canonical_source_descriptors() {
-        let root = std::path::PathBuf::from(
-            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required; no skip"),
-        );
-        assert!(root.is_absolute());
-        for (name, expected) in [
-            ("lac", [0.0000333, 0.6453644, 2.1526121]),
-            ("bmw", [-0.0006400, 0.7822034, 2.0537605]),
-            ("stk", [0.0000000, 0.6, 2.4]),
-            ("sal", [-0.0000003, 0.524_505, 2.1360629]),
-            ("r10", [-0.0000003, 0.9857384, 2.019_38]),
-            ("787", [0.0000003, 0.954_859, 1.9609809]),
-        ] {
-            let model = CarModel::new(name).unwrap();
-            let high = crate::read(&root.join(model.file("_highLOD.pssg"))).unwrap();
-            let ned = crate::read(&root.join(model.file(".ned"))).unwrap();
-            let p = descriptor(
-                &pssg::read_tree(&high).unwrap(),
-                &binxml::read(&ned).unwrap(),
-            )
-            .unwrap();
-            assert!(p.value.is_finite());
-            assert!(
-                p.value.distance(Vec3::from_array(expected)) < 0.000002,
-                "independent diagnostic59 point: {name}"
-            );
-            eprintln!(
-                "headlight pilot source {name} {:?} {}",
-                p.value, p.provenance
-            );
-        }
     }
 }

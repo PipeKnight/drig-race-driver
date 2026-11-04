@@ -149,6 +149,7 @@ mod touge_event;
 mod demolition_event;
 mod le_mans_event;
 mod vehicle_lights;
+mod headlight_frame;
 mod headlight_pilot;
 mod effective_lighting;
 mod source_light_trial;

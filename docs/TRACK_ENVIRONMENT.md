@@ -312,8 +312,10 @@ baked IBL remain limitations for a complete night/time-of-day feature.
 Static f64 arithmetic is not an x87-80bit oracle. Existing interpolation time
 precision and extreme/subnormal values remain separate limits. Three-family
 metadata admission passed for23 purchased lighting files, not all render paths.
-Eleven new tests are proposed; compilation, actual ECS results and matched
-night/day/headlight renders must be recorded before claiming success.
+Eleven source-resolution/consumer tests passed, followed by the required670-test
+gate and five matched final night/day captures (G364/G365). The explicit-unit
+night case reduces excessive scene brightness; the current physical spotlight
+produces only a one-byte maximum PNG difference and does not validate a beam.
 
 
 ### Source headlight projector footprint and cookie (G366)
