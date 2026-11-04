@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F728](F0728.md) | 2026-11-04 | Owner playtest of e66e1c24963c: trees fixed; rows 114-116 recorded, on hold |
 | [F727](F0727.md) | 2026-11-04 | Playable e66e1c24963c for the PC (tree edge culling and pipeline warm-up) |
 | [F726](F0726.md) | 2026-11-03 | Pipeline warm-up at the race start: no objects missing while their pipeline compiles |
 | [F725](F0725.md) | 2026-11-03 | Near full trees: edge-vanish evidence for F724 |

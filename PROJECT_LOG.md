@@ -145,6 +145,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F728](log/F0728.md) | 2026-11-04 | Owner playtest of e66e1c24963c: trees fixed; rows 114-116 recorded, on hold |
 | [F727](log/F0727.md) | 2026-11-04 | Playable e66e1c24963c for the PC (tree edge culling and pipeline warm-up) |
 | [F726](log/F0726.md) | 2026-11-03 | Pipeline warm-up at the race start: no objects missing while their pipeline compiles |
 | [F725](log/F0725.md) | 2026-11-03 | Near full trees: edge-vanish evidence for F724 |
@@ -204,7 +205,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F671](log/F0671.md) | 2026-10-31 | Every car finishes on its own line crossing; Okutama routes 2 and 5 count both laps |
 | [F670](log/F0670.md) | 2026-10-31 | Car reflections: dynamic cube and per-material response (off by default) |
 | [F669](log/F0669.md) | 2026-10-31 | A wheel on a material without mechanics reads the original's initializer record (row 9) |
-| [F668](log/F0668.md) | 2026-10-31 | Jarama route 1 autopilot finishes again; known-failing asset test restored |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
