@@ -3794,3 +3794,13 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0098CE10	NamedParameterRegistryAddress	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		returns shared E85FE0 registry; no arguments consumed
 0x008F87C0	CarSemanticLodNodesPopulate	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		exact catalogue x%d_%s -> selected root -> semantic byLOD cell
 0x008F4EE0	CarNodeFindExactName	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G376	[D]		case-sensitive full name; current then sibling recursion then child
+0x0076D650	OrganismHlaLoadForward	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		actual binary hla resource forwarding to embedded loader
+0x0076D520	HlaResourceRead	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		constructs resource and stores object plus +8 interface
+0x00ACE360	HlaResourceConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		resource object holds wrapper at+20
+0x00ACEB80	HlaWrapperConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		wrapper delegate+4 initially null
+0x00AD4CE0	HlaXmlSelectionTreeLoad	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		HighLevelAnimation/AnimSelectionTree dispatch to typed builder
+0x00AD4780	HlaXmlSelectionNodeBuild	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		exact four-name map to shared node constructors
+0x00AD4510	HlaNumericSelectionNodeBuild	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		numeric node cases use same constructors
+0x00AD5250	HlaFactorNodeConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		installs D3A5E4; virtual+8 target B76F10
+0x008F56C0	CarRenderLampRequestSet	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G377	[D]		write supplied byte to context+32B0
+0x0099C0D0	FirstFlaggedCarContextSlot	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md	G377	[D]		first+128C flagged slot or-1; typedflagmeaning unresolved

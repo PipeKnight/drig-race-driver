@@ -550,3 +550,27 @@ three cases; later reduced-use success has no explicit receipt and stays unknown
 These checks do not establish an original grass screenshot match or eliminate
 actual contact/texture/grass/terrain interruptions. Detailed source/artifact,
 failed shader trial and exact control records are in G340.
+
+
+## Selected skid colour roles and declaration boundary (G377)
+
+The selected original skid vertex program passes COLOR onward unchanged; its
+pixel program consumes x,z,w. There x weights geometric versus mapped normal,
+z multiplies atlas opacity, and w crossfades both diffuse and normal-map samples
+with the established identical-UV bypass. The wet-lighting y component is not
+used by this selected pixel program. The CPU producer packs Fade*ramp,
+wetLightingScale, NormalDepth and the layer endpoint byte in that order.
+
+The actual GPU declaration/normalization/swizzle between those packed bytes and
+shader components is still not authenticated. A generic uchar4 builtin record
+is not proof that this skid submission uses it. In particular strip+0x2D34 is
+wheel-emission data, not a GPU stream owner. Do not guess a backend format or
+multiply visible opacity by Fade or wet brightness to fill this gap.
+
+A bounded four-profile census finds352 enabled layers with NormalDepth bounds
+all1,1, while Fade bounds vary. The current Bevy shader's blend/opacity channel
+remapping is an owned adaptation and still lacks the source normal-map/Fade
+path. These facts do not prove the remaining ragged grass pixels are an alpha
+bug or justify forced continuous marks. Private evidence:
+local/handoff/drafts/skid-color-contract149/ and skid-declaration-boundary150/.
+No renderer, material values, contact rules or source assets changed.

@@ -381,3 +381,13 @@ prepared shader values are distinct stages. This does not identify the active
 effect/chain, port GPU colour-domain or establish that the separate timeline
 luminance output is the final-merge exposure texture. Private evidence:
 local/handoff/drafts/postprocess-timeline145/. No new Java or renderer change.
+
+
+A bounded follow-up of the actual first-completion calls0x008B0760,
+0x0088EEE0 and0x00883DF0 finds group setup/callbacks and a texture-status report,
+not a demonstrated default-factory setter. No direct+0x108 store appears in
+those selected bodies, but alias escapes and dynamic callbacks prevent proving
+the field remains null. Generic fallback stays conditional. A concrete named
+texture binding is retained as a future port-to-sampler lead; it does not close
+factory or colour-domain selection. Private evidence:
+local/handoff/drafts/postprocess-first-completion146/ (G377).
