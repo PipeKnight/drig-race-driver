@@ -67,6 +67,8 @@ Grammar:
 | | `max_ticks_per_frame` | interactive window only: at most this many 16 ms ticks per rendered frame, default 4; `0` restores Bevy's 250 ms clamp, for comparisons (docs/FRAME_STEPPING.md) | `GRID_MAX_TICKS_PER_FRAME=N` |
 | | `tick_delay_ms` | milliseconds slept in every vehicle tick: a forced slow tick for frame-rate checks (docs/FRAME_STEPPING.md) | `GRID_TICK_DELAY_MS=MS` |
 | | `camera_fps` | frames per second of race time: the in-race views step by the original's per-frame rules at this rate (head-cam springs, look smoothing, follow damp, spin hold), for comparisons with the original at 60 or 165 fps; unset, one step per 16 ms tick (docs/CAMERA_VIEWS.md §3 "Camera clock") | `GRID_CAMERA_FPS=F` |
+| | `tick_interpolation` | interactive window only: `on` (default) draws the cars, their parts and the camera between the last two 16 ms ticks; `off` draws the last tick, for comparisons (docs/FRAME_STEPPING.md §6) | `GRID_TICK_INTERPOLATION=0` |
+| | `present_trace` | interactive window only: one `present_frame` line per drawn frame and one `present_done` line per presented frame (frame time, tick, drawn simulation time, view, car and camera), for frame-pacing checks; works on a phone through its settings file (docs/FRAME_STEPPING.md §6) | `GRID_PRESENT_TRACE=1` |
 
 Notes:
 

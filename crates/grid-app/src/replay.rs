@@ -1031,14 +1031,8 @@ pub fn present(
         return;
     };
     // Cars: the replayed body and wheels; the live damage parts follow the
-    // replayed body.
-    let live_pose = |car: usize| -> Option<Mat4> {
-        if car == 0 {
-            return Some(Mat4::from_cols_array(&driving.runtime.pose()));
-        }
-        let o = driving.opponents.as_ref()?;
-        Some(Mat4::from_cols_array(&o.multi.cars.get(car)?.pose()))
-    };
+    // replayed body, from where the live car is drawn.
+    let live_pose = |car: usize| driving.shown_pose(car);
     if let (Some(car), Some(live)) = (shown.cars.first(), live_pose(0)) {
         let pose = car.pose.to_mat4();
         for (part, mut transform, ..) in &mut parts {

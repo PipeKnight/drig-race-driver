@@ -291,6 +291,202 @@ Not changed:
 - The present mode is the player's choice in the video menu (Fifo, AutoVsync, AutoNoVsync).
 - AutoNoVsync can tear on a fixed-rate monitor; that is a different artefact from this judder.
 
+## 7. Resolution, views, frame rates and Android (F730)
+
+Follow-up of 4 November 2026 (coordinator, owner's words):
+- "на моём ПК проблему видно при игре в максимальном разрешении, то есть в 2К в моём случае. В 4К
+  будет ещё заметнее, вероятно. Ниже 2К не заметно фризов и рваной картинки".
+- The owner asked for a thorough check: all views, several tracks, frame rates above and below
+  62.5 Hz, desktop and Android.
+
+### Why the resolution mattered
+
+[V] The owner's playtest logs (`local/playtest/menu-*.log`, prototype e66e1c24963c) show the
+setup:
+- monitor 165 Hz, `present_mode = auto_no_vsync`, `render_height = native`;
+- Baseline preset, MSAA ×4, DLAA not active;
+- the window maximised to 2560 × 1369.
+
+| Session | Window | Race seconds | FPS p10 / median / p90 | seconds at 50–75 FPS |
+| --- | --- | --- | --- | --- |
+| menu-32112-19856 | 2560 × 1369 | 175 | 56.9 / 69.3 / 97.6 | 55 % |
+| menu-31016-11482 | 1280 × 800 | 266 | 132.7 / 154.5 / 162.5 | 2 % |
+| menu-9456-17359 | 1280 × 800 | 115 | 87.9 / 100.8 / 136.9 | 1 % |
+| menu-32762-29455 | 1280 × 800 | 555 | 60.0 / 85.9 / 149.6 | 47 % |
+
+[D] How the frame rate decides what the tick-stepped drawing (before F729) looks like:
+- At about 150 FPS, each tick stays on screen for 2 or 3 frames: 62.5 Hz motion with ±3 ms
+  jitter, which reads as fairly even.
+- Close to 62.5 FPS, most frames get one tick. But the frame times vary by ±20 %, so some frames
+  get none (the picture repeats) and others get two (a double step). At a 69 FPS median that is
+  several hitches a second.
+- From 70 to 100 FPS, a tick stays for one frame or for two, irregularly.
+
+At 2K the owner's frame rate sat in that band, at 1280 × 800 mostly above it. Nothing else in the
+renderer depends on the window size:
+- the render scale stayed native, with two `render_scale` events: the start and the maximise;
+- there is no dynamic resolution on the desktop.
+
+On this PC the research build reached about 100 FPS even at 3840 × 2160 (the main world is the
+limit: 9–10 ms per frame at every size). So the resolution sweep below shows the same judder at
+every size, and the frame-rate rows reproduce the owner's band. [I] The owner's 2K sessions ran
+slower than these autopilot runs, probably from manual driving (crashes, debris) and other
+sessions' builds loading the PC. The mechanism does not depend on why the frame rate drops.
+
+What the FPS counter measures [V code, trace]:
+- `frame_stats` averages the main world's `Time<Real>` frame times.
+- The new `present_done` line marks each frame in the render world, after Bevy handed it to the
+  swap chain (`RenderSystems::Cleanup`, after `render_system`'s present).
+- In every run, the present intervals have the same mean, p99 and slow-frame share as the main
+  world's frames (table below). So the counter is the presented rate: no frame is dropped and none
+  comes in bursts at the swap chain.
+- [N] Display-side timing (PresentMon or ETW) was not measured. It needs an elevated process or
+  the Performance Log Users group, and this session has neither.
+- In a window on a 165 Hz display, the compositor shows each frame for a whole number of refreshes
+  (6.1 ms steps). That quantisation is the same with or without interpolation.
+
+Queue and pacing:
+- `frame_latency` is unset (wgpu's 2) and was not changed.
+- Slow frames (over 1.5 × the median present interval) are about 1 % of the frames and come in
+  clusters, with gaps of 1–2 frames (`spikes.py`).
+- The autocorrelation of the present intervals falls smoothly with the lag, with no peak at a
+  fixed period. So there is no periodic spike; the frame time drifts slowly with the scene's load.
+
+### More of the frame drawn between ticks
+
+Besides the F729 users:
+- **Damage parts** (`damage_parts.rs`):
+  - detached panels (their rigid body, or the AUTHORED flight without one);
+  - lost wheels;
+  - the swing angle of hinged loose parts.
+
+  These stepped per tick and led the drawn car by one tick. `tick` now keeps each part's state
+  from before every fixed step (`Part::before`, `LostWheel::before`), and `present` draws between
+  that and the current state by alpha. Glass shards already spawned from the drawn pose and fly
+  on the frame clock.
+- **Minimap dots and the OSD map markers:** `race_hud::car_pose` returns the drawn pose.
+- **The car reflection centre:** `car_reflections.rs`.
+- **The live pose that replay uses to place the damage parts:** `replay.rs`.
+- **The camera hold:** `Driving::frozen()` compared the player's pose with its pose a tick
+  earlier, so a car standing still with the ticks running stopped the camera blend. The blend now
+  holds only when a fixed step ran without a tick (`ShownPoses::steps`): pause, race over, a
+  scripted end.
+
+Left on the tick, on purpose:
+- the HUD's wrong-way test, sound, force feedback and the simulation readers;
+- the wheel's suspension travel and steer angle in the car's frame (one tick ahead of the body,
+  sub-millimetre);
+- the wheel spin phase, which already follows the overstep and is continuous from frame to frame.
+
+Switches:
+- `[diagnostics] tick_interpolation = off` (`GRID_TICK_INTERPOLATION=0`) draws the last tick.
+- `[diagnostics] present_trace = on` (`GRID_PRESENT_TRACE=1`) prints `present_frame` and
+  `present_done` (`frame_pacing.rs`). Both keys work on a phone through its settings file.
+- `GRID_AUDIO=off` opens no audio device in a window, for silent research runs.
+
+### Measurement matrix
+
+Release exe 5705cb3e2224 (research build without `dlaa`/`paint-specular`), autopilot, 11
+opponents, silent (`GRID_AUDIO=off`). Each run lasted 75 s and was analysed from 2 s after the
+start. The view was set through `camera.ini`. Frame caps used `GRID_FRAME_CAP_HZ`.
+
+Scripts: `local/judder/matrix.sh`, `plan.txt` and `pace.py`. Logs: `local/judder/m/`, summary
+`pace.tsv`. Plots: `steps-1440.svg`, `steps-70.svg` and `steps-bumper.svg`.
+
+Columns:
+- car sd: the spread of each frame's car step against its expected step (speed × present
+  interval);
+- still: frames moving less than 25 % of the expected step;
+- turn sd: the same as car sd for the camera's rotation, over turns faster than 0.5 rad/s;
+- eye in car: the frame-to-frame change of the eye in the car's frame.
+
+Off is `tick_interpolation = off`; on is the default.
+
+| Run | Window, rate | Present mean / p99 ms | car sd off → on | still off → on | turn sd off → on |
+| --- | --- | --- | --- | --- | --- |
+| A, two rounds | 1280 × 800, uncapped | 9.1–9.4 / 13.3–14.4 | 0.873, 0.911 → 0.094, 0.100 | 40.7, 42.4 % → 0 | 0.853, 0.874 → 0.097, 0.107 |
+| A | 1920 × 1080 | 8.9–9.8 / 13.4–14.4 | 0.874, 0.921 → 0.111, 0.097 | 40.4, 43.2 % → 0 | 0.837, 0.881 → 0.158, 0.137 |
+| A (owner's window) | 2560 × 1369 | 9.1–9.6 / 14.0–14.3 | 0.845, 0.906 → 0.105, 0.087 | 38.8, 42.3 % → 0 | 0.784, 0.869 → 0.117, 0.101 |
+| A | 3840 × 2160 | 9.6–10.0 / 14.3–14.7 | 0.817, 0.847 → 0.121, 0.120 | 37.6, 39.7 % → 0 | 0.791, 0.821 → 0.145, 0.123 |
+| B | 2560 × 1369, Fifo (165 Hz) | 9.4–9.5 / 14.8 | 0.883 → 0.095 | 40.3 % → 0 | 0.824 → 0.111 |
+| B | cap 144 | 9.2–9.3 / 14.3–15.0 | 0.905 → 0.106 | 41.8 % → 0 | 0.861 → 0.109 |
+| B | cap 100 | 10.7 / 14.6–14.9 | 0.726 → 0.118 | 32.8 % → 0 | 0.725 → 0.132 |
+| B | cap 70 | 14.6 / 16.5 | 0.352 → 0.112 | 8.8 % → 0 | 0.419 → 0.131 |
+| B | cap 65 | 15.7 / 17.4 | 0.197 → 0.133 | 2.3 % → 0 | 0.206 → 0.098 |
+| B | cap 60 (2 ticks on 6.5 % of frames) | 17.0 / 19.5 | 0.270 → 0.146 | 0.2 % → 0 | 0.330 → 0.239 |
+| B, phone-like | 1920 × 1080, cap 45 | 22.6 / 25.5 | 0.374 → 0.136 | 0.1 % → 0 | 0.413 → 0.122 |
+| B, phone-like | cap 30 | 33.7 / 37.3 | 0.198 → 0.104 | 0.1 % → 0 | 0.271 → 0.196 |
+
+Tracks and views, 2560 × 1369, uncapped, interpolation on (off in brackets where measured):
+
+| Track | View | car sd | still | turn sd | eye in car, sd |
+| --- | --- | --- | --- | --- | --- |
+| Washington | chase_close | 0.098 | 0 | 0.114 | 0.96 cm |
+| Washington | head-cam | 0.085 (0.678) | 0 (29.3 %) | 0.247 (0.748) | 0.07 cm |
+| Washington | bumper | 0.092 (0.963) | 0 (45.5 %) | 0.199 (0.964) | 0.05 cm |
+| Spa | chase_close | 0.089 | 0 | 0.090 | 0.61 cm |
+| Spa | head-cam | 0.068 (0.509) | 0 (18.9 %) | 0.110 (0.647) | 0.06 cm |
+| Spa | bumper | 0.084 (0.784) | 0 (35.2 %) | 0.105 (0.876) | 0.05 cm |
+| Shibuya | chase_close | 0.120 | 0 | 0.132 | 0.82 cm |
+| Shibuya | head-cam | 0.102 | 0 | 0.121 | 0.05 cm |
+| Shibuya | bumper | 0.088 | 0 | 0.106 | 0.05 cm |
+| Le Mans | chase_close | 0.082 | 0 | 0.086 | 0.57 cm |
+| Le Mans | head-cam | 0.083 | 0 | 0.193 | 0.06 cm |
+| Le Mans | bumper | 0.081 | 0 | 0.112 | 0.04 cm |
+
+Reading:
+- With interpolation, every combination moves on every frame (no frame stands still), and the
+  step spread is 0.07–0.15. The remainder is timing noise: the main world samples the clock at the
+  start of a frame and the render world presents one frame later. The drawn simulation time per
+  present interval has the same spread (`content sd` in `pace.tsv`).
+- Without it, the spread is largest where frames often get no tick (up to 45 % standing still,
+  worst in the bumper view, which shows the road closest). Below 62.5 FPS the failure is the
+  opposite one, double steps. The phone's 40–50 FPS sits there.
+- In the head-cam and bumper views, the eye moves 0.04–0.07 cm per frame in the car's frame. The
+  camera and the drawn car or cockpit are blended consistently.
+- The head-cam turn spread (0.11–0.25) is higher than the chase view's. It comes from the
+  head-cam's own springs (head shake), not from ticks: with interpolation off it is 0.65–0.75.
+
+### Android
+
+[V code, phone log `local/android/phone-logs/20261022-0446`]:
+- The phone starts through the same `main`, and its log has `frame_catch_up max_ticks_per_frame=4`.
+  That line is printed only on the interactive branch, which also installs `shown_alpha` and the
+  trace.
+- The phone ran Fifo at 60 Hz (`display_hz=Some(60.000004)`) at 40–50 FPS, below the tick rate: the
+  double-step case of the cap 45 row.
+
+[N] Not measured on a phone: none was attached, and no Android emulator is installed. The APK is
+arm64, so an x86 emulator would not run it representatively. A phone trace needs `[diagnostics]
+present_trace = on` in the phone's `settings.ini`; `pace.py` reads the log file the app writes to
+Downloads. The Android Clippy (`tools/build_android.ps1 -Clippy`) passes.
+
+### The original
+
+[V docs/BRAKING_REFERENCE.md, F419]:
+- The shipped config has `vsync="0"` and `maxfps` 10000.
+- The original steps its world once per drawn frame by the real frame time, and its unlocked
+  captures on this PC ran at 57–164 Hz.
+
+So it moves every frame at any rate, without vsync, like the port's interpolated drawing with the
+owner's `auto_no_vsync`.
+
+### How it should look
+
+At 2K (or any size or rate):
+- the cars, the scenery and the camera move by the same amount on each frame;
+- the "20–30 FPS" stutter of ticks held for one or two frames is gone;
+- in the head-cam and bumper views, the road and the scenery no longer shake;
+- the debris of a crash flies smoothly beside its car instead of stepping ahead of it.
+
+The picture stays 16 ms behind the simulation.
+
+Not covered:
+- display-side timing (PresentMon);
+- variable refresh rate displays;
+- a phone measurement;
+- the prototype's `dlaa` build (DLAA was not active in the owner's session).
+
 ## Symbols
 
 New or updated rows in `docs/re/symbols.tsv`: `5E7F30` (physics task run), `CE34EC` (its

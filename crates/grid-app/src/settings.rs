@@ -99,6 +99,12 @@ pub struct Diagnostics {
     /// original's per-frame rules at this rate instead of once per tick
     /// (docs/CAMERA_VIEWS.md §3).
     pub camera_fps: Option<f32>,
+    /// Interactive window: draw the cars and the camera between the last two
+    /// ticks (default on; off draws the last tick, docs/FRAME_STEPPING.md §6).
+    pub tick_interpolation: bool,
+    /// Interactive window: one `present_frame` / `present_done` line per
+    /// frame (frame_pacing.rs, docs/FRAME_STEPPING.md §6).
+    pub present_trace: bool,
 }
 
 impl Default for Diagnostics {
@@ -121,6 +127,8 @@ impl Default for Diagnostics {
             tick_delay_ms: None,
             max_ticks_per_frame: None,
             camera_fps: None,
+            tick_interpolation: true,
+            present_trace: false,
         }
     }
 }
@@ -150,6 +158,8 @@ impl Diagnostics {
             tick_delay_ms: text("GRID_TICK_DELAY_MS").and_then(|v| v.parse().ok()),
             max_ticks_per_frame: text("GRID_MAX_TICKS_PER_FRAME").and_then(|v| v.parse().ok()),
             camera_fps: text("GRID_CAMERA_FPS").and_then(|v| v.parse().ok()),
+            tick_interpolation: text("GRID_TICK_INTERPOLATION").is_none_or(|v| v != "0"),
+            present_trace: text("GRID_PRESENT_TRACE").is_some_and(|v| v == "1"),
         }
     }
 
@@ -183,6 +193,8 @@ impl Diagnostics {
                 self.max_ticks_per_frame = Some(value.parse().map_err(|_| number(key))?)
             }
             "camera_fps" => self.camera_fps = Some(value.parse().map_err(|_| number(key))?),
+            "tick_interpolation" => self.tick_interpolation = on(key, value)?,
+            "present_trace" => self.present_trace = on(key, value)?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())

@@ -471,11 +471,7 @@ fn follow(
         .and_then(|s| s.shown.as_ref())
         .and_then(|s| s.cars.first())
         .map(|car| car.pose.to_mat4())
-        .or_else(|| {
-            driving
-                .as_deref()
-                .map(|d| Mat4::from_cols_array(&d.runtime.pose()))
-        });
+        .or_else(|| driving.as_deref().and_then(|d| d.shown_pose(0)));
     let centre = pose.map(|p| p.transform_point3(Vec3::Y * CENTRE_HEIGHT));
     if centre.is_some() {
         selection.centre = centre;

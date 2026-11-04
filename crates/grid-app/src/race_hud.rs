@@ -778,13 +778,10 @@ fn update(
     }
 }
 
-/// World pose of car `c` (0 = the player).
+/// World pose of car `c` (0 = the player) as drawn this frame
+/// (`Driving::shown_pose`).
 pub fn car_pose(driving: &crate::Driving, c: usize) -> Option<[f32; 16]> {
-    if c == 0 {
-        Some(driving.runtime.pose())
-    } else {
-        driving.opponents.as_ref().and_then(|o| o.multi.cars.get(c)).map(|r| r.pose())
-    }
+    driving.shown_pose(c).map(|p| p.to_cols_array())
 }
 
 #[cfg(test)]

@@ -413,6 +413,29 @@ struct Part {
     debris: Option<Debris>,
     /// A detached part's world body: pose at the loss and now (loose_panel).
     body: Option<(Mat4, Mat4)>,
+    /// The swing angle and the detached world matrix before the latest tick:
+    /// drawn between them and now, as the cars are (main.rs `ShownPoses`).
+    before: (f32, Option<Mat4>),
+}
+
+impl Part {
+    /// A detached part's world matrix after the tick: its body, or the
+    /// AUTHORED flight without one.
+    fn world(&self) -> Option<Mat4> {
+        self.debris.map(|d| match self.body {
+            Some((start, now)) => now * start.inverse() * d.origin,
+            None => d.matrix(),
+        })
+    }
+
+    fn shown_world(&self, alpha: f32) -> Option<Mat4> {
+        let now = self.world()?;
+        Some(self.before.1.map_or(now, |before| crate::between_poses(before, now, alpha)))
+    }
+
+    fn shown_angle(&self, alpha: f32) -> f32 {
+        if alpha >= 1. { self.angle } else { self.before.0 + (self.angle - self.before.0) * alpha }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -439,6 +462,8 @@ struct LostWheel {
     body: Option<(Mat4, Mat4)>,
     /// AUTHORED fallback flight without body geometry.
     flight: Debris,
+    /// [`LostWheel::matrix`] before the latest tick.
+    before: Option<Mat4>,
 }
 impl LostWheel {
     fn matrix(&self) -> Mat4 {
@@ -446,6 +471,12 @@ impl LostWheel {
             Some((start, now)) => now * start.inverse() * self.origin,
             None => self.flight.matrix(),
         }
+    }
+
+    /// Drawn between the last two ticks (main.rs `ShownPoses`).
+    fn shown(&self, alpha: f32) -> Mat4 {
+        let now = self.matrix();
+        self.before.map_or(now, |before| crate::between_poses(before, now, alpha))
     }
 }
 
@@ -801,6 +832,16 @@ fn row_pose(m: &[[f32; 4]; 4]) -> Mat4 {
 pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
     let ticks = driving.runtime.ticks;
     let damage = &mut *damage;
+    // Every fixed step, also one that does not advance: what each part was
+    // drawn at before it.
+    for car in &mut damage.cars {
+        for part in car.parts.values_mut() {
+            part.before = (part.angle, part.world());
+        }
+        for wheel in car.wheels.iter_mut().flatten() {
+            wheel.before = Some(wheel.matrix());
+        }
+    }
     if damage.last_tick.is_some_and(|last| ticks < last) {
         damage.cars.clear();
         damage.reset = true;
@@ -863,6 +904,7 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                     origin: r.wheel_frames[i],
                     body: None,
                     flight,
+                    before: None,
                 });
                 log_line!(
                     "drive_wheel_detached car={index} tick={ticks} wheel={i} impact_strength={:?}",
@@ -1206,23 +1248,19 @@ fn present(
         let carried = carrier
             .and_then(|door| car.parts.get(door).map(|p| (door, p)))
             .filter(|(_, p)| p.state == State::Loose && own.is_none());
+        let alpha = driving.shown.alpha;
         let model = match (own, carried) {
-            (Some(part), _) if part.state == State::Detached => {
-                part.debris.map(|d| match part.body {
-                    Some((start, now)) => now * start.inverse() * d.origin,
-                    None => d.matrix(),
-                })
-            }
+            (Some(part), _) if part.state == State::Detached => part.shown_world(alpha),
             (Some(part), _) => layout
                 .bounds
                 .get(name)
                 .and_then(|b| hinge(name, *b, config))
-                .map(|h| poses[index] * h.matrix(part.angle)),
+                .map(|h| poses[index] * h.matrix(part.shown_angle(alpha))),
             (None, Some((door, part))) => layout
                 .bounds
                 .get(door)
                 .and_then(|b| hinge(door, *b, config))
-                .map(|h| poses[index] * h.matrix(part.angle)),
+                .map(|h| poses[index] * h.matrix(part.shown_angle(alpha))),
             _ => None,
         };
         if let Some(model) = model {
@@ -1454,6 +1492,7 @@ fn layout(parts: &PartQuery, m: usize, car_model: &[usize]) -> Layout {
 /// the disc and the caliper stay (`m_calipers_come_off_with_wheels` is 0 on
 /// both cars).
 fn present_lost_wheels(
+    driving: Res<crate::Driving>,
     damage: Res<DamageParts>,
     mut parts: Query<(&crate::MovingPart, &mut Transform), Without<crate::OpponentPart>>,
     mut opponents: Query<(&crate::OpponentPart, &mut Transform), Without<crate::MovingPart>>,
@@ -1461,7 +1500,7 @@ fn present_lost_wheels(
     let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DamageParts);
     let flight = |car: usize, wheel: Option<usize>, flies: bool| {
         let lost = damage.cars.get(car)?.wheels[wheel?].as_ref()?;
-        flies.then(|| lost.matrix())
+        flies.then(|| lost.shown(driving.shown.alpha))
     };
     for (part, mut transform) in &mut parts {
         if let Some(matrix) = flight(0, part.wheel, part.lost_with_wheel) {
@@ -1809,6 +1848,7 @@ mod tests {
             origin,
             body: Some((start, start)),
             flight,
+            before: None,
         };
         // At the loss the body leaves the wheel where it was drawn.
         assert!(wheel.matrix().abs_diff_eq(origin, 1e-5));
@@ -1816,6 +1856,12 @@ mod tests {
         let moved = Mat4::from_translation(Vec3::new(0., 0., 5.)) * Mat4::from_rotation_x(0.7);
         wheel.body = Some((start, moved * start));
         assert!(wheel.matrix().abs_diff_eq(moved * origin, 1e-5));
+        // A frame draws it between its matrices before and after the tick.
+        wheel.before = Some(origin);
+        assert!(wheel.shown(0.).abs_diff_eq(origin, 1e-5));
+        assert_eq!(wheel.shown(1.), wheel.matrix());
+        let half = wheel.shown(0.5).w_axis.truncate();
+        assert!(half.abs_diff_eq((origin.w_axis.truncate() + (moved * origin).w_axis.truncate()) / 2., 1e-4));
         wheel.body = None;
         assert_eq!(wheel.matrix(), flight.matrix());
     }
