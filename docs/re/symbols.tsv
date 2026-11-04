@@ -3785,3 +3785,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00892AA0	PostprocessParameterGroupResolve	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		lookup or registered-factory group instantiation
 0x0086AB10	PostprocessFloatParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		_atof and binary32 store through node+0C
 0x00876BC0	PostprocessColourParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		four integer low bytes packed RGBA; not saturation
+0x00733500	PostprocessResourceProcess	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		resource role->pending effect description slots; allocator guard
+0x00865230	ResourceTypeNameMatches	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		resource virtual type string compared by full equality
+0x008A76A0	PostprocessEffectRegistryClear	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		guarded clear; status13 before cleanup if any effect+A0 nonzero
+0x00895FB0	PostprocessGroupsCallbackByEffectId	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		select effect+98 id then group virtual+8 argument
+0x00746230	ColourBalanceRegisterSources	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		one-time named parameter-source registration; slot0/1 not enable
+0x0098D1D0	TimelineParameterDestinationsRegister	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		retain scalar or packed-colour destination pointers for day/night timeline
+0x0098CE10	NamedParameterRegistryAddress	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		returns shared E85FE0 registry; no arguments consumed

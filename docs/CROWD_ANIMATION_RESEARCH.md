@@ -820,3 +820,26 @@ crowd-state-candidate97/ and crowd-selector-interface98/ under local/handoff/dra
 The97/98 source functions were each decompiled once through the shared master
 under the machine lease; this consolidation reused those results without new
 Java, decompilation, address expansion, renderer or application checks.
+
+
+### Shipped selector coverage and ordinary playback priority (G375)
+
+Bounded purchased-data decoding through the existing binary-XML decoder finds
+27 animation selectors in crowdDefs.xml. All27 declare blendset_none; all36
+instance-map entries (six ps3, thirty generic) resolve to those selectors. With
+that selected resource and no later mutation, the recovered zero-index setup
+therefore reaches0x0076CB90 rather than named triple blending. G370's nonzero
+branch remains valid source research but is not the shortest route to ordinary
+shipped spectator playback.
+
+Among18 discovered organism track datasets,15 circuit records reference the
+shared crowd animation bank and three garage records the frontend bank. Use
+the existing dataset-owned alias resolver; a common clip bank does not make
+rigs, placement, appearance or LOD interchangeable.
+
+The zero-mode delegate, scheduler clock consumer and prior actor joint locals
+remain separate missing joins. Existing captures lack even the manager+0x3C
+link, so they cannot establish the delegate type. The bounded original reader
+remains disabled while the owner's computer is busy. This metadata narrows
+implementation priority; it adds no animated crowd or original observation.
+Private evidence: local/handoff/drafts/crowd-playback-priority141/.
