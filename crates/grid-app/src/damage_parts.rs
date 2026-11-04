@@ -1523,7 +1523,21 @@ mod tests {
         })};
         let mut damage=DamageParts {models:vec![model],car_model:vec![0,0],cars:vec![CarDamage {lights:vec![true,false],..Default::default()},CarDamage::default()],last_tick:None,reset:false,log_zones:false,cracked:BTreeMap::new(),shard_assets:None,camera:None};
         assert!(damage.light_smashed(0,"light_brake_pod_bl"));assert!(damage.light_smashed(0,"light_brake_glass_bl"));
+        // Source cluster ordinal is compacted away here; actual semantic membership is authoritative.
+        let member=crate::lamp_signals::runtime::member("x2_light_brake_pod_bl",2).unwrap();
+        assert!(damage.light_smashed(0,&member));assert!(!damage.light_smashed(1,&member));
         assert!(!damage.light_smashed(0,"light_pod_fl"));assert!(!damage.light_smashed(1,"light_brake_pod_bl"));assert!(!damage.light_smashed(9,"light_brake_pod_bl"));
+        // Consume this real compact layout through the actual lamp projection system.
+        let mut app=App::new();app.init_resource::<Assets<StandardMaterial>>().init_resource::<crate::lamp_signals::runtime::State>().init_resource::<crate::lamp_signals::runtime::Owners>();
+        let bank=crate::lamp_association::BankKey {source:"actual_fixture_high".into(),resource:"same_lights_on.tga".into()};
+        app.insert_resource(crate::lamp_signals::Atlas([(bank.clone(),Handle::default())].into_iter().collect()));
+        app.world_mut().resource_mut::<crate::lamp_signals::runtime::State>().constant(crate::lamp_signals::Mode::Brake,2);
+        let base=app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+        let receipt=crate::lamp_association::Receipt {bank,geometry_source:"fixture_geometry".into(),namespaced_texture:"fixture_namespace/same_lights_on.tga".into(),section:crate::lamp_sections::Section {semantic:121,palette:9,role:crate::lamp_sections::Role::Brake,cluster:6,lod:2,node:3,bundle:"LOD2_".into(),draw:"actual_fixture_draw".into(),material:"Rear Lights Pod".into(),joint:"x2_light_brake_pod_bl".into()}};
+        let entities:Vec<_>=(0..2).map(|slot|app.world_mut().spawn((crate::lamp_signals::runtime::Receiver::from_receipt(slot,&receipt).unwrap(),MeshMaterial3d(base.clone()))).id()).collect();
+        app.insert_resource(damage).add_systems(Update,crate::lamp_signals::runtime::project);app.update();
+        for (slot,entity) in entities.into_iter().enumerate(){let handle=&app.world().get::<MeshMaterial3d<StandardMaterial>>(entity).unwrap().0;let material=app.world().resource::<Assets<StandardMaterial>>().get(handle).unwrap();assert_eq!(material.emissive,if slot==0{LinearRgba::BLACK}else{LinearRgba::rgb(0.7,0.7,0.7)});}
+        damage=app.world_mut().remove_resource::<DamageParts>().unwrap();
         let saved=damage.checkpoint();damage.restore(&saved);assert!(!damage.light_smashed(0,"light_brake_pod_bl"));
     }
     use super::*;

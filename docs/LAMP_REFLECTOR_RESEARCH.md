@@ -357,3 +357,59 @@ required for a general emission consumer. These source results introduce no
 activation, gamma or intensity default. Private evidence: lamp-activation-writer147/,
 lamp-focus-adapter148/, lamp-focus-flag151/ and lamp-state-ownership146/ under
 local/handoff/drafts/.
+
+
+## General signal ownership and load-flag producer (G381, in progress)
+
+The final signal candidate consumes the shared exact section/bank receipt on
+player, high opponent and low opponent spawn paths. A raw bank is keyed by its
+actual source path and resource ID; LOW metadata never silently reuses HIGH
+pixels. Actual DDS bytes are read/prepared before startup and uploaded through
+the existing portable image helper after device selection. Model/route/12-part/
+LOD0 signal gates are removed from this optional path; separate optical-pilot
+restrictions and normal signal default Off remain. This is not an ordinary
+night-rendering completion claim.
+
+Each admitted entity owns its intact/cracked material families and each actual
+field slot owns its fades. Ownership is established before source-bank/state
+readiness: a damage clone can inherit lit emission, so returning early before
+adoption would leave that incoming cracked material lit. Only the owned clone
+is neutralized; shared source/cracked cache/Original are preserved. Existing
+compacted damage-layout membership lookup is used, never source cluster ordinal
+as a vector index. Broken is retained as a signed state but projects dark in
+this StandardMaterial adaptation, not original negative-shader parity.
+
+An additional cross-resource requirement emerged in review: cloning material
+fields does not copy the material-ID keyed reflection Response registry. Owned
+handles must inherit the exact canonical/Original response, including cached
+and pending-image states, or existing overlay follow removes their overlay.
+The correction remains in lamp-owned production code; shared reflection files
+supply only cfg(test) construction and an actual attach/project/follow regression.
+No reflection coefficients, probe/CSM/cockpit or batching algorithm is retuned.
+These final alias changes still require current CPU and GPU checks.
+
+Initial general candidate Clippy and18 selected CPU/ECS checks pass, including
+production batcher registration and actual44-model selectedHIGH0/LOW2..5 source
+admission:1927 sections,86 actual admitted banks. Those are purchased metadata/
+DDS and CPU lifecycle facts, not render-world readiness or all-view draw proof.
+Source sampler/gamma, mutable source caps, native ancestry/negative branch and
+historical replay signal state remain qualified. Ordinary and LeMans clock
+owners are consumed, never advanced twice by the signal system.
+
+The native special-load flag producer is now less opaque: callback0x8F3060,
+store0x8F3111, copies positivity of the 'call' resource's userdata integer1 into
+plugin+0x1C0[userdata integer0]. Existing0x6138D0 builder/0x613D90 comparison
+and0x614C93 submission form the SAME loader vector as [actualslot,
+load_descriptor.field_1C==2,fieldcount,...]. The purchased car_loader.xml call
+entry uses parameters1,2,3; its bytes match the retained cached XML. High LOD
+is not equivalent: its selection also admits descriptor1 with graphics-mode2,
+whereas this flag requires descriptor2 only. The same flag gates interior load.
+Its symbolic descriptor role and conversion to the current Runtime identity
+remain unproved, so do not rename it player/camera/highres. The source flag's
+path through0x8F171F/0xA14540 to+0x128C is structurally linked; no guessed focus
+delay override is introduced into the current engine activation adapter.
+
+Evidence: local/graphics/lamp-runtime01/ and private lamp-stage-a156/,
+lamp-stage-b157/, lamp-focus-producer158/, lamp-current-independent-review162/
+and lamp-reflection-alias163/ under local/handoff/drafts/. Default and broad
+night/source-radiometry acceptance await actual final validation.

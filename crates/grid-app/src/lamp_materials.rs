@@ -25,6 +25,7 @@ pub(crate) fn attach(
         Without<super::OpponentPart>,
     >,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut reflective: Option<ResMut<crate::car_reflection_overlay::Reflective>>,
 ) {
     let mut handles = HashMap::new();
     let mut count = 0;
@@ -60,6 +61,12 @@ pub(crate) fn attach(
                 materials.add(base)
             })
             .clone();
+        // This authored optical clone must retain its exact source response alias.
+        if let Some(ref mut reflective) = reflective
+            && let Some(response) = reflective.0.get(&original.0.id()).cloned()
+        {
+            reflective.0.insert(handle.id(), response);
+        }
         commands.entity(entity).insert(MeshMaterial3d(handle));
         count += 1;
     }

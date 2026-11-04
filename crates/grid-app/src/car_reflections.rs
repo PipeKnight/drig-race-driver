@@ -118,6 +118,19 @@ pub struct Cube {
     pub copies: Arc<AtomicU64>,
 }
 
+// CPU-only fixture for actual overlay-follow lifecycle tests; no probe/render job.
+#[cfg(test)]
+impl Cube {
+    pub(crate) fn for_cpu_test(image: Handle<Image>) -> Self {
+        Self {
+            image,
+            size: 1,
+            faces: Vec::new(),
+            copies: Arc::default(),
+        }
+    }
+}
+
 /// Which meshes the probe draws: the original's reflection object selection
 /// (docs/TRACK_LOD.md 3.3) with the cube's centre as the eye, re-chosen when
 /// the centre has moved [`RESELECT`] metres.

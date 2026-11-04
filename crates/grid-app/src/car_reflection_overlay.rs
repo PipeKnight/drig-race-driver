@@ -415,4 +415,278 @@ mod tests {
         values.insert(b"EnvironmentColour".as_slice(), vec![0., 0., 0.]);
         assert_eq!(Controls::from_constants(b"carpaint_metallic.fx", &values), None);
     }
+    #[test]
+    fn actual_follow_retains_lamp_owned_optics_across_damage_and_bank_readiness() {
+        use crate::lamp_association::{BankKey, Receipt};
+        use crate::lamp_signals::{Atlas, Mode, runtime};
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<Overlay>>()
+            .init_resource::<Reflective>()
+            .init_resource::<runtime::State>()
+            .init_resource::<runtime::Owners>();
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let crack_image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let mask = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        app.insert_resource(crate::car_reflections::Cube::for_cpu_test(image.clone()));
+        let high = BankKey {
+            source: "fixture_high".into(),
+            resource: "same_lights_on.tga".into(),
+        };
+        let low = BankKey {
+            source: "fixture_low".into(),
+            resource: "same_lights_on.tga".into(),
+        };
+        app.insert_resource(Atlas([(high.clone(), image.clone())].into_iter().collect()));
+        app.world_mut()
+            .resource_mut::<runtime::State>()
+            .constant(Mode::Brake, 1);
+        let source = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                base_color_texture: Some(image.clone()),
+                perceptual_roughness: 0.37,
+                ..Default::default()
+            });
+        let response = Response {
+            controls: Controls {
+                colour: Vec3::new(0.2, 0.3, 0.4),
+                power: 0.7,
+                min: 0.02,
+                max: 0.9,
+                paint: None,
+            },
+            glass: true,
+            mask: Some(mask),
+        };
+        app.world_mut()
+            .resource_mut::<Reflective>()
+            .0
+            .insert(source.id(), response.clone());
+        let section = crate::lamp_sections::Section {
+            semantic: 121,
+            palette: 9,
+            role: crate::lamp_sections::Role::Brake,
+            cluster: 6,
+            lod: 0,
+            node: 3,
+            bundle: "LOD0_".into(),
+            draw: "fixture_draw".into(),
+            material: "Rear Lights Pod".into(),
+            joint: "x0_light_brake_pod_bl".into(),
+        };
+        let receipt = Receipt {
+            bank: high.clone(),
+            section,
+            geometry_source: "fixture_geometry".into(),
+            namespaced_texture: "fixture_namespace/same_lights_on.tga".into(),
+        };
+        let mesh = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Mesh::from(Cuboid::new(1., 1., 1.)));
+        let entity = app
+            .world_mut()
+            .spawn((
+                runtime::Receiver::from_receipt(0, &receipt).unwrap(),
+                Mesh3d(mesh),
+                MeshMaterial3d(source.clone()),
+                crate::track_surface::SourcePart("car0/Rear Lights Pod".into()),
+                Transform::IDENTITY,
+                Visibility::Inherited,
+            ))
+            .id();
+        // Exercise the actual first optical clone too, rather than fabricate its alias.
+        let settings = crate::graphics::Settings {
+            lamp_reflectors: crate::lamp_materials::Mode::Pbr,
+            ..Default::default()
+        };
+        app.insert_resource(settings)
+            .insert_resource(crate::lamp_materials::Prepared(None));
+        app.add_systems(PostStartup, crate::lamp_materials::attach)
+            .add_systems(Update, runtime::project)
+            .add_systems(PostUpdate, follow);
+        app.update();
+        let current = |app: &App| {
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                .unwrap()
+                .0
+                .clone()
+        };
+        let check = |app: &App, expected: &Response, base: &Handle<Image>| {
+            let child = app
+                .world()
+                .get::<HasOverlay>(entity)
+                .expect("actual follow must create/retain a real child")
+                .0;
+            assert!(app.world().get::<OverlayOf>(child).is_some());
+            let material = &app.world().get::<MeshMaterial3d<Overlay>>(child).unwrap().0;
+            let overlay = app
+                .world()
+                .resource::<Assets<Overlay>>()
+                .get(material)
+                .unwrap();
+            assert_eq!(
+                overlay.environment,
+                expected.controls.colour.extend(expected.controls.power)
+            );
+            assert_eq!(
+                overlay.fresnel,
+                Vec4::new(expected.controls.min, expected.controls.max, 1., 0.)
+            );
+            assert_eq!(overlay.mask, expected.mask);
+            assert_eq!(overlay.base.as_ref(), Some(base));
+            child
+        };
+        let intact = current(&app);
+        assert_ne!(intact, source);
+        let child = check(&app, &response, &image);
+        let original_source = app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .get(&source)
+            .unwrap();
+        assert_eq!(original_source.perceptual_roughness, 0.37);
+        assert_eq!(original_source.emissive, LinearRgba::BLACK);
+        // Raw damage clone has NO response row. Original supplies actual intact identity.
+        let mut damaged = app
+            .world()
+            .resource::<Assets<StandardMaterial>>()
+            .get(&intact)
+            .unwrap()
+            .clone();
+        damaged.base_color_texture = Some(crack_image.clone());
+        let damaged = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(damaged);
+        assert!(
+            !app.world()
+                .resource::<Reflective>()
+                .0
+                .contains_key(&damaged.id())
+        );
+        app.world_mut().entity_mut(entity).insert((
+            MeshMaterial3d(damaged.clone()),
+            crate::damage_parts::Original(intact.clone()),
+        ));
+        app.world_mut().resource_mut::<Atlas>().0.clear();
+        app.world_mut()
+            .resource_mut::<runtime::State>()
+            .constant(Mode::Off, 0);
+        app.update();
+        let cracked_owned = current(&app);
+        assert_ne!(cracked_owned, damaged);
+        assert_eq!(check(&app, &response, &crack_image), child);
+        assert_eq!(
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&cracked_owned)
+                .unwrap()
+                .emissive,
+            LinearRgba::BLACK
+        );
+        assert_eq!(
+            app.world()
+                .get::<crate::damage_parts::Original>(entity)
+                .unwrap()
+                .0,
+            intact
+        );
+        assert_eq!(
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&intact)
+                .unwrap()
+                .emissive,
+            LinearRgba::rgb(0.7, 0.7, 0.7)
+        );
+        // Lose only our cached alias rows; canonical optical-source controls remain.
+        // Actual follow must retain its child, so BOTH cracked and Original-owned
+        // rows need refreshing even while state and image are unavailable.
+        app.world_mut()
+            .resource_mut::<Reflective>()
+            .0
+            .remove(&intact.id());
+        app.world_mut()
+            .resource_mut::<Reflective>()
+            .0
+            .remove(&cracked_owned.id());
+        app.update();
+        assert_eq!(current(&app), cracked_owned);
+        assert_eq!(check(&app, &response, &crack_image), child);
+        assert_eq!(
+            app.world()
+                .resource::<Reflective>()
+                .0
+                .get(&intact.id())
+                .unwrap()
+                .controls,
+            response.controls
+        );
+        // Restore actual Original contract, then switch to a distinct pending LOW bank.
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<crate::damage_parts::Original>()
+            .insert(MeshMaterial3d(intact.clone()));
+        app.world_mut()
+            .resource_mut::<runtime::State>()
+            .constant(Mode::Brake, 1);
+        app.world_mut()
+            .resource_mut::<Atlas>()
+            .0
+            .insert(high, image.clone());
+        app.update();
+        assert_eq!(current(&app), intact);
+        assert_eq!(check(&app, &response, &image), child);
+        let mut low_receipt = receipt.clone();
+        low_receipt.bank = low.clone();
+        low_receipt.section.lod = 2;
+        low_receipt.section.bundle = "LOD2_".into();
+        low_receipt.section.joint = "x2_light_brake_pod_bl".into();
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(runtime::Receiver::from_receipt(0, &low_receipt).unwrap());
+        app.update();
+        let low_owned = current(&app);
+        assert_ne!(low_owned, intact);
+        assert_eq!(check(&app, &response, &image), child);
+        assert_eq!(
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&low_owned)
+                .unwrap()
+                .emissive,
+            LinearRgba::BLACK
+        );
+        app.world_mut()
+            .resource_mut::<Atlas>()
+            .0
+            .insert(low, image.clone());
+        app.update();
+        assert_eq!(current(&app), low_owned);
+        assert_eq!(check(&app, &response, &image), child);
+        assert_eq!(
+            app.world()
+                .resource::<Assets<StandardMaterial>>()
+                .get(&low_owned)
+                .unwrap()
+                .emissive,
+            LinearRgba::rgb(0.7, 0.7, 0.7)
+        );
+    }
+
 }

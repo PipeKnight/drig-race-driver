@@ -1,12 +1,14 @@
 # Graphics / engine integration
 
+Current (4 November 2026, G381): ordinary enhanced reference/driving scenes with layered car and track materials use shared capability admission for every selected model/route. Actual source readers still validate the chosen assets. This admits the renderer; it does not establish identical tuning or full visual parity on every route. Separate experimental optics, Donington grading and probe guards remain independent. Lamp signals remain default off: representative BMW and six-model LeMans rear-marker comparisons pass, while native optics and complete night illumination remain unverified. The sections below retain the original integration history; the old integration worktree has since been removed.
+
 16 October 2026. Owner requested periodic careful merges into main, preservation of the recovered F269 stash branch, and portable texture uploads through the engine's shared upload path. Work happens in a separate managed integration worktree, codex/grid-graphics-integration. Primary checkout's uncommitted PROJECT_LOG.md and untracked AI research document are preserved.
 
 ## First merge, in validation
 
 Parents: engine main0a2ff450aec2 and graphics b4febd620480. Four files conflicted: PROJECT_LOG.md, grid-app/main.rs, grid-formats/lib.rs and texture.rs. Both journals/modules are retained. The texture reader combines partial mip-chain support with main's BGRA8 level sizing. General route/car loading, mixed-car field, unified input, damage/joint ownership, auto-reset, race finish and timeout handling remain from main. Graphics uses the new car0 namespace for player-model materials/probe exclusion. A tuple keeps presentation within Bevy's16-parameter system limit.
 
-Enhanced rendering currently explicitly requires Lacetti/Donington route_0; baseline retains other cars/routes. Graphics launchers pin this car/route so a user's unrelated profile does not silently load Donington lighting/assets into a different circuit. Wheel exposure follows source-part visibility after damage presentation, before transform propagation, avoiding a floating blur hull after a wheel is hidden/detached. These integration changes still require GPU checks.
+At that first merge, enhanced rendering explicitly required Lacetti/Donington route_0; baseline retains other cars/routes. Graphics launchers pin this car/route so a user's unrelated profile does not silently load Donington lighting/assets into a different circuit. Wheel exposure follows source-part visibility after damage presentation, before transform propagation, avoiding a floating blur hull after a wheel is hidden/detached. These integration changes still require GPU checks.
 
 ## Portable texture contract
 
@@ -98,3 +100,5 @@ local-only `integration-source.bundle` in the same archive folder. This legacy
 history is recovery-only and must not be merged or pushed. An old app attachment
 may remain as stale metadata; it is not a live Git checkout. No internal app
 metadata was edited. Removal is complete; active graphics work continues.
+
+G381 shared enhanced admission (pending current validation): the legacy global scene guard was independent of the newly generic signal path and would reject BMW/Haruna and DBR/LeMans before loading. Shared layered car+track reference/driving scenes now use a model/route-independent capability predicate, identical for signal Off and Live. Actual selected source package/texture/material validation remains downstream. Collision/headless/nonlayered and unrelated Donington-grade/paint-environment/reflection-calibration pilots do not gain admission. Their prior guards remain. This is renderer availability, not broad optical tuning parity; mixed opponent authored PBR tuning and night light consistency remain open. New tests and refreshed full gate/GPU comparisons pending. An invalid private166 draft misplaced #[bevy_main]; reviewed167 corrects attribute placement before application. No invalid166 source applied.
