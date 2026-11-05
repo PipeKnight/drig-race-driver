@@ -282,6 +282,7 @@ hard hit. No pre-F653 baseline was rerun for these four.
 | Deep crush into the sheet at high speed (2.25 m at 62 m/s) | Le Mans | port: deformation contact limit, fixed 16 ms step | row 10 |
 | Body event pool overflow ("unsupported body event pool or query ownership") | Donington routes 0/2 and Milan route 3, R10 | port robustness defect | open follow-up |
 | Okutama does not load | 6 routes | port reader (row 82) | open |
+| Owner report "drove through the barrier" (row 117, F734) | Washington route 0, ~2,560 m, outer side | not a defect: a launch over a spinning AI car at 53 m/s, the armco breaking at the physics threshold, two rolls into the area behind the cushion row through the gap at its end; no barrier crossed, 38+38 impact branches with 0 crossings | none |
 | Basic-entity damage behaviours (breakable armco, planks, crates, signs) | 35 templates | not ported: intact fixed shapes | open |
 
 ## 6. Per-route table

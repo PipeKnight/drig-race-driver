@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F734](F0734.md) | 2026-11-05 | Row 117: the end-of-race barrier pass was a crash and roll through a gap, not a pass-through |
 | [F733](F0733.md) | 2026-11-05 | Token retro: where the tokens go; AGENTS.md token rules; earlier auto-compact |
 | [F732](F0732.md) | 2026-11-05 | Owner playtest of ee26c2ebc427: judder gone; HUD regression sent; barrier pass-through recorded (row 117) |
 | [F731](F0731.md) | 2026-11-04 | Playable ee26c2ebc427 for the PC and both APKs (smooth motion between ticks) |

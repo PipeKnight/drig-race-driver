@@ -1,5 +1,6 @@
 //! Research probe: the racing-line points of a route near a world point.
-//! `grid-line-near ROOT ROUTE X Y Z [RADIUS]`.
+//! `grid-line-near ROOT ROUTE X Y Z [RADIUS]`. With `GRID_BOX_CORNERS=1` each
+//! nearby collision box also prints its eight world corners.
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,6 +31,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "box {i} {} entity={:?} enabled={} bounds={:?}",
                 b.template, b.entity, b.enabled, b.bounds
             );
+            if std::env::var_os("GRID_BOX_CORNERS").is_some() {
+                println!("corners {i} {:?}", b.positions);
+            }
         }
     }
     Ok(())
