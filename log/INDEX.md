@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F752](F0752.md) | 2026-11-05 | Playable 343de39742df for the PC and both APKs (first tyre smoke builds no pipeline mid-race) |
 | [F751](F0751.md) | 2026-11-05 | Tyre smoke pipelines warmed behind the start cover |
 | [F750](F0750.md) | 2026-11-05 | Playable 989dd8305b37 for the PC and both APKs (tree shadows no longer turn with the camera) |
 | [F749](F0749.md) | 2026-11-05 | Release script drafts the APK test order's New-in section; F range from added log files |
