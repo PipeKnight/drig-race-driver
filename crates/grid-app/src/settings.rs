@@ -109,6 +109,11 @@ pub struct Diagnostics {
     /// save what the window shows, the HUD included, as
     /// `<data dir>/window-shot-S.png` (frame_pacing.rs; F737).
     pub window_shots: Vec<f32>,
+    /// Interactive window: `START,SECONDS` of real time over which every
+    /// frame the window shows is appended, box-averaged by 8, to
+    /// `<data dir>/window-frames.rgb` (frame_pacing.rs; row 115,
+    /// tools/blink_detect.py). Empty: off.
+    pub window_frames: Vec<f32>,
 }
 
 impl Default for Diagnostics {
@@ -134,6 +139,7 @@ impl Default for Diagnostics {
             tick_interpolation: true,
             present_trace: false,
             window_shots: Vec::new(),
+            window_frames: Vec::new(),
         }
     }
 }
@@ -166,6 +172,7 @@ impl Diagnostics {
             tick_interpolation: text("GRID_TICK_INTERPOLATION").is_none_or(|v| v != "0"),
             present_trace: text("GRID_PRESENT_TRACE").is_some_and(|v| v == "1"),
             window_shots: text("GRID_WINDOW_SHOTS").map_or_else(Vec::new, |v| seconds_list(&v).unwrap_or_default()),
+            window_frames: text("GRID_WINDOW_FRAMES").map_or_else(Vec::new, |v| frame_range(&v).unwrap_or_default()),
         }
     }
 
@@ -202,10 +209,16 @@ impl Diagnostics {
             "tick_interpolation" => self.tick_interpolation = on(key, value)?,
             "present_trace" => self.present_trace = on(key, value)?,
             "window_shots" => self.window_shots = seconds_list(value).ok_or_else(|| number(key))?,
+            "window_frames" => self.window_frames = frame_range(value).ok_or_else(|| number(key))?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
     }
+}
+
+/// `START,SECONDS` (empty or `off`: none).
+fn frame_range(value: &str) -> Option<Vec<f32>> {
+    seconds_list(value).filter(|v| v.is_empty() || v.len() == 2)
 }
 
 /// `S,S,...` seconds (empty or `off`: none).

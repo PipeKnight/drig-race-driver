@@ -70,6 +70,7 @@ Grammar:
 | | `tick_interpolation` | interactive window only: `on` (default) draws the cars, their parts and the camera between the last two 16 ms ticks; `off` draws the last tick, for comparisons (docs/FRAME_STEPPING.md §6) | `GRID_TICK_INTERPOLATION=0` |
 | | `present_trace` | interactive window only: one `present_frame` line per drawn frame and one `present_done` line per presented frame (frame time, tick, drawn simulation time, view, car and camera), for frame-pacing checks; works on a phone through its settings file (docs/FRAME_STEPPING.md §6) | `GRID_PRESENT_TRACE=1` |
 | | `window_shots` | interactive window only: `S,S,...` seconds of real time after loading at which the window is saved, HUD included, as `<data dir>/window-shot-S.png`; for checks of what the screen shows (tools/hud_window_check.py, docs/RACE_HUD.md §6.3) | `GRID_WINDOW_SHOTS=S,S,...` |
+| | `window_frames` | interactive window only: `START,SECONDS` of real time after loading over which every frame the window shows is appended, box-averaged by 8, to `<data dir>/window-frames.rgb`, and each capture prints `window_frame frame=N t_s=S`; for the blink detector (tools/blink_detect.py, backlog row 115). Reading every frame back slows the window | `GRID_WINDOW_FRAMES=START,SECONDS` |
 
 Notes:
 

@@ -23,7 +23,10 @@
 //! `GRID_ORNAMENT_LOD=0` keeps every ornament at level 0 (comparisons).
 use bevy::{
     asset::uuid_handle,
-    camera::visibility::{RenderLayers, VisibilityRange, VisibilitySystems},
+    camera::{
+        primitives::Aabb,
+        visibility::{RenderLayers, VisibilityRange, VisibilitySystems},
+    },
     light::NotShadowCaster,
     mesh::MeshTag,
     pbr::{ExtendedMaterial, MaterialExtension},
@@ -274,8 +277,18 @@ pub fn install(app: &mut App) {
 
 /// A shadow-level part whose instance crosses D casts through a proxy that
 /// dithers in the shadow map like the colour fade (owner 2026-11-03: nothing
-/// should appear in view; F713); the part itself casts none meanwhile. Level
-/// changes keep the shadow level, so only crossings of D need one.
+/// should appear in view; F713); the part itself casts none meanwhile.
+///
+/// A level change keeps the shadow level, but while the shadow level fades
+/// in or out as a *colour* level its part carries the fade's
+/// `VisibilityRange`, and Bevy's light visibility check applies ranges too:
+/// at the fade-out's last step the range excludes every distance, so the
+/// part left every cascade until the fade ended and the range went, and its
+/// shadow was missing for a frame (row 115, F743: buildings and trees
+/// flashed brighter as the car approached them). So it casts through a
+/// proxy at full presence (tag 0) for the length of that fade too. A proxy
+/// starts with the part's world transform and bounds, so its first frame
+/// casts where the part is and not at the origin.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn shadow_proxies(
     lods: Res<Lods>,
@@ -287,6 +300,7 @@ fn shadow_proxies(
             &Mesh3d,
             Option<&MeshMaterial3d<StandardMaterial>>,
             &GlobalTransform,
+            Option<&Aabb>,
             Has<NotShadowCaster>,
         ),
         With<RenderLayers>,
@@ -300,13 +314,16 @@ fn shadow_proxies(
     let state = &mut *state;
     // Pipeline warm-up: every shadow-level part casts through a step-0 proxy.
     let warming = warm.is_some_and(|w| w.proxies());
-    for (part, level, mesh, material, transform, shadowless) in &parts {
+    for (part, level, mesh, material, transform, aabb, shadowless) in &parts {
         let fade = lods.fades[level.instance as usize];
+        let casts = !shadowless || state.proxies.contains_key(&part);
+        let colour_fading = matches!(fade.draw(level.level), Some((appearing, step)) if appearing || step > 0);
         let step = match fade.presence() {
-            Some((appearing, step)) if (appearing || step > 0) && !(shadowless && !state.proxies.contains_key(&part)) => {
+            Some((appearing, step)) if (appearing || step > 0) && casts => {
                 Some(step.min(31) as u32 | if appearing { 32 } else { 0 })
             }
-            _ if warming && (!shadowless || state.proxies.contains_key(&part)) => Some(0),
+            Some(_) if colour_fading && casts => Some(0),
+            _ if warming && casts => Some(0),
             _ => None,
         };
         match (step, state.proxies.get(&part).copied()) {
@@ -330,15 +347,18 @@ fn shadow_proxies(
                     Some(materials.add(ShadowMaterial { base, extension: ShadowFade { marker: Vec4::ONE } }))
                 });
                 let Some(handle) = entry.clone() else { continue };
-                let proxy = commands
-                    .spawn((
-                        Mesh3d(mesh.0.clone()),
-                        MeshMaterial3d(handle),
-                        transform.compute_transform(),
-                        MeshTag(tag),
-                        crate::car_batch::shadow_layer(),
-                    ))
-                    .id();
+                let mut proxy = commands.spawn((
+                    Mesh3d(mesh.0.clone()),
+                    MeshMaterial3d(handle),
+                    transform.compute_transform(),
+                    *transform,
+                    MeshTag(tag),
+                    crate::car_batch::shadow_layer(),
+                ));
+                if let Some(aabb) = aabb {
+                    proxy.insert(*aabb);
+                }
+                let proxy = proxy.id();
                 commands.entity(part).insert(NotShadowCaster);
                 state.proxies.insert(part, (proxy, shadowless));
             }
@@ -824,6 +844,79 @@ mod tests {
         for _ in 0..4 {
             frame(&mut app);
         }
+        assert!(proxies(&mut app).is_empty());
+        assert!(app.world().get::<NotShadowCaster>(part).is_none());
+    }
+
+    #[test]
+    fn the_shadow_level_casts_in_full_while_it_fades_as_a_colour_level() {
+        let mut app = App::new();
+        install(&mut app);
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<ShadowMaterial>>()
+            .init_resource::<ShadowProxies>()
+            .insert_resource(Time::<()>::default())
+            .add_systems(PostUpdate, shadow_proxies.run_if(resource_exists::<Lods>).after(select));
+        let material = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+        // Level 1 (the shadow level) is the colour level at 200 m.
+        let camera = app.world_mut().spawn((
+            crate::ViewerCamera,
+            GlobalTransform::from_translation(Vec3::new(-200., 0.5, 0.5)),
+            Projection::Perspective(PerspectiveProjection {
+                fov: REFERENCE_HALF_FOV * 2., ..default()
+            }),
+        )).id();
+        let placed = GlobalTransform::from_translation(Vec3::new(3., 4., 5.));
+        let part = app.world_mut().spawn((
+            OrnamentLevel { instance: 0, level: 1 },
+            Mesh3d(Handle::default()),
+            MeshMaterial3d(material),
+            placed,
+            Visibility::Inherited,
+            RenderLayers::layer(0),
+        )).id();
+        app.insert_resource(Lods::new(Levels {
+            types: vec![building()],
+            instances: vec![Instance { kind: 0, min: Vec3::ZERO, max: Vec3::ONE }],
+            parts: HashMap::new(),
+        }));
+        let frame = |app: &mut App| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+            app.world_mut().run_schedule(PostUpdate);
+        };
+        let proxies = |app: &mut App| {
+            app.world_mut()
+                .query::<(&MeshTag, &GlobalTransform, &MeshMaterial3d<ShadowMaterial>)>()
+                .iter(app.world())
+                .map(|(t, g, _)| (t.0, *g))
+                .collect::<Vec<_>>()
+        };
+        frame(&mut app);
+        frame(&mut app);
+        assert!(proxies(&mut app).is_empty());
+        assert!(app.world().get::<NotShadowCaster>(part).is_none());
+
+        // Approaching to 50 m in steps under CUT_METRES: level 1 fades out as
+        // a colour level over FADE_SECONDS and carries the fade's range
+        // meanwhile. Its shadow must not fade with it: a full proxy (tag 0) at
+        // the part's place casts.
+        let mut fading = 0;
+        for x in (5..=20).rev() {
+            *app.world_mut().get_mut::<GlobalTransform>(camera).unwrap() =
+                GlobalTransform::from_translation(Vec3::new(-10. * x as f32, 0.5, 0.5));
+            frame(&mut app);
+            if app.world().get::<VisibilityRange>(part).is_some() {
+                fading += 1;
+                assert_eq!(proxies(&mut app), vec![(0, placed)], "full shadow where the part is");
+                assert!(app.world().get::<NotShadowCaster>(part).is_some());
+            }
+        }
+        assert!(fading > 0, "the colour fade ran");
+        // After the fade the part casts again, without a range.
+        for _ in 0..4 {
+            frame(&mut app);
+        }
+        assert!(app.world().get::<VisibilityRange>(part).is_none());
         assert!(proxies(&mut app).is_empty());
         assert!(app.world().get::<NotShadowCaster>(part).is_none());
     }

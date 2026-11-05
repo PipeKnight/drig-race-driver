@@ -17,6 +17,10 @@
 //! pipeline compiled (row 115, F740). The picture is unchanged.
 //!
 //! `GRID_SHADOW_CULL=0` keeps Bevy's lists (comparisons).
+//!
+//! `GRID_SHADOW_TRACE=1` (research, row 115) prints `shadow_dropout` for each
+//! caster that is in a cascade's final list in frames N-2 and N but not in
+//! N-1 (a shadow missing for one frame), with Bevy's `FrameCount` of N-1.
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::CascadesVisibleEntities;
 use bevy::light::{CascadeShadowConfig, Cascades, SimulationLightSystems};
@@ -36,6 +40,48 @@ pub fn install(app: &mut App) {
             PostUpdate,
             cull.after(SimulationLightSystems::CheckLightVisibility),
         );
+    }
+    if std::env::var("GRID_SHADOW_TRACE").is_ok_and(|v| v == "1") {
+        app.add_systems(
+            PostUpdate,
+            trace_dropouts
+                .after(SimulationLightSystems::CheckLightVisibility)
+                .after(cull),
+        );
+    }
+}
+
+/// Per light, view and cascade: the final lists of the last two frames.
+type Lists = std::collections::HashMap<(Entity, Entity, usize), [std::collections::HashSet<Entity>; 2]>;
+
+fn trace_dropouts(
+    lights: Query<(Entity, &CascadesVisibleEntities)>,
+    names: Query<(Option<&Name>, Option<&ChildOf>)>,
+    frame: Res<bevy::diagnostic::FrameCount>,
+    mut last: Local<Lists>,
+) {
+    for (light, visible) in &lights {
+        for (view, lists) in &visible.entities {
+            for (i, list) in lists.iter().enumerate() {
+                let now: std::collections::HashSet<Entity> = list.entities.iter().copied().collect();
+                let [older, previous] = last.entry((light, *view, i)).or_default();
+                let mut missing: Vec<Entity> = older.iter().filter(|e| now.contains(e) && !previous.contains(e)).copied().collect();
+                missing.sort();
+                for e in &missing {
+                    let name = |e: Entity| names.get(e).ok().and_then(|(n, _)| n).map_or_else(String::new, |n| n.to_string());
+                    let parent = names.get(*e).ok().and_then(|(_, p)| p).map(|p| name(p.parent()));
+                    println!(
+                        "shadow_dropout frame={} cascade={i} entity={e} name={:?} parent={:?} in_list_before={} now={}",
+                        frame.0.wrapping_sub(1),
+                        name(*e),
+                        parent.unwrap_or_default(),
+                        older.len(),
+                        now.len(),
+                    );
+                }
+                *older = std::mem::replace(previous, now);
+            }
+        }
     }
 }
 
