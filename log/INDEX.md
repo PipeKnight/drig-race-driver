@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F740](F0740.md) | 2026-11-05 | Row 115: tree shadows built mid-race; shadow cull keeps unculled casters so the warm-up builds every shadow variant |
 | [F739](F0739.md) | 2026-11-05 | OSD sprites clamp as the original's wrapS/wrapT say: no thin lines beside the speedometer needle |
 | [F738](F0738.md) | 2026-11-05 | Track surfaces take the route's macro AO scale; Washington black void gone (row 119) |
 | [F737](F0737.md) | 2026-11-05 | Race OSD froze after a mid-race window resize: the display material kept the old texture; rebind on resize, render-world bind check, window check tool |

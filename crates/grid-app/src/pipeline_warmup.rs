@@ -18,7 +18,10 @@
 //! Research: `GRID_PIPELINE_TRACE=1` prints each new pipeline (label and key
 //! defines), how many frames it waited and the frames that had any waiting;
 //! `GRID_CAPTURE_ASYNC_PIPELINES=1` makes an offscreen capture compile in the
-//! background as a window does.
+//! background as a window does. With the trace, each new pipeline is also
+//! attributed to up to three entities that use it in the main, prepass or
+//! shadow pass (`pipeline_user` lines: ornament level, car level part, shadow
+//! proxy or body, tree, name; row 115).
 use bevy::camera::visibility::{NoFrustumCulling, VisibilityRange, VisibilitySystems};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
@@ -99,7 +102,9 @@ pub fn install(app: &mut App) {
     };
     render.insert_resource(counters.clone()).add_systems(Render, count.in_set(RenderSystems::Cleanup));
     if env_on("GRID_PIPELINE_TRACE") {
-        render.add_systems(Render, trace.in_set(RenderSystems::Cleanup));
+        let users = Users::default();
+        render.insert_resource(users.clone()).add_systems(Render, trace.in_set(RenderSystems::Cleanup));
+        app.insert_resource(users).add_systems(Last, (describe_users, missed_casters, cascade_census));
     }
     if std::env::var("GRID_PIPELINE_WARMUP").is_ok_and(|v| v == "0") {
         return;
@@ -228,10 +233,181 @@ fn step(
     }
 }
 
-fn trace(cache: Res<PipelineCache>, mut frame: Local<u64>, mut created: Local<usize>, mut since: Local<HashMap<usize, u64>>) {
+/// New pipelines' users found in the render world, described by the main world.
+#[derive(Resource, Clone, Default)]
+struct Users(Arc<std::sync::Mutex<Vec<PipelineUser>>>, Arc<std::sync::Mutex<bevy::platform::collections::HashSet<Entity>>>);
+
+/// (frame, pipeline id, pass, main-world entity).
+type PipelineUser = (u64, usize, &'static str, Entity);
+
+/// Up to three users per pass of each pipeline in `ids`.
+fn find_users(
+    ids: &[usize],
+    main: Option<&bevy::pbr::SpecializedMaterialPipelineCache>,
+    prepass: Option<&bevy::pbr::SpecializedPrepassMaterialPipelineCache>,
+    shadow: Option<&bevy::pbr::SpecializedShadowMaterialPipelineCache>,
+) -> Vec<(usize, &'static str, Entity)> {
+    let mut found: Vec<(usize, &'static str, Entity)> = Vec::new();
+    let mut add = |id: usize, pass: &'static str, entity: Entity| {
+        if ids.contains(&id)
+            && found.iter().filter(|f| f.0 == id && f.1 == pass).count() < 3
+            && !found.contains(&(id, pass, entity))
+        {
+            found.push((id, pass, entity));
+        }
+    };
+    for view in main.iter().flat_map(|c| c.values()) {
+        for (entity, pipeline) in view.iter() {
+            add(pipeline.id(), "main", entity.id());
+        }
+    }
+    for view in prepass.iter().flat_map(|c| c.values()) {
+        for (entity, (_, pipeline, _)) in view.iter() {
+            add(pipeline.id(), "prepass", entity.id());
+        }
+    }
+    for view in shadow.iter().flat_map(|c| c.values()) {
+        for (entity, (pipeline, _)) in view.iter() {
+            add(pipeline.id(), "shadow", entity.id());
+        }
+    }
+    found
+}
+
+/// At the end of the warm-up: shadow-level ornament parts that never got a
+/// shadow pipeline while it ran (row 115).
+#[allow(clippy::type_complexity)]
+fn missed_casters(
+    users: Res<Users>,
+    warm: Option<Res<Warmup>>,
+    parts: Query<(
+        Entity,
+        Option<&Name>,
+        &crate::ornament_lod::OrnamentLevel,
+        &Visibility,
+        &InheritedVisibility,
+        Has<bevy::camera::primitives::Aabb>,
+        Has<bevy::light::NotShadowCaster>,
+        &bevy::camera::visibility::RenderLayers,
+        &Mesh3d,
+    )>,
+    meshes: Res<Assets<Mesh>>,
+    mut done: Local<u32>,
+) {
+    if !warm.is_some_and(|w| w.ready()) || *done > 2 {
+        return;
+    }
+    *done += 1;
+    if *done < 2 {
+        return;
+    }
+    let cast = users.1.lock().unwrap();
+    let missed: Vec<_> = parts.iter().filter(|p| !cast.contains(&p.0)).collect();
+    println!("pipeline_missed_casters parts={} missed={}", parts.iter().count(), missed.len());
+    for (e, name, level, vis, inherited, aabb, shadowless, layers, mesh) in missed.iter().take(12) {
+        println!(
+            "pipeline_missed entity={e} name={:?} ornament=({}, {}) visibility={vis:?} inherited={} aabb={aabb} not_shadow_caster={shadowless} layers={:?} mesh_loaded={}",
+            name.map(|n| n.as_str()), level.instance, level.level, inherited.get(), layers.iter().collect::<Vec<_>>(), meshes.contains(&mesh.0)
+        );
+    }
+}
+
+/// Each warm-up frame: shadow-level ornament parts that are casters (visible,
+/// no `NotShadowCaster`), how many the sun's cascades list, and how many have
+/// had a shadow pipeline so far (row 115).
+#[allow(clippy::type_complexity)]
+fn cascade_census(
+    users: Res<Users>,
+    warm: Option<Res<Warmup>>,
+    parts: Query<(Entity, &InheritedVisibility, Has<bevy::light::NotShadowCaster>, Has<NoFrustumCulling>, Option<&VisibilityRange>), (With<crate::ornament_lod::OrnamentLevel>, With<bevy::camera::visibility::RenderLayers>)>,
+    lights: Query<&bevy::camera::visibility::CascadesVisibleEntities>,
+) {
+    let Some(warm) = warm else { return };
+    if warm.ready() {
+        return;
+    }
+    let listed: bevy::platform::collections::HashSet<Entity> = lights
+        .iter()
+        .flat_map(|c| c.entities.values())
+        .flat_map(|cascades| cascades.iter())
+        .flat_map(|v| v.entities.iter().copied())
+        .collect();
+    let cast = users.1.lock().unwrap();
+    let (mut casters, mut in_cascades, mut piped, mut unculled, mut ranged) = (0, 0, 0, 0, 0);
+    for (e, inherited, shadowless, nfc, range) in &parts {
+        if !inherited.get() || shadowless {
+            continue;
+        }
+        casters += 1;
+        in_cascades += usize::from(listed.contains(&e));
+        piped += usize::from(cast.contains(&e));
+        unculled += usize::from(nfc);
+        ranged += usize::from(range.is_some());
+    }
+    println!(
+        "pipeline_census frame={} phase={:?} parts={} casters={casters} unculled={unculled} ranged={ranged} in_cascades={in_cascades} with_shadow_pipeline={piped} cascade_entities={}",
+        warm.frames, warm.phase, parts.iter().count(), listed.len()
+    );
+}
+
+#[allow(clippy::type_complexity)]
+fn describe_users(
+    users: Res<Users>,
+    parts: Query<(
+        Option<&Name>,
+        Option<&crate::ornament_lod::OrnamentLevel>,
+        Option<&crate::car_batch::LodPart>,
+        Has<crate::car_batch::ShadowBody>,
+        Has<bevy::mesh::MeshTag>,
+        Has<crate::source_trees::Facing>,
+        Has<bevy::light::NotShadowCaster>,
+        Option<&bevy::camera::visibility::RenderLayers>,
+        Option<&ChildOf>,
+    )>,
+    names: Query<&Name>,
+) {
+    let found = std::mem::take(&mut *users.0.lock().unwrap());
+    for (frame, id, pass, entity) in found {
+        let Ok((name, ornament, lod, body, tag, tree, shadowless, layers, parent)) = parts.get(entity) else {
+            println!("pipeline_user frame={frame} id={id} pass={pass} entity={entity} gone");
+            continue;
+        };
+        let parent = parent.and_then(|p| names.get(p.parent()).ok()).map_or(String::new(), |n| n.to_string());
+        println!(
+            "pipeline_user frame={frame} id={id} pass={pass} entity={entity} name={:?} parent={parent:?} ornament={:?} car_level={:?} shadow_body={body} mesh_tag={tag} tree={tree} not_shadow_caster={shadowless} layers={:?}",
+            name.map(|n| n.as_str()),
+            ornament.map(|o| (o.instance, o.level)),
+            lod.map(|l| l.level),
+            layers.map(|l| l.iter().collect::<Vec<_>>()),
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn trace(
+    cache: Res<PipelineCache>,
+    mut frame: Local<u64>,
+    mut created: Local<usize>,
+    mut since: Local<HashMap<usize, u64>>,
+    users: Res<Users>,
+    main: Option<Res<bevy::pbr::SpecializedMaterialPipelineCache>>,
+    prepass: Option<Res<bevy::pbr::SpecializedPrepassMaterialPipelineCache>>,
+    shadow: Option<Res<bevy::pbr::SpecializedShadowMaterialPipelineCache>>,
+) {
     use bevy::render::render_resource::PipelineDescriptor;
     *frame += 1;
     let frame = *frame;
+    if let Some(shadow) = shadow.as_deref() {
+        let mut cast = users.1.lock().unwrap();
+        for view in shadow.values() {
+            cast.extend(view.keys().map(|e| e.id()));
+        }
+    }
+    let fresh: Vec<usize> = (*created..cache.pipelines().count()).collect();
+    if !fresh.is_empty() {
+        let found = find_users(&fresh, main.as_deref(), prepass.as_deref(), shadow.as_deref());
+        users.0.lock().unwrap().extend(found.into_iter().map(|(id, pass, e)| (frame, id, pass, e)));
+    }
     let total = cache.pipelines().count();
     let waiting: Vec<usize> = cache.waiting_pipelines().collect();
     for (id, pipeline) in cache.pipelines().enumerate().skip(*created) {

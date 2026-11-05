@@ -9,7 +9,12 @@
 //! the light direction, cannot reach the slice writes no texel the slice
 //! samples, so it is dropped from that cascade's list. A margin of
 //! [`MARGIN_TEXELS`] cascade texels covers the shadow filter and the normal
-//! bias. Casters without bounds stay. The picture is unchanged.
+//! bias. Casters without bounds stay, and so do casters with
+//! `NoFrustumCulling`, as in Bevy's own lists: the pipeline warm-up unculls
+//! every mesh so each shadow variant is built behind its cover. Dropping them
+//! here left those variants to be built the first time a tree or its fade
+//! proxy entered a cascade mid-race, and that shadow was not drawn until the
+//! pipeline compiled (row 115, F740). The picture is unchanged.
 //!
 //! `GRID_SHADOW_CULL=0` keeps Bevy's lists (comparisons).
 use bevy::camera::primitives::Aabb;
@@ -89,7 +94,7 @@ fn cull(
         &Cascades,
         &mut CascadesVisibleEntities,
     )>,
-    casters: Query<(&Aabb, &GlobalTransform)>,
+    casters: Query<(&Aabb, &GlobalTransform, Has<bevy::camera::visibility::NoFrustumCulling>)>,
 ) {
     for (light_transform, config, cascades, mut visible) in &mut lights {
         let light = Vec3A::from(light_transform.forward().as_vec3());
@@ -119,9 +124,12 @@ fn cull(
                 let planes = slice_planes(&corners);
                 let margin = MARGIN_TEXELS * cascade.texel_size;
                 list.entities.retain(|entity| {
-                    let Ok((aabb, transform)) = casters.get(*entity) else {
+                    let Ok((aabb, transform, unculled)) = casters.get(*entity) else {
                         return true;
                     };
+                    if unculled {
+                        return true;
+                    }
                     let affine = transform.affine();
                     let centre = affine.transform_point3a(aabb.center);
                     let m = affine.matrix3;
@@ -195,5 +203,36 @@ mod tests {
         let slant = Vec3A::new(-1., -1., 0.).normalize();
         assert!(reaches(&slice(), slant, Vec3A::new(3., 3., -2.), &UNIT, 0.));
         assert!(!reaches(&slice(), -slant * Vec3A::new(1., -1., 1.), Vec3A::new(3., 3., -2.), &UNIT, 0.));
+    }
+
+    /// Row 115: a caster far outside every slice is dropped, the same caster
+    /// with `NoFrustumCulling` (the pipeline warm-up) stays in every cascade.
+    #[test]
+    fn unculled_casters_stay_in_every_cascade() {
+        use bevy::camera::visibility::{NoFrustumCulling, VisibleMeshEntities};
+        use bevy::light::cascade::Cascade;
+        let mut app = App::new();
+        app.add_systems(Update, cull);
+        let world = app.world_mut();
+        let view = world
+            .spawn((GlobalTransform::IDENTITY, Projection::Perspective(PerspectiveProjection::default())))
+            .id();
+        let far = GlobalTransform::from_translation(Vec3::new(0., 0., 5000.));
+        let aabb = Aabb { center: Vec3A::ZERO, half_extents: Vec3A::ONE };
+        let culled = world.spawn((aabb, far)).id();
+        let unculled = world.spawn((aabb, far, NoFrustumCulling)).id();
+        let config = CascadeShadowConfig::default();
+        let n = config.bounds.len();
+        let mut cascades = Cascades::default();
+        cascades.cascades.insert(view, vec![Cascade { texel_size: 0.1, ..default() }; n]);
+        let mut visible = CascadesVisibleEntities::default();
+        visible.entities.insert(view, vec![VisibleMeshEntities { entities: vec![culled, unculled] }; n]);
+        let light = world.spawn((GlobalTransform::from_rotation(Quat::from_rotation_x(-1.)), config, cascades, visible)).id();
+        app.update();
+        let lists = &app.world().get::<CascadesVisibleEntities>(light).unwrap().entities[&view];
+        let first = usize::from(crate::shadow_layout::enabled());
+        for list in &lists[first..] {
+            assert_eq!(list.entities, vec![unculled]);
+        }
     }
 }

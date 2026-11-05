@@ -42,7 +42,8 @@ the objects updating or something else). Port: `crates/grid-app/src/pipeline_war
 process; Android relaunches the activity). From the first frame with a viewer camera and a mesh:
 
 1. A black full-screen UI node covers the viewer camera (`GlobalZIndex(i32::MAX)`).
-2. Plain: every `Mesh3d` gets `NoFrustumCulling` (also honoured by the shadow cascades), every
+2. Plain: every `Mesh3d` gets `NoFrustumCulling` (also honoured by the shadow cascades and, since
+   F740, by `shadow_cull`), every
    hidden mesh and hidden parent (`Visibility::Hidden`, not UI) is shown, and
    `ornament_lod::select` draws every ornament level as a caster.
 3. When the cache has had no new or waiting pipeline for 8 frames: Dither. Every mesh also gets
@@ -60,6 +61,34 @@ The main world reads the render world's cache through a shared counter (`count` 
 Not covered: car levels hidden through `car_batch::hidden_layer()` and their demoted meshes (the
 levels the other cars show at the start share their materials and layouts), and meshes spawned
 after the warm-up.
+
+### 2.1 Shadow variants built mid-race (row 115, F740)
+
+Owner retest after F726 (prototype e66e1c24963c): "отдельные объекты иногда моргают ... по мере
+приближения к ним и довольно редко".
+
+- Trace [V] (`GRID_PIPELINE_TRACE=1`, silent autopilot windows at 2560 × 1369, 120 s, Washington,
+  Spa, Shibuya and Le Mans): after the warm-up, 3 to 6 new pipelines per run, each waiting 1 to 2
+  frames. They are the first tyre smoke's two passes, the reduced alpha-blend pass, and cascade
+  (orthographic) depth prepasses of masked materials.
+- The trace now names each new pipeline's users (`pipeline_user`): the late shadow variants
+  belonged to trees (`trees/!f`, level 0, casting from the shadow layer) and to their fade proxies
+  (F713). Two of them were also the variants F726 could not place.
+- Why the warm-up missed them [V]: `shadow_cull` (docs/PERFORMANCE.md "Sun shadow cost") drops
+  casters from each cascade by geometry after Bevy's own check, and it ignored `NoFrustumCulling`.
+  The warm-up census (`pipeline_census`) on Washington: 4910 casters, all unculled, but only 219
+  in the cascades. So a tree's shadow variant, or its proxy's, was built the first time it entered
+  a cascade while the car approached it, and that shadow was not drawn until the compile finished.
+  On this PC that was 1 frame; on a slower compile it is longer. [I] This fits "rarely, while
+  approaching them", but the owner's own sighting was not captured.
+- Fix: `shadow_cull` keeps casters with `NoFrustumCulling`, as Bevy's lists do. After the
+  warm-up only the skinned prop pieces stay unculled.
+- After [V]: all casters are in the cascades during the warm-up, with a shadow pipeline (Washington
+  4910/4910, Spa 6922, Shibuya 2382, Le Mans 14713), and no shadow variant is built after it on the
+  four tracks. Left: the first tyre smoke and its reduced alpha-blend pass, 1 frame each.
+- Car levels behind `hidden_layer()` built no pipeline after the warm-up in these runs
+  (11 opponents each).
+- Test: `shadow_cull::tests::unculled_casters_stay_in_every_cascade`.
 
 ## 3. Evidence
 

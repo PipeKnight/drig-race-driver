@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F740](log/F0740.md) | 2026-11-05 | Row 115: tree shadows built mid-race; shadow cull keeps unculled casters so the warm-up builds every shadow variant |
 | [F739](log/F0739.md) | 2026-11-05 | OSD sprites clamp as the original's wrapS/wrapT say: no thin lines beside the speedometer needle |
 | [F738](log/F0738.md) | 2026-11-05 | Track surfaces take the route's macro AO scale; Washington black void gone (row 119) |
 | [F737](log/F0737.md) | 2026-11-05 | Race OSD froze after a mid-race window resize: the display material kept the old texture; rebind on resize, render-world bind check, window check tool |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F683](log/F0683.md) | 2026-11-02 | Nürburgring grid-start capture: the original's leader slows by side contact |
 | [F682](log/F0682.md) | 2026-11-02 | Camera FOV setting; cockpit view 10 degrees wider by default (owner request, row 103) |
 | [F681](log/F0681.md) | 2026-10-31 | Close-drift flags take no contact outside the drift formats (row 104) |
-| [F680](log/F0680.md) | 2026-10-31 | Box contacts beside long barrier boxes: an inconsistent distance result, the mesh frame and the pair direction (row 99) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
