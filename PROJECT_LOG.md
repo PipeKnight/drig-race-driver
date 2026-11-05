@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F748](log/F0748.md) | 2026-11-05 | Owner's prototype unmuted again; build gate never mutes the main checkout exe |
 | [F747](log/F0747.md) | 2026-11-05 | Row 122: tree shadows turned with the camera; sun-facing shadow twins |
 | [F746](log/F0746.md) | 2026-11-05 | Playable b6eaecaefa82 for the PC and both APKs (shadow kept through the whole LOD fade) |
 | [F745](log/F0745.md) | 2026-11-05 | Row 115: remaining shadow dropouts attributed; shadow level stops one fade step short |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F691](log/F0691.md) | 2026-11-02 | Continuous collision against route boxes and round primitives (AE34B0): the step-size question answered |
 | [F690](log/F0690.md) | 2026-11-02 | Start-line matrix after F681: Yokohama Docks fields pass the drift-flag bases; Shibuya 0 losses predate F680 |
 | [F689](log/F0689.md) | 2026-11-02 | Runtime float check of broken prop pieces; ornament and LOD gaps are the original's data (row 102) |
-| [F688](log/F0688.md) | 2026-11-02 | Car reflections: the player's driver out of the cube; overlays of opaque parts before the glass; cracked glass as the original's program |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

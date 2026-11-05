@@ -8,6 +8,15 @@
 # reads the logs as they grow and stops the run when its script completes.
 
 $script:GateRepo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+# The owner's prototype (target\release\grid-app.exe of the main checkout) is never muted:
+# Windows keeps the mixer mute per executable path, so muting a gate run of that path would
+# leave every later owner run silent (F639, F748). The gate's data dir already sets
+# [sound] effects = 0.
+$script:GateOwnerExe = $null
+$gateCommon = (& git -C $script:GateRepo rev-parse --path-format=absolute --git-common-dir 2>$null)
+if ($LASTEXITCODE -eq 0 -and $gateCommon) {
+    $script:GateOwnerExe = [IO.Path]::GetFullPath((Join-Path $gateCommon '..\target\release\grid-app.exe'))
+}
 $script:GateTicksPerSecond = 62.5
 
 # The private inputs (AI characteristics) live in local/ of the main checkout; a worktree's
@@ -76,6 +85,7 @@ function Get-GateProcessTable {
             Parent = [int]$p.ParentProcessId
             PrivateMB = [double]$p.PrivatePageCount / 1MB
             PeakMB = [double]$p.PeakPageFileUsage / 1KB
+            Path = [string]$p.ExecutablePath
         }
     }
     return $table
@@ -261,7 +271,7 @@ function Update-GateRuns {
         foreach ($id in $tree) {
             $private += $table[$id].PrivateMB
             if ($table[$id].PeakMB -gt $run.PeakMB) { $run.PeakMB = $table[$id].PeakMB }
-            if (-not $run.Muted.Contains($id)) { $pids.Add([uint32]$id) }
+            if (-not $run.Muted.Contains($id) -and $table[$id].Path -ne $script:GateOwnerExe) { $pids.Add([uint32]$id) }
         }
         if ($private -gt $run.PeakMB) { $run.PeakMB = $private }
         if ($tree.Count -gt 0) {

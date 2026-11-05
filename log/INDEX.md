@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F748](F0748.md) | 2026-11-05 | Owner's prototype unmuted again; build gate never mutes the main checkout exe |
 | [F747](F0747.md) | 2026-11-05 | Row 122: tree shadows turned with the camera; sun-facing shadow twins |
 | [F746](F0746.md) | 2026-11-05 | Playable b6eaecaefa82 for the PC and both APKs (shadow kept through the whole LOD fade) |
 | [F745](F0745.md) | 2026-11-05 | Row 115: remaining shadow dropouts attributed; shadow level stops one fade step short |
