@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F733](log/F0733.md) | 2026-11-05 | Token retro: where the tokens go; AGENTS.md token rules; earlier auto-compact |
 | [F732](log/F0732.md) | 2026-11-05 | Owner playtest of ee26c2ebc427: judder gone; HUD regression sent; barrier pass-through recorded (row 117) |
 | [F731](log/F0731.md) | 2026-11-04 | Playable ee26c2ebc427 for the PC and both APKs (smooth motion between ticks) |
 | [F730](log/F0730.md) | 2026-11-04 | Row 116 follow-up: judder at 2K is the frame rate near 62.5 Hz; debris, map and camera hold drawn between ticks; pacing matrix |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F676](log/F0676.md) | 2026-10-31 | Car reflections: paint masks, per-view cost, damage and level crops |
 | [F675](log/F0675.md) | 2026-10-31 | Paused and Intro mix modes from the state flow; race music research (row 71 and the music sizing) |
 | [F674](log/F0674.md) | 2026-10-31 | Nürburgring and Jarama first-corner losses: inside car clamped to the line beside a car; field trace detail |
-| [F673](log/F0673.md) | 2026-10-31 | Doppler for the opponent engines and the crowd loops: the game's own CMStream_Update shift (backlog row 71) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

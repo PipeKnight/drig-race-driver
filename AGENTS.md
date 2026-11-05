@@ -30,6 +30,16 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 - Hand-off notes live in the session's own worktree, `local/handoff/<session-name>.md`. Child sessions cannot write to the main checkout, so do not copy them there.
 - Long runs (builds, soaks, captures): start them in the background, continue useful independent work in the active response, and process their actual results without ending the response merely because a job is running (owner instruction, 30 October 2026). Preserve source freezes and the machine-wide build lock; do not duplicate jobs or repeatedly report unchanged status.
 
+## Token economy (owner, 5 November 2026)
+
+Every model call re-reads the whole context, so the context size and the number of calls set the cost. From 29 October to 5 November, sessions read 2.8 billion cached tokens at about 280k per call, and 28 % of shell calls only waited or looked at logs (log/F0733.md).
+- Do not poll. Start a long job with the shell tool's background option and wait for its completion notice. No `sleep`, `until` or `while` loops, no repeated `tail` of a log, no repeated `build_lock.ps1 -Status`. If you need a condition, use one blocking wait that returns when it holds.
+- Print verdicts, not logs. Scripts and commands end with a short summary: pass/fail, the key numbers, and the path of the full log. Read a full log only when the verdict says something failed, and then only the relevant part (`grep`, a line range).
+- Fewer round trips. Chain dependent commands in one call. For a repeated experiment, write one script that builds, runs, analyses and prints the summary, and call it once per variant.
+- Images stay in the context until it compacts. Read an image only when a decision needs it. Prefer a cropped or downscaled image (a few hundred pixels) to a full frame, and a measured number to an image.
+- Tests must exercise every mode the player gets. If a change adds behaviour that only runs in an interactive window (interpolation, presentation, input), add a test or a smoke step that switches that mode on. Offscreen captures alone do not count (the F729/F730 HUD regression, row 116).
+- The coordinator gives each session one topic. Before a new task, it compacts the idle session or starts a fresh one with a full brief. Mechanical work (log entries, backlog rows, release notes) may run on a cheaper model or a lower effort.
+
 ## Original reference and provenance
 
 - Original installation: `C:\Program Files (x86)\Steam\steamapps\common\Grid`.
