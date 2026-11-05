@@ -35,8 +35,11 @@ Steps, each skippable:
   test order local\android\<APK test order>.txt: the previous APK names and sizes become the new
              ones, the "updated" time and the upper end of the F range move on, and when the
              bundled data did not change the previous revision joins the "no data copy" lists.
-             The feature summary stays the coordinator's job (the draft lists the merged
-             commits). A copy of the old file goes to the release folder.       -NoTestOrder
+             A new "New in <rev> (Fa-Fb)" section goes above the older ones, with one TODO line
+             per merged F entry (its English title); writing the owner-facing summary in place
+             of the TODO lines stays the coordinator's job. Merged F numbers come from the
+             log/Fnnnn.md files the merge adds. A copy of the old file goes to the release
+             folder.                                                             -NoTestOrder
   draft      local\release\<time>.md: revisions, merged F range and commits, exe sha256,
              APK sizes and sha256, bundle version, step times; for the coordinator to turn into
              the log entry and commit.
@@ -154,8 +157,17 @@ if ($mtCode -eq 1) {
 }
 if ($mtCode -ne 0) { throw "release: git merge-tree failed ($mtCode): $($mt -join ' | ')" }
 $newCommits = (Invoke-Git log --format='%h %s' "$preHead..$upstream")
-# A commit's own F number: "F722 ...", "F531: ..." or "... (F530)"; earlier playable entries are not merged work.
-$fNumbers = @($newCommits | Where-Object { $_ -notmatch '^\S+ F\d+:? playable' } | ForEach-Object { if ($_ -match '^\S+ F(\d+)[: ]' -or $_ -match '\(F(\d+)\)\s*$') { [int]$Matches[1] } } | Sort-Object -Unique)
+# Merged F numbers: the log/Fnnnn.md files the merge adds (one file per entry since F532), minus
+# earlier playable entries, which are not merged work. Commit subjects alone missed numbers written
+# as "(row 115, F743)" (F741, F744, F746).
+$newEntries = Invoke-Git diff --name-only --diff-filter=A $preHead $upstream -- 'log/F*.md'
+$playableEntries = @()
+$isPlayable = $false
+foreach ($l in (Invoke-Git log --format='%x01%s' --name-only --diff-filter=A "$preHead..$upstream" -- 'log/F*.md')) {
+    if ($l.StartsWith([string][char]1)) { $isPlayable = $l.Substring(1) -match '^F\d+:? playable'; continue }
+    if ($isPlayable -and $l) { $playableEntries += $l }
+}
+$fNumbers = @($newEntries | Where-Object { $playableEntries -notcontains $_ } | ForEach-Object { if ($_ -match '^log/F(\d+)\.md$') { [int]$Matches[1] } } | Sort-Object -Unique)
 $fRange = if ($fNumbers.Count -gt 1) { "F$($fNumbers[0])-F$($fNumbers[-1])" } elseif ($fNumbers.Count) { "F$($fNumbers[0])" } else { 'none' }
 if (-not $NoPrototype -and (Get-RunningFrom (Join-Path $root 'target\release\grid-app.exe')).Count) { throw 'release: the prototype (target\release\grid-app.exe) is running; keep it open and release after it exits' }
 if (-not $NoPortable -and (Get-RunningFrom (Join-Path $portable 'target\release\grid-app.exe')).Count) { throw 'release: the portable copy is running; release after it exits' }
@@ -345,9 +357,11 @@ if (-not $NoTestOrder -and $apks.Count -and (Test-Path -LiteralPath $testOrderPa
             $text = [regex]::Replace($text, "($newBuild)$oldRev(\s*\(F\d+)" + [char]0x2013 + "F\d+", { param($m) "$($m.Groups[1].Value)$apkRev$($m.Groups[2].Value)$([char]0x2013)$(if ($fNumbers.Count) { "F$($fNumbers[-1])" } else { 'F?' })" })
             # Same bundled data as the previous APK: no data copy when installed over it either.
             $prevJson = Join-Path $apkDir "grid-$oldRev-bundled-PRIVATE-$($apks[0].Suffix)-debug.apk.json"
+            $sameData = $false
             if (Test-Path -LiteralPath $prevJson) {
                 $prevBundle = (Get-Content -LiteralPath $prevJson -Raw | ConvertFrom-Json).bundled_data.version
-                if ($prevBundle -eq $apks[0].Bundle) {
+                $sameData = $prevBundle -eq $apks[0].Bundle
+                if ($sameData) {
                     $builds = U '\u0441\u0431\u043e\u0440\u043a[\u0430\u0438]'
                     $text = [regex]::Replace($text, "(?i)($builds )((?:[0-9a-f]{12}, )*[0-9a-f]{12}\b)", { param($m) if ($m.Groups[2].Value -match "$oldRev|$apkRev") { $m.Value } else { "$($m.Groups[1].Value)$oldRev, $($m.Groups[2].Value)" } })
                     $script:bundleNote = "bundled data unchanged since $oldRev (version $($prevBundle.Substring(0, 12))); $oldRev added to the no-copy lists"
@@ -355,9 +369,31 @@ if (-not $NoTestOrder -and $apks.Count -and (Test-Path -LiteralPath $testOrderPa
                     $script:bundleNote = "bundled data CHANGED since $oldRev ($($prevBundle.Substring(0, 12)) -> $($apks[0].Bundle.Substring(0, 12))): installing over an older drift build copies the data again; fix the no-copy lists in the test order by hand"
                 }
             }
+            # "- New in <rev> (Fa-Fb):" above the previous sections, one TODO line per merged entry with
+            # its English title; the coordinator replaces them with the owner-facing summary.
+            $newIn = U 'Новое в '
+            $summary = 'feature summary not touched'
+            if ($text -notmatch "$newIn$apkRev\b") {
+                $range = if ($fNumbers.Count -gt 1) { "F$($fNumbers[0])$([char]0x2013)F$($fNumbers[-1])" } elseif ($fNumbers.Count) { "F$($fNumbers[0])" } else { '' }
+                $section = @("- $newIn$apkRev$(if ($range) { " ($range)" }):")
+                foreach ($n in $fNumbers) {
+                    $entry = Join-Path $root ('log\F{0:D4}.md' -f $n)
+                    $title = if (Test-Path -LiteralPath $entry) { [string](Get-Content -LiteralPath $entry -Encoding UTF8 -TotalCount 1) -replace '^F\d+\s+', '' -replace '\s*\(\d{4}-\d\d-\d\d,[^()]*\)\.?\s*$', '' } else { '' }
+                    $section += "  - TODO F${n}: $title"
+                }
+                if ($sameData) { $section += '  ' + (U 'Данные внутри APK те же, копирования не будет.') }
+                $nl = if ($text -match "`r`n") { "`r`n" } else { "`n" }
+                $first = [regex]::Match($text, "(?m)^- $newIn")
+                if ($first.Success) {
+                    $text = $text.Insert($first.Index, ($section -join $nl) + $nl)
+                    $summary = "section '$newIn$apkRev' drafted with $($fNumbers.Count) TODO line(s): replace them with the summary"
+                } else {
+                    $summary = "no earlier '$newIn' section found; feature summary not touched"
+                }
+            }
             $enc = New-Object Text.UTF8Encoding($bom)
             [IO.File]::WriteAllText($testOrderPath, $text, $enc)
-            $script:testOrderLine = "previous $oldRev -> $apkRev ($($changes -join ', ')); feature summary not touched"
+            $script:testOrderLine = "previous $oldRev -> $apkRev ($($changes -join ', ')); $summary"
         } else {
             $script:testOrderLine = 'no previous bundled APK name found; not changed'
         }

@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F749](log/F0749.md) | 2026-11-05 | Release script drafts the APK test order's New-in section; F range from added log files |
 | [F748](log/F0748.md) | 2026-11-05 | Owner's prototype unmuted again; build gate never mutes the main checkout exe |
 | [F747](log/F0747.md) | 2026-11-05 | Row 122: tree shadows turned with the camera; sun-facing shadow twins |
 | [F746](log/F0746.md) | 2026-11-05 | Playable b6eaecaefa82 for the PC and both APKs (shadow kept through the whole LOD fade) |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F692](log/F0692.md) | 2026-11-02 | Captured first-corner state injected into the port: contact and tyres reproduce the original |
 | [F691](log/F0691.md) | 2026-11-02 | Continuous collision against route boxes and round primitives (AE34B0): the step-size question answered |
 | [F690](log/F0690.md) | 2026-11-02 | Start-line matrix after F681: Yokohama Docks fields pass the drift-flag bases; Shibuya 0 losses predate F680 |
-| [F689](log/F0689.md) | 2026-11-02 | Runtime float check of broken prop pieces; ornament and LOD gaps are the original's data (row 102) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
