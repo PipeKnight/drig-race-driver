@@ -10,7 +10,9 @@
 //! so the `present_done` times follow the GPU's pace.
 //!
 //! `GRID_AUDIO=off` opens no audio device in a window (silent research runs;
-//! offscreen captures never open one).
+//! offscreen captures never open one). `[diagnostics] window_shots = S,S,...`
+//! (`GRID_WINDOW_SHOTS`) saves what the window shows, the HUD included, at
+//! those seconds of real time to `<data dir>/window-shot-S.png`.
 use bevy::prelude::*;
 use bevy::render::{
     extract_resource::{ExtractResource, ExtractResourcePlugin},
@@ -40,6 +42,9 @@ pub(crate) struct Drawn {
 }
 
 pub(crate) fn install(app: &mut App) {
+    if !crate::settings::diagnostics().window_shots.is_empty() {
+        app.add_systems(Last, window_shots);
+    }
     if !trace_on() {
         return;
     }
@@ -96,5 +101,17 @@ pub(crate) fn drawn(drawn: Option<&mut Drawn>, frame: Frame) {
 fn presented(drawn: Option<Res<Drawn>>) {
     if let Some(drawn) = drawn {
         println!("present_done frame={} t_ms={:.3}", drawn.frame, now_ms());
+    }
+}
+
+fn window_shots(mut commands: Commands, time: Res<Time<Real>>, mut next: Local<usize>) {
+    use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+    while let Some(&at) = crate::settings::diagnostics().window_shots.get(*next)
+        && time.elapsed_secs() >= at
+    {
+        let path = crate::settings::data_dir().join(format!("window-shot-{at:05.1}.png"));
+        println!("window_shot at_s={at} path={}", path.display());
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        *next += 1;
     }
 }

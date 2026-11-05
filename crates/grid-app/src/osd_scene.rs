@@ -412,6 +412,8 @@ pub struct Osd {
     /// Added to an animated node's translation (authored layout moves).
     offsets: HashMap<Entity, Vec3>,
     image: Handle<Image>,
+    /// The UI material that shows `image` over the 3D view.
+    display: Handle<OsdDisplay>,
     camera: Entity,
     size: UVec2,
 }
@@ -620,6 +622,11 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         fonts,
         cubes: (images.get("env_soft.dds").cloned().unwrap_or_default(), fallback_cube.clone()),
     });
+    if let Some(render) = app.get_sub_app_mut(RenderApp) {
+        render
+            .add_systems(ExtractSchedule, extract_display_ids)
+            .add_systems(Render, check_display.in_set(RenderSystems::Queue));
+    }
     app.insert_resource(Installed)
         .init_resource::<crate::mesh_stream::MeshStream>()
         .add_systems(Update, spawn)
@@ -648,7 +655,55 @@ fn drop_sun_cascades(osd: Query<Entity, With<OsdCamera>>, mut lights: Query<&mut
 }
 
 use bevy::light::{Cascades, SimulationLightSystems};
+use bevy::render::render_asset::RenderAssets;
+use bevy::render::render_resource::OwnedBindingResource;
+use bevy::render::texture::GpuImage;
+use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy::transform::TransformSystems;
+use bevy::ui_render::PreparedUiMaterial;
+
+/// The OSD image and its display material, in the render world.
+#[derive(Resource, Clone, Copy)]
+struct DisplayIds {
+    image: AssetId<Image>,
+    display: AssetId<OsdDisplay>,
+}
+
+fn extract_display_ids(mut commands: Commands, osd: Extract<Option<Res<Osd>>>, mut done: Local<bool>) {
+    if let (false, Some(osd)) = (*done, osd.as_ref()) {
+        commands.insert_resource(DisplayIds { image: osd.image.id(), display: osd.display.id() });
+        *done = true;
+    }
+}
+
+/// Prints `osd_display bound=B size=WxH` when it changes: whether the display
+/// material binds the OSD image's current GPU texture (false: the screen
+/// shows a stale OSD, F737) and that texture's size. Interactive window
+/// checks (tools/hud_window_check.py) read it after a resize.
+fn check_display(
+    ids: Option<Res<DisplayIds>>,
+    images: Res<RenderAssets<GpuImage>>,
+    materials: Res<RenderAssets<PreparedUiMaterial<OsdDisplay>>>,
+    mut last: Local<Option<(bool, UVec2)>>,
+) {
+    let Some(ids) = ids else {
+        return;
+    };
+    let (Some(gpu), Some(material)) = (images.get(ids.image), materials.get(ids.display)) else {
+        return;
+    };
+    let view = gpu.texture_view.id();
+    let bound = material
+        .bindings
+        .0
+        .iter()
+        .any(|(_, r)| matches!(r, OwnedBindingResource::TextureView(_, v) if v.id() == view));
+    let size = UVec2::new(gpu.texture_descriptor.size.width, gpu.texture_descriptor.size.height);
+    if *last != Some((bound, size)) {
+        println!("osd_display bound={bound} size={}x{}", size.x, size.y);
+        *last = Some((bound, size));
+    }
+}
 
 #[derive(Component)]
 pub struct OsdCamera;
@@ -667,6 +722,7 @@ fn spawn(
     };
     commands.remove_resource::<Loaded>();
     let image = images.add(Image::new_target_texture(16, 16, TextureFormat::Rgba8UnormSrgb, None));
+    let display = displays.add(OsdDisplay { image: image.clone() });
     let c = &loaded.camera;
     let camera = commands
         .spawn((
@@ -698,7 +754,7 @@ fn spawn(
             height: percent(100.),
             ..default()
         },
-        MaterialNode(displays.add(OsdDisplay { image: image.clone() })),
+        MaterialNode(display.clone()),
         GlobalZIndex(-1000),
         Pickable::IGNORE,
         UiTargetCamera(viewer),
@@ -805,6 +861,7 @@ fn spawn(
         shown: HashMap::new(),
         offsets: HashMap::new(),
         image,
+        display,
         camera,
         size: UVec2::ZERO,
     });
@@ -817,6 +874,7 @@ fn resize(
     viewer: Query<&Camera, With<crate::ViewerCamera>>,
     ui: Query<&Camera, With<IsDefaultUiCamera>>,
     mut images: ResMut<Assets<Image>>,
+    mut displays: ResMut<Assets<OsdDisplay>>,
     mut projection: Query<&mut Projection, With<OsdCamera>>,
 ) {
     let (Some(mut osd), Some(camera)) = (osd, ui.iter().next().or(viewer.iter().next())) else {
@@ -825,18 +883,35 @@ fn resize(
     let Some(size) = camera.physical_target_size().filter(|s| s.x > 0 && s.y > 0) else {
         return;
     };
-    if size == osd.size {
+    if !set_size(&mut osd, size, &mut images, &mut displays) {
         return;
-    }
-    osd.size = size;
-    if let Some(mut image) = images.get_mut(&osd.image) {
-        image.resize(Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 });
     }
     if let Ok(mut p) = projection.get_mut(osd.camera)
         && let Projection::Perspective(p) = p.as_mut()
     {
         p.aspect_ratio = size.x as f32 / size.y as f32;
     }
+}
+
+/// Resizes the OSD image; false when it already has `size`. The resized
+/// image is a new GPU texture under the same handle, but a UI material's
+/// bind group is rebuilt only when the material asset changes (Bevy 0.19
+/// `PreparedUiMaterial` tracks no image dependencies): without touching the
+/// display material the screen keeps showing the old texture, the OSD as it
+/// was at the resize (F737: a window maximised mid-race froze the dial,
+/// timers and minimap).
+fn set_size(osd: &mut Osd, size: UVec2, images: &mut Assets<Image>, displays: &mut Assets<OsdDisplay>) -> bool {
+    if size == osd.size {
+        return false;
+    }
+    osd.size = size;
+    if let Some(mut image) = images.get_mut(&osd.image) {
+        image.resize(Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 });
+    }
+    if let Some(mut display) = displays.get_mut(&osd.display) {
+        display.image = osd.image.clone();
+    }
+    true
 }
 
 /// Advances the animations and writes node transforms and material values.
@@ -993,6 +1068,64 @@ mod tests {
         assert!((c.positions[0][0] - (-2.5 + 0.5)).abs() < 1e-4);
         // An empty text is a degenerate triangle.
         assert_eq!(layout(&f, "", 0., 1., 0., 1.).indices, [0, 1, 2]);
+    }
+
+    /// A window resized mid-race (F737): the display material must change with
+    /// the image, so the UI rebinds the resized texture instead of showing the
+    /// OSD frozen as it was at the resize.
+    #[test]
+    fn a_resize_rebinds_the_display_material_to_the_resized_image() {
+        #[derive(Resource, Default)]
+        struct Seen(Vec<AssetEvent<OsdDisplay>>);
+        fn record(mut seen: ResMut<Seen>, mut events: MessageReader<AssetEvent<OsdDisplay>>) {
+            seen.0.extend(events.read().cloned());
+        }
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<OsdDisplay>()
+            .init_resource::<Seen>()
+            .add_systems(Last, record);
+        let world = app.world_mut();
+        let image = world.resource_mut::<Assets<Image>>().add(Image::new_target_texture(16, 16, TextureFormat::Rgba8UnormSrgb, None));
+        let display = world.resource_mut::<Assets<OsdDisplay>>().add(OsdDisplay { image: image.clone() });
+        let camera = world.spawn_empty().id();
+        let mut osd = Osd {
+            entities: HashMap::new(),
+            tree: Vec::new(),
+            cubes: (Handle::default(), Handle::default()),
+            anims: Vec::new(),
+            anim_index: HashMap::new(),
+            materials: Vec::new(),
+            texts: HashMap::new(),
+            fonts: Vec::new(),
+            shown: HashMap::new(),
+            offsets: HashMap::new(),
+            image: image.clone(),
+            display: display.clone(),
+            camera,
+            size: UVec2::ZERO,
+        };
+        let mut resize = |app: &mut App, size: UVec2| {
+            let world = app.world_mut();
+            world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
+                set_size(&mut osd, size, &mut images, &mut world.resource_mut::<Assets<OsdDisplay>>())
+            })
+        };
+        // The first size (spawn), then frames at that size.
+        assert!(resize(&mut app, UVec2::new(1280, 800)));
+        app.update();
+        app.world_mut().resource_mut::<Seen>().0.clear();
+        assert!(!resize(&mut app, UVec2::new(1280, 800)));
+        app.update();
+        assert!(app.world().resource::<Seen>().0.is_empty(), "an unchanged size leaves the material alone");
+        // Maximised mid-race.
+        assert!(resize(&mut app, UVec2::new(2560, 1369)));
+        app.update();
+        let modified = AssetEvent::Modified { id: display.id() };
+        assert!(app.world().resource::<Seen>().0.contains(&modified), "{:?}", app.world().resource::<Seen>().0);
+        let size = app.world().resource::<Assets<Image>>().get(&image).unwrap().size();
+        assert_eq!(size, UVec2::new(2560, 1369));
     }
 
     #[test]

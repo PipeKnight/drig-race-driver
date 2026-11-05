@@ -69,6 +69,7 @@ Grammar:
 | | `camera_fps` | frames per second of race time: the in-race views step by the original's per-frame rules at this rate (head-cam springs, look smoothing, follow damp, spin hold), for comparisons with the original at 60 or 165 fps; unset, one step per 16 ms tick (docs/CAMERA_VIEWS.md §3 "Camera clock") | `GRID_CAMERA_FPS=F` |
 | | `tick_interpolation` | interactive window only: `on` (default) draws the cars, their parts and the camera between the last two 16 ms ticks; `off` draws the last tick, for comparisons (docs/FRAME_STEPPING.md §6) | `GRID_TICK_INTERPOLATION=0` |
 | | `present_trace` | interactive window only: one `present_frame` line per drawn frame and one `present_done` line per presented frame (frame time, tick, drawn simulation time, view, car and camera), for frame-pacing checks; works on a phone through its settings file (docs/FRAME_STEPPING.md §6) | `GRID_PRESENT_TRACE=1` |
+| | `window_shots` | interactive window only: `S,S,...` seconds of real time after loading at which the window is saved, HUD included, as `<data dir>/window-shot-S.png`; for checks of what the screen shows (tools/hud_window_check.py, docs/RACE_HUD.md §6.3) | `GRID_WINDOW_SHOTS=S,S,...` |
 
 Notes:
 

@@ -249,6 +249,14 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   lowest UI node (premultiplied). The pause menu, post-race screens, front end and touch zones stay
   above it, and the 3D post-processing does not touch it (AUTHORED composition). Nodes become Bevy
   entities in the saved hierarchy with the saved transforms; animations are sampled every frame.
+- Window resize (F737): the image follows the UI camera's size, so a resize (maximising the window,
+  a phone rotation) replaces its GPU texture under the same handle. A Bevy 0.19 UI material builds
+  its bind group only when the material asset changes (`PreparedUiMaterial` tracks no image
+  dependencies), so `set_size` also touches the display material. Before that, the screen kept the
+  old texture after a resize: the whole OSD (dial, timers, position, minimap) stood still as it was
+  at the resize while the race went on (owner playtest of ee26c2ebc427, window maximised to
+  2560 × 1369 mid-race). The render world prints `osd_display bound=B size=WxH` when the binding or
+  the texture size changes (`check_display`); `bound=false` is a stale OSD on screen.
 - Shaders (`osd.wgsl`) [I: the effect files were not decoded]:
   - flat image: texture × colour, alpha × `alphaScaler`;
   - special image: the atlas scrolled by `scrollX/Y` plus its glow map × `glowScaler`;
@@ -292,7 +300,15 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   `1.3` layout value -134.6), the cubemaps, `sceneconfig.xml` fonts and all five fonts with metrics
   and kerning.
 - `osd_scene::tests`: metric layout (baseline, kerning, alignment); asset: `0:05.600` in
-  `swiss_time` sits on its baseline inside `race_time`'s box.
+  `swiss_time` sits on its baseline inside `race_time`'s box;
+  `a_resize_rebinds_the_display_material_to_the_resized_image` (a new size modifies the display
+  material, an unchanged size does not).
+- Interactive window (F737): `py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR` starts a silent
+  autopilot race in a 1280 × 800 window, resizes the game's own window mid-race (no focus change, no
+  keys) and passes when the last `osd_display` line has the new size and `bound=true`;
+  `--expect-stale` shows that it catches the defect. It also saves window shots before and after the
+  resize through `GRID_WINDOW_SHOTS=S,S,...` (`frame_pacing.rs`, `<data dir>/window-shot-S.png`, game
+  real time after loading; interactive window only).
 - `race_osd::tests`: aspect range names (`2.2` for 20:9), red-zone angle, speed digits.
 - Offscreen renders (Donington, 11 AI, autopilot, tick 1500): `r3-16x9.png` 1920 × 1080,
   `r4-20x9-touch.png` 2400 × 1080 with touch zones; inspected: texts, dial, red zone, minimap and

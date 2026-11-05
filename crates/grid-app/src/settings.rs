@@ -105,6 +105,10 @@ pub struct Diagnostics {
     /// Interactive window: one `present_frame` / `present_done` line per
     /// frame (frame_pacing.rs, docs/FRAME_STEPPING.md §6).
     pub present_trace: bool,
+    /// Interactive window: seconds of real time (after loading) at which to
+    /// save what the window shows, the HUD included, as
+    /// `<data dir>/window-shot-S.png` (frame_pacing.rs; F737).
+    pub window_shots: Vec<f32>,
 }
 
 impl Default for Diagnostics {
@@ -129,6 +133,7 @@ impl Default for Diagnostics {
             camera_fps: None,
             tick_interpolation: true,
             present_trace: false,
+            window_shots: Vec::new(),
         }
     }
 }
@@ -160,6 +165,7 @@ impl Diagnostics {
             camera_fps: text("GRID_CAMERA_FPS").and_then(|v| v.parse().ok()),
             tick_interpolation: text("GRID_TICK_INTERPOLATION").is_none_or(|v| v != "0"),
             present_trace: text("GRID_PRESENT_TRACE").is_some_and(|v| v == "1"),
+            window_shots: text("GRID_WINDOW_SHOTS").map_or_else(Vec::new, |v| seconds_list(&v).unwrap_or_default()),
         }
     }
 
@@ -195,10 +201,19 @@ impl Diagnostics {
             "camera_fps" => self.camera_fps = Some(value.parse().map_err(|_| number(key))?),
             "tick_interpolation" => self.tick_interpolation = on(key, value)?,
             "present_trace" => self.present_trace = on(key, value)?,
+            "window_shots" => self.window_shots = seconds_list(value).ok_or_else(|| number(key))?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
     }
+}
+
+/// `S,S,...` seconds (empty or `off`: none).
+fn seconds_list(value: &str) -> Option<Vec<f32>> {
+    if value.is_empty() || value == "off" {
+        return Some(Vec::new());
+    }
+    value.split(',').map(|s| s.trim().parse().ok()).collect()
 }
 
 static DIAGNOSTICS: OnceLock<Diagnostics> = OnceLock::new();
