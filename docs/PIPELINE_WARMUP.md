@@ -85,10 +85,33 @@ Owner retest after F726 (prototype e66e1c24963c): "отдельные объек
   warm-up only the skinned prop pieces stay unculled.
 - After [V]: all casters are in the cascades during the warm-up, with a shadow pipeline (Washington
   4910/4910, Spa 6922, Shibuya 2382, Le Mans 14713), and no shadow variant is built after it on the
-  four tracks. Left: the first tyre smoke and its reduced alpha-blend pass, 1 frame each.
+  four tracks. Left: the first tyre smoke and its reduced alpha-blend pass, 1 frame each (fixed in
+  §2.2).
 - Car levels behind `hidden_layer()` built no pipeline after the warm-up in these runs
   (11 opponents each).
 - Test: `shadow_cull::tests::unculled_casters_stay_in_every_cascade`.
+
+### 2.2 The first tyre smoke's pipelines
+
+- [V] F740 traces, Washington and Spa: the 3 pipelines left after the warm-up were all the reduced
+  smoke buffer's (F645, `smoke_reduced`): `tyre smoke depth reduction`, `tyre smoke compose` and
+  `pbr_alpha_blend_mesh_pipeline reduced`, made on the first frame with smoke sprites (render frame
+  685 and 666), mid-race.
+- Cause: the source smoke pipelines were already warm. The five smoke groups are spawned at the
+  start with an empty mesh, are visible and unculled, so the full-size replay draws them from the
+  first frame. But the automatic replay (`smoke_boundary/live.rs`, every window and image view)
+  queued the reduced buffer's pipelines only on a frame with sprites.
+- Fix: `smoke_reduced::queue` queues, once each, the reduction (per multisampled depth), the
+  composition (per view format and sample count) and the reduced variant of every source pipeline
+  the replay owns. The automatic replay calls it on every frame, with or without sprites, so they
+  compile while the cover is up. Shared for all cars, tracks and smoke variants: the full-size
+  sources come from the empty groups, the reduced ones from those sources, and a resize changes
+  only the target size, which is in no pipeline key (F742 rebinds a material, not a pipeline).
+  Sprites mode (`--smoke-order sprites`) is research-only and not covered.
+- Test: `smoke_reduced::tests::pipelines_are_queued_once_before_the_first_smoke` (fake queue: all
+  three queued without sprites, nothing new on a repeat or a resize, an uncovered source keeps the
+  full-size replay).
+- After [V], F751: Washington and Spa build no pipeline after the warm-up (before: 3 each), with smoke on screen from the opponents' launch wheelspin.
 
 ## 3. Evidence
 

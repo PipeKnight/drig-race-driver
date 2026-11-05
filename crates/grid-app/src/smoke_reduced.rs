@@ -7,7 +7,10 @@
 //! and one full-size pass composes `smoke + transmittance * scene` with a
 //! depth-weighted upsample at edges. Pipelines still compiling, a source
 //! pipeline this does not cover or a scene depth that cannot be sampled keep
-//! the full-size replay for that frame.
+//! the full-size replay for that frame. The pipelines are queued on every
+//! automatic replay frame, with or without sprites, so they compile at the
+//! start behind the warm-up cover (`pipeline_warmup`) and the first tyre
+//! smoke of a race builds none (docs/PIPELINE_WARMUP.md §2.2).
 use crate::smoke_boundary::attachments::Capability;
 use crate::tyre_smoke::{SmokeDepth, SmokeMaterial};
 use bevy::{
@@ -176,7 +179,59 @@ fn resize_depth(
 }
 
 fn init(mut commands: Commands, fullscreen: Res<FullscreenShader>) {
-    let layouts = |multisampled: bool| {
+    commands.insert_resource(Pipelines::new(fullscreen.to_vertex_state()));
+}
+
+/// Where pipelines are queued: the render world's cache, or a stand-in in tests.
+pub(crate) trait Queue {
+    fn queue(&self, descriptor: RenderPipelineDescriptor) -> CachedRenderPipelineId;
+    fn descriptor(&self, id: CachedRenderPipelineId) -> RenderPipelineDescriptor;
+}
+
+impl Queue for PipelineCache {
+    fn queue(&self, descriptor: RenderPipelineDescriptor) -> CachedRenderPipelineId {
+        self.queue_render_pipeline(descriptor)
+    }
+    fn descriptor(&self, id: CachedRenderPipelineId) -> RenderPipelineDescriptor {
+        self.get_render_pipeline_descriptor(id).clone()
+    }
+}
+
+/// A view's reduction and composition pipelines and the reduced variant of
+/// each source.
+type Queued = (
+    CachedRenderPipelineId,
+    CachedRenderPipelineId,
+    Vec<(CachedRenderPipelineId, CachedRenderPipelineId)>,
+);
+
+/// Queues (once each) the reduction and composition pipelines of a view with
+/// `capability` and the reduced variant of each source smoke pipeline; None
+/// when the buffer was refused or a source is not covered. The automatic
+/// replay calls this every frame, also without sprites: the empty smoke
+/// groups are replayed from the start, so these compile behind the warm-up
+/// cover instead of on the first smoke of a race (1 frame each in F740).
+pub(crate) fn queue(
+    pipelines: &mut Pipelines,
+    cache: &impl Queue,
+    capability: Capability,
+    sources: impl IntoIterator<Item = CachedRenderPipelineId>,
+) -> Option<Queued> {
+    if pipelines.refused {
+        return None;
+    }
+    let reduce = pipelines.reduce(cache, capability.samples > 1);
+    let compose = pipelines.compose(cache, capability.format, capability.samples);
+    let mut smoke = Vec::new();
+    for source in sources {
+        smoke.push((source, pipelines.smoke(cache, source)?));
+    }
+    Some((reduce, compose, smoke))
+}
+
+impl Pipelines {
+    fn new(vertex: VertexState) -> Self {
+        let layouts = |multisampled: bool| {
         let scene = if multisampled {
             texture_depth_2d_multisampled()
         } else {
@@ -200,19 +255,18 @@ fn init(mut commands: Commands, fullscreen: Res<FullscreenShader>) {
             ),
         )
     };
-    let (single, multi) = (layouts(false), layouts(true));
-    commands.insert_resource(Pipelines {
-        vertex: fullscreen.to_vertex_state(),
-        reduce_layouts: [single.0, multi.0],
-        compose_layouts: [single.1, multi.1],
-        reduce: HashMap::new(),
-        compose: HashMap::new(),
-        smoke: HashMap::new(),
-        refused: false,
-    });
-}
+        let (single, multi) = (layouts(false), layouts(true));
+        Pipelines {
+            vertex,
+            reduce_layouts: [single.0, multi.0],
+            compose_layouts: [single.1, multi.1],
+            reduce: HashMap::new(),
+            compose: HashMap::new(),
+            smoke: HashMap::new(),
+            refused: false,
+        }
+    }
 
-impl Pipelines {
     fn fullscreen(
         &self,
         label: &'static str,
@@ -238,7 +292,7 @@ impl Pipelines {
         }
     }
 
-    fn reduce(&mut self, cache: &PipelineCache, multisampled: bool) -> CachedRenderPipelineId {
+    fn reduce(&mut self, cache: &impl Queue, multisampled: bool) -> CachedRenderPipelineId {
         if let Some(id) = self.reduce.get(&multisampled) {
             return *id;
         }
@@ -252,12 +306,12 @@ impl Pipelines {
             stencil: default(),
             bias: default(),
         });
-        let id = cache.queue_render_pipeline(descriptor);
+        let id = cache.queue(descriptor);
         self.reduce.insert(multisampled, id);
         id
     }
 
-    fn compose(&mut self, cache: &PipelineCache, format: TextureFormat, samples: u32) -> CachedRenderPipelineId {
+    fn compose(&mut self, cache: &impl Queue, format: TextureFormat, samples: u32) -> CachedRenderPipelineId {
         if let Some(id) = self.compose.get(&(format, samples)) {
             return *id;
         }
@@ -272,17 +326,17 @@ impl Pipelines {
             })];
         }
         descriptor.multisample.count = samples;
-        let id = cache.queue_render_pipeline(descriptor);
+        let id = cache.queue(descriptor);
         self.compose.insert((format, samples), id);
         id
     }
 
     /// The reduced variant of a source smoke pipeline, queued once.
-    fn smoke(&mut self, cache: &PipelineCache, source: CachedRenderPipelineId) -> Option<CachedRenderPipelineId> {
-        *self.smoke.entry(source).or_insert_with(|| {
-            reduced_smoke(cache.get_render_pipeline_descriptor(source))
-                .map(|descriptor| cache.queue_render_pipeline(descriptor))
-        })
+    fn smoke(&mut self, cache: &impl Queue, source: CachedRenderPipelineId) -> Option<CachedRenderPipelineId> {
+        *self
+            .smoke
+            .entry(source)
+            .or_insert_with(|| reduced_smoke(&cache.descriptor(source)).map(|descriptor| cache.queue(descriptor)))
     }
 }
 
@@ -322,7 +376,8 @@ pub(crate) fn prepare(
     capability: Capability,
     sources: impl IntoIterator<Item = CachedRenderPipelineId>,
 ) -> Option<Frame> {
-    if pipelines.refused || !depth.texture.usage().contains(TextureUsages::TEXTURE_BINDING) {
+    let (reduce, compose, smoke) = queue(pipelines, cache, capability, sources)?;
+    if !depth.texture.usage().contains(TextureUsages::TEXTURE_BINDING) {
         return None;
     }
     let size = Extent3d {
@@ -333,12 +388,6 @@ pub(crate) fn prepare(
     // The image follows a resize one frame later.
     let reduced_depth = reduced_depth.filter(|i| i.texture.size() == size)?.texture_view.clone();
     let multisampled = capability.samples > 1;
-    let reduce = pipelines.reduce(cache, multisampled);
-    let compose = pipelines.compose(cache, capability.format, capability.samples);
-    let mut smoke = Vec::new();
-    for source in sources {
-        smoke.push((source, pipelines.smoke(cache, source)?));
-    }
     for id in [reduce, compose].into_iter().chain(smoke.iter().map(|s| s.1)) {
         match cache.get_render_pipeline_state(id) {
             CachedPipelineState::Ok(_) => {}
@@ -565,6 +614,60 @@ mod tests {
     fn other_blending_keeps_the_full_size_replay() {
         assert!(reduced_smoke(&source(None)).is_none());
         assert!(reduced_smoke(&source(Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING))).is_none());
+    }
+
+    /// The first smoke builds no pipeline: without sprites the replay already
+    /// queues the reduction, the composition (per view format and samples)
+    /// and the reduced variant of each covered source, once each; a resize
+    /// keeps every key.
+    #[test]
+    fn pipelines_are_queued_once_before_the_first_smoke() {
+        #[derive(Default)]
+        struct Fake(std::cell::RefCell<Vec<RenderPipelineDescriptor>>);
+        impl Queue for Fake {
+            fn queue(&self, descriptor: RenderPipelineDescriptor) -> CachedRenderPipelineId {
+                let mut queued = self.0.borrow_mut();
+                queued.push(descriptor);
+                CachedRenderPipelineId::new(queued.len() - 1)
+            }
+            fn descriptor(&self, id: CachedRenderPipelineId) -> RenderPipelineDescriptor {
+                self.0.borrow()[id.id()].clone()
+            }
+        }
+        let cache = Fake::default();
+        let smoke = cache.queue(source(Some(BlendState::ALPHA_BLENDING)));
+        let mut pipelines = Pipelines::new(VertexState::default());
+        let view = Capability {
+            format: TextureFormat::Rgba16Float,
+            samples: 4,
+            size: UVec2::new(2560, 1369),
+            hdr: true,
+        };
+        let (reduce, compose, reduced) = queue(&mut pipelines, &cache, view, [smoke, smoke]).unwrap();
+        assert_eq!(cache.0.borrow().len(), 4, "source, reduction, composition, one variant");
+        let variant = reduced[0].1;
+        assert_eq!(reduced, vec![(smoke, variant); 2]);
+        {
+            let queued = cache.0.borrow();
+            assert_eq!(queued[reduce.id()].label.as_deref(), Some("tyre smoke depth reduction"));
+            assert_eq!(queued[compose.id()].multisample.count, 4);
+            assert_eq!(queued[variant.id()].multisample.count, 1);
+            let defs = &queued[variant.id()].fragment.as_ref().unwrap().shader_defs;
+            assert!(defs.contains(&"TYRE_SMOKE_REDUCED".into()));
+        }
+        let resized = Capability {
+            size: UVec2::new(1280, 720),
+            ..view
+        };
+        assert_eq!(
+            queue(&mut pipelines, &cache, resized, [smoke]),
+            Some((reduce, compose, vec![(smoke, variant)]))
+        );
+        assert_eq!(cache.0.borrow().len(), 4);
+        // A source this does not cover keeps the full-size replay.
+        let opaque = cache.queue(source(None));
+        assert_eq!(queue(&mut pipelines, &cache, view, [smoke, opaque]), None);
+        assert_eq!(cache.0.borrow().len(), 5);
     }
 
     #[test]

@@ -871,20 +871,28 @@ impl Reduction<'_> {
         frame: &core::Frame,
         sprites: usize,
     ) -> Option<crate::smoke_reduced::Frame> {
+        if kind != LiveKind::Automatic {
+            return None;
+        }
+        let (pipelines, capability) = (self.pipelines.as_deref_mut()?, capability?);
+        let sources = || frame.owned.items.values().map(|i| i.pipeline);
+        // Queued before the first smoke: the empty groups are replayed from
+        // the start, so the pipelines compile behind the warm-up cover.
+        crate::smoke_reduced::queue(pipelines, cache, capability, sources());
         // With no sprite the full-size replay draws nothing; the reduced
         // buffer would still reduce depth and compose.
-        if kind != LiveKind::Automatic || sprites == 0 {
+        if sprites == 0 {
             return None;
         }
         crate::smoke_reduced::prepare(
-            self.pipelines.as_deref_mut()?,
+            pipelines,
             cache,
             &self.device,
             &mut self.textures,
             depth?,
             self.images.get(&self.depth.as_ref()?.0),
-            capability?,
-            frame.owned.items.values().map(|i| i.pipeline),
+            capability,
+            sources(),
         )
     }
 }
