@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F732](F0732.md) | 2026-11-05 | Owner playtest of ee26c2ebc427: judder gone; HUD regression sent; barrier pass-through recorded (row 117) |
 | [F731](F0731.md) | 2026-11-04 | Playable ee26c2ebc427 for the PC and both APKs (smooth motion between ticks) |
 | [F730](F0730.md) | 2026-11-04 | Row 116 follow-up: judder at 2K is the frame rate near 62.5 Hz; debris, map and camera hold drawn between ticks; pacing matrix |
 | [F729](F0729.md) | 2026-11-04 | Cars and camera drawn between fixed ticks: no motion judder above 62.5 FPS |
