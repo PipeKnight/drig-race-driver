@@ -132,19 +132,44 @@ ship `trees.pssg` and a `trees.bin` per route. The phone draws it too (its only 
 
 ### Selection [O except where marked]
 
-The tree pass 0x97A160 computes the ornament FOV factor `k` and calls 0x972500 per instance, which
-takes `v` from the ornament metric 0x965790 with `far = lod_distance_02` (type +0x4C) and draws one
-level while `+0x94 < v < +0xA0` (fading in from +0x94 to +0x98, out from +0x9C to +0xA0) and the
-other from `+0xA4` (fading in to +0xA8); a species without the second geometry (+0xF0 == 0) draws
-one level fading in at +0x94. Which code fills +0x94..+0xC0 is not traced. [I] The full tree is
-level 0 inside `lod_distance_00` and the card level 1 out to `lod_distance_02` (the buffer maxima
-fit: Washington `large_tree` keeps 12 full trees and 150 cards).
+The tree pass 0x97A160 computes the ornament FOV factor `k` and calls 0x972500 per instance
+(made by 0x963C30 in 0x971A20: box at +0x20, type at +0xA4), which takes `v` from the ornament
+metric 0x965790 with `far = lod_distance_02` (type +0x4C). The type is built by 0x981D40: it copies
+the species record (0x48 bytes) to type +0x14, so d0, d1, d2 sit at +0x44, +0x48, +0x4C, clamps
+them to a caller limit, applies `lodQuality` "trees" (0 zeroes d1 and d0, 1 zeroes d0, 2 keeps both) and
+calls 0x986550 on them. 0x986550 writes, with `v(x) = 1 - x / d2` and `D = d1 - d0`:
+
+| field | v at | role in 0x972500 |
+|---|---|---|
+| +0x94 | d2 (0) | card fades in from here |
+| +0x98 | d1 + 0.9 (d2 - d1) | card fully drawn |
+| +0x9C | d0 + 0.95 D | card fades out from here |
+| +0xA0 | d0 + 0.6 D | card gone |
+| +0xA4 | d1 | full tree fades in from here |
+| +0xA8 | d0 + 0.75 D | full tree fully drawn |
+| +0xAC, +0xB0 | d0, 0.75 d0 | a ramp handed to the full-tree draw with its buffer (0 inside d0, 1 beyond) |
+| +0xB4..+0xC0 | | reciprocals of the four widths |
+
+So the card (`+0xF0`, 0x9606D0) and the full tree (`+0xF4`, 0x970BE0 -> 0x962250) are both drawn
+between `d0 + 0.6 D` and d1, cross-fading by distance; the fade goes into each instance's colour.
+Washington `large_tree` (30 / 150 / 940 m): full tree from 150 m (fully in at 120 m), card out
+between 144 and 102 m. A species without a card draws its one geometry fading in from d2. The
+full-tree draw appends into buffer 0 (inside d0) or 1 (d0..d1) only while the buffer holds fewer
+than `instance_buffer_max_00/01`; extra instances are not drawn [O, 0x962250; order = the pass's
+visible list, not sorted]. The ×6 / 2000 m branch of 0x9637C0 and the "all distances = limit"
+branch of 0x981D40 depend on manager +0x1EC, which only an initialiser stores (0x97E390) [I: off].
+All routes' distances: `local/r52/tree_attributes.tsv` (d0 10-30 m, d1 90-200 m for carded species).
 
 ### Port (`source_trees.rs`, `ornament_lod.rs`)
 
 - Trees join the ornament levels: one type per placed species with the route's distances, an
   instance per placement (the species bounds placed), `_x0` draws at level 0 and `_x2` cards at
-  level 1. Each switch, and each appearance at `lod_distance_02`, fades over 0.4 s with the
+  level 1. The card replaces the full tree at `d0 + 5/6 (d1 - d0)`, where the original's two
+  fade weights are equal (`ornament_lod::impostor_switch`; Spa 10 / 150 m: 127 m, Washington
+  `large_tree`: 130 m) [the original draws both across 102-150 m; the port's levels are
+  exclusive]. Until F735 (row 114) the switch was at d0 (Spa 10 m), where the card's low-resolution
+  atlas showed at close range; `GRID_TREE_SWITCH=d0` keeps that for review. The buffer caps are not
+  ported (all trees are drawn). Each switch, and each appearance at `lod_distance_02`, fades over 0.4 s with the
   ornament dither (F703, F713). Shadows follow the ornament rule (one level casts inside D,
   through the fading proxy at D), but a tree casts through its full tree, not its card
   (`Type::impostor`): a card turned to the eye throws the wrong shape from the sun and darkened

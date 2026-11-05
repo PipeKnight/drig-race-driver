@@ -405,12 +405,29 @@ pub fn metric(min: Vec3, max: Vec3, eye: Vec3, k: f32, far: f32) -> f32 {
     }
 }
 
+/// Where a tree's card replaces its full tree, metres. The tree pass
+/// (0x972500, thresholds from 0x986550 with `D = d1 - d0`) fades the full
+/// tree in from d1 to `d0 + 0.75 D` and the card out from `d0 + 0.95 D` to
+/// `d0 + 0.6 D`, both drawn in between; their weights are equal at
+/// `d0 + 5/6 D` (Washington `large_tree` 30 / 150 m: 130 m). The port's
+/// levels are exclusive, so it switches there with the ornament fade.
+/// `GRID_TREE_SWITCH=d0` keeps the earlier switch at d0, for review.
+pub fn impostor_switch(d0: f32, d1: f32) -> f32 {
+    static AT_D0: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if d1 <= d0 || *AT_D0.get_or_init(|| std::env::var("GRID_TREE_SWITCH").is_ok_and(|v| v == "d0")) {
+        d0
+    } else {
+        d0 + (d1 - d0) * 5. / 6.
+    }
+}
+
 /// Level `i`'s range in `v` (0x95D2A0): drawn while `r0 < v <= r1`; `r2`
-/// is the cross-fade width above `r0`.
+/// is the cross-fade width above `r0`. A tree (`impostor`) shows its full
+/// tree out to [`impostor_switch`] and its card beyond.
 pub fn range(kind: &Type, i: u8) -> [f32; 3] {
     let n = kind.levels.max(1);
     let [d0, d1, far] = kind.distances;
-    let d = [d0, d1];
+    let d = if kind.impostor { [impostor_switch(d0, d1), d1] } else { [d0, d1] };
     let v = |m: f32| (1. - m / far).clamp(0., 1.);
     if n == 1 {
         return [0., 1., 0.];
@@ -684,6 +701,24 @@ mod tests {
         assert_eq!(shadow_level(&single), 0);
         // A tree's card faces the eye: the full tree casts.
         assert_eq!(shadow_level(&Type { impostor: true, ..kind }), 0);
+    }
+
+    #[test]
+    fn a_tree_switches_to_its_card_where_the_original_cross_fades() {
+        let tree = Type {
+            distances: [30., 150., 940.],
+            levels: 2,
+            scenery: false,
+            impostor: true,
+        };
+        assert_eq!(impostor_switch(30., 150.), 130.);
+        assert_eq!(at(&tree, 100.), 0);
+        assert_eq!(at(&tree, 125.), 0);
+        assert_eq!(at(&tree, 135.), 1);
+        assert_eq!(at(&tree, 900.), 1);
+        assert_eq!(at(&tree, 950.), NONE);
+        // Without a larger d1 it stays at d0.
+        assert_eq!(impostor_switch(30., 30.), 30.);
     }
 
     #[test]
