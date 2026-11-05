@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F738](log/F0738.md) | 2026-11-05 | Track surfaces take the route's macro AO scale; Washington black void gone (row 119) |
 | [F737](log/F0737.md) | 2026-11-05 | Race OSD froze after a mid-race window resize: the display material kept the old texture; rebind on resize, render-world bind check, window check tool |
 | [F736](log/F0736.md) | 2026-11-05 | Row 117 crash as a cinematic clip: the owner's race replayed exactly from its input log (GRID_CINE) |
 | [F735](log/F0735.md) | 2026-11-05 | Trees switch to their card where the original cross-fades, not at d0 |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F681](log/F0681.md) | 2026-10-31 | Close-drift flags take no contact outside the drift formats (row 104) |
 | [F680](log/F0680.md) | 2026-10-31 | Box contacts beside long barrier boxes: an inconsistent distance result, the mesh frame and the pair direction (row 99) |
 | [F679](log/F0679.md) | 2026-11-02 | Car reflections: the cube was black since F676 (faces not drawn); masked strength checked against the original |
-| [F678](log/F0678.md) | 2026-10-31 | Cockpit: dash backlight at night |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

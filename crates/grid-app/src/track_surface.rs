@@ -433,7 +433,7 @@ fn read_surfaces(
         }
     }
     println!(
-        "track_surface prepared materials={} draws={} textures={} lighting=authored macro_ao_scale=1",
+        "track_surface prepared materials={} draws={} textures={} lighting=authored macro_ao_scale=sao_scale",
         definitions.len(),
         draws.len(),
         textures.len()
@@ -692,7 +692,12 @@ pub(crate) fn attach(
                         phong_direction: settings.baseline_specular.map_or(Vec4::ZERO, |p| {
                             Vec3::from_array(p.direction_to_light).normalize().extend(0.)
                         }),
-                        controls: d.controls,
+                        // Macro AO strength from the route's lighting (`controls.z` > 0).
+                        controls: if d.controls.z > 0. {
+                            Vec4::new(d.controls.x, d.controls.y, settings.surface_ao_scale, d.controls.w)
+                        } else {
+                            d.controls
+                        },
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
                         dry_ground: Vec4::new(

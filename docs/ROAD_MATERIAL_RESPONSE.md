@@ -19,7 +19,7 @@ That alpha is not opacity, roughness or a direct GGX conversion. The current Sou
 | Input | Current shared path | Evidence boundary |
 |---|---|---|
 | Diffuse layers and alpha | Surface textures100/102 and mixed layer alpha | Actual filtered mask survives independently of RGB |
-| Macro/skid inputs | Existing texture104/106 and shared controls | Source runtime AO scale remains open |
+| Macro/skid inputs | Existing texture104/106 and shared controls | AO scale = `ambientOcclusionScales.x` = lighting.xml `sao_scale` (F738) |
 | PhongPower, SpecScale, PhongColour, Fresnel fields, EnvironmentColour | Constants decoded but response fields not retained/uploaded by Definition | Saved fields do not establish their runtime composition |
 | Dry-ground response | Authored roughness1/reflectance.25 eligibility | Not a semantic classifier or legacy conversion |
 | Optional grazing gain | Guarded authored F0 gain | Not the original Fresnel parameter contract |
@@ -84,7 +84,7 @@ The existing static direction adapter uses the sun angles when linked and the ex
   sun's 18,000 lux, divided by pi (Bevy's Lambert); linear like the fill;
 - the shadow is the sun's shadow map (the brightest directional light); `shadow_strength` is not
   applied, as for the diffuse;
-- `ao` is the port's macro AO at scale 1 (the AO scale uniform is not recovered).
+- `ao = 1 + sao_scale (macro.a - 1)` (F738): `ambientOcclusionScales` (c49) is published by 0x743750 from lighting object +0x160; 0x730F90 packs lane x from +0x298, which 0x72BB40 reads from lighting.xml `sao_scale` (default 0.9 from 0x726A50; y from +0x294 `dao_scale` [I], z `objectao_scale`, w `fixedao_scale`). Routes: 0.58-1.0, seven track-level files without it use 0.9. Until F738 the port used scale 1, which turned ground with macro alpha near 0 black (Washington under the plaza deck after the JVC bridge, row 119).
 
 AUTHORED / open: the enhanced preset keeps its GGX response; `min_specular_power`,
 `max_specular_power` and `max_specular_scale` in lighting.xml have no traced consumer here; the

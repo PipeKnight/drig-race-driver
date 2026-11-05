@@ -149,6 +149,10 @@ pub struct Settings {
     pub saved_sun: Option<grid_formats::track_lighting::Sun>,
     /// Baseline track scenes: the original's back/ambient fill (row 109).
     pub baseline_fill: Option<Fill>,
+    /// `ambientOcclusionScales.x`: lighting.xml `sao_scale` (0x72BB40 reads it,
+    /// 0x730F90 packs it into lane x), the strength of the track surfaces'
+    /// macro AO, `ao = 1 + scale (macro.a - 1)` (`track_infield.cg.fp`).
+    pub surface_ao_scale: f32,
     /// Baseline track scenes: the original road/infield specular (track_surface.rs).
     pub baseline_specular: Option<Phong>,
     pub preset: Preset,
@@ -227,6 +231,7 @@ impl Default for Settings {
             saved_sun_colour: None,
             saved_sun: None,
             baseline_fill: None,
+            surface_ao_scale: 1.,
             baseline_specular: None,
             preset: Preset::Baseline,
             width: 1280,
@@ -237,6 +242,9 @@ impl Default for Settings {
 
 /// The original track shader's light besides the sun [V static,
 /// `track_surface_simple.cg.fp`]: `back * (1 - N.L) / 2 + ambient`, from
+/// `sao_scale` of a lighting.xml without one (0x726A50 stores 0.9 at +0x298).
+pub const SAO_SCALE_DEFAULT: f32 = 0.9;
+
 /// lighting.xml's `backlight_backcolour` / `backlight_ambientcolour`, scaled
 /// against `backlight_suncolour`'s peak = the baseline sun's 18,000 lux.
 /// AUTHORED: as Bevy lights, `ambient + back / 2` is a uniform ambient and

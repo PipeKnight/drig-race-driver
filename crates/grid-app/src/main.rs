@@ -3649,6 +3649,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             _ => return Err("GRID_BASELINE_FILL needs linear, gamma or off".into()),
         };
         println!("baseline_fill mode={mode} fill={:?}", graphics.baseline_fill);
+        // GRID_SURFACE_AO_SCALE=N overrides it for review (1: the earlier full AO).
+        graphics.surface_ao_scale = std::env::var("GRID_SURFACE_AO_SCALE")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .or_else(|| environment.lighting.scalar("sao_scale"))
+            .filter(|s| s.is_finite() && (0. ..=1.).contains(s))
+            .unwrap_or(graphics::SAO_SCALE_DEFAULT);
+        println!("surface_ao_scale sao_scale={}", graphics.surface_ao_scale);
         // GRID_BASELINE_SPECULAR: source (default) or bevy, Bevy's own
         // reflectance (owner review). Same colour decoding as the fill.
         graphics.baseline_specular = match std::env::var("GRID_BASELINE_SPECULAR").as_deref() {

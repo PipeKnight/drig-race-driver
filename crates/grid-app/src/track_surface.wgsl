@@ -151,7 +151,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     pbr.material.perceptual_roughness = mix(pbr.material.perceptual_roughness, dry_ground.z, ground);
     // Preserve optional source-mask weighting, applied above.
     pbr.material.reflectance *= mix(1.0, dry_ground.w / 0.5, ground);
-    // Original AO-scale uniform is not recovered; scale=1 is an explicit choice.
+    // ambientOcclusionScales.x (lighting.xml sao_scale): ao = 1 + scale (macro.a - 1).
     let ao = mix(1.0, macro_sample.a, max(controls.z, 0.0));
     pbr.diffuse_occlusion *= ao;
     pbr.specular_occlusion *= ao;
