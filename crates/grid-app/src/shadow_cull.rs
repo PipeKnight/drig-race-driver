@@ -20,7 +20,9 @@
 //!
 //! `GRID_SHADOW_TRACE=1` (research, row 115) prints `shadow_dropout` for each
 //! caster that is in a cascade's final list in frames N-2 and N but not in
-//! N-1 (a shadow missing for one frame), with Bevy's `FrameCount` of N-1.
+//! N-1 (a shadow missing for one frame), with Bevy's `FrameCount` of N-1,
+//! why it was left out in N-1 (`cause`, see [`cause`]), its distance from
+//! the camera and its box centre.
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::CascadesVisibleEntities;
 use bevy::light::{CascadeShadowConfig, Cascades, SimulationLightSystems};
@@ -51,35 +53,113 @@ pub fn install(app: &mut App) {
     }
 }
 
-/// Per light, view and cascade: the final lists of the last two frames.
-type Lists = std::collections::HashMap<(Entity, Entity, usize), [std::collections::HashSet<Entity>; 2]>;
+/// Per light, view and cascade: the last frame's final list and why each
+/// caster that left it in that frame was left out.
+type Lists = std::collections::HashMap<(Entity, Entity, usize), (std::collections::HashSet<Entity>, std::collections::HashMap<Entity, String>)>;
 
+#[allow(clippy::type_complexity)]
+type Caster<'a> = (
+    Option<&'a Name>,
+    Has<Mesh3d>,
+    Has<bevy::light::NotShadowCaster>,
+    Option<&'a InheritedVisibility>,
+    Option<&'a bevy::camera::visibility::RenderLayers>,
+    Has<bevy::camera::visibility::VisibilityRange>,
+    Option<Ref<'a, Aabb>>,
+    Option<Ref<'a, GlobalTransform>>,
+);
+
+/// Why Bevy's `check_dir_light_mesh_visibility` (bevy_light 0.19.1) or this
+/// module's `cull` left a caster out of a cascade's list, in the order Bevy
+/// tests: `gone`, `not_caster`, `hidden`, `layers`, `range`, `frustum`, else
+/// `port_cull`; with `+moved` / `+bounds` when its transform or box changed
+/// in that frame.
+#[allow(clippy::too_many_arguments)]
+fn cause(
+    entity: Entity,
+    casters: &Query<Caster>,
+    light_layers: &bevy::camera::visibility::RenderLayers,
+    frustum: Option<&bevy::camera::primitives::Frustum>,
+    ranges: Option<&bevy::camera::visibility::VisibleEntityRanges>,
+    view: Entity,
+) -> String {
+    let Ok((_, mesh, not_caster, inherited, layers, ranged, aabb, transform)) = casters.get(entity) else {
+        return "gone".into();
+    };
+    let mut why = if !mesh {
+        "gone"
+    } else if not_caster {
+        "not_caster"
+    } else if !inherited.is_some_and(|v| v.get()) {
+        "hidden"
+    } else if !light_layers.intersects(layers.unwrap_or_default()) {
+        "layers"
+    } else if ranged && ranges.is_some_and(|r| !r.entity_is_in_range_of_view(entity, view)) {
+        "range"
+    } else if let (Some(f), Some(a), Some(t)) = (frustum, aabb.as_deref(), transform.as_deref())
+        && !f.intersects_obb(a, &t.affine(), false, true)
+    {
+        "frustum"
+    } else {
+        "port_cull"
+    }
+    .to_string();
+    if transform.is_some_and(|t| t.is_changed()) {
+        why += "+moved";
+    }
+    if aabb.is_some_and(|a| a.is_changed()) {
+        why += "+bounds";
+    }
+    why
+}
+
+#[allow(clippy::type_complexity)]
 fn trace_dropouts(
-    lights: Query<(Entity, &CascadesVisibleEntities)>,
-    names: Query<(Option<&Name>, Option<&ChildOf>)>,
+    lights: Query<(
+        Entity,
+        &CascadesVisibleEntities,
+        &bevy::camera::primitives::CascadesFrusta,
+        Option<&bevy::camera::visibility::RenderLayers>,
+    )>,
+    casters: Query<Caster>,
+    cameras: Query<&GlobalTransform>,
+    ranges: Option<Res<bevy::camera::visibility::VisibleEntityRanges>>,
     frame: Res<bevy::diagnostic::FrameCount>,
     mut last: Local<Lists>,
 ) {
-    for (light, visible) in &lights {
+    for (light, visible, frusta, light_layers) in &lights {
+        let light_layers = light_layers.cloned().unwrap_or_default();
         for (view, lists) in &visible.entities {
+            let eye = cameras.get(*view).map_or(Vec3::ZERO, |c| c.translation());
             for (i, list) in lists.iter().enumerate() {
                 let now: std::collections::HashSet<Entity> = list.entities.iter().copied().collect();
-                let [older, previous] = last.entry((light, *view, i)).or_default();
-                let mut missing: Vec<Entity> = older.iter().filter(|e| now.contains(e) && !previous.contains(e)).copied().collect();
-                missing.sort();
-                for e in &missing {
-                    let name = |e: Entity| names.get(e).ok().and_then(|(n, _)| n).map_or_else(String::new, |n| n.to_string());
-                    let parent = names.get(*e).ok().and_then(|(_, p)| p).map(|p| name(p.parent()));
+                let (previous, left) = last.entry((light, *view, i)).or_default();
+                let mut back: Vec<(&Entity, &String)> = left.iter().filter(|(e, _)| now.contains(e)).collect();
+                back.sort();
+                for (e, why) in back {
+                    let (name, centre) = casters.get(*e).map_or((String::new(), Vec3::ZERO), |c| {
+                        let centre = match (c.6.as_deref(), c.7.as_deref()) {
+                            (Some(a), Some(t)) => t.transform_point(a.center.into()),
+                            _ => Vec3::ZERO,
+                        };
+                        (c.0.map_or_else(String::new, |n| n.to_string()), centre)
+                    });
                     println!(
-                        "shadow_dropout frame={} cascade={i} entity={e} name={:?} parent={:?} in_list_before={} now={}",
+                        "shadow_dropout frame={} cascade={i} cause={why} entity={e} name={name:?} distance={:.1} centre={:.1},{:.1},{:.1}",
                         frame.0.wrapping_sub(1),
-                        name(*e),
-                        parent.unwrap_or_default(),
-                        older.len(),
-                        now.len(),
+                        centre.distance(eye),
+                        centre.x,
+                        centre.y,
+                        centre.z,
                     );
                 }
-                *older = std::mem::replace(previous, now);
+                let frustum = frusta.frusta.get(view).and_then(|f| f.get(i));
+                *left = previous
+                    .iter()
+                    .filter(|e| !now.contains(e))
+                    .map(|&e| (e, cause(e, &casters, &light_layers, frustum, ranges.as_deref(), *view)))
+                    .collect();
+                *previous = now;
             }
         }
     }

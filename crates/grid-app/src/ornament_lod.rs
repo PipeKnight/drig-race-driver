@@ -279,16 +279,10 @@ pub fn install(app: &mut App) {
 /// dithers in the shadow map like the colour fade (owner 2026-11-03: nothing
 /// should appear in view; F713); the part itself casts none meanwhile.
 ///
-/// A level change keeps the shadow level, but while the shadow level fades
-/// in or out as a *colour* level its part carries the fade's
-/// `VisibilityRange`, and Bevy's light visibility check applies ranges too:
-/// at the fade-out's last step the range excludes every distance, so the
-/// part left every cascade until the fade ended and the range went, and its
-/// shadow was missing for a frame (row 115, F743: buildings and trees
-/// flashed brighter as the car approached them). So it casts through a
-/// proxy at full presence (tag 0) for the length of that fade too. A proxy
-/// starts with the part's world transform and bounds, so its first frame
-/// casts where the part is and not at the origin.
+/// A level change keeps the shadow level, and the part casts itself through
+/// its colour fade ([`select`] stops its fade-out one step short; F745). A
+/// proxy starts with the part's world transform and bounds, so its first
+/// frame casts where the part is and not at the origin (F743).
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn shadow_proxies(
     lods: Res<Lods>,
@@ -317,12 +311,10 @@ fn shadow_proxies(
     for (part, level, mesh, material, transform, aabb, shadowless) in &parts {
         let fade = lods.fades[level.instance as usize];
         let casts = !shadowless || state.proxies.contains_key(&part);
-        let colour_fading = matches!(fade.draw(level.level), Some((appearing, step)) if appearing || step > 0);
         let step = match fade.presence() {
             Some((appearing, step)) if (appearing || step > 0) && casts => {
                 Some(step.min(31) as u32 | if appearing { 32 } else { 0 })
             }
-            Some(_) if colour_fading && casts => Some(0),
             _ if warming && casts => Some(0),
             _ => None,
         };
@@ -546,7 +538,8 @@ pub(crate) fn select(
         let colour = fade.draw(part.level);
         // The shadow level is drawn inside D, by the camera only while it is
         // a colour level; otherwise it fades with the instance's presence.
-        let drawn = if layers.is_some() { colour.or(fade.presence()) } else { colour };
+        let shadow_level = layers.is_some();
+        let drawn = if shadow_level { colour.or(fade.presence()) } else { colour };
         visibility.set_if_neq(if drawn.is_some() {
             Visibility::Inherited
         } else {
@@ -558,6 +551,16 @@ pub(crate) fn select(
                 *layers = want.clone();
             }
         }
+        // Bevy's light visibility check applies ranges as well: at a
+        // fade-out's last step the range excludes every distance, so a
+        // shadow-level part fading out as a colour level left every cascade
+        // until its fade ended, and its shadow was missing for that frame
+        // (row 115, F743/F745: buildings and trees flashed brighter as the car
+        // approached). Bevy's shadow pass takes no dither, so the shadow level
+        // stops one step short; the camera sees 1/16 of it for that frame.
+        let drawn = drawn.map(|(appearing, step)| {
+            (appearing, if shadow_level && !appearing { step.min(STEPS as u8 - 1) } else { step })
+        });
         match (range, drawn) {
             (Some(mut range), Some((appearing, step))) if appearing || step > 0 => {
                 range.set_if_neq(fade_range(appearing, step));
@@ -880,44 +883,39 @@ mod tests {
             instances: vec![Instance { kind: 0, min: Vec3::ZERO, max: Vec3::ONE }],
             parts: HashMap::new(),
         }));
-        let frame = |app: &mut App| {
-            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+        let frame = |app: &mut App, ms: u64| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(ms));
             app.world_mut().run_schedule(PostUpdate);
         };
-        let proxies = |app: &mut App| {
-            app.world_mut()
-                .query::<(&MeshTag, &GlobalTransform, &MeshMaterial3d<ShadowMaterial>)>()
-                .iter(app.world())
-                .map(|(t, g, _)| (t.0, *g))
-                .collect::<Vec<_>>()
-        };
-        frame(&mut app);
-        frame(&mut app);
-        assert!(proxies(&mut app).is_empty());
+        let proxies = |app: &mut App| app.world_mut().query::<&MeshMaterial3d<ShadowMaterial>>().iter(app.world()).count();
+        frame(&mut app, 100);
+        frame(&mut app, 100);
+        assert_eq!(proxies(&mut app), 0);
         assert!(app.world().get::<NotShadowCaster>(part).is_none());
 
-        // Approaching to 50 m in steps under CUT_METRES: level 1 fades out as
-        // a colour level over FADE_SECONDS and carries the fade's range
-        // meanwhile. Its shadow must not fade with it: a full proxy (tag 0) at
-        // the part's place casts.
-        let mut fading = 0;
-        for x in (5..=20).rev() {
+        // Approach in steps under CUT_METRES until level 1 starts to fade out
+        // as a colour level, then hold the camera and run 26 ms frames, which
+        // land on the fade's last step (t 0.975, step 16 uncapped). The part
+        // keeps casting itself, and its range never excludes every distance
+        // (that would drop it from the light's cascades).
+        let mut x = 20;
+        while app.world().get::<VisibilityRange>(part).is_none() && x > 5 {
             *app.world_mut().get_mut::<GlobalTransform>(camera).unwrap() =
                 GlobalTransform::from_translation(Vec3::new(-10. * x as f32, 0.5, 0.5));
-            frame(&mut app);
-            if app.world().get::<VisibilityRange>(part).is_some() {
-                fading += 1;
-                assert_eq!(proxies(&mut app), vec![(0, placed)], "full shadow where the part is");
-                assert!(app.world().get::<NotShadowCaster>(part).is_some());
-            }
+            frame(&mut app, 26);
+            x -= 1;
         }
-        assert!(fading > 0, "the colour fade ran");
-        // After the fade the part casts again, without a range.
-        for _ in 0..4 {
-            frame(&mut app);
+        let mut fading = 0;
+        while let Some(range) = app.world().get::<VisibilityRange>(part) {
+            fading += 1;
+            assert!(range.end_margin.end > 1000., "in range at fade frame {fading}: end {:?}", range.end_margin);
+            assert_eq!(proxies(&mut app), 0);
+            assert!(app.world().get::<NotShadowCaster>(part).is_none());
+            assert!(fading < 40);
+            frame(&mut app, 26);
         }
-        assert!(app.world().get::<VisibilityRange>(part).is_none());
-        assert!(proxies(&mut app).is_empty());
+        assert!(fading >= 15, "the colour fade ran ({fading} frames)");
+        assert_eq!(proxies(&mut app), 0);
         assert!(app.world().get::<NotShadowCaster>(part).is_none());
     }
 }

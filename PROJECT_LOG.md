@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F745](log/F0745.md) | 2026-11-05 | Row 115: remaining shadow dropouts attributed; shadow level stops one fade step short |
 | [F744](log/F0744.md) | 2026-11-05 | Playable 0a0e7db3c349 for the PC and both APKs (smoke ghost after resize, house shadow blink) |
 | [F743](log/F0743.md) | 2026-11-05 | Row 115: building shadows lost for a frame at the end of a level fade |
 | [F742](log/F0742.md) | 2026-11-05 | Ghost of the old frame through smoke after a resize: smoke materials now rebind the resized depth |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F688](log/F0688.md) | 2026-11-02 | Car reflections: the player's driver out of the cube; overlays of opaque parts before the glass; cracked glass as the original's program |
 | [F687](log/F0687.md) | 2026-11-02 | Cockpit wheel turns at most 2 lock-fractions per second on the keyboard (owner request, row 105) |
 | [F686](log/F0686.md) | 2026-11-02 | Pinned first-corner contact: port against the original capture; slip, yaw and gear in the field trace |
-| [F685](log/F0685.md) | 2026-11-02 | All-route floating and texture audit; hidden damage pieces, raised pavement and mounted boards triaged (row 102) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F745](F0745.md) | 2026-11-05 | Row 115: remaining shadow dropouts attributed; shadow level stops one fade step short |
 | [F744](F0744.md) | 2026-11-05 | Playable 0a0e7db3c349 for the PC and both APKs (smoke ghost after resize, house shadow blink) |
 | [F743](F0743.md) | 2026-11-05 | Row 115: building shadows lost for a frame at the end of a level fade |
 | [F742](F0742.md) | 2026-11-05 | Ghost of the old frame through smoke after a resize: smoke materials now rebind the resized depth |

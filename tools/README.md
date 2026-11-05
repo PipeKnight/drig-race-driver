@@ -554,7 +554,7 @@ description is the first header found. Rows with a single file are validators wi
 | Topic | What it checks | Files | Doc |
 |---|---|---|---|
 | alongside_capture | Alongside squeeze capture for the original (FIRST_CORNER_LIVE section 13, rows 30/31). | [alongside_capture.py](alongside_capture.py) | [FIRST_CORNER_LIVE](../docs/FIRST_CORNER_LIVE.md) |
-| blink_detect | Blink detector for consecutive window frames: large on-screen regions whose brightness jumps for one or a few frames and returns (row 115). | [blink_detect.py](blink_detect.py) | [SETTINGS](../docs/SETTINGS.md) |
+| blink_detect | Blink detector for consecutive window frames: large on-screen regions whose brightness jumps for one or a few frames and returns (row 115). | [blink_detect.py](blink_detect.py) | [FIDELITY_BACKLOG](../docs/FIDELITY_BACKLOG.md) |
 | car_collision | Compare native car collision geometry, source bounds and saved live description words. | [validate_car_collision.py](validate_car_collision.py) | [CAR_COLLISION](../docs/CAR_COLLISION.md) |
 | diagnose_headlight_points | Report source headlight point selection from saved per-model data (CPU only). | [diagnose_headlight_points.py](diagnose_headlight_points.py) | [TRACK_ENVIRONMENT](../docs/TRACK_ENVIRONMENT.md) |
 | float_audit_all | Runs `grid-app --float-audit` (backlog row 102, docs/FLOATING_AUDIT.md) over every route folder with a track.jpk; one TSV and log per route plus a summary line each, in … | [float_audit_all.sh](float_audit_all.sh) | [FIDELITY_BACKLOG](../docs/FIDELITY_BACKLOG.md) |
@@ -567,6 +567,7 @@ description is the first header found. Rows with a single file are validators wi
 | lamp_fades | Compare owned lamp-fade inputs against unchanged, hash-guarded GRID code. | [build_lamp_fades_probe.cmd](build_lamp_fades_probe.cmd), [probe_lamp_fades.c](probe_lamp_fades.c), [validate_lamp_fades.py](validate_lamp_fades.py) | [LAMP_REFLECTOR_RESEARCH](../docs/LAMP_REFLECTOR_RESEARCH.md) |
 | phantom_post | Original close-drift flag post geometry (0x7BBB70, 0x7BC370, 0x7BCDA0) and the pole's turn (acos 0xBF4067, axis-angle 0x772670) against the Rust port, FPP1. | [probe_phantom_post.c](probe_phantom_post.c), [validate_phantom_post.py](validate_phantom_post.py) | [JOINTS_RESEARCH](../docs/JOINTS_RESEARCH.md) |
 | runtime_collision | Match bounded live collision headers/scales to original JPK chunk bytes. | [validate_runtime_collision.py](validate_runtime_collision.py) | [TRACK_COLLISION](../docs/TRACK_COLLISION.md) |
+| shadow_dropouts | Classify one-frame sun shadow caster dropouts (`GRID_SHADOW_TRACE=1`, shadow_cull.rs) by cause and match them with blink_detect events (row 115). | [shadow_dropouts.py](shadow_dropouts.py) | [TRACK_LOD](../docs/TRACK_LOD.md) |
 | source_boundary_plans | Read-only provenance and complete-file replay audit of scheduled driving. | [audit_source_boundary_plans.py](audit_source_boundary_plans.py) |  |
 | source_boundary_plans | Scheduled source driving regressions; no whole-original-frame oracle. | [validate_source_boundary_plans.py](validate_source_boundary_plans.py) | [SCHEDULED_DONINGTON_CONTACTS](../docs/SCHEDULED_DONINGTON_CONTACTS.md) |
 | source_drive | Source-only startup, retained original world and independent driving semantics. | [validate_source_drive.py](validate_source_drive.py) |  |
