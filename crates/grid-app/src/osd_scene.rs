@@ -536,6 +536,22 @@ impl Osd {
     }
 }
 
+/// Each texture's own addressing (`wrapS` / `wrapT`). A sprite that repeated
+/// drew a thin line along its far edges from the opposite edge (bilinear
+/// filtering and mips across the wrap): two lines beside the rotated needle
+/// and its blur (F739).
+fn sampler([u, v]: [grid_formats::texture::Wrap; 2]) -> ImageSampler {
+    let mode = |w| match w {
+        grid_formats::texture::Wrap::Repeat => ImageAddressMode::Repeat,
+        grid_formats::texture::Wrap::Clamp => ImageAddressMode::ClampToEdge,
+    };
+    ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: mode(u),
+        address_mode_v: mode(v),
+        ..ImageSamplerDescriptor::linear()
+    })
+}
+
 /// Loads the scene and fonts; `Err` leaves the app without the OSD (the
 /// plain HUD panels then stay).
 pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
@@ -558,17 +574,12 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         .resource_mut::<Assets<Shader>>()
         .insert(DISPLAY_SHADER.id(), Shader::from_wgsl(include_str!("osd_display.wgsl"), "grid_osd_display.wgsl"))
         .map_err(|e| e.to_string())?;
-    let sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
     let mut images = HashMap::new();
     {
         let mut assets = world.resource_mut::<Assets<Image>>();
-        for t in &scene.textures {
+        for (t, &wrap) in scene.textures.iter().zip(&scene.wraps) {
             let (dds, _) = t.validated_dds();
-            let image = crate::texture_upload::image(&dds, sampler.clone(), RenderAssetUsages::RENDER_WORLD).map_err(|e| e.to_string())?;
+            let image = crate::texture_upload::image(&dds, sampler(wrap), RenderAssetUsages::RENDER_WORLD).map_err(|e| e.to_string())?;
             images.insert(String::from_utf8_lossy(t.id).into_owned(), assets.add(image));
         }
         for c in &scene.cubemaps {

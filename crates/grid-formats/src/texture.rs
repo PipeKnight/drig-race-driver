@@ -133,6 +133,30 @@ pub fn read_textures<'a>(tree: &Tree<'a>) -> Result<Vec<Texture<'a>>> {
 
 /// Only the TEXTURE nodes whose id is listed; others (any format) are skipped.
 /// Uncompressed `ui8x4` texels are accepted here.
+/// Texture addressing of a TEXTURE node, its `wrapS` / `wrapT` attributes.
+/// [I] 1 repeats and 2 clamps: in the OSD scene (`Osd/dial2.pssg`) only the
+/// strips that scroll past their ends carry 1 (the odometer drum, the drift
+/// combo timers), every sprite 2 (F739). Absent or other values repeat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wrap {
+    Repeat,
+    Clamp,
+}
+
+/// (`wrapS`, `wrapT`) of the TEXTURE node named `id`.
+pub fn wrap(tree: &Tree, id: &[u8]) -> Result<[Wrap; 2]> {
+    for i in 0..tree.nodes.len() {
+        if tree.name(i) == b"TEXTURE" && tree.string(i, b"id")? == id {
+            let one = |name: &[u8]| match tree.integer(i, name) {
+                Ok(2) => Wrap::Clamp,
+                _ => Wrap::Repeat,
+            };
+            return Ok([one(b"wrapS"), one(b"wrapT")]);
+        }
+    }
+    fail(0, "texture not found")
+}
+
 pub fn read_named<'a>(tree: &Tree<'a>, ids: &[&[u8]]) -> Result<Vec<Texture<'a>>> {
     read_matching(tree, |id| ids.contains(&id), true)
 }

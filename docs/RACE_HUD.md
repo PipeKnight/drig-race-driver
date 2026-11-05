@@ -257,6 +257,12 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   at the resize while the race went on (owner playtest of ee26c2ebc427, window maximised to
   2560 × 1369 mid-race). The render world prints `osd_display bound=B size=WxH` when the binding or
   the texture size changes (`check_display`); `bound=false` is a stale OSD on screen.
+- Texture addressing (F739): each texture keeps its own `wrapS` / `wrapT` [D]. 48 of the 53 clamp
+  (value 2): the needle, its blur, the dial faces, every sprite. 5 repeat (value 1): `dial_odo` and
+  the drift combo strips, which scroll past their ends [I: 1 repeat, 2 clamp, from which ones
+  scroll]. The port used to repeat every texture. Bilinear filtering and mips then pulled a
+  sprite's opposite edge into its far edges: two thin white lines beside the needle and its blur
+  (owner screenshot, prototype ee26c2ebc427, at 0 km/h).
 - Shaders (`osd.wgsl`) [I: the effect files were not decoded]:
   - flat image: texture × colour, alpha × `alphaScaler`;
   - special image: the atlas scrolled by `scrollX/Y` plus its glow map × `glowScaler`;
@@ -297,7 +303,7 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
 ### 6.3 Checks
 
 - `grid_formats::osd::tests`: Bezier sampling; the asset test reads dial2 (counts, camera, the
-  `1.3` layout value -134.6), the cubemaps, `sceneconfig.xml` fonts and all five fonts with metrics
+  `1.3` layout value -134.6, the needle and its blur clamp, `dial_odo` repeats, 5 repeat), the cubemaps, `sceneconfig.xml` fonts and all five fonts with metrics
   and kerning.
 - `osd_scene::tests`: metric layout (baseline, kerning, alignment); asset: `0:05.600` in
   `swiss_time` sits on its baseline inside `race_time`'s box;

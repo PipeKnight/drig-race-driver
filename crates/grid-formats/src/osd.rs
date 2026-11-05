@@ -195,6 +195,8 @@ pub struct Cubemap<'a> {
 
 pub struct Scene<'a> {
     pub textures: Vec<texture::Texture<'a>>,
+    /// Each texture's (`wrapS`, `wrapT`) addressing, in `textures` order.
+    pub wraps: Vec<[texture::Wrap; 2]>,
     pub cubemaps: Vec<Cubemap<'a>>,
     pub materials: Vec<Material>,
     pub nodes: Vec<Node>,
@@ -606,8 +608,11 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
             faces,
         });
     }
+    let textures = texture::read_named(tree, &ids)?;
+    let wraps = textures.iter().map(|t| texture::wrap(tree, t.id)).collect::<Result<_>>()?;
     let mut scene = Scene {
-        textures: texture::read_named(tree, &ids)?,
+        textures,
+        wraps,
         cubemaps,
         materials,
         nodes,
@@ -803,6 +808,12 @@ mod tests {
         let tree = crate::pssg::read_tree(&bytes).unwrap();
         let scene = read_scene(&tree).unwrap();
         assert_eq!(scene.textures.len(), 53);
+        // Addressing: the sprites clamp, the scrolling odometer drum repeats.
+        let wrap = |id: &str| scene.wraps[scene.textures.iter().position(|t| t.id == id.as_bytes()).unwrap()];
+        assert_eq!(wrap("dial_needle_blur.tga"), [texture::Wrap::Clamp; 2]);
+        assert_eq!(wrap("dial_needle.tga"), [texture::Wrap::Clamp; 2]);
+        assert_eq!(wrap("dial_odo.tga"), [texture::Wrap::Repeat; 2]);
+        assert_eq!(scene.wraps.iter().filter(|w| **w == [texture::Wrap::Repeat; 2]).count(), 5);
         assert_eq!(scene.cubemaps.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["env_soft.dds", "env_sharp.dds"]);
         assert_eq!(scene.materials.len(), 206);
         assert_eq!(scene.animations.len(), 101);
