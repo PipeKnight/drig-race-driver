@@ -46,6 +46,7 @@ mod body_occlusion;
 #[cfg(feature = "paint-specular")]
 mod body_specular;
 mod camera;
+mod cine;
 mod player_view_visibility;
 mod cockpit;
 mod ambience_sound;
@@ -4508,6 +4509,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .set_error_handler(headless_error);
         println!("drive_headless version=1 dt={}", grid_tools::source_vehicle::DELTA);
     } else if let Some(path) = output {
+        if drive && let Some(cine) = cine::Cine::from_env(render_fps)? {
+            app.insert_resource(cine)
+                .add_systems(First, cine::pace.before(bevy::time::TimeSystems))
+                .add_systems(PostUpdate, cine::shoot.before(bevy::transform::TransformSystems::Propagate))
+                .add_systems(RunFixedMainLoop, shown_alpha.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop));
+        }
         if let Some(config) = motion_sequence {
             motion_capture::install(
                 &mut app,
@@ -6146,6 +6153,7 @@ fn drive_tick(
     mut recorded: Local<Option<(u64, grid_tools::source_vehicle::Controls, bool)>>,
     // The player's inputs for Flashback (logged, or given back when ticks run again).
     mut inputs: Option<ResMut<flashback::Inputs>>,
+    cine: Option<Res<cine::Cine>>,
 ) {
     let _tick_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DriveTick);
     driving.keep_previous_poses();
@@ -6230,6 +6238,8 @@ fn drive_tick(
     };
     let mut applied = None;
     let mut controls = if let Some(controls) = autopilot {
+        controls
+    } else if let Some(controls) = cine.as_ref().and_then(|c| c.controls(driving.runtime.ticks + 1)) {
         controls
     } else if driving.scripted_ticks.is_some()
         && let Some(script) = prop_script.as_mut()

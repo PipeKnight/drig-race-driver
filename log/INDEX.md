@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F736](F0736.md) | 2026-11-05 | Row 117 crash as a cinematic clip: the owner's race replayed exactly from its input log (GRID_CINE) |
 | [F735](F0735.md) | 2026-11-05 | Trees switch to their card where the original cross-fades, not at d0 |
 | [F734](F0734.md) | 2026-11-05 | Row 117: the end-of-race barrier pass was a crash and roll through a gap, not a pass-through |
 | [F733](F0733.md) | 2026-11-05 | Token retro: where the tokens go; AGENTS.md token rules; earlier auto-compact |

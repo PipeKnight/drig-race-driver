@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F736](log/F0736.md) | 2026-11-05 | Row 117 crash as a cinematic clip: the owner's race replayed exactly from its input log (GRID_CINE) |
 | [F735](log/F0735.md) | 2026-11-05 | Trees switch to their card where the original cross-fades, not at d0 |
 | [F734](log/F0734.md) | 2026-11-05 | Row 117: the end-of-race barrier pass was a crash and roll through a gap, not a pass-through |
 | [F733](log/F0733.md) | 2026-11-05 | Token retro: where the tokens go; AGENTS.md token rules; earlier auto-compact |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F679](log/F0679.md) | 2026-11-02 | Car reflections: the cube was black since F676 (faces not drawn); masked strength checked against the original |
 | [F678](log/F0678.md) | 2026-10-31 | Cockpit: dash backlight at night |
 | [F677](log/F0677.md) | 2026-10-31 | Sun shadows in the original's layout: three maps, the player car's map, shadow quality setting |
-| [F676](log/F0676.md) | 2026-10-31 | Car reflections: paint masks, per-view cost, damage and level crops |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
