@@ -1,4 +1,4 @@
-"""Interactive window check of the race OSD after a window resize mid-race (F737): the screen must show the OSD image's current texture.
+"""Interactive window check of the race OSD after a window resize mid-race (F737, F742): the OSD and the smoke's reduced depth must follow the new size.
 
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
        [--size WxH] [--shots S,S,...] [--expect-stale]
@@ -102,6 +102,17 @@ def main():
         verdict = f'FAIL: OSD {"stale" if stale else "bound"} after the resize'
     else:
         verdict = f'PASS: OSD {"stale (as expected)" if stale else "bound to the resized texture"} at {last[1]}x{last[2]}'
+    # F742: the reduced smoke depth follows the resize and every smoke material is marked to rebind it.
+    smoke = re.findall(r'^smoke_depth size=(\d+)x(\d+) rebound=(\d+)', log_path.read_text(errors='replace'), re.M)
+    for x, y, n in smoke:
+        print(f'smoke_depth size={x}x{y} rebound={n}')
+    if verdict.startswith('PASS') and not args.expect_stale:
+        if len(smoke) < 2:
+            verdict = 'FAIL: no smoke_depth line after the resize (an exe without the check?)'
+        elif int(smoke[-1][2]) == 0:
+            verdict = f'FAIL: smoke depth resized to {smoke[-1][0]}x{smoke[-1][1]} but no smoke material rebound'
+        else:
+            verdict += f'; smoke depth {smoke[-1][0]}x{smoke[-1][1]} rebound by {smoke[-1][2]} materials'
     missing = [n for n in names if not (out / n).exists()]
     if missing:
         verdict += f' (shots missing: {", ".join(missing)})'

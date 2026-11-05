@@ -140,15 +140,39 @@ fn size_depth(
         return;
     };
     let size = size.map(|v| v.div_ceil(SCALE));
-    if images.get(&depth.0).is_some_and(|i| i.size() == size) {
-        return;
+    let handles: Vec<_> = smoke.iter().map(|m| m.0.id()).collect();
+    if let Some(rebound) = resize_depth(size, &depth.0, &mut images, &mut materials, &handles) {
+        println!("smoke_depth size={}x{} rebound={rebound}", size.x, size.y);
     }
-    if images.insert(&depth.0, SmokeDepth::image(size)).is_ok() {
-        // The smoke materials bind the image: prepare them again.
-        for material in &smoke {
-            let _ = materials.get_mut(&material.0);
+}
+
+/// Replaces the reduced depth image with one of `size` and marks every smoke
+/// material that binds it changed, so its bind group is rebuilt with the new
+/// texture; None when the image already has that size. Bevy 0.19 emits
+/// `AssetEvent::Modified` only on a mutable dereference of `get_mut`'s guard:
+/// a bare `get_mut` left the old, smaller texture bound after a window resize,
+/// and the smoke's soft fade read stale depth inside the old screen rectangle
+/// (a ghost of the old frame through smoke; F742). Returns how many
+/// materials were marked.
+fn resize_depth(
+    size: UVec2,
+    depth: &Handle<Image>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<SmokeMaterial>,
+    smoke: &[AssetId<SmokeMaterial>],
+) -> Option<usize> {
+    if images.get(depth).is_some_and(|i| i.size() == size) {
+        return None;
+    }
+    images.insert(depth, SmokeDepth::image(size)).ok()?;
+    let mut rebound = 0;
+    for &id in smoke.iter().collect::<std::collections::HashSet<_>>() {
+        if let Some(mut material) = materials.get_mut(id) {
+            let _: &mut SmokeMaterial = &mut material;
+            rebound += 1;
         }
     }
+    Some(rebound)
 }
 
 fn init(mut commands: Commands, fullscreen: Res<FullscreenShader>) {
@@ -456,6 +480,44 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F742: a resize marks every smoke material changed (once each), so the
+    /// resized depth image is bound; an unchanged size marks none.
+    #[test]
+    fn a_depth_resize_marks_the_smoke_materials_changed() {
+        #[derive(Resource, Default)]
+        struct Seen(Vec<AssetEvent<SmokeMaterial>>);
+        fn record(mut seen: ResMut<Seen>, mut events: MessageReader<AssetEvent<SmokeMaterial>>) {
+            seen.0.extend(events.read().cloned());
+        }
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<SmokeMaterial>()
+            .init_resource::<Seen>()
+            .add_systems(Last, record);
+        let world = app.world_mut();
+        let depth = world.resource_mut::<Assets<Image>>().add(SmokeDepth::image(UVec2::new(640, 400)));
+        let material = world.resource_mut::<Assets<SmokeMaterial>>().add(SmokeMaterial::default());
+        app.update();
+        app.world_mut().resource_mut::<Seen>().0.clear();
+        let resize = |app: &mut App, size: UVec2| {
+            let world = app.world_mut();
+            world.resource_scope(|world, mut images: Mut<Assets<Image>>| {
+                let mut materials = world.resource_mut::<Assets<SmokeMaterial>>();
+                // Two smoke entities share the material.
+                resize_depth(size, &depth, &mut images, &mut materials, &[material.id(), material.id()])
+            })
+        };
+        assert_eq!(resize(&mut app, UVec2::new(640, 400)), None);
+        app.update();
+        assert!(app.world().resource::<Seen>().0.is_empty());
+        assert_eq!(resize(&mut app, UVec2::new(1280, 685)), Some(1));
+        app.update();
+        let seen = &app.world().resource::<Seen>().0;
+        assert_eq!(seen, &vec![AssetEvent::Modified { id: material.id() }]);
+        assert_eq!(app.world().resource::<Assets<Image>>().get(&depth).unwrap().size(), UVec2::new(1280, 685));
+    }
 
     fn source(blend: Option<BlendState>) -> RenderPipelineDescriptor {
         RenderPipelineDescriptor {

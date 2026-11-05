@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F742](log/F0742.md) | 2026-11-05 | Ghost of the old frame through smoke after a resize: smoke materials now rebind the resized depth |
 | [F741](log/F0741.md) | 2026-11-05 | Playable 09da41d6d2a4 for the PC and both APKs (HUD resize, needle lines, Washington void, blink on approach) |
 | [F740](log/F0740.md) | 2026-11-05 | Row 115: tree shadows built mid-race; shadow cull keeps unculled casters so the warm-up builds every shadow variant |
 | [F739](log/F0739.md) | 2026-11-05 | OSD sprites clamp as the original's wrapS/wrapT say: no thin lines beside the speedometer needle |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F685](log/F0685.md) | 2026-11-02 | All-route floating and texture audit; hidden damage pieces, raised pavement and mounted boards triaged (row 102) |
 | [F684](log/F0684.md) | 2026-11-02 | Drivers' suit and helmet colours from the livery's driver_suit |
 | [F683](log/F0683.md) | 2026-11-02 | Nürburgring grid-start capture: the original's leader slows by side contact |
-| [F682](log/F0682.md) | 2026-11-02 | Camera FOV setting; cockpit view 10 degrees wider by default (owner request, row 103) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

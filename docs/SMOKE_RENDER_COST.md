@@ -200,6 +200,18 @@ the cars and the ground, and leaves smoke thinner within about 0.4 m of surfaces
 preferred this over the full-size look with its lines and doubling. Enhanced graphics (HDR,
 single sample, Lacetti at Donington) runs the single-sample variant with the same result.
 
+### Window resize (F742)
+
+`size_depth` replaces the reduced depth image on a resize and must mark every smoke material
+changed, because the materials bind it (`SmokeLight::depth`). It used `let _ = materials.get_mut(..)`,
+but Bevy 0.19 emits `AssetEvent::Modified` only on a mutable dereference of the returned guard,
+so the materials kept the old, smaller texture. After a mid-race resize the soft fade then read
+stale depth inside the old screen rectangle and nothing beyond it: a ghost of the old frame (car,
+barrier, the rectangle's edge) through smoke (owner screenshot, release 09da41d6). Now
+`resize_depth` dereferences each material once and logs `smoke_depth size=WxH rebound=N`;
+`tools/hud_window_check.py` requires it at the new size. The only other image replaced in place,
+the OSD image, rebinds its material since F737.
+
 ## Not measured
 
 - Windowed frame time with present mode Immediate (the owner was at the PC; the offscreen renderer
