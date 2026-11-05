@@ -296,6 +296,7 @@ fn shadow_proxies(
             &GlobalTransform,
             Option<&Aabb>,
             Has<NotShadowCaster>,
+            Option<&crate::source_trees::ShadowTwin>,
         ),
         With<RenderLayers>,
     >,
@@ -308,7 +309,7 @@ fn shadow_proxies(
     let state = &mut *state;
     // Pipeline warm-up: every shadow-level part casts through a step-0 proxy.
     let warming = warm.is_some_and(|w| w.proxies());
-    for (part, level, mesh, material, transform, aabb, shadowless) in &parts {
+    for (part, level, mesh, material, transform, aabb, shadowless, twin) in &parts {
         let fade = lods.fades[level.instance as usize];
         let casts = !shadowless || state.proxies.contains_key(&part);
         let step = match fade.presence() {
@@ -339,8 +340,10 @@ fn shadow_proxies(
                     Some(materials.add(ShadowMaterial { base, extension: ShadowFade { marker: Vec4::ONE } }))
                 });
                 let Some(handle) = entry.clone() else { continue };
+                // A facing placement's proxy casts its sun-facing twin's
+                // quads (row 122), not the camera-facing ones.
                 let mut proxy = commands.spawn((
-                    Mesh3d(mesh.0.clone()),
+                    Mesh3d(twin.map_or_else(|| mesh.0.clone(), |t| t.mesh.clone())),
                     MeshMaterial3d(handle),
                     transform.compute_transform(),
                     *transform,

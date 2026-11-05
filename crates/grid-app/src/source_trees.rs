@@ -705,8 +705,10 @@ mod tests {
 
 /// Source-facing foliage stores repeated centres and signed offsets in UV1.
 /// The zero-wind original VS expands those offsets along inverse-view X/Y,
-/// after applying the source instance scale. This CPU adaptation uses the main
-/// camera for all passes; shadow/reflection-view orientation is not 1:1 yet.
+/// after applying the source instance scale, in every pass: in the sun's
+/// shadow pass they face the sun. This CPU adaptation faces the drawn mesh to
+/// the main camera, and each placement's sun shadow comes from a twin faced to
+/// the sun ([`ShadowTwin`], row 122); reflection views are not 1:1 yet.
 #[derive(Clone)]
 pub struct FacingSource {
     cylindrical: bool,
@@ -829,8 +831,166 @@ fn blend_views() -> bool {
     static BLEND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *BLEND.get_or_init(|| std::env::var("GRID_CARD_BLEND").map_or(true, |v| v != "0"))
 }
+/// The sun-facing shadow twin of a facing placement (row 122). The drawn mesh
+/// turns to the main camera every frame; cast from that, a tree's shadow
+/// turned with the camera and nearly vanished when the cards stood edge-on
+/// to the sun. The original's facing shaders face each pass's own view, so
+/// in the shadow pass the quads, sheets and impostor views face the sun. The
+/// twin is that mesh: expanded along the sun's right/up (sheets and cards:
+/// about world Y towards the sun; cards: the atlas view seen from the sun),
+/// rewritten only when the sun turns. It is on `car_batch::shadow_layer()`,
+/// which only the sun takes (Bevy's shadow queue also drops a mesh whose
+/// layers the light does not see); [`swap_shadow_twins`] then makes each
+/// cascade list hold the twin exactly where it holds the part, so the twin
+/// casts when and where the part would (level, fade, cull).
+#[derive(Component)]
+pub(crate) struct ShadowTwin {
+    pub entity: Entity,
+    pub mesh: Handle<Mesh>,
+}
+
+#[derive(Component)]
+pub(crate) struct TwinOf;
+
+/// The sun's right, up and forward (the direction its light travels).
+fn sun_basis(light: &GlobalTransform) -> (Vec3, Vec3, Vec3) {
+    (light.right().as_vec3(), light.up().as_vec3(), light.forward().as_vec3())
+}
+
+/// `mesh` (the placement's source asset) with its quads faced to the sun.
+pub(crate) fn sun_faced(facing: &Facing, mesh: &Mesh, right: Vec3, up: Vec3, forward: Vec3) -> Mesh {
+    let source = &facing.source;
+    // An eye far up the light: the view the shadow pass has of the tree.
+    let eye = facing.world.w_axis.truncate() - forward * 1e4;
+    let mut mesh = mesh.clone();
+    let positions: Vec<[f32; 3]> = source
+        .centers
+        .iter()
+        .zip(&source.offsets)
+        .map(|(p, uv)| {
+            let (p, uv) = (Vec3::from_array(*p), Vec2::from_array(*uv));
+            if source.cylindrical {
+                sheet_expanded(p, uv, eye, facing.world, facing.inverse, facing.scale)
+            } else {
+                expanded(p, uv, right, up, facing.inverse, facing.scale)
+            }
+            .to_array()
+        })
+        .collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    if let Some(atlas) = &source.atlas {
+        let (view, weight) = atlas_view(facing.world, eye);
+        let shift = view as f32 / 8.;
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, atlas.iter().map(|uv| [uv[0] + shift, uv[1]]).collect::<Vec<_>>());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![[weight, 0.]; atlas.len()]);
+    }
+    mesh
+}
+
+/// Spawns each facing placement's [`ShadowTwin`] and re-faces every twin when
+/// the sun turns.
+#[allow(clippy::type_complexity)]
+fn shadow_twins(
+    mut commands: Commands,
+    parts: Query<(
+        Entity,
+        &Facing,
+        &Mesh3d,
+        &Transform,
+        Option<&bevy::camera::primitives::Aabb>,
+        Option<&MeshMaterial3d<StandardMaterial>>,
+        Option<&MeshMaterial3d<super::tree_cards::CardMaterial>>,
+        Option<&ShadowTwin>,
+    )>,
+    suns: Query<(&DirectionalLight, &GlobalTransform)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut faced: Local<Option<Vec3>>,
+) {
+    let Some((_, sun)) = suns.iter().find(|(l, _)| l.shadow_maps_enabled) else {
+        return;
+    };
+    let (right, up, forward) = sun_basis(sun);
+    let turned = faced.is_none_or(|f| f.dot(forward) < 0.99999);
+    *faced = Some(forward);
+    for (part, facing, mesh, transform, aabb, standard, card, twin) in &parts {
+        match twin {
+            Some(twin) if turned => {
+                if let Some(source) = meshes.get(&mesh.0) {
+                    let faced = sun_faced(facing, source, right, up, forward);
+                    let _ = meshes.insert(&twin.mesh, faced);
+                }
+            }
+            Some(_) => {}
+            None => {
+                let material = (standard.map(|m| m.0.clone()), card.map(|m| m.0.clone()));
+                if material.0.is_none() && material.1.is_none() {
+                    continue;
+                }
+                let Some(faced) = meshes.get(&mesh.0).map(|source| sun_faced(facing, source, right, up, forward)) else {
+                    continue;
+                };
+                let handle = meshes.add(faced);
+                let mut entity = commands.spawn((
+                    Name::new("shadow twin"),
+                    TwinOf,
+                    Mesh3d(handle.clone()),
+                    *transform,
+                    GlobalTransform::from(*transform),
+                    bevy::camera::visibility::NoAutoAabb,
+                    super::car_batch::shadow_layer(),
+                ));
+                if let Some(aabb) = aabb {
+                    entity.insert(*aabb);
+                }
+                match material {
+                    (Some(m), _) => entity.insert(MeshMaterial3d(m)),
+                    (None, Some(m)) => entity.insert(MeshMaterial3d(m)),
+                    _ => unreachable!(),
+                };
+                let id = entity.id();
+                commands.entity(part).insert(ShadowTwin { entity: id, mesh: handle });
+            }
+        }
+    }
+}
+
+/// In every sun cascade list a facing placement's twin casts in its place,
+/// and only there: a part is replaced by its twin, and a twin Bevy's light
+/// check took by itself is dropped (after that check, before the port's
+/// cull). The twin is marked visible so the render world extracts it.
+pub(crate) fn swap_shadow_twins(
+    mut lights: Query<&mut bevy::camera::visibility::CascadesVisibleEntities>,
+    twins: Query<&ShadowTwin>,
+    mut seen: Query<&mut ViewVisibility, With<TwinOf>>,
+) {
+    for mut visible in &mut lights {
+        for lists in visible.entities.values_mut() {
+            for list in lists.iter_mut() {
+                list.entities.retain_mut(|entity| {
+                    if seen.contains(*entity) {
+                        return false;
+                    }
+                    if let Ok(twin) = twins.get(*entity) {
+                        *entity = twin.entity;
+                        if let Ok(mut view) = seen.get_mut(twin.entity) {
+                            bevy::camera::visibility::SetViewVisibility::set_visible(&mut view);
+                        }
+                    }
+                    true
+                });
+            }
+        }
+    }
+}
+
 pub fn install(app: &mut App) {
     visibility_census::install(app);
+    app.add_systems(Update, shadow_twins).add_systems(
+        PostUpdate,
+        swap_shadow_twins
+            .after(bevy::light::SimulationLightSystems::CheckLightVisibility)
+            .before(super::shadow_cull::cull),
+    );
     app.init_resource::<MeshStream>().add_systems(
         Update,
         present
@@ -981,6 +1141,76 @@ mod census_tests {
     fn facing() -> Facing {
         FacingSource::from_mesh("trees/facing/census", &mesh()).unwrap().placed(Mat4::IDENTITY)
     }
+    /// One facing quad around (0, 5, 0): four corners at that centre with
+    /// signed unit offsets in UV1.
+    fn quad() -> Mesh {
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0., 5., 0.]; 4]);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]]);
+        mesh
+    }
+
+    #[test]
+    fn shadow_twins_face_the_sun_whatever_the_orbit_camera_does() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .add_systems(Update, shadow_twins)
+            .add_systems(PostUpdate, swap_shadow_twins);
+        let forward = Vec3::new(0.3, -0.6, -0.74).normalize();
+        let sun = app.world_mut().spawn((
+            DirectionalLight { shadow_maps_enabled: true, ..default() },
+            GlobalTransform::from(Transform::IDENTITY.looking_to(forward, Vec3::Y)),
+        )).id();
+        let camera = app.world_mut().spawn((super::super::ViewerCamera, Transform::from_xyz(20., 3., 0.))).id();
+        let source = quad();
+        let facing = FacingSource::from_mesh("trees/facing/twin", &source).unwrap().placed(Mat4::IDENTITY);
+        let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(source);
+        let material = MeshMaterial3d::<StandardMaterial>(Handle::default());
+        let part = app.world_mut().spawn((facing, Mesh3d(mesh), Transform::IDENTITY, material)).id();
+        let twin_positions = |app: &mut App| {
+            let twin = app.world().get::<ShadowTwin>(part).expect("twin spawned").mesh.clone();
+            match app.world().resource::<Assets<Mesh>>().get(&twin).unwrap().attribute(Mesh::ATTRIBUTE_POSITION) {
+                Some(VertexAttributeValues::Float32x3(p)) => p.clone(),
+                _ => panic!("positions"),
+            }
+        };
+        app.update();
+        let first = twin_positions(&mut app);
+        // The quad spans the sun's right/up: every corner lies in the plane
+        // through its centre across the light, at the offset's distance.
+        for p in &first {
+            let d = Vec3::from_array(*p) - Vec3::new(0., 5., 0.);
+            assert!(d.dot(forward).abs() < 1e-4, "corner {p:?} off the sun's plane");
+            assert!((d.length() - 2f32.sqrt()).abs() < 1e-4);
+        }
+        // An orbit or replay camera going round the tree changes nothing.
+        for yaw in [0.5f32, 1.6, 3.1, 4.7] {
+            *app.world_mut().get_mut::<Transform>(camera).unwrap() =
+                Transform::from_xyz(20. * yaw.sin(), 3., 20. * yaw.cos()).looking_at(Vec3::new(0., 5., 0.), Vec3::Y);
+            app.update();
+            assert_eq!(twin_positions(&mut app), first, "yaw {yaw}");
+        }
+        // In a sun cascade list the twin casts in the part's place.
+        let twin = app.world().get::<ShadowTwin>(part).unwrap().entity;
+        let mut list = bevy::camera::visibility::VisibleMeshEntities::default();
+        // The twin as Bevy's own check would add it (shadow layer), then the part.
+        list.entities.push(twin);
+        list.entities.push(part);
+        app.world_mut().get_mut::<bevy::camera::visibility::CascadesVisibleEntities>(sun).unwrap().entities.insert(camera, vec![list]);
+        app.world_mut().entity_mut(twin).insert(ViewVisibility::default());
+        app.update();
+        let lists = app.world().get::<bevy::camera::visibility::CascadesVisibleEntities>(sun).unwrap().entities[&camera][0].entities.clone();
+        assert_eq!(lists, vec![twin]);
+        assert!(app.world().get::<ViewVisibility>(twin).unwrap().get());
+        assert_eq!(app.world().get::<bevy::camera::visibility::RenderLayers>(twin), Some(&super::super::car_batch::shadow_layer()));
+        // Without its part in a list, the twin casts nothing there.
+        let mut list = bevy::camera::visibility::VisibleMeshEntities::default();
+        list.entities.push(twin);
+        app.world_mut().get_mut::<bevy::camera::visibility::CascadesVisibleEntities>(sun).unwrap().entities.insert(camera, vec![list]);
+        app.update();
+        assert!(app.world().get::<bevy::camera::visibility::CascadesVisibleEntities>(sun).unwrap().entities[&camera][0].entities.is_empty());
+    }
+
     fn mesh_ids() -> [bevy::asset::AssetId<Mesh>; 2] {
         let mut assets = Assets::<Mesh>::default();
         [assets.add(mesh()).id(), assets.add(mesh()).id()]

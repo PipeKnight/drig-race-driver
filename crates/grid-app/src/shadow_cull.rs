@@ -212,7 +212,7 @@ fn reaches(planes: &[Plane; 6], light: Vec3A, centre: Vec3A, axes: &[Vec3A; 3], 
 }
 
 #[allow(clippy::type_complexity)]
-fn cull(
+pub(crate) fn cull(
     cameras: Query<(&GlobalTransform, &Projection)>,
     mut lights: Query<(
         &GlobalTransform,
