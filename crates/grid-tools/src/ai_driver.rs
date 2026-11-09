@@ -1032,6 +1032,9 @@ const AVOID_SCORE: u8 = 15;
 const RECOVERY_SCORES: [u8; 4] = [11, 16, 17, 19];
 const RECOVER_TBONE_SCORE: u8 = 18;
 const RETIRE_STUCK_SCORE: u8 = 23;
+/// The retire score otherwise (fired by damage or failures, 0x78B300 reads
+/// the behaviour's first value, +4).
+const RETIRE_FAILURE_SCORE: u8 = 10;
 /// race_start's score while active (its first ai_behaviour_fire.xml value).
 const RACE_START_SCORE: u8 = 14;
 /// race_start side choice: a car more than 2 m to one side of us (0xCB8DA4),
@@ -2348,6 +2351,9 @@ struct Failure {
     side_timer: f32,
     side_offset: f32,
     removal: bool,
+    /// The retire failure drive holds a retire point (behaviour +0x60,
+    /// cleared by the activation 0x77D570, set by 0x79A090).
+    point: bool,
 }
 
 /// avoid test (0x79A960) memory and behaviour object (0x79C600): remembered
@@ -2444,6 +2450,12 @@ pub struct View {
     /// No wheel touches the ground: car state +0xE2 is 0 (0x402D20 sets it
     /// to "fewer than four wheels without contact", 0x990FC0).
     pub airborne: bool,
+    /// The car is terminally damaged: handling status 3 or 4
+    /// ([`crate::source_vehicle::Runtime::terminal_wheel`]). The original's
+    /// AI car-state byte +0xE3 == 1, read by the retire test 0x784560 and the
+    /// racing-state transition 0x784870 (its setter is not traced; the
+    /// mapping to the handling status is [I]).
+    pub terminal: bool,
 }
 
 impl View {
@@ -2469,6 +2481,7 @@ impl View {
             wheel_speeds: car.wheel_rolling_speeds(),
             driven: car.driven_wheels(),
             airborne: car.wheels_in_contact() == [false; 4],
+            terminal: car.terminal_wheel().is_some(),
         }
     }
 }
@@ -2584,8 +2597,13 @@ pub struct AiDriver {
     recovery: Recovery,
     /// recover_tbone timer (+0x34).
     tbone: f32,
-    /// Retire stuck timer: reference position, time and latched flag (0x77E3B0).
+    /// Retire stuck timer: reference position, time and the sticky latch
+    /// (test +0x20, +0x18, +0x14; 0x77E3B0).
     stuck: Option<([f32; 3], f32, bool)>,
+    /// The AI racing state is ai::RacingStateRetire (0x784870 leaves
+    /// RacingStateRacing on terminal damage); the stuck timer runs only in
+    /// RacingStateRacing (0x77E3B0 compares the state name with 0xE4CDA0).
+    retiring: bool,
     lines: BrakeLineState,
     /// Published (slewed) packet: throttle, brake, steering.
     throttle: f32,
@@ -2760,6 +2778,7 @@ impl AiDriver {
             recovery: Recovery::default(),
             tbone: -1.,
             stuck: None,
+            retiring: false,
             lines: BrakeLineState {
                 active: None,
                 target: 0.,
@@ -3209,24 +3228,14 @@ impl AiDriver {
             + usize::from(obstruction && !on_track)
             + usize::from(frontal);
         let recovery_score = if n == 0 { 0 } else { RECOVERY_SCORES[n - 1] };
-        // retire stuck timer (0x77E3B0): 20 s within 5 m and no racing car
-        // within 100 m.
-        let moved = self.stuck.is_none_or(|(reference, _, _)| {
-            let d = sub(position, reference);
-            dot3(d, d) >= rs.rt_stuck_distance_sq
-        });
-        if moved {
-            self.stuck = Some((position, 0., false));
-        } else if let Some((_, time, latched)) = &mut self.stuck {
-            *time += dt;
-            *latched = *time > rs.rt_stuck_time
-                && !others.iter().any(|o| {
+        let faults = self.fault_scores(speed);
+        let (retire_behaviour, retire_score) =
+            self.retire_test(view.terminal, position, dt, speed, || {
+                others.iter().any(|o| {
                     let d = sub(o.position, position);
                     !o.backwards() && dot3(d, d) < rs.rt_player_distance_sq
-                });
-        }
-        let stuck = self.stuck.is_some_and(|s| s.2);
-        let faults = self.fault_scores(speed);
+                })
+            });
 
         // Path obstacle (0x78B560): the kept obstacle with its sweep distance
         // and closing speed.
@@ -3336,10 +3345,7 @@ impl AiDriver {
         // Arbitration (0x79A400): the first strictly greatest score wins.
         let overtake_target = pass_vehicle.or(attempt);
         let scores = [
-            (
-                Behaviour::Retire,
-                if stuck { RETIRE_STUCK_SCORE } else { 0 },
-            ),
+            (retire_behaviour, retire_score),
             (
                 Behaviour::RecoverTbone,
                 if self.tbone > 0. {
@@ -3359,7 +3365,6 @@ impl AiDriver {
                 if avoid_fire.is_some() { AVOID_SCORE } else { 0 },
             ),
             (Behaviour::Drift, drift_score),
-            (Behaviour::RetireFailure, faults[2]),
             (
                 Behaviour::RaceDamaged,
                 if p.race_damaged { faults[3] } else { 0 },
@@ -3390,7 +3395,10 @@ impl AiDriver {
                 |best, &s| if s.1 > best.1 { s } else { best },
             )
             .0;
-        if next != self.behaviour {
+        // Retire and RetireFailure are the two drive branches of the one
+        // retire behaviour: a switch between them is no reactivation.
+        let retire = |b| matches!(b, Behaviour::Retire | Behaviour::RetireFailure);
+        if next != self.behaviour && !(retire(next) && retire(self.behaviour)) {
             match self.behaviour {
                 Behaviour::Overtake => self.overtake.min_fire = 0.,
                 Behaviour::Recovery => self.recovery.elapsed = 0.,
@@ -3424,10 +3432,11 @@ impl AiDriver {
                 Behaviour::LostControl | Behaviour::RaceDamaged | Behaviour::RetireFailure => {
                     self.activate_failure(next, speed)
                 }
+                Behaviour::Retire => self.failure.point = false,
                 _ => {}
             }
-            self.behaviour = next;
         }
+        self.behaviour = next;
         let mut octant_index = 0;
 
         // Common setup (0x789700) and the race behaviour's offsets.
@@ -3887,9 +3896,10 @@ impl AiDriver {
                 }
             }
             Behaviour::Retire => {
-                // Drive 0x79C6E0 for a stuck car: stop and hold; once below
-                // rtStoppedSpeed it requests removal (req+0x38), as the
-                // failure retire does at its retire point.
+                // Drive 0x79C6E0 for a terminally damaged or stuck car: force
+                // brake and no-steer on the spot; below rtStoppedSpeed it
+                // sets req+0x38 (the removal request [I]), as the failure
+                // retire does at its retire point.
                 request.force_brake = true;
                 request.no_steer = true;
                 if speed < self.parameters.faults.stopped_speed {
@@ -4444,8 +4454,10 @@ impl AiDriver {
     pub fn reverse_request(&self) -> bool {
         self.reverse
     }
-    /// The failure/damage retire drive has stopped the car (retire drive
-    /// 0x79C6E0 below rtStoppedSpeed: removal request req+0x38 [I]).
+    /// The retire drive has stopped the car: terminal damage, the stuck
+    /// latch, failures or damage (0x79C6E0 and 0x79A090 below
+    /// rtStoppedSpeed set req+0x38; its reader is not traced, the removal
+    /// meaning is [I]).
     pub fn removal_requested(&self) -> bool {
         self.failure.removal
     }
@@ -4463,6 +4475,69 @@ impl AiDriver {
         } else {
             self.pace.b
         }
+    }
+
+    /// The retire test 0x784560 with its stuck timer 0x77E3B0 and score
+    /// 0x78B300: the retire drive branch and its score for this tick.
+    /// `racer_near` tells whether a racing car is within
+    /// rtPlayerDistanceSq; it is asked only once the stuck time has run.
+    fn retire_test(
+        &mut self,
+        terminal: bool,
+        position: [f32; 3],
+        dt: f32,
+        speed: f32,
+        racer_near: impl FnOnce() -> bool,
+    ) -> (Behaviour, u8) {
+        let rs = &self.parameters.rescue;
+        // Racing-state transition 0x784870: terminal damage (car state
+        // +0xE3) moves the AI from RacingStateRacing to RacingStateRetire;
+        // no transition leads back [I].
+        if terminal {
+            self.retiring = true;
+        }
+        // retire stuck timer (0x77E3B0): outside RacingStateRacing, or after
+        // moving rtStuckDistanceSq (5 m), the reference, timer and latch
+        // reset. After rtStuckTime (20 s) the latch +0x14 and the test's
+        // fired flag +8 are set unless a racing record (+0xFC == 0) is within
+        // rtPlayerDistanceSq (100 m); then neither is touched, so a latch set
+        // earlier stays while the test does not fire.
+        let moved = self.retiring
+            || self.stuck.is_none_or(|(reference, _, _)| {
+                let d = sub(position, reference);
+                dot3(d, d) >= rs.rt_stuck_distance_sq
+            });
+        let mut stuck_fired = false;
+        if moved {
+            self.stuck = Some((position, 0., false));
+        } else if let Some((_, time, latched)) = &mut self.stuck {
+            *time += dt;
+            if *time > rs.rt_stuck_time && !racer_near() {
+                *latched = true;
+                stuck_fired = true;
+            }
+        }
+        let latched = self.stuck.is_some_and(|s| s.2);
+        let faults = self.fault_scores(speed);
+        // Retire test 0x784560 (fired +8: terminal +0xC, damage over
+        // damage_retirement_ratio +0xD, failure count +0x10, or the stuck
+        // timer) and score 0x78B300: 23 when terminal, latched or the
+        // failure drive holds a retire point (behaviour +0x60), else 10.
+        // Its drive 0x79C6E0 stops on the spot when terminal or latched
+        // (`Retire`), else drives to a retire point (`RetireFailure`).
+        let retire_fired = terminal || faults[2] > 0 || stuck_fired;
+        let retire_stop = terminal || latched;
+        let retire_score = match (retire_fired, retire_stop || self.failure.point) {
+            (false, _) => 0,
+            (true, true) => RETIRE_STUCK_SCORE,
+            (true, false) => RETIRE_FAILURE_SCORE,
+        };
+        let retire_behaviour = if retire_stop {
+            Behaviour::Retire
+        } else {
+            Behaviour::RetireFailure
+        };
+        (retire_behaviour, retire_score)
     }
 
     /// Scores of lost_control (21), controlled_stop (20), the retire
@@ -4572,7 +4647,10 @@ impl AiDriver {
                 self.failure.crash = speed > self.parameters.faults.crash_min_speed;
                 self.failure.wobble_timer = 0.;
             }
-            _ => self.failure.side_timer = 0.,
+            _ => {
+                self.failure.side_timer = 0.;
+                self.failure.point = false;
+            }
         }
     }
 
@@ -4647,6 +4725,9 @@ impl AiDriver {
                 request.track_limits = true;
             }
             Behaviour::RetireFailure => {
+                // The retire point is the nearer track limit (AUTHORED), always
+                // found, so +0x60 holds from the first drive on [I].
+                self.failure.point = true;
                 let side = self.limit_side(data, arc, half_width, dt);
                 request.desired_speed = f.retirement_speed;
                 request.brake_to_speed = true;
@@ -4981,6 +5062,90 @@ mod tests {
         assert_eq!(d.fault_scores(25.), [0, 0, 10, 9]);
         d.pace.damage = 0.5;
         assert_eq!(d.fault_scores(25.), [0, 0, 0, 9]);
+    }
+
+    #[test]
+    fn retire_test_latch_terminal_and_failure_point() {
+        let Some(root) = std::env::var_os("GRID_GAME_ROOT") else {
+            return;
+        };
+        let data = AiData::load(
+            Path::new(&root),
+            "tracks/europe/donington/route_0",
+            "touring",
+            "lac",
+        )
+        .unwrap();
+        let mut d = AiDriver::new(
+            Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.).unwrap(),
+            7,
+        );
+        let rs = d.parameters.rescue.clone();
+        assert_eq!(
+            (rs.rt_stuck_time, rs.rt_stuck_distance_sq, rs.rt_player_distance_sq),
+            (20., 25., 10000.)
+        );
+        let at = [0.; 3];
+        let tick = 0.5;
+        let (mut near_asked, mut near) = (0, true);
+        let step = |d: &mut AiDriver, terminal: bool, near: bool, asked: &mut i32| {
+            d.retire_test(terminal, at, tick, 0., || {
+                *asked += 1;
+                near
+            })
+        };
+        // A parked car (the first tick sets the reference): nothing fires
+        // before rtStuckTime; then a racing car within rtPlayerDistanceSq
+        // holds the test off (asked only then).
+        for _ in 0..41 {
+            assert_eq!(step(&mut d, false, near, &mut near_asked).1, 0);
+        }
+        assert_eq!(near_asked, 0);
+        assert_eq!(step(&mut d, false, near, &mut near_asked).1, 0);
+        assert_eq!(near_asked, 1);
+        // Clear of racers: the latch and the fired flag are set (score 23,
+        // stop on the spot).
+        near = false;
+        assert_eq!(
+            step(&mut d, false, near, &mut near_asked),
+            (Behaviour::Retire, RETIRE_STUCK_SCORE)
+        );
+        // The latch stays while a racer passes, but the test does not fire.
+        near = true;
+        assert_eq!(step(&mut d, false, near, &mut near_asked).1, 0);
+        assert!(d.stuck.is_some_and(|s| s.2));
+        // Moving rtStuckDistanceSq resets the reference, timer and latch.
+        d.retire_test(false, [5.1, 0., 0.], tick, 0., || false);
+        assert_eq!(d.stuck, Some(([5.1, 0., 0.], 0., false)));
+
+        // Terminal damage: RacingStateRetire, score 23, stop on the spot;
+        // the stuck timer no longer runs.
+        assert_eq!(
+            d.retire_test(true, at, tick, 30., || unreachable!()),
+            (Behaviour::Retire, RETIRE_STUCK_SCORE)
+        );
+        assert!(d.retiring);
+        for _ in 0..100 {
+            d.retire_test(false, at, tick, 0., || unreachable!());
+        }
+        assert_eq!(d.stuck, Some((at, 0., false)));
+
+        // A failed wheel: the failure branch scores 10 until its drive holds
+        // a retire point (behaviour +0x60), then 23.
+        let mut d = AiDriver::new(
+            Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.).unwrap(),
+            7,
+        );
+        d.pace.failures[1] = true;
+        assert_eq!(
+            d.retire_test(false, at, tick, 20., || false),
+            (Behaviour::RetireFailure, RETIRE_FAILURE_SCORE)
+        );
+        d.failure.point = true;
+        assert_eq!(
+            d.retire_test(false, at, tick, 20., || false),
+            (Behaviour::RetireFailure, RETIRE_STUCK_SCORE)
+        );
     }
 
     #[test]

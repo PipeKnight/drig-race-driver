@@ -317,8 +317,8 @@ Inputs: `h = |view+0x64|` (heading error to the planned look-ahead target).
 ### 3.2 stop 0x77E7D0 (type 2) [V]
 
 - Fired when the track view is invalid (`view+0x88 == 0`, look-ahead off the route).
-  Certain game modes (string compares against globals 0xE4CD78/0xE4CCD8/…) force it on or
-  off [I which modes].
+  The AI racing state forces it on in PreLights (with +0x1C), RaceComplete, Retire, Stopping
+  and Inactive (string globals 0xE4CD78/0xE4CCD8/…, docs/RESET_AND_RESPAWN_RESEARCH.md §9.1) [V].
 - +0xC = `own.speed < minimumMovingSpeed` (cfg+0xC48, 1.0).
 - Effect in common setup 0x7978D0: **req+0xA5 force brake = 1** for every behaviour, and
   **req+0xA6 no-steer** when +0xC is also set.
@@ -378,9 +378,11 @@ The list is filled geometrically by the scan (0x783B20 → 0x7A45D0 [I that 0x7A
   - +0xD = damage (own+0x11C) > map[30] damage_retirement_ratio;
   - +0xE = damage ≥ 0.5 (both only when a flag at context +0x34 → +0x1D is set);
   - **stuck timer 0x77E3B0**: reference position +0x20. Reset (timer 0, +0x14 = 0) when the
-    car is ≥ sqrt(rtStuckDistanceSq = 25) = 5 m from it, or in one game mode. Otherwise the
+    car is ≥ sqrt(rtStuckDistanceSq = 25) = 5 m from it, or when the AI racing state is not
+    RacingStateRacing (0xE4CDA0; docs/RESET_AND_RESPAWN_RESEARCH.md §9). Otherwise the
     timer +0x18 += dt. Past rtStuckTime (20 s), +0x14 = 1 and fired — **unless** a racing
-    record (state 0) is within sqrt(rtPlayerDistanceSq = 10000) = 100 m.
+    record (state 0) is within sqrt(rtPlayerDistanceSq = 10000) = 100 m; then neither the
+    latch nor fired is touched, so an earlier latch stays (ported 1:1 in F755).
   - fired = 0xC or 0xD or failures > 0 or stuck.
 
 ## 4. Behaviours
@@ -513,7 +515,7 @@ obstruction contact) or something higher wins.
 - **controlled_stop** (20): §3.2.
 - **retire** (score 0x78B300; activate 0x77D570 sets +0x34 = rtRetirementResetTimer):
   - score is 10 for failures or damage, 23 for terminal damage or stuck (or behaviour
-    +0x60);
+    +0x60, set while the failure drive 0x79A090 holds a retire point; F755 ports it);
   - drive 0x79C6E0: for terminal or stuck → force brake + no-steer; below rtStoppedSpeed
     (cfg+0x4F0, 0.5) → req+0x38 = 1 (removal request [I]; the port sets it here since
     F620, docs/RESET_AND_RESPAWN_RESEARCH.md §8). No retire vfunc reads the +0x34 timer;
@@ -758,8 +760,10 @@ would be an AUTHORED deviation to label.
 5. The racing-normally angle test compares with the reversed track direction. Confirm with a
    live trace whether the original ever fires avoid on a slowly moving, correctly oriented
    car (expected: only below 4 m/s).
-6. Game modes forcing the stop test (string globals 0xE4CD78, 0xE4CCD8, 0xE4CDC8, 0xE4CDF0,
-   0xE4CD50) and the retire stuck-reset mode 0xE4CDA0.
+6. ~~Game modes forcing the stop test (string globals 0xE4CD78, 0xE4CCD8, 0xE4CDC8, 0xE4CDF0,
+   0xE4CD50) and the retire stuck-reset mode 0xE4CDA0.~~ Resolved (F755): they are the AI
+   racing states PreLights, RaceComplete, Retire, Stopping, Inactive and Racing
+   (docs/RESET_AND_RESPAWN_RESEARCH.md §9.1).
 7. Corner order of the contact boxes relative to the left/right naming (types 1/2 are the
    two front corners either way).
 8. 0x78B070 (a copy of the recovery offset helper without the on-track branch) has no

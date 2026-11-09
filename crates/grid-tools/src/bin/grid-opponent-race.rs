@@ -1221,22 +1221,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        // A car stopped by the failure/damage retire drive is out (AUTHORED).
-        for (i, driver) in drivers.iter().enumerate() {
-            if let Driver::Ai(ai) = driver
-                && ai.removal_requested()
-                && standings.status(i) == Status::Racing
-            {
-                standings.retire(i, Out::Wrecked);
-                println!("retire tick={} car{i} reason=ai-failure", multi.ticks);
+        // A car stopped by its retire drive is out (AUTHORED: the original
+        // keeps the entry racing until the race is finalised). Terminal
+        // damage stops an AI car on the spot first (0x79C6E0); a pursuit
+        // car has no retire drive and is out at once.
+        for (i, (driver, car)) in drivers.iter().zip(&multi.cars).enumerate() {
+            let removed = match driver {
+                Driver::Ai(ai) => ai.removal_requested(),
+                Driver::Pursuit(_) => car.terminal_wheel().is_some(),
+            };
+            if !removed || standings.status(i) != Status::Racing {
+                continue;
             }
-        }
-        // Terminal damage takes a car out of the race (AUTHORED for AI cars).
-        for (i, car) in multi.cars.iter().enumerate() {
-            if let Some(wheel) = car.terminal_wheel()
-                && standings.status(i) == Status::Racing
-            {
-                standings.retire(i, Out::Wrecked);
+            standings.retire(i, Out::Wrecked);
+            if let Some(wheel) = car.terminal_wheel() {
                 // A lost wheel (status 4) names the wheel; the earlier wheel
                 // damage terminal (status 3) keeps its line unchanged.
                 if car.lost_wheel() {
@@ -1247,6 +1245,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     println!("retire tick={} car{i} reason=terminal-damage", multi.ticks);
                 }
+            } else {
+                println!("retire tick={} car{i} reason=ai-failure", multi.ticks);
             }
         }
         if multi.ticks.is_multiple_of(1500) {

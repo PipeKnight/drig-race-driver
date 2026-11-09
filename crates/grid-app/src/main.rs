@@ -6525,8 +6525,9 @@ fn drive_tick(
                 opponents.standings.finish(0, result.seconds);
             }
             // Terminal damage: the player's race is over (the original's
-            // wrecked screen retires and ends the race [V]); opponents are
-            // retired on it (AUTHORED).
+            // wrecked screen retires and ends the race [V]). An opponent's
+            // AI stops on the spot first (retire drive 0x79C6E0) and leaves
+            // through its removal request below.
             use grid_tools::race::{Out, Status};
             if driving.runtime.terminal_wheel().is_some()
                 && opponents.standings.status(0) == Status::Racing
@@ -6552,13 +6553,9 @@ fn drive_tick(
                 );
             }
             for i in 1..opponents.standings.len() {
-                if opponents.multi.cars[i].terminal_wheel().is_some()
-                    && opponents.standings.status(i) == Status::Racing
-                {
-                    opponents.standings.retire(i, Out::Wrecked);
-                }
-                // Stopped by the AI's retire drive: stuck, failure or damage
-                // (AUTHORED).
+                // Stopped by the AI's retire drive: terminal damage, stuck,
+                // failure or damage (AUTHORED: the original keeps the entry
+                // racing until the race is finalised).
                 if opponents.drivers[i - 1].removal_requested()
                     && opponents.standings.status(i) == Status::Racing
                 {

@@ -296,3 +296,117 @@ Recovery, then retire. The car moves 1.5 m and requests removal.
 The headless run of the same race.ini (current main, and the evidence's own source rebuilt)
 does not reach this state. Opponent contacts differ from tick 814 (a rebuilt binary, not
 the playtest's), so the race diverges.
+
+## 9. The retire path 1:1 (F755, backlog rows 45 and 46)
+
+Static analysis of the hash-pinned image (`grid_re.py dis`; four of the functions are outside
+the master analysis). Before F755 the port's retire test lacked the stuck latch, the racing-state
+gate and the terminal input, and grid-app retired a terminally damaged AI on the spot.
+
+### 9.1 AI racing states [V]
+
+The AI driver keeps its racing state as a name string. Nine globals hold a pointer and a
+0x20-byte buffer, filled at start-up by 0xC79C60–0xC79D40 through 0xA66940 (copy into a
+0x20-byte buffer). The tests compare names with strcmp 0xA66720.
+
+| state | string | global (pointer, buffer) |
+|---|---|---|
+| ai::RacingStateAtLights | 0xCF91FC | 0xE4CCB0, 0xE4CCB4 |
+| ai::RacingStateRaceComplete | 0xCF9214 | 0xE4CCD8, 0xE4CCDC |
+| ai::RacingStateCrashed | 0xCF9230 | 0xE4CD00, 0xE4CD04 (no code reference) |
+| ai::RacingStateCruise | 0xCF9248 | 0xE4CD28 |
+| ai::RacingStateInactive | 0xCF9260 | 0xE4CD50 |
+| ai::RacingStatePreLights | 0xCF9278 | 0xE4CD78 |
+| ai::RacingStateRacing | 0xCF9294 | 0xE4CDA0, 0xE4CDA4 |
+| ai::RacingStateRetire | 0xCF92AC | 0xE4CDC8, 0xE4CDCC |
+| ai::RacingStateStopping | 0xCF92C4 | 0xE4CDF0 |
+
+The state objects' transition vfuncs (vtable slots 0xCF772C … 0xCF7804) read a status record
+`p = [ebx+0x158]`, `status[p+4]`:
+
+| vfunc | from (by the names it returns) [I] | transition |
+|---|---|---|
+| 0x7846A0 | AtLights | → Racing |
+| 0x784870 | Racing | own car state +0xE3 == 1 or status byte 3 → Retire; byte 2 → RaceComplete; else stays |
+| 0x784A80 | Cruise/Stopping [I] | byte 2 → RaceComplete; byte 3 → Retire |
+| 0x784760 | RaceComplete | [+0x15C] == 1 → Cruise, else Stopping |
+| 0x7849C0 | PreLights | → AtLights |
+| 0x784990, 0x77F720 | Retire, Inactive [I] | none |
+
+No transition leads out of Retire. Readers of the state in the behaviour tests:
+- the retire stuck timer 0x77E3B0 runs only in Racing (0xE4CDA0);
+- the cruise test 0x77E060 (type 4) fires in RaceComplete, Retire, Cruise and Stopping;
+- the stop test 0x77E7D0 (type 2) fires in PreLights (with its +0x1C), RaceComplete, Retire,
+  Stopping and Inactive; common setup 0x7978D0 then forces the brake for every behaviour.
+  This closes docs/AI_AVOID_RECOVERY_RESEARCH.md open item 6.
+
+### 9.2 Retire test, score and drive [V]
+
+Retire test 0x784560 (type 8, 0x30 bytes), every tick:
+- clears +8 (fired), +0xC, +0xD, +0xE and the count +0x10;
+- +0xC = own car state +0xE3 == 1 (terminal damage);
+- +0xD = damage > `damage_retirement_ratio` and +0xE = damage ≥ 0.5, both only behind the
+  context flag ctx+0x34 → +0x1D (the engine-failure gate);
+- +0x10 = count of the four failure bytes from car vfunc +0x18;
+- fired if +0xC, +0xD or the count; then calls the stuck timer.
+
+Stuck timer 0x77E3B0:
+- not in Racing, or moved ≥ `rtStuckDistanceSq` (cfg+0x4C8, 25) from the reference +0x20:
+  reference = position, timer +0x18 = 0, latch +0x14 = 0;
+- else timer += dt; past `rtStuckTime` (cfg+0x4B4, 20 s) it walks the records. A racing
+  record (+0xFC == 0) within 0x7A3840(0x3D) = `rtPlayerDistanceSq` (10 000) returns **without
+  touching the latch or the fired flag**; otherwise latch = 1 and fired = 1.
+
+So a latch set earlier survives a passing car, but the test does not fire while that car is
+near; the score falls to 0 and recovery can take over until it is clear again.
+
+Score 0x78B300: 0 if not fired; 10 if fired and neither +0xC, the latch nor behaviour +0x60
+is set; otherwise 23.
+
+Drive 0x79C6E0:
+- +0xC or the latch: req+0xA5 force brake, req+0xA6 no-steer; below `rtStoppedSpeed`
+  (cfg+0x4F0, 0.5 m/s) req+0x38 = 1;
+- else +0xD or the count: 0x79A090, the drive to a retire point. Its +0x60 is set while a
+  retire point is found (0x79A144, cleared at 0x79A14E); req+0x60 = the point. Below
+  stoppedSpeed +0x40 = 1 and req+0x38 = req+0x39 = 1; with +0x40 set it forces the brake.
+
+Activate 0x77D570 clears +0x30, +0x31, +0x38, +0x3C, +0x40 and +0x60 and stores
+`rtRetirementResetTimer` at +0x34. The two drive branches belong to one behaviour, so moving
+between them does not activate it again.
+
+### 9.3 What happens to the entry [V]
+
+- The race manager keeps a retired AI as an entry. Race over 0x90E1B0 (type 1) needs every
+  entry to reach the event laps, so a stopped AI blocks it; the race ends when the player
+  finishes and finalisation 0x911F30 / 0x90FCD0 estimates or retires the others (cars below
+  5 mph are retired).
+- The reader of req+0x38 is not traced (§7 item 3). The setter of the car-state byte +0xE3 is
+  not traced either; the port maps it to handling status 3 or 4 (`terminal_wheel()`) [I].
+- The physics side of terminal damage: status 3 sets +0x226C, which disables the controls,
+  and the car rolls to rest (port: under 3 m/s within 4 s, the wheel-detach test).
+
+### 9.4 Port (F755)
+
+`AiDriver::retire_test` (ai_driver.rs):
+- terminal damage (`View::terminal`) moves the driver to the Retire racing state (`retiring`);
+  the stuck timer then stays reset, as outside RacingStateRacing;
+- the stuck timer keeps the sticky latch and a per-tick fired flag;
+- fired = terminal, the failure/damage branch, or the stuck timer;
+- the score is 23 for terminal, latched, or once the failure drive holds its retire point
+  (`Failure::point`, behaviour +0x60; the port's retire point, the nearer track limit, is
+  always found [I]); else 10;
+- `Behaviour::Retire` (stop on the spot) for terminal or latched, else
+  `Behaviour::RetireFailure`; switching between them does not activate again.
+
+So a terminally damaged AI brakes with no steer and, below 0.5 m/s, requests removal.
+
+Standings (AUTHORED, rows 45 and 46): the removal request retires the AI in the standings
+(grid-app `retired=removal` with the notice; grid-opponent-race `reason=terminal-damage`,
+`lost-wheel` or `ai-failure`). The original keeps the entry until finalisation. The port
+retires earlier so that an AI-only field (autopilot, headless) still ends by itself and the
+HUD list drops cars that will never move again. A terminal AI is no longer retired on the
+spot: it first stops. A pursuit driver (no retire drive) still retires on terminal damage.
+
+Not ported: the RaceComplete, Cruise and Stopping states after an AI finishes (it keeps
+racing at pace), the stop test's state list, and the status byte 3 that moves the Racing
+state to Retire (writer not traced).

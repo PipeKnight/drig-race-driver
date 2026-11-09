@@ -209,8 +209,12 @@ entry order; `grid_order` is not read.
 - [V, docs/AI_AVOID_RECOVERY_RESEARCH.md] AI cars retire through the AI `retire` behaviour:
   - damage above `damage_retirement_ratio`, or stuck for 20 s;
   - if they stand still when the race is finalised, they get state 3 (section 1).
-- [I] Terminal damage therefore means DNF / retired. The port retires an AI car with terminal damage
-  immediately (AUTHORED shortcut for the retire behaviour).
+- [V, docs/RESET_AND_RESPAWN_RESEARCH.md §9] Terminal damage (AI car state +0xE3) moves the AI to
+  RacingStateRetire; its retire behaviour (score 23) brakes with no steer and requests removal below
+  0.5 m/s. The entry stays in the race until finalisation.
+- Port (F755): the AI stops the same way; its removal request then retires it in the standings
+  (AUTHORED: earlier than the original, so a field without a human ends by itself). Before F755 the
+  port retired a terminally damaged AI on the spot.
 
 ## Port (F308)
 

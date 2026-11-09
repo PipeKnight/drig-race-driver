@@ -236,6 +236,8 @@ Release, cargo/rustc 1.99.0. Outputs in this worktree's private `local/wheel-bod
   - Nürburgring, car 5 rear right at 2500: retires at 2501, body moved 134 m, race completes;
   - Istanbul Park, `--cars bmw,lac`, car 0 (BMW) front right at 3000: retires at 3001, body moved 125 m;
   - Long Beach (rebased on F354), car 4 front left at 2500: retires at 2501, body moved 64 m, race completes.
+  Since F755 an AI car with a lost wheel first stops (retire drive, docs/RESET_AND_RESPAWN_RESEARCH.md §9)
+  and retires on its removal request: Donington car 5 front left at 3000 retires at 3167.
   Without the variable the Donington race is byte-identical to main.
 - grid-soak checks every world body (non-finite, out of bounds, falling, speed), so a wheel body is
   covered like a prop piece. `grid-soak quick`: 16/16 (`local/wheel-body/soak/quick`, and again on the tree
