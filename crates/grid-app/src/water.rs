@@ -1,9 +1,10 @@
 //! The original's `water.fx` (land.pssg sea, rivers and Haruna's wet patches;
 //! docs/WATER.md): its programs' arithmetic on the saved constants, normal map
-//! and vertex colour. AUTHORED: the reflection cube (the original binds a
-//! runtime `WaterEnvMap`) is the route's source sky baked at 64 texels a face
-//! (sky_environment.rs), colours are decoded from sRGB, time is seconds, and
-//! the port's fog replaces the program's own.
+//! and vertex colour. The reflection cube is the original's `WaterEnvMap` of
+//! the draw's child of the `water` node (water_probe.rs); a draw outside that
+//! node samples the route's source sky baked at 64 texels a face
+//! (sky_environment.rs) [authored]. AUTHORED: colours are decoded from sRGB,
+//! time is seconds, and the port's fog replaces the program's own.
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     mesh::{Indices, PrimitiveTopology},
@@ -57,6 +58,8 @@ struct Draw {
     material: String,
     mesh: Mesh,
     transform: Mat4,
+    /// The `water` child whose environment map it samples.
+    probe: Option<usize>,
 }
 #[derive(Resource)]
 struct Source {
@@ -64,6 +67,49 @@ struct Source {
     draws: Vec<Draw>,
     textures: BTreeMap<String, Vec<u8>>,
     environment: Option<Image>,
+    /// World origins of the `water` node's children (the probes' centres).
+    origins: Vec<Vec3>,
+    cubes: Vec<Handle<Image>>,
+}
+
+/// The `water` node's children: their world origins, and each scene id at or
+/// under a child mapped to its index (0x985550 makes one `WaterEnvMap` per
+/// child, at its first scene child's translation, else at its own).
+fn probe_nodes(tree: &pssg::Tree<'_>, file: &str) -> (Vec<Vec3>, BTreeMap<Vec<u8>, usize>) {
+    let mut origins = Vec::new();
+    let mut ids = BTreeMap::new();
+    let Some(water) = (0..tree.nodes.len()).find(|&i| {
+        matches!(tree.name(i), b"NODE" | b"ROOTNODE") && tree.string(i, b"id").is_ok_and(|v| v == b"water")
+    }) else {
+        return (origins, ids);
+    };
+    for &child in &tree.nodes[water].children {
+        if !matches!(tree.name(child), b"NODE" | b"RENDERNODE" | b"ROOTNODE" | b"LODVISIBLERENDERNODE") {
+            continue;
+        }
+        // 0x985550 places the probe at the child's first scene child (the
+        // authored `*_cube_01` marker) when it has one, else at the child.
+        let marker = tree.nodes[child].children.iter().copied()
+            .find(|&c| matches!(tree.name(c), b"NODE" | b"RENDERNODE" | b"ROOTNODE"))
+            .unwrap_or(child);
+        let m = match scene::node_matrix(tree, marker) {
+            Ok(m) => m,
+            Err(error) => {
+                eprintln!("water_probe child={child} skipped file={file} error={error}");
+                continue;
+            }
+        };
+        let index = origins.len();
+        origins.push(Vec3::new(m[12], m[13], m[14]));
+        let mut stack = vec![child];
+        while let Some(node) = stack.pop() {
+            if let Ok(id) = tree.string(node, b"id") {
+                ids.entry(id.to_vec()).or_insert(index);
+            }
+            stack.extend(tree.nodes[node].children.iter().copied());
+        }
+    }
+    (origins, ids)
 }
 
 /// The `water.fx` draws of the route's land.pssg; none on tracks without.
@@ -77,6 +123,8 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
             draws: Vec::new(),
             textures: BTreeMap::new(),
             environment: None,
+            origins: Vec::new(),
+            cubes: Vec::new(),
         });
     }
     let mut definitions = BTreeMap::new();
@@ -103,6 +151,7 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
         return Err(format!("{file}: water material {name:?} has no TNormalMap").into());
     }
     let sources = mesh::read_meshes(&tree)?;
+    let (origins, probe_ids) = probe_nodes(&tree, &file);
     let mut draws = Vec::new();
     for draw in scene::read_static_draws(&tree, &sources)? {
         let material = std::str::from_utf8(draw.material)?;
@@ -115,6 +164,7 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
             return Err(format!("{file}: water draw without UVs or normals").into());
         }
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let transform = Mat4::from_cols_array(&draw.transform);
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, source.positions[range.clone()].to_vec());
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, source.normals[range.clone()].to_vec());
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, source.texcoords[range.clone()].to_vec());
@@ -135,7 +185,12 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
             let tangents: Vec<[f32; 4]> = source.tangents[range].iter().map(|t| [t[0], t[1], t[2], 1.]).collect();
             mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
         }
-        draws.push(Draw { material: material.to_owned(), mesh, transform: Mat4::from_cols_array(&draw.transform) });
+        draws.push(Draw {
+            material: material.to_owned(),
+            mesh,
+            transform,
+            probe: probe_ids.get(draw.joint).copied(),
+        });
     }
     let mut textures = BTreeMap::new();
     let files: std::collections::BTreeSet<&String> = containers.values().collect();
@@ -157,10 +212,11 @@ fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error:
         return Err(format!("{file}: water normal map {name:?} unresolved").into());
     }
     println!(
-        "water prepared materials={} draws={} textures={} source=land.pssg shader=water.fx",
-        definitions.len(), draws.len(), textures.len()
+        "water prepared materials={} draws={} textures={} probes={} probed_draws={} source=land.pssg shader=water.fx",
+        definitions.len(), draws.len(), textures.len(), origins.len(),
+        draws.iter().filter(|d| d.probe.is_some()).count()
     );
-    Ok(Source { definitions, draws, textures, environment: None })
+    Ok(Source { definitions, draws, textures, environment: None, origins, cubes: Vec::new() })
 }
 
 pub fn install(app: &mut App, root: &Path, route: &Route) -> Result<(), Box<dyn std::error::Error>> {
@@ -169,6 +225,22 @@ pub fn install(app: &mut App, root: &Path, route: &Route) -> Result<(), Box<dyn 
         return Ok(());
     }
     source.environment = Some(sky_cube(root, route)?);
+    // GRID_WATER_PROBE=0 reflects the baked sky cube only (F705's look; comparisons).
+    if std::env::var_os("GRID_WATER_PROBE").is_some_and(|v| v == "0") {
+        for d in &mut source.draws {
+            d.probe = None;
+        }
+    }
+    // Probes no draw samples are not drawn.
+    let used: std::collections::BTreeSet<usize> = source.draws.iter().filter_map(|d| d.probe).collect();
+    if used.len() != source.origins.len() {
+        let remap: BTreeMap<usize, usize> = used.iter().enumerate().map(|(new, &old)| (old, new)).collect();
+        source.origins = used.iter().map(|&i| source.origins[i]).collect();
+        for d in &mut source.draws {
+            d.probe = d.probe.map(|p| remap[&p]);
+        }
+    }
+    source.cubes = super::water_probe::install(app, source.origins.clone());
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
         SHADER.id(),
         Shader::from_wgsl(include_str!("water.wgsl"), "grid_water.wgsl"),
@@ -211,8 +283,12 @@ fn spawn(
             (name.clone(), images.add(image))
         })
         .collect();
-    let handles: BTreeMap<_, _> = source.definitions.iter()
-        .map(|(name, d)| {
+    let mut keys: Vec<(String, Option<usize>)> = source.draws.iter().map(|d| (d.material.clone(), d.probe)).collect();
+    keys.sort();
+    keys.dedup();
+    let handles: BTreeMap<_, _> = keys.into_iter()
+        .map(|(name, probe)| {
+            let d = &source.definitions[&name];
             let c = |key: &str, i: usize| d.constants.get(key).and_then(|v| v.get(i)).copied().unwrap_or(0.);
             let colour = |key: &str| Color::srgb(c(key, 0), c(key, 1), c(key, 2)).to_linear().to_vec3();
             let base = StandardMaterial {
@@ -227,9 +303,9 @@ fn spawn(
                 reflection: colour("reflectionColour").extend(c("reflectionAmount", 0)),
                 motion: Vec4::new(c("textureScaleX", 0), c("textureScaleY", 0), c("bumpSpeedX", 0), c("bumpSpeedY", 0)),
                 fresnel: Vec4::new(c("fresnelBias", 0), c("fresnelPower", 0), 0., 0.),
-                environment: environment.clone(),
+                environment: probe.map_or_else(|| environment.clone(), |p| source.cubes[p].clone()),
             };
-            (name.clone(), materials.add(ExtendedMaterial { base, extension }))
+            ((name, probe), materials.add(ExtendedMaterial { base, extension }))
         })
         .collect();
     let draws = std::mem::take(&mut source.draws);
@@ -238,12 +314,17 @@ fn spawn(
         commands.spawn((
             Name::new(format!("land/water/{}#{i}", draw.material)),
             Mesh3d(meshes.add(draw.mesh)),
-            MeshMaterial3d(handles[&draw.material].clone()),
+            MeshMaterial3d(handles[&(draw.material, draw.probe)].clone()),
             Transform::from_matrix(draw.transform),
             bevy::light::NotShadowCaster,
+            super::water_probe::WaterSurface,
         ));
     }
-    println!("water spawned draws={count} materials={} reflection=source-sky-cube-64 authored_cube=true", handles.len());
+    let probed = handles.keys().filter(|(_, p)| p.is_some()).count();
+    println!(
+        "water spawned draws={count} materials={} reflection=water-env-probe-{} probed_materials={probed} sky_cube_materials={}",
+        handles.len(), super::water_probe::SIZE, handles.len() - probed
+    );
 }
 
 #[cfg(test)]
@@ -270,5 +351,12 @@ mod tests {
         assert!(!source.draws.is_empty());
         assert!(!source.textures.is_empty());
         assert!(source.environment.is_none());
+        // One WaterEnvMap probe at the `sea_mesh_01_cube_01` marker under the
+        // `water` node (lifted 8.9 m below its parent), and every water draw
+        // lies under it.
+        assert_eq!(source.origins.len(), 1);
+        let expected = Vec3::new(330.52, 273.47 - 8.89, 948.03);
+        assert!(source.origins[0].distance(expected) < 0.05, "{:?}", source.origins);
+        assert!(source.draws.iter().all(|d| d.probe == Some(0)));
     }
 }

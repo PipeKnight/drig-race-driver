@@ -363,15 +363,22 @@ fn follow_time_of_day(
     }
 }
 
+/// The dome stays on the viewer, or on the water probe's centre while it
+/// draws (water_probe.rs).
 fn follow_camera(
     camera: Query<&Transform, With<super::ViewerCamera>>,
+    probe: Option<Res<super::water_probe::SkyCentre>>,
     mut skies: Query<&mut Transform, (With<SkyDome>, Without<super::ViewerCamera>)>,
 ) {
-    let Ok(camera) = camera.single() else {
-        return;
+    let centre = match probe.and_then(|p| p.0) {
+        Some(centre) => centre,
+        None => match camera.single() {
+            Ok(camera) => camera.translation,
+            Err(_) => return,
+        },
     };
     for mut sky in &mut skies {
-        sky.translation = camera.translation;
+        sky.translation = centre;
     }
 }
 

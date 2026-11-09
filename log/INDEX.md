@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F754](F0754.md) | 2026-11-09 | Water probes at authored markers; original shadow depth offsets and disc radii |
 | [F753](F0753.md) | 2026-11-09 | AI yield full brake when sliding and backwards brake (0x78990B, 0x7764C0); first-corner matrix |
 | [F752](F0752.md) | 2026-11-05 | Playable 343de39742df for the PC and both APKs (first tyre smoke builds no pipeline mid-race) |
 | [F751](F0751.md) | 2026-11-05 | Tyre smoke pipelines warmed behind the start cover |

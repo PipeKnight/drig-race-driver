@@ -155,6 +155,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F754](log/F0754.md) | 2026-11-09 | Water probes at authored markers; original shadow depth offsets and disc radii |
 | [F753](log/F0753.md) | 2026-11-09 | AI yield full brake when sliding and backwards brake (0x78990B, 0x7764C0); first-corner matrix |
 | [F752](log/F0752.md) | 2026-11-05 | Playable 343de39742df for the PC and both APKs (first tyre smoke builds no pipeline mid-race) |
 | [F751](log/F0751.md) | 2026-11-05 | Tyre smoke pipelines warmed behind the start cover |
@@ -214,7 +215,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F697](log/F0697.md) | 2026-11-02 | Body events after a wake: the solved contact count, not the sum of both collections (Donington chaos world error) |
 | [F696](log/F0696.md) | 2026-11-02 | Playable a8cef46b9294 with DLAA and APKs a8cef46b9294 |
 | [F695](log/F0695.md) | 2026-11-02 | Old APKs are deleted when new ones are built |
-| [F694](log/F0694.md) | 2026-11-02 | Release gate: paint-specular test missed the reflections field |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

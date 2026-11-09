@@ -288,12 +288,19 @@ const GRID_FILTER: u32 = GRID_FILTER_VALUEu;
 // Scale of the original's disc radii (1: the original), and of the car's.
 const GRID_SOFT: f32 = GRID_SOFT_VALUE;
 const GRID_CAR_SOFT: f32 = GRID_CAR_SOFT_VALUE;
+// 1: the original's depth offsets; 0: Bevy's depth and normal bias.
+const GRID_BIAS: u32 = GRID_BIAS_VALUEu;
+// The original's shadow pass (0x5BA930) writes caster depth along the light
+// plus block[3] + block[4] of the mode-0 table, in metres: car map 0.005 +
+// 0.05, world cascades 0.25 + 0.15 and 0.3 + 0.6. Moving the receiver that
+// far towards the light compares the same; there is no normal offset.
+const GRID_DEPTH_OFFSET = array<f32, 3>(0.055, 0.4, 0.9);
 // World disc radii in metres, cascades 1 and 2: block[2] - block[1] of the
-// mode-0 table (1.0 - 0.5, 2.0 - 0.6). discScales is that / range / 2, a
-// share of a map 2 range wide [I].
-const GRID_WORLD_RADIUS = array<f32, 2>(0.5, 1.4);
-// Car map disc radius as a share of the map: (3.75 - 0.6) / 250 / 2.
-const GRID_CAR_RADIUS: f32 = 0.0063;
+// mode-0 table (1.0 - 0.5, 2.0 - 0; 0x5B4990 stores block[1] = 0, 0.5, 0).
+// discScales is that / range / 2, a share of a map 2 range wide [I].
+const GRID_WORLD_RADIUS = array<f32, 2>(0.5, 2.0);
+// Car map disc radius as a share of the map: (3.75 - 0) / 250 / 2.
+const GRID_CAR_RADIUS: f32 = 0.0075;
 // csm_wedge_shadow_1 taps: the car's 8 (centre, shader constants c0.zw and
 // c4-c6), the world cascades' 4 (shadowSamplePos0 and 1, 0xDAFC38).
 const GRID_CAR_TAPS = array<vec2<f32>, 7>(
@@ -347,8 +354,12 @@ fn grid_cascade(
     }
     let light = &view_bindings::lights.directional_lights[light_id];
     let cascade = &(*light).cascades[cascade_index];
-    let normal_offset = (*light).shadow_normal_bias * (*cascade).texel_size * surface_normal.xyz;
-    let depth_offset = (*light).shadow_depth_bias * (*light).direction_to_light.xyz;
+    var normal_offset = (*light).shadow_normal_bias * (*cascade).texel_size * surface_normal.xyz;
+    var depth_offset = (*light).shadow_depth_bias * (*light).direction_to_light.xyz;
+    if (GRID_BIAS == 1u) {
+        normal_offset = vec3(0.0);
+        depth_offset = GRID_DEPTH_OFFSET[min(cascade_index, 2u)] * (*light).direction_to_light.xyz;
+    }
     let offset_position = vec4<f32>(frag_position.xyz + normal_offset + depth_offset, frag_position.w);
     let light_local = world_to_directional_light_local(light_id, cascade_index, offset_position);
     if (light_local.w == 0.0) {
@@ -436,7 +447,9 @@ const LAYOUT_IMPORT: &str = "sample_shadow_map, sample_shadow_map_pcss, sample_s
 /// Low and ultra take high's. `GRID_SHADOW_FILTER=bevy` keeps Bevy's
 /// filter, `GRID_SHADOW_SOFT` scales the disc radii and
 /// `GRID_SHADOW_CAR_SOFT` the car's again [research].
-fn filter(quality: Quality) -> (u32, f32, f32) {
+/// `GRID_SHADOW_BIAS=bevy` keeps Bevy's depth and normal bias instead of the
+/// original's per-cascade depth offsets (comparisons).
+fn filter(quality: Quality) -> Filter {
     let bevy = std::env::var("GRID_SHADOW_FILTER").is_ok_and(|v| v == "bevy");
     let scale = |name| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(1.0_f32);
     let mode = match (bevy, quality) {
@@ -444,15 +457,19 @@ fn filter(quality: Quality) -> (u32, f32, f32) {
         (false, Quality::Medium) => 2,
         (false, _) => 1,
     };
-    (mode, scale("GRID_SHADOW_SOFT"), scale("GRID_SHADOW_CAR_SOFT"))
+    let bias = u32::from(!std::env::var("GRID_SHADOW_BIAS").is_ok_and(|v| v == "bevy"));
+    (mode, scale("GRID_SHADOW_SOFT"), scale("GRID_SHADOW_CAR_SOFT"), bias)
 }
+
+/// Filter mode, disc scale, car disc scale, bias mode.
+type Filter = (u32, f32, f32, u32);
 
 /// The `[video] shadows` quality the layout runs with.
 #[derive(Resource)]
 struct LayoutQuality(Quality);
 
 /// Bevy's `fetch_directional_shadow` with the layout's head, or why not.
-fn patch(source: &str, (mode, soft, car_soft): (u32, f32, f32)) -> Result<String, &'static str> {
+fn patch(source: &str, (mode, soft, car_soft, bias): Filter) -> Result<String, &'static str> {
     if source.matches(BEVY_FETCH).count() != 1 {
         return Err("pinned Bevy fetch_directional_shadow absent or ambiguous");
     }
@@ -462,7 +479,8 @@ fn patch(source: &str, (mode, soft, car_soft): (u32, f32, f32)) -> Result<String
     let fetch = LAYOUT_FETCH
         .replace("GRID_FILTER_VALUE", &mode.to_string())
         .replace("GRID_SOFT_VALUE", &format!("{soft:?}"))
-        .replace("GRID_CAR_SOFT_VALUE", &format!("{car_soft:?}"));
+        .replace("GRID_CAR_SOFT_VALUE", &format!("{car_soft:?}"))
+        .replace("GRID_BIAS_VALUE", &bias.to_string());
     Ok(source.replacen(BEVY_IMPORT, LAYOUT_IMPORT, 1).replacen(BEVY_FETCH, &fetch, 1))
 }
 
@@ -490,11 +508,11 @@ fn patch_shader(mut shaders: ResMut<Assets<Shader>>, quality: Res<LayoutQuality>
         eprintln!("shadow_layout patched=false reason=not-wgsl");
         return;
     };
-    let (mode, soft, car_soft) = filter(quality.0);
-    match patch(source, (mode, soft, car_soft)) {
+    let (mode, soft, car_soft, bias) = filter(quality.0);
+    match patch(source, (mode, soft, car_soft, bias)) {
         Ok(source) => {
             shader.source = Source::Wgsl(source.into());
-            println!("shadow_layout patched=true bevy=0.19.1 maps=3 car_map=cascade0 filter={mode} soft={soft} car_soft={car_soft}");
+            println!("shadow_layout patched=true bevy=0.19.1 maps=3 car_map=cascade0 filter={mode} soft={soft} car_soft={car_soft} bias={bias}");
         }
         Err(error) => eprintln!("shadow_layout patched=false reason={error}"),
     }
@@ -530,14 +548,14 @@ mod tests {
     #[test]
     fn the_patch_replaces_one_exact_head() {
         let source = format!("{BEVY_IMPORT}before\n{BEVY_FETCH}    var shadow = 1.0;\n    return shadow;\n}}\nafter");
-        let patched = patch(&source, (1, 1., 1.)).unwrap();
+        let patched = patch(&source, (1, 1., 1., 1)).unwrap();
         assert!(patched.contains("fn grid_world_shadow("));
         assert!(patched.contains("return min(car, world);"));
         assert!(patched.contains(LAYOUT_IMPORT));
         assert!(!patched.contains("_VALUE"));
-        assert!(patch(&patched, (1, 1., 1.)).is_err());
-        assert!(patch(&format!("{BEVY_IMPORT}{BEVY_FETCH}{BEVY_FETCH}"), (1, 1., 1.)).is_err());
-        assert!(patch(BEVY_FETCH, (1, 1., 1.)).is_err());
+        assert!(patch(&patched, (1, 1., 1., 1)).is_err());
+        assert!(patch(&format!("{BEVY_IMPORT}{BEVY_FETCH}{BEVY_FETCH}"), (1, 1., 1., 1)).is_err());
+        assert!(patch(BEVY_FETCH, (1, 1., 1., 1)).is_err());
     }
 
     #[test]

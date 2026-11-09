@@ -289,7 +289,7 @@ pub fn install(
 
 /// Bevy's cube face directions (the environment map's sampling convention),
 /// as scene_probe::direction.
-fn direction(face: usize, u: f32, v: f32) -> Vec3 {
+pub(crate) fn direction(face: usize, u: f32, v: f32) -> Vec3 {
     let (u, v) = (2. * u - 1., 2. * v - 1.);
     match face {
         0 => Vec3::new(1., -v, u),
@@ -303,7 +303,7 @@ fn direction(face: usize, u: f32, v: f32) -> Vec3 {
     .normalize()
 }
 
-fn face_transform(face: usize, centre: Vec3) -> Transform {
+pub(crate) fn face_transform(face: usize, centre: Vec3) -> Transform {
     let forward = direction(face, 0.5, 0.5);
     let right = (direction(face, 0.75, 0.5) - direction(face, 0.25, 0.5)).normalize();
     let up = (direction(face, 0.5, 0.25) - direction(face, 0.5, 0.75)).normalize();
@@ -597,13 +597,25 @@ fn dump(mut commands: Commands, cube: Res<Cube>, mut state: ResMut<Dump>) {
 
 fn write_dump(event: On<ReadbackComplete>, mut commands: Commands, cube: Res<Cube>) {
     commands.entity(event.entity).despawn();
-    let size = cube.size as usize;
-    if event.data.len() != size * size * 6 * 8 {
-        eprintln!("car_reflections dump=failed bytes={}", event.data.len());
-        return;
+    let directory = crate::settings::data_dir().join("graphics");
+    let path = directory.join(format!(
+        "car-reflections-{}.png",
+        cube.copies.load(Ordering::Acquire)
+    ));
+    match save_cube_strip(&event.data, cube.size as usize, &path) {
+        Ok(()) => println!("car_reflections dump={}", path.display()),
+        Err(error) => eprintln!("car_reflections dump=failed {error}"),
+    }
+}
+
+/// A read-back Rgba16Float cube's six faces side by side (+X, −X, +Y, −Y,
+/// +Z, −Z) as an sRGB PNG, tone mapped x/(1+x) for viewing.
+pub(crate) fn save_cube_strip(data: &[u8], size: usize, path: &std::path::Path) -> Result<(), String> {
+    if data.len() != size * size * 6 * 8 {
+        return Err(format!("bytes={}", data.len()));
     }
     let mut rgba = vec![255u8; size * 6 * size * 4];
-    for (i, pixel) in event.data.as_chunks::<8>().0.iter().enumerate() {
+    for (i, pixel) in data.as_chunks::<8>().0.iter().enumerate() {
         let (face, rest) = (i / (size * size), i % (size * size));
         let (y, x) = (rest / size, rest % size);
         let at = (y * size * 6 + face * size + x) * 4;
@@ -629,19 +641,15 @@ fn write_dump(event: On<ReadbackComplete>, mut commands: Commands, cube: Res<Cub
         TextureFormat::Rgba8UnormSrgb,
         bevy::asset::RenderAssetUsages::MAIN_WORLD,
     );
-    let directory = crate::settings::data_dir().join("graphics");
-    let path = directory.join(format!(
-        "car-reflections-{}.png",
-        cube.copies.load(Ordering::Acquire)
-    ));
-    let result = std::fs::create_dir_all(&directory)
-        .map_err(|e| e.to_string())
-        .and_then(|_| image.try_into_dynamic().map_err(|e| format!("{e:?}")))
-        .and_then(|image| image.to_rgb8().save(&path).map_err(|e| e.to_string()));
-    match result {
-        Ok(()) => println!("car_reflections dump={}", path.display()),
-        Err(error) => eprintln!("car_reflections dump=failed {error}"),
+    if let Some(directory) = path.parent() {
+        std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
     }
+    image
+        .try_into_dynamic()
+        .map_err(|e| format!("{e:?}"))?
+        .to_rgb8()
+        .save(path)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

@@ -93,6 +93,18 @@ impl Warmup {
     pub fn proxies(&self) -> bool {
         self.phase == Phase::Dither
     }
+
+    /// The scene is back to its own visibility and the cover still up.
+    pub fn restoring(&self) -> bool {
+        self.phase == Phase::Restore
+    }
+
+    /// Read in Update: this frame's `step` lifts the cover if the frame
+    /// turns out quiet (or the frame limit is reached).
+    pub fn finishing(&self) -> bool {
+        self.phase == Phase::Restore
+            && (self.quiet + 1 >= QUIET_FRAMES || self.frames >= MAX_FRAMES)
+    }
 }
 
 pub fn install(app: &mut App) {

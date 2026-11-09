@@ -1,5 +1,6 @@
 mod object_materials;
 mod water;
+mod water_probe;
 mod light_shafts;
 mod float_audit;
 #[cfg(not(target_os = "android"))]
