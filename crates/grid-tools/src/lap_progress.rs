@@ -13,15 +13,7 @@ pub fn load(root: &Path) -> Result<Prepared, Box<dyn std::error::Error>> {
     load_route(root, &Route::default())
 }
 pub fn load_route(root: &Path, route: &Route) -> Result<Prepared, Box<dyn std::error::Error>> {
-    let mut bytes = Vec::new();
-    std::fs::File::open(root.join(route.file("progress_track.xml")))?
-        .take(16 * 1024 * 1024 + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > 16 * 1024 * 1024 {
-        return Err("source lap progress exceeds bound".into());
-    }
-    let document = binxml::read(&bytes)?;
-    let mut progress = progress::read(&document)?;
+    let mut progress = read_route(root, route)?;
     if progress.kind == progress::TrackKind::PointToPoint {
         return run(progress, route.subroute());
     }
@@ -49,6 +41,23 @@ pub fn load_route(root: &Path, route: &Route) -> Result<Prepared, Box<dyn std::e
     let required: Vec<_> = std::iter::once(0).chain(sectors.iter().copied()).collect();
     let course = Course::new(&endpoints, &sectors, Policy::default())?.with_required(&required)?;
     Ok(Prepared { course, progress })
+}
+
+/// The route's `progress_track.xml` as the file holds it, without the lap
+/// preparation of [`load_route`].
+pub fn read_route(
+    root: &Path,
+    route: &Route,
+) -> Result<progress::Progress, Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(root.join(route.file("progress_track.xml")))?
+        .take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err("source lap progress exceeds bound".into());
+    }
+    let document = binxml::read(&bytes)?;
+    Ok(progress::read(&document)?)
 }
 
 /// A point-to-point route as one run: the subroute's start gate becomes gate
@@ -140,7 +149,10 @@ fn run(
             gate: last,
         }))
         .collect(),
-        reverse: false,
+        // Gates and points are already in travel order; the flag still says
+        // the run goes against the file's order (the reset line's directions,
+        // source_vehicle::player_reset::ResetLine).
+        reverse,
     }];
     let endpoints: Vec<_> = progress.gates.iter().map(|g| [g.left, g.right]).collect();
     let required: Vec<_> = std::iter::once(0)

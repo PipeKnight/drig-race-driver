@@ -161,6 +161,8 @@ pub(crate) fn race_app_on(route: grid_tools::route::Route, models: &[&str], laps
             opponents: Some(opponents),
             auto_reset: Default::default(),
             reset_line: Some(Line::load(root, route.path()).unwrap()),
+            reset_tracker: grid_tools::source_vehicle::player_reset::ResetLine::load(root, &route)
+                .unwrap(),
         })
         .insert_resource(input::Actions::new(
             input::ActionMap::keyboard(),
@@ -404,6 +406,102 @@ fn restart_race_resets_cars_damage_ai_timing_and_props() {
         drive_to(&mut app, RUN);
         drive_to(&mut fresh, RUN);
         assert_eq!(digest(&app), digest(&fresh));
+    });
+}
+
+/// Pause menu, Reset Vehicle (Button3, the Ctrl keys), Yes: the reset job
+/// runs in the interactive drive tick as the auto trigger's does (row 43,
+/// docs/RESET_AND_RESPAWN_RESEARCH.md 6). Throttle held through the fade is
+/// ignored until the placement, the car lands at rest on the tracker line
+/// at its own trackpos (the race clock is past the early window), stays out
+/// of car-to-car collisions for the tail and then collides again.
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn pause_menu_reset_vehicle_runs_the_reset_job() {
+    use grid_tools::source_vehicle::{Controls, DELTA};
+    use grid_world::reset_lines::{FADE, MIDPOINT, TAIL};
+    big_stack(|| {
+        let mut app = race_app();
+        app.update();
+        drive_to(&mut app, 1500);
+        keys(&mut app).release(KeyCode::KeyW);
+        keys(&mut app).release(KeyCode::KeyD);
+        tap(&mut app, KeyCode::Escape);
+        tap(&mut app, KeyCode::ControlLeft);
+        assert_eq!(
+            app.world().resource::<PauseMenu>().screen,
+            Screen::Confirm(Confirm::ResetCar)
+        );
+        let before = ticks(&app);
+        keys(&mut app).press(KeyCode::Enter);
+        app.update();
+        keys(&mut app).release(KeyCode::Enter);
+        assert!(!app.world().resource::<PauseMenu>().open);
+        // Full throttle through the whole job.
+        keys(&mut app).press(KeyCode::KeyW);
+        let (mut started, mut placed, mut ended) = (None, None, None);
+        let mut darkest = 0f32;
+        while ended.is_none() {
+            assert!(advance(&mut app));
+            let tick = ticks(&app);
+            assert!(tick < before + 600, "the job did not end");
+            let d = app.world().resource::<Driving>();
+            let ghost = d.opponents.as_ref().unwrap().multi.ghost(0);
+            darkest = darkest.max(d.auto_reset.darkness());
+            match d.auto_reset.job {
+                Some(job) => {
+                    // The job starts after the tick that saw the request,
+                    // whose input was still the player's.
+                    let first = *started.get_or_insert(tick) == tick;
+                    if job.controls_off() {
+                        if !first {
+                            assert_eq!(d.last_controls, Some(Controls::default()), "tick {tick}");
+                        }
+                        assert!(!ghost);
+                    } else {
+                        placed.get_or_insert(tick);
+                        assert!(ghost, "tick {tick}");
+                    }
+                }
+                None if started.is_some() => {
+                    ended = Some(tick);
+                    assert!(!ghost);
+                }
+                None => {}
+            }
+            if placed == Some(tick) {
+                let p = d.runtime.pose();
+                let line = &d.reset_tracker.as_ref().unwrap().line;
+                let target = d.auto_reset.job.unwrap().target;
+                let (point, _) = line.point_at(target);
+                let off = [p[12] - point[0], p[14] - point[2]];
+                eprintln!(
+                    "menu_reset placed tick={tick} target={target:.1} offset={off:?} up={:.3}",
+                    p[5]
+                );
+                // Upright, on the line point (overlap retries step back at
+                // most 19 m along it).
+                assert!(p[5] > 0.95);
+                assert!(off[0].hypot(off[1]) < 20.);
+            }
+        }
+        let [started, placed, ended] = [started.unwrap(), placed.unwrap(), ended.unwrap()];
+        let place_ticks = ((FADE - MIDPOINT) / DELTA) as u64;
+        let job_ticks = ((FADE + TAIL) / DELTA) as u64;
+        eprintln!(
+            "menu_reset before={before} started={started} placed={placed} ended={ended} darkest={darkest:.3}"
+        );
+        assert!(started <= before + 2);
+        assert!((place_ticks..=place_ticks + 2).contains(&(placed - started)));
+        assert!(ended - started >= job_ticks - 1);
+        assert!(darkest > 0.95);
+        // Back under the player's control: the held throttle drives off.
+        for _ in 0..120 {
+            assert!(advance(&mut app));
+        }
+        let d = app.world().resource::<Driving>();
+        let v = d.runtime.velocity();
+        assert!(v[0].hypot(v[2]) > 5., "{v:?}");
     });
 }
 

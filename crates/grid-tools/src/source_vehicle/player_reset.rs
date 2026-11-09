@@ -1,64 +1,233 @@
-//! The original's only reset path, for the local player's car
-//! (ResetLinesManager, docs/RESET_AND_RESPAWN_RESEARCH.md 3): the car is
-//! re-placed at rest on its line point once it has been nearly still on its
-//! side or roof for 2 s. AI cars are never reset (F332).
+//! The player's reset job (ResetLinesManager, docs/RESET_AND_RESPAWN_RESEARCH.md
+//! 3 and 6): a request from the auto trigger (nearly still on the side or
+//! roof for 2 s, 0x60D590) or from the pause menu's Reset Vehicle starts a
+//! job (0x60D0E0). The job darkens the screen for [`reset_lines::FADE`] s,
+//! ignores the player's input until it places the car at rest on the track
+//! tracker's line halfway through the fade (0x612C90 event 4), keeps the
+//! placed car out of car-to-car collisions for the rest of the fade and a
+//! [`reset_lines::TAIL`] of 5 s, and ends once the car overlaps no other car
+//! (event 9). AI cars are never reset (F332); a Demolition Derby car is
+//! disqualified by the auto trigger instead. There is no time penalty.
 //!
-//! AUTHORED: the placement happens on the tick the detector fires. The
-//! original first fades the screen out (`0.9 - clamp(0.02 |v|, 0, 0.4)` s
-//! [I]) and places the car when it is black; the fade, the camera hold and
-//! the pause menu's confirmation fade are not ported. The pause menu's Reset
-//! Vehicle uses [`place`] (grid-app, docs/PAUSE_MENU.md).
-use super::{Runtime, multi::MultiRuntime};
-use crate::ai_driver::Line;
-use grid_world::{Error, reset_lines::Detector};
+//! The line is the route's progress line ([`ResetLine`]), not the AI racing
+//! line; the target is the car's tracker distance, moved ahead early in a
+//! circuit race and clamped to a point-to-point finish (0x5EC0E0).
+use super::{Controls, Runtime, multi::MultiRuntime};
+use grid_formats::progress::{Progress, TrackKind};
+use grid_world::{
+    Error,
+    reset_lines::{self, Detector, Job, JobEvent, Tracker, TrackerLine},
+};
+use std::path::Path;
 
-/// Auto-reset state of the player's car. Shared by grid-app's drive tick and
-/// the soak [`crate::soak::Session`].
+/// The track tracker's line of a route and, on a point-to-point run, its
+/// finish distance.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResetLine {
+    pub line: TrackerLine,
+    pub finish: Option<f32>,
+}
+
+impl ResetLine {
+    /// The route's `progress_track.xml` points as [`crate::lap_progress`]
+    /// prepares them: a circuit's from its finish around the lap, a
+    /// point-to-point run's in travel order from its start, trimmed to the
+    /// finish. `None` when the file has fewer than two points. [I] A drift
+    /// freestyle arena's placeholder progress (2-3 gates, no valid lap
+    /// gates) is read as the file holds it when its route ignores progress:
+    /// the original's tracker has no other line there.
+    pub fn load(
+        root: &Path,
+        route: &crate::route::Route,
+    ) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+        let progress = match crate::lap_progress::load_route(root, route) {
+            Ok(prepared) => prepared.progress,
+            Err(_) if route.ignores_progress() => crate::lap_progress::read_route(root, route)?,
+            Err(error) => return Err(error),
+        };
+        Ok(Self::from_progress(&progress))
+    }
+
+    /// From progress prepared by [`crate::lap_progress`]: a point-to-point
+    /// run's single route says whether it goes against the file's order.
+    pub fn from_progress(progress: &Progress) -> Option<Self> {
+        let closed = progress.kind == TrackKind::Circuit;
+        let reversed = !closed && progress.routes.first().is_some_and(|r| r.reverse);
+        let points: Vec<_> = progress
+            .points
+            .iter()
+            .map(|p| (p.position, p.distance))
+            .collect();
+        let line = TrackerLine::new(&points, closed, reversed, progress.total_distance)?;
+        let finish = (!closed).then_some(progress.total_distance);
+        Some(Self { line, finish })
+    }
+}
+
+/// Reset state of the player's car. Shared by grid-app's drive tick and the
+/// soak [`crate::soak::Session`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PlayerReset {
     pub detector: Detector,
     /// Demolition Derby: the trigger disqualifies the car instead of
     /// resetting it (0x60D590 calls 0x9E64E0(6, 0) when +0x2E5C is 2) [V].
     pub demolition: bool,
+    /// The car's trackpos on the reset line, updated every tick.
+    pub tracker: Tracker,
+    /// The running job, from the request until the car may collide again.
+    pub job: Option<Job>,
+    /// Placements so far: a view that follows the car cuts at each one (it
+    /// happens in the dark of the fade) instead of swinging across.
+    pub placements: u32,
+    /// A pause-menu request waiting for the next update.
+    requested: bool,
 }
 
-/// A performed reset: the line point and heading the car was placed at.
+/// A performed placement: the line point and heading the car was placed at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Reset {
     pub point: [f32; 3],
     pub heading: [f32; 3],
+    /// Trackpos of the placement after the overlap retries.
+    pub distance: f32,
+    /// One-metre steps back along the line while the car overlapped another.
+    pub retries: usize,
+}
+
+/// What an update did.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Event {
+    /// A job started (the fade begins, input is ignored). `auto` for the
+    /// still-and-tilted trigger, otherwise the pause menu.
+    Started { auto: bool, target: f32 },
+    /// The car was placed at the middle of the fade.
+    Placed(Reset),
+    /// The tail is over and the car overlaps no other car: collisions are
+    /// back and the job is done.
+    Ended,
+    /// Derby: the auto trigger disqualified the car.
+    Disqualified,
 }
 
 impl PlayerReset {
-    /// After a successful tick: update the detector with the player's car
-    /// and, when it fires, place the car at rest on its line point. With a
-    /// shared world, `player` is the runtime held outside slot 0 of `shared`
-    /// (grid-app and the soak Session swap it in for the common tick). A
-    /// retired player is never reset.
+    /// No job yet; `demolition` for a Demolition Derby event.
+    pub fn new(demolition: bool) -> Self {
+        Self {
+            demolition,
+            ..Self::default()
+        }
+    }
+
+    /// The pause menu's Reset Vehicle (`c_pause_reset_car`, the same
+    /// ResetLinesManager request [I]); it starts at the next update.
+    /// AUTHORED: refused while a job runs.
+    pub fn request(&mut self) -> bool {
+        let accepted = self.job.is_none();
+        self.requested |= accepted;
+        accepted
+    }
+
+    /// After a successful tick: track the player's car on `line`, start a
+    /// job when the auto trigger fires or the menu asked, and run the job.
+    /// `clock` is the race clock in seconds (the early-race target window).
+    /// With a shared world, `player` is the runtime held outside slot 0 of
+    /// `shared` (grid-app and the soak Session swap it in for the common
+    /// tick). A retired player is never reset; without a line a request is
+    /// dropped (there is nothing to place on).
     pub fn update(
         &mut self,
         player: &mut Runtime,
-        shared: Option<&mut MultiRuntime>,
-        line: &Line,
-    ) -> Result<Option<Reset>, Error> {
+        mut shared: Option<&mut MultiRuntime>,
+        line: Option<&ResetLine>,
+        clock: f32,
+    ) -> Result<Option<Event>, Error> {
         if shared.as_ref().is_some_and(|m| m.retirement(0).is_some()) {
+            if self.job.take().is_some()
+                && let Some(multi) = shared
+            {
+                multi.set_ghost(0, false);
+            }
+            self.requested = false;
             return Ok(None);
         }
         let pose = player.pose();
+        let position = [pose[12], pose[13], pose[14]];
+        if let Some(line) = line {
+            self.tracker.update(&line.line, position);
+        }
+        if let Some(job) = &mut self.job {
+            let target = job.target;
+            return match job.update(super::DELTA) {
+                None => Ok(None),
+                Some(JobEvent::Place) => {
+                    let Some(line) = line else {
+                        self.job = None;
+                        return Ok(None);
+                    };
+                    let reset = place(player, shared.as_deref_mut(), line, target)?;
+                    if let Some(multi) = shared {
+                        multi.set_ghost(0, true);
+                    }
+                    self.tracker.update(&line.line, reset.point);
+                    self.placements = self.placements.wrapping_add(1);
+                    Ok(Some(Event::Placed(reset)))
+                }
+                Some(JobEvent::TailOver) => {
+                    if let Some(multi) = shared {
+                        if multi.overlaps_other_car(0)? {
+                            return Ok(None);
+                        }
+                        multi.set_ghost(0, false);
+                    }
+                    self.job = None;
+                    Ok(Some(Event::Ended))
+                }
+            };
+        }
         let [v, w] = [player.velocity(), player.angular_velocity()];
-        if !self.detector.update(
+        let auto = self.detector.update(
             [v[0], v[1], v[2]],
             [w[0], w[1], w[2]],
             pose[5],
             super::DELTA,
-        ) {
+        );
+        let menu = std::mem::take(&mut self.requested);
+        if !auto && !menu {
             return Ok(None);
         }
-        if self.demolition {
+        if auto && self.demolition {
             player.disqualify();
-            return Ok(None);
+            return Ok(Some(Event::Disqualified));
         }
-        place(player, shared, line).map(Some)
+        let Some(line) = line else {
+            return Ok(None);
+        };
+        let target = reset_lines::target(
+            &line.line,
+            self.tracker.distance,
+            position,
+            clock,
+            line.finish,
+        );
+        self.job = Some(Job::new(target));
+        self.detector = Detector::default();
+        Ok(Some(Event::Started { auto, target }))
+    }
+
+    /// Player input while a job runs: neutral until the placement (0x606990
+    /// disables the car's controller at the fade start, event 2, and event 4
+    /// enables it again).
+    pub fn controls(&self, controls: Controls) -> Controls {
+        if self.job.is_some_and(|j| j.controls_off()) {
+            Controls::default()
+        } else {
+            controls
+        }
+    }
+
+    /// Screen darkness of the reset fade, 0 (clear) to 1 (black).
+    pub fn darkness(&self) -> f32 {
+        self.job.map_or(0., |j| j.darkness())
     }
 
     /// `R` restarts the whole event (the derby mode stays).
@@ -70,305 +239,53 @@ impl PlayerReset {
     }
 }
 
-/// The placement itself: the player's car at rest on the line point nearest
-/// its position. Also the pause menu's Reset Vehicle (`c_pause_reset_car`,
-/// the same ResetLinesManager placement [I]). A retired player is refused.
+/// The placement (0x612C90 event 4): the car at rest on the line at
+/// `distance`, stepped back [`reset_lines::OVERLAP_STEP`] along the line
+/// while it overlaps another car, at most [`reset_lines::OVERLAP_TRIES`]
+/// tries (the last one stands: the car is a ghost until clear). A retired
+/// player is refused.
 pub fn place(
     player: &mut Runtime,
     shared: Option<&mut MultiRuntime>,
-    line: &Line,
+    line: &ResetLine,
+    distance: f32,
 ) -> Result<Reset, Error> {
-    let pose = player.pose();
-    let (point, heading) = line.reset_target([pose[12], pose[13], pose[14]]);
-    match shared {
-        Some(multi) => {
-            std::mem::swap(player, &mut multi.cars[0]);
-            let result = multi.place_at_rest(0, point, heading);
-            std::mem::swap(player, &mut multi.cars[0]);
-            result?;
+    let mut d = line.line.normalise(distance);
+    let Some(multi) = shared else {
+        let (point, heading) = line.line.point_at(d);
+        player.place_at_rest(point, heading)?;
+        return Ok(Reset {
+            point,
+            heading,
+            distance: d,
+            retries: 0,
+        });
+    };
+    std::mem::swap(player, &mut multi.cars[0]);
+    let mut retries = 0;
+    let result = loop {
+        let (point, heading) = line.line.point_at(d);
+        if let Err(e) = multi.place_at_rest(0, point, heading) {
+            break Err(e);
         }
-        None => player.place_at_rest(point, heading)?,
-    }
-    Ok(Reset { point, heading })
+        let clear = match multi.overlaps_other_car(0) {
+            Ok(overlaps) => !overlaps,
+            Err(e) => break Err(e),
+        };
+        if clear || retries + 1 >= reset_lines::OVERLAP_TRIES {
+            break Ok(Reset {
+                point,
+                heading,
+                distance: d,
+                retries,
+            });
+        }
+        retries += 1;
+        d = line.line.step(d, -reset_lines::OVERLAP_STEP);
+    };
+    std::mem::swap(player, &mut multi.cars[0]);
+    result
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::source_vehicle::Controls;
-    use grid_world::reset_lines::length;
-    use std::path::Path;
-
-    /// The grid pose turned onto its roof, 1.5 m up.
-    fn flipped(mut pose: [f32; 16]) -> [f32; 16] {
-        for k in 0..3 {
-            pose[k] = -pose[k];
-            pose[4 + k] = -pose[4 + k];
-        }
-        pose[13] += 1.5;
-        pose
-    }
-
-    const HOLD: Controls = Controls {
-        throttle: 0.,
-        brake: 0.,
-        steering: 0.,
-        handbrake: true,
-    };
-
-    fn speed(car: &Runtime) -> f32 {
-        let v = car.velocity();
-        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
-    }
-
-    /// Upright, still, on the road and in first gear: the state right after
-    /// the placement and after two more seconds.
-    fn check_placed(car: &Runtime, reset: &Reset, rest: bool) {
-        let p = car.pose();
-        let drift = (p[12] - reset.point[0]).hypot(p[14] - reset.point[2]);
-        // Heading along the line: forward row is the line direction.
-        let along = p[8] * reset.heading[0] + p[10] * reset.heading[2];
-        let mut cache = grid_world::rectangle_cull::Cache::default();
-        let below = car
-            .track()
-            .query(
-                [p[12], p[13], p[14], 1.],
-                [p[12], p[13] - 3., p[14], 1.],
-                &mut cache,
-            )
-            .unwrap()
-            .hit
-            .map(|h| 3. * h.contact.fraction);
-        println!(
-            "placed rest={rest} up_y={} drift={drift} along={along} speed={} ground_below={below:?} gear={}",
-            p[5],
-            speed(car),
-            car.state.car.owner.vehicle[0x196c / 4]
-        );
-        assert!(p[5] > 0.95, "upright: {}", p[5]);
-        assert!(along > 0.95, "heading along the line: {along}");
-        assert!(below.is_some_and(|d| d < 1.), "on the road: {below:?}");
-        if rest {
-            assert!(speed(car) < 0.3, "at rest: {}", speed(car));
-            assert!(drift < 0.5, "stays put: {drift}");
-        } else {
-            assert_eq!(speed(car), 0.);
-            assert!(drift < 1e-3, "at the line point: {drift}");
-            assert_eq!(car.state.car.owner.vehicle[0x196c / 4], 1);
-            for i in 0..4 {
-                let spin = car.state.car.owner.vehicle[(0x1990 + i * 0x150 + 0x104) / 4];
-                assert_eq!(f32::from_bits(spin), 0.);
-            }
-        }
-    }
-
-    fn run(test: impl FnOnce() + Send + 'static) {
-        std::thread::Builder::new()
-            .stack_size(64 * 1024 * 1024)
-            .spawn(test)
-            .unwrap()
-            .join()
-            .unwrap();
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_upright_on_the_road_after_two_seconds() {
-        run(|| flipped_on(crate::route::DONINGTON));
-    }
-
-    /// The reset target is the route's own AI racing line.
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_on_istanbul_park() {
-        run(|| flipped_on(crate::route::ISTANBUL_PARK));
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_on_long_beach() {
-        run(|| flipped_on(crate::route::LONG_BEACH));
-    }
-
-    /// Jarama route 1 finishes at a later gate; the reset line is still the
-    /// route's own AI racing line.
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_on_jarama() {
-        run(|| flipped_on(crate::route::JARAMA));
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_on_yokohama() {
-        run(|| flipped_on(crate::route::YOKOHAMA));
-    }
-
-    /// Demolition Derby: the same trigger disqualifies the stock car on the
-    /// Detroit stadium instead of resetting it; its controls are then
-    /// disabled (status 6, vehicle_sync) and the car stays where it is.
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_derby_car_is_disqualified_not_reset() {
-        run(|| {
-            let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
-            let root = Path::new(&root);
-            let table =
-                std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
-            let route = crate::route::Route::new(crate::route::DETROIT_STADIUM).unwrap();
-            let stock = crate::car::Car::new("stk").unwrap();
-            let mut car = Runtime::load(root, &route, &stock, "slot_00", 200679).unwrap();
-            let geometry = car.prepare_body_geometry(root, &table).unwrap();
-            let line = Line::load(root, car.route().path()).unwrap();
-            car.set_pose_at_rest(flipped(car.pose()));
-            let mut reset = PlayerReset {
-                demolition: true,
-                ..Default::default()
-            };
-            let mut at = None;
-            for tick in 1..=1200u64 {
-                car.tick_with_body_geometry(HOLD, &geometry).unwrap();
-                assert_eq!(reset.update(&mut car, None, &line).unwrap(), None);
-                if car.disqualified() {
-                    at = Some(tick);
-                    break;
-                }
-            }
-            let tick = at.expect("the flipped derby car is disqualified");
-            let pose = car.pose();
-            assert!(pose[5] < 0.17, "still on its roof: {}", pose[5]);
-            // The next tick synchronises the disabled controls.
-            car.tick_with_body_geometry(HOLD, &geometry).unwrap();
-            let disabled = f32::from_bits(car.state.car.owner.vehicle[0x226c / 4]);
-            assert_eq!(disabled, 1., "controls disabled after tick {tick}");
-            assert!(!car.disqualify(), "only once");
-        });
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_on_spa() {
-        run(|| flipped_on(crate::route::SPA));
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_on_the_street_circuits() {
-        for route in [
-            crate::route::MILAN,
-            crate::route::SHIBUYA,
-            crate::route::SAN_FRANCISCO,
-        ] {
-            run(move || flipped_on(route));
-        }
-    }
-
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_on_le_mans() {
-        run(|| flipped_on(crate::route::LE_MANS));
-    }
-
-    fn flipped_on(route: &str) {
-        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
-        let root = Path::new(&root);
-        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
-        let route = crate::route::Route::new(route).unwrap();
-        let mut car = Runtime::lacetti_on(root, &route, "slot_00", 200679).unwrap();
-        let geometry = car.prepare_body_geometry(root, &table).unwrap();
-        let line = Line::load(root, car.route().path()).unwrap();
-        let damage = car.state.car.owner.vehicle[0xcdf0 / 4..0xce30 / 4].to_vec();
-        car.set_pose_at_rest(flipped(car.pose()));
-        let mut reset = PlayerReset::default();
-        let mut still_since = None;
-        let mut fired = None;
-        for tick in 1..=1200u64 {
-            car.tick_with_body_geometry(HOLD, &geometry).unwrap();
-            let (v, w) = (car.velocity(), car.angular_velocity());
-            let tilted = car.pose()[5] <= 0.17
-                && length([v[0], v[1], v[2]]) + length([w[0], w[1], w[2]]) <= 0.8;
-            if !tilted {
-                still_since = None;
-            } else if still_since.is_none() {
-                still_since = Some(tick);
-            }
-            if let Some(r) = reset.update(&mut car, None, &line).unwrap() {
-                fired = Some((tick, r));
-                break;
-            }
-        }
-        let (tick, placed) = fired.expect("the auto-reset fires");
-        println!("fired at tick {tick}, still and tilted since {still_since:?}");
-        // 2 s of still-and-tilted (125 accumulating ticks), then the firing one.
-        assert!(
-            (125..=127).contains(&(tick - still_since.unwrap())),
-            "{tick} {still_since:?}"
-        );
-        check_placed(&car, &placed, false);
-        // The placement keeps the damage state.
-        assert_eq!(
-            car.state.car.owner.vehicle[0xcdf0 / 4..0xce30 / 4],
-            damage[..]
-        );
-        for _ in 0..125 {
-            car.tick_with_body_geometry(HOLD, &geometry).unwrap();
-            assert_eq!(reset.update(&mut car, None, &line).unwrap(), None);
-        }
-        check_placed(&car, &placed, true);
-        // Engine speed 0 after the placement: the car still drives off.
-        let go = Controls {
-            throttle: 1.,
-            ..Default::default()
-        };
-        for _ in 0..250 {
-            car.tick_with_body_geometry(go, &geometry).unwrap();
-        }
-        println!("drive-off speed after 4 s: {}", speed(&car));
-        assert!(speed(&car) > 10., "drives off: {}", speed(&car));
-    }
-
-    /// The same through the shared world: the player runtime is held outside
-    /// slot 0 between ticks, as in grid-app and the soak Session.
-    #[test]
-    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
-    fn a_flipped_player_car_is_reset_in_the_shared_world() {
-        run(|| {
-            let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
-            let root = Path::new(&root);
-            let table =
-                std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
-            let mut multi =
-                MultiRuntime::lacetti(root, &["slot_00", "slot_01"], &table, None).unwrap();
-            let line = Line::load(root, multi.cars[0].route().path()).unwrap();
-            let pose = flipped(multi.cars[0].pose());
-            multi.set_pose_at_rest(0, pose);
-            let mut player = Runtime::lacetti(root, "slot_00", 200679).unwrap();
-            std::mem::swap(&mut player, &mut multi.cars[0]);
-            let mut reset = PlayerReset::default();
-            let mut fired = None;
-            for tick in 1..=1200u64 {
-                std::mem::swap(&mut player, &mut multi.cars[0]);
-                multi.tick(&[HOLD, HOLD]).unwrap();
-                std::mem::swap(&mut player, &mut multi.cars[0]);
-                if let Some(r) = reset.update(&mut player, Some(&mut multi), &line).unwrap() {
-                    fired = Some((tick, r));
-                    break;
-                }
-            }
-            let (tick, placed) = fired.expect("the auto-reset fires");
-            println!("shared world: fired at tick {tick}");
-            check_placed(&player, &placed, false);
-            for _ in 0..125 {
-                std::mem::swap(&mut player, &mut multi.cars[0]);
-                multi.tick(&[HOLD, HOLD]).unwrap();
-                std::mem::swap(&mut player, &mut multi.cars[0]);
-                assert_eq!(
-                    reset.update(&mut player, Some(&mut multi), &line).unwrap(),
-                    None
-                );
-            }
-            check_placed(&player, &placed, true);
-            assert!(multi.retirement(0).is_none() && multi.retirement(1).is_none());
-        });
-    }
-}
+mod tests;

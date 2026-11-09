@@ -879,33 +879,18 @@ pub fn update(
     *shifts = ShiftQueue::default();
 }
 
-/// Reset Vehicle (pause menu Button3, `c_pause_reset_car`): the player's car
-/// back onto the racing line at rest, as the auto-reset places it (F341).
+/// Reset Vehicle (pause menu Button3, `c_pause_reset_car`): a request to
+/// the player's reset job, which fades, places the car on the track
+/// tracker's line and keeps it out of car collisions for a while, as the
+/// auto trigger does (docs/RESET_AND_RESPAWN_RESEARCH.md 6). The job starts
+/// at the next tick (`drive_reset event=start trigger=menu`).
 fn reset_car(driving: &mut crate::Driving) {
-    let Some(line) = &driving.reset_line else {
-        return;
-    };
-    let shared = driving.opponents.as_mut().map(|o| &mut o.multi);
-    let result =
-        grid_tools::source_vehicle::player_reset::place(&mut driving.runtime, shared, line);
-    if result.is_ok() {
-        driving.auto_reset.reset();
-    }
-    match result {
-        Ok(reset) => log_line!(
-            "drive_menu_reset version=1 segment={} tick={} point={:?} heading={:?}",
-            driving.segment,
-            driving.runtime.ticks,
-            reset.point,
-            reset.heading
-        ),
-        Err(error) => log_line!(
-            "drive_menu_reset version=1 segment={} tick={} error={:?}",
-            driving.segment,
-            driving.runtime.ticks,
-            error.0
-        ),
-    }
+    let accepted = driving.reset_tracker.is_some() && driving.auto_reset.request();
+    log_line!(
+        "drive_menu_reset version=2 segment={} tick={} accepted={accepted}",
+        driving.segment,
+        driving.runtime.ticks
+    );
 }
 /// Retire from Race: the player is out (`retire_race`), the race is
 /// classified and logged; the results screen follows (post_race).

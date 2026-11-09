@@ -21,6 +21,7 @@ use crate::input::{Action, Actions};
 use crate::replay::{FlashbackStatus, Kind, Replay};
 use bevy::prelude::*;
 use grid_tools::flashback::{self as rules, Manager};
+use grid_tools::source_vehicle::player_reset::PlayerReset;
 use grid_tools::source_vehicle::{Controls, DELTA, Runtime, assists::Shift};
 use std::collections::VecDeque;
 
@@ -76,7 +77,7 @@ struct Checkpoint {
     after_change: bool,
     runtime: Runtime,
     geometry: Option<grid_tools::body_geometry::BodyGeometry>,
-    auto_reset: grid_tools::source_vehicle::player_reset::PlayerReset,
+    auto_reset: PlayerReset,
     last_controls: Option<Controls>,
     failure: Option<String>,
     notices: Vec<String>,
@@ -204,9 +205,10 @@ pub struct Flashback {
     pub stage: Stage,
     checkpoints: VecDeque<Checkpoint>,
     segment: Option<u64>,
-    /// The player's tick, pose and velocity after the last tick (a change
-    /// outside the tick shows as a difference at the same tick).
-    last: Option<(u64, [f32; 16], [f32; 4])>,
+    /// The player's tick, pose, velocity and reset state after the last
+    /// tick (a change outside the tick shows as a difference at the same
+    /// tick).
+    last: Option<Last>,
     /// The last refusal logged, to log each once.
     refused: Option<&'static str>,
     /// A jump-in still running ticks again.
@@ -282,8 +284,11 @@ pub fn install(app: &mut App, ai_difficulty: f32) {
         );
 }
 
-fn pose(r: &Runtime) -> ([f32; 16], [f32; 4]) {
-    (r.pose(), r.velocity())
+type Last = (u64, [f32; 16], [f32; 4], PlayerReset);
+
+fn last(driving: &crate::Driving) -> Last {
+    let r = &driving.runtime;
+    (r.ticks, r.pose(), r.velocity(), driving.auto_reset)
 }
 
 /// After each tick: a checkpoint every [`CHECKPOINT_TICKS`], kept while the
@@ -318,8 +323,7 @@ pub fn capture(
     if tick == 0 || flashback.last.is_some_and(|(t, ..)| t == tick) {
         return;
     }
-    let (p, v) = pose(&driving.runtime);
-    flashback.last = Some((tick, p, v));
+    flashback.last = Some(last(&driving));
     if flashback.checkpoints.is_empty() || tick.is_multiple_of(CHECKPOINT_TICKS) {
         let c = Checkpoint::take(
             &driving,
@@ -354,9 +358,10 @@ pub fn capture(
     }
 }
 
-/// A car reset from the pause menu changes the player's car outside the
-/// tick: a checkpoint of the changed state, so ticks run again never cross
-/// the change.
+/// A car reset from the pause menu changes the player's reset state outside
+/// the tick (it requests the reset job, which then runs in the ticks): a
+/// checkpoint of the changed state, so ticks run again never cross the
+/// change. A changed pose outside the tick is caught the same way.
 pub fn watch(
     mut flashback: ResMut<Flashback>,
     driving: Res<crate::Driving>,
@@ -364,7 +369,7 @@ pub fn watch(
     damage: Option<Res<crate::damage_parts::DamageParts>>,
     drift: Option<Res<crate::drift_event::DriftEvent>>,
 ) {
-    let Some((tick, p, v)) = flashback.last else {
+    let Some(before @ (tick, ..)) = flashback.last else {
         return;
     };
     if flashback.pending.is_some()
@@ -373,11 +378,11 @@ pub fn watch(
     {
         return;
     }
-    let now = pose(&driving.runtime);
-    if now == (p, v) {
+    let now = last(&driving);
+    if now == before {
         return;
     }
-    flashback.last = Some((tick, now.0, now.1));
+    flashback.last = Some(now);
     log_line!(
         "drive_flashback version=1 event=checkpoint_after_change segment={} tick={tick}",
         driving.segment
@@ -634,12 +639,12 @@ fn advance(world: &mut World) {
     inputs.log.retain(|e| e.0 <= reached);
     let driving = world.resource::<crate::Driving>();
     let segment = driving.segment;
-    let last = pose(&driving.runtime);
+    let now = last(driving);
     let mut f = world.resource_mut::<Flashback>();
     f.pending = None;
     f.checkpoints
         .retain(|c| c.tick < reached || (c.tick == reached && !c.after_change));
-    f.last = Some((reached, last.0, last.1));
+    f.last = Some((reached, now.1, now.2, now.3));
     match result {
         Ok(()) => log_line!(
             "drive_flashback version=1 event=restored segment={segment} from={} target={} checkpoint={} ran={} ms={:.1}",

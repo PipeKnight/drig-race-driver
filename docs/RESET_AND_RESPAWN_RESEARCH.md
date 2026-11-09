@@ -20,8 +20,10 @@ Labels: [V] read from code or data, [I] interpretation, AUTHORED = port decision
   gets past a held car (section 5).
 - **The reset path that does exist is for the local player** [V]. A `ResetLinesManager`
   resets the player's car when it is nearly still and on its side or roof for 2 s, and on
-  the pause menu's "reset car". The car is faded out, placed on the track by the
-  **grid-spawn setter 0x9EF040** with zero speed, and faded back in.
+  the pause menu's "reset car". Over a 1 s fade the car's controller is off, at 0.5 s it is
+  placed on the route's progress line by the **grid-spawn setter 0x9EF040** with zero speed,
+  and it does not touch other cars until a 5 s tail has passed and no car overlaps it. There
+  is no time penalty (3.2). The port (row 43, F762) follows this (section 6).
 - The F323 observation, "car 7 parked behind held car 5 moved 0.0 m", came from a test
   that drives every car with fixed throttle 0.6 and no AI. It is not evidence of a
   missing respawn.
@@ -87,34 +89,58 @@ Other requesters [V]:
 - A delayed-request queue at manager+0x104. Its entries count down +0x10 and then call
   0x60D0E0 [I: delayed resets].
 
-### 3.2 Request 0x60D0E0 and the sequence [V structure, I roles]
+### 3.2 Request 0x60D0E0 and the job [V, row 43 re-read]
 
 - Jobs are kept per vehicle in a map at manager+0xEC. An existing job of kind 3, or of
   kind 1 with a delay no longer than the new one, wins.
 - The job copies the vehicle's car+0xB14 byte, and sets car+0xB14 = 0.
-- Timings: delay = argument; a time field of 5 (0xCB093C); a hold of 3.2 (0xCE6590) when
-  manager+0xD8 is set; and `0.9 − clamp(0.02·|v|, 0, 0.4)` (0xCB0DE8, 0xDB29E4, 0xCB22A4)
-  [I: a fade length that is shorter at speed].
+- Kind 0 (the player's reset, from the trigger and the menu): delay 0, a fade of
+  **1.0 s** (vehicle+0x6C == 0), the placement when the fade passes its middle (0.5 s),
+  and a tail of **5 s** (0xCB093C).
+- Corrections to the F332 reading:
+  - `0.9 − clamp(0.02·|v|, 0, 0.4)` (0xCB0DE8, 0xDB29E4, 0xCB22A4) belongs to kind 2
+    (a damping of the car's speed), not to the player's fade.
+  - The 3.2 s hold (0xCE6590) needs manager+0xD8, and only zero is ever written there:
+    it is never armed. The 88 m advance (0xCE3970) behind the same flag is dead too.
 
 The phase machine 0x5EBDA0 returns events that the update 0x612C90 handles:
 
 | Event | Action |
 |---|---|
-| 0 (start) | 0x5EC0E0: choose the target track position, see below |
-| 2 (fade-out starts) | camera hold 0x606990(veh, 0, …); **vehicle+0x2C90 vfunc +0x38(1)**; vehicle+0x88 = 1, +0x8C = 15 |
-| 4 (screen black) | car+0xB14 restored; vehicle+0x20 = 1; **placement 0x9145D0**; 0x5EBF90; camera back; vehicle+0x89 = 1; **vfunc +0x38(0)** |
-| 5, 7 | camera 0x606990(veh, 1, …) |
-| 9 | job removed |
+| 0 (start) | 0x5EC0E0: choose the target trackpos, see below |
+| 2 (fade-out starts) | **0x606990(veh, 0, …) disables the car's controller** (not a camera hold); vehicle+0x2C90 vfunc +0x38(1); vehicle+0x88 = 1, +0x8C = 15 |
+| 4 (fade half way) | car+0xB14 restored; vehicle+0x20 = 1; **placement 0x9145D0**, retried while the car overlaps another (below); **0x5EBF90 puts every body of the car in collision layer 0xE** (no car-to-car contact); controller enabled again; vehicle+0x89 = 1; vfunc +0x38(0) |
+| 5, 7 | 0x606990(veh, 1, …): controller enabled |
+| 9 (tail over) | each frame: while the car overlaps another car (car+0xDD0 phantom) nothing happens; otherwise layer 0x12 is restored on all bodies (0xABC250 filter setter) and the job is removed |
 
-The target track position (0x5EC0E0) is a (line, distance) pair:
-- it starts from the tracker's current position (record +0x74/+0x78);
-- a saved position (tracker sub-object +0x44/+0x48) replaces it when 0x90BDE0 accepts it
-  (a distance comparison in the line's direction);
-- 0x90C0F0 offsets it along the line (manager+0x220 × a length, or the constant at
-  0xCE3970).
+Overlap at the placement [V]: after 0x9145D0, while the car's phantom (car+0xDCC, type 7)
+overlaps another car and fewer than 20 tries were made, the trackpos is moved 1 m back
+(0x90C0C0(1.0) → 0x90BEC0) and the car placed again. The last try stands; the layer
+switch then keeps the cars apart until event 9.
 
-[I] In effect, the car goes back to its last good place on the line. The exact choice is
-not established.
+The target trackpos (0x5EC0E0) [V]:
+- It starts from the tracker record's current trackpos (+0x74 line, +0x78 distance).
+- The record's route is rec+0x80 (0x912670 from vehicle+0x2E54); route+0x18 is the
+  closed byte, route+0x19 the reversed byte.
+- Closed route (a circuit): while the trackers' clock (trackers+0x120, int64 µs; [I] the
+  race clock) is below 15 s (manager+0x224), the target moves ahead by manager+0x220 = 1.5
+  times |rec+0x20 − rec+0x30|, the 3D distance from the car to its line point (0x90C0F0 →
+  0x90BFC0: forward, wrapping).
+- Open route (a point-to-point run): a target past the route's +0x44/+0x48 trackpos ([I]
+  the finish) is clamped to it (0x90BDE0: "is this trackpos ahead of that one").
+- The F332 reading of +0x44/+0x48 as a saved "last good" position was wrong: the car is
+  reset at its own current trackpos.
+
+The tracker line [V]: the route is the `progress_track.xml` route, **not the AI racing
+line**. 0x915100 updates the record each frame: rec+0x20 = the vehicle position
+(0x90CA00). 0x912980 places a trackpos: rec+0x30 = the lerp of the neighbouring points'
+positions (point +0x10, distance +0x34); rec+0x40 = the lerp of their horizontal unit
+directions to the next point (point +0x20, 0x909C00), negated on a reversed route.
+
+No time penalty is applied anywhere on this path [V], and wrong way (0x5F7880) only shows
+the `osd_wrong_way` warning; it never requests a reset. The still-and-tilted detector
+(3.1) is the only automatic trigger: being off the track, below a kill plane or stuck
+upright does not reset the player.
 
 ### 3.3 Placement 0x9145D0 [V]
 
@@ -125,8 +151,8 @@ The call is `0x9145D0(this = race+0x1040 trackers, vehicle, &trackpos, 1, 1, spe
    vehicle. 0x913CB0 moves it to the stored track position (0x912730 recomputes its line
    point).
 2. Position p = record+0x30. Heading = (rec+0x48, rec+0x44, −rec+0x40): the record's +0x40
-   vector turned 90° about Y [I: +0x40 is the line's lateral vector]. Argument 5 = 1 keeps
-   the sign.
+   direction turned 90° about Y (3.2: the line's horizontal direction). Argument 5 = 1
+   keeps the sign.
 3. Height limit: a vertical cast 0x96B7F0 from p.y + 1 − 10000 to p.y + 1 + 10000. On a
    hit at fraction f, h = f·20000 + p.y + 1 − 10000 + 1. The limit is max(p.y + 1, h).
 4. **0x9EF040(car, x, z, &heading, speed 0, limit)**. This is the setter the grid start
@@ -140,10 +166,12 @@ The call is `0x9145D0(this = race+0x1040 trackers, vehicle, &trackpos, 1, 1, spe
 
 ### 3.4 Collision during and after a reset
 
-- vehicle+0x2C90 vfunc +0x38 is called with 1 from the start of the fade-out until the
-  placement, and with 0 after it [V]. The target was not decompiled [I: physics or
-  collision off while the car is invisible].
-- No separate no-collide period after the placement was found.
+- [V] From the placement (event 4) until the job ends, the car's bodies are in layer 0xE,
+  which other cars do not collide with. The job ends at the first frame after the 5 s
+  tail in which the car overlaps no other car; then layer 0x12 comes back. The F332 note
+  "no separate no-collide period" was wrong.
+- vehicle+0x2C90 vfunc +0x38 is called with 1 from the fade start until the placement,
+  and with 0 after it [V]. Its target was not decompiled.
 
 ## 4. What the port does (F332)
 
@@ -172,22 +200,25 @@ Outputs are in `local/reset-respawn/`. The command was `grid-opponent-race ROOT 
 | car 3 at tick 1500, 60 m/s in traffic | frozen on the racing line | car 4 hits it (182 contact records), goes off the track, runs recovery from tick 1618 and races again at tick 2200 (0.924 laps at the end). Cars 6/7/8/9/10 touch it (25..141 records) and go on (0.96..0.98 laps) |
 | car 1 at tick 2000 | in traffic | cars 7 and 10 touch it (63, 85) and go on; every other car covers ≥ 0.969 laps |
 
-## 6. Player auto-reset port (F341)
+## 6. Player reset port (F341, row 43)
 
-Code: `grid_world::reset_lines` (detector, limit, drivetrain tail), `spawn::align_below`,
-`Runtime::place_at_rest`, `MultiRuntime::place_at_rest`, `ai_driver::Line::reset_target`
-and `source_vehicle::player_reset::PlayerReset` (used by grid-app `drive_tick` and the
-soak `Session::step`).
+Code:
+- `grid_world::reset_lines`: the detector, the limit, the drivetrain tail, `TrackerLine`
+  (the 0x912980 points and directions), `Tracker`, `target` (0x5EC0E0) and `Job`
+  (0x5EBDA0 / 0x612C90, kind 0).
+- `spawn::align_below`, `Runtime::place_at_rest`, `MultiRuntime::place_at_rest`,
+  `MultiRuntime::set_ghost` / `overlaps_other_car`.
+- `source_vehicle::player_reset`: `ResetLine` (the route's progress line), `PlayerReset`
+  (the job per tick) and `place` (the placement with the overlap retries). grid-app
+  `drive_tick` and the soak `Session::step` use it.
 
-New static facts (read-only, analysis image constants and r9/r10/r12 decompilation):
+Static facts from F341, still valid:
 - [V] Constants: 0xDB29F0 = 0.8, 0xDB29EC = 0.17, 0xDB29E8 = 2.0, 0xCAFBE8 = 10000,
   0xCAFBE4 = 20000, 0xD17278 = −2000 (bit-exact nearest f32 values).
 - [V] 0x9DE4E0's center and corner casts start at its argument 6 (the limit) and end at the
-  fixed Y 0xD17278 = −2000. The grid start passes 10000, which gave the earlier fixed
-  10000/−2000 pair. `spawn::align_below` takes the limit; `align_with_normalization`
-  passes `GRID_LIMIT` = 10000, so the grid start is unchanged.
-- [V] 0x9145D0's limit cast runs upward, from p.y + 1 − 10000 to p.y + 1 + 10000; a hit at
-  fraction f gives f·20000 + (p.y + 1 − 10000) + 1, kept if above p.y + 1.
+  fixed Y 0xD17278 = −2000. The grid start passes 10000. `spawn::align_below` takes the
+  limit; `align_with_normalization` passes `GRID_LIMIT` = 10000, so the grid start is
+  unchanged.
 - [V] 0x9EF040's speed-0 tail: wheel +0x104 = 0 / radius (+0xE0) for +0x1620 wheels; the
   gear is the first of gears 0..9 with a non-zero ratio and the largest torque-curve value
   (+0x17AC, 31 nodes, index scale 0xD15028, top 0xD1502C = 1675.5) at the engine speed
@@ -195,49 +226,102 @@ New static facts (read-only, analysis image constants and r9/r10/r12 decompilati
   becomes 1. [I] +0x18D8 points to a wheel record, so the speed is 0 and the result is
   gear 1 with engine speed 0.
 - [V] 0x5EC0E0's inline vector length: z² + (y² + x²), RSQRTPS seed s, root = s·sq,
-  ((1 − root·s)·root)·0.5 + root, zero kept. [I] 0x60D590 uses the same inline helper
-  (it was not re-decompiled); `reset_lines::length` takes the seed from the F321 table.
-- [V, structure only] 0x5EC0E0's target: tracker +0x74/+0x78 (current line position);
-  with the job byte set it is moved by 0x90C0F0 by the constant 0xCE3970, otherwise, when
-  tracker-sub +0x18 is set, by manager+0x220 × |record +0x20 − record +0x30|. When +0x18
-  is clear, a saved position (sub +0x44/+0x48) replaces it if 0x90BDE0 finds it behind.
+  ((1 − root·s)·root)·0.5 + root, zero kept. `reset_lines::length` takes the seed from the
+  F321 table (owner rule F320: no hardware rsqrtps).
 
-Port decisions:
-- Detector exactly as 3.1 with the frame time 0.016 s; a non-finite state restarts the
-  stretch. It runs after each successful player tick; a retired player (F323) is skipped.
-- [I] Target: the AI racing line point at the car's projection and the line direction
-  there. The tracker's own line, the saved point and the offsets are not ported.
-- Placement: limit cast and `align_below` with ReferenceSse normalization and the current
-  wheel displacements; pose through the verified bridge (B12710 path, F062/F160 bridge
-  code), both velocities zero in every lane, then the drivetrain tail. Damage, deformation,
-  suspension, lap state and the body links in the shared world are kept.
-- AUTHORED: the car is placed on the tick the detector fires. The fade-out, camera hold,
-  vfunc +0x38 collision switch and the pause menu's `reset_car` are not ported.
-- grid-app logs `drive_auto_reset` (point and heading, or the placement error, after
-  which the car drives on). The soak Session counts `auto_resets` and returns a placement
-  error as a failed step. `R` clears the detector.
+What the port does (row 43):
+- **Triggers.** The detector exactly as 3.1, after each successful player tick, with the
+  frame time 0.016 s; a non-finite state restarts the stretch. The pause menu's Reset
+  Vehicle (Button3 on the main pause screen, then Yes) calls `PlayerReset::request`; the
+  job starts at the next tick. Both start the same job. A Demolition Derby car is
+  disqualified by the detector instead (0x9E64E0(6, 0), F341). A retired player is never
+  reset. There are no other triggers (3.2).
+- **Line.** `ResetLine::load` takes the route's progress points as `lap_progress` prepares
+  them: a circuit from its finish around the lap, closed; a point-to-point run in travel
+  order from its start, open, with its finish distance. A run against the file's order
+  (Haruna downhill) keeps `reverse`, so the directions are negated as in the original.
+  `lap_progress::run` now keeps the route's `reverse` flag (it was forced to false; the
+  gates and points were already in travel order, and no other reader used the flag).
+- **Tracker.** AUTHORED: the car's trackpos is a nearest-point projection on the line,
+  searched from 2 segments behind to 6 ahead of the last one, and on the whole line at
+  first or when that window is more than 30 m away. The original's own tracker update
+  (0x915100) is not ported (7).
+- **Target.** `reset_lines::target` as 0x5EC0E0. The clock is the race clock (grid-app:
+  the trial's race time; without a race trial and in the soak, AUTHORED, the segment's
+  ticks × 0.016).
+- **Job.** Kind 0 timings. Input is neutral from the request until the placement, for
+  any driver (keyboard, pad, wheel, autopilot). The placement comes at the job tick that
+  passes 0.5 s, on the line point with the heading of 3.3, through `place_at_rest`
+  (limit cast, `align_below`, both velocities zero, the drivetrain tail; damage,
+  deformation, suspension, lap state and body links kept). In a shared world the car is
+  placed in slot 0 and tried again 1 m back while it overlaps another car's bodies, at
+  most 20 tries. From the placement the car is a ghost: the shared world's pair loop skips
+  every pair of it with another car (layer 0xE). After the 5 s tail the job ends at the
+  first tick in which the car overlaps no other car; the ghost flag is cleared then.
+  AUTHORED: a menu request while a job runs is refused, and the detector restarts at the
+  job's start.
+- **Screen and camera.** [I] `PlayerReset::darkness` rises linearly to 1 at the placement
+  and falls back over the second half of the fade; grid-app draws it as a black
+  full-screen overlay (`reset_fade.rs`, below the flashback whiteout and the menus).
+  [I] The cameras restart their history at the placement, as at a new segment, so the
+  chase camera does not swing across from the old position. Both are AUTHORED
+  presentation: the readers of vehicle +0x88/+0x89/+0x8C and the 0x5F9AE0 / 0x5F18C0
+  messages are not identified (7).
+- **Penalty.** None, as in the original.
+- **Logs.** grid-app logs `drive_reset version=2` with `event=start trigger=auto|menu
+  target=`, `event=place point= heading= distance= retries=`, `event=end` and
+  `event=disqualified`, and the menu's `drive_menu_reset version=2 accepted=`. A failed
+  placement is logged with `error=`; the job is dropped and the car drives on. The soak
+  Session counts started jobs and disqualifications in `auto_resets` and returns a
+  placement error as a failed step. `R` (restart) clears the job; the flashback saves and
+  restores the whole reset state with its checkpoints.
 
-Checks: `player_reset` asset tests flip car 0 on its roof on the Donington grid, solo and in
-a two-car shared world. Both fire at tick 260, 125 ticks after the car became still and
-tilted (tick 135). Placed: up Y 0.99981, 0 m from the line point, heading · line 0.99981,
-speed 0, gear 1, wheel spins 0, damage words unchanged. After 2 more seconds: up Y 0.99982,
-drift 0.0023 m, speed 1.4e-5 m/s, road 0.39 m below the body origin. With full throttle the
-solo car reaches 32.9 m/s in 4 s.
+Route kinds: circuits and point-to-point runs use their progress lines. The Yokohama drift
+freestyle arenas (routes 3–6) have only placeholder progress (2–3 gates); [I] it is the
+only line the original's tracker has there, so the port uses it. Their gates are not valid
+lap gates, so for a route that ignores progress `ResetLine::load` reads the file as it is
+(`lap_progress::read_route`) instead of the lap preparation, which rejects it. The Detroit derby stadium
+(route_8/9) disqualifies. Drift battles on circuits use the circuit line.
+
+Checks (2026-11-09, release, the Lacetti from `slot_00`, flipped on its roof on the grid):
+`reset_lines` 11 unit tests; `player_reset` unit test and 7 asset tests, all passing.
+- Flip: 20 runs cover 11 circuits, Haruna routes 1/4/9 both ways and Yokohama arenas 4–6.
+  In every run the auto trigger fires 125 ticks (2.0 s) after the car comes to rest tilted,
+  places the car 32 ticks (0.5 s) later and ends 377 ticks (6.0 s) after the start. At
+  the placement the car is upright (up_y ≥ 0.998), heads along the line (≥ 0.998), stands
+  0.40–0.47 m above the ground, is at rest in first gear and keeps its damage. Throttle
+  offered during the fade does not reach the car. With full throttle after the job it
+  drives 50–59 m in 4 s on circuits and touge roads (top speed 32–34 m/s). In the arenas
+  it drives 19–52 m before the arena wall, because the placeholder line points at the
+  wall.
+- Wedge: a reset onto another car steps back 5 × 1 m and is placed at 295 m.
+- Derby: a flipped derby car is disqualified, not reset.
+- Pause menu: the shared-world test and the menu reset run the same job. The grid-app
+  test `pause_menu_reset_vehicle_runs_the_reset_job` drives the interactive pause menu
+  (Donington). The request is accepted at tick 1500, the job starts at 1502, the car is
+  placed at 1533 and the job ends at 1878. The darkest frame is 0.992, and the controls
+  are neutral while the controller is off.
 
 ## 7. Not ported and open
 
-1. The tracker's own line and target choice (3.2, section 6), and what ResetLines'
-   0x20-byte elements hold. The fade timing and the collision switch during it.
-3. The target of vehicle+0x2C90 vfunc +0x38; the reader of req+0x38 (still unknown after F620's
-   look, section 8); the handler
-   0x9E64E0(6, 0); and the `ResetCarToTrack`, `VehicleDisqualified` and `EnableAIControl`
-   messages (handler 0x401380 → AI 0x79E240).
-4. The record state of a retired car in the retire-stuck 100 m test. The port treats a
+1. The original tracker update 0x915100 (how the trackpos follows the car, its search
+   window, shortcuts); the port projects on the nearest segment.
+2. The readers of vehicle +0x88/+0x89/+0x8C and the 0x5F9AE0 / 0x5F18C0 messages sent
+   at the fade's start and end: whether they drive a screen fade, a camera cut or a car
+   visibility fade. The port's black fade and camera cut are [I].
+3. The target of vehicle+0x2C90 vfunc +0x38; the reader of req+0x38 (still unknown after
+   F620's look, section 8); and the `ResetCarToTrack`, `VehicleDisqualified` and
+   `EnableAIControl` messages (handler 0x401380 → AI 0x79E240).
+4. What ResetLines' 0x20-byte elements (race+0x22AC) hold; the reset path above does not
+   read them.
+5. The record state of a retired car in the retire-stuck 100 m test. The port treats a
    held car as racing (it is not moving backwards). So a follower pinned within 100 m of a
    held car never retires [I]. Not changed without evidence.
-5. The car-side bytes +0xDE4/+0xDFC that vehicle_driver_prepare rejects (labelled
+6. The car-side bytes +0xDE4/+0xDFC that vehicle_driver_prepare rejects (labelled
    "respawn" in docs/RUNTIME_LIMITS_AUDIT.md). The reset path above does not write them.
    Their meaning stays open.
+7. The original's overlap test uses the car's phantom (car+0xDCC/+0xDD0); the port tests
+   the car's world bodies against the other cars' bodies (`overlaps_other_car`) [I].
 
 ## 8. A car wedged against tyre stacks (Washington, F620)
 

@@ -17,7 +17,7 @@ use crate::{
         Controls, DELTA, Runtime,
         assists::{Assists, Input, Shift, Transmission},
         multi::{DeformationParameters, MultiRuntime},
-        player_reset::PlayerReset,
+        player_reset::{Event as ResetEvent, PlayerReset, ResetLine},
     },
     time_trial::{Phase, State},
 };
@@ -710,9 +710,11 @@ pub struct Session {
     /// Ticks run in the current segment / in the whole session.
     pub total_ticks: u64,
     pub resets: u64,
-    /// The player's auto-reset (grid-app `drive_tick`, F341).
+    /// The player's reset job (grid-app `drive_tick`, row 43).
     pub auto_reset: PlayerReset,
-    /// Auto-resets performed in the whole session.
+    /// The route's track tracker line the job places the car on.
+    pub reset_line: Option<ResetLine>,
+    /// Reset jobs started (or derby disqualifications) in the whole session.
     pub auto_resets: u64,
     /// Expected losses: world bodies that fell below the world after the
     /// original's own static geometry pressed them down at their spawn pose
@@ -1053,6 +1055,7 @@ impl Session {
             None => None,
         };
         let progress = crate::lap_progress::load_route(root, &route)?.progress;
+        let reset_line = ResetLine::from_progress(&progress);
         let centreline = progress
             .points
             .iter()
@@ -1079,6 +1082,7 @@ impl Session {
             total_ticks: 0,
             resets: 0,
             auto_reset: PlayerReset::default(),
+            reset_line,
             auto_resets: 0,
             expected_losses: Default::default(),
             piece_history: Default::default(),
@@ -1112,6 +1116,8 @@ impl Session {
         } else {
             player
         };
+        // The reset job ignores input until its placement, as in the app.
+        let controls = self.auto_reset.controls(controls);
         let result = if let Some(race) = &mut self.race {
             let mut all = vec![controls];
             let cars: Vec<Other> = std::iter::once(&self.runtime)
@@ -1190,16 +1196,19 @@ impl Session {
         if result.is_ok() {
             self.total_ticks += 1;
             // The app logs a failed placement and drives on; here it is a
-            // failure to report.
-            if self
-                .auto_reset
-                .update(
-                    &mut self.runtime,
-                    self.race.as_mut().map(|r| &mut r.multi),
-                    &self.ai.line,
-                )?
-                .is_some()
-            {
+            // failure to report. AUTHORED: the clock is the segment's ticks,
+            // the app's fallback without a race trial.
+            let clock = self.runtime.ticks as f32 * DELTA;
+            let event = self.auto_reset.update(
+                &mut self.runtime,
+                self.race.as_mut().map(|r| &mut r.multi),
+                self.reset_line.as_ref(),
+                clock,
+            )?;
+            if matches!(
+                event,
+                Some(ResetEvent::Started { .. } | ResetEvent::Disqualified)
+            ) {
                 self.auto_resets += 1;
             }
         }

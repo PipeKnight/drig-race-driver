@@ -160,9 +160,11 @@ The same end state is reached exactly another way (AUTHORED):
     12-car scripted race: 1003 MB against 809 MB for the playable without Flashback (with a 2 s
     interval it was 1235 MB, which is why the interval is 4 s).
 - **Player inputs**: `drive_tick` logs the player's controls and gear request of each tick.
-- **A car reset from the pause menu** changes the car outside the tick: a checkpoint of the
-  changed state is taken at once (detected as a pose change at the same tick), and is used only
-  for later frames, so ticks run again never cross the change.
+- **A car reset from the pause menu** changes state outside the tick. It requests the reset
+  job, which then runs inside the ticks (RESET_AND_RESPAWN_RESEARCH §6). A checkpoint of the
+  changed state is taken at once and is used only for later frames, so ticks run again never
+  cross the change. The change is detected at the same tick as a difference in the player's
+  reset state, pose or velocity.
 - **Jump-in** at replay time t: the frame at or before t [D] gives tick T; the checkpoint at or
   before T is restored and ticks up to T run again (`drive_tick`, damage parts, drift scorers)
   with the logged inputs; the AI is deterministic given its state. The simulation is

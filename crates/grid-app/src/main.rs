@@ -68,6 +68,7 @@ mod window_transitions;
 mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
+mod reset_fade;
 mod damage_hud;
 mod dash;
 mod driver;
@@ -462,10 +463,16 @@ struct Driving {
     segment: u64,
     started: Instant,
     opponents: Option<Opponents>,
-    /// The player's auto-reset onto the racing line (ResetLinesManager, F341).
+    /// The player's reset job (ResetLinesManager): the auto trigger and the
+    /// pause menu's Reset Vehicle, the fade, the placement and the collision
+    /// ghost (docs/RESET_AND_RESPAWN_RESEARCH.md 6).
     auto_reset: grid_tools::source_vehicle::player_reset::PlayerReset,
-    /// Its line; None disables it (unit tests).
+    /// The route's AI racing line (minimap, OSD, off-track speech, drift
+    /// scoring); None in unit tests.
     reset_line: Option<grid_tools::ai_driver::Line>,
+    /// The track tracker's line the reset job places the car on (the
+    /// route's progress line); None disables resets (unit tests).
+    reset_tracker: Option<grid_tools::source_vehicle::player_reset::ResetLine>,
 }
 /// Shared-world opponents. Car 0 of `multi` is a placeholder that is swapped
 /// with the player runtime for each common tick.
@@ -4135,6 +4142,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     geometry,
                     opponents,
                     reset_line: Some(grid_tools::ai_driver::Line::load_route(&root, &reverse)?),
+                    reset_tracker: grid_tools::source_vehicle::player_reset::ResetLine::load(&root, &reverse)?,
                     length: length(&reverse)?,
                 },
                 length(&route)?,
@@ -4175,16 +4183,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             started: Instant::now(),
             opponents,
             // A derby disqualifies a flipped player instead (0x60D590).
-            auto_reset: grid_tools::source_vehicle::player_reset::PlayerReset {
-                demolition,
-                ..Default::default()
-            },
-            // The Yokohama arenas have no AI line: no auto-reset there.
+            auto_reset: grid_tools::source_vehicle::player_reset::PlayerReset::new(demolition),
+            // The Yokohama arenas have no AI line.
             reset_line: if route.ignores_progress() {
                 grid_tools::ai_driver::Line::load_route(&root, &route).ok()
             } else {
                 Some(grid_tools::ai_driver::Line::load_route(&root, &route)?)
             },
+            // Every route has a progress line, the arenas a placeholder one.
+            reset_tracker: grid_tools::source_vehicle::player_reset::ResetLine::load(&root, &route)?,
         })
     } else {
         None
@@ -4847,7 +4854,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     pause_menu::Variant::TestDrive
                 },
                 input_settings.device == input::Device::Wheel,
-                driving.reset_line.is_some(),
+                driving.reset_tracker.is_some(),
                 pause_menu::initial_options(&profile, Some(&actions)),
             );
             // The original autosaves its profile when a settings screen is
@@ -5030,6 +5037,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             source_projector_present::install(&mut app,prepared,image,mode,request.range,source_projector::Parameters {working_unit:request.units,global_colour:Vec3::from_array(request.colour)})?;
         }
         damage_hud::install(&mut app);
+        reset_fade::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);
             flashback::install(&mut app, ai_settings.difficulty);
@@ -6384,6 +6392,9 @@ fn drive_tick(
             ..Default::default()
         };
     }
+    // A reset job ignores the car's input from the fade start until the
+    // placement (0x606990), whoever drives it.
+    controls = driving.auto_reset.controls(controls);
     // Player input record: every change, gear request and segment start.
     let now = (driving.segment, controls, held);
     if *recorded != Some(now) || applied.is_some() {
@@ -6548,26 +6559,34 @@ fn drive_tick(
         driving.failure = Some(text);
         driving.report("failure", controls);
     } else {
-        // Nearly still on the side or roof for 2 s: back onto the line. A
-        // failed placement is logged and the car drives on where it is.
-        if let Some(line) = &driving.reset_line {
-            let player = &mut driving.runtime;
-            let shared = driving.opponents.as_mut().map(|o| &mut o.multi);
-            match driving.auto_reset.update(player, shared, line) {
-                Ok(Some(reset)) => log_line!(
-                    "drive_auto_reset version=1 segment={} tick={} point={:?} heading={:?}",
-                    driving.segment,
-                    driving.runtime.ticks,
-                    reset.point,
-                    reset.heading
-                ),
-                Ok(None) => {}
-                Err(error) => log_line!(
-                    "drive_auto_reset version=1 segment={} tick={} error={:?}",
+        // The reset job: the auto trigger (nearly still on the side or roof
+        // for 2 s) or the pause menu's request, the fade, the placement and
+        // the ghost tail. A failed placement is logged, the job ends and the
+        // car drives on where it is.
+        let clock = trial
+            .as_ref()
+            .and_then(|t| t.race_time(driving.runtime.ticks))
+            .map_or(
+                driving.runtime.ticks as f32 * grid_tools::source_vehicle::DELTA,
+                |t| t as f32,
+            );
+        let player = &mut driving.runtime;
+        let shared = driving.opponents.as_mut().map(|o| &mut o.multi);
+        let line = driving.reset_tracker.as_ref();
+        match driving.auto_reset.update(player, shared, line, clock) {
+            Ok(Some(event)) => log_reset(driving.segment, driving.runtime.ticks, &event),
+            Ok(None) => {}
+            Err(error) => {
+                driving.auto_reset.job = None;
+                if let Some(o) = &mut driving.opponents {
+                    o.multi.set_ghost(0, false);
+                }
+                log_line!(
+                    "drive_reset version=2 segment={} tick={} error={:?}",
                     driving.segment,
                     driving.runtime.ticks,
                     error.0
-                ),
+                );
             }
         }
         // Trial bookkeeping never stops physics: a refused tick invalidates
@@ -6792,6 +6811,27 @@ fn drive_actions(
     // Without the pause menu (no input layer) Escape still exits.
     if actions.is_none() && input.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
+    }
+}
+/// One `drive_reset` log line per reset job event.
+fn log_reset(segment: u64, tick: u64, event: &grid_tools::source_vehicle::player_reset::Event) {
+    use grid_tools::source_vehicle::player_reset::Event;
+    match event {
+        Event::Started { auto, target } => log_line!(
+            "drive_reset version=2 segment={segment} tick={tick} event=start trigger={} target={target}",
+            if *auto { "auto" } else { "menu" }
+        ),
+        Event::Placed(r) => log_line!(
+            "drive_reset version=2 segment={segment} tick={tick} event=place point={:?} heading={:?} distance={} retries={}",
+            r.point,
+            r.heading,
+            r.distance,
+            r.retries
+        ),
+        Event::Ended => log_line!("drive_reset version=2 segment={segment} tick={tick} event=end"),
+        Event::Disqualified => {
+            log_line!("drive_reset version=2 segment={segment} tick={tick} event=disqualified")
+        }
     }
 }
 /// Restart Race / R: the whole event from its start (`StateRestartRace`):
@@ -7187,7 +7227,10 @@ fn drive_present(
         Some(c) => c,
         None => fallback.insert(camera::Cameras::new(camera::Views::fallback(), "", None)),
     };
-    let sample = camera::Sample::of(&driving.runtime, driving.segment);
+    // [I] The cameras restart their history at a reset placement, as at a
+    // new segment: the car moved in the dark of the fade (row 43).
+    let continuity = driving.segment << 32 | u64::from(driving.auto_reset.placements);
+    let sample = camera::Sample::of(&driving.runtime, continuity);
     if actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView)) {
         // The blend's lift clears the car's collision box (0x7F9CA0).
         let car = driving
@@ -7840,6 +7883,7 @@ mod driving_tests {
                 handbrake_from: None,
                 auto_reset: Default::default(),
                 reset_line: None,
+                reset_tracker: None,
                 scripted_ticks: None,
                 scripted: Default::default(),
                 last_controls: None,
@@ -8199,6 +8243,7 @@ mod driving_tests {
                 opponents: None,
                 auto_reset: Default::default(),
                 reset_line: None,
+                reset_tracker: None,
             })
             .add_systems(Update, drive_present);
         app.world_mut().spawn((ViewerCamera, Transform::default()));
@@ -8313,6 +8358,7 @@ mod driving_tests {
                 opponents: None,
                 auto_reset: Default::default(),
                 reset_line: None,
+                reset_tracker: None,
             })
             .insert_resource(input::Actions::new(
                 input::ActionMap::keyboard(),
@@ -8548,6 +8594,7 @@ mod driving_tests {
                 opponents: None,
                 auto_reset: Default::default(),
                 reset_line: None,
+                reset_tracker: None,
             })
             .insert_resource(input::Actions::new(
                 input::ActionMap::keyboard(),
@@ -8878,6 +8925,7 @@ mod driving_tests {
                 opponents: None,
                 auto_reset: Default::default(),
                 reset_line: None,
+                reset_tracker: None,
             })
             .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
             .init_resource::<input::ShiftQueue>()
@@ -9026,6 +9074,7 @@ mod driving_tests {
                 opponents: None,
                 auto_reset: Default::default(),
                 reset_line: None,
+                reset_tracker: None,
             })
             .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
             .init_resource::<input::ShiftQueue>()
@@ -9176,6 +9225,7 @@ mod driving_tests {
                 opponents: None,
                 auto_reset: Default::default(),
                 reset_line: None,
+                reset_tracker: None,
             })
             .insert_resource(input::Actions::new(
                 input::ActionMap::keyboard(),

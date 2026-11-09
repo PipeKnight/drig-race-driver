@@ -993,6 +993,7 @@ mod sprite_visibility_reset_regression {
                     opponents: None,
                     auto_reset: default(),
                     reset_line: None,
+                    reset_tracker: None,
                 })
                 .insert_resource(ButtonInput::<KeyCode>::default())
                 .add_message::<AppExit>();

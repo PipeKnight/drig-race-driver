@@ -630,6 +630,7 @@ mod tests {
             handbrake_from: None,
             auto_reset: Default::default(),
             reset_line: None,
+            reset_tracker: None,
             runtime,
             geometry: None,
             paused: false,

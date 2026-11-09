@@ -22,6 +22,7 @@ pub(crate) struct NextRun {
     pub geometry: Option<grid_tools::body_geometry::BodyGeometry>,
     pub opponents: Option<crate::Opponents>,
     pub reset_line: Option<grid_tools::ai_driver::Line>,
+    pub reset_tracker: Option<grid_tools::source_vehicle::player_reset::ResetLine>,
     /// Run length (m) of the reverse direction.
     pub length: f64,
 }
@@ -180,6 +181,7 @@ pub(crate) fn tick(
     driving.geometry = next.geometry;
     driving.opponents = next.opponents;
     driving.reset_line = next.reset_line;
+    driving.reset_tracker = next.reset_tracker;
     driving.auto_reset.reset();
     driving.segment += 1;
     driving.last_controls = None;

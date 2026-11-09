@@ -101,10 +101,11 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
   - F348 closed the app here directly, a stopgap until the results screens existed. The F348 entry
     in PROJECT_LOG.md keeps that history.
 - **Finish Test Drive**: after Yes, the app closes (practice).
-- **Reset Vehicle** (button3, with its confirmation): the player's car is placed at rest on the
-  racing line, with the same placement as the auto-reset of F341
-  (`player_reset::place`, `c_pause_reset_car` [I]). It is offered only when the route has a reset
-  line.
+- **Reset Vehicle** (button3, with its confirmation): starts the player's reset job, the same one
+  the auto trigger starts (`PlayerReset::request`, `c_pause_reset_car` [I]): a 1 s fade, the car
+  placed at rest on the route's progress line at the middle of it, no car-to-car contact until 5 s
+  later and no other car overlaps (docs/RESET_AND_RESPAWN_RESEARCH.md 3.2 and 6). It is offered
+  only when the route has a reset line; a request while a job runs is refused.
 - **Options**: the standard screen, or the wheel screen for `device=wheel`. There is no force
   feedback in the prototype, so the `_ffb` screen is not used.
   - Effects Volume trims the engine and tyre groups in dB like the original (4124A0:
@@ -143,7 +144,7 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
 - **Log lines:**
   - `drive_menu version=1 … action=open|resume|restart|reset-car|retire-race|finish-test-drive`;
   - `drive_menu version=1 action=apply …` and `action=unavailable button=…`;
-  - `drive_menu_reset …`;
+  - `drive_menu_reset version=2 accepted=…` and the job's `drive_reset version=2 event=start|place|end|disqualified …`;
   - the existing `drive_sample event=pause|resume|reset|retire`.
 
 AUTHORED presentation:

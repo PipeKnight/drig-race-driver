@@ -59,6 +59,9 @@ pub struct MultiRuntime {
     retired: Vec<Option<Retirement>>,
     /// Cars retired by the last tick.
     newly_retired: Vec<usize>,
+    /// Per car: a reset car that other cars pass through (the original's
+    /// collision layer 0xE, 0x5EBF90; [`Self::set_ghost`]).
+    ghost: Vec<bool>,
     /// Independent per-car stages run on the shared compute pool
     /// ([`crate::parallel`]); results are identical either way.
     pub parallel: bool,
@@ -426,6 +429,7 @@ impl MultiRuntime {
             panel_tipping: Default::default(),
             retired: vec![None; n],
             newly_retired: Vec::new(),
+            ghost: vec![false; n],
             parallel: true,
             #[cfg(test)]
             fail_lap_timing: None,
@@ -682,7 +686,40 @@ impl MultiRuntime {
         self.speeds = vec![0.; self.cars.len()];
         self.retired = vec![None; self.cars.len()];
         self.newly_retired.clear();
+        self.ghost = vec![false; self.cars.len()];
         self.panel_tipping.clear();
+    }
+
+    /// Car `i` collides with no other car while `ghost` (the reset job puts
+    /// a placed car on collision layer 0xE and back on 0x12 when it is clear
+    /// of the others, 0x5EBF90). [I] Layer 0xE keeps the track, the
+    /// boundary and the props; only car pairs are skipped.
+    pub fn set_ghost(&mut self, i: usize, ghost: bool) {
+        if let Some(g) = self.ghost.get_mut(i) {
+            *g = ghost;
+        }
+    }
+
+    pub fn ghost(&self, i: usize) -> bool {
+        self.ghost.get(i).copied().unwrap_or(false)
+    }
+
+    /// Whether car `i`'s hull touches another car's hull where they stand
+    /// now ([I] the car phantom's overlap test of the reset job, 0x612C90
+    /// events 4 and 9). Retired cars count: they stay in the world.
+    pub fn overlaps_other_car(&self, i: usize) -> Result<bool, Error> {
+        let bodies = &self.world.groups.bodies;
+        if i >= self.cars.len() {
+            return Err(Error("no such car"));
+        }
+        let placed = self.geometry[i].placed(&bodies[i])?;
+        for j in (0..self.cars.len()).filter(|&j| j != i) {
+            let hull = crate::body_geometry::WorldHull::new(&self.geometry[j].hull_world_triangles(&bodies[j])?);
+            if !self.geometry[i].car_contacts_hull_at(&placed, &hull, 1)?.is_empty() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// [`Runtime::place_at_rest`] for car `i`, on its body in the shared
@@ -840,6 +877,7 @@ impl MultiRuntime {
             .map(|(p, g)| p.as_ref().unwrap_or(g))
             .collect();
         let cars = &self.cars;
+        let ghost = self.ghost.clone();
         let props = self.props.as_ref();
         let moving: Vec<bool> = staged.iter().map(Option::is_some).collect();
         let mut recorded = Vec::new();
@@ -984,7 +1022,7 @@ impl MultiRuntime {
                     (contact_failed[i].is_none() && remaining - out.len() >= PAIR).then(|| {
                         (0..n)
                             .map(|j| match &built[j] {
-                                Some(Ok(hull)) if j > i => {
+                                Some(Ok(hull)) if j > i && !ghost[i] && !ghost[j] => {
                                     Some(geometry[i].car_contacts_hull(&bodies[i], hull, PAIR))
                                 }
                                 _ => None,
@@ -1016,6 +1054,9 @@ impl MultiRuntime {
                     let Some(Ok(other)) = &built[j] else {
                         unreachable!("hulls are built for every car that can be met");
                     };
+                    if ghost[i] || ghost[j] {
+                        continue;
+                    }
                     let room = remaining - out.len();
                     let pair = match rows[i][j].take() {
                         Some(prepared) if room >= PAIR => prepared,

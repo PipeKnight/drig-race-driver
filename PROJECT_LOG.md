@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F762](log/F0762.md) | 2026-11-09 | Player reset job ported 1:1 (row 43) |
 | [F761](log/F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
 | [F760](log/F0760.md) | 2026-11-09 | Graphics route audit: every raceable route, autopilot lap, chase and head-cam verdicts |
 | [F759](log/F0759.md) | 2026-11-09 | Circuit lap estimator 0x67FFB0 and marshal flags (rows 44, 47) |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F705](log/F0705.md) | 2026-11-03 | Water and light shafts ported from the original's programs (rows 108, 107) |
 | [F704](log/F0704.md) | 2026-11-03 | Playable e5e885362a85 for the PC (no APKs) |
 | [F703](log/F0703.md) | 2026-11-02 | Ornament level and draw-distance fades (owner pop report) |
-| [F702](log/F0702.md) | 2026-11-02 | Invisible barriers: anchor-only entity renderables draw their enclosing root's intact LOD on every route |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
