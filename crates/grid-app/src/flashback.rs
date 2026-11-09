@@ -96,6 +96,10 @@ struct Field {
     after_finish: Option<grid_tools::ai_driver::AiDriver>,
     throttles: Vec<f32>,
     pacing: grid_tools::ai_pacing::Field,
+    /// Marshal flags and the player's yellow-zone state: a flashback rewinds
+    /// the flags raised after the target with the rest of the race.
+    flags: Option<grid_tools::race_flags::RaceFlags>,
+    yellow_flag: bool,
 }
 
 impl Checkpoint {
@@ -123,6 +127,8 @@ impl Checkpoint {
                 after_finish: o.after_finish.clone(),
                 throttles: o.throttles.clone(),
                 pacing: o.pacing.clone(),
+                flags: o.flags.clone(),
+                yellow_flag: o.yellow_flag,
             }),
             trial: trial.map(|t| t.checkpoint()),
             damage: damage.map(|d| d.checkpoint()),
@@ -147,6 +153,8 @@ impl Checkpoint {
             o.after_finish = f.after_finish.clone();
             o.throttles = f.throttles.clone();
             o.pacing = f.pacing.clone();
+            o.flags = f.flags.clone();
+            o.yellow_flag = f.yellow_flag;
         }
         if let (Some(mut t), Some(saved)) = (world.get_resource_mut::<crate::time_trial::Trial>(), &self.trial) {
             t.restore(saved);

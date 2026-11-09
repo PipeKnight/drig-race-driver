@@ -433,7 +433,8 @@ outputs `local/drift-est/decomp/g1..g10`), Capstone 5.0.6 dumps through `local/d
   original's *virtual race*: its error strings are "Virtual race not initialised", "Competitor not
   in virtual race", "Not enough competitor slots" and `virtualRace::updateVirtualLapBaseResult::
   eventTrackPoolId %d not found` (0xCE8F6C..0xCE9020).
-- Set-up for a free race (0x646320) and a career event (0x646A90): +0x10, +0x14, +0x18 are copied
+- Set-up for a career event (0x646320, reads `event_track_pool` [V]) and a free race (0x646A90 [I];
+  the two labels were swapped here before 9 November 2026): +0x10, +0x14, +0x18 are copied
   from a difficulty object's +0x14, +0x18, +0x1C, +0xABC points at that object, +0xABA = 1, and
   0x680CE0 loads the base results; when it succeeds, +0xAB9 = 1.
 - The difficulty object (vtable 0xCC0A64, constructor 0x5F1B10) is filled by the `difficulty` row

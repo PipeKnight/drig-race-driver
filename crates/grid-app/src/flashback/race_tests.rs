@@ -65,6 +65,9 @@ fn state(app: &App) -> (Vec<u64>, String) {
     if let Some(d) = app.world().get_resource::<crate::drift_event::DriftEvent>() {
         rest.push_str(&format!(" drift={:?}", d.checkpoint()));
     }
+    if let Some(o) = app.world().resource::<crate::Driving>().opponents.as_ref() {
+        rest.push_str(&format!(" flags={:?} yellow={}", o.flags, o.yellow_flag));
+    }
     (cars, rest)
 }
 

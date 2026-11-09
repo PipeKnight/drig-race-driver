@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F764](log/F0764.md) | 2026-11-09 | Flashback rewinds the marshal flags; career/free-race set-up labels |
 | [F763](log/F0763.md) | 2026-11-09 | Race HUD: split pills, needle blur, PB pill, OSD and results time formats from static RE |
 | [F762](log/F0762.md) | 2026-11-09 | Player reset job ported 1:1 (row 43) |
 | [F761](log/F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F707](log/F0707.md) | 2026-11-03 | Okutama grass per route: track.vis covers every grass patch; baseline-sun crops for the owner |
 | [F706](log/F0706.md) | 2026-11-03 | Water and light shafts read the route's own lighting.xml (Haruna night routes) |
 | [F705](log/F0705.md) | 2026-11-03 | Water and light shafts ported from the original's programs (rows 108, 107) |
-| [F704](log/F0704.md) | 2026-11-03 | Playable e5e885362a85 for the PC (no APKs) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
