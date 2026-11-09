@@ -87,7 +87,7 @@ GROUPS = [
         r"tools/render_grid_engine_trace"]),
     ("Graphics, textures and meshes", [
         r"alpha_mips", r"mip_tails", r"shader", r"inventory_graphics", r"prepare_texture", r"preview_mesh",
-        r"pssg", r"hdr_probe", r"object_lods", r"light_math", r"particle"]),
+        r"pssg", r"hdr_probe", r"object_lods", r"light_math", r"particle", r"route_graphics_audit"]),
     ("Resource formats and data readers", [
         r"binxml", r"resource_readers", r"validate_progress", r"surface_xml", r"vehicle_tuning",
         r"vehicle_source_gearing", r"entity_descriptors", r"body_tuning"]),

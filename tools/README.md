@@ -188,6 +188,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [inventory_graphics_resources.py](inventory_graphics_resources.py) | Read-only texture/shader inventory; purchased-resource metadata stays private. | [GRAPHICS_REMASTER](../docs/GRAPHICS_REMASTER.md) |
 | [preview_mesh.py](preview_mesh.py) | Orthographic diagnostic plot of private OBJ sources, without scene assembly. | [PSSG_PAYLOADS](../docs/PSSG_PAYLOADS.md) |
 | [probe_grid_light_math.py](probe_grid_light_math.py) | Bounded isolated x86 probe of the pinned private GRID lighting calculation. | [SOURCE_SKY_LIGHTING](../docs/SOURCE_SKY_LIGHTING.md) |
+| [route_graphics_audit.py](route_graphics_audit.py) | Graphics audit of every raceable route: an autopilot lap per route, chase and cockpit shots, a verdict table. | [GRAPHICS_ROUTE_AUDIT](../docs/GRAPHICS_ROUTE_AUDIT.md) |
 | [survey_pssg_payloads.py](survey_pssg_payloads.py) | Read-only exploratory PSSG survey. | [PSSG_PAYLOADS](../docs/PSSG_PAYLOADS.md) |
 | [validate_pssg_payloads.py](validate_pssg_payloads.py) | Compare native Rust exports to independent read-only PSSG surveys. | [DONINGTON_SCENE](../docs/DONINGTON_SCENE.md) |
 

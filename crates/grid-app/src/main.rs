@@ -48,6 +48,7 @@ mod body_occlusion;
 mod body_specular;
 mod camera;
 mod cine;
+mod route_audit;
 mod player_view_visibility;
 mod cockpit;
 mod ambience_sound;
@@ -1707,6 +1708,18 @@ fn main() {
     if args.first().is_some_and(|a| a == "--career") {
         match career_screen::supervise(&args[1..]) {
             Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("grid-app: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    // `--menu-routes`: every route the event menu offers, one line each
+    // (tools/route_graphics_audit.py, docs/GRAPHICS_ROUTE_AUDIT.md).
+    #[cfg(not(target_os = "android"))]
+    if args.first().is_some_and(|a| a == "--menu-routes") {
+        match event_menu::list_routes(&args[1..]) {
+            Ok(()) => std::process::exit(0),
             Err(error) => {
                 eprintln!("grid-app: {error}");
                 std::process::exit(1);
@@ -4577,6 +4590,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 .add_systems(First, cine::pace.before(bevy::time::TimeSystems))
                 .add_systems(PostUpdate, cine::shoot.before(bevy::transform::TransformSystems::Propagate))
                 .add_systems(RunFixedMainLoop, shown_alpha.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop));
+        }
+        if drive && let Some(audit) = route_audit::Audit::from_env(
+            grid_tools::lap_progress::load_route(&root, &route).ok().map(|p| p.progress.total_distance),
+        )? {
+            app.insert_resource(audit)
+                .add_systems(PostUpdate, route_audit::shoot.before(bevy::transform::TransformSystems::Propagate));
         }
         if let Some(config) = motion_sequence {
             motion_capture::install(

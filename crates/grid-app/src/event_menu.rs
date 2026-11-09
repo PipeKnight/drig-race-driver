@@ -1169,6 +1169,77 @@ struct Saving {
     profile: PathBuf,
 }
 
+/// `--menu-routes`: prints one `menu_route` line per route the menu offers
+/// with every event type that runs it and the first car each offers
+/// (tools/route_graphics_audit.py).
+/// `--menu-routes [DIR]`: every route the menu offers. With DIR, also
+/// writes for each the settings profile the menu would write for the first
+/// event type offering it, with that type's defaults
+/// (`DIR/<route slug>.ini`; a Touge layout also uphill, `-up.ini`), the
+/// profiles tools/route_graphics_audit.py drives.
+pub fn list_routes(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let out = args.first().filter(|a| !a.starts_with("--")).map(PathBuf::from);
+    let profile_args = if out.is_some() { &args[1..] } else { args };
+    let settings = crate::settings::load(profile_args)?;
+    let root = crate::game_root(settings.root.clone())?;
+    let labels = Labels::load(&root);
+    let catalog = Catalog::load(&root, &labels);
+    if let Some(dir) = &out {
+        std::fs::create_dir_all(dir)?;
+    }
+    for (route, venue, events) in catalog.routes() {
+        println!("menu_route route={route} venue={venue:?} events={}", events.join(","));
+        let Some(dir) = &out else { continue };
+        for (kind, choice) in catalog.route_choices(&route) {
+            let slug = route.trim_start_matches("tracks/").replace('/', "-");
+            let up = if choice.subroute == 1 { "-up" } else { "" };
+            let path = dir.join(format!("{slug}{up}.ini"));
+            std::fs::write(&path, profile(kind, &choice))?;
+            println!(
+                "menu_route_profile route={route} type={} car={} subroute={} path={}",
+                choice.key,
+                choice.car,
+                choice.subroute,
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+impl Catalog {
+    /// Every route the menu offers, in first-offered order, with its venue
+    /// and `KEY:CAR` for each event type that runs it.
+    pub fn routes(&self) -> Vec<(String, String, Vec<String>)> {
+        let mut out: Vec<(String, String, Vec<String>)> = Vec::new();
+        for t in &self.types {
+            for l in &t.layouts {
+                let event = format!("{}:{}", t.key, t.cars.first().map_or("-", String::as_str));
+                match out.iter_mut().find(|(r, ..)| *r == l.route) {
+                    Some((.., events)) => events.push(event),
+                    None => out.push((l.route.clone(), format!("{} {}", l.venue, l.name), vec![event])),
+                }
+            }
+        }
+        out
+    }
+
+    /// The default choice of the first event type offering `route`, and
+    /// for a type with directions also the other direction.
+    pub fn route_choices(&self, route: &str) -> Vec<(Kind, Choice)> {
+        let Some(t) = self.types.iter().find(|t| t.layouts.iter().any(|l| l.route == route)) else {
+            return Vec::new();
+        };
+        let old = Choice { key: t.key.clone(), route: route.to_owned(), ..Choice::default() };
+        let first = t.choice(&old);
+        let mut out = vec![(t.kind, first.clone())];
+        if t.directions {
+            out.push((t.kind, t.choice(&Choice { subroute: 1, ..old })));
+        }
+        out
+    }
+}
+
 /// Runs the menu as its own app (`--menu-screen`). Exits with [`MENU_GO`]
 /// after Continue (Android: restarts into the race), 0 after Back.
 pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -1585,6 +1656,25 @@ mod tests {
         let mut nav = Nav::default();
         f(&mut nav);
         nav
+    }
+
+    #[test]
+    fn routes_merge_the_event_types_of_each_layout() {
+        let routes = catalog().routes();
+        let donington = routes.iter().find(|(r, ..)| r == route::DONINGTON).unwrap();
+        assert!(donington.2.iter().any(|e| e.starts_with("race:")));
+        assert!(donington.2.iter().any(|e| e.starts_with("time_trial:")));
+        let mut seen: Vec<&String> = routes.iter().map(|(r, ..)| r).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), routes.len());
+        // The audit profile of a route is the menu's own for its first type.
+        let choices = catalog().route_choices(route::DONINGTON);
+        assert_eq!(choices.len(), 1);
+        let (kind, choice) = &choices[0];
+        assert_eq!((*kind, choice.key.as_str(), choice.route.as_str()), (Kind::Race, "race", route::DONINGTON));
+        assert!(profile(*kind, choice).contains("body_contacts = derive"));
+        assert!(catalog().route_choices("tracks/nowhere/route_0").is_empty());
     }
 
     #[test]

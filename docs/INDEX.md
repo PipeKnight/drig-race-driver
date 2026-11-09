@@ -163,6 +163,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [GRAPHICS_QUALITY_CONTRACT.md](GRAPHICS_QUALITY_CONTRACT.md) Visual quality and future renderer interfaces — Owner direction, 15 October 2026: preserve GRID 2008 atmosphere while improving the actual scene substantially.
 - [GRAPHICS_REMASTER.md](GRAPHICS_REMASTER.md) Lacetti / Donington graphics workstream — Current owner priority (15 October 2026): **image quality first; optimize later**.
 - [GRAPHICS_ROADMAP_RU.md](GRAPHICS_ROADMAP_RU.md) План улучшения графики GRID — Владелец подтвердил: обязательны все шесть направлений ниже; порядок зависит от технических связей.
+- [GRAPHICS_ROUTE_AUDIT.md](GRAPHICS_ROUTE_AUDIT.md) Graphics route audit — A rerunnable check of the normal playable picture on every raceable route.
 - [GRASS_RENDERING.md](GRASS_RENDERING.md) Grass cutout/shading diagnosis — 17 October2026, owner-reported black dots/strokes in native4K far-view crops.
 - [GRID_IMAGE_FORMATION.md](GRID_IMAGE_FORMATION.md) Original GRID image formation: Donington research — Purchased inputs are read-only.
 - [GROUND_EFFECTS_RESEARCH.md](GROUND_EFFECTS_RESEARCH.md) Ground effects: skid marks, wheel kick-up and ground cover — Recorded 15 October 2026 (F306).
