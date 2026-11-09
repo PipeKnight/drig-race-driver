@@ -1,7 +1,7 @@
 """Interactive window check of the race OSD after a window resize mid-race (F737, F742): the OSD and the smoke's reduced depth must follow the new size.
 
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
-       [--size WxH] [--shots S,S,...] [--expect-stale]
+       [--size WxH] [--shots S,S,...] [--expect-stale] [--expect-splits]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1). RESIZE_AT seconds after launch it resizes
@@ -18,6 +18,10 @@ GRID_WINDOW_SHOTS (frame_pacing.rs) also saves window shots at the --shots game 
 after loading) for a look: by default two before and two after the resize, two seconds apart. The
 log, the shots and `result.txt` stay in OUT_DIR. The settings file must start a race with the OSD
 (`[game] route`, `[drive] enabled = on`). Windows only.
+
+--expect-splits (F763) also requires the split pills in the interactive window: an `osd_splits`
+line (race_osd.rs, printed when the shown pills change) with a race clock after the resize, and
+one with a signed difference. Choose a race with opponents and a resize before the first split.
 """
 import argparse
 import ctypes
@@ -56,6 +60,7 @@ def main():
     ap.add_argument('--size', default='2560x1369')
     ap.add_argument('--shots', default='20,22,40,42')
     ap.add_argument('--expect-stale', action='store_true')
+    ap.add_argument('--expect-splits', action='store_true')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -113,6 +118,22 @@ def main():
             verdict = f'FAIL: smoke depth resized to {smoke[-1][0]}x{smoke[-1][1]} but no smoke material rebound'
         else:
             verdict += f'; smoke depth {smoke[-1][0]}x{smoke[-1][1]} rebound by {smoke[-1][2]} materials'
+    # F763: split pills (leader's race clock, the others' signed differences).
+    text = log_path.read_text(errors='replace')
+    # The first OSD line at the new size (the client area, smaller than the window).
+    moved = [m for m in re.finditer(r'^osd_display bound=true size=(\d+)x(\d+)', text, re.M)
+             if (int(m.group(1)), int(m.group(2))) != (1280, 800)]
+    at = moved[0].start() if moved else -1
+    splits = re.findall(r'^osd_splits shown=(\d+) rows=(.*)$', text[max(at, 0):], re.M)
+    clock = [r for n, r in splits if re.search(r':\d\d:\d\d\.\d\d', r)]
+    signed = [r for r in clock if re.search(r':[+-]\d\d:\d\d\.\d\d', r)]
+    print(f'osd_splits after the resize: {len(splits)} lines, {len(clock)} with a time, {len(signed)} with a difference'
+          + (f'; first: {clock[0]}' if clock else ''))
+    if args.expect_splits and verdict.startswith('PASS'):
+        if at < 0 or not clock or not signed:
+            verdict = 'FAIL: no split pills with a race clock and a difference after the resize'
+        else:
+            verdict += f'; {len(clock)} split pill updates'
     missing = [n for n in names if not (out / n).exists()]
     if missing:
         verdict += f' (shots missing: {", ".join(missing)})'

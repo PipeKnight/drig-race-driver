@@ -130,6 +130,7 @@ pub(crate) fn race_app_on(route: grid_tools::route::Route, models: &[&str], laps
         ai_messages: Vec::new(),
         flags: Some(flags),
         yellow_flag: false,
+        split_times: Default::default(),
     };
     let mut trial =
         time_trial::Trial::new(laps, grid_tools::time_trial::Mode::Events, false).unwrap();
@@ -913,7 +914,8 @@ fn a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress() {
         tap(&mut app, KeyCode::Enter);
         assert_eq!(post(&app).stage, Stage::Results);
         let view = post(&app).view(&rows, &Labels::default());
-        assert_eq!(view.table[1][2], "1440:00.000");
+        // The results list formats totals like the original (0x908860: hundredths).
+        assert_eq!(view.table[1][2], "1440:00.00");
     });
 }
 

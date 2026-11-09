@@ -80,8 +80,8 @@ are the same for both.
 
 | Group | Port | Rule |
 |---|---|---|
-| Lap group (left) | LAP n/total, RACE time, LAP time, BEST, with PB for 5 s after a new best | The event's completed laps + 1, capped at the total. Free practice: the lap timer's lap number, no total [I]. |
-| Position (right top) | POS n/total. Split pills: the car ahead, the player and the car behind, with name, position and the gap in seconds | Pills show for 5 s after each completed lap (the `minduration`) [I]. The rows and trigger were not traced. Gaps are race distance at the player's speed (floor 10 m/s), as before. |
+| Lap group (left) | LAP n/total, RACE time, LAP time, BEST (mm:ss.hh, section 6.4); after each lap the LAP time shows that lap for 5 s, with the PB pill when it is a new best (section 6.4) | The event's completed laps + 1, capped at the total. Free practice: the lap timer's lap number, no total [I]. |
+| Position (right top) | POS n/total. Split pills: the leader and the three cars around the player, with name, position and split time | Shown when the player passes a split point (sector end or lap end), for `maxduration` 10 s, at least `minduration` 5 s after a late car's time arrives; the first row with a time shows the race clock, the others the signed difference to it (section 6.4) [D]. |
 | Dial (right bottom) | Speed (km/h or mph), gear (N, R, 1…), rpm bar with red zone, GEAR and REV lights, throttle and brake bars, odometer | rpm = engine word +0x1894 × 60/2π against the limit +0x17A4 (rad/s [I]). Scale: the smallest range ≥ the limit [I]; red zone: its last 2000 rpm [I]. GEAR at 0.90 and REV at 0.95 of the limit [D values, I meaning]. The odometer is the distance driven this event [I]. |
 | Damage icons | the F333 panel, moved beside the dial | `dial_damage` is part of `dial_main` [D]. |
 | Message box (centre) | solo time trial only: countdown number, then GO for 1 s | AUTHORED timing for GO. Races show no box (F590): the original single-player session never starts it (AUDIO_RESEARCH §28). |
@@ -89,12 +89,12 @@ are the same for both.
 | Minimap (left bottom) | the AI racing line (up to 160 points) and a dot per car (player yellow), YELLOW while the player is in a yellow flag's zone (F759) | AUTHORED: the original draws `track_mask` from its own data, with world +Z up [I]. |
 
 Not ported:
-- the dial's needle, blur and smoothing;
+- the dial's needle smoothing (the OSD dial has the blur, section 6.4);
 - boost;
-- the excessive-speed brake light;
+- the excessive-speed brake light (traced, section 6.4);
 - penalty pills;
 - driver name tags;
-- the PB/WR animation;
+- world records (`osd_wr`): the port has no record table;
 - offers;
 - spectator layout.
 
@@ -299,7 +299,7 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
 - Phone: `tools/push_android_data.ps1` (and so `build_android.ps1 -BundleData`) now also copies
   `Osd/` and the five OSD fonts (about 3.6 MB); without them the app falls back to the panels.
 - Not ported: boost, drift groups, chat, penalty pills, driver name tags, offers, the brake light,
-  the needle blur sweep, the stacker re-flow (hidden groups leave their gap), the cutscene/post-race
+  the stacker re-flow (hidden groups leave their gap), the cutscene/post-race
   and pause-menu art (front-end packages, not this scene).
 
 ### 6.3 Checks
@@ -317,7 +317,114 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   `--expect-stale` shows that it catches the defect. It also saves window shots before and after the
   resize through `GRID_WINDOW_SHOTS=S,S,...` (`frame_pacing.rs`, `<data dir>/window-shot-S.png`, game
   real time after loading; interactive window only).
-- `race_osd::tests`: aspect range names (`2.2` for 20:9), red-zone angle, speed digits.
+- `race_osd::tests`: aspect range names (`2.2` for 20:9), red-zone angle, speed digits,
+  `needle_blur_follows_the_needle_speed`.
+- `race_hud::tests` (split pills): `split_rows_show_the_leader_and_three_around_the_player`,
+  `split_times_read_as_a_race_clock_then_differences`, `split_pills_show_ten_seconds_and_five_after_a_late_car`,
+  `a_completed_lap_holds_its_time_and_the_record_pill_for_five_seconds`.
+- Interactive split pills (F763): `hud_window_check.py ... --expect-splits` also requires an
+  `osd_splits` line (race_osd.rs, printed when the shown pills change) with a race clock and one
+  with a signed difference after the resize.
 - Offscreen renders (Donington, 11 AI, autopilot, tick 1500): `r3-16x9.png` 1920 × 1080,
   `r4-20x9-touch.png` 2400 × 1080 with touch zones; inspected: texts, dial, red zone, minimap and
   markers in place; with touch zones nothing overlaps a zone.
+
+### 6.4 Original HUD logic from static analysis (F763)
+
+Read from the unpacked executable with `tools/re/grid_re.py` (no live runs). Addresses are in
+`docs/re/symbols.tsv`.
+
+Split pills (`playerspositioninterface`) [D]:
+- Trigger: 0x6BBB70 starts the display when the player car passes a split point (each sector end
+  and the lap end, the same events the lap timer reports).
+- Rows: 0x6BB9E0 picks four rows: with four or fewer cars, or the player first or second, the top
+  four; otherwise the leader plus three consecutive places around the player (the player and the two
+  cars ahead when the player is last, else the car ahead, the player and the car behind).
+- Texts: 0x69F010 fills the rows in place order. Each car shows a time only once it has passed
+  that split itself. The first row with a time shows that car's split time as a race clock
+  (0x69EA10, `mm:ss.hh`), every later row its signed difference to that time (0x69EAB0, `+`/`-`).
+- Late cars: 0x6A6A00 fills a car whose time arrives while the pills are up and raises the remaining
+  time to at least `minduration`.
+- Durations: the constructor 0x6B5240 defaults to 5 / 2 s, the config overrides them with
+  `maxduration` 10 and `minduration` 5; 0x6AC650 copies them into the controller. 0x6B94C0 hides the
+  pills when the time runs out.
+- Pill flip: `playerN` `in` (0 to 0.333 s) turns the pill about X from -90 through 0 to +90
+  degrees. The `playersposition` attach (factory vtable 0xCEBF24, object vtable 0xCEBEA0) binds
+  `object/position_pill=N` (0x69F460), `splittimeN` (0x69F4E0) and the row texts (0x6A7050), and its
+  reset 0x6A7180 selects `in` and seeks to fraction 0.5 (0x8D2AA0, 0x8D5820), so the pill rests face
+  on at the range's middle [D]. The port flips a pill in over the first half when it appears and out
+  over the second half when it goes [I]; playing the whole range left the pills edge-on (F763,
+  found in the window shots).
+- Pill colour: `object/position_split=N` (bound at 0x69F560) has no motion of its own; its ranges
+  `normal`, `player` and `first` (each with a following `end*` range) key the `drift_combo_pill` and
+  `split_pill_text` DiffuseColour and AlphaScaler, like `object/position_pill=N` does for the name
+  pill. Each split range fades the pill's alpha in from 0 (to 0.55 normal, 0.9 player, 0.8 leader;
+  colours grey, black, orange), so the port plays the row's range once and rests at its end, while
+  the name pill is held at its range [I]; held at a range's start, the split pill stayed invisible
+  (F763 window shots).
+- Port: `race_hud::SplitTimes` records every car's split race times from the lap timers (player)
+  and the opponents' `lap_events`, `SplitDisplay` keeps the 10 / 5 s timer, `position` builds the
+  rows. Earlier the port showed the car ahead, the player and the car behind for 5 s after each lap
+  with distance gaps (AUTHORED).
+
+Needle blur [D]: 0x69D100 binds `needle_blur_up` and `needle_blur_down`; 0x69CFC0 runs every frame:
+a smoothed copy of the needle moves 0.4 of the way to it each frame (the port: per 1/30 s, AUTHORED, so the blur does not depend on the frame rate), the lead of the needle over the
+copy, scaled by 30, drives the up blur, the negative lead the down blur, each clamped to 0..1 with
+dead zones under 0.01 and over 0.99. Port: `race_osd::needle_blur`, seeking each blur animation to
+that fraction of its duration.
+
+Excessive-speed brake light (`excessivespeedindicator threshold 10 lookahead 2`), in 0x6BA460 [D
+reading, I meaning]:
+- severity = (speed - recommended) / threshold, capped at 1, where the recommended speed is read
+  `speed × 1 s + lookahead` metres ahead along the lap;
+- the light flashes on a 0.3 s cycle and stays steady below severity 0.5.
+- The recommended speed comes from 0x99B9F0, a byte-quantised speed table per AI racing line
+  (vehicle manager +0x4B0: entries of 0x50 bytes, the lap length at +0xD30, the cell length at +0xD34,
+  a scale per table), linearly interpolated between cells. The loader of that table was not found;
+  the port would need the AI brake speeds from grid-tools. Not ported.
+
+Minimap [D]: a camera view of the track (`minimap_zoom` 400, `minimap_dist_behind` 116,
+`minimap_dist_above` 110 per track), up to 20 car markers; `track_mask` is drawn by the
+`rd4minimap` attach (vtable 0xCEB9D8, not decompiled). Its strings name render instances for the
+track, start/end, player and opponents, an `minimap_alphacamera` and the `osd_minimap_track`
+shader (used by 0x6B14D0 and 0x6B26A0); the track shape comes from a data field
+`minimap_file_string` [I: a per-track minimap model, its loader not traced]. Porting it is a render
+feature of its own. The port's route line stays AUTHORED.
+
+Post-race cutscene (`cutscene/postrace.xml`) [D]: damage off, the AI takes over with a RaceOver
+cruise at 40 then 30, the OSD off. Porting it needs an AI cruise behaviour in the simulation.
+
+Lap time hold and PB/WR pill (the lap interface, constructor 0x6B3950, vtable 0xCED0C8) [D]:
+- 0x6B85C0 runs every frame: when the player's completed lap count grows, the LAP timer shows the
+  lap just completed (0x6B3C90) and a 5 s timer starts; when the count drops (a restart) the timer
+  is cleared; while the timer is out it shows the running lap (0x6B3C00).
+- The constructor subscribes to `BroadcastMessage_NewPersonalBestMessage` and
+  `..._NewWorldRecordMessage`, which only raise a PB or WR flag (0x69E1E0, 0x69E1D0).
+- 0x6B3AF0 binds `object/pb_wr=lap_record` and `pb_wr_lap_text` (in dial2.pssg the pill's `multiplier_text!0`); 0x6B7A90 writes `osd_pb` (or
+  `osd_wr`, which wins) into the text and plays `on`; once the 5 s timer is out it calls 0x6B2D00,
+  which plays `off`. The `best__record` and `race_record` pills are not bound by any code.
+- Port: `race_hud::LapHold`. The PB source is the session best [I: what the original compares
+  against is not traced]; world records are not ported. Before, the port showed `osd_pb` on the
+  `best__record` pill for 5 s and never held the completed lap time (AUTHORED).
+
+OSD timer format [D]: the LAP and RACE texts are written with `%02u:%02u.%02u` (0x69E050 for
+the lap, 0x6B3D30 for the race): whole minutes (hours included), seconds and truncated
+hundredths, capped at 1:39:59.999, so `99:59.99`. Port: `race_hud::osd_clock`, used for LAP,
+RACE and BEST [I for BEST, whose writer is not traced]; the empty text `--:--.--` is AUTHORED.
+Before, the port wrote `0:05.600` (AUTHORED).
+
+Results list formats [D]: the list fills `list.%d.anim.content.time` with 0x4C8200, which writes
+the Le Mans results format (0x908860, `grid_tools::race::format_lemans_time`), and
+`list.%d.anim.content.difference` with 0x4C8280: `+%02u.%02u` under a minute, else
+`+%02u:%02u.%02u`, truncated hundredths, a blank for the first row (callers 0x540373, 0x542037,
+0x54225A; the Touge stats' difference 0x51EB72 uses it too). Port: `post_race::time_text` writes
+the winner's time and the others' differences in these formats; the original gives every row
+both a time and a difference, the port's one Time column keeps its AUTHORED layout. Before, it
+wrote `0:05.600` and `+3.072` (AUTHORED).
+
+Not traced yet: boost (0x8EFA60), name tags (0x6B0540), penalty pills (0x6B3380), the stacker
+re-flow and the post-race art. The wreck-screen delay is partly traced: the state
+`StateTerminalDamageDelay` (registered at 0xC760D0, factory 0x5AB610, vtable 0xCDA548) has no
+timer of its own; its only own handler, 0x5A5990, sets a completion bit at +0x28, so it seems to
+wait for a message [I: the sender, probably the terminal-damage monitor or choreographer, is not
+traced]. The port's 2 s `post_race::WRECK_DELAY` stays AUTHORED.

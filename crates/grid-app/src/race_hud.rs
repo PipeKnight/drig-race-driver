@@ -66,54 +66,151 @@ pub fn lap_info(
     }
 }
 
-/// One split pill: running position, name, gap (s) to the player, minus for
-/// a car ahead.
+/// One split pill: running position, name and the time text at the last
+/// split (empty while the car has not reached it).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Split {
     pub position: usize,
     pub name: String,
-    pub gap: Option<f64>,
+    pub time: String,
     pub player: bool,
 }
 
-/// Position group (n / total) and the split pills around the player: the car
-/// ahead, the player and the car behind [I: four pills, `player1..4`; the
-/// original's choice of rows was not traced]. Gaps are race distance at the
-/// player's speed (floor 10 m/s).
+/// Race time of each car at every split point it has passed, in order: the
+/// lap timing's time splits and the line (the original asks each participant
+/// for its time at a (split, lap) pair, 0x69F010 [D structure; I that the
+/// split points are the lap timing's time splits and the line]).
+#[derive(Clone, Debug, Default)]
+pub struct SplitTimes(Vec<Vec<f64>>);
+
+impl SplitTimes {
+    pub fn record(&mut self, car: usize, time: f64) {
+        if self.0.len() <= car {
+            self.0.resize(car + 1, Vec::new());
+        }
+        self.0[car].push(time);
+    }
+    /// Split points `car` has passed.
+    pub fn count(&self, car: usize) -> usize {
+        self.0.get(car).map_or(0, Vec::len)
+    }
+    /// Race time of `car` at the split with this index (0 = the first).
+    pub fn time(&self, car: usize, split: usize) -> Option<f64> {
+        self.0.get(car)?.get(split).copied()
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+/// The OSD's lap and race timers use the split clock's format (0x69E050 for the lap
+/// time, 0x6B3D30 for the race time), capped at 1:39:59.999, that is
+/// 99:59.99 (0x69E050 [D]).
+pub fn osd_clock(seconds: f64) -> String {
+    split_clock(seconds.min(99. * 60. + 59.999))
+}
+
+/// `%02u:%02u.%02u` (0x69EA10): minutes, seconds, hundredths [D format].
+/// Times are rounded to whole milliseconds first (the original keeps 64-bit
+/// millisecond times [I]), then the hundredths are truncated.
+pub fn split_clock(seconds: f64) -> String {
+    let hundredths = (seconds.abs() * 1000.).round() as u64 / 10;
+    format!("{:02}:{:02}.{:02}", hundredths / 6000, hundredths / 100 % 60, hundredths % 100)
+}
+
+/// The rows shown (0-based race positions), from the player's position `p`
+/// of `n` cars (0x6BB9E0 [D]): the first four for a leading or second
+/// player, otherwise the leader and the three around the player, the last
+/// three for the last car.
+pub fn split_rows(p: usize, n: usize) -> Vec<usize> {
+    if n <= 4 || p <= 1 {
+        return (0..n.min(4)).collect();
+    }
+    let first = if p + 1 >= n { p - 2 } else { p - 1 };
+    std::iter::once(0).chain(first..first + 3).collect()
+}
+
+/// `playerspositioninterface splitdisplay maxduration="10.0"
+/// minduration="5.0"` [D]: the pills show for the maximum after the player
+/// passes a split point; a car that reaches the split later raises the time
+/// left to at least the minimum (0x6BBB70, 0x6A6A00 [D structure]).
+pub const SPLIT_MAX: f32 = 10.;
+pub const SPLIT_MIN: f32 = 5.;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SplitDisplay {
+    /// The split shown (index into each car's split times) and time left.
+    split: Option<usize>,
+    timer: f32,
+    /// Cars whose time at the shown split was known at the last update.
+    filled: Vec<bool>,
+}
+
+impl SplitDisplay {
+    /// One frame: returns the split shown, if any.
+    pub fn update(&mut self, times: &SplitTimes, player: usize, cars: usize, dt: f32) -> Option<usize> {
+        let passed = times.count(player);
+        let known = |s: usize| (0..cars).map(|c| times.time(c, s).is_some()).collect::<Vec<_>>();
+        if passed == 0 {
+            *self = Self::default();
+            return None;
+        }
+        if self.split != Some(passed - 1) {
+            self.split = Some(passed - 1);
+            self.timer = SPLIT_MAX;
+            self.filled = known(passed - 1);
+            return self.split;
+        }
+        if self.timer <= 0. {
+            return None;
+        }
+        self.timer -= dt;
+        let now = known(self.split.unwrap_or(0));
+        if now.iter().zip(&self.filled).any(|(n, f)| *n && !*f) {
+            self.timer = self.timer.max(SPLIT_MIN);
+        }
+        self.filled = now;
+        (self.timer > 0.).then_some(self.split).flatten()
+    }
+}
+
+/// Position group (n / total) and the split pills: the rows of
+/// [`split_rows`], each with its time at the shown split. The first row with
+/// a time shows it as a race clock, the others their difference to it
+/// (0x69F010, 0x69EAB0: `%s%02u:%02u.%02u` with `+` or `-` [D]).
 pub fn position(
     standings: &grid_tools::race::Standings,
     names: &[String],
     player: usize,
-    speed: f64,
+    times: &SplitTimes,
+    split: Option<usize>,
 ) -> (usize, usize, Vec<Split>) {
     let order = standings.order();
     let at = order.iter().position(|&c| c == player).unwrap_or(0);
-    let (ahead, behind) = standings.neighbour_gaps(player);
-    let speed = speed.max(10.);
-    let mut rows = Vec::new();
     let name = |c: usize| names.get(c).cloned().unwrap_or_default();
-    if at > 0 {
-        rows.push(Split {
-            position: at,
-            name: name(order[at - 1]),
-            gap: ahead.map(|d| -d / speed),
-            player: false,
-        });
-    }
-    rows.push(Split {
-        position: at + 1,
-        name: name(player),
-        gap: None,
-        player: true,
-    });
-    if let Some(&c) = order.get(at + 1) {
-        rows.push(Split {
-            position: at + 2,
-            name: name(c),
-            gap: behind.map(|d| d / speed),
-            player: false,
-        });
-    }
+    let mut base = None;
+    let rows = split_rows(at, order.len())
+        .into_iter()
+        .map(|i| {
+            let car = order[i];
+            let time = match split.and_then(|s| times.time(car, s)) {
+                None => String::new(),
+                Some(t) => match base {
+                    None => {
+                        base = Some(t);
+                        split_clock(t)
+                    }
+                    Some(b) => format!("{}{}", if t >= b { "+" } else { "-" }, split_clock(t - b)),
+                },
+            };
+            Split {
+                position: i + 1,
+                name: name(car),
+                time,
+                player: car == player,
+            }
+        })
+        .collect();
     (at + 1, standings.len(), rows)
 }
 
@@ -184,20 +281,54 @@ impl WrongWay {
     }
 }
 
-/// `playerspositioninterface splitdisplay maxduration="10.0" minduration="5.0"`
-/// [D]: split pills show for 5 s after each completed lap [I: the minimum
-/// duration, from the line crossing].
-pub const SPLIT_SECONDS: f32 = 5.;
+/// After each completed lap the lap timer shows that lap's time for this
+/// long, then the running lap again; a new personal best's record pill
+/// stays up until then (0x6B85C0 sets 5 s when the lap count grows and
+/// clears it when the count drops; 0x6B7A90 shows the pill, 0x6B2D00 hides
+/// it once the time is out [D]).
+pub const LAP_HOLD: f32 = 5.;
+
+/// The lap group's completed-lap hold and record pill.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LapHold {
+    laps: Option<u32>,
+    best: Option<f64>,
+    timer: f32,
+    record: bool,
+}
+
+impl LapHold {
+    /// One frame with the lap timer's completed laps, its last lap time and
+    /// best lap. Returns the completed lap time to show instead of the
+    /// running one, and whether the record pill is up.
+    pub fn update(&mut self, laps: Option<u32>, last: Option<f64>, best: Option<f64>, dt: f32) -> (Option<f64>, bool) {
+        // A new best is the personal best message [I: the port's session
+        // best; the original's PB source is not traced].
+        if best != self.best {
+            self.record |= best.is_some();
+            self.best = best;
+        }
+        match (laps, self.laps) {
+            (Some(n), Some(o)) if n > o => self.timer = LAP_HOLD,
+            (Some(n), Some(o)) if n < o => self.timer = 0.,
+            (None, _) => self.timer = 0.,
+            _ => {}
+        }
+        self.laps = laps;
+        let held = self.timer > 0.;
+        self.record &= held;
+        self.timer = (self.timer - dt).max(0.);
+        (last.filter(|_| held), self.record)
+    }
+}
 
 #[derive(Resource, Default)]
 struct HudState {
     wrong_way: WrongWay,
-    /// (segment, completed laps) of the last split trigger, and time left.
-    split: (u64, u32, f32),
+    split: SplitDisplay,
     odometer: f64,
     last: Option<(u64, u64)>,
-    /// New personal best lap shown with `osd_pb` for the split time.
-    best: (Option<f64>, f32),
+    lap_hold: LapHold,
 }
 
 #[derive(Component)]
@@ -561,19 +692,16 @@ fn frame(
         _ => state.odometer = 0.,
     }
     state.last = Some(now);
-    let info = lap_info(trial.as_ref().map(|t| &t.state), driving.runtime.lap.as_ref());
-    // Splits show for 5 s after each completed lap; a new best is marked PB.
-    let completed = driving.runtime.lap.as_ref().map_or(0, |l| l.attempts);
-    if (state.split.0, state.split.1) != (driving.segment, completed) {
-        let fresh = state.split.0 != driving.segment;
-        state.split = (driving.segment, completed, if fresh { 0. } else { SPLIT_SECONDS });
-    } else {
-        state.split.2 = (state.split.2 - dt).max(0.);
-    }
-    if info.best != state.best.0 {
-        state.best = (info.best, if info.best.is_some() { SPLIT_SECONDS } else { 0. });
-    } else {
-        state.best.1 = (state.best.1 - dt).max(0.);
+    let lap = driving.runtime.lap.as_ref();
+    let mut info = lap_info(trial.as_ref().map(|t| &t.state), lap);
+    let (held, new_best) = state.lap_hold.update(
+        lap.map(|l| l.attempts),
+        lap.and_then(|l| l.last_lap.as_ref()).map(|l| l.seconds),
+        info.best,
+        if driving.paused { 0. } else { dt },
+    );
+    if held.is_some() {
+        info.current = held;
     }
     let wrong = wrong_way(&driving);
     let wrong_way = state.wrong_way.update(wrong && !driving.paused, if driving.paused { 0. } else { dt });
@@ -581,6 +709,7 @@ fn frame(
     let word = |o: usize| f32::from_bits(b[o / 4]);
     let controls = driving.last_controls.unwrap_or_default();
     let race = driving.opponents.as_ref().filter(|_| trial.is_some());
+    let split = race.and_then(|o| state.split.update(&o.split_times, 0, o.standings.len(), if driving.paused { 0. } else { dt }));
     let finished = trial.as_ref().is_some_and(|t| t.finished());
     let go = view.label("osd_GO");
     // The message box counts down only the solo time trial (AUTHORED, no
@@ -598,9 +727,9 @@ fn frame(
     let labels = std::mem::take(&mut view.labels);
     *view = HudView {
         lap: info,
-        new_best: state.best.1 > 0.,
-        position: race.map(|o| position(&o.standings, &o.names, 0, speed)),
-        splits: state.split.2 > 0.,
+        new_best,
+        position: race.map(|o| position(&o.standings, &o.names, 0, &o.split_times, split)),
+        splits: split.is_some(),
         speed: if options.mph { speed * 3.6 / 1.609_344 } else { speed * 3.6 },
         mph: options.mph,
         gear: match b[0x196c / 4] {
@@ -706,7 +835,7 @@ fn update(
                                     "{:>2}  {:<10} {}",
                                     r.position,
                                     r.name,
-                                    r.gap.map_or_else(String::new, |g| format!("{g:+.1}"))
+                                    r.time
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -842,5 +971,79 @@ mod tests {
         assert_eq!(b, (0., -25., 100.));
         assert_eq!(map_point([0., 0., -25.], b, 200.), (0., 200.));
         assert_eq!(map_point([100., 0., 75.], b, 200.), (200., 0.));
+    }
+
+    #[test]
+    fn split_rows_show_the_leader_and_three_around_the_player() {
+        assert_eq!(split_rows(0, 12), [0, 1, 2, 3]);
+        assert_eq!(split_rows(1, 12), [0, 1, 2, 3]);
+        assert_eq!(split_rows(2, 12), [0, 1, 2, 3]);
+        assert_eq!(split_rows(6, 12), [0, 5, 6, 7]);
+        assert_eq!(split_rows(11, 12), [0, 9, 10, 11]);
+        assert_eq!(split_rows(2, 3), [0, 1, 2]);
+    }
+
+    #[test]
+    fn split_times_read_as_a_race_clock_then_differences() {
+        assert_eq!(split_clock(83.456), "01:23.45");
+        assert_eq!(split_clock(3600.), "60:00.00");
+        // Leader (car 2) at 61.25 s, the player (car 0) 1.5 s later, car 1
+        // not there yet: its pill stays empty.
+        let standings = grid_tools::race::Standings::on_loop(3, 1000., &[400., 300., 450.]);
+        let names: Vec<String> = ["P", "B", "L"].map(String::from).into();
+        let mut times = SplitTimes::default();
+        times.record(2, 61.25);
+        times.record(0, 62.75);
+        let (pos, total, rows) = position(&standings, &names, 0, &times, Some(0));
+        assert_eq!((pos, total), (2, 3));
+        let texts: Vec<_> = rows.iter().map(|r| (r.position, r.name.as_str(), r.time.as_str(), r.player)).collect();
+        assert_eq!(texts, [(1, "L", "01:01.25", false), (2, "P", "+00:01.50", true), (3, "B", "", false)]);
+    }
+
+    #[test]
+    fn split_pills_show_ten_seconds_and_five_after_a_late_car() {
+        let mut times = SplitTimes::default();
+        let mut d = SplitDisplay::default();
+        assert_eq!(d.update(&times, 0, 2, 0.1), None);
+        times.record(0, 10.);
+        assert_eq!(d.update(&times, 0, 2, 0.1), Some(0));
+        let mut shown = 0.;
+        while d.update(&times, 0, 2, 0.5).is_some() {
+            shown += 0.5;
+            if shown == 7.5 {
+                // The car behind reaches the split with 2.5 s left.
+                times.record(1, 13.);
+            }
+        }
+        assert_eq!(shown, 12.5);
+        // The next split shows again; a restart clears it.
+        times.record(0, 40.);
+        assert_eq!(d.update(&times, 0, 2, 0.1), Some(1));
+        times.clear();
+        assert_eq!(d.update(&times, 0, 2, 0.1), None);
+    }
+
+    #[test]
+    fn a_completed_lap_holds_its_time_and_the_record_pill_for_five_seconds() {
+        let mut h = LapHold::default();
+        assert_eq!(h.update(Some(0), None, None, 0.5), (None, false));
+        // Lap 1 completes in 61.2 s: a new best.
+        let mut frames = Vec::new();
+        for _ in 0..12 {
+            frames.push(h.update(Some(1), Some(61.2), Some(61.2), 0.5));
+        }
+        assert_eq!(frames.iter().filter(|f| **f == (Some(61.2), true)).count(), 10);
+        assert_eq!(frames[11], (None, false));
+        // A slower lap holds its time without the pill.
+        assert_eq!(h.update(Some(2), Some(63.), Some(61.2), 0.5), (Some(63.), false));
+        // A restart (the count drops) ends the hold at once.
+        assert_eq!(h.update(Some(0), None, None, 0.5), (None, false));
+    }
+
+    #[test]
+    fn osd_timers_read_minutes_seconds_hundredths() {
+        assert_eq!(osd_clock(5.617), "00:05.61");
+        assert_eq!(osd_clock(83.255), "01:23.25");
+        assert_eq!(osd_clock(7200.), "99:59.99");
     }
 }

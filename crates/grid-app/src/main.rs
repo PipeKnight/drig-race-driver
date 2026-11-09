@@ -483,6 +483,8 @@ struct Opponents {
     /// Race positions during a timed event (authored classification).
     standings: grid_tools::race::Standings,
     names: Vec<String>,
+    /// Each car's race time at the split points it passed (the split pills).
+    split_times: race_hud::SplitTimes,
     /// Scripted validation only (diagnostics autopilot with --drive-ticks): the
     /// ported AI drives the player's car.
     autopilot: Option<grid_tools::ai_driver::AiDriver>,
@@ -4104,6 +4106,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     ai,
                     standings,
                     names,
+                    split_times: Default::default(),
                     autopilot,
                     after_finish: None,
                     throttles: vec![0.; n],
@@ -6621,10 +6624,18 @@ fn drive_tick(
             opponents
                 .standings
                 .update(&opponents.ai.line, &positions, time, &external);
-            for k in 1..opponents.multi.cars.len() {
-                for event in &opponents.multi.cars[k].lap_events {
-                    if let grid_world::lap_timing::Event::Finished(completed) = event {
+            for k in 0..opponents.multi.cars.len() {
+                // Car 0 of `multi` is the placeholder: the player's events.
+                let events = if k == 0 { &driving.runtime.lap_events } else { &opponents.multi.cars[k].lap_events };
+                for event in events {
+                    use grid_world::lap_timing::Event;
+                    if let Event::Finished(completed) = event
+                        && k > 0
+                    {
                         opponents.standings.line_crossing(k, completed.number, time);
+                    }
+                    if matches!(event, Event::Sector { .. } | Event::Finished(_)) {
+                        opponents.split_times.record(k, time);
                     }
                 }
             }
@@ -6848,6 +6859,7 @@ fn restart(driving: &mut Driving, trial: Option<&mut time_trial::Trial>) {
         }
         let positions = opponents.positions(&driving.runtime);
         opponents.standings.reset(&opponents.ai.line, &positions);
+        opponents.split_times.clear();
         opponents.pacing.reset(&opponents.ai.line, &positions);
         opponents.after_finish = None;
         if let Some(pilot) = &mut opponents.autopilot {

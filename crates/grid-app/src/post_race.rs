@@ -571,11 +571,27 @@ pub(crate) fn table(driving: &crate::Driving, trial: Option<&crate::time_trial::
     }
 }
 
+/// The results list's difference text (0x4C8280, written into
+/// `list.%d.anim.content.difference`): `+%02u.%02u` under a minute, else
+/// `+%02u:%02u.%02u` with whole minutes, truncated hundredths; a zero
+/// difference is a blank [D]. The `*` for an estimated finish is AUTHORED.
+fn results_gap(seconds: f64) -> String {
+    let hundredths = (seconds.max(0.) * 1000.).round() as u64 / 10;
+    let (minutes, seconds, hundredths) = (hundredths / 6000, hundredths / 100 % 60, hundredths % 100);
+    match (minutes, seconds, hundredths) {
+        (0, 0, 0) => " ".into(),
+        (0, _, _) => format!("+{seconds:02}.{hundredths:02}"),
+        _ => format!("+{minutes:02}:{seconds:02}.{hundredths:02}"),
+    }
+}
+
 fn time_text(row: &Row, l: &dyn Fn(&'static str) -> String) -> String {
     let est = if row.estimated { " *" } else { "" };
     match row.time {
-        Cell::Total(t) => format!("{}{est}", crate::race_hud::lap_time(t)),
-        Cell::Gap(g) => format!("+{g:.3}{est}"),
+        // The results list's time text, `list.%d.anim.content.time`
+        // (0x4C8200 -> 0x908860 [D], the Le Mans results' format).
+        Cell::Total(t) => format!("{}{est}", grid_tools::race::format_lemans_time(t)),
+        Cell::Gap(g) => format!("{}{est}", results_gap(g)),
         Cell::Out(why, laps) => {
             let word = match why {
                 Out::Retired => l("RETIRED"),
@@ -1385,5 +1401,16 @@ mod tests {
         {
             assert!(language.get(id).is_some(), "{id}");
         }
+    }
+
+    #[test]
+    fn results_times_use_the_original_formats() {
+        assert_eq!(results_gap(3.072), "+03.07");
+        assert_eq!(results_gap(83.5), "+01:23.50");
+        assert_eq!(results_gap(0.), " ");
+        let row = |time| Row { time, ..solo_row("You", "car", None) };
+        let l = |k: &'static str| k.to_owned();
+        assert_eq!(time_text(&row(Cell::Total(299.136)), &l), "04:59.14");
+        assert_eq!(time_text(&row(Cell::Gap(3.072)), &l), "+03.07");
     }
 }

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F763](F0763.md) | 2026-11-09 | Race HUD: split pills, needle blur, PB pill, OSD and results time formats from static RE |
 | [F762](F0762.md) | 2026-11-09 | Player reset job ported 1:1 (row 43) |
 | [F761](F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
 | [F760](F0760.md) | 2026-11-09 | Graphics route audit: every raceable route, autopilot lap, chase and head-cam verdicts |

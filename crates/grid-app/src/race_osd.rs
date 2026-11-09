@@ -48,6 +48,20 @@ pub fn digits(value: u32, places: usize) -> Vec<Option<u32>> {
         .collect()
 }
 
+/// Needle blur (0x69CFC0 [D]): a smoothed needle value follows the needle
+/// by 0.4 of the difference each update; the up blur is 30 times the needle's
+/// lead over it, the down blur 30 times its lag, each 0 below 0.01 and 1
+/// above 0.99. The original updates once a frame; the port applies the 0.4
+/// per 1/30 s (AUTHORED rate), so the blur does not depend on the frame rate.
+/// Returns the (up, down) blur fractions.
+pub fn needle_blur(smoothed: &mut f32, needle: f32, dt: f32) -> (f32, f32) {
+    let follow = 1. - 0.6_f32.powf(dt.max(0.) * 30.);
+    *smoothed += follow * (needle - *smoothed);
+    let lead = 30. * (needle - *smoothed);
+    let clamp = |v: f32| if v < 0.01 { 0. } else if v > 0.99 { 1. } else { v };
+    (clamp(lead), clamp(-lead))
+}
+
 /// Fraction of the `redzone` animation for a display range. `dial_redzone`
 /// [D]: red marks the arc from 12 o'clock (half the range) to the end of the
 /// 240 degree sweep, green the angle from 12 o'clock over 135 degrees; the
@@ -66,14 +80,22 @@ pub struct Driver {
     mph: Option<bool>,
     countdown: Option<String>,
     wrong_way: bool,
+    /// The split pills last reported (`osd_splits`).
+    splits: String,
+    /// The needle blur's smoothed needle (`needle_blur`).
+    blur: f32,
+    /// Split pills flipped in (`playerN`), kept up while they flip out.
+    pills: [bool; 4],
 }
 
 pub fn drive(
     view: Res<HudView>,
     osd: Option<ResMut<Osd>>,
     mobile: Option<Res<crate::touch_controls::Mobile>>,
+    time: Option<Res<Time<Real>>>,
     mut driver: Local<Driver>,
 ) {
+    let dt = time.map_or(0., |t| t.delta_secs());
     let Some(mut osd) = osd else {
         return;
     };
@@ -128,8 +150,8 @@ pub fn drive(
         }
     }
     lap_group(&view, &mut osd);
-    position_group(&view, &mut osd);
-    dial(&view, &mut osd, &mut driver);
+    position_group(&view, &mut osd, &mut driver);
+    dial(&view, &mut osd, &mut driver, dt);
     // Central message box: the countdown number, then GO.
     if driver.countdown != view.countdown {
         if view.countdown.is_some() {
@@ -158,7 +180,9 @@ fn lap_group(view: &HudView, osd: &mut Osd) {
     osd.set_text("big_lap_number", &info.lap.to_string());
     osd.set_text("big_lap_slash", if info.total.is_some() { "/" } else { "" });
     osd.set_text("big_lap_total", &info.total.map_or(String::new(), |t| t.to_string()));
-    let time = |t: Option<f64>| t.map_or_else(|| "-:--.---".into(), crate::race_hud::lap_time);
+    // The original's OSD timers read mm:ss.hh (race_hud::osd_clock); the
+    // empty placeholder is AUTHORED.
+    let time = |t: Option<f64>| t.map_or_else(|| "--:--.--".into(), crate::race_hud::osd_clock);
     osd.set_text("race_title", &up("osd_race"));
     osd.set_text("race_time", &time(info.race));
     osd.show("race_group", info.race.is_some());
@@ -166,19 +190,36 @@ fn lap_group(view: &HudView, osd: &mut Osd) {
     osd.set_text("lap_time", &time(info.current));
     osd.set_text("best_title", &up("osd_best"));
     osd.set_text("best_time", &time(info.best));
-    // PB marker: the best group's record pill.
-    let pb = "object/pb_wr=best__record";
-    osd.set_text("multiplier_text!1", &up("osd_pb"));
-    osd.play_once(pb, if view.new_best { "on" } else { "off" });
-    for record in ["object/pb_wr=lap_record", "object/pb_wr=race_record"] {
+    // PB marker: the lap time's record pill (0x6B3AF0 binds `lap_record`
+    // and `pb_wr_lap_text`; 0x6B7A90 sets `osd_pb` and plays "on", 0x6B2D00
+    // "off" [D]). No world records in the port, so never `osd_wr`. The
+    // other two record pills are not bound by the original's code. In
+    // dial2.pssg the pill's text node is `multiplier_text!0`, found under
+    // the pill.
+    if let Some(id) = osd.find("object/pb_wr=lap_record", "multiplier_text") {
+        osd.set_text(&id, &up("osd_pb"));
+    }
+    osd.play_once("object/pb_wr=lap_record", if view.new_best { "on" } else { "off" });
+    for record in ["object/pb_wr=best__record", "object/pb_wr=race_record"] {
         osd.play_once(record, "off");
     }
 }
 
-fn position_group(view: &HudView, osd: &mut Osd) {
+fn position_group(view: &HudView, osd: &mut Osd, driver: &mut Driver) {
     let Some((pos, total, rows)) = &view.position else {
         return;
     };
+    // `osd_splits` reports each change of the shown pills (the interactive
+    // window check, tools/hud_window_check.py).
+    let report = if view.splits {
+        rows.iter().map(|r| format!("{}:{}", r.position, r.time)).collect::<Vec<_>>().join(",")
+    } else {
+        String::new()
+    };
+    if driver.splits != report {
+        println!("osd_splits shown={} rows={report}", if view.splits { rows.len() } else { 0 });
+        driver.splits = report;
+    }
     osd.set_text("pos_number", &pos.to_string());
     osd.set_text("pos_slash", "/");
     osd.set_text("pos_total", &total.to_string());
@@ -187,14 +228,30 @@ fn position_group(view: &HudView, osd: &mut Osd) {
     for pill in 1..=4usize {
         let row = rows.len().checked_sub(pill).and_then(|i| rows.get(i)).filter(|_| pill <= shown);
         let player = format!("player{pill}");
-        osd.show(&player, row.is_some());
+        // `playerN` `in` turns the pill from -90 to 0 to +90 degrees about X;
+        // the original's rest pose is the range's middle (0x6A7180 selects
+        // `in` and seeks to 0.5 [D]). The pill flips in over the first half
+        // and out over the second [I].
         let Some(r) = row else {
+            if driver.pills[pill - 1] {
+                osd.play_part_once(&player, "in", 0.5, 1.);
+                if osd.finished(&player) {
+                    driver.pills[pill - 1] = false;
+                }
+            }
+            osd.show(&player, driver.pills[pill - 1]);
             continue;
         };
-        osd.play_once(&player, "in");
+        osd.show(&player, true);
+        driver.pills[pill - 1] = true;
+        osd.play_part_once(&player, "in", 0., 0.5);
         osd.play_once(&format!("splittime{pill}"), "in");
-        let anim = format!("object/position_pill={pill}");
-        osd.hold(&anim, if r.player { "player" } else if r.position == 1 { "first" } else { "normal" });
+        // Both pills colour themselves through their attach animation's ranges (0x69F4E0,
+        // 0x69F560). The split pill's ranges fade its alpha in from 0 (0.55 normal, 0.9 player,
+        // 0.8 leader), so it plays its range and rests at the end [I].
+        let state = if r.player { "player" } else if r.position == 1 { "first" } else { "normal" };
+        osd.hold(&format!("object/position_pill={pill}"), state);
+        osd.play_once(&format!("object/position_split={pill}"), state);
         let owner = format!("object/position_pill={pill}");
         if let Some(id) = osd.find(&owner, "name") {
             osd.set_text(&id, &r.name);
@@ -203,12 +260,12 @@ fn position_group(view: &HudView, osd: &mut Osd) {
             osd.set_text(&id, &r.position.to_string());
         }
         if let Some(id) = osd.find(&format!("object/position_split={pill}"), "split") {
-            osd.set_text(&id, &r.gap.map_or(String::new(), |g| format!("{g:+.1}")));
+            osd.set_text(&id, &r.time);
         }
     }
 }
 
-fn dial(view: &HudView, osd: &mut Osd, driver: &mut Driver) {
+fn dial(view: &HudView, osd: &mut Osd, driver: &mut Driver, dt: f32) {
     let Some(g) = view.gauge else {
         return;
     };
@@ -219,7 +276,12 @@ fn dial(view: &HudView, osd: &mut Osd, driver: &mut Driver) {
         driver.faces = Some(g.scale);
     }
     let sweep = osd.duration("needle");
-    osd.seek("needle", (g.rpm / g.scale).clamp(0., 1.) * sweep);
+    let needle = (g.rpm / g.scale).clamp(0., 1.);
+    osd.seek("needle", needle * sweep);
+    let (up, down) = needle_blur(&mut driver.blur, needle, dt);
+    for (anim, blur) in [("needle_blur_up", up), ("needle_blur_down", down)] {
+        osd.seek(anim, blur * osd.duration(anim));
+    }
     osd.seek("redzone", red_zone_time(g.scale) * osd.duration("redzone"));
     for (i, (anim, on)) in [("light_gear", g.gear_light), ("light_revs", g.rev_light)].into_iter().enumerate() {
         if driver.lights[i] != Some(on) {
@@ -250,9 +312,6 @@ fn dial(view: &HudView, osd: &mut Osd, driver: &mut Driver) {
         if let Some((a, b)) = start(osd, anim) {
             osd.seek(anim, a + (b - a) * value.clamp(0., 1.));
         }
-    }
-    for anim in ["needle_blur_up", "needle_blur_down"] {
-        osd.hold(anim, "on");
     }
 }
 
@@ -462,5 +521,21 @@ mod tests {
         assert_eq!(digits(145, 3), [Some(1), Some(4), Some(5)]);
         assert_eq!(digits(0, 3), [None, None, Some(0)]);
         assert_eq!(digits(1234, 3), [Some(9), Some(9), Some(9)]);
+    }
+
+    #[test]
+    fn needle_blur_follows_the_needle_speed() {
+        let mut s = 0.;
+        // A steady needle has no blur.
+        for _ in 0..200 {
+            needle_blur(&mut s, 0.5, 1. / 60.);
+        }
+        assert_eq!(needle_blur(&mut s, 0.5, 1. / 60.), (0., 0.));
+        // One 1/30 s step up by 0.02: the smoothed value moves 0.4 of it,
+        // the lead 0.012 blurs up 0.36.
+        let (up, down) = needle_blur(&mut s, 0.52, 1. / 30.);
+        assert!((up - 0.36).abs() < 1e-4 && down == 0., "{up} {down}");
+        // A fast drop saturates the down blur.
+        assert_eq!(needle_blur(&mut s, 0.3, 1. / 30.), (0., 1.));
     }
 }

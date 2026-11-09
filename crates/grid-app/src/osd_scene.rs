@@ -511,6 +511,28 @@ impl Osd {
         }
         self.play(anim, range);
     }
+    /// Plays a named range from fraction `from` to fraction `to` of its
+    /// length, unless the animation already plays or stopped at `to`. The
+    /// original seeks attach animations by a fraction of the selected range
+    /// (0x8D5820).
+    pub fn play_part_once(&mut self, anim: &str, range: &str, from: f32, to: f32) {
+        if let Some(a) = self.anim_index.get(anim).map(|&i| &mut self.anims[i])
+            && let Some(r) = a.data.range(range)
+        {
+            let end = if r.end > r.start { r.end } else { a.data.duration() };
+            let at = |f: f32| r.start + (end - r.start) * f;
+            let (start, stop) = (at(from), at(to));
+            if a.stop == stop && a.time >= start.min(stop) && a.time <= stop {
+                return;
+            }
+            a.time = start;
+            a.stop = stop;
+        }
+    }
+    /// Whether an animation has reached the end of what it plays.
+    pub fn finished(&self, anim: &str) -> bool {
+        self.anim_index.get(anim).is_none_or(|&i| self.anims[i].time >= self.anims[i].stop)
+    }
     /// Holds an animation at the start of a named range.
     pub fn hold(&mut self, anim: &str, range: &str) {
         if let Some(a) = self.anim_index.get(anim).map(|&i| &mut self.anims[i])
@@ -1137,6 +1159,62 @@ mod tests {
         assert!(app.world().resource::<Seen>().0.contains(&modified), "{:?}", app.world().resource::<Seen>().0);
         let size = app.world().resource::<Assets<Image>>().get(&image).unwrap().size();
         assert_eq!(size, UVec2::new(2560, 1369));
+    }
+
+    /// The split pill flip (`playerN` `in`: -90, 0, +90 degrees): the pill
+    /// flips in to the range's middle, stays there, then flips out.
+    #[test]
+    fn a_partial_range_plays_once_and_stops_at_its_fraction() {
+        let key = |time: f32, value: f32| osd::Key { time, value, in_value: value, in_time: time, out_value: value, out_time: time };
+        let flip = osd::Animation {
+            id: "Anim_player1".into(),
+            ranges: vec![osd::Range { name: "in".into(), start: 0., end: 1. / 3. }],
+            channels: vec![osd::Channel {
+                target: "player1".into(),
+                semantic: osd::Semantic::Rotation,
+                components: vec![osd::Curve(vec![key(0., -std::f32::consts::FRAC_PI_2), key(1. / 6., 0.), key(1. / 3., std::f32::consts::FRAC_PI_2)])],
+            }],
+        };
+        let mut osd = Osd {
+            entities: HashMap::new(),
+            tree: Vec::new(),
+            cubes: (Handle::default(), Handle::default()),
+            anims: vec![Anim { data: flip, time: 0., stop: 0., targets: vec![Target::None] }],
+            anim_index: HashMap::from([("player1".to_owned(), 0)]),
+            materials: Vec::new(),
+            texts: HashMap::new(),
+            fonts: Vec::new(),
+            shown: HashMap::new(),
+            offsets: HashMap::new(),
+            image: Handle::default(),
+            display: Handle::default(),
+            camera: Entity::PLACEHOLDER,
+            size: UVec2::ZERO,
+        };
+        let step = |osd: &mut Osd, dt: f32| {
+            let a = &mut osd.anims[0];
+            a.time = (a.time + dt).min(a.stop);
+        };
+        osd.play_part_once("player1", "in", 0., 0.5);
+        assert!(!osd.finished("player1"));
+        step(&mut osd, 0.1);
+        // Asked again every frame: it keeps playing, then rests at the middle.
+        osd.play_part_once("player1", "in", 0., 0.5);
+        assert!((osd.anims[0].time - 0.1).abs() < 1e-6);
+        step(&mut osd, 1.);
+        osd.play_part_once("player1", "in", 0., 0.5);
+        assert!(osd.finished("player1"));
+        assert!((osd.anims[0].time - 1. / 6.).abs() < 1e-6);
+        assert!(osd.anims[0].data.channels[0].components[0].sample(osd.anims[0].time).abs() < 1e-4);
+        // Out: from the middle to the end.
+        osd.play_part_once("player1", "in", 0.5, 1.);
+        assert!(!osd.finished("player1"));
+        step(&mut osd, 1.);
+        assert!(osd.finished("player1"));
+        assert!((osd.anims[0].time - 1. / 3.).abs() < 1e-6);
+        // In again restarts from the range start.
+        osd.play_part_once("player1", "in", 0., 0.5);
+        assert_eq!(osd.anims[0].time, 0.);
     }
 
     #[test]
