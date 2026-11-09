@@ -114,6 +114,8 @@ pub(crate) fn race_app_on(route: grid_tools::route::Route, models: &[&str], laps
         vec![1.; OPPONENTS + 1],
         0x5eed,
     );
+    let flags =
+        grid_tools::race_flags::RaceFlags::load(root, false, &ai.line, positions.len()).unwrap();
     let opponents = Opponents {
         multi,
         drivers,
@@ -126,6 +128,8 @@ pub(crate) fn race_app_on(route: grid_tools::route::Route, models: &[&str], laps
         throttles: vec![0.; OPPONENTS],
         pacing,
         ai_messages: Vec::new(),
+        flags: Some(flags),
+        yellow_flag: false,
     };
     let mut trial =
         time_trial::Trial::new(laps, grid_tools::time_trial::Mode::Events, false).unwrap();
@@ -569,6 +573,10 @@ fn finish_one_lap(route: &str) {
     assert_eq!(post(&app).stage, Stage::Results);
     let d = app.world().resource::<Driving>();
     assert!(d.opponents.as_ref().unwrap().standings.over());
+    // The marshal flags ran in the app: green at the start, chequered on the
+    // last lap (row 47).
+    let flags = d.opponents.as_ref().unwrap().flags.as_ref().unwrap();
+    assert_eq!(flags.raised(), (true, true));
     let rows = results(&app);
     eprintln!("finish_results rows={rows:?}");
     assert_eq!(rows.len(), OPPONENTS + 1);

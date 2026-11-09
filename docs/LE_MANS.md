@@ -133,8 +133,8 @@ LMP1s, four Courage C65 LMP2s, lam); Spyker 17.
 - `grid_tools::race::Standings::with_time_limit(seconds)`: no line finish,
   lap cap (`UNLIMITED_LAPS`), classification at the limit, `progress`, the
   type-3 `order`, `finalize` for an early human end (AUTHORED projection: the
-  car's mean race speed, as in lap races; the estimator 0x67FFB0 is not
-  ported), `lemans_results_order`, `class_positions`, `format_lemans_time`.
+  car's mean race speed; the lap estimator 0x67FFB0, ported for lap races,
+  is not attached here), `lemans_results_order`, `class_positions`, `format_lemans_time`.
   No chequered flag in a time-limited race.
 - `grid_tools::series`: `is_le_mans_24`, `build_lemans_field_for(db, car,
   lemans_24)`, `lemans_class` (class name, sort order, adjustment); series
@@ -260,5 +260,5 @@ the street-light binding.
   near (−775, −1160) in both GT fields (cause not traced); four cars of the
   12-car GT field wreck early at speed.
 - The career 24 h trigger, the HUD countdown's format, the race-wide results
-  factor, the AI lap estimator 0x67FFB0.
+  factor, the AI lap estimator 0x67FFB0 in a timed race (ported for lap races, F759).
 - Rendering the time of day (section 3.5) and drawn headlights.

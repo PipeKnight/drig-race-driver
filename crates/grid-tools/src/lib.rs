@@ -46,6 +46,7 @@ pub mod loose_wheel;
 pub mod private_parameters;
 pub mod pursuit_driver;
 pub mod race;
+pub mod race_flags;
 pub mod route;
 pub mod series;
 pub mod source_deformation;

@@ -146,8 +146,9 @@ pub fn drive(
         driver.wrong_way = view.wrong_way;
     }
     osd.show("object/wrong_way_pill=wrong_way", view.wrong_way);
-    // The minimap flag: in when the leader has the chequered flag.
-    osd.play_once("object/flag=flag", if view.chequered { "in" } else { "out" });
+    // The minimap flag: in while the player is inside an active yellow
+    // flag's zone, out otherwise (0x6BA460; green and chequered have none).
+    osd.play_once("object/flag=flag", if view.yellow_flag { "in" } else { "out" });
 }
 
 fn lap_group(view: &HudView, osd: &mut Osd) {

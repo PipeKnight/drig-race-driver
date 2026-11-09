@@ -119,8 +119,9 @@ Checks:
 - **F ("Finish Race")** ends the race at once with the original's finalisation:
   - cars still racing above 5 mph (2.2352 m/s) get an estimated finish time, marked `(est.)` [V];
   - slower cars are classified `DNF` [V].
-  - The estimate (remaining distance at the car's mean race speed so far) is AUTHORED; the
-    original's per-vehicle lap estimator is not ported.
+  - In a lap race the estimate is the original's lap estimator 0x67FFB0, seeded per race
+    (docs/RACE_RULES_RESEARCH.md "Lap estimator"); elsewhere the AUTHORED remaining distance at
+    the car's mean race speed so far.
 - **Classification** [V]: finishers by time, then estimated finishers, then every other car by
   race distance. Cars out of the race show their completed laps (`DNF, 1 lap`, `Wrecked, 2 laps`).
 - **Terminal damage:**

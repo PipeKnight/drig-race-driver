@@ -262,9 +262,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
         grid_tools::race::Standings::new_run(&data.line, start, finish, &positions_of(&multi))
     } else {
+        // Cars still racing at the tick limit are estimated as the game
+        // estimates them (0x67FFB0; docs/RACE_RULES_RESEARCH.md section 1).
         grid_tools::race::Standings::new(&data.line, race_laps, start, &positions_of(&multi))
+            .with_estimator(grid_tools::virtual_race::circuit_estimator(
+                root,
+                route.path(),
+                difficulty,
+            )?)
     };
     let race_laps = if open { 1 } else { race_laps };
+    // Marshal flags of a lap race (grid_tools::race_flags): every raised flag
+    // is printed; the race starts at tick 0 here.
+    let mut flags = if open {
+        None
+    } else {
+        Some(grid_tools::race_flags::RaceFlags::load(root, demolition, &data.line, cars)?)
+    };
     // Cars with lap timing finish on their line crossings (0x912170), the
     // rest on the racing-line distance.
     let timed_cars: Vec<usize> = (0..multi.cars.len())
@@ -1317,6 +1331,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
                     );
                 }
+            }
+        }
+        if let Some(flags) = &mut flags {
+            let poses: Vec<_> = multi.cars.iter().map(|c| (c.pose(), c.velocity())).collect();
+            let raised = flags.step(
+                grid_tools::source_vehicle::DELTA,
+                true,
+                &data.line,
+                &standings,
+                &poses,
+            );
+            for flag in raised {
+                println!(
+                    "flag {} tick={} car={} position={:.1}",
+                    flag.flag,
+                    multi.ticks,
+                    flag.car.map_or_else(|| "none".into(), |c| format!("car{c}")),
+                    flag.position
+                );
             }
         }
         if standings.over() {

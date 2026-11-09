@@ -86,7 +86,7 @@ are the same for both.
 | Damage icons | the F333 panel, moved beside the dial | `dial_damage` is part of `dial_main` [D]. |
 | Message box (centre) | solo time trial only: countdown number, then GO for 1 s | AUTHORED timing for GO. Races show no box (F590): the original single-player session never starts it (AUDIO_RESEARCH §28). |
 | Wrong way (top) | WRONG WAY! | Shown after 4 s moving against the racing line (speed > 3 m/s), hidden after 2 s the right way [D intervals, I reading]. |
-| Minimap (left bottom) | the AI racing line (up to 160 points) and a dot per car (player yellow), CHEQUERED when the leader has the flag | AUTHORED: the original draws `track_mask` from its own data, with world +Z up [I]. |
+| Minimap (left bottom) | the AI racing line (up to 160 points) and a dot per car (player yellow), YELLOW while the player is in a yellow flag's zone (F759) | AUTHORED: the original draws `track_mask` from its own data, with world +Z up [I]. |
 
 Not ported:
 - the dial's needle, blur and smoothing;
@@ -280,7 +280,9 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
 - Shown: lap group (LAP n / total, RACE, LAP, BEST, PB pill after a new best), position number,
   slash and total, the split pills (player1 lowest; `player` and `first` colour states), dial with
   speed, gear, needle, red zone, gear and rev lights, km/h or mph, odometer, pedal gauges, damage
-  icon panel, countdown box, wrong-way pill, minimap frame with the chequered flag.
+  icon panel, countdown box, wrong-way pill, minimap frame with the flag, which plays `in` while the
+  player is inside an active yellow flag's zone, as 0x6BA460 (F759; before, it played for the
+  chequered flag; docs/RACE_RULES_RESEARCH.md "Flag system").
 - Minimap (AUTHORED): the original draws its track shape into `track_mask` (`rd4minimap`, not
   traced). The port hides the mask quad, draws the route as a light line inside the frame (north
   up, as the plain HUD) and moves the original player arrow (turned with the heading [I]) and one

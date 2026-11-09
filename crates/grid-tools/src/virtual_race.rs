@@ -21,6 +21,10 @@
 //!
 //! Only the score branch (`time_based` = 0, the drift formats) is ported;
 //! the time branch scales by championship counts not needed here.
+//!
+//! [`LapEstimator`] is the same object's lap estimator of a circuit race
+//! (0x67FFB0; docs/RACE_RULES_RESEARCH.md section 1).
+use crate::ai_pacing::Mt;
 
 /// One `difficulty` row of `database.bin` [D].
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -283,6 +287,234 @@ impl VirtualRace {
     }
 }
 
+/// One lap record of a competitor as the lap estimator reads and fills it
+/// (the original's lap timing object: a 64-bit total and up to four sector
+/// splits, each in microseconds, and a valid flag).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LapRecord {
+    pub total: i64,
+    pub splits: Vec<i64>,
+    pub valid: bool,
+}
+
+impl LapRecord {
+    /// A lap of `total` microseconds without sector splits.
+    pub fn new(total: i64) -> Self {
+        Self {
+            total,
+            splits: Vec::new(),
+            valid: false,
+        }
+    }
+    /// Split `i`, 0 for a split not recorded [I 0x908C60].
+    fn split(&self, i: usize) -> i64 {
+        self.splits.get(i).copied().unwrap_or(0)
+    }
+}
+
+/// 0x908470: a microsecond count times a factor (as double), truncated.
+fn scale(micros: i64, factor: f64) -> i64 {
+    (micros as f64 * factor) as i64
+}
+
+/// 0xCB0948: the base lap of a track model without a `world_record` row.
+pub const NO_WORLD_RECORD: f32 = -1.;
+
+/// The virtual race of a circuit race as the race manager's lap estimator:
+/// the race object's virtual race (+0x23F4, handed to the race manager at
+/// +0xF2D8), whose vf 0x18 = 0x67FFB0 predicts the remaining laps of a car
+/// still racing when the race is ended (0x90FCD0). The race manager adds
+/// every competitor with skill 1.0 (0x916FE0).
+#[derive(Clone)]
+pub struct LapEstimator {
+    /// Base lap (+0x20, µs): the track model's world record (0x67D890).
+    pub base: i64,
+    /// Sector bases (+0x28 + 8·i): the base lap × 0.25 each (0xCE8828).
+    pub sectors: [i64; 4],
+    /// Sector count (+0x48): 4.
+    pub sector_count: u32,
+    /// Draw period (+8): 1 from the constructor 0x67D590.
+    pub period: u32,
+    /// `performance_variance` of the difficulty row (+0x18).
+    pub performance_variance: f32,
+    /// The generator (MT19937, 0xA683B0). AUTHORED: seeded per race by the
+    /// caller; the original seeds it from the clock × 1000.
+    rng: Mt,
+}
+
+impl std::fmt::Debug for LapEstimator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LapEstimator")
+            .field("base", &self.base)
+            .field("performance_variance", &self.performance_variance)
+            .finish_non_exhaustive()
+    }
+}
+
+impl LapEstimator {
+    /// The set-up of `virtual_race_new` (0x646320) for a circuit: the
+    /// difficulty row's variance and 0x67D890's base lap from the track
+    /// model's world record (s; [`NO_WORLD_RECORD`] without one).
+    pub fn new(world_record: f32, difficulty: &Difficulty, seed: u32) -> Self {
+        let base = micros(f64::from(world_record));
+        let sector = scale(base, 0.25);
+        Self {
+            base,
+            sectors: [sector; 4],
+            sector_count: 4,
+            period: 1,
+            performance_variance: difficulty.performance_variance,
+            rng: Mt::new(seed),
+        }
+    }
+
+    /// 0x67D6C0 for a competitor of `skill`: U(clamp(1 − (skill + v/2)),
+    /// clamp(1 − (skill − v/2))).
+    fn draw(&mut self, skill: f32) -> f32 {
+        let half = self.performance_variance * 0.5;
+        let upper = (1. - (skill - half)).clamp(0., 1.);
+        let lower = (1. - (half + skill)).clamp(0., 1.);
+        self.rng.uniform(lower, upper)
+    }
+
+    /// A lap without a time to go by: base + base × U(0, variance).
+    fn fresh_lap(&mut self) -> i64 {
+        let u = self.rng.uniform(0., self.performance_variance);
+        self.base.wrapping_add(scale(self.base, f64::from(u)))
+    }
+
+    /// 0x67FFB0: complete `lap` (the lap a car is on: its splits so far and
+    /// its time so far in `total`) into a whole-lap estimate. `previous` is
+    /// the car's previous lap record, `fraction` the part of `lap` covered,
+    /// `unfinished_human` the finalisation flag (some human did not finish);
+    /// `skill` is the competitor's (clamped to 0..1 by 0x67FF20).
+    pub fn estimate(
+        &mut self,
+        lap: &mut LapRecord,
+        skill: f32,
+        previous: Option<&LapRecord>,
+        fraction: f32,
+        unfinished_human: bool,
+    ) {
+        let skill = skill.clamp(0., 1.);
+        let n = if (1..=3).contains(&self.sector_count) {
+            self.sector_count as usize
+        } else {
+            4
+        };
+        let k = lap.splits.len();
+        // A draw whose value is not used.
+        self.draw(skill);
+        let covered = lap.splits.iter().fold(0i64, |a, &s| a.wrapping_add(s));
+        // The whole lap: the time so far over the fraction covered (1e-4 at
+        // 0xCBA1F0), else the previous lap, else a fresh lap.
+        let mut total = if fraction > 1e-4 {
+            scale(lap.total, f64::from(1. / fraction))
+        } else if let Some(p) = previous {
+            p.total
+        } else {
+            self.fresh_lap()
+        };
+        if unfinished_human {
+            // Implausible against the base lap: under half of it, or over
+            // twice it with under 0.1 (0xCAFCD4) of the lap covered.
+            let (t, b) = (seconds(total), seconds(self.base));
+            if !(b * 0.5 <= t && (t <= b + b || 0.1 <= fraction)) {
+                total = match previous {
+                    Some(p) => p.total,
+                    None => self.fresh_lap(),
+                };
+            }
+        }
+        if k + 1 >= n && fraction > 0.5 && total > covered {
+            lap.splits.push(total.wrapping_sub(covered));
+        } else {
+            let elapsed = lap.total.wrapping_sub(covered);
+            for i in k..n {
+                let mut split = 0;
+                if let Some(p) = previous {
+                    // At most twice the sector base, else redrawn below it.
+                    let twice = scale(self.sectors[i], 2.);
+                    split = p.split(i);
+                    if split > twice {
+                        let u = self.rng.uniform(0.5, 1.);
+                        split = scale(twice, f64::from(u));
+                    }
+                }
+                if split == 0 {
+                    split = scale(total, f64::from(1. / n as f32));
+                }
+                if i % self.period.max(1) as usize == 0 {
+                    // A draw whose value is not used.
+                    self.draw(skill);
+                }
+                if i == k && elapsed > split {
+                    split = elapsed;
+                }
+                lap.splits.push(split);
+            }
+        }
+        // The last sector takes up the rest, at least 2 s (0xCB9B78).
+        let sum = (0..n).fold(0i64, |a, i| a.wrapping_add(lap.split(i)));
+        let last = seconds(total.wrapping_sub(sum).wrapping_add(lap.split(n - 1))).max(2.);
+        if let Some(s) = lap.splits.get_mut(n - 1) {
+            *s = micros(last);
+        }
+        lap.total = total;
+        lap.valid = true;
+    }
+}
+
+/// 0x67D890's base lap source: the `world_record` (s) of the first
+/// `world_record` row of the route's track model (any vehicle grade, in
+/// table order [I]), [`NO_WORLD_RECORD`] without one. `route` is
+/// `tracks/{folder}/{file}/{route}`.
+pub fn world_record(db: &grid_formats::database::Database, route: &str) -> f32 {
+    let parts: Vec<&str> = route.split('/').collect();
+    let [_, folder, file, layout] = parts[..] else {
+        return NO_WORLD_RECORD;
+    };
+    let eq = |r: &grid_formats::database::Row<'_>, col: &str, v: &str| {
+        r.text(col).is_some_and(|t| t.eq_ignore_ascii_case(v))
+    };
+    let model = db.table("track_model").and_then(|t| {
+        t.rows()
+            .find(|m| {
+                eq(m, "folder_string", folder) && eq(m, "file_string", file) && eq(m, "route_string", layout)
+            })
+            .and_then(|m| m.int("id"))
+    });
+    model
+        .and_then(|id| {
+            db.table("world_record")?
+                .rows()
+                .find(|r| r.int("track_model_id") == Some(id))
+                .and_then(|r| r.float("world_record"))
+        })
+        .unwrap_or(NO_WORLD_RECORD)
+}
+
+/// [`world_record`] from the game's `database/schema.bin` and
+/// `database/database.bin` under `root`.
+pub fn load_world_record(root: &std::path::Path, route: &str) -> Result<f32, Box<dyn std::error::Error>> {
+    let schema = std::fs::read(root.join("database/schema.bin"))?;
+    let data = std::fs::read(root.join("database/database.bin"))?;
+    Ok(world_record(&grid_formats::database::read(&schema, &data)?, route))
+}
+
+/// The circuit race's lap estimator for an event on `route` at the AI
+/// difficulty `ai_ratio`: the career rank 2 `difficulty` row of its star
+/// level (as the drift virtual race, docs/DISCIPLINES.md) and the
+/// AUTHORED seed 0x5EED in place of the original's clock.
+pub fn circuit_estimator(
+    root: &std::path::Path,
+    route: &str,
+    ai_ratio: f32,
+) -> Result<LapEstimator, Box<dyn std::error::Error>> {
+    let row = difficulty(2, crate::flashback::star_level(ai_ratio));
+    Ok(LapEstimator::new(load_world_record(root, route)?, row, 0x5eed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +594,69 @@ mod tests {
         let score = VirtualRace::new(pool, d, 1).drift_score(1., 2);
         let one = seconds(VirtualRace::new(pool, d, 1).result(1.));
         assert_eq!(score, (one * 2.) as f32);
+    }
+
+    #[test]
+    fn the_lap_estimator_fills_four_sectors_and_the_whole_lap() {
+        let mut e = LapEstimator::new(80., difficulty(2, 1), 3);
+        assert_eq!((e.base, e.sectors[3]), (80_000_000, 20_000_000));
+        // Half a lap in 40 s: an 80 s lap; the first sector takes the time
+        // so far, the last the rest (at least 2 s).
+        let mut lap = LapRecord::new(micros(40.));
+        e.estimate(&mut lap, 1., None, 0.5, false);
+        assert!(lap.valid);
+        assert_eq!(lap.total, 80_000_000);
+        assert_eq!(lap.splits[..3], [40_000_000, 20_000_000, 20_000_000]);
+        assert_eq!(lap.splits[3], 2_000_000);
+        // Past half a lap with three sectors recorded: one more split.
+        let mut lap = LapRecord {
+            total: micros(60.),
+            splits: vec![micros(20.); 3],
+            valid: false,
+        };
+        e.estimate(&mut lap, 1., None, 0.75, false);
+        // 1 / 0.75 in single precision: 80 000 002 us.
+        assert_eq!((lap.total, lap.splits.len()), (80_000_002, 4));
+        assert_eq!(lap.splits[3], 20_000_002);
+        // No time to go by: the previous lap, with its long sectors redrawn
+        // between one and two sector bases.
+        let previous = LapRecord {
+            total: micros(90.),
+            splits: vec![micros(50.), micros(10.), micros(10.), micros(20.)],
+            valid: true,
+        };
+        let mut lap = LapRecord::default();
+        e.estimate(&mut lap, 1., Some(&previous), 0., false);
+        assert_eq!(lap.total, 90_000_000);
+        assert!((20_000_000..=40_000_000).contains(&lap.splits[0]), "{:?}", lap.splits);
+        assert_eq!(lap.splits[1..3], [10_000_000, 10_000_000]);
+        // Neither: base + base x U(0, variance).
+        for _ in 0..50 {
+            let mut lap = LapRecord::default();
+            e.estimate(&mut lap, 1., None, 0., false);
+            assert!((80_000_000..=90_400_000).contains(&lap.total), "{}", lap.total);
+        }
+    }
+
+    #[test]
+    fn the_unfinished_human_flag_rejects_implausible_laps() {
+        let previous = LapRecord::new(micros(85.));
+        let mut e = LapEstimator::new(80., difficulty(2, 1), 3);
+        // Under half the base lap.
+        let mut lap = LapRecord::new(micros(10.));
+        e.estimate(&mut lap, 1., Some(&previous), 0.5, true);
+        assert_eq!(lap.total, previous.total);
+        // Over twice the base under 0.1 of the lap; at 0.1 it stands.
+        let mut lap = LapRecord::new(micros(17.));
+        e.estimate(&mut lap, 1., Some(&previous), 0.09, true);
+        assert_eq!(lap.total, previous.total);
+        let mut lap = LapRecord::new(micros(17.));
+        e.estimate(&mut lap, 1., Some(&previous), 0.1, true);
+        assert!(lap.total > micros(169.));
+        // Without the flag the projection stands.
+        let mut lap = LapRecord::new(micros(10.));
+        e.estimate(&mut lap, 1., Some(&previous), 0.5, false);
+        assert_eq!(lap.total, 20_000_000);
     }
 
     #[test]

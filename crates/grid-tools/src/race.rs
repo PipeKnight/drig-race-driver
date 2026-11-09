@@ -20,10 +20,12 @@
 //!
 //! Race progress is the distance along the AI racing line from the
 //! start-finish line, unwrapped tick by tick (the original uses its own lap
-//! count plus lap fraction). The remaining-distance estimate is AUTHORED: the
-//! original predicts each remaining lap from a per-vehicle reference table
-//! with random variation (0x67FFB0), which is not ported.
+//! count plus lap fraction). A car ended early is estimated lap by lap with
+//! the circuit race's lap estimator when one is attached (0x67FFB0,
+//! [`crate::virtual_race::LapEstimator`]); without one the AUTHORED
+//! mean-speed estimate.
 use crate::ai_driver::Line;
+use crate::virtual_race::{LapEstimator, LapRecord, micros, seconds};
 
 /// Below this speed a car still racing at the end is retired instead of
 /// estimated: 5 mph (0xCB093C converted by 0xA7DDB0, x 1.609344 / 3.6).
@@ -85,6 +87,9 @@ pub struct Standings {
     finalized: bool,
     /// Real time limit (s) of a time-limited race (race type 3).
     limit: Option<f64>,
+    /// The circuit race's lap estimator (0x67FFB0) for cars ended early;
+    /// without one the AUTHORED mean-speed estimate.
+    estimator: Option<LapEstimator>,
 }
 
 /// `m:ss.mmm`.
@@ -133,6 +138,38 @@ pub fn grid_slot(base: u32, range: u32, field: usize, draw: impl FnOnce(u32) -> 
     }
 }
 
+/// 0x90FCD0 for an AI car still racing: estimate the lap it is on and each
+/// lap still to run (skill 1.0, 0x916FE0), add them to its laps and finish
+/// it at the sum of its lap times. The lap it is on carries the time since
+/// its last line crossing and the fraction of the line length covered since
+/// (0 before the first crossing) [I: the original's entry +0x70 lap
+/// fraction from its own track tracker].
+fn estimate_laps(
+    estimator: &mut LapEstimator,
+    car: &mut Car,
+    (laps, length): (u32, f64),
+    time: f64,
+    unfinished_human: bool,
+) {
+    let done = car.laps.len();
+    let start = car.laps.last().copied().unwrap_or(0.);
+    let mut previous = (done > 0).then(|| {
+        let before = if done > 1 { car.laps[done - 2] } else { 0. };
+        LapRecord::new(micros(start - before))
+    });
+    let mut fraction = (car.distance / length - done as f64).clamp(0., 1.) as f32;
+    let mut lap = LapRecord::new(micros(time - start));
+    let mut total = micros(start);
+    for _ in done..laps as usize {
+        estimator.estimate(&mut lap, 1., previous.as_ref(), fraction, unfinished_human);
+        total = total.wrapping_add(lap.total);
+        car.laps.push(seconds(total));
+        previous = Some(std::mem::take(&mut lap));
+        fraction = 0.;
+    }
+    car.finish = Some(seconds(total));
+}
+
 impl Standings {
     /// `start` is a point on the start-finish line; `positions` are the cars' grid positions.
     pub fn new(line: &Line, laps: u32, start: [f32; 3], positions: &[[f32; 3]]) -> Self {
@@ -145,6 +182,7 @@ impl Standings {
             cars: Vec::new(),
             finalized: false,
             limit: None,
+            estimator: None,
         };
         standings.reset(line, positions);
         standings
@@ -164,6 +202,7 @@ impl Standings {
             cars: Vec::new(),
             finalized: false,
             limit: None,
+            estimator: None,
         };
         standings.reset(line, positions);
         standings
@@ -207,6 +246,7 @@ impl Standings {
                 .collect(),
             finalized: false,
             limit: None,
+            estimator: None,
         }
     }
 
@@ -214,6 +254,13 @@ impl Standings {
     /// over when the race time reaches it, no finish at the line [V].
     pub fn with_time_limit(mut self, seconds: f64) -> Self {
         self.limit = (seconds.is_finite() && seconds > 0.).then_some(seconds);
+        self
+    }
+
+    /// Estimate the cars ended early with the circuit race's lap estimator
+    /// (0x67FFB0) instead of the AUTHORED mean race speed.
+    pub fn with_estimator(mut self, estimator: LapEstimator) -> Self {
+        self.estimator = Some(estimator);
         self
     }
 
@@ -350,14 +397,17 @@ impl Standings {
     /// - If a human did not finish, every other car still racing is estimated;
     ///   otherwise only cars above [`FINALIZE_MINIMUM_SPEED`] are, and the rest
     ///   are retired as stopped [V].
-    /// - Estimate (AUTHORED): remaining distance at the car's mean race speed
-    ///   so far, or its current speed (floor 1 m/s) before it has covered any.
+    /// - Estimate: with a lap estimator ([`Self::with_estimator`]) the
+    ///   original's lap by lap prediction [V 0x90FCD0, 0x67FFB0]; without one
+    ///   (AUTHORED) the remaining distance at the car's mean race speed so
+    ///   far, or its current speed (floor 1 m/s) before it has covered any.
     pub fn finalize(&mut self, speeds: &[f64], time: f64, humans: &[usize]) {
         if let Some(limit) = self.limit {
             self.finalize_timed(speeds, time, limit, humans);
             return;
         }
         let target = self.target();
+        let (laps, length) = (self.laps, self.length);
         let human_unfinished = humans.iter().any(|&h| {
             self.cars
                 .get(h)
@@ -369,7 +419,12 @@ impl Standings {
             }
             if humans.contains(&i) {
                 car.status = Status::Out(Out::Retired);
-            } else if human_unfinished || speed > FINALIZE_MINIMUM_SPEED {
+            } else if !(human_unfinished || speed > FINALIZE_MINIMUM_SPEED) {
+                car.status = Status::Out(Out::Stopped);
+            } else if let Some(estimator) = self.estimator.as_mut() {
+                estimate_laps(estimator, car, (laps, length), time, human_unfinished);
+                car.status = Status::Estimated;
+            } else {
                 let mean = if car.distance > 0. && time > 0. {
                     car.distance / time
                 } else {
@@ -377,8 +432,6 @@ impl Standings {
                 };
                 car.finish = Some(time + (target - car.distance).max(0.) / mean.max(1.));
                 car.status = Status::Estimated;
-            } else {
-                car.status = Status::Out(Out::Stopped);
             }
         }
         self.finalized = true;
@@ -431,7 +484,8 @@ impl Standings {
 
     /// Completed laps of `car` and their times (s), measured on the race
     /// progress line from GO (AUTHORED: the original times each car's laps
-    /// with its own track tracker). Estimated laps are not included.
+    /// with its own track tracker). Laps estimated by the lap estimator are
+    /// included, as the original records them [V 0x90FCD0].
     pub fn lap_times(&self, car: usize) -> Vec<f64> {
         let mut previous = 0.;
         self.cars[car]
@@ -457,6 +511,17 @@ impl Standings {
     /// Completed race distance of `car` in laps (may be negative before the line).
     pub fn laps_covered(&self, car: usize) -> f64 {
         self.cars[car].distance / self.length
+    }
+
+    /// Racing-line arc of the start-finish line.
+    pub fn line_arc(&self) -> f64 {
+        self.start_arc
+    }
+
+    /// Distance from `car` forward to the start-finish line (race_start
+    /// 0x94A1E0 measures the leader's).
+    pub fn to_line(&self, car: usize) -> f64 {
+        (-self.cars[car].distance).rem_euclid(self.length)
     }
 
     /// Car indices from first to last: finishers by time, then estimated
@@ -646,6 +711,7 @@ mod tests {
                 .collect(),
             finalized: false,
             limit: None,
+            estimator: None,
         }
     }
 
@@ -737,6 +803,62 @@ mod tests {
         assert_eq!(lines[0], "1. car0  1:40.000");
         assert_eq!(lines[1], "2. car1  +11.111 (est.)");
         assert_eq!(lines[3], "4. car2  DNF, 1 lap");
+    }
+
+    fn estimator(record: f32, seed: u32) -> LapEstimator {
+        LapEstimator::new(record, crate::virtual_race::difficulty(2, 1), seed)
+    }
+
+    #[test]
+    fn the_lap_estimator_projects_the_current_lap_and_repeats_it() {
+        let mut s = standings(3, &[3000., 1600., 900., 1500.]).with_estimator(estimator(48., 1));
+        s.cars[0].laps = vec![45., 92., 140.];
+        s.finish(0, 140.);
+        s.cars[1].laps = vec![50.];
+        s.finalize(&[0., 30., 30., 1.], 80., &[0]);
+        // Car 1: 30 s into lap 2 at 0.6 of it -> 50 s laps; finish 50 + 2 x 50.
+        assert_eq!(s.status(1), Status::Estimated);
+        assert!((s.finished(1).unwrap() - 150.).abs() < 1e-3, "{:?}", s.finished(1));
+        assert_eq!(s.lap_times(1).len(), 3);
+        // Car 2: 80 s at 0.9 of lap 1 -> 88.9 s laps.
+        assert!((s.finished(2).unwrap() - 3. * 80. / 0.9).abs() < 1e-3);
+        // Below 5 mph without an unfinished human: stopped.
+        assert_eq!(s.status(3), Status::Out(Out::Stopped));
+        assert_eq!(s.order(), vec![0, 1, 2, 3]);
+        // The estimated laps count for the best lap [V 0x90FCD0].
+        assert!((s.best_lap(1).unwrap().0 - 50.).abs() < 1e-3);
+    }
+
+    #[test]
+    fn with_an_unfinished_human_implausible_laps_fall_back() {
+        // Base 60 s. Car 1 at 0.05 of lap 2 after 20 s (400 s projected,
+        // over twice the base): its previous 55 s lap instead. Car 2 before
+        // the line on lap 1: a fresh lap of base + base x U(0, 0.13).
+        let mut s = standings(2, &[600., 1050., -20.]).with_estimator(estimator(60., 7));
+        s.cars[1].laps = vec![55.];
+        s.finalize(&[20., 20., 20.], 75., &[0]);
+        assert_eq!(s.status(0), Status::Out(Out::Retired));
+        assert!((s.finished(1).unwrap() - 110.).abs() < 1e-3, "{:?}", s.finished(1));
+        let lap = s.finished(2).unwrap() / 2.;
+        assert!((60. ..=60. * 1.13 + 1e-3).contains(&lap), "{lap}");
+        // Without the flag the projection stands.
+        let mut s = standings(2, &[2000., 1050.]).with_estimator(estimator(60., 7));
+        s.cars[0].laps = vec![50., 100.];
+        s.finish(0, 100.);
+        s.cars[1].laps = vec![55.];
+        s.finalize(&[0., 20.], 75., &[0]);
+        assert!((s.finished(1).unwrap() - (55. + 400. * 1.)).abs() < 1e-2);
+    }
+
+    #[test]
+    fn lap_estimates_are_seeded_and_repeat_exactly() {
+        let run = |seed| {
+            let mut s = standings(4, &[700., -10., 300.]).with_estimator(estimator(80., seed));
+            s.finalize(&[20.; 3], 30., &[0]);
+            (s.finished(1).unwrap(), s.finished(2).unwrap())
+        };
+        assert_eq!(run(5), run(5));
+        assert_ne!(run(5).0, run(6).0);
     }
 
     #[test]

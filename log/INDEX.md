@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F759](F0759.md) | 2026-11-09 | Circuit lap estimator 0x67FFB0 and marshal flags (rows 44, 47) |
 | [F758](F0758.md) | 2026-11-09 | Haruna's vertical streaks are light-shaft cards |
 | [F757](F0757.md) | 2026-11-09 | Car shadows in race views and Haruna's wet layer |
 | [F756](F0756.md) | 2026-11-09 | Front-end screen transitions, launcher races back to the menu, Race Options difficulty and grid |

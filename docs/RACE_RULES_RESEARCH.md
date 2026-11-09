@@ -89,11 +89,66 @@ entry's position and per-class position for classes 0–5):
     count are updated;
   - its time becomes the sum of its lap times [V].
 - otherwise the vehicle race state is set to 3 [V].
-- The estimator 0x67FFB0:
-  - [V] looks the car up in a per-vehicle table (+0x4C, 8-byte records) and uses the RNG 0xA683B0;
-  - [V] has a speed branch (≤ the constant at 0xCBA1F0);
-  - [I] the lap reference is an AI lap-time model;
-  - the estimator itself is not ported.
+- The estimator is described in "Lap estimator" below; **ported** (row 44, 9 November 2026).
+
+### Lap estimator (0x67FFB0) [V unless marked]
+
+The estimator is a "virtual race" object (constructor 0x67D590, vtable 0xCE87FC; the drift
+VirtualRace of docs/DRIFT.md is the same class). 0x90FCD0 calls its vf 6 = vtable +0x18 = 0x67FFB0.
+
+Layout:
+- +4 vehicle count; +8 period = 1;
+- +0x10/+0x14/+0x18 = base_time_factor, top_time_factor, performance_variance of the career
+  difficulty row;
+- +0x20 base lap time (i64 µs); +0x28 + 8i the sector times; +0x48 sector count = 4;
+- +0x4C records {vehicle id, skill}; the race manager adds every car with skill 1.0 (0x916FE0);
+- +0xAB9 loaded, +0xABA initialised.
+
+The circuit base lap comes from 0x67D890: the first `world_record` row whose `track_model_id` is
+the route's track model (seconds; no grade filter [I]), default −1.0 (0xCB0948) when no row exists.
+Each sector is base × 0.25. Of 99 track models, 76 have a row [D]; none for haruna, detroit
+Route_8/9, yokohama_docks Route_3–6 and the frontend models.
+
+Finalisation 0x90FCD0 calls the estimator for the lap the car is on (record L with its time so far,
+the previous lap, the lap fraction +0x70 and the "human unfinished" flag), then once per remaining
+lap with fraction 0 and the lap just estimated as the previous one. The car's time is the sum of its
+lap times; estimated laps count for the best lap.
+
+0x67FFB0(L, prev, frac, flag), with fixed-point helpers 0x908470 (i64 × double, truncated),
+0x908360 (add), 0x9083B0 (subtract) and 0x9082B0 (seconds → µs):
+1. One RNG draw (0xA683B0, MT19937), discarded. C = sum of L's existing splits, k = their count.
+2. Projected lap time T:
+   - frac > 1e-4 (0xCBA1F0): T = L.total × (1/frac);
+   - else with a previous lap: T = prev.total;
+   - else: T = base + base × U(0, performance_variance).
+3. With the flag set, T is replaced as in step 2's later branches when T < base/2, or when
+   T > 2·base and frac < 0.1.
+4. Splits:
+   - if k ≥ n − 1, frac > 0.5 and T > C: push T − C;
+   - else for i in k..n: S = prev.split(i); if S > 2·sector then S = 2·sector × U(0.5, 1); if S = 0
+     then S = T / n; one discarded draw when i % period = 0; at i = k, S = max(S, L.total − C).
+   - The last split becomes max(2 s, (T − Σ splits) + split[n − 1]).
+5. L.total = T; L is marked valid.
+
+Port (`grid_tools::virtual_race::LapEstimator`, `race::Standings::with_estimator`):
+- AUTHORED: the original seeds the RNG from the clock; the port seeds it with 0x5eed per race, so
+  results never depend on CPU or frame timing.
+- AUTHORED: the difficulty row is career rank 2 at the AI star level (`flashback::star_level`).
+- [I] The fraction is the share of the line length covered since the last line crossing (0 before
+  the first), and the current lap's time is the time since that crossing.
+- AUTHORED: the port keeps no sector splits of driven laps, so k = 0 and the previous driven lap has
+  no splits. Lap totals do not depend on splits; only the splits and the RNG use do.
+- On a route with no world_record row the base is −1 s, as in the original, so a fresh-lap estimate
+  is negative. A car only gets a fresh lap when it is ended before its first line crossing with
+  fraction ≤ 1e-4.
+- Without an attached estimator (unit tests, point-to-point, touge tools) the AUTHORED mean-speed
+  estimate remains. Le Mans `finalize_timed` is unchanged.
+- Observation (F759, `grid-opponent-race ROOT CD01 BP01 12 6000 ai`, cut at 96 s in lap 2):
+  every car was estimated, at 2:37.2–2:44.3, in a different order from the track. The leader
+  (1.112 laps) came 10th: projected from 8.5 s over 11 % of the lap, its lap was 76 s; the car
+  at 1.082 laps, from 5.5 s over 8 %, got 67 s. The standings' line crossings solved from the
+  output (87.5 s and 90.5 s) reproduce both totals, so this is the original's T = time / fraction
+  on a short fraction, not a port error [I: the original behaves the same; no capture].
 
 **State 3 [I]** is "retired / did not finish".
 - The retire path 0x585E00 writes the same value to the player vehicle.
@@ -140,8 +195,7 @@ Each rule's update emits a flag event to the flag system:
 - **end_race** 0x94AA70 [V]: chequered_flag once, when the leader has 1 lap left and is within 250 m of
   the line. **Ported** as `Standings::leader_flag`.
 - **serious_incident** 0x94AC60 [V]: an accumulating timer gates 0x94A6E0/0x94A7D0, which emit
-  yellow_flag.
-  - [I] The thresholds describe a spun or slow car; incident detection was not decompiled further.
+  yellow_flag. Described in "Flag system" below; **ported** (row 47, 9 November 2026).
 - **corner_cutting** [V]: every method is a stub (load 0x949790 and update 0x9497C0 return 0; the
   enable setter 0x94B930 only stores a byte), and the rule is absent from rules.xml [D].
   - **There is no corner-cutting or track-limit penalty in a single race.**
@@ -150,6 +204,80 @@ Each rule's update emits a flag event to the flag system:
   - the HUD `penalty_pill` (0x6B3380);
   - drift.xml `collisionPenalty 500`;
   - language entries `osd_minor`/`osd_major` and the touge penalty totals.
+
+### Flag system [V unless marked]
+
+Static RE of 9 November 2026 (row 47). Several functions are not function entries in the master
+analysis and were read with `grid_re.py dis`.
+
+**Rules system** (vtable 0xD109DC, update 0x94A4A0): +0x20 sums dt; when it reaches
+`rule_reaction_time` (0.3 s) every enabled rule's update runs with the summed dt and the sum resets.
+
+**serious_incident** (ctor 0x94A120, load 0x949A70). Defaults before the attributes are read: angle 45,
+maximum_speed 10, slow_speed 1, time_between 30, time_to_register 1, race_time 5. rules.xml sets
+90 / 40 / 3 / 8 / 0.5 / 10 (the attribute names are spelt `minumum_*`). The angle is in degrees and
+converted at use; no other conversion.
+- Incident test 0x949B40: `(angle > minimum_angle AND speed < maximum_speed) OR speed < slow_speed`.
+  - angle 0x909F70: acos of the flattened, normalised car axis against the line vector of the car's
+    tracker record (+0x40), 0..π [I: the heading against the line direction].
+  - speed 0x90A250: the body velocity along the line, negative going backwards, so reversing is
+    always an incident.
+- Update 0x94AC60: only while race state +0x10 = 1 (started) and +0x11 = 0 [I: not ended]; +0x24 sums
+  dt and the rule continues only past `minumum_race_time` (10 s).
+- 0x94A6E0, per tracked car (up to 20 entries of 0x20 bytes): skip a car out of the race (entry
+  vf+0x50 [I: finished or retired]) or without a tracker record; if the test holds, the entry's
+  register time += dt and its incident position = the car's track position; otherwise the register
+  time is 0.
+- 0x94A7D0, when any car is in an incident: for each entry with register ≥ 0.5 s and at least 8 s since
+  that car's last yellow (system clock 0x4B1E20; the first always passes), raise a global
+  `yellow_flag` at the incident position. Several cars can each raise one.
+
+**race_start** 0x94A1E0: once, after the start, when the leader's forward distance to the
+start-finish line is ≤ 20 m, raise a global `green_flag` at the line. **end_race** 0x94AA70 raises
+`chequered_flag` the same way at 250 m on the last lap.
+
+**Flag system** (vtable 0xD10D6C: raiseFlag 0x94B440, registerVehicle 0x94AFA0):
+- raiseFlag finds the type by name, takes a free pool instance (0x94A370) and activates it (0x949960:
+  remaining = duration), then applyFlag 0x94B2A0 puts a global flag in every registered vehicle's list
+  (0x94B130: no duplicates, at most `max_flags_per_vehicle` 12).
+- `max_vehicles` is 1 [D]: one vehicle holds flags [I: the local player].
+- Zone 0x90CB10: from `track_distance_before` behind the flag's point to `track_distance_after` past it;
+  the whole line if their sum exceeds the line length. Zone test 0x94BA10: the zone length exceeds the
+  distance from the car forward to the zone end.
+- Instance tick 0x949E60: remaining −= dt; below 0 the instance is freed. 0x94B990 compares by
+  priority; 0x94AD60 returns the highest in-zone flag (debug view 0x64CDA0).
+
+| Flag | Priority | Duration (s) | Before (m) | After (m) |
+|---|---|---|---|---|
+| green_flag | 2 | 30 | 400 | 100 |
+| yellow_flag | 3 | 10 | 100 | 20 |
+| chequered_flag | 4 | 600 | 400 | 100 |
+
+`single_demolition_race` has green and chequered only [D].
+
+**What the player sees.**
+- HUD 0x6BA460: the minimap node `object/flag=flag` (flag.tga) plays "in" while the viewed car is
+  inside an active yellow_flag's zone and "out" otherwise. Green and chequered have no HUD element.
+- 0x64BA60 posts game-broadcaster codes for the local car's flags (green 1/4, yellow 2/5, chequered
+  3/6, on/off). Their receiver (speech or crowd) was not found, so they are not ported.
+- No AI reaction to flags was found [I: the AI code was not searched for flag reads].
+
+**Port** (`grid_tools::race_flags`): `RuleSet::load` reads rules.xml; `RaceFlags::step` runs the rules
+every 0.3 s on the fixed simulation tick. Decisions:
+- AUTHORED: the "time between" clock is the flag system's own summed simulation time instead of the
+  wall clock, so results never depend on frame timing.
+- AUTHORED: within a rule tick, active flags count down before new ones are raised.
+- [I] Every race car is tracked by serious_incident (the caller of vf+8 was not traced); cars not
+  racing in `Standings` are skipped; the player is the registered vehicle.
+- [I] Format: `single_demolition_race` for a derby, `single_race` for every other lap race;
+  point-to-point runs get no flags.
+- On an open line the zone is a plain interval [I].
+- The minimap flag before this port played for the chequered flag; it now follows the yellow zone.
+- grid-app logs `drive_race_flag`; grid-opponent-race prints `flag NAME tick= car= position=`.
+
+Open: the caller registering cars with serious_incident; flag.tga content; the zone sign check of
+0x90BFC0/0x90BEC0; race state +0x11; vehicle byte +0x2E68 (0x98D620); 0x94AC50; receivers of the
+broadcaster codes.
 
 ## 4. Start and false starts
 
@@ -225,6 +353,7 @@ entry order; `grid_order` is not read.
 - `finalize(speeds, time, humans)` with the 5 mph rule and the unfinished-human rule;
 - `over()`: finalised, or no car still racing;
 - `leader_flag()` (chequered);
+- marshal flags in `race_flags` (section 3);
 - `grid_slot`.
 
 Finishing (F671): every car with lap timing finishes on the lap-timing line crossing that completes
@@ -239,10 +368,9 @@ docs/RACE_MODE.md.
 
 ## Open
 
-- Estimator 0x67FFB0 (per-vehicle reference table, RNG).
 - Meaning of entry status 3 and of the vehicle race-state enum.
 - Results cell formatting.
 - Free-race front/middle/back mapping.
-- serious_incident detection 0x94A6E0.
+- serious_incident: which vehicles are registered; receivers of the flag broadcaster codes.
 - What makes the human's race type 1 end when an AI car has retired: the frontend finalisation
   0x583B00 [I].

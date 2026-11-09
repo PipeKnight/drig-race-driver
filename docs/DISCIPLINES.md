@@ -462,8 +462,9 @@ outputs `local/drift-est/decomp/g1..g10`), Capstone 5.0.6 dumps through `local/d
   0.05·(8 − n) and 1.15 + 0.0625·(8 − n) clamped to 1..1.4 and 1.15..1.65, n from two counts of the
   difficulty object) is overwritten by this branch in score formats and is not ported.
 - vtable 0xCE87FC = {+0 0x6808C0, +4 0x67FF20 add, +8 0x67D650 clear, +0xC 0x67D660 remove, +0x10
-  0x6850F0 result of one car, +0x14 0x685190, +0x18 0x67FFB0 (a lap estimate of the time races,
-  used by 0x63C830), +0x1C 0x67D3A0 reset}.
+  0x6850F0 result of one car, +0x14 0x685190, +0x18 0x67FFB0 (the lap estimate of a
+  race's finalisation 0x90FCD0, also used by 0x63C830; ported, docs/RACE_RULES_RESEARCH.md "Lap
+  estimator"), +0x1C 0x67D3A0 reset}.
 
 **Data [D]** (`database.bin`, `local/race-rules/data/database.json`): career Drift Battle events
 carry `100000,0,0,0`, career Drift GPs 650,000–2,000,000; the free-race pools carry per route

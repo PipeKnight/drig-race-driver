@@ -211,6 +211,11 @@ impl Line {
         (i, i + 1, (s - self.start[i]) / self.segment(i).max(1e-6))
     }
 
+    /// Unit horizontal direction of the line at arc `s`.
+    pub fn direction(&self, s: f32) -> [f32; 3] {
+        self.at(s).1
+    }
+
     /// Whether the line is an open road (point-to-point) rather than a loop.
     pub fn is_open(&self) -> bool {
         self.open

@@ -490,6 +490,12 @@ struct Opponents {
     ai_messages: Vec<(u64, u64, grid_tools::ai_pacing::Message)>,
     /// Each opponent's AI data with its own car's statistics (car k at k-1).
     car_ai: Vec<grid_tools::ai_driver::AiData>,
+    /// Marshal flags of a lap race (rules.xml; docs/RACE_RULES_RESEARCH.md
+    /// section 3).
+    flags: Option<grid_tools::race_flags::RaceFlags>,
+    /// The player is inside an active yellow flag's zone (the HUD minimap
+    /// flag, 0x6BA460).
+    yellow_flag: bool,
 }
 impl Opponents {
     /// Positions of every car; car 0 is the player runtime held outside `multi`.
@@ -4015,12 +4021,28 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                             trial_laps.unwrap_or(1),
                             start,
                             &positions,
-                        );
+                        )
+                        .with_estimator(grid_tools::virtual_race::circuit_estimator(
+                            &root,
+                            route.path(),
+                            difficulty,
+                        )?);
                         match race_limit {
                             Some(limit) => standings.with_time_limit(limit),
                             None => standings,
                         }
                     }
+                };
+                // Lap races run the marshals' rules (race_start, serious_incident,
+                // end_race); point-to-point runs have no flags [I].
+                let flags = match run_finish {
+                    Some(_) => None,
+                    None => Some(grid_tools::race_flags::RaceFlags::load(
+                        &root,
+                        demolition,
+                        &ai.line,
+                        positions.len(),
+                    )?),
                 };
                 let pacing = grid_tools::ai_pacing::Field::new(
                     grid_tools::ai_pacing::Data::load_for(
@@ -4065,6 +4087,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     pacing,
                     ai_messages: Vec::new(),
                     car_ai,
+                    flags,
+                    yellow_flag: false,
                 })
             })
             .transpose()?;
@@ -6612,6 +6636,32 @@ fn drive_tick(
                         .push(format!("{} retired", opponents.names[i]));
                 }
             }
+            if let Some(flags) = opponents.flags.as_mut() {
+                let cars: Vec<_> = std::iter::once(&driving.runtime)
+                    .chain(opponents.multi.cars.iter().skip(1))
+                    .map(|c| (c.pose(), c.velocity()))
+                    .collect();
+                let raised = flags.step(
+                    grid_tools::source_vehicle::DELTA,
+                    trial.race_time(driving.runtime.ticks).is_some(),
+                    &opponents.ai.line,
+                    &opponents.standings,
+                    &cars,
+                );
+                for flag in raised {
+                    log_line!(
+                        "drive_race_flag version=1 segment={} tick={} flag={} car={} position={:.1}",
+                        driving.segment,
+                        driving.runtime.ticks,
+                        flag.flag,
+                        flag.car.map_or_else(|| "none".into(), |c| c.to_string()),
+                        flag.position
+                    );
+                }
+                let p = &cars[0].0;
+                opponents.yellow_flag =
+                    flags.yellow(f64::from(opponents.ai.line.arc([p[12], p[13], p[14]])));
+            }
             if opponents.standings.over() {
                 for line in opponents.standings.classification(&opponents.names) {
                     log_line!("drive_race_result {line}");
@@ -7331,7 +7381,9 @@ fn drive_present(
                 o.standings.len(),
                 gap("Ahead ", "-", ahead),
                 gap("Behind", "+", behind),
-                if o.standings.leader_flag().is_some() {
+                if o.yellow_flag {
+                    "\nYellow flag"
+                } else if o.standings.leader_flag().is_some() {
                     "\nChequered flag"
                 } else {
                     ""

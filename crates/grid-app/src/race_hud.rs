@@ -497,7 +497,7 @@ pub struct HudView {
     pub odometer: f64,
     pub countdown: Option<String>,
     pub wrong_way: bool,
-    pub chequered: bool,
+    pub yellow_flag: bool,
     pub show_lap: bool,
     pub show_position: bool,
     pub show_dials: bool,
@@ -614,7 +614,7 @@ fn frame(
         odometer: state.odometer,
         countdown: if driving.paused { None } else { countdown },
         wrong_way: wrong_way && !finished,
-        chequered: race.is_some_and(|o| o.standings.leader_flag().is_some()),
+        yellow_flag: race.is_some_and(|o| o.yellow_flag),
         show_lap: options.lap_timer,
         show_position: options.position && race.is_some(),
         show_dials: options.dials,
@@ -758,7 +758,7 @@ fn update(
             Part::Message => set(text, view.countdown.clone().unwrap_or_default()),
             Part::WrongWay => set(text, if view.wrong_way { l("osd_wrong_way") } else { String::new() }),
             Part::Minimap => show(visibility, view.show_minimap),
-            Part::MinimapFlag => set(text, if view.chequered { "CHEQUERED".into() } else { String::new() }),
+            Part::MinimapFlag => set(text, if view.yellow_flag { "YELLOW".into() } else { String::new() }),
         }
     }
     // Car dots on the minimap.
