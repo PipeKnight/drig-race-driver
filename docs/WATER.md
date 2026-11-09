@@ -7,12 +7,15 @@ river showed its bed; this ports the water drawn over it.
 ## Where water is
 
 - Every `water.fx` draw is in a track's `land.pssg`; no other shipped package uses the group.
-- Seven tracks: Haruna (`wetness`, wet road patches), Okutama (`sea`), Yokohama docks (`sea`),
+- Seven tracks: Haruna (`wetness`, a half-transparent layer in the gullies and streams beside
+  the road, F757), Okutama (`sea`), Yokohama docks (`sea`),
   Detroit (`placeholder_water`), Long Beach (`water_material`), San Francisco (`Material #58`)
   and Washington (`sea`).
 - Each shader instance saves `bumpHeight`, `bumpSpeedX/Y`, `deepColour`, `shallowColour`,
   `reflectionColour`, `reflectionAmount`, `fresnelBias`, `fresnelPower`, `textureScaleX/Y` and
-  `waterAmount`, and binds `TNormalMap` (`grid-shader-constants LAND.pssg water.fx` prints them).
+  `waterAmount`, and binds `TNormalMap` (`grid-shader-constants LAND.pssg water.fx` prints them;
+  `grid-water-mesh LAND.pssg [CELL]` prints each water draw's vertex colours and the world cells
+  holding its visible vertices).
 
 ## The original's programs [V static]
 
@@ -114,6 +117,36 @@ Before F754 the port reflected only the route's source sky (slot 0, lighting.xml
 `skygamma`) baked into a 64-texel cube by `sky_environment::bake_sized`, with the authored ground
 colour below the horizon. That cube remains the fallback.
 
+## Checks (F757): Haruna's wet layer
+
+`grid-water-mesh` on Haruna's land.pssg: one `wetness` draw, 2659 vertices and 4624 triangles at
+y 855..1107. Every vertex has a colour: alpha 101..165 (mean 132, so 40 to 65 % opaque), RGB 20, 30,
+30. The constants are a dark grey water (`deepColour` 0.051, `shallowColour` 0.102, `waterAmount`
+1) with a strong grey-blue reflection (`reflectionColour` 0.278, 0.278, 0.349 x 1.2, Fresnel bias
+0.1, power 6), a 1.5 bump, a texture scale of 5 by 10 and a scroll of -0.1 along V, which is a
+flowing stream. The other six tracks' water is nearly opaque (Okutama alpha 203..255, Washington
+154..229).
+
+Views from 6 m above and 17 m back from the four densest 50 m cells (route 0, offscreen
+1280 x 800, probe vs `GRID_WATER_PROBE=0`; private `local/water/hw-after`, `hw-before`,
+`hw-pair.png`, `hw-zoom2.png`): all 8 runs exited 0 with no panic, `probed_materials=1` with the
+probe and `sky_cube_materials=1` without it.
+
+- The layer lies in rocky gullies and stream beds beside the road and under a bridge, not on the
+  road surface.
+- It reads as dark green-grey moving water with streaks along the flow. It meets the rocks without
+  a gap, and shows no z-fighting, holes or floating edges.
+- Probe and sky cube look the same here: the probe at the marker (662.8, 961.6, 25.4) sees mostly
+  green slopes and haze, about the colour of the sky cube's horizon.
+
+A night-route drive (route 1, autopilot, chase camera, 8 points over 12 000 ticks) shows no
+visible change either. The night routes light the terrain as day, which is SKY.md's open night
+lighting item, not the water.
+
+Not checked: the original's picture of these streams (no live capture). Seen in two views, not
+inspected: tall beige vertical streaks under the bridge and beside a cliff. They are the same with
+and without the probe, so they are not the water draw.
+
 ## Checks (F754)
 
 Release build of the F754 tree. Offscreen 2560 × 1369 views from a camera near each probe
@@ -124,7 +157,7 @@ without it.
 
 | track (route 0) | probe origin | what the view shows |
 |---|---|---|
-| Haruna | 662.8, 961.6, 25.4 (marker) | no open water in view; Haruna's water material is the wet layer at y 855..1107, not inspected close up |
+| Haruna | 662.8, 961.6, 25.4 (marker) | no open water in view; Haruna's water material is the wet layer at y 855..1107 (close views: Checks (F757)) |
 | Okutama | 0, 0, 0 (no marker child; the child's own origin, as 0x9853C0) | the dam pool reflects its banks, a little darker and bluer than the sky cube |
 | Yokohama docks | -483.8, 0, -206.6 (marker) | nearly the same as the sky cube (dark `deepColour`, low reflection) |
 | Detroit | 330.5, 264.6, 948.0 (marker) | the far shore and city appear as dark streaks in the river |
