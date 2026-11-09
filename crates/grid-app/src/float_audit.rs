@@ -49,7 +49,7 @@ fn referenced(mesh: &Mesh) -> (Vec<Vec3>, Vec<[u32; 3]>) {
 }
 
 /// Height of the collision below `p` (from `ABOVE` over it), if any.
-fn ground(track: &Track, p: Vec3) -> Result<Option<f32>, Box<dyn std::error::Error>> {
+pub(crate) fn ground(track: &Track, p: Vec3) -> Result<Option<f32>, Box<dyn std::error::Error>> {
     let mut cache = grid_world::rectangle_cull::Cache::default();
     let start = [p.x, p.y + ABOVE, p.z, 1.];
     let end = [p.x, p.y - BELOW, p.z, 1.];
@@ -448,7 +448,7 @@ pub fn run(
 
 /// The route's gate centres in order (`progress_track.xml`), closed for a
 /// circuit. Empty when the route has no progress file.
-fn gate_line(root: &Path, route: &Route) -> Result<Vec<Vec3>, Box<dyn std::error::Error>> {
+pub(crate) fn gate_line(root: &Path, route: &Route) -> Result<Vec<Vec3>, Box<dyn std::error::Error>> {
     use grid_formats::{binxml, progress};
     let path = root.join(route.file("progress_track.xml"));
     if !path.is_file() {

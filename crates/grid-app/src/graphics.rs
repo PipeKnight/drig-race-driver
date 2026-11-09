@@ -155,6 +155,10 @@ pub struct Settings {
     pub surface_ao_scale: f32,
     /// Baseline track scenes: the original road/infield specular (track_surface.rs).
     pub baseline_specular: Option<Phong>,
+    /// Bevy radiance per original light unit for object emissive maps
+    /// (object_materials::configure_emissive): the baseline sun's lux over the
+    /// route's `backlight_suncolour` peak, over pi. None: sun lux over pi.
+    pub emissive_unit: Option<f32>,
     pub preset: Preset,
     pub width: u32,
     pub height: u32,
@@ -233,6 +237,7 @@ impl Default for Settings {
             baseline_fill: None,
             surface_ao_scale: 1.,
             baseline_specular: None,
+            emissive_unit: None,
             preset: Preset::Baseline,
             width: 1280,
             height: 800,
@@ -304,6 +309,14 @@ pub struct Phong {
     /// Radiance per unit of the source lobe, before exposure.
     pub colour: [f32; 3],
     pub direction_to_light: [f32; 3],
+}
+
+/// Bevy radiance per original light unit, before exposure: `sun_lux` over
+/// `backlight_suncolour`'s peak, over pi (as Fill and Phong scale).
+pub fn light_unit(lighting: &grid_formats::track_environment::Lighting, sun_lux: f32, gamma: bool) -> Option<f32> {
+    let sun = lighting.rgb("backlight_suncolour")?;
+    let sun = if gamma { sun.map(|c| c.max(0.).powf(2.2)) } else { sun };
+    Some(sun_lux / sun.into_iter().fold(1e-3_f32, f32::max) / std::f32::consts::PI)
 }
 
 impl Phong {

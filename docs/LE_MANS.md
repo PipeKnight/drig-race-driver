@@ -205,7 +205,8 @@ Global fade 0x73B890 per frame: when wanted, `F = max(F, 0) + dt`; when not,
 weight `clamp((F − d_i) · 4, 0.001, 1)`. Mode 2: always on.
 `headlights.pssg` holds only the projector texture `headlight.tga`.
 Night-emissive objects (`object_simple_night_emissive*`) take the `emissive`
-curve in mode 1 (3.0 at night). `street_lights.xml` (163 lights: position,
+curve in mode 1 (3.0 at night; 0x9790E0, ported as
+`object_materials::emissive_time`, docs/GRAPHICS_AUDIT.md "Emissive objects"). `street_lights.xml` (163 lights: position,
 direction, range 8–20, brightness 0.8–4, parsed by 0x732970) has no
 time-based switching found [I: it follows the night light path].
 

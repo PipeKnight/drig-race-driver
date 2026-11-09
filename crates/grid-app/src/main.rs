@@ -3,6 +3,7 @@ mod water;
 mod water_probe;
 mod light_shafts;
 mod float_audit;
+mod graphics_audit;
 #[cfg(not(target_os = "android"))]
 mod coverage_probe;
 #[cfg(not(target_os = "android"))]
@@ -223,6 +224,10 @@ struct Car {
     decal_materials: std::collections::BTreeSet<String>,
     object_glass_materials: std::collections::BTreeSet<String>,
     object_two_sided_materials: std::collections::BTreeSet<String>,
+    /// Object materials whose original adds an emissive map (object_materials::emissive_materials).
+    object_emissive_materials: BTreeMap<String, object_materials::Emissive>,
+    /// `EmissiveTime` when the route loads (object_materials::emissive_time).
+    emissive_time: f32,
     center: Vec3,
     radius: f32,
     track: bool,
@@ -1056,6 +1061,8 @@ fn load_package(
         decal_materials,
         object_glass_materials: Default::default(),
         object_two_sided_materials: Default::default(),
+        object_emissive_materials: Default::default(),
+        emissive_time: 0.,
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
@@ -1266,6 +1273,19 @@ fn append_objects(
     };
     car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
     car.object_two_sided_materials.extend(object_materials::two_sided_materials(&tree)?);
+    // A shader table the constants reader rejects keeps the objects drawn
+    // without their maps, and says so.
+    match object_materials::emissive_materials(&tree) {
+        Ok(emissive) => car.object_emissive_materials.extend(emissive),
+        Err(error) => println!("object_emissive error={error}"),
+    }
+    let mode = grid_tools::time_of_day::Mode::for_route(root, route).unwrap_or(grid_tools::time_of_day::Mode::None);
+    let timeline = match mode {
+        grid_tools::time_of_day::Mode::Timeline => grid_tools::time_of_day::Timeline::load(root, route).ok().flatten(),
+        _ => None,
+    };
+    car.emissive_time =
+        object_materials::emissive_time(mode, timeline.as_ref(), grid_tools::time_of_day::day_fraction(0., None));
     let light_shafts = object_materials::light_shaft_materials(&tree)?;
     let mut light_shaft_draws = 0;
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
@@ -1854,6 +1874,8 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         decal_materials: Default::default(),
         object_glass_materials: Default::default(),
         object_two_sided_materials: Default::default(),
+        object_emissive_materials: Default::default(),
+        emissive_time: 0.,
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
@@ -2275,6 +2297,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut float_audit_out: Option<PathBuf> = None;
+    let mut graphics_audit_cfg: Option<graphics_audit::Config> = None;
+    let mut graphics_audit_points = 24usize;
     let mut body_contacts = profile.body_contacts.clone();
     let mut body_events = profile.body_events.clone();
     let mut deformation = profile.deformation.clone();
@@ -2433,6 +2457,19 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             "--float-audit" => {
                 float_audit_out = Some(args.next().ok_or("--float-audit needs local/OUT.tsv")?.into())
+            }
+            // docs/GRAPHICS_AUDIT.md: materials report plus a camera sweep along the route.
+            "--graphics-audit" => {
+                graphics_audit_cfg = Some(graphics_audit::Config {
+                    directory: args.next().ok_or("--graphics-audit needs local/DIR")?.into(),
+                    points: 0,
+                })
+            }
+            "--graphics-audit-points" => {
+                graphics_audit_points = args.next().ok_or("--graphics-audit-points needs N")?.parse()?;
+                if graphics_audit_points > 200 {
+                    return Err("--graphics-audit-points must be 0..200 (0: materials only)".into());
+                }
             }
             "--drive-ticks" => {
                 drive_ticks = Some(args.next().ok_or("missing tick count")?.parse::<u64>()?)
@@ -3715,6 +3752,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             _ => return Err("GRID_BASELINE_SPECULAR needs source or bevy".into()),
         };
         println!("baseline_specular phong={:?}", graphics.baseline_specular);
+        if mode != "off" {
+            graphics.emissive_unit = graphics::light_unit(&environment.lighting, graphics.sun_illuminance(), mode == "gamma");
+        }
     }
     if source_haze {
         if !graphics.enhanced() || (!track && !drive) {
@@ -4284,6 +4324,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if track && !collision && graphics.source_land {
         append_land(&root, &route, &player_car, &mut car)?;
     }
+    if let Some(config) = &mut graphics_audit_cfg {
+        config.points = graphics_audit_points;
+        if !track || collision || drive || output.is_none() {
+            return Err("--graphics-audit requires an offscreen --render of a track scene without driving".into());
+        }
+        graphics_audit::materials_report(&root, &route, &car.parts, &car.bindings, &car.textures, config)?;
+        if let Some(rays) = std::env::var_os("GRID_GRAPHICS_AUDIT_RAYS") {
+            graphics_audit::ray_report(&root, &route, &car.parts, Path::new(&rays), graphics.width, graphics.height)?;
+        }
+    }
     if let Some(out) = &float_audit_out {
         if !track || collision {
             return Err("--float-audit requires a track scene".into());
@@ -4609,6 +4659,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         )? {
             app.insert_resource(audit)
                 .add_systems(PostUpdate, route_audit::shoot.before(bevy::transform::TransformSystems::Propagate));
+        }
+        if let Some(config) = graphics_audit_cfg.take().filter(|c| c.points > 0) {
+            graphics_audit::install(&mut app, &root, &route, config)?;
         }
         if let Some(config) = motion_sequence {
             motion_capture::install(
@@ -5276,6 +5329,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         )
         .add_systems(Last, texture_upload::convert_added)
         .add_systems(Startup, setup)
+        .add_systems(Update, object_materials::update_night_emissive)
         .run();
     // Leaving an event started from the menu (event_menu::leave).
     if exit == AppExit::from_code(event_menu::BACK_TO_MENU as u8) {
@@ -5411,6 +5465,16 @@ fn setup(
     let decal_materials = car.decal_materials.clone();
     let object_glass_materials = car.object_glass_materials.clone();
     let object_two_sided_materials = car.object_two_sided_materials.clone();
+    // GRID_OBJECT_EMISSIVE=off leaves the maps out (matched before/after review).
+    let object_emissive_materials = if std::env::var("GRID_OBJECT_EMISSIVE").as_deref() == Ok("off") {
+        Default::default()
+    } else {
+        car.object_emissive_materials.clone()
+    };
+    let emissive_unit = graphics.emissive_unit.unwrap_or(graphics.sun_illuminance() / std::f32::consts::PI);
+    let emissive_time = car.emissive_time;
+    let mut emissive_drawn = 0;
+    let mut emissive_missing = std::collections::BTreeSet::new();
     // Breakable-prop pieces of one library draw share a mesh asset.
     // Keyed by source mesh, draw and material, plus a hash of the indices;
     // each key keeps every distinct index list.
@@ -5521,6 +5585,17 @@ fn setup(
                 object_materials::configure(name, &object_glass_materials, &mut material);
                 object_materials::configure_sidedness(name, &object_two_sided_materials, &mut material);
                 object_materials::configure_coverage(graphics.object_coverage, name, &mut material);
+                if let Some(emissive) = object_emissive_materials.get(name) {
+                    match texture_handles.get(&emissive.texture) {
+                        Some(texture) => {
+                            object_materials::configure_emissive(emissive, texture.clone(), emissive_unit, emissive_time, &mut material);
+                            emissive_drawn += 1;
+                        }
+                        None => {
+                            emissive_missing.insert(emissive.texture.clone());
+                        }
+                    }
+                }
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
                     && graphics.layered_car
@@ -5939,12 +6014,23 @@ fn setup(
         })
         .collect();
     commands.insert_resource(car_reflection_overlay::Reflective(reflective));
+    let night_emissive: Vec<_> = object_emissive_materials
+        .iter()
+        .filter(|(_, e)| e.night && !emissive_missing.contains(&e.texture))
+        .filter_map(|(name, e)| Some((material_handles.get(name)?.clone(), e.clone())))
+        .collect();
+    println!(
+        "object_emissive drawn={emissive_drawn} night={} emissive_time={emissive_time} unit={emissive_unit:.1} missing={emissive_missing:?}",
+        night_emissive.len()
+    );
+    commands.insert_resource(object_materials::NightEmissive { materials: night_emissive, unit: emissive_unit, time: emissive_time });
     if let Some(material) = material_handles.get("objects/start_lights").cloned()
         && start_light_images.iter().all(Option::is_some)
     {
         let textures: Vec<Handle<Image>> = start_light_images.into_iter().flatten().collect();
         if let Some(mut m) = materials.get_mut(&material) {
             m.emissive = LinearRgba::rgb(3., 3., 3.);
+            m.emissive_exposure_weight = 0.;
             m.emissive_texture = Some(textures[0].clone());
         }
         commands.insert_resource(StartLights {
@@ -6080,6 +6166,9 @@ fn setup(
         capture.target = Some(target);
     }
 }
+/// The crowd and graphics-audit camera sweeps that hold the capture open.
+type Sweeps<'w> = (Option<Res<'w, crowd_preview::Sweep>>, Option<Res<'w, graphics_audit::Sweep>>);
+
 // Separate ECS borrows for the bounded offscreen capture system.
 #[allow(clippy::too_many_arguments)]
 fn capture(
@@ -6090,7 +6179,7 @@ fn capture(
     benchmark: Option<Res<graphics_benchmark::Benchmark>>,
     (probe, warmup): (Option<Res<scene_probe::Cube>>, Option<Res<pipeline_warmup::Warmup>>),
     graphics: Res<graphics::Settings>,
-    (motion, crowd_sweep): (Option<Res<motion_capture::Motion>>, Option<Res<crowd_preview::Sweep>>),
+    (motion, (crowd_sweep, audit_sweep)): (Option<Res<motion_capture::Motion>>, Sweeps<'_>),
     motion_phase: Option<Res<skid_phase_ledger::Audit>>,
     smoke_ct: Option<Res<smoke_ct_neutral::Audit>>,
     (smoke_boundary, smoke_boundary_live): (Option<Res<smoke_boundary::Audit>>, Option<Res<smoke_boundary::LiveState>>),
@@ -6102,6 +6191,7 @@ fn capture(
 ) {
     capture.frames += 1;
     if crowd_sweep.as_ref().is_some_and(|s| s.failed()) { exit.write(AppExit::error()); return; }
+    if audit_sweep.as_ref().is_some_and(|s| s.failed()) { exit.write(AppExit::error()); return; }
     if smoke_boundary.as_ref().is_some_and(|audit| audit.failed())
         || smoke_boundary_live.as_ref().is_some_and(|state| state.failed()) {
         exit.write(AppExit::error()); return;
@@ -6123,6 +6213,7 @@ fn capture(
         limit
     };
     let limit = graphics.capture_timeout_seconds.map_or(limit, |extra| limit.max(extra));
+    let limit = audit_sweep.as_ref().map_or(limit, |s| limit + s.budget_seconds());
     if capture.frames == 1
         && (graphics.reflection_mode != 3 || probe.as_ref().is_some_and(|p| p.ready()))
     {
@@ -6188,6 +6279,7 @@ fn capture(
     if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
         && warmup.as_ref().is_none_or(|warm| warm.ready())
         && crowd_sweep.as_ref().is_none_or(|s| s.finished())
+        && audit_sweep.as_ref().is_none_or(|s| s.finished())
         && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
         && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
         && motion_phase.as_ref().is_none_or(|audit| audit.ready())
@@ -7991,6 +8083,8 @@ mod driving_tests {
                         decal_materials: Default::default(),
                         object_glass_materials: Default::default(),
                         object_two_sided_materials: Default::default(),
+                        object_emissive_materials: Default::default(),
+                        emissive_time: 0.,
                         center: car.center,
                         radius: car.radius,
                         track: true,

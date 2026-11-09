@@ -4,7 +4,7 @@
 //! Bevy PBR depth/separate-alpha remain adaptations, not original pass parity.
 use bevy::prelude::*;
 use grid_formats::pssg;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn glass_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeSet<String>> {
     let mut result = BTreeSet::new();
@@ -69,9 +69,172 @@ pub(crate) fn configure(name: &str, glass: &BTreeSet<String>, material: &mut Sta
     if glass.contains(name) { material.alpha_mode = AlphaMode::Blend; }
 }
 
+/// An object material's emissive map and the colour it is added with, in the
+/// original's shading units (light 1 = `backlight_suncolour`'s peak).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Emissive {
+    /// Texture key `container#name` as the diffuse bindings (`objectstextures.pssg#...`).
+    pub texture: String,
+    pub colour: [f32; 3],
+    /// `object_simple_night_emissive*`: `colour` is further scaled by the
+    /// lighting manager's `EmissiveTime` (emissive_time).
+    pub night: bool,
+}
+
+/// The object materials whose original pixel program adds `TEmissiveMap`
+/// (docs/GRAPHICS_AUDIT.md, "Emissive objects"; shaderpack disassembly):
+/// `object_simple_emissive*`, `object_lod_emissive*`: `out += E.rgb`, unscaled
+/// (`EmissiveMapScale` is not read); `object_animated_emissive*`:
+/// `E.rgb * EmissiveColour * EmissivePower` (the UV animation is not
+/// reproduced); `object_simple_night_emissive*`: `E.rgb * EmissiveTime *
+/// EmissivePower / 3` (EmissiveTime: 0x9790E0; the program also adds the map
+/// to the light through the street-light mask, unported). All add before fog.
+/// Without the map these screens and signs draw their near-black diffuse
+/// (Shibuya `big_screen_*`). `object_emissive_ripple*` (Shibuya water) is left
+/// out: its emissive only lights through the street-light mask.
+pub(crate) fn emissive_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeMap<String, Emissive>> {
+    use grid_formats::material;
+    let bindings = material::read_texture_bindings(tree)?;
+    let mut result = BTreeMap::new();
+    for s in material::read_constants(tree)? {
+        let group = s.group.strip_suffix(b".fx").unwrap_or(s.group);
+        let animated = group.starts_with(b"object_animated_emissive");
+        let night = group.starts_with(b"object_simple_night_emissive");
+        if !(animated || night || group.starts_with(b"object_simple_emissive") || group.starts_with(b"object_lod_emissive")) {
+            continue;
+        }
+        let Some(binding) = bindings
+            .iter()
+            .find(|b| b.shader == s.shader && b.sampler == b"TEmissiveMap")
+        else {
+            continue;
+        };
+        let power = s.values.get(&b"EmissivePower"[..]).and_then(|v| v.first().copied()).unwrap_or(1.);
+        let colour = if animated {
+            let c = s.values.get(&b"EmissiveColour"[..]).map(|v| v.as_slice()).unwrap_or(&[1., 1., 1.]);
+            std::array::from_fn(|i| c.get(i).copied().unwrap_or(1.) * power)
+        } else if night {
+            [power / 3.; 3]
+        } else {
+            [1.; 3]
+        };
+        result.insert(
+            format!("objects/{}", String::from_utf8_lossy(s.shader)),
+            Emissive {
+                texture: format!(
+                    "{}#{}",
+                    String::from_utf8_lossy(binding.container.unwrap_or(b"objectstextures.pssg")),
+                    String::from_utf8_lossy(binding.texture)
+                ),
+                colour,
+                night,
+            },
+        );
+    }
+    Ok(result)
+}
+
+/// Adds an object's emissive map. `unit` is Bevy radiance per original light
+/// unit before exposure (the baseline sun's lux over `backlight_suncolour`'s
+/// peak, over pi, as graphics::Phong), so the map adds what the original adds
+/// next to `albedo * light`; exposure applies to it like to lit surfaces.
+/// `time` is the current `EmissiveTime` (night materials only).
+pub(crate) fn configure_emissive(emissive: &Emissive, texture: Handle<Image>, unit: f32, time: f32, material: &mut StandardMaterial) {
+    material.emissive = emissive_colour(emissive, unit, time);
+    material.emissive_texture = Some(texture);
+    material.emissive_exposure_weight = 1.;
+}
+
+fn emissive_colour(emissive: &Emissive, unit: f32, time: f32) -> LinearRgba {
+    let scale = unit * if emissive.night { time.max(0.) } else { 1. };
+    let [r, g, b] = emissive.colour.map(|c| c.max(0.) * scale);
+    LinearRgba::rgb(r, g, b)
+}
+
+/// 0x9790E0 stores 3.0 (0x40400000) in forced night and as the start value.
+pub(crate) const FORCED_NIGHT_EMISSIVE_TIME: f32 = 3.;
+
+/// The original's `EmissiveTime` (0x9790E0, lighting manager +0x250): the
+/// daynight `emissive` curve in the timeline mode, 3.0 in forced night, else
+/// 0 (3.0 only after a forced-night route ran in the same session, a sticky
+/// carry-over not reproduced).
+pub(crate) fn emissive_time(mode: grid_tools::time_of_day::Mode, timeline: Option<&grid_tools::time_of_day::Timeline>, t: f64) -> f32 {
+    use grid_tools::time_of_day::Mode;
+    match mode {
+        Mode::Timeline => timeline.and_then(|tl| tl.value("emissive", t)).unwrap_or(FORCED_NIGHT_EMISSIVE_TIME),
+        Mode::ForcedNight => FORCED_NIGHT_EMISSIVE_TIME,
+        Mode::None => 0.,
+    }
+}
+
+/// The night-emissive materials and the `EmissiveTime` they show.
+#[derive(Resource)]
+pub(crate) struct NightEmissive {
+    pub materials: Vec<(Handle<StandardMaterial>, Emissive)>,
+    pub unit: f32,
+    pub time: f32,
+}
+
+/// Follows the Le Mans timeline's `emissive` curve as the clock runs.
+pub(crate) fn update_night_emissive(
+    event: Option<Res<crate::le_mans_event::LeMansEvent>>,
+    night: Option<ResMut<NightEmissive>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let (Some(event), Some(mut night)) = (event, night) else { return };
+    let time = emissive_time(event.mode, event.timeline.as_ref(), event.time_of_day);
+    if night.materials.is_empty() || (time - night.time).abs() < 1e-3 {
+        return;
+    }
+    night.time = time;
+    for (handle, emissive) in &night.materials {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.emissive = emissive_colour(emissive, night.unit, time);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn shibuya_big_screens_add_their_emissive_map() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let bytes = std::fs::read(std::path::Path::new(&root).join("tracks/japan/shibuya/objects.pssg")).unwrap();
+        let tree = pssg::read_tree(&bytes).unwrap();
+        let emissive = emissive_materials(&tree).unwrap();
+        let screens: Vec<_> = emissive.keys().filter(|k| k.starts_with("objects/big_screen")).collect();
+        assert!(!screens.is_empty(), "no big_screen emissive among {:?}", emissive.keys().take(8).collect::<Vec<_>>());
+        let mut material = StandardMaterial::default();
+        configure_emissive(&emissive[screens[0]], Handle::default(), 2., 0., &mut material);
+        assert!(material.emissive_texture.is_some());
+        assert_eq!(material.emissive_exposure_weight, 1.);
+        assert!(material.emissive.red > 0.);
+    }
+
+    #[test]
+    fn emissive_scales_the_colour_by_the_light_unit() {
+        let mut material = StandardMaterial::default();
+        let e = Emissive { texture: "t".into(), colour: [1., 0.5, -1.], night: false };
+        configure_emissive(&e, Handle::default(), 4., 0., &mut material);
+        assert_eq!(material.emissive, LinearRgba::rgb(4., 2., 0.));
+        // Night materials follow EmissiveTime: off by day, on at night.
+        let n = Emissive { night: true, ..e };
+        configure_emissive(&n, Handle::default(), 4., 0., &mut material);
+        assert_eq!(material.emissive, LinearRgba::rgb(0., 0., 0.));
+        configure_emissive(&n, Handle::default(), 4., 3., &mut material);
+        assert_eq!(material.emissive, LinearRgba::rgb(12., 6., 0.));
+    }
+
+    #[test]
+    fn emissive_time_follows_the_time_of_day_mode() {
+        use grid_tools::time_of_day::Mode;
+        assert_eq!(emissive_time(Mode::None, None, 0.5), 0.);
+        assert_eq!(emissive_time(Mode::ForcedNight, None, 0.5), 3.);
+        assert_eq!(emissive_time(Mode::Timeline, None, 0.5), 3.);
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn detroit_stand_glass_does_not_use_the_concrete_fence_cutout() {
