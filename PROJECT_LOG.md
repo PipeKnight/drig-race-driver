@@ -158,6 +158,8 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F761](log/F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
+| [F760](log/F0760.md) | 2026-11-09 | Graphics route audit: every raceable route, autopilot lap, chase and head-cam verdicts |
 | [F759](log/F0759.md) | 2026-11-09 | Circuit lap estimator 0x67FFB0 and marshal flags (rows 44, 47) |
 | [F758](log/F0758.md) | 2026-11-09 | Haruna's vertical streaks are light-shaft cards |
 | [F757](log/F0757.md) | 2026-11-09 | Car shadows in race views and Haruna's wet layer |
@@ -216,8 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F704](log/F0704.md) | 2026-11-03 | Playable e5e885362a85 for the PC (no APKs) |
 | [F703](log/F0703.md) | 2026-11-02 | Ornament level and draw-distance fades (owner pop report) |
 | [F702](log/F0702.md) | 2026-11-02 | Invisible barriers: anchor-only entity renderables draw their enclosing root's intact LOD on every route |
-| [F701](log/F0701.md) | 2026-11-03 | No AI countersteer threshold in the original; with the same inputs the port's car yaws less |
-| [F700](log/F0700.md) | 2026-11-02 | Publish macOS rebuild scripts and engine-only preview |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

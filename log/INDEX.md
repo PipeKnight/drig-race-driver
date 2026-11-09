@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F761](F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
+| [F760](F0760.md) | 2026-11-09 | Graphics route audit: every raceable route, autopilot lap, chase and head-cam verdicts |
 | [F759](F0759.md) | 2026-11-09 | Circuit lap estimator 0x67FFB0 and marshal flags (rows 44, 47) |
 | [F758](F0758.md) | 2026-11-09 | Haruna's vertical streaks are light-shaft cards |
 | [F757](F0757.md) | 2026-11-09 | Car shadows in race views and Haruna's wet layer |

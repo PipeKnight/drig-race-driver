@@ -245,6 +245,14 @@ impl Default for Settings {
 /// `sao_scale` of a lighting.xml without one (0x726A50 stores 0.9 at +0x298).
 pub const SAO_SCALE_DEFAULT: f32 = 0.9;
 
+/// What Bevy's ambient light gives a diffuse surface per unit of albedo,
+/// colour and brightness. pbr_ambient.wgsl lights it with
+/// `EnvBRDFApprox(albedo, F_AB(1, N.V))`; without Bevy's `dfg_lut` feature
+/// (this build enables none), `F_AB` at roughness 1 is (0.4524, 0.00005) for
+/// every N.V (`bevy_f_ab`). The fills divide by it, so that a shadowed
+/// surface gets the `albedo * (ambient + back / 2)` they mean (row 125).
+pub const BEVY_DIFFUSE_AMBIENT: f32 = 0.4524;
+
 /// lighting.xml's `backlight_backcolour` / `backlight_ambientcolour`, scaled
 /// against `backlight_suncolour`'s peak = the baseline sun's 18,000 lux.
 /// AUTHORED: as Bevy lights, `ambient + back / 2` is a uniform ambient and
@@ -274,10 +282,10 @@ impl Fill {
         let fill: [f32; 3] = std::array::from_fn(|i| ambient[i] + back[i] / 2.);
         let peak = |c: [f32; 3]| c.into_iter().fold(1e-6_f32, f32::max);
         // Bevy: a directional light gives albedo/pi * lux * N.L; the ambient
-        // gives albedo * colour * brightness.
+        // gives BEVY_DIFFUSE_AMBIENT * albedo * colour * brightness.
         Some(Self {
             ambient: fill.map(|c| c / peak(fill)),
-            ambient_brightness: peak(fill) * unit / std::f32::consts::PI,
+            ambient_brightness: peak(fill) * unit / std::f32::consts::PI / BEVY_DIFFUSE_AMBIENT,
             back: back.map(|c| c / peak(back)),
             back_lux: peak(back) / 2. * unit,
         })
@@ -738,6 +746,39 @@ fn configure_display(commands: &mut Commands, camera: Entity, settings: &Setting
 #[cfg(test)]
 mod graphics_settings_tests {
     use super::*;
+
+    /// Bevy 0.19 pbr_lighting.wgsl `F_AB` without `dfg_lut`.
+    fn bevy_f_ab(perceptual_roughness: f32, n_dot_v: f32) -> [f32; 2] {
+        let c0 = [-1.0, -0.0275, -0.572, 0.022];
+        let c1 = [1.0, 0.0425, 1.04, -0.04];
+        let r: [f32; 4] = std::array::from_fn(|i| perceptual_roughness * c0[i] + c1[i]);
+        let a004 = (r[0] * r[0]).min((-9.28 * n_dot_v).exp2()) * r[0] + r[1];
+        [(-1.04 * a004 + r[2]).max(0.00005), (1.04 * a004 + r[3]).max(0.00005)]
+    }
+
+    #[test]
+    fn fill_ambient_compensates_bevy_diffuse_ambient_response() {
+        // A diffuse surface's ambient is albedo * F_AB.x + F_AB.y, the same at every N.V.
+        for i in 0..=20 {
+            let [scale, bias] = bevy_f_ab(1.0, i as f32 / 20.);
+            assert!((scale - BEVY_DIFFUSE_AMBIENT).abs() < 1e-4, "{scale}");
+            assert!(bias <= 1e-4, "{bias}");
+        }
+        let mut lighting = grid_formats::track_environment::Lighting::default();
+        for (key, value) in [
+            ("backlight_suncolour", "1 1 1"),
+            ("backlight_backcolour", "0.2 0.2 0.2"),
+            ("backlight_ambientcolour", "0.1 0.1 0.1"),
+        ] {
+            lighting.params.insert(key.into(), value.into());
+        }
+        let fill = Fill::from_lighting(&lighting, 18_000., false).unwrap();
+        // Shadowed albedo-1 surface: Bevy's ambient response times the brightness
+        // is the original's (ambient + back / 2) in the sun's albedo/pi * lux units.
+        let shadowed = BEVY_DIFFUSE_AMBIENT * fill.ambient_brightness;
+        let original = (0.1 + 0.2 / 2.) * 18_000. / std::f32::consts::PI;
+        assert!((shadowed / original - 1.).abs() < 1e-5, "{shadowed} {original}");
+    }
 
     #[test]
     fn baseline_dlaa_prepares_only_main_view_without_enhanced_display_or_lighting() {

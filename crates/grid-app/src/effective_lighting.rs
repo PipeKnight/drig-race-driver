@@ -197,7 +197,9 @@ impl EffectiveLighting {
         };
         let out = AuthoredFill {
             ambient_rgb: normal(ambient),
-            ambient_brightness: peak(ambient) * units_per_coefficient / std::f32::consts::PI,
+            ambient_brightness: peak(ambient) * units_per_coefficient
+                / std::f32::consts::PI
+                / crate::graphics::BEVY_DIFFUSE_AMBIENT,
             back_rgb: normal(self.back),
             back_lux: peak(self.back) * units_per_coefficient / 2.,
         };

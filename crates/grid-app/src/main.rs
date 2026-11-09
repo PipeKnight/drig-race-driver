@@ -3679,12 +3679,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let sun = grid_formats::track_lighting::Sun { height_degrees, rotation_degrees };
         println!("baseline_sun angles={sun:?} direction_to_light={:?} source={} radiometry=baseline", sun.direction_to_light(), environment.lighting_file);
         graphics.saved_sun = Some(sun);
-        // GRID_BASELINE_FILL: linear (default), gamma or off (owner review).
+        // GRID_BASELINE_FILL: linear (default), gamma or off (owner review);
+        // linear-bevy is the fill before row 125, at Bevy's 0.45 ambient response.
         let mode = std::env::var("GRID_BASELINE_FILL").unwrap_or_else(|_| "linear".into());
         graphics.baseline_fill = match mode.as_str() {
             "off" => None,
             "linear" | "gamma" => graphics::Fill::from_lighting(&environment.lighting, graphics.sun_illuminance(), mode == "gamma"),
-            _ => return Err("GRID_BASELINE_FILL needs linear, gamma or off".into()),
+            "linear-bevy" => graphics::Fill::from_lighting(&environment.lighting, graphics.sun_illuminance(), false)
+                .map(|f| graphics::Fill { ambient_brightness: f.ambient_brightness * graphics::BEVY_DIFFUSE_AMBIENT, ..f }),
+            _ => return Err("GRID_BASELINE_FILL needs linear, gamma, linear-bevy or off".into()),
         };
         println!("baseline_fill mode={mode} fill={:?}", graphics.baseline_fill);
         // GRID_SURFACE_AO_SCALE=N overrides it for review (1: the earlier full AO).
