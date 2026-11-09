@@ -50,9 +50,7 @@ pub(crate) struct Drawn {
 }
 
 pub(crate) fn install(app: &mut App) {
-    if !crate::settings::diagnostics().window_shots.is_empty() {
-        app.add_systems(Last, window_shots);
-    }
+    install_window_shots(app);
     if !crate::settings::diagnostics().window_frames.is_empty() {
         app.add_systems(Last, window_frames.before(bevy::diagnostic::update_frame_count));
     }
@@ -112,6 +110,13 @@ pub(crate) fn drawn(drawn: Option<&mut Drawn>, frame: Frame) {
 fn presented(drawn: Option<Res<Drawn>>) {
     if let Some(drawn) = drawn {
         println!("present_done frame={} t_ms={:.3}", drawn.frame, now_ms());
+    }
+}
+
+/// `window_shots` alone, for the front-end screens (event menu, career).
+pub(crate) fn install_window_shots(app: &mut App) {
+    if !crate::settings::diagnostics().window_shots.is_empty() {
+        app.add_systems(Last, window_shots);
     }
 }
 

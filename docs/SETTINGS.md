@@ -30,7 +30,7 @@ Grammar:
 | `[drive]` | `enabled` | `on`/`off` | `--drive` |
 | | `laps` | `0` (free practice) or 1..99 | `--time-trial-laps` |
 | | `opponents` | `0` or 1..11 | `--opponents` |
-| | `grid_position` | `back` (after the opponents), `0` (pole, default) or 1..opponents+1 | `--grid-position` |
+| | `grid_position` | `front`, `middle`, `back` or `random` (the original's Race Options choice, docs/SCREEN_FLOW.md §3), `0` (pole, default) or 1..opponents+1 | `--grid-position` |
 | | `ai_characteristics` | private TSV; **used only when the file exists** | `--ai-characteristics` (must exist) |
 | | `discipline` | `race` (default) or `drift_battle` (needs `laps` and `opponents`; [DISCIPLINES.md](DISCIPLINES.md)) | `--discipline` |
 | `[private]` | `body_contacts` | `derive`, a CD01 path, or `off` | `--body-contacts PATH\|derive` |
@@ -43,7 +43,7 @@ Grammar:
 | | `speech`, `music` | 0..100, percent (default 100): the pause menu's Speech and Music Volume, saved for later (the port plays no speech or music yet) | none |
 | `[front_end]` | `show` | `on` (default) / `off`: the Race Options front end with Driver Aids before the race ([DRIVER_AIDS.md](DRIVER_AIDS.md)); never shown for scripted or autopilot runs | none |
 | `[front_end]` | `event_menu` | `on` (default) / `off`: Android starts in the event menu ([EVENT_MENU.md](EVENT_MENU.md)); off = the old direct start. The desktop opens the menu with `--menu` only | none |
-| `[event]` | `type`, `route`, `car`, `laps`, `opponents`, `time`, `direction` | the event menu's last choice, written by the menu and read only by it ([EVENT_MENU.md](EVENT_MENU.md)) | none |
+| `[event]` | `type`, `route`, `car`, `laps`, `opponents`, `time`, `direction`, `difficulty`, `grid` | the event menu's last choice, written by the menu and read only by it ([EVENT_MENU.md](EVENT_MENU.md)) | none |
 | `[osd]` | `lap_timer`, `position`, `minimap`, `dials` | `on` (default) / `off`: the pause menu's Screen Setup, the HUD's lap group, race position, minimap and dial (docs/RACE_HUD.md) | none |
 | `[osd]` | `fps` | `on` / `off`: frame-rate counter at the top (FPS, mean and worst frame time of the last second) and one `frame_stats` log line per second; default `on` on Android, `off` on the desktop, where F9 toggles it ([ANDROID.md](ANDROID.md) "Frame rate") | none |
 | `[video]` | `render_height` | `auto`, `native` or rows 240..4320: the 3D view renders at most this many rows (window aspect) and is stretched over the window; HUD, menus and touch zones stay at the window's resolution (F556); never above native. `auto`: dynamic rows by the frame time (F556, F559, F571): 480-720 with the mobile preset; on the desktop from native down to half of native, rounded up to 24 rows, starting and staying at native while frames are on time (F573); on a high-DPI window (scale factor above 1) the ceiling is at most 1440 rows, upscaled (F642). Default `auto` on Android (mobile preset) and macOS (F642), `native` on other desktops ([ANDROID.md](ANDROID.md) "Frame rate") | none |

@@ -11,6 +11,9 @@
 //!   cars it can race; Race and Time Trial (the launchers' events) are
 //!   AUTHORED entries. Opponents and Direction rows are AUTHORED; the
 //!   panel is the pause menu's AUTHORED look.
+//! - Difficulty and Grid Position are the original's Race Options items
+//!   (`f_m_event_options` [D], docs/SCREEN_FLOW.md section 3). DRIG shows
+//!   them here, before the race process builds its grid.
 //! - The choice is saved in `<data dir>/settings.ini` `[event]` (read only
 //!   here, so the launchers' profiles are unaffected) and written as a
 //!   settings profile `<data dir>/event-menu.ini` equal to the launchers'
@@ -23,6 +26,7 @@
 //!   from the menu (results Continue/Exit, Retire, Finish Test Drive) returns
 //!   here, as the original's `end_race_finish_race` returns to its front end.
 use crate::pause_menu::{Labels, Nav, Repeat, View};
+use crate::settings::GridOption;
 use bevy::prelude::*;
 use grid_tools::car::Car;
 use grid_tools::route;
@@ -105,7 +109,7 @@ pub struct EventType {
 }
 
 /// What the user picked (`[event]` keys).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Choice {
     pub key: String,
     pub route: String,
@@ -114,7 +118,38 @@ pub struct Choice {
     pub opponents: usize,
     pub minutes: u32,
     pub subroute: u8,
+    /// Race Options Difficulty: the star level, 0 Basic .. 4 Extreme
+    /// (`difficulty_1..5` [D]); the AI's `[ai] difficulty` is
+    /// `flashback::AI_RATIOS[level]`.
+    pub difficulty: usize,
+    /// Race Options Grid Position (default Random, `default_index=3` [D]).
+    pub grid: GridOption,
 }
+
+impl Default for Choice {
+    fn default() -> Self {
+        Self {
+            key: String::new(),
+            route: String::new(),
+            car: String::new(),
+            laps: 0,
+            opponents: 0,
+            minutes: 0,
+            subroute: 0,
+            difficulty: NORMAL,
+            grid: GridOption::default(),
+        }
+    }
+}
+
+/// The settings values of the star levels; the screen's labels are
+/// `difficulty_1..6` (Basic, Normal, Serious, Savage, Extreme, Ninja) [D].
+const DIFFICULTIES: [&str; 6] = ["basic", "normal", "serious", "savage", "extreme", "ninja"];
+/// Normal, the launchers' `[ai] difficulty = 0.606` (AI_RATIOS[1]).
+const NORMAL: usize = 1;
+/// Levels offered: the original lists `difficulty_1..5`, and Ninja only when
+/// unlocked (`unlockedDifficulty` [D]); that unlock is not ported.
+const OFFERED_DIFFICULTIES: usize = 5;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Catalog {
@@ -488,14 +523,16 @@ impl EventType {
             } else {
                 0
             },
+            // Race Options carry over between types.
+            difficulty: old.difficulty.min(OFFERED_DIFFICULTIES - 1),
+            grid: old.grid,
         }
     }
 }
 
-const AI: &str = "[ai]\ndifficulty = 0.606\ncatchup = on\nchoreographer = on\nmistakes = on\n";
+const AI: &str = "catchup = on\nchoreographer = on\nmistakes = on\n";
 /// Touge formats use the `_touge` catch-up configs (0x5D5530, F439).
-const AI_TOUGE: &str =
-    "[ai]\ndifficulty = 0.606\ncatchup = touge\nchoreographer = on\nmistakes = on\n";
+const AI_TOUGE: &str = "catchup = touge\nchoreographer = on\nmistakes = on\n";
 const PRIVATE: &str =
     "[private]\nbody_contacts = derive\nbody_events = derive\ndeformation = derive\n";
 
@@ -504,7 +541,10 @@ const PRIVATE: &str =
 pub fn profile(kind: Kind, c: &Choice) -> String {
     let mut game = format!("[game]\nroute = {}\ncar = {}\n", c.route, c.car);
     let mut drive = String::from("[drive]\nenabled = on\n");
-    let field = "grid_position = back\nai_characteristics = ai-driver-characteristics.tsv\n";
+    let characteristics = "ai_characteristics = ai-driver-characteristics.tsv\n";
+    // The Race Options grid choice; a touge pair starts the player behind.
+    let field = format!("grid_position = {}\n{characteristics}", c.grid.key());
+    let touge_field = format!("grid_position = back\n{characteristics}");
     let ai = match kind {
         Kind::Race => {
             drive += &format!("laps = {}\nopponents = {}\n{field}", c.laps, c.opponents);
@@ -532,23 +572,23 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
         }
         Kind::DriftGp => {
             drive += &format!("discipline = drift_grand_prix\nlaps = {}\n", c.laps);
-            "[ai]\ndifficulty = 0.606\n"
+            ""
         }
         Kind::Freestyle => {
             drive += &format!(
                 "discipline = drift_freestyle\ntime_limit = {}\n",
                 c.minutes * 60
             );
-            "[ai]\ndifficulty = 0.606\n"
+            ""
         }
         Kind::Touge => {
             // The opponent drives the player's car (the default field).
             game += &format!("subroute = {}\n", c.subroute);
-            drive += &format!("laps = 1\nopponents = 1\n{field}");
+            drive += &format!("laps = 1\nopponents = 1\n{touge_field}");
             AI_TOUGE
         }
         Kind::ProTouge => {
-            drive += &format!("discipline = pro_touge\nlaps = 1\nopponents = 1\n{field}");
+            drive += &format!("discipline = pro_touge\nlaps = 1\nopponents = 1\n{touge_field}");
             AI_TOUGE
         }
         Kind::LeMans => {
@@ -574,8 +614,24 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
             AI
         }
     };
+    let ai = match kind {
+        Kind::TimeTrial => String::new(),
+        _ => format!(
+            "[ai]\ndifficulty = {}\n{ai}",
+            grid_tools::flashback::AI_RATIOS[c.difficulty.min(DIFFICULTIES.len() - 1)]
+        ),
+    };
     format!(
         "# Written by the event menu (docs/EVENT_MENU.md); chosen again in the menu.\n{game}{drive}{ai}{PRIVATE}"
+    )
+}
+
+/// Whether a type offers Grid Position: the events with a starting grid of
+/// the player's choice (a touge pair starts the player behind).
+fn has_grid(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Race | Kind::Series | Kind::DriftBattle | Kind::LeMans | Kind::Demolition
     )
 }
 
@@ -599,6 +655,11 @@ pub fn keys(c: &Choice) -> Vec<(&'static str, Option<String>)> {
                 .into(),
             ),
         ),
+        (
+            "difficulty",
+            Some(DIFFICULTIES[c.difficulty.min(DIFFICULTIES.len() - 1)].into()),
+        ),
+        ("grid", Some(c.grid.key().into())),
     ]
 }
 
@@ -614,6 +675,12 @@ pub fn saved(event: &[(String, String)]) -> Choice {
             "opponents" => c.opponents = value.parse().unwrap_or(0),
             "time" => c.minutes = value.parse().unwrap_or(0),
             "direction" => c.subroute = u8::from(value == "uphill"),
+            "difficulty" => {
+                if let Some(level) = DIFFICULTIES.iter().position(|d| value == d) {
+                    c.difficulty = level;
+                }
+            }
+            "grid" => c.grid = GridOption::parse(value).unwrap_or_default(),
             _ => {}
         }
     }
@@ -630,6 +697,8 @@ pub enum Row {
     Time,
     Opponents,
     Direction,
+    Difficulty,
+    Grid,
     Continue,
 }
 
@@ -685,7 +754,8 @@ impl Menu {
     }
 
     /// The original's button order (discipline, car, location, route,
-    /// laps), then the AUTHORED rows and Continue.
+    /// laps), then the AUTHORED rows, the original's Race Options
+    /// (difficulty, grid position) and Continue.
     pub fn rows(&self) -> Vec<Row> {
         let t = self.kind();
         let mut rows = vec![Row::Discipline, Row::Car, Row::Location, Row::Route];
@@ -700,6 +770,12 @@ impl Menu {
         }
         if t.directions {
             rows.push(Row::Direction);
+        }
+        if t.kind != Kind::TimeTrial {
+            rows.push(Row::Difficulty);
+        }
+        if has_grid(t.kind) {
+            rows.push(Row::Grid);
         }
         rows.push(Row::Continue);
         rows
@@ -766,6 +842,11 @@ impl Menu {
                 c.opponents = step_in(&list, &c.opponents, right);
             }
             Row::Direction => c.subroute = 1 - c.subroute.min(1),
+            Row::Difficulty => {
+                let levels: Vec<usize> = (0..OFFERED_DIFFICULTIES).collect();
+                c.difficulty = step_in(&levels, &c.difficulty, right);
+            }
+            Row::Grid => c.grid = step_in(&GridOption::MENU, &c.grid, right),
             Row::Continue => {}
         }
     }
@@ -859,13 +940,24 @@ impl Menu {
                         }
                         .into(),
                     ),
+                    Row::Difficulty => (
+                        l("event_options_difficulty_setting_title", "Difficulty"),
+                        l(
+                            &format!("difficulty_{}", c.difficulty + 1),
+                            DIFFICULTIES[c.difficulty.min(DIFFICULTIES.len() - 1)],
+                        ),
+                    ),
+                    Row::Grid => (
+                        l("event_options_grid_position_title", "Grid Position"),
+                        l(c.grid.label_id(), c.grid.key()),
+                    ),
                     Row::Continue => (l("raceday_buttontext_to_race", "Continue"), String::new()),
                 };
                 (name, value, true, i == self.cursor)
             })
             .collect();
         let mut help = String::from(
-            "Up/Down choose, Left/Right change, Select on Continue starts the event; Race Options follow.",
+            "Up/Down choose, Left/Right change, Select on Continue starts the event; Driver Assists follow.",
         );
         if t.experimental {
             help += " Experimental: some cars of this series cannot race yet.";
@@ -903,6 +995,22 @@ pub fn leave(exit: &mut MessageWriter<AppExit>, from_menu: bool) {
     exit.write(AppExit::from_code(BACK_TO_MENU as u8));
 }
 
+/// Set by a launcher's race left to the menu (`run` in main.rs): `main`
+/// then opens the event menu in this process, once the race app is gone.
+pub static MENU_AFTER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The menu's flags after a launcher's race: the launcher's, without its
+/// race profile (the menu reads its own saved choice).
+#[cfg(not(target_os = "android"))]
+pub(crate) fn launcher_menu_flags(args: &[String]) -> Vec<String> {
+    passed_on(args)
+        .chunks(2)
+        .filter(|pair| pair[0] != "--settings")
+        .flatten()
+        .cloned()
+        .collect()
+}
+
 /// The flags a supervised child gets from the supervisor's own arguments.
 #[cfg(not(target_os = "android"))]
 pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
@@ -925,8 +1033,10 @@ pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
 
 /// `grid-app --menu ...` on the desktop: the menu process, then the chosen
 /// race, and again while the race ends with "back to menu". Each is a new
-/// process because winit allows one event loop per process. Returns the
-/// exit code.
+/// process because winit allows one event loop per process; the leaving one
+/// stays black with "Loading" until the next one shows
+/// (`transition::run_supervised`, docs/SCREEN_FLOW.md). Returns the exit
+/// code.
 #[cfg(not(target_os = "android"))]
 pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
     let exe = std::env::current_exe()?;
@@ -937,31 +1047,48 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         .find(|w| w[0] == "--data-dir")
         .map(|w| PathBuf::from(&w[1]))
         .unwrap_or_else(crate::settings::default_data_dir);
-    loop {
-        let menu = std::process::Command::new(&exe)
-            .arg("--menu-screen")
-            .args(&flags)
-            .status()?;
-        if menu.code() != Some(MENU_GO) {
-            return Ok(menu.code().unwrap_or(1));
+    let menu = |round: u32| {
+        let mut menu = std::process::Command::new(&exe);
+        menu.arg("--menu-screen").args(&flags).env(ROUND_ENV, round.to_string());
+        menu
+    };
+    let mut round = 0;
+    let code = crate::transition::run_supervised(menu(0), None, |code| match code {
+        MENU_GO => {
+            // An experimental series runs with the gate (none since F420).
+            let mut race = std::process::Command::new(&exe);
+            if experimental(&dir) {
+                race.env("GRID_SERIES_EXPERIMENTAL", "1");
+            }
+            race.args(&flags)
+                .arg("--settings")
+                .arg(dir.join(PROFILE))
+                .arg("--from-menu");
+            if let Some(ticks) = auto_ticks() {
+                race.args(["--drive-ticks", &ticks.to_string()]);
+            }
+            Some(race)
         }
-        // An experimental series runs with the gate (none since F420).
-        let mut race = std::process::Command::new(&exe);
-        if experimental(&dir) {
-            race.env("GRID_SERIES_EXPERIMENTAL", "1");
+        BACK_TO_MENU => {
+            round += 1;
+            Some(menu(round))
         }
-        race.args(&flags)
-            .arg("--settings")
-            .arg(dir.join(PROFILE))
-            .arg("--from-menu");
-        if let Some(ticks) = auto_ticks() {
-            race.args(["--drive-ticks", &ticks.to_string()]);
-        }
-        let race = race.status()?;
-        if race.code() != Some(BACK_TO_MENU) {
-            return Ok(race.code().unwrap_or(1));
-        }
-    }
+        _ => None,
+    })?;
+    Ok(code)
+}
+
+/// The menu's round under the supervisor: 0, then one more after each race
+/// (`GRID_MENU_AUTO_RACES`).
+#[cfg(not(target_os = "android"))]
+const ROUND_ENV: &str = "GRID_MENU_ROUND";
+
+/// Diagnostics `GRID_MENU_AUTO`: whether this menu presses Continue (its
+/// round is below `GRID_MENU_AUTO_RACES`, default 1) or Back (quits).
+#[cfg(not(target_os = "android"))]
+fn auto_continue() -> bool {
+    let number = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u32>().ok());
+    number(ROUND_ENV).unwrap_or(0) < number("GRID_MENU_AUTO_RACES").unwrap_or(1)
 }
 
 /// Diagnostics `GRID_MENU_AUTO=TICKS` (unattended checks, desktop; the build
@@ -1079,15 +1206,22 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let data = crate::settings::data_dir();
     let mut app = App::new();
     app.add_plugins(crate::with_profile(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
+        // Centred like a supervised race window, or where the last race's
+        // window was (transition::window).
+        primary_window: Some(crate::transition::window(Window {
             title: "GRID Reassembly".into(),
             resolution: (1280, 800).into(),
+            position: bevy::window::WindowPosition::Centered(bevy::window::MonitorSelection::Primary),
             present_mode: profile.present_mode.unwrap_or_default(),
             ..default()
-        }),
+        }, true)),
         ..default()
     })));
     crate::ui_font::install(&mut app);
+    // The original's overlay fade (docs/SCREEN_FLOW.md): the menu fades in
+    // from black, and out to "Loading" on Continue.
+    crate::transition::install(&mut app, labels.get("loading"), crate::transition::Start::Screen);
+    crate::frame_pacing::install_window_shots(&mut app);
     #[cfg(target_os = "android")]
     crate::android_display::install(&mut app, profile.video_refresh_hz());
     crate::input::install(&mut app, actions);
@@ -1128,8 +1262,8 @@ struct RowText(usize);
 struct Help;
 
 /// The most rows a type shows (Discipline..Route, Laps, Time, Opponents,
-/// Direction, Continue).
-const ROWS: usize = 9;
+/// Direction, Difficulty, Grid Position, Continue).
+const ROWS: usize = 11;
 
 /// The pause menu's panel look (AUTHORED, docs/PAUSE_MENU.md), full screen.
 fn spawn(mut commands: Commands) {
@@ -1198,10 +1332,10 @@ fn update(
     clicks: Query<(&Interaction, &RowText), Changed<Interaction>>,
     saving: Res<Saving>,
     time: Res<Time<Real>>,
-    mut exit: MessageWriter<AppExit>,
+    mut fade: ResMut<crate::transition::Fade>,
     mut done: Local<bool>,
 ) {
-    if *done {
+    if *done || fade.leaving() {
         return;
     }
     let mut repeat = menu.repeat;
@@ -1213,8 +1347,12 @@ fn update(
     // start (each menu is its own process).
     #[cfg(not(target_os = "android"))]
     if auto_ticks().is_some() && time.elapsed_secs() >= 3. {
-        menu.cursor = menu.rows().len() - 1;
-        nav.select = true;
+        if auto_continue() {
+            menu.cursor = menu.rows().len() - 1;
+            nav.select = true;
+        } else {
+            nav.back = true;
+        }
     }
     let mut command = menu.step(nav);
     for (interaction, row) in &clicks {
@@ -1238,10 +1376,13 @@ fn update(
                         choice.minutes,
                         choice.subroute
                     );
-                    #[cfg(target_os = "android")]
-                    crate::android::relaunch();
-                    #[cfg(not(target_os = "android"))]
-                    exit.write(AppExit::from_code(MENU_GO as u8));
+                    // The original's `fade_to_black_quickest`, then the
+                    // loading overlay until the race shows (transition.rs).
+                    fade.leave(
+                        crate::transition::Next::Code(MENU_GO as u8),
+                        crate::transition::Speed::Quick,
+                        "menu_go",
+                    );
                 }
                 Err(error) => {
                     *done = false;
@@ -1256,7 +1397,11 @@ fn update(
             {
                 *done = true;
                 log_line!("drive_event_menu version=1 event=quit");
-                exit.write(AppExit::Success);
+                fade.leave(
+                    crate::transition::Next::Close,
+                    crate::transition::Speed::Quick,
+                    "menu_quit",
+                );
             }
         }
         None => {}
@@ -1496,6 +1641,8 @@ mod tests {
                 Row::Route,
                 Row::Laps,
                 Row::Opponents,
+                Row::Difficulty,
+                Row::Grid,
                 Row::Continue
             ]
         );
@@ -1512,7 +1659,44 @@ mod tests {
         m.step(press(|n| n.right = true));
         assert_eq!(m.choice.key, "time_trial");
         assert!(!m.rows().contains(&Row::Opponents));
+        assert!(!m.rows().contains(&Row::Difficulty) && !m.rows().contains(&Row::Grid));
         assert_eq!(m.step(press(|n| n.back = true)), Some(Command::Quit));
+    }
+
+    #[test]
+    fn race_options_default_and_write_the_ai_and_grid() {
+        let mut m = Menu::new(catalog(), &Choice::default());
+        // Normal and Random [D]; the labels come from the language file.
+        assert_eq!((m.choice.difficulty, m.choice.grid), (NORMAL, GridOption::Random));
+        let s = parsed(&profile(Kind::Race, &m.choice));
+        assert_eq!(s.grid_option, Some(GridOption::Random));
+        m.change(Row::Difficulty, true);
+        m.change(Row::Grid, true);
+        assert_eq!((m.choice.difficulty, m.choice.grid), (2, GridOption::Front));
+        let text = profile(Kind::Race, &m.choice);
+        assert!(text.contains("difficulty = 0.706\n"), "{text}");
+        assert!(text.contains("grid_position = front\n"), "{text}");
+        // The screen's order wraps: Front, Middle, Back, Random.
+        for want in [GridOption::Middle, GridOption::Back, GridOption::Random] {
+            m.change(Row::Grid, true);
+            assert_eq!(m.choice.grid, want);
+        }
+        // Ninja stays locked.
+        for _ in 0..OFFERED_DIFFICULTIES {
+            m.change(Row::Difficulty, true);
+        }
+        assert_eq!(m.choice.difficulty, 2);
+        m.change(Row::Difficulty, false);
+        m.change(Row::Difficulty, false);
+        m.change(Row::Difficulty, false);
+        assert_eq!(m.choice.difficulty, OFFERED_DIFFICULTIES - 1);
+        // Both carry over to another type and through the saved keys.
+        m.change(Row::Discipline, true);
+        assert_eq!(m.choice.difficulty, OFFERED_DIFFICULTIES - 1);
+        let saved_text = crate::settings::with_keys("", "event", &keys(&m.choice));
+        let mut s = crate::settings::Settings::new();
+        s.apply(&saved_text, Path::new("d")).unwrap();
+        assert_eq!(saved(&s.event), m.choice);
     }
 
     #[test]
@@ -1523,6 +1707,8 @@ mod tests {
         assert_ne!(m.choice.route, start);
         m.change(Row::Location, false);
         assert_eq!(m.choice.route, start);
+        // The launchers start from the back.
+        m.choice.grid = GridOption::Back;
         let menu = parsed(&profile(Kind::Race, &m.choice));
         assert_eq!(menu, launcher("race").0);
     }
@@ -1602,6 +1788,9 @@ mod tests {
                 opponents: ini.opponents.unwrap_or(0),
                 minutes: ini.time_limit.map_or(0, |s| (s / 60.).round() as u32),
                 subroute: ini.subroute.unwrap_or(0),
+                // The launchers: Normal, from the back.
+                difficulty: NORMAL,
+                grid: GridOption::Back,
             };
             assert!(
                 t.layouts.iter().any(|l| l.route == choice.route),
@@ -1633,6 +1822,8 @@ mod tests {
             opponents: 0,
             minutes: 0,
             subroute: 1,
+            difficulty: 3,
+            grid: GridOption::Middle,
         };
         let text = crate::settings::with_keys("# mine\n[osd]\nfps = on\n", "event", &keys(&c));
         let mut s = crate::settings::Settings::new();

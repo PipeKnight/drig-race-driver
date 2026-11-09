@@ -765,18 +765,20 @@ pub fn update(
     mut actions: ResMut<Actions>,
     mut shifts: ResMut<ShiftQueue>,
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
-    (time, mut post, front, from_menu): (
+    (time, mut post, front, mut leave): (
         Option<Res<Time<Real>>>,
         Option<ResMut<crate::post_race::PostRace>>,
         Option<Res<crate::front_end::FrontEnd>>,
-        Option<Res<crate::event_menu::FromMenu>>,
+        crate::transition::Leave,
     ),
-    mut exit: MessageWriter<AppExit>,
     mut replay: Option<ResMut<crate::replay::Replay>>,
 ) {
     // A replay owns the input; after it the menu shows again. The front end
-    // owns it before the race.
-    if replay.as_ref().is_some_and(|r| r.owns_input()) || front.is_some_and(|f| f.open) {
+    // owns it before the race. Nothing more after leaving (the fade runs).
+    if replay.as_ref().is_some_and(|r| r.owns_input())
+        || front.is_some_and(|f| f.open)
+        || leave.leaving()
+    {
         return;
     }
     // A restart from elsewhere (R) closes the menu.
@@ -828,12 +830,12 @@ pub fn update(
             driving.paused = false;
             match post.as_mut() {
                 Some(post) => post.on_retire(),
-                None => crate::event_menu::leave(&mut exit, from_menu.is_some()),
+                None => leave.event(),
             }
         }
         Command::Exit => {
             log("finish-test-drive");
-            crate::event_menu::leave(&mut exit, from_menu.is_some());
+            leave.event();
         }
         Command::InstantReplay => {
             log("instant-replay");

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F756](F0756.md) | 2026-11-09 | Front-end screen transitions, launcher races back to the menu, Race Options difficulty and grid |
 | [F755](F0755.md) | 2026-11-09 | AI retire 1:1: stuck latch, Racing gate, terminal damage stops then leaves |
 | [F754](F0754.md) | 2026-11-09 | Water probes at authored markers; original shadow depth offsets and disc radii |
 | [F753](F0753.md) | 2026-11-09 | AI yield full brake when sliding and backwards brake (0x78990B, 0x7764C0); first-corner matrix |

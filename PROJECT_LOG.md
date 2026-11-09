@@ -42,6 +42,9 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   Demolition Derby; Le Mans 24 Hours (race type 3, F429/F430). Circuit series F401/F457.
 - Career (GRID World) screen with events, fields, payouts, head-to-heads, driver offers, eBay Motors,
   Flashback Bonus, Le Mans selection events and class positions (F424–F522).
+- Front end: event menu (Race Day) with Race Options Difficulty and Grid Position; every screen
+  fades through black with "Loading" and hands off to the next window without a desktop gap;
+  launcher races return to the menu (F756, docs/SCREEN_FLOW.md). The career screen does not use it yet.
 - Open: career run 13 (Le Mans) not rerun after F530; Okutama does not load (row 82); retire timer and
   marshal flags (rows 45–47); Drift Battle stand-in cars (row 52).
 
@@ -155,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F756](log/F0756.md) | 2026-11-09 | Front-end screen transitions, launcher races back to the menu, Race Options difficulty and grid |
 | [F755](log/F0755.md) | 2026-11-09 | AI retire 1:1: stuck latch, Racing gate, terminal damage stops then leaves |
 | [F754](log/F0754.md) | 2026-11-09 | Water probes at authored markers; original shadow depth offsets and disc radii |
 | [F753](log/F0753.md) | 2026-11-09 | AI yield full brake when sliding and backwards brake (0x78990B, 0x7764C0); first-corner matrix |
@@ -214,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F699](log/F0699.md) | 2026-11-02 | Black drops and floating grass: god-ray cards not drawn as objects, land on every preset, water counted (rows 102, 107, 108) |
 | [F698](log/F0698.md) | 2026-11-02 | Car glass: transparent items sort by their current position; the windscreen no longer shows over the rear window |
 | [F697](log/F0697.md) | 2026-11-02 | Body events after a wake: the solved contact count, not the sum of both collections (Donington chaos world error) |
-| [F696](log/F0696.md) | 2026-11-02 | Playable a8cef46b9294 with DLAA and APKs a8cef46b9294 |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -338,8 +338,9 @@ pub struct Settings {
     pub time_limit: Option<f64>,
     pub opponents: Option<usize>,
     pub grid_position: Option<usize>,
-    /// `grid_position = back`: the last slot, after the opponents.
-    pub grid_back: bool,
+    /// `grid_position = front|middle|back|random`: the original's Race
+    /// Options grid choice, placed when the field is known.
+    pub grid_option: Option<GridOption>,
     pub ai_characteristics: Option<PathBuf>,
     /// `[drive] discipline`: `race` (default), `drift_battle`, `drift_grand_prix`
     /// or `drift_freestyle`
@@ -394,7 +395,8 @@ pub struct Settings {
     /// (docs/DRIVER_AIDS.md); default on.
     pub front_end: Option<bool>,
     /// `[front_end] event_menu`: Android starts in the event menu
-    /// (event_menu.rs); default on. The desktop opens it with `--menu`.
+    /// (event_menu.rs); default on. The desktop opens it with `--menu`,
+    /// and after a launcher race unless this is off (docs/SCREEN_FLOW.md).
     pub event_menu: Option<bool>,
     /// `[event]`: the event menu's last choice (`type`, `route`, `car`,
     /// `laps`, `opponents`, `time`, `direction`), read only by the menu.
@@ -621,11 +623,13 @@ impl Settings {
                     self.opponents = (n > 0).then_some(n);
                 }
                 ("drive", "grid_position") => {
-                    self.grid_back = value.eq_ignore_ascii_case("back");
-                    self.grid_position = if self.grid_back || value == "0" {
+                    self.grid_option = GridOption::parse(value);
+                    self.grid_position = if self.grid_option.is_some() || value == "0" {
                         None
                     } else {
-                        Some(count(value).map_err(at)?)
+                        Some(count(value).map_err(|_| {
+                            at("`grid_position` needs a slot number, front, middle, back or random".into())
+                        })?)
                     };
                 }
                 ("drive", "discipline") => match value.to_ascii_lowercase().as_str() {
@@ -721,7 +725,8 @@ impl Settings {
                 }
                 (
                     "event",
-                    "type" | "route" | "car" | "laps" | "opponents" | "time" | "direction",
+                    "type" | "route" | "car" | "laps" | "opponents" | "time" | "direction" | "difficulty"
+                    | "grid",
                 ) => {
                     self.event.retain(|(k, _)| *k != key);
                     self.event.push((key.to_string(), value.to_string()));
@@ -1162,6 +1167,75 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
     Ok(settings)
 }
 
+/// The player's grid choice of the original's Race Options (`gridpos`,
+/// `IBGridPositionSelect`, states.xml `f_m_event_options` [D]). The screen
+/// lists Front, Middle, Back, Random (0x5035D0 [D]) with Random the default
+/// (`default_index=3` [D]); the race reads the option in the encoding of
+/// 0x5D7630 -> 0x5B60F0 (docs/SERIES.md "Grid", [V]): 0 front, 1 back,
+/// 2 middle, 3 random. The menu index -> option mapping by name is [I].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GridOption {
+    Front,
+    Back,
+    Middle,
+    #[default]
+    Random,
+}
+
+impl GridOption {
+    /// The screen's order [D].
+    pub const MENU: [GridOption; 4] = [Self::Front, Self::Middle, Self::Back, Self::Random];
+
+    /// The original's option value (0x5B60F0, `lemans_grid`).
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Front => 0,
+            Self::Back => 1,
+            Self::Middle => 2,
+            Self::Random => 3,
+        }
+    }
+
+    /// The settings value (`[drive] grid_position`).
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Front => "front",
+            Self::Back => "back",
+            Self::Middle => "middle",
+            Self::Random => "random",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::MENU
+            .into_iter()
+            .find(|o| value.eq_ignore_ascii_case(o.key()))
+    }
+
+    /// The language id of its label (`event_options_grid_position_*` [D]).
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Front => "event_options_grid_position_front",
+            Self::Back => "event_options_grid_position_back",
+            Self::Middle => "event_options_grid_position_middle",
+            Self::Random => "event_options_grid_position_random",
+        }
+    }
+
+    /// The player's slot (0-based) on a grid of `cars` (0x5B60F0 [V]):
+    /// back n - 1, middle n / 2, random `draw(n) % n`, else 0; the other
+    /// cars fill the remaining slots in order.
+    pub fn slot(self, cars: usize, draw: impl FnOnce(u32) -> u32) -> usize {
+        let cars = cars.max(1);
+        match self {
+            Self::Front => 0,
+            Self::Back => cars - 1,
+            Self::Middle => cars / 2,
+            Self::Random => draw(cars as u32) as usize % cars,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1197,6 +1271,28 @@ tick_delay_ms = 20
 "#;
 
     #[test]
+    fn grid_options_follow_the_original() {
+        use GridOption::*;
+        // 0x5B60F0 on a 4-car grid.
+        assert_eq!(Front.slot(4, |_| unreachable!()), 0);
+        assert_eq!(Middle.slot(4, |_| unreachable!()), 2);
+        assert_eq!(Back.slot(4, |_| unreachable!()), 3);
+        assert_eq!(Random.slot(4, |n| n + 1), 1);
+        assert_eq!(
+            GridOption::MENU.map(GridOption::code),
+            [0, 2, 1, 3],
+            "screen order front, middle, back, random"
+        );
+        for o in GridOption::MENU {
+            assert_eq!(GridOption::parse(o.key()), Some(o));
+        }
+        let mut s = Settings::default();
+        s.apply("[drive]\ngrid_position = Random\n", Path::new(".")).unwrap();
+        assert_eq!((s.grid_option, s.grid_position), (Some(Random), None));
+        assert!(s.apply("[drive]\ngrid_position = left\n", Path::new(".")).is_err());
+    }
+
+    #[test]
     fn race_profile_parses_with_data_dir_paths() {
         let dir = Path::new("data");
         let mut s = Settings::default();
@@ -1205,7 +1301,7 @@ tick_delay_ms = 20
         assert_eq!(s.route.as_deref(), Some("tracks/europe/donington/route_0"));
         assert_eq!(s.car.as_deref(), Some("bmw"));
         assert_eq!(s.opponent_cars.as_deref(), Some("lac,bmw"));
-        assert!(s.drive && s.grid_back);
+        assert!(s.drive && s.grid_option == Some(GridOption::Back));
         assert_eq!(s.discipline.as_deref(), Some("drift_battle"));
         assert_eq!(
             (s.laps, s.opponents, s.grid_position),
@@ -1250,7 +1346,7 @@ tick_delay_ms = 20
             (s.laps, s.opponents, s.grid_position),
             (None, None, Some(2))
         );
-        assert!(!s.grid_back);
+        assert_eq!(s.grid_option, None);
         assert_eq!(s.body_contacts, Some(Private::Derive));
         assert_eq!(s.body_events, None);
         assert_eq!(s.deformation, Some(Private::Derive));

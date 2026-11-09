@@ -172,7 +172,8 @@ fn step(
                             ..default()
                         },
                         BackgroundColor(Color::BLACK),
-                        GlobalZIndex(i32::MAX),
+                        // Under the screen-transition overlay (its loading text).
+                        GlobalZIndex(i32::MAX - 1),
                         UiTargetCamera(camera),
                     ))
                     .id(),

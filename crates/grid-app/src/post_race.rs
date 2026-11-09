@@ -416,17 +416,14 @@ pub fn update(
     actions: Res<Actions>,
     mut shifts: ResMut<ShiftQueue>,
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
-    (time, from_menu): (
-        Option<Res<Time<Real>>>,
-        Option<Res<crate::event_menu::FromMenu>>,
-    ),
-    mut exit: MessageWriter<AppExit>,
+    (time, mut leave): (Option<Res<Time<Real>>>, crate::transition::Leave),
     mut replay: Option<ResMut<crate::replay::Replay>>,
     touge: Option<Res<crate::touge_event::TougeEvent>>,
     mut waited: Local<f32>,
 ) {
-    // A replay owns the input; its exit returns here.
-    if replay.as_ref().is_some_and(|r| r.owns_input()) {
+    // A replay owns the input; its exit returns here. Nothing more after
+    // leaving (the fade to black runs).
+    if replay.as_ref().is_some_and(|r| r.owns_input()) || leave.leaving() {
         return;
     }
     let dt = time.map_or(0., |t| t.delta_secs());
@@ -524,10 +521,10 @@ pub fn update(
         Command::Restart => crate::restart(&mut driving, trial.as_deref_mut()),
         // Back to the event menu when the race came from it (the original's
         // `end_race_finish_race` returns to its front end).
-        Command::Exit => crate::event_menu::leave(&mut exit, from_menu.is_some()),
+        Command::Exit => leave.event(),
         Command::RetireAndExit => {
             crate::pause_menu::retire_player(&mut driving, trial.as_deref());
-            crate::event_menu::leave(&mut exit, from_menu.is_some());
+            leave.event();
         }
         Command::Replay(kind) => {
             if let Some(replay) = replay.as_mut() {

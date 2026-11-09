@@ -93,6 +93,7 @@ mod graphics_benchmark;
 mod perf_test;
 mod perf_timing;
 mod pipeline_warmup;
+mod transition;
 mod frame_pacing;
 mod gpu_passes;
 #[cfg(feature = "profile")]
@@ -1713,7 +1714,21 @@ fn main() {
         let rest: Vec<String> = args.into_iter().filter(|a| a != "--career-screen").collect();
         career_screen::screen(&rest)
     } else {
-        run(args)
+        #[cfg(not(target_os = "android"))]
+        let menu_flags = event_menu::launcher_menu_flags(&args);
+        let result = run(args);
+        // A launcher's race left to the menu (event_menu::MENU_AFTER).
+        #[cfg(not(target_os = "android"))]
+        if result.is_ok() && event_menu::MENU_AFTER.load(std::sync::atomic::Ordering::Relaxed) {
+            match event_menu::supervise(&menu_flags) {
+                Ok(code) => std::process::exit(code),
+                Err(error) => {
+                    eprintln!("grid-app: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        result
     };
     if let Err(error) = result {
         eprintln!("grid-app: {error}");
@@ -3066,9 +3081,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
     if let Some(name) = &series {
-        // Le Mans Series grid option (AUTHORED mapping of the settings):
-        // `grid_position = back` is the back of the player's class group,
-        // anything else its front.
+        // Le Mans Series grid option: the Race Options choice in the
+        // original's encoding (0x5BDF10), front of the class group when
+        // none is set.
         let event = grid_tools::series::Event::prepare_on_grid(
             &root,
             name,
@@ -3077,7 +3092,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             opponents,
             opponent_cars.is_none(),
             series_seed(profile.series_seed),
-            if profile.grid_back { 1 } else { 0 },
+            profile.grid_option.map_or(0, settings::GridOption::code),
         )?;
         if let Some(slot) = event.player_slot {
             grid_position = Some(slot + 1);
@@ -3356,7 +3371,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         opponent_models_stk: opponent_cars.as_ref().is_none_or(|models|
             !models.is_empty() && models.iter().all(|m| m.stem() == "stk")),
         discipline: discipline.as_deref(), laps: trial_laps,
-        back_grid: grid_position == Some(12) || (grid_position.is_none() && profile.grid_back),
+        back_grid: grid_position == Some(12)
+            || (grid_position.is_none() && profile.grid_option == Some(settings::GridOption::Back)),
         damage_enabled: body_contacts.is_some() && body_events.is_some() && deformation.is_some(),
         output: output.is_some(), ticks: drive_ticks, fps: render_fps, motion: motion_sequence,
         handbrake: handbrake_from, throttle: scripted.throttle, steering: scripted.steering,
@@ -3605,8 +3621,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("enhanced nondefault scene requires shared layered car/track materials, track/driving rendering and no collision/headless; legacy fixture compatibility is otherwise unchanged".into());
     }
-    if profile.grid_back && grid_position.is_none() {
-        grid_position = opponents.map(|n| n + 1);
+    // The Race Options grid choice (0x5B60F0), seeded like the series grid.
+    if let (None, Some(option), Some(n)) = (grid_position, profile.grid_option, opponents) {
+        let mut rng = grid_tools::series::Mt::new(series_seed(profile.series_seed).wrapping_add(2));
+        grid_position = Some(option.slot(n + 1, |cars| rng.range(0, cars)) + 1);
     }
     if audio_check {
         return engine_sound::check(&root);
@@ -4153,6 +4171,18 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             Ok(result)
         })
         .transpose()?;
+    // A window the player sees (not an offscreen capture or headless run).
+    let windowed = output.is_none() && !headless;
+    // A race a launcher starts returns to the event menu when it is left
+    // (results Continue, Retire, Exit), as the original returns to its
+    // front end; not for scripted checks unless the menu loop is driven
+    // (GRID_MENU_AUTO, tools/menu_loop_smoke.ps1).
+    let to_menu = drive
+        && windowed
+        && !from_menu
+        && career_result.is_none()
+        && profile.event_menu != Some(false)
+        && (drive_ticks.is_none() || std::env::var_os("GRID_MENU_AUTO").is_some());
     if eye.is_some() != target.is_some() {
         return Err("provide both --camera and --look-at".into());
     }
@@ -4587,7 +4617,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     ..default()
                 })
                 .set(WindowPlugin {
-                    primary_window: Some(Window {
+                    primary_window: Some(transition::window(Window {
                         title: if drive {
                             "GRID independent driving prototype"
                         } else {
@@ -4599,7 +4629,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                         present_mode: profile.present_mode.unwrap_or_default(),
                         desired_maximum_frame_latency: profile.frame_latency,
                         ..default()
-                    }),
+                    }, windowed && drive_input.is_some())),
                     ..default()
                 }),
         );
@@ -4789,7 +4819,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     input_settings.device == input::Device::Auto,
                 );
             }
-            pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
+            let labels = pause_menu::Labels::load(&root);
+            // The original's overlay fade and loading screen
+            // (docs/SCREEN_FLOW.md): black with "Loading" until the
+            // pipelines are warm, then the race fades in.
+            if windowed {
+                transition::install(&mut app, labels.get("loading"), transition::Start::Race);
+            }
+            pause_menu::install(&mut app, menu, labels);
             perf_test::install(&mut app);
             // Android: the mobile preset (lower render resolution).
             mobile::install(&mut app);
@@ -5121,7 +5158,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(feature = "paint-specular")]
     app.insert_resource(body_specular);
-    if from_menu {
+    if from_menu || to_menu {
         app.insert_resource(event_menu::FromMenu);
     }
     if let Some(path) = career_result {
@@ -5185,6 +5222,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .run();
     // Leaving an event started from the menu (event_menu::leave).
     if exit == AppExit::from_code(event_menu::BACK_TO_MENU as u8) {
+        if to_menu {
+            // main() opens the menu once this app is gone.
+            event_menu::MENU_AFTER.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Ok(());
+        }
         std::process::exit(event_menu::BACK_TO_MENU);
     }
     if !matches!(exit, AppExit::Success) {

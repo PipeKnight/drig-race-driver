@@ -180,8 +180,9 @@ entry order; `grid_order` is not read.
   - most common player placements are (7, 19), (8, 19), (1, 19), (6, 19), (9, 19) and (7, 3);
   - 31 named-driver rows, mostly (1, 0–4).
 - [I] The remaining cars fill the free slots randomly, per `grid_order random`; the fill was not traced.
-- **Ported** as `race::grid_slot`. The app's `--grid-position N` keeps fixed slots; a random option is
-  not wired yet.
+- **Ported** as `race::grid_slot`. The app's `--grid-position N` keeps fixed slots. The free race's
+  Front/Middle/Back/Random option (0x5B60F0) is `[drive] grid_position = front|middle|back|random`,
+  chosen in the event menu (docs/SCREEN_FLOW.md §3).
 
 ## 6. Results screen fields
 
