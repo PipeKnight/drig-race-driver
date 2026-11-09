@@ -143,9 +143,12 @@ A night-route drive (route 1, autopilot, chase camera, 8 points over 12 000 tick
 visible change either. The night routes light the terrain as day, which is SKY.md's open night
 lighting item, not the water.
 
-Not checked: the original's picture of these streams (no live capture). Seen in two views, not
-inspected: tall beige vertical streaks under the bridge and beside a cliff. They are the same with
-and without the probe, so they are not the water draw.
+Not checked: the original's picture of these streams (no live capture). The tall beige vertical
+streaks under the bridge and beside a cliff (views 0 and 3) are not water.fx. They are two
+`god_rays.fx` cards in Haruna's objects.pssg, drawn by the shared light-shaft port
+(docs/LIGHT_SHAFTS.md): `01 - Default` with `godwater.tga` and its dust falling at -1.5 (a
+waterfall), and `godfog_03` (fog). The program colours them with the sun's backlight colour
+(Haruna 2.96, 2.09, 1.02), hence beige; their strength against the original is not verified.
 
 ## Checks (F754)
 

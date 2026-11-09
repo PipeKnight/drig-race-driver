@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F758](log/F0758.md) | 2026-11-09 | Haruna's vertical streaks are light-shaft cards |
 | [F757](log/F0757.md) | 2026-11-09 | Car shadows in race views and Haruna's wet layer |
 | [F756](log/F0756.md) | 2026-11-09 | Front-end screen transitions, launcher races back to the menu, Race Options difficulty and grid |
 | [F755](log/F0755.md) | 2026-11-09 | AI retire 1:1: stuck latch, Racing gate, terminal damage stops then leaves |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F701](log/F0701.md) | 2026-11-03 | No AI countersteer threshold in the original; with the same inputs the port's car yaws less |
 | [F700](log/F0700.md) | 2026-11-02 | Publish macOS rebuild scripts and engine-only preview |
 | [F699](log/F0699.md) | 2026-11-02 | Black drops and floating grass: god-ray cards not drawn as objects, land on every preset, water counted (rows 102, 107, 108) |
-| [F698](log/F0698.md) | 2026-11-02 | Car glass: transparent items sort by their current position; the windscreen no longer shows over the rear window |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
