@@ -1974,11 +1974,10 @@ Then, for each free slot i of 35 (cell = result i mod count):
   - finish line 1.2, last 1.3, team 1.4, finish without damage 1.3;
   - normal 0, normalGood 1.3.
 
-**Gasps (CrowdRecoil) [O, not ported].** The visual crowd broadcasts a recoil (0x764A40). After
+**Gasps (CrowdRecoil) [O, ported in §34].** The visual crowd broadcasts a recoil (0x764A40). After
 it, 0x449FA0 plays `group_gasp`/`grand_gasp` on query cell j, one per tick. The level is the sum
 of three curves: gaspControl over intensity, the variety's own curve over people, and
-gaspDistControl over the distance from the recoil. The port's visual crowd raises no recoil, so
-the gasps have no trigger and are left out.
+gaspDistControl over the distance from the recoil.
 
 **Port.**
 - `grid_tools::crowd_audio`: `Cells` (grid, seated count, query), `Bank` (both AutoPlays over
@@ -2006,7 +2005,7 @@ the gasps have no trigger and are left out.
 - The game's RNG is not reproduced.
 - A finished one-shot is detected by its length.
 - The excitement needs the speech manager, which runs only in races with opponents.
-- The gasps are not ported.
+- The gasps were ported later (§34).
 
 ## 32. Doppler ported (backlog row 71)
 
@@ -2131,3 +2130,143 @@ tick-driven sources (tyres, collisions, ambience, crowd) are frozen while paused
 - Intro before the race: the port has no race intro.
 
 **Test.** `engine_sound::tests::mix_mode_follows_the_state_flow`.
+
+## 34. Crowd gasps ported (backlog row 70)
+
+9 November 2026, Claude Code. Static reading of the disassembly (0x756E40, 0x756C40, 0x608940,
+0x76A620, 0x7648F0, 0x764A40, 0x41BCD0, 0x449FA0). The original was not run. This completes
+§31, which left the gasps out because nothing raised a recoil.
+
+**Recording, 0x756E40 → 0x756C40 [O].** The visual crowd's contact listener runs on every
+contact of every car.
+- A contact within 1 m of the averaged point of one of the car's records from this frame adds
+  to that record: points summed with a count (+0x10, +4) and solved impacts summed (+0x20).
+- Otherwise the contact opens a new record, while fewer than ten records are open (stride 0x30,
+  count at +0x1E0).
+- Each record's flag (+0x24) says the other body is static geometry (shape +0x216: the track,
+  its boundary or route props, not another car) and the contact is not floor-like
+  (|normal.y| < 0.2).
+
+**Broadcast, 0x608940 → 0x76A620, 0x7648F0 [O].**
+- Each frame, the previous frame's records become the read list (manager +0x3B00 written,
+  +0x3B04 read).
+- A record whose summed impact exceeds 2000 (0xCBD664) is broadcast as `CrowdRecoil` when the
+  cooldown (+0x3B08) has run out. Its fields are +4 the averaged position, +0x10 the impact and
+  +0x15 the flag (0x764A40). Each broadcast sets the cooldown to 1 s, and 0x7648F0 runs it down
+  by dt.
+- The original broadcasts only outside replays (0x608940, mode +0xA30). The port has no replay
+  playback.
+
+**The gasp, 0x41BCD0 and 0x449FA0 [O].**
+- A recoil with its flag set starts a gasp unless one is already running (C+0x15C8). The gasp
+  keeps the intensity (+0x15CC), the position (+0x15D0) and the next query entry (+0x15C4).
+- 0x449FA0 runs last in each crowd tick while a gasp is active. It starts at most one gasp per
+  tick: on the cell of query entry j, in slot j.
+- Within a tick it skips cells with five people or fewer and moves on.
+- It stops for the tick at any of these:
+  - a looping slot;
+  - the end of the list;
+  - a cell beyond the variety's MaxDistance;
+  - a gasp quieter than −36 dB (0xCB469C).
+- The gasp ends once all 35 entries have been passed. EndOfRace holds it.
+- A cell with more than 20 seated people uses `grand_gasp`; any other cell uses `group_gasp`.
+- Level = gaspControl(intensity) + the variety's curve(people) + gaspDistControl(distance from
+  the recoil to the cell centre).
+- Pitch = lerp(0.95, 1.05, t), where t is that distance's position in gaspDistControl's range.
+- A one-shot already in the slot is replaced.
+
+**Shipped data.** SHIPPED_PLACEHOLDER
+
+**Port.**
+- `grid_tools::crowd_audio::Gasps` parses the four CollisionInfos and two varieties from bank
+  `env_crowd`. The decoded samples are shared with the AutoPlays.
+- `Recoils` covers recording and broadcast (0x756C40, 0x76A620). `Recoil` is the message.
+- `Crowd::recoil` is 0x41BCD0. `Crowd::gasp_step` is 0x449FA0.
+- `collision_audio::read_varieties` is shared with the collision bank.
+- grid-app `crowd_sound` feeds every car's contact impacts (`contact_impacts`, the other body
+  static unless it is a car) to `Recoils` each tick, and passes the broadcasts to the crowd.
+
+**Tests.**
+- `crowd_audio::tests` covers merging, the flag, the threshold and cooldown, the ten-record
+  limit, the per-tick walk, skipped and far cells, the loop and quiet stops, the −36 dB edge and
+  EndOfRace.
+- The ignored `shipped_crowd_cells_and_spawns` test runs a hard wall hit beside the busiest cell
+  of a shipped route and asserts that gasp samples start within 36 ticks, at levels in
+  [−36, 0] dB.
+- The ignored grid-app `crowd_sound` window test drives a wall hit through `Recoils` and checks
+  that the gasp runs and that the crowd source sounds.
+
+**[I] and gaps.**
+- The game's RNG is not reproduced: the sample choice uses the port's crowd RNG.
+- The impact is the port solver's solved contact +0x3C, the same field the collision sounds
+  use (F479). How often real wall hits pass 2000 was not measured in a race.
+
+## 35. Engine Treble and the "artificial" engine (backlog row 72)
+
+9 November 2026, Claude Code. Static reading of the disassembly (0x41DE10, 0x42DE60, 0xA233D0,
+0xA25D90, 0xA2C080, 0xA27780, the table at 0xEBEE28). The original was not run.
+ENGINE_AUDIO_CONTROL "Treble reaches an EFX filter path" traced the chain; this section reads
+the producer and the filter call.
+
+**Producer, 41DE10 [O].** It writes car +0xA6A4, the Treble in dB. 42DE60 publishes it to all
+twelve engine voices (+0x5C).
+- Treble = 0 when any of these holds:
+  - global +0x972C is set, +0x972D is clear, and the car is the player's;
+  - the audio camera is Detached (3);
+  - the car is the player's and the camera is not DetachedMultiCar (4).
+- Otherwise Treble = lin2db((1 − clamp(0.02·d, 0, 1))^8) − 3, with d the distance from the
+  listener to the car (+0xA420). lin2db is floored at −48, so Treble runs from −3 dB at the car
+  to −51 dB at 25 m and beyond.
+- In camera 4, and for the player's car there, d is measured from car +0xA460 instead. That
+  point is not established.
+- A flag at +0xA6B4 fades the Treble by −1 dB per call down to −96. Its setter is not
+  established.
+
+So the player's own engine has Treble 0, with no filter, in every driving view (Bonnet,
+Internal, Chase). Only AI cars are filtered, by their distance.
+
+**Backend [O].**
+- A25D90 limits Treble to at most 0 dB and sets the voice's dirty flag.
+- A27780 computes GAINHF = 10^(Treble·0.5·0.05). The CRT pow is 0xBF4B50; 0.5 is the Treble
+  scale (0xE50908), 0.05 is 0xCAFE60 and the base 10 is 0xCB8538. With the sqrt switch on, it
+  takes 10^(Treble·0.05) and then the square root. Both paths give 10^(Treble/40).
+- It sets AL_LOWPASS_GAINHF on the voice's filter, and then `alSourcei(AL_DIRECT_FILTER)`.
+- A per-voice offset from the table at 0xEBEE28 (initialised to −999) is added only when the
+  voice has a filter bit. The engine voices' bits are not established.
+- GAINHF at −3 dB is 0.841; the minimum, at −51 dB, is 0.053.
+
+**Mixer and resampler.** The original mixes in Creative's wrap_oal 2.2.0.5 ("Generic Software"
+or "Generic Hardware"). Its resampler and mix period are inside that third-party DLL and are not
+read here. So the port's linear resampler and 16 ms control cadence still cannot be shown to
+differ from the original's. The game side rounds rate × pitch to an integer frequency capped at
+96 kHz (A25D90), and the port already does the same.
+
+**Conclusion for row 72.** The static comparison shows no filter on the player's engine, so a
+low-pass is not why the player's engine sounds "artificial". The one difference shown is that
+the original dulls the AI engines with distance, and the port played them full-band. That part
+is ported.
+
+**Port.**
+- `audio_mix::ai_engine_treble_db(camera, distance)` implements 41DE10's AI branch. Detached and
+  DetachedMultiCar give 0 [I for camera 4: the reference point is unknown].
+- `audio_mix::treble_gain_hf` implements A25D90 and A27780.
+- `audio_mix::Lowpass` is the EFX low-pass at a given GAINHF. EFX fixes only the 5 kHz
+  reference, so this is a high shelf at 5 kHz with slope 1, the Audio EQ Cookbook form that
+  OpenAL Soft uses [I: Generic Software's own design is not read]. At GAINHF 1 the samples
+  pass through unchanged.
+- `engine_audio_continuous::Mixer::treble` filters the twelve engine voices. The mechanical
+  voices (whine, backfire) pass unfiltered [I].
+- grid-app `engine_sound` sets each opponent's GAINHF each frame from the camera and the car's
+  distance to the ear. The player's mixer keeps GAINHF 1, so its output is unchanged.
+
+**Tests.**
+- `audio_mix::tests::ai_engine_treble_follows_41de10_and_a27780`: the 0, 10, 25 and 80 m values
+  and the cameras.
+- `audio_mix::tests::lowpass_is_a_5khz_shelf_and_exact_at_unity`: low frequencies at about 1,
+  −10 dB at 5 kHz for GAINHF 0.1, GAINHF at 20 kHz, and an exact pass-through at 1.
+
+**Not done [I].**
+- The +0xA6B4 fade.
+- The camera-4 reference point.
+- The voice filter-preset offsets.
+- The wrap_oal resampler and mix period.

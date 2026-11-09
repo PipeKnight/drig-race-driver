@@ -282,6 +282,8 @@ filter's parameter 2 and binds source properties 0x20005/0x20006. These match
 AL_LOWPASS_GAINHF, AL_DIRECT_FILTER and AL_AUXILIARY_SEND_FILTER in the primary
 [OpenAL Soft EFX header](https://raw.githubusercontent.com/kcat/openal-soft/master/include/AL/efx.h).
 This identifies an actual filtering path, rather than guessing from an INI name.
+The producer's branches and the GAINHF formula are read in AUDIO_RESEARCH §35: the player's
+car gets Treble 0 in every driving view, and AI cars are filtered by distance (ported).
 
 Read-only current native menu state has direct filter handle 3, a nonzero filter
 function pointer, feature mask 0x2A60, effect-filter mask 6, sqrt switch 1 and

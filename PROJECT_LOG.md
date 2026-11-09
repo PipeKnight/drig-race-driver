@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F766](log/F0766.md) | 2026-11-09 | Crowd gasps and the AI engine Treble low-pass (rows 70, 72) |
 | [F765](log/F0765.md) | 2026-11-09 | Graphics audit of all routes; night and container emissive objects drawn |
 | [F764](log/F0764.md) | 2026-11-09 | Flashback rewinds the marshal flags; career/free-race set-up labels |
 | [F763](log/F0763.md) | 2026-11-09 | Race HUD: split pills, needle blur, PB pill, OSD and results time formats from static RE |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F709](log/F0709.md) | 2026-11-03 | track.vis decoded; Okutama raised grass is out of route reach; read_sun reads every lighting file |
 | [F708](log/F0708.md) | 2026-11-03 | Car LOD level fades and remaining pop sources |
 | [F707](log/F0707.md) | 2026-11-03 | Okutama grass per route: track.vis covers every grass patch; baseline-sun crops for the owner |
-| [F706](log/F0706.md) | 2026-11-03 | Water and light shafts read the route's own lighting.xml (Haruna night routes) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

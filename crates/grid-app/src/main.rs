@@ -9100,6 +9100,18 @@ mod driving_tests {
         if crowd < 1e-4 {
             failures.push(format!("parked: the crowd is silent: rms {crowd:.5}"));
         }
+        // A hard wall hit beside the nearest crowd (AUDIO_RESEARCH §34): the recoil broadcasts
+        // on the next tick and the gasp walks the 35 query entries, one start per tick.
+        let pose = app.world().resource::<Driving>().runtime.pose();
+        crowd_sound::hit_wall_near(&mut app.world_mut().resource_mut::<crowd_sound::CrowdSound>(), [pose[12], pose[13], pose[14]]);
+        app.update();
+        if !crowd_sound::gasping(app.world().resource::<crowd_sound::CrowdSound>()) {
+            failures.push("recoil: a hard wall hit beside the crowd starts no gasp".to_owned());
+        }
+        window(&mut app, "gasp", 1, 0.);
+        if crowd_sound::gasping(app.world().resource::<crowd_sound::CrowdSound>()) {
+            failures.push("recoil: the gasp still runs after a second".to_owned());
+        }
         type Stop = fn(&mut Driving, bool);
         let stops: [(&str, Stop); 2] = [
             ("paused", |d, on| d.paused = on),

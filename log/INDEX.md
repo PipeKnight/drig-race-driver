@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F766](F0766.md) | 2026-11-09 | Crowd gasps and the AI engine Treble low-pass (rows 70, 72) |
 | [F765](F0765.md) | 2026-11-09 | Graphics audit of all routes; night and container emissive objects drawn |
 | [F764](F0764.md) | 2026-11-09 | Flashback rewinds the marshal flags; career/free-race set-up labels |
 | [F763](F0763.md) | 2026-11-09 | Race HUD: split pills, needle blur, PB pill, OSD and results time formats from static RE |

@@ -2,7 +2,8 @@
 //! (`grid_tools::crowd_audio`) runs once per vehicle tick on the route's crowd cells, with the
 //! race events' excitement from the speech manager's ReactiveCrowd messages. Each voice keeps
 //! the level and pitch it started with and is heard from the camera on the Crowd group (11),
-//! with the A23B70 distance law. Presentation only.
+//! with the A23B70 distance law. Every car's contacts feed the visual crowd's recoil records,
+//! whose hard wall hits make the nearest cells gasp. Presentation only.
 use bevy::{
     audio::{AddAudioSource, ChannelCount, SampleRate, Source},
     prelude::*,
@@ -10,9 +11,9 @@ use bevy::{
 use grid_tools::{
     ambience_audio::Mixer,
     audio_mix::{self, Table},
-    crowd_audio::{Bank, CROWD, Cells, Crowd, Event, Listener},
+    crowd_audio::{Bank, CROWD, Cells, Crowd, Event, Listener, Recoils},
     hud_audio::Sound,
-    source_vehicle::DELTA,
+    source_vehicle::{DELTA, multi::Contacted},
 };
 use std::{
     sync::{
@@ -40,6 +41,7 @@ pub(crate) struct CrowdSound {
     last: Option<(u64, u64)>,
     hushed: bool,
     events: Vec<Event>,
+    recoils: Recoils,
 }
 
 #[derive(Asset, TypePath)]
@@ -125,6 +127,7 @@ pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, cells: Cells, tabl
         last: None,
         hushed: false,
         events: Vec::new(),
+        recoils: Recoils::default(),
     })
     .insert_resource(PendingSource(Some(source)))
     .add_systems(Startup, start)
@@ -170,6 +173,22 @@ fn tick(
     };
     let modes = listening.modes();
     let ear = listening.ear(&pose);
+    // The visual crowd's frame (0x608940, 0x76A620): last tick's records broadcast, then this
+    // tick's contacts of every car are recorded (0x756E40).
+    let mut recoils = Vec::new();
+    sound.recoils.frame(DELTA, &mut recoils);
+    for r in &recoils {
+        sound.crowd.recoil(r);
+    }
+    let mut record = |k: usize, impacts: Vec<(grid_tools::body_impacts::Impact, Contacted)>| {
+        for (i, other) in impacts {
+            sound.recoils.add(k, i.point, i.normal, i.impact, !matches!(other, Contacted::Car(_)));
+        }
+    };
+    match &driving.opponents {
+        Some(o) => (0..o.multi.cars.len()).for_each(|k| record(k, o.multi.contact_impacts(k))),
+        None => record(0, driving.runtime.contact_impacts()),
+    }
     sound.events.clear();
     sound.crowd.tick(&sound.cells, &car, modes.mode(), ear.to_array(), DELTA, &mut sound.events);
     for event in sound.events.drain(..) {
@@ -210,6 +229,26 @@ fn audibility(mut sound: ResMut<CrowdSound>, driving: Res<super::Driving>, liste
 #[cfg(test)]
 pub(crate) fn state(sound: &CrowdSound) -> (usize, f32) {
     (sound.crowd.emitters().count(), sound.crowd.excitement())
+}
+/// Whether a gasp runs (tests).
+#[cfg(test)]
+pub(crate) fn gasping(sound: &CrowdSound) -> bool {
+    sound.crowd.gasping()
+}
+/// A hard wall hit at the centre of the populated cell nearest `at`, recorded as a contact of a
+/// car outside the field (tests): the next tick broadcasts it (0x76A620).
+#[cfg(test)]
+pub(crate) fn hit_wall_near(sound: &mut CrowdSound, at: [f32; 3]) {
+    let distance = |c: [f32; 3]| (0..3).map(|k| (at[k] - c[k]).powi(2)).sum::<f32>();
+    let centre = sound
+        .cells
+        .cells
+        .iter()
+        .filter(|c| c.people > 5)
+        .map(|c| c.centre)
+        .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
+        .expect("a populated crowd cell");
+    sound.recoils.add(usize::MAX, centre, [1., 0., 0.], 20_000., true);
 }
 /// The nearest crowd cell to `at`: its distance and people (tests).
 #[cfg(test)]

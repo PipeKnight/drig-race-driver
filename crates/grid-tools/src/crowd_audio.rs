@@ -4,10 +4,13 @@
 //! (autoplaybanks, bank `env_crowd`) on the cells within 150 m, with the level and pitch set
 //! once from the cell's head count, and it stops looping voices the car has left behind
 //! (0x41F280). Race events raise the excitement (the speech data's ReactiveCrowd messages,
-//! 0x41F2D0), which lets the excited samples play. Group Crowd (11). Presentation only.
+//! 0x41F2D0), which lets the excited samples play. A hard hit against a wall or the track
+//! (the visual crowd's CrowdRecoil, 0x756C40 → 0x76A620) makes the nearest crowd cells gasp,
+//! one cell per tick (0x41BCD0 → 0x449FA0). Group Crowd (11). Presentation only.
 use crate::{
     ambience_audio::{AutoPlay, lerp, linstep},
-    hud_audio::Sound,
+    collision_audio::{Curve, Variety, read_infos, read_varieties},
+    hud_audio::{Sound, wip_sound},
     route::Route,
 };
 use grid_formats::{audio_dictionary, binxml, crowd_placements};
@@ -28,6 +31,11 @@ const AHEAD: f32 = 70.;
 const QUIETEST: f32 = -32.;
 /// A loop stops once the car is farther than this share of its MaxDistance (0xCAFE64).
 const STOP_SHARE: f32 = 0.75;
+/// A gasp quieter than this is not started (0xCB469C).
+const GASP_QUIETEST: f32 = -36.;
+/// A cell uses GrandStandCrowd's samples and the grand gasp above this many seated people
+/// (0x449A93, 0xCAFBD8: people × seated share).
+const SEATED: u32 = 20;
 /// The mix modes 0x4499A0 and 0x44E220 test (`[[AM+0x28]+0xBF0]`, 0x411C10).
 pub use crate::audio_mix::{END_OF_RACE, INTRO};
 
@@ -182,7 +190,63 @@ fn seated_sets(defs: &[u8]) -> Result<Vec<String>, String> {
 pub struct Bank {
     pub normal: AutoPlay,
     pub grand: AutoPlay,
+    /// The gasps' CollisionInfos and varieties; `None` when the data lacks one.
+    pub gasps: Option<Gasps>,
     pub sounds: Arc<[Sound]>,
+}
+
+/// The CollisionInfos the constructor looks up for the gasps (0x42D3B0).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gasps {
+    /// C+0x24 `group_gasp` and C+0x28 `grand_gasp`: level over the cell's head count, and the
+    /// variety the sample comes from.
+    pub group: (Curve, Variety),
+    pub grand: (Curve, Variety),
+    /// C+0x2C `gaspControl`: level over the recoil's intensity.
+    pub control: Curve,
+    /// C+0x30 `gaspDistControl`: level over the cell's distance from the recoil, which also
+    /// sets the pitch.
+    pub distance: Curve,
+}
+
+impl Gasps {
+    /// The four CollisionInfos and the two varieties (bank `env_crowd`), decoding their
+    /// samples into `sounds` (`decoded`: env_crowd sample index → sound, shared with the
+    /// AutoPlay banks).
+    pub fn parse(
+        dictionary: &audio_dictionary::Dictionary,
+        infos: &[u8],
+        varieties: &[u8],
+        data: &[u8],
+        sounds: &mut Vec<Sound>,
+        decoded: &mut HashMap<usize, usize>,
+    ) -> Result<Option<Self>, String> {
+        let mut infos = read_infos(infos)?;
+        let Some(bank) = dictionary.banks.iter().find(|b| b.name.eq_ignore_ascii_case("env_crowd")) else {
+            return Ok(None);
+        };
+        let mut sample = |_: &str, name: &str| -> Result<Option<usize>, String> {
+            let Some(i) = bank.samples.iter().position(|s| s.name.eq_ignore_ascii_case(name)) else { return Ok(None) };
+            if let Some(&k) = decoded.get(&i) {
+                return Ok(Some(k));
+            }
+            let Ok(sound) = wip_sound(bank, i, data) else { return Ok(None) };
+            sounds.push(sound);
+            decoded.insert(i, sounds.len() - 1);
+            Ok(Some(sounds.len() - 1))
+        };
+        let mut varieties = read_varieties(varieties, &["env_crowd"], &mut sample)?;
+        let mut take = |name: &str| -> Option<(Curve, Variety)> {
+            let curve = infos.remove(name)?;
+            let variety = varieties.remove(&curve.variety)?;
+            Some((curve, variety))
+        };
+        let (Some(group), Some(grand)) = (take("group_gasp"), take("grand_gasp")) else { return Ok(None) };
+        let (Some(control), Some(distance)) = (infos.remove("gaspControl"), infos.remove("gaspDistControl")) else {
+            return Ok(None);
+        };
+        Ok(Some(Self { group, grand, control, distance }))
+    }
 }
 
 impl Bank {
@@ -200,7 +264,8 @@ impl Bank {
         // 0x433738 / 0x433748.
         let normal = play("NormalCrowd")?;
         let grand = play("GrandStandCrowd")?;
-        Ok(Arc::new(Self { normal, grand, sounds: sounds.into() }))
+        let gasps = Gasps::parse(&dictionary, &infos, &read("audioVarieties.bin")?, &data, &mut sounds, &mut decoded)?;
+        Ok(Arc::new(Self { normal, grand, gasps, sounds: sounds.into() }))
     }
 }
 
@@ -231,6 +296,94 @@ pub struct Emitter {
     left: f32,
 }
 
+/// The visual crowd's recoil records (crowd manager +0x3B00 written, +0x3B04 read; 10 of
+/// stride 0x30, count at +0x1E0) and the recoil cooldown (+0x3B08).
+#[derive(Default)]
+pub struct Recoils {
+    write: Vec<Record>,
+    read: Vec<Record>,
+    cooldown: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Record {
+    /// +0 the car.
+    owner: usize,
+    /// +0x10 the summed contact points, +4 their count.
+    sum: [f32; 3],
+    weight: f32,
+    /// +0x20 the summed solved impacts.
+    intensity: f32,
+    /// +0x24: the other body is static geometry (shape +0x216) and the contact is not
+    /// floor-like (|normal.y| < 0.2).
+    flag: bool,
+}
+
+/// A `CrowdRecoil` message the crowd audio takes (0x764A40: +4 position, +0x10 intensity,
+/// +0x15 the record's flag).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Recoil {
+    pub position: [f32; 3],
+    pub intensity: f32,
+    pub flag: bool,
+}
+
+/// Records at most this many per frame (0x756C40).
+const RECORDS: usize = 10;
+/// A record broadcasts above this summed impact (0xCBD664) …
+const RECOIL_IMPACT: f32 = 2000.;
+/// … and then holds the next ones off for a second (0x76A620).
+const RECOIL_COOLDOWN: f32 = 1.;
+
+impl Recoils {
+    /// 0x756C40, the contact listener 0x756E40 for each contact of a car: a contact within
+    /// 1 m of the averaged point of the car's earlier records this frame adds to each of
+    /// them, else it opens a record while fewer than ten are open. `other_static`: the other
+    /// body's shape is static geometry (+0x216: the track, its boundary and the route
+    /// props; not another car).
+    pub fn add(&mut self, owner: usize, point: [f32; 3], normal: [f32; 3], impact: f32, other_static: bool) {
+        let mut merged = false;
+        for r in self.write.iter_mut().filter(|r| r.owner == owner) {
+            let d2: f32 = (0..3).map(|k| (r.sum[k] / r.weight - point[k]).powi(2)).sum();
+            if d2 < 1. {
+                (0..3).for_each(|k| r.sum[k] += point[k]);
+                r.intensity += impact;
+                r.weight += 1.;
+                merged = true;
+            }
+        }
+        if !merged && self.write.len() < RECORDS {
+            let flag = other_static && normal[1].abs() < 0.2;
+            self.write.push(Record { owner, sum: point, weight: 1., intensity: impact, flag });
+        }
+    }
+
+    /// One frame: 0x608940 makes the last frame's records the read list, 0x76A620 broadcasts
+    /// each record above 2000 when the cooldown has run out, and 0x7648F0 runs the cooldown
+    /// down by `dt`. The original broadcasts only outside replays (0x608940, mode +0xA30);
+    /// the port has no replay playback.
+    pub fn frame(&mut self, dt: f32, out: &mut Vec<Recoil>) {
+        std::mem::swap(&mut self.read, &mut self.write);
+        self.write.clear();
+        if self.cooldown <= 0. {
+            for r in self.read.iter().filter(|r| r.intensity > RECOIL_IMPACT) {
+                self.cooldown = RECOIL_COOLDOWN;
+                out.push(Recoil { position: r.sum.map(|v| v / r.weight), intensity: r.intensity, flag: r.flag });
+            }
+        }
+        self.cooldown = (self.cooldown - dt.abs()).max(0.);
+    }
+}
+
+/// The running gasp (C+0x15C8 set): the next query entry (+0x15C4), the intensity (+0x15CC)
+/// and where the recoil happened (+0x15D0).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Gasp {
+    next: usize,
+    intensity: f32,
+    position: [f32; 3],
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     Start { slot: usize },
@@ -256,6 +409,7 @@ pub struct Crowd {
     random: u32,
     /// +0x15A0: the crowd's loops get Doppler 0.5 from now on.
     doppler_on: bool,
+    gasp: Option<Gasp>,
 }
 
 impl Crowd {
@@ -273,6 +427,7 @@ impl Crowd {
             forward: [0., 0., 1.],
             random: seed | 1,
             doppler_on: false,
+            gasp: None,
         }
     }
 
@@ -304,6 +459,16 @@ impl Crowd {
             self.hold = hold;
             self.since = 0.;
         }
+    }
+
+    /// 0x41BCD0: a recoil with its flag set starts the gasps unless they are running.
+    pub fn recoil(&mut self, r: &Recoil) {
+        if r.flag && self.gasp.is_none() {
+            self.gasp = Some(Gasp { next: 0, intensity: r.intensity, position: r.position });
+        }
+    }
+    pub fn gasping(&self) -> bool {
+        self.gasp.is_some()
     }
 
     /// 0x411600, each tick first. Once the hold has run out only the current value is
@@ -370,6 +535,66 @@ impl Crowd {
                 }
             }
         }
+        if self.gasp.is_some() {
+            self.gasp_step(cells, &entries, mode, out);
+        }
+    }
+
+    /// 0x449FA0, last in the tick while a gasp runs: walks the query list from the next
+    /// entry and starts at most one gasp per tick, on the cell of entry j in slot j. It stops
+    /// for this tick at a looping slot, the list's end, a cell beyond the variety's
+    /// MaxDistance or a gasp quieter than −36 dB, and ends once all 35 entries are passed.
+    /// EndOfRace holds it.
+    fn gasp_step(&mut self, cells: &Cells, entries: &[(f32, usize)], mode: usize, out: &mut Vec<Event>) {
+        let Some(mut gasp) = self.gasp else { return };
+        if mode == END_OF_RACE {
+            return;
+        }
+        let bank = self.bank.clone();
+        let Some(g) = bank.gasps.as_ref() else {
+            self.gasp = None;
+            return;
+        };
+        while gasp.next < SLOTS {
+            let j = gasp.next;
+            gasp.next += 1;
+            self.gasp = Some(gasp);
+            if self.slots[j].is_some_and(|e| e.looped) {
+                return;
+            }
+            let Some(&(d2, c)) = entries.get(j) else { return };
+            let cell = &cells.cells[c];
+            if cell.people <= 5 {
+                continue;
+            }
+            let (curve, variety) = if cell.seated > SEATED { &g.grand } else { &g.group };
+            if d2 > variety.max_distance * variety.max_distance {
+                return;
+            }
+            let (db, t) = gasp_level(g, curve, gasp.intensity, cell.people, gasp.position, cell.centre);
+            if db < GASP_QUIETEST || variety.samples.is_empty() {
+                return;
+            }
+            let sound = variety.samples[self.next() as usize % variety.samples.len()];
+            let data = &bank.sounds[sound];
+            let seconds = (data.pcm.len() / data.channels.max(1)) as f32 / data.rate.max(1) as f32;
+            let pitch = lerp(0.95, 1.05, t).clamp(0.5, 2.);
+            // A one-shot already in the slot is replaced.
+            self.slots[j] = Some(Emitter {
+                sound,
+                looped: false,
+                db: db.clamp(-48., 0.),
+                pitch,
+                position: cell.centre,
+                min_distance: variety.min_distance,
+                max_distance: variety.max_distance,
+                doppler: 0.,
+                left: seconds / pitch,
+            });
+            out.push(Event::Start { slot: j });
+            return;
+        }
+        self.gasp = None;
     }
 
     /// 0x4499A0 over the query's first `entries`.
@@ -394,7 +619,7 @@ impl Crowd {
             if cell.people <= 5 {
                 continue;
             }
-            let play = if cell.seated > 20 { &bank.grand } else { &bank.normal };
+            let play = if cell.seated > SEATED { &bank.grand } else { &bank.normal };
             // Behind the car (fast, not EndOfRace): skipped.
             if s > 0.5 && mode != END_OF_RACE {
                 let along: f32 = (0..3).map(|k| (cell.centre[k] - self.position[k]) * self.forward[k]).sum();
@@ -465,6 +690,16 @@ impl Crowd {
     }
 }
 
+/// 0x449FA0's level: gaspControl over the intensity, the cell's gasp over its head count and
+/// gaspDistControl over the distance from the recoil to the cell centre; and that distance's
+/// position in gaspDistControl's range, which sets the pitch.
+fn gasp_level(g: &Gasps, curve: &Curve, intensity: f32, people: u32, at: [f32; 3], centre: [f32; 3]) -> (f32, f32) {
+    let level = |c: &Curve, x: f32| lerp(c.min_vol, c.max_vol, linstep(c.min_vel, c.max_vel, x));
+    let away = (0..3).map(|k| (at[k] - centre[k]).powi(2)).sum::<f32>().sqrt();
+    let t = linstep(g.distance.min_vel, g.distance.max_vel, away);
+    (level(&g.control, intensity) + level(curve, people as f32) + lerp(g.distance.min_vol, g.distance.max_vol, t), t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,7 +707,7 @@ mod tests {
     #[test]
     fn excitement_holds_then_alternates() {
         let mut crowd = Crowd::new(
-            Arc::new(Bank { normal: empty(), grand: empty(), sounds: Vec::new().into() }),
+            Arc::new(Bank { normal: empty(), grand: empty(), gasps: None, sounds: Vec::new().into() }),
             1,
         );
         crowd.since = 1.;
@@ -502,6 +737,133 @@ mod tests {
             master: None,
             sounds: Vec::new().into(),
         }
+    }
+
+    /// 0x756C40 merges a car's contacts within 1 m and 0x76A620 broadcasts records above 2000
+    /// one frame later, then waits a second.
+    #[test]
+    fn recoil_records_merge_threshold_and_cooldown() {
+        let mut r = Recoils::default();
+        let mut out = Vec::new();
+        let side = [1., 0., 0.];
+        r.add(0, [0., 0., 0.], side, 1200., true);
+        r.add(0, [0.5, 0., 0.], side, 900., true);
+        // Another car at the same point opens its own record.
+        r.add(1, [0., 0., 0.], side, 2500., false);
+        // Floor-like contact: no flag.
+        r.add(2, [9., 0., 0.], [0., 1., 0.], 3000., true);
+        assert_eq!(r.write.len(), 3);
+        assert_eq!((r.write[0].weight, r.write[0].intensity), (2., 2100.));
+        r.frame(0.016, &mut out);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], Recoil { position: [0.25, 0., 0.], intensity: 2100., flag: true });
+        assert!(!out[1].flag && !out[2].flag);
+        // Within the second: nothing; the records are this frame's only.
+        out.clear();
+        r.add(0, [0., 0., 0.], side, 5000., true);
+        r.frame(0.5, &mut out);
+        r.frame(0.5, &mut out);
+        assert!(out.is_empty());
+        r.add(0, [0., 0., 0.], side, 5000., true);
+        r.frame(0.016, &mut out);
+        r.frame(0.016, &mut out);
+        assert_eq!(out.len(), 1);
+        // Ten records at most; 2000 itself does not broadcast.
+        let mut r = Recoils::default();
+        for i in 0..12 {
+            r.add(0, [i as f32 * 2., 0., 0.], side, 2000., true);
+        }
+        assert_eq!(r.write.len(), RECORDS);
+        out.clear();
+        r.frame(0.016, &mut out);
+        assert!(out.is_empty());
+    }
+
+    fn curve(variety: &str, vel: (f32, f32), vol: (f32, f32)) -> Curve {
+        Curve {
+            variety: variety.into(),
+            min_vel: vel.0,
+            max_vel: vel.1,
+            min_vol: vol.0,
+            max_vol: vol.1,
+            min_pitch: 1.,
+            max_pitch: 1.,
+        }
+    }
+
+    /// 0x449FA0: one gasp per tick on entry j's cell in slot j, small cells skipped within the
+    /// tick, a loop or a far cell ending the tick, and the level and pitch from the three curves.
+    #[test]
+    fn gasps_walk_the_query_one_cell_per_tick() {
+        let one = || Sound { pcm: vec![0.; 22050].into(), channels: 1, rate: 22050, looped: false };
+        let variety = |s| Variety { samples: vec![s], min_distance: 5., max_distance: 100. };
+        let gasps = Gasps {
+            group: (curve("normal_gasp", (0., 100.), (-20., 0.)), variety(0)),
+            grand: (curve("grand_gasp", (0., 100.), (-10., 0.)), variety(1)),
+            control: curve("", (5000., 30000.), (-12., 0.)),
+            distance: curve("", (0., 50.), (0., -24.)),
+        };
+        let bank = Arc::new(Bank { normal: empty(), grand: empty(), gasps: Some(gasps), sounds: vec![one(), one()].into() });
+        let cell = |x: f32, people, seated| Cell { min: [x; 3], max: [x; 3], centre: [x, 0., 0.], people, seated };
+        let cells = Cells {
+            origin: [0.; 2],
+            size: [1.; 2],
+            dims: [1; 2],
+            map: Vec::new(),
+            cells: vec![cell(0., 50, 0), cell(10., 3, 0), cell(20., 200, 100), cell(150., 200, 0)],
+        };
+        let entries = [(0., 0), (100., 1), (400., 2), (22500., 3)];
+        let mut crowd = Crowd::new(bank, 3);
+        let mut out = Vec::new();
+        // Unflagged recoils are ignored.
+        crowd.recoil(&Recoil { position: [0.; 3], intensity: 30000., flag: false });
+        assert!(!crowd.gasping());
+        crowd.recoil(&Recoil { position: [0.; 3], intensity: 30000., flag: true });
+        // EndOfRace holds it.
+        crowd.gasp_step(&cells, &entries, END_OF_RACE, &mut out);
+        assert!(out.is_empty() && crowd.gasping());
+        crowd.gasp_step(&cells, &entries, 0, &mut out);
+        assert_eq!(out, [Event::Start { slot: 0 }]);
+        let e = crowd.slots[0].unwrap();
+        // 0 (intensity at the top) + lerp(−20, 0, 0.5) + 0 (at the recoil) = −10.
+        assert_eq!((e.db, e.pitch, e.sound, e.looped), (-10., 0.95, 0, false));
+        // Entry 1 has 3 people: skipped within the tick; entry 2 is a grandstand cell 20 m off.
+        out.clear();
+        crowd.gasp_step(&cells, &entries, 0, &mut out);
+        assert_eq!(out, [Event::Start { slot: 2 }]);
+        let e = crowd.slots[2].unwrap();
+        assert_eq!(e.sound, 1);
+        assert!((e.db - (0. + 0. - 24. * 0.4)).abs() < 1e-4, "{}", e.db);
+        assert!((e.pitch - 0.99).abs() < 1e-6);
+        // Entry 3 lies beyond MaxDistance (150 m > 100 m): this tick ends without a start …
+        out.clear();
+        crowd.gasp_step(&cells, &entries, 0, &mut out);
+        assert!(out.is_empty() && crowd.gasping());
+        // … and the list's end stops each later tick until the 35 entries are passed. The tick
+        // that passes the last entry still returns there; 0x449FA0 clears +0x15C8 on the next.
+        for _ in 4..SLOTS {
+            crowd.gasp_step(&cells, &entries, 0, &mut out);
+        }
+        assert!(out.is_empty() && crowd.gasping());
+        crowd.gasp_step(&cells, &entries, 0, &mut out);
+        assert!(out.is_empty() && !crowd.gasping());
+        // A loop in the slot stops the tick; a quiet gasp (low intensity) starts nothing.
+        crowd.slots[0] = Some(Emitter { looped: true, ..e });
+        crowd.recoil(&Recoil { position: [0.; 3], intensity: 30000., flag: true });
+        crowd.gasp_step(&cells, &entries, 0, &mut out);
+        assert!(out.is_empty() && crowd.gasping());
+        crowd.slots[0] = None;
+        let mut quiet = Crowd::new(crowd.bank.clone(), 3);
+        // −12 (intensity at the bottom) − 10 (50 people) − 24 (50 m from the recoil) = −46.
+        quiet.recoil(&Recoil { position: [50., 0., 0.], intensity: 2001., flag: true });
+        quiet.gasp_step(&cells, &entries, 0, &mut out);
+        assert!(out.is_empty() && quiet.slots[0].is_none() && quiet.gasping());
+        // −36 itself still starts (0x449FA0 tests below −36): 200 people (0 dB) 150 m away.
+        let mut edge = Crowd::new(crowd.bank.clone(), 3);
+        edge.recoil(&Recoil { position: [0.; 3], intensity: 2001., flag: true });
+        edge.gasp_step(&cells, &[(0., 3)], 0, &mut out);
+        assert_eq!(out, [Event::Start { slot: 0 }]);
+        assert_eq!(edge.slots[0].unwrap().db, -36.);
     }
 
     /// 0x771D30 orders the query nearest first.
@@ -591,6 +953,45 @@ mod tests {
             excited += out.iter().filter(|e| matches!(e, Event::Start { .. })).count();
         }
         println!("crowd version=1 window=excited_5s starts={excited} excitement={}", crowd.excitement());
+        // A hard hit on a wall beside the busiest cell (CrowdRecoil): the gasp walks the
+        // query one cell per tick and starts gasp samples from both varieties' banks.
+        let bank = crowd.bank.clone();
+        let gasps = bank.gasps.as_ref().expect("CollisionInfos gasp curves and audioVarieties gasp varieties");
+        for (name, (curve, variety)) in [("group_gasp", &gasps.group), ("grand_gasp", &gasps.grand)] {
+            println!(
+                "crowd version=1 gasp curve={name} variety={} samples={} people={}..{} vol={}..{} distance={}..{}",
+                curve.variety, variety.samples.len(), curve.min_vel, curve.max_vel, curve.min_vol, curve.max_vol, variety.min_distance, variety.max_distance
+            );
+            assert!(!variety.samples.is_empty(), "{name}");
+        }
+        let c = &gasps.control;
+        let d = &gasps.distance;
+        println!(
+            "crowd version=1 gasp control_vel={}..{} control_vol={}..{} distance_vel={}..{} distance_vol={}..{}",
+            c.min_vel, c.max_vel, c.min_vol, c.max_vol, d.min_vel, d.max_vel, d.min_vol, d.max_vol
+        );
+        let is_gasp = |sound: usize| gasps.group.1.samples.contains(&sound) || gasps.grand.1.samples.contains(&sound);
+        crowd.recoil(&Recoil { position: at, intensity: 20_000., flag: true });
+        assert!(crowd.gasping());
+        let (mut gasp_starts, mut gasp_db, mut ticks) = (0, Vec::new(), 0);
+        while crowd.gasping() && ticks < 100 {
+            out.clear();
+            crowd.tick(&cells, &parked, 0, at, 0.016, &mut out);
+            ticks += 1;
+            for e in &out {
+                if let Event::Start { slot } = e
+                    && let Some(em) = crowd.slots[*slot].as_ref()
+                    && is_gasp(em.sound)
+                {
+                    gasp_starts += 1;
+                    gasp_db.push(em.db);
+                }
+            }
+        }
+        let loudest_gasp = gasp_db.iter().copied().fold(-48f32, f32::max);
+        println!("crowd version=1 gasp intensity=20000 ticks={ticks} starts={gasp_starts} loudest_db={loudest_gasp:.1}");
+        assert!(!crowd.gasping() && ticks <= 36, "the walk ends within 35 query entries");
+        assert!(gasp_starts > 0 && gasp_db.iter().all(|&db| (GASP_QUIETEST..=0.).contains(&db)));
         // The sample windows (speed band in mph/100 or excitement, head count).
         for (name, play) in [("normal", &crowd.bank.normal), ("grand", &crowd.bank.grand)] {
             for smp in &play.samples {

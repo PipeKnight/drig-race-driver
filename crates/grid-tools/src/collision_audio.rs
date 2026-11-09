@@ -120,6 +120,45 @@ pub fn read_infos(bytes: &[u8]) -> Result<HashMap<String, Curve>, String> {
     Ok(out_infos)
 }
 
+/// Resolves a bank and sample name to a decoded sound index, or `None` when it is absent or
+/// undecodable.
+pub type SampleLookup<'a> = dyn FnMut(&str, &str) -> Result<Option<usize>, String> + 'a;
+
+/// audioVarieties.bin: the varieties of `banks` with their samples and preset distances
+/// (min/max distance, 1 and 2 without a preset). `sample` resolves each sample.
+pub fn read_varieties(
+    bytes: &[u8],
+    banks: &[&str],
+    sample: &mut SampleLookup<'_>,
+) -> Result<HashMap<String, Variety>, String> {
+    let doc = binxml::read(bytes).map_err(|e| format!("audioVarieties: {e:?}"))?;
+    let mut presets: HashMap<&str, (f32, f32)> = HashMap::new();
+    for e in doc.elements.iter().filter(|e| e.name == "Preset") {
+        if let (Some(n), Some(a), Some(b)) = (attr(e, "name"), number(e, "minDist"), number(e, "maxDist")) {
+            presets.insert(n, (a, b));
+        }
+    }
+    let mut out = HashMap::new();
+    for (i, v) in doc.elements.iter().enumerate() {
+        let Some(bank) = attr(v, "bank").filter(|b| banks.contains(b)) else {
+            continue;
+        };
+        let mut samples = Vec::new();
+        for s in doc.elements.iter().filter(|s| s.name == "Sample" && s.parent.is_some_and(|p| doc.elements[p].parent == Some(i))) {
+            if let Some(n) = attr(s, "index")
+                && let Some(k) = sample(bank, n)?
+            {
+                samples.push(k);
+            }
+        }
+        let (min_distance, max_distance) = attr(v, "preset").and_then(|p| presets.get(p).copied()).unwrap_or((1., 2.));
+        if let Some(name) = attr(v, "name") {
+            out.insert(name.to_owned(), Variety { samples, min_distance, max_distance });
+        }
+    }
+    Ok(out)
+}
+
 impl Bank {
     pub fn load(root: &Path) -> Result<Arc<Self>, String> {
         let audio = root.join("audio");
@@ -176,34 +215,8 @@ impl Bank {
             sounds.push(sound);
             Ok(Some(sounds.len() - 1))
         };
-        // audioVarieties: presets (min/max distance) and the banks' varieties.
-        let doc = binxml::read(varieties).map_err(|e| format!("audioVarieties: {e:?}"))?;
-        let mut presets: HashMap<&str, (f32, f32)> = HashMap::new();
-        for e in doc.elements.iter().filter(|e| e.name == "Preset") {
-            if let (Some(n), Some(a), Some(b)) = (attr(e, "name"), number(e, "minDist"), number(e, "maxDist")) {
-                presets.insert(n, (a, b));
-            }
-        }
-        let mut out_varieties = HashMap::new();
-        for (i, v) in doc.elements.iter().enumerate() {
-            let Some(bank) = attr(v, "bank").filter(|b| banks.iter().any(|(name, _)| name == b)) else {
-                continue;
-            };
-            let mut samples = Vec::new();
-            for s in doc.elements.iter().filter(|s| s.name == "Sample" && s.parent.is_some_and(|p| doc.elements[p].parent == Some(i))) {
-                if let Some(n) = attr(s, "index")
-                    && let Some(k) = sample(bank, n)?
-                {
-                    samples.push(k);
-                }
-            }
-            let (min_distance, max_distance) = attr(v, "preset")
-                .and_then(|p| presets.get(p).copied())
-                .unwrap_or((1., 2.));
-            if let Some(name) = attr(v, "name") {
-                out_varieties.insert(name.to_owned(), Variety { samples, min_distance, max_distance });
-            }
-        }
+        let names: Vec<&str> = banks.iter().map(|(name, _)| *name).collect();
+        let out_varieties = read_varieties(varieties, &names, &mut sample)?;
         let out_infos = read_infos(infos)?;
         // ImpactVarieties: the first three children in file order (45B040).
         let doc = binxml::read(impacts).map_err(|e| format!("ImpactVarieties: {e:?}"))?;

@@ -467,9 +467,144 @@ pub fn doppler_pitch(pitch: f32, doppler: f32) -> f32 {
     (pitch * doppler).clamp(0.5, 2.)
 }
 
+/// 41DE10 distance scale of the engine Treble: the high frequencies are gone at 50 m.
+pub const TREBLE_PER_METRE: f32 = 0.02;
+
+/// 41DE10 Treble (car +0xA6A4, dB) that 42DE60 publishes to all twelve engine voices of an
+/// AI car, `distance` the car (+0xA420) to the listener: lin2db((1 - min(0.02 d, 1))^8) - 3.
+/// The Detached camera gives 0. In DetachedMultiCar 41DE10 measures from car +0xA460
+/// instead of the listener, a point not established, so this gives 0 there [I]. The human
+/// player's car gets 0 in every driving view (41DE10 returns before the distance term).
+pub fn ai_engine_treble_db(camera: Camera, distance: f32) -> f32 {
+    if matches!(camera, Camera::Detached | Camera::DetachedMultiCar) || !distance.is_finite() {
+        return 0.;
+    }
+    let near = 1. - (distance * TREBLE_PER_METRE).clamp(0., 1.);
+    crate::tyre_audio::lin2db(near.powi(8)) - 3.
+}
+
+/// AL_LOWPASS_GAINHF of a voice's Treble: A25D90 limits Treble to 0 dB, A27780 sets
+/// 10^(Treble·0.5·0.05), then √ with the sqrt switch on (both paths give 10^(Treble/40)).
+/// A per-voice filter preset offset (0xEBEE28, by the voice's filter bit) is not added: the
+/// engine voices' filter bits are not established.
+pub fn treble_gain_hf(treble_db: f32) -> f32 {
+    10f32.powf(treble_db.min(0.) / 40.)
+}
+
+/// The EFX low-pass reference frequency: AL_LOWPASS_GAINHF is the gain at 5 kHz.
+pub const LOWPASS_REFERENCE_HZ: f32 = 5000.;
+
+/// The EFX low-pass (AL_FILTER_LOWPASS, gain 1) at a given AL_LOWPASS_GAINHF. The EFX
+/// guide fixes only the 5 kHz reference; "Generic Software"'s filter design is not
+/// established, so this is a high shelf at 5 kHz with slope 1 (the Audio EQ Cookbook form
+/// OpenAL Soft uses) [I]. GAINHF 1 is an exact pass-through.
+#[derive(Clone, Copy, Debug)]
+pub struct Lowpass {
+    gain_hf: f32,
+    b: [f32; 3],
+    a: [f32; 2],
+    x: [f32; 2],
+    y: [f32; 2],
+}
+impl Default for Lowpass {
+    fn default() -> Self {
+        Self { gain_hf: 1., b: [1., 0., 0.], a: [0.; 2], x: [0.; 2], y: [0.; 2] }
+    }
+}
+impl Lowpass {
+    /// Sets AL_LOWPASS_GAINHF (clamped to [0.001, 1]) at sample rate `rate`; the history
+    /// carries over, as a filter update on a playing source does.
+    pub fn set(&mut self, gain_hf: f32, rate: f32) {
+        let gain_hf = if gain_hf.is_finite() { gain_hf.clamp(0.001, 1.) } else { 1. };
+        if gain_hf == self.gain_hf {
+            return;
+        }
+        self.gain_hf = gain_hf;
+        if gain_hf == 1. {
+            (self.b, self.a) = ([1., 0., 0.], [0.; 2]);
+            return;
+        }
+        let w0 = std::f32::consts::TAU * (LOWPASS_REFERENCE_HZ / rate).min(0.49);
+        let (sin, cos) = w0.sin_cos();
+        let a = gain_hf.sqrt();
+        // Slope 1: alpha = sin(w0)/2 · √2.
+        let s = 2. * a.sqrt() * (sin / 2. * std::f32::consts::SQRT_2);
+        let a0 = (a + 1.) - (a - 1.) * cos + s;
+        self.b = [
+            a * ((a + 1.) + (a - 1.) * cos + s) / a0,
+            -2. * a * ((a - 1.) + (a + 1.) * cos) / a0,
+            a * ((a + 1.) + (a - 1.) * cos - s) / a0,
+        ];
+        self.a = [2. * ((a - 1.) - (a + 1.) * cos) / a0, ((a + 1.) - (a - 1.) * cos - s) / a0];
+    }
+    pub fn gain_hf(&self) -> f32 {
+        self.gain_hf
+    }
+    /// One sample (direct form I). At GAINHF 1 the coefficients are (1, 0, 0 | 0, 0), so the
+    /// output is the input exactly.
+    pub fn process(&mut self, x: f32) -> f32 {
+        let y = self.b[0] * x + self.b[1] * self.x[0] + self.b[2] * self.x[1] - self.a[0] * self.y[0] - self.a[1] * self.y[1];
+        self.x = [x, self.x[0]];
+        self.y = [y, self.y[0]];
+        y
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ai_engine_treble_follows_41de10_and_a27780() {
+        // At the car: lin2db(1) - 3 = -3 dB; GAINHF 10^(-3/40).
+        assert_eq!(ai_engine_treble_db(Camera::Chase, 0.), -3.);
+        assert!((treble_gain_hf(-3.) - 0.841_395).abs() < 1e-5);
+        // 25 m: (1/2)^8 = 1/256 -> -48.16, floored at -48 by lin2db, then -3.
+        assert_eq!(ai_engine_treble_db(Camera::Internal, 25.), -51.);
+        assert_eq!(ai_engine_treble_db(Camera::Bonnet, 80.), -51.);
+        // 10 m: 0.8^8.
+        let t = ai_engine_treble_db(Camera::Chase, 10.);
+        assert!((t - (20. * 0.8f32.powi(8).log10() - 3.)).abs() < 1e-4, "{t}");
+        // Detached cameras publish no Treble here; positive Treble is limited to 0 dB.
+        assert_eq!(ai_engine_treble_db(Camera::Detached, 10.), 0.);
+        assert_eq!(ai_engine_treble_db(Camera::DetachedMultiCar, 10.), 0.);
+        assert_eq!(treble_gain_hf(3.), 1.);
+    }
+
+    #[test]
+    fn lowpass_is_a_5khz_shelf_and_exact_at_unity() {
+        let rate = 48_000.;
+        // Steady-state gain of a sine through the filter.
+        let gain = |gain_hf: f32, hz: f32| {
+            let mut f = Lowpass::default();
+            f.set(gain_hf, rate);
+            let (mut peak, n) = (0f32, 48_000);
+            for i in 0..n {
+                let y = f.process((std::f32::consts::TAU * hz * i as f32 / rate).sin());
+                if i > n / 2 {
+                    peak = peak.max(y.abs());
+                }
+            }
+            peak
+        };
+        // Low frequencies pass; the reference frequency sits halfway in dB (shelf
+        // midpoint); the top of the band reaches GAINHF.
+        assert!((gain(0.1, 100.) - 1.).abs() < 0.01);
+        let mid = 20. * gain(0.1, 5000.).log10();
+        assert!((mid + 10.).abs() < 0.5, "{mid}");
+        assert!((gain(0.1, 20_000.) - 0.1).abs() < 0.02);
+        // GAINHF 1 changes no sample, before and after a filtered stretch.
+        let mut f = Lowpass::default();
+        let xs: Vec<f32> = (0..200).map(|i| (i as f32 * 0.37).sin()).collect();
+        assert!(xs.iter().all(|&x| f.process(x) == x));
+        f.set(0.2, rate);
+        xs.iter().for_each(|&x| {
+            f.process(x);
+        });
+        f.set(1., rate);
+        let tail: Vec<f32> = xs.iter().map(|&x| f.process(x)).collect();
+        assert!(tail.iter().zip(&xs).all(|(y, x)| y == x));
+    }
 
     #[test]
     fn doppler_follows_cmstream_update() {

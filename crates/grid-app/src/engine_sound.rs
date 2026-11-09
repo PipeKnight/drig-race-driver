@@ -139,6 +139,8 @@ pub(crate) struct OpponentEngine {
     /// This car's own decoder failure: its mixer stays silent until the
     /// next reset, the other engines play on.
     failure: Arc<AtomicU32>,
+    /// Its engine voices' Treble filter (41DE10: AI cars only).
+    treble: Arc<AtomicU32>,
 }
 /// audioVarieties presets `Engine`/`Exhaust`: min/max distance in metres.
 const ENGINE_DISTANCE: (f32, f32) = (10., 175.);
@@ -187,6 +189,12 @@ pub(crate) struct EngineSource {
     mech: Option<MechBus>,
     /// The player's car (`Mixer::player`): clunk, turbo, focused backfire.
     player: bool,
+    /// Its engine voices' AL_LOWPASS_GAINHF (f32 bits; `audio_mix::treble_gain_hf`).
+    treble: Arc<AtomicU32>,
+}
+/// GAINHF 1: no Treble filtering (the player's car in every driving view, 41DE10).
+fn unfiltered() -> Arc<AtomicU32> {
+    Arc::new(AtomicU32::new(1f32.to_bits()))
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
@@ -197,6 +205,7 @@ pub(crate) struct Decoder {
     count: usize,
     failure: Arc<AtomicU32>,
     reported_failure: bool,
+    treble: Arc<AtomicU32>,
 }
 impl Iterator for Decoder {
     type Item = f32;
@@ -230,6 +239,7 @@ impl Iterator for Decoder {
             if let Some(mech) = &self.mech {
                 self.mixer.mech_levels = mech_audio::Levels::from_bits(mech.each_ref().map(|a| a.load(Ordering::Relaxed)));
             }
+            self.mixer.treble.set(f32::from_bits(self.treble.load(Ordering::Relaxed)), RATE as f32);
         }
         self.count = self.count.wrapping_add(1);
         let value = self.mixer.sample(self.control);
@@ -275,6 +285,7 @@ impl TestVoice {
             doppler: None,
             mech: None,
             player: false,
+            treble: unfiltered(),
         };
         Self { decoder: source.decoder(), mailbox: source.mailbox, bus: source.bus }
     }
@@ -325,6 +336,7 @@ impl Decodable for EngineSource {
                 count: 0,
                 failure: self.failure.clone(),
                 reported_failure: false,
+                treble: self.treble.clone(),
             };
         match &self.doppler {
             Some(doppler) => Stereo::with_doppler(decoder, self.pan.clone(), RATE, doppler.clone()),
@@ -496,6 +508,7 @@ fn start(
             doppler: None,
             mech: Some(sound.mech.clone()),
             player: true,
+            treble: unfiltered(),
         });
         commands.spawn(AudioPlayer(handle));
     }
@@ -518,6 +531,7 @@ fn start(
         let pan = Pan::centre();
         let doppler = Rate::unit();
         let failure = Arc::new(AtomicU32::new(0));
+        let treble = unfiltered();
         // Its backfire and gear whine (451260, 4518E0) from its own mec bank.
         let mech = mech_bus();
         let handle = assets.add(EngineSource {
@@ -529,6 +543,7 @@ fn start(
             pan: pan.clone(),
             doppler: Some(doppler.clone()),
             player: false,
+            treble: treble.clone(),
         });
         // Played once, as the player's engine: the decoder never ends. LOOP
         // wraps it in rodio's `repeat_infinite`, which keeps every sample
@@ -545,6 +560,7 @@ fn start(
                 pan,
                 doppler,
                 failure,
+                treble,
             },
         ));
     }
@@ -713,6 +729,9 @@ fn update(
             let v = car.velocity();
             let relative = Vec3::new(v[0], v[1], v[2]) - listening.camera_velocity();
             engine.doppler.set(audio_mix::doppler((at - ear).to_array(), relative.to_array()));
+            // 41DE10: the high frequencies fade with the car's distance from the listener.
+            let treble = audio_mix::ai_engine_treble_db(camera, at.distance(ear));
+            engine.treble.store(audio_mix::treble_gain_hf(treble).to_bits(), Ordering::Relaxed);
             let at = Mat4::from_cols_array(&pose);
             let distances = distances(at, engine.model);
             // Its backfire and whine: the AI group (4223D0: 0x11 for all of an
@@ -890,6 +909,7 @@ mod tests {
                 doppler: None,
                 mech: None,
                 player: true,
+                treble: unfiltered(),
             }
             .decoder()
             .inner;
@@ -934,6 +954,7 @@ mod tests {
                 doppler: None,
                 mech: None,
                 player: false,
+                treble: unfiltered(),
             };
             let mut engine = source.decoder().inner;
             let control = Control { normalized_rpm: 0.5, throttle: 1., audible: true, generation: 0, gear: 3 };
@@ -1056,7 +1077,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre(), doppler: None, mech: None, player: true }.decoder().inner;
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre(), doppler: None, mech: None, player: true, treble: unfiltered() }.decoder().inner;
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();

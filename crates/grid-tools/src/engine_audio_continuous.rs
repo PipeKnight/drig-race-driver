@@ -207,6 +207,9 @@ pub struct Mixer {
     /// 43C320's latch: +0xA5E8 pulled, +0xA5E9 released, +0xA5EA played.
     pub handbrake: bool,
     handbrake_latch: [bool; 3],
+    /// The twelve engine voices' Treble filter (42DE60 publishes car +0xA6A4 to each;
+    /// `audio_mix::ai_engine_treble_db`); the mechanical voices are not filtered.
+    pub treble: crate::audio_mix::Lowpass,
 }
 /// Normal/Chase/PC levels of the Engine and Exhaust groups.
 pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
@@ -233,6 +236,7 @@ impl Mixer {
             whine_start: None,
             handbrake: false,
             handbrake_latch: [false; 3],
+            treble: crate::audio_mix::Lowpass::default(),
         };
         result.reset();
         result
@@ -431,6 +435,7 @@ impl Mixer {
             }
             cursor.position += cursor.step;
         }
+        let mut value = self.treble.process(value);
         if let Some(mech) = &mut self.mech {
             value += mech.sample();
         }

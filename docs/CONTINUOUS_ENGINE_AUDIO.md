@@ -12,7 +12,8 @@ This is experimental presentation, not 1:1 sound. The original full451770 load,
 gear/wobble/rev-limit effects, virtual backend, spatialization, reverb and stereo
 routing are not reconstructed. A16ms audio scheduling cadence, linear mono
 resampler, direct throttle, initial stopped voices/fade, zero angular-motion
-adjustment, neutral Treble, observed Chase bus offsets(-14engine/-7exhaust dB)
+adjustment, neutral Treble (correct for the player's car; AI cars are low-passed by distance
+since AUDIO_RESEARCH §35), observed Chase bus offsets(-14engine/-7exhaust dB)
 and silent input-floor voices are explicit policies. Native observed cooldown
 0x3e21cac0 is used; its producer rule remains unknown. Camera3 publication math
 has been proved; applying its scalar gains to this mono presentation does not
