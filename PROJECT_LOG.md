@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F768](log/F0768.md) | 2026-11-09 | Drift Battle: original drift field, unread drift settings, drift soak |
 | [F767](log/F0767.md) | 2026-11-09 | One-window front end: menu, loading screen and race in one process |
 | [F766](log/F0766.md) | 2026-11-09 | Crowd gasps and the AI engine Treble low-pass (rows 70, 72) |
 | [F765](log/F0765.md) | 2026-11-09 | Graphics audit of all routes; night and container emissive objects drawn |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F711](log/F0711.md) | 2026-11-03 | Row 99 recheck on main: the Le Mans route 0 R10 branch at 8,689 m and the route sweep hold |
 | [F710](log/F0710.md) | 2026-11-03 | Barrier strips at impact: skinned damage meshes blend over their pieces' joints; the anchor offset is the body frame |
 | [F709](log/F0709.md) | 2026-11-03 | track.vis decoded; Okutama raised grass is out of route reach; read_sun reads every lighting file |
-| [F708](log/F0708.md) | 2026-11-03 | Car LOD level fades and remaining pop sources |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

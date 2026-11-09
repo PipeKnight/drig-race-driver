@@ -49,6 +49,27 @@ pub const CIRCUIT_SERIES: [&str; 11] = [
     "prestige",
 ];
 
+/// Free-race drift formats whose field the free-race path draws like a
+/// circuit series' (0x65FF70 reads the pool by name, not the discipline
+/// [V, docs/SERIES.md]): Drift Battle's `drift_battle` pool, 8 cars.
+pub const DRIFT_SERIES: [&str; 1] = ["drift_battle"];
+
+/// Whether `series` / `--series` accepts the name: a circuit series or a
+/// drift format of [`DRIFT_SERIES`].
+pub fn is_offered(name: &str) -> bool {
+    CIRCUIT_SERIES.contains(&name) || DRIFT_SERIES.contains(&name)
+}
+
+/// The names [`is_offered`] accepts, for error messages.
+pub fn offered() -> String {
+    CIRCUIT_SERIES
+        .iter()
+        .chain(DRIFT_SERIES.iter())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// The time-limited Le Mans 24 Hours (free race `Le_Mans` [V 0x62A5D0]).
 pub fn is_le_mans_24(name: &str) -> bool {
     name.eq_ignore_ascii_case("le_mans")
@@ -136,11 +157,12 @@ pub const SURVEYED_TRACKS: [&str; 5] = [
 /// since the default setup's downforce limit (F414), the Le Mans Series
 /// prototypes and the 911; since F457 the other prototypes (787, 390, je4),
 /// the muscle cars except the Mustang Boss, the open-wheel cars, gt_club and
-/// prestige. Another car needs GRID_SERIES_EXPERIMENTAL=1.
-pub const RACEABLE: [&str; 35] = [
+/// prestige; since F768 the drift cars, whose zero low-speed grip bounds the
+/// grip update had rejected. Another car needs GRID_SERIES_EXPERIMENTAL=1.
+pub const RACEABLE: [&str; 42] = [
     "lac", "bmw", "sup", "sky", "nsx", "350", "dbr", "c6r", "sal", "ccg", "c5r", "lam", "spk", "esp",
     "911", "c65", "b05", "cre", "lc7", "b06", "r10", "787", "390", "je4", "ply", "cha", "gtr", "vip",
-    "cam", "df3", "fmj", "tch", "ccx", "zon", "bos",
+    "cam", "df3", "fmj", "tch", "ccx", "zon", "bos", "cor", "imp", "mop", "gto", "soa", "s15", "rx7",
 ];
 
 /// Whether a series' events still need GRID_SERIES_EXPERIMENTAL=1 (a car of

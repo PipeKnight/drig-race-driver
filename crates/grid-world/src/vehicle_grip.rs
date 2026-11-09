@@ -54,7 +54,9 @@ pub fn apply(
         || s.f(0xfcc) <= 0.
         || s.f(0xfcc) >= 1.
         || s.f(0x1160) == 0.
-        || s.f(0x21f8) == s.f(0x21fc)
+        // No guard on +21F8 == +21FC: the drift cars author both as zero, and
+        // A00E10 (A0180A) divides by their difference only on the low-speed
+        // branch, where the quotient clamps exactly as below (F768).
         || s.f(0x12a8) < 0.
         || s.f(0x12a8) > 4.
         || (0..4).any(|i| {
@@ -305,8 +307,7 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn material_failure_after_suspension_rolls_back_both_buffers() {
+    fn fixture() -> (State, [u32; VIEW_WORDS]) {
         let mut s = State {
             words: [0; crate::suspension_prepare::WORDS],
         };
@@ -363,6 +364,12 @@ mod tests {
             }
             set(&mut v, 0x298 + i * 4, 1.);
         }
+        (s, v)
+    }
+
+    #[test]
+    fn material_failure_after_suspension_rolls_back_both_buffers() {
+        let (mut s, mut v) = fixture();
         let before = s.words;
         let view_before = v;
         let mut queries = 0;
@@ -396,5 +403,22 @@ mod tests {
         assert_eq!(materials, 5);
         assert_eq!(s.words, before);
         assert_eq!(v, view_before);
+    }
+
+    /// The drift cars author both low-speed bounds +21F8/+21FC as zero (F768);
+    /// validation accepts the equal pair and the update proceeds.
+    #[test]
+    fn equal_low_speed_bounds_pass_validation() {
+        let (mut s, mut v) = fixture();
+        s.set(0x21fc, 0.);
+        let error = apply(
+            &mut s,
+            &mut v,
+            0.01,
+            |_, _| Ok(None),
+            |_| Err(Error("authored late material failure")),
+        )
+        .unwrap_err();
+        assert_eq!(error.0, "authored late material failure");
     }
 }

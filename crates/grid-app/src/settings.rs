@@ -598,10 +598,10 @@ impl Settings {
                 }
                 ("game", "series") => {
                     let name = value.to_ascii_lowercase();
-                    if !grid_tools::series::CIRCUIT_SERIES.contains(&name.as_str()) {
+                    if !grid_tools::series::is_offered(&name) {
                         return Err(at(format!(
                             "`series` needs one of {}",
-                            grid_tools::series::CIRCUIT_SERIES.join(", ")
+                            grid_tools::series::offered()
                         )));
                     }
                     self.series = Some(name);

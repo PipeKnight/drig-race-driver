@@ -132,6 +132,32 @@ fn records(doc: &Document<'_>, index: usize, count: &str, record: &str) -> Resul
     }
     Ok(items)
 }
+/// The `record` children of `index` with their `id`s, which may skip values:
+/// the class brake lines of a vehicle track list only the lines the class
+/// overrides (Washington route_3 `drift`: ids 0-3, 5-7, 10-14). The original
+/// loader 0x79FA60 finds or inserts each line by its `id` attribute; DRIG
+/// keeps the count check and requires increasing ids.
+fn records_by_id(
+    doc: &Document<'_>,
+    index: usize,
+    count: &str,
+    record: &str,
+) -> Result<Vec<(usize, usize)>> {
+    let items = named(doc, index, record)?;
+    if items.len() != integer(element(doc, index)?, count)? || items.is_empty() {
+        return fail(index, "AI record count mismatch");
+    }
+    let mut out: Vec<(usize, usize)> = Vec::with_capacity(items.len());
+    for item in items {
+        let id = integer(&doc.elements[item], "id")?;
+        if out.last().is_some_and(|&(last, _)| id <= last) {
+            return fail(item, "AI IDs must increase");
+        }
+        out.push((id, item));
+    }
+    Ok(out)
+}
+/// One `brake_data` element (the brake-data object's loader 0x778EA0, via 0x775100).
 fn brake_data(e: &Element<'_>) -> Result<BrakeData> {
     let optional = |name| {
         e.attributes
@@ -276,8 +302,13 @@ pub fn track_named(doc: &Document<'_>, name: &str, wanted: &str) -> Result<Track
 }
 
 /// Per-class brake data from `route_0/ai_vehicle_track.xml` (track `default`),
-/// indexed by brake-line id; `None` when the class has no entry.
-pub fn class_brake_lines(doc: &Document<'_>, class: &str) -> Result<Option<Vec<BrakeData>>> {
+/// indexed by brake-line id; `None` when the class has no entry. An id the
+/// class does not list is `None`: that line keeps the track's own data
+/// (0x78E820, F768).
+pub type ClassBrakeLines = Vec<Option<BrakeData>>;
+
+/// [`ClassBrakeLines`] of `class` on track `default`.
+pub fn class_brake_lines(doc: &Document<'_>, class: &str) -> Result<Option<ClassBrakeLines>> {
     class_brake_lines_on(doc, "default", class)
 }
 
@@ -300,7 +331,7 @@ pub fn class_brake_lines_on(
     doc: &Document<'_>,
     name: &str,
     class: &str,
-) -> Result<Option<Vec<BrakeData>>> {
+) -> Result<Option<ClassBrakeLines>> {
     if element(doc, 0)?.name != "vehicle_type_track_data" {
         return fail(0, "unsupported AI vehicle track data");
     }
@@ -316,16 +347,17 @@ pub fn class_brake_lines_on(
     else {
         return Ok(None);
     };
-    records(
+    let lines = records_by_id(
         doc,
         only(doc, class, "brake_lines")?,
         "num_brake_lines",
         "brake_line",
-    )?
-    .into_iter()
-    .map(|line| brake_data(&doc.elements[only(doc, line, "brake_data")?]))
-    .collect::<Result<_>>()
-    .map(Some)
+    )?;
+    let mut out = vec![None; lines.last().map_or(0, |&(id, _)| id + 1)];
+    for (id, line) in lines {
+        out[id] = Some(brake_data(&doc.elements[only(doc, line, "brake_data")?])?);
+    }
+    Ok(Some(out))
 }
 
 /// One grip's speed->distance table (m/s -> m), speeds increasing.
@@ -917,4 +949,66 @@ pub fn choreographer(doc: &Document<'_>, discipline: &str) -> Result<Choreograph
         events,
         triggers,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Element name, attributes, children.
+    type Spec = (
+        &'static str,
+        Vec<(&'static str, &'static str)>,
+        std::ops::Range<usize>,
+    );
+
+    /// A class that lists brake lines 0 and 2 of a vehicle track.
+    fn sparse_class(second_id: &'static str) -> Document<'static> {
+        let data = vec![
+            ("min_speed", "10"),
+            ("max_speed", "30"),
+            ("distance_modifier", "1"),
+        ];
+        let specs: Vec<Spec> = vec![
+            ("vehicle_type_track_data", vec![], 1..2),
+            ("vehicle_track", vec![("name", "default")], 2..3),
+            ("vehicle_types", vec![], 3..4),
+            ("vehicle_type", vec![("name", "drift")], 4..5),
+            ("brake_lines", vec![("num_brake_lines", "2")], 5..7),
+            ("brake_line", vec![("id", "0")], 7..8),
+            ("brake_line", vec![("id", second_id)], 8..9),
+            ("brake_data", data.clone(), 9..9),
+            ("brake_data", data, 9..9),
+        ];
+        Document {
+            strings: vec![],
+            string_padding: &[],
+            elements: specs
+                .into_iter()
+                .map(|(name, attributes, children)| Element {
+                    name,
+                    value: None,
+                    attributes,
+                    children,
+                    parent: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn class_brake_lines_are_keyed_by_id() {
+        let lines = class_brake_lines(&sparse_class("2"), "drift")
+            .unwrap()
+            .unwrap();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].is_some() && lines[1].is_none() && lines[2].is_some());
+        assert_eq!(lines[2].unwrap().max_speed, 30.);
+        assert!(
+            class_brake_lines(&sparse_class("2"), "touring")
+                .unwrap()
+                .is_none()
+        );
+        assert!(class_brake_lines(&sparse_class("0"), "drift").is_err());
+    }
 }

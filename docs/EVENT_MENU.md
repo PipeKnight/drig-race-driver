@@ -26,7 +26,7 @@ Labels: **[D]** read from shipped data; **[I]** interpretation; **AUTHORED** a c
 | Time Trial | AUTHORED (`main_menu_time_trial_button_title`) | `route::CIRCUITS` | every raceable car | Laps (3) |
 | Pro Tuned, Touring Cars, GT1, GT2 | `free_race_discipline` | pool ∩ raced tracks (`Series::supported_layouts` rule), 21 each | `Series::raceable_cars` | Laps (3); the field is the original's grid fill |
 | Le Mans Series | `le_mans_series` (F409) | pool ∩ raced tracks (4) | the series' raceable cars (7) | Laps (3); the original's 15–17-car field; experimental like its launcher (the desktop supervisor sets `GRID_SERIES_EXPERIMENTAL=1` for this race), help line says so |
-| Drift Battle | `drift_battle` | pool ∩ raced tracks (9) | BMW, Lacetti (stand-ins) | Laps (2), Opponents 1–7 (7, pool `max_cars` − 1) |
+| Drift Battle | `drift_battle` | pool ∩ raced tracks (9) | the `drift_battle` pool's raceable drift cars (`Series::raceable_cars`, F768); the field is the original's grid fill | Laps (2), Opponents 1–7 (7, pool `max_cars` − 1) |
 | Drift GP | `drift_gp` | pool ∩ raced tracks (9) | BMW, Lacetti (stand-ins) | Laps (2) |
 | Freestyle Drift | `Free_Drift` | the four Yokohama arenas | BMW, Lacetti (stand-ins) | Time (`free_race_times`; 2 minutes AUTHORED default) |
 | Midnight Touge | `illegal_touge` | Haruna route 1 (`route::HARUNA`), the validated road | Lacetti, then the pool's raceable 350Z, Skyline, Supra | Direction Downhill/Uphill (subroute 0/1) |
@@ -38,7 +38,7 @@ Labels: **[D]** read from shipped data; **[I]** interpretation; **AUTHORED** a c
 - Not offered:
   - the 24 Hours of Le Mans, open wheel, muscle, club and prestige: not ported (docs/SERIES.md, docs/DISCIPLINES.md);
   - practice and the body-contact test drive: not events; their launchers stay.
-- Stand-in cars: the original's drift cars (cor, gto, imp, mop, rx7, s15, soa) and most touge cars are not ported. The help line says so. AUTHORED.
+- Stand-in cars: Drift GP and Freestyle Drift still offer the BMW and the Lacetti, and most touge cars are not ported; the help line says so (AUTHORED). The original's drift cars (cor, gto, imp, mop, rx7, s15, soa) race since F768 and make up the Drift Battle field; Drift GP and Freestyle do not offer them yet.
 - A route or car whose folder is missing is left out. On the phone's data subset that leaves Race and Time Trial at Donington with the Lacetti. That subset has no `database/`, so the series and drift disciplines are absent, and venue and layout names fall back to folder names (AUTHORED).
 - AUTHORED rows: Opponents (the original fills the grid from the pool), Direction (the original's Midnight Touge picks it at random, docs/TOUGE.md) and the lap range 1–10 (the original's lap choices are not decoded). Livery (`team`) is not offered.
 - Look: the pause menu's panel (AUTHORED, docs/PAUSE_MENU.md) on a plain background. The original's garage scene and glyphs are not ported.

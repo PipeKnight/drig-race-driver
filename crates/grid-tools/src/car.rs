@@ -78,6 +78,14 @@ impl Car {
             "spk" => "Spyker C8",
             "esp" => "Panoz Esperante",
             "911" => "Porsche 911 GT3",
+            // The Drift Battle pool (docs/DISCIPLINES.md §4).
+            "cor" => "Toyota Corolla",
+            "imp" => "Subaru Impreza",
+            "soa" => "Toyota Soarer",
+            "s15" => "Nissan Silvia",
+            "rx7" => "Mazda RX-7",
+            "gto" => "Pontiac GTO RMR",
+            "mop" => "Dodge Charger",
             other => other,
         }
     }
@@ -157,6 +165,54 @@ impl std::fmt::Display for Car {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Every authored label names its car's `vehicle_model` [D].
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn labels_name_the_database_model() {
+        let root = std::env::var("GRID_GAME_ROOT").unwrap();
+        let db = crate::read_database(std::path::Path::new(&root)).unwrap();
+        let vehicles = db.table("vehicle").unwrap();
+        let models = db.table("vehicle_model").unwrap();
+        let mut stems: Vec<&str> = vehicles
+            .rows()
+            .filter_map(|r| r.text("file_string"))
+            .collect();
+        stems.sort_unstable();
+        stems.dedup();
+        let mut wrong = Vec::new();
+        for stem in stems {
+            let Ok(car) = Car::new(stem) else { continue };
+            if car.label() == stem {
+                continue;
+            }
+            let model = vehicles
+                .rows()
+                .find(|r| r.text("file_string") == Some(stem))
+                .and_then(|v| {
+                    models
+                        .rows()
+                        .find(|m| m.int("id") == v.int("vehicle_model_id"))
+                })
+                .map(|m| {
+                    models
+                        .columns
+                        .iter()
+                        .filter_map(|c| m.text(c))
+                        .collect::<Vec<_>>()
+                        .join("/")
+                })
+                .unwrap_or_default();
+            let lower = model.to_lowercase();
+            let name = lower
+                .split(['/', ' ', '_'])
+                .find(|w| w.len() > 1)
+                .unwrap_or("");
+            if name.is_empty() || !car.label().to_lowercase().contains(name) {
+                wrong.push(format!("{stem}: {} vs {model}", car.label()));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
     #[test]
     fn car_folders() {
         let c = Car::default();

@@ -379,15 +379,17 @@ impl Catalog {
                     // The field draws from every one of them, so a series
                     // with one missing from the data subset is left out
                     // (F539: Touring Cars on the Donington bundle needs the BMW).
-                    Kind::Series | Kind::LeMans => {
+                    // Drift Battle draws its free-race field from the
+                    // `drift_battle` pool like a series (docs/SERIES.md).
+                    Kind::Series | Kind::LeMans | Kind::DriftBattle => {
                         let raceable = series.raceable_cars();
                         let stems: Vec<&str> = raceable.iter().map(Car::stem).collect();
                         let found = cars(&stems);
                         (if found.len() == stems.len() { found } else { Vec::new() }, false)
                     }
-                    // The drift pool's cars (cor, gto, rx7, ...) are not
-                    // ported: the launchers' BMW, and the Lacetti.
-                    Kind::DriftBattle | Kind::DriftGp | Kind::Freestyle => (
+                    // Drift GP and freestyle keep the launchers' BMW and the
+                    // Lacetti (their pools are not wired to the field yet).
+                    Kind::DriftGp | Kind::Freestyle => (
                         cars(&[grid_tools::car::BMW, grid_tools::car::LACETTI]),
                         true,
                     ),
@@ -564,7 +566,11 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
             AI
         }
         Kind::DriftBattle => {
-            game += &format!("opponent_cars = {}\n", c.car);
+            // The free-race field of the `drift_battle` pool (docs/SERIES.md).
+            game = format!(
+                "[game]\nseries = drift_battle\nroute = {}\ncar = {}\n",
+                c.route, c.car
+            );
             drive += &format!(
                 "discipline = drift_battle\nlaps = {}\nopponents = {}\n{field}",
                 c.laps, c.opponents
@@ -1896,9 +1902,10 @@ mod tests {
                 opponents: ini.opponents.unwrap_or(0),
                 minutes: ini.time_limit.map_or(0, |s| (s / 60.).round() as u32),
                 subroute: ini.subroute.unwrap_or(0),
-                // The launchers: Normal, from the back.
+                // The launchers: Normal, from their own grid choice (the
+                // drift battles draw the slot, the original's default).
                 difficulty: NORMAL,
-                grid: GridOption::Back,
+                grid: ini.grid_option.unwrap_or(GridOption::Back),
             };
             assert!(
                 t.layouts.iter().any(|l| l.route == choice.route),

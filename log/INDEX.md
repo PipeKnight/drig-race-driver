@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F768](F0768.md) | 2026-11-09 | Drift Battle: original drift field, unread drift settings, drift soak |
 | [F767](F0767.md) | 2026-11-09 | One-window front end: menu, loading screen and race in one process |
 | [F766](F0766.md) | 2026-11-09 | Crowd gasps and the AI engine Treble low-pass (rows 70, 72) |
 | [F765](F0765.md) | 2026-11-09 | Graphics audit of all routes; night and container emissive objects drawn |

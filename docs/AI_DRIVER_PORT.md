@@ -215,6 +215,16 @@ Static, read-only. Pseudocode is in the worktree fervent-napier-50814b
   invalid line is passed over and the next valid one is the car's next brake line.
 - [D] 0x7886C0 also calls the same check before it touches the line's state, and skips braking
   when it fails.
+- [D] Sparse class lines (F768). The class loader 0x79FA60 reads each `brake_line` of a
+  `vehicle_type` by its `id` attribute and finds or inserts the line object of that id
+  (0x7A6A20 / 0x7AB3D0), then stores the class's `brake_data` in that line's per-class map
+  (0x79BA60; the brake-data object's loader slot +4 is 0x778EA0, which reads the `brake_data`
+  child through 0x775100). 0x78E820 looks the car's class up in that map and uses the line's own data
+  (`+0x10`) when the class is absent. So a class may list only some ids: Washington route_3
+  `drift` lists 0–3, 5–7 and 10–14 (`num_brake_lines` 12), route_7 is sparse as well. The port
+  read the class lines by position and rejected these routes ("AI IDs must follow declared
+  order"); since F768 `ai::class_brake_lines_on` keys them by id and `track_lines` falls back to
+  the track line's own data for an id the class does not list.
 - Port: `next_brake_line` skips lines whose data is invalid (`brake_data_valid`), and the
   line-braking block requires it as well.
   - Before: the touring AI braked toward 0 m/s at Milan's lines 1 and 3. Solo it rolled past them

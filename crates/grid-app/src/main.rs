@@ -2545,10 +2545,10 @@ pub(crate) fn race_app(
             }
             "--series" => {
                 let name = args.next().ok_or("--series needs a series name")?.to_ascii_lowercase();
-                if !grid_tools::series::CIRCUIT_SERIES.contains(&name.as_str()) {
+                if !grid_tools::series::is_offered(&name) {
                     return Err(format!(
                         "--series needs one of {}",
-                        grid_tools::series::CIRCUIT_SERIES.join(", ")
+                        grid_tools::series::offered()
                     )
                     .into());
                 }

@@ -648,15 +648,17 @@ type BrakeLines = Vec<(f32, ai::BrakeData)>;
 /// Racing line and brake lines of `track` (brake-line arcs on that line).
 fn track_lines(
     track: &ai::Track,
-    class_lines: &Option<Vec<ai::BrakeData>>,
+    class_lines: &Option<ai::ClassBrakeLines>,
 ) -> Result<(Line, BrakeLines), Box<dyn std::error::Error>> {
     let line = Line::new(track)?;
     let mut brake_lines = Vec::new();
     for (id, b) in track.brake_lines.iter().enumerate() {
-        let data = match class_lines {
-            Some(lines) => *lines.get(id).ok_or("class brake line absent")?,
-            None => b.data,
-        };
+        // [V] 0x78E820 looks the line up in its per-class map and falls back
+        // to the line's own data when the class does not list it (F768).
+        let data = class_lines
+            .as_ref()
+            .and_then(|lines| lines.get(id).copied().flatten())
+            .unwrap_or(b.data);
         brake_lines.push((line.start[line.gate_index[b.gate]], data));
     }
     Ok((line, brake_lines))

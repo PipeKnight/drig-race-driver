@@ -230,13 +230,40 @@ Constructor defaults [V] and `drift.xml` [D]:
   disarms it.
 - A collision above collisionThreshold during a combo (and outside the 0.5 s cooldown) loses the
   current drift and the combo. The failed drift cannot raise a combo again; its later points join the
-  next combo. collisionPenalty (500) is parsed but not read by this path.
+  next combo. collisionPenalty (500) is parsed but has no reader (§2, "Settings without a reader").
 - Shown score = (combo points + current drift) × combo + total.
 - Statistics for the scoreboard: `numSingleDrifts` (+0x104; the combo bank also counts one), longest
   drift, largest angle, fastest drift speed, best combo, running averages of speed, distance and
   angle, points and count per rating.
 - The drift-count stat of `post_race_stats_drift_scores` is read through 0x4D1890 (0x51E2C0), not
   traced; the port shows the banked rating counts, the drifts that scored [I].
+
+### Settings without a reader (F768)
+
+9 November 2026, static only (capstone over the executable, `grid_re.py decompile`; no live run).
+The parser 0x62FAE0 fills collisionPenalty (+0x40), smokeFactor (+0x54), maxSmokeMultiplier
+(+0x58) and wrongWayThreshold (+0x68), but nothing found reads them:
+- the drift manager: FUN_00668720 builds it (vtable 0xCEA03C: 0x697D80, the per-step update
+  0x65F250, 0x5A42B0) with the Settings object at +8 (vtable 0xCEA030: 0x697D60, the parser 0x62FAE0,
+  0x560E30) and the entry vector at +0x1D8/+0x1DC; 0x67A8DD stores it in the race object at
+  **+0x23E4**, whose getter 0x468DA0 (`mov eax,[ecx+0x23E4]`) has one direct caller, 0x5F4F6F in
+  0x5F4E60 [V];
+- the scorer 0x643BC0 reads, through scorer+0x74, only +0x44 (interval), +0x48 (divisor), +0x5C
+  (close bonus), +0x6C (main-multiplier step), +0x1B0 (bias) and the flags +0x1C8/+0x1C9; the
+  detector 0x65DD50, through detector+0x28, only +0x38 (enter speed), +0x60/+0x64 (close radii) and
+  +0x74/+0x78 (battle multipliers) [V];
+- no instruction reads those four offsets from a register loaded from scorer+0x74, detector+0x28,
+  the manager pointer race+0x23E4 or Settings at manager+8 [V for the drift functions and every
+  caller of the getter; other paths not exhaustively searched].
+
+So as in Demolition Derby (DEMOLITION_DERBY.md, "no reader found") the smoke multiplier, the drift
+wrong-way message and the collision penalty are not part of the shipped scoring: the port leaves
+them out on purpose. The race HUD's general wrong-way pill (`race_hud.rs`, osd_wrong_way) is
+shared by every race, Drift Battle included.
+
+Detector permission +0x41 [I, partly traced]: true unless detector+0x48 ≠ 0 and 0x401350() and
+0x78EBB0(car) and the object at car +0x2C64 has a non-zero +0x2C; then it is that object's +0xC ≠ 0.
+The port grants it always (§4).
 
 ### Race end (0x64D940)
 
@@ -276,14 +303,17 @@ lap timing (`local/disciplines/runs/`: 4 cars, 9000 ticks, laps 85–97 s, no fa
   results in score order with a Score column.
 - `[drive] discipline = drift_battle` / `--discipline drift_battle` (needs laps and opponents);
   `settings/drift-battle.ini`, launcher `Play GRID Drift Battle.cmd`: longbeach_cl, 2 laps [D: the
-  career event], 7 AI cars [D: free-race battle maximum 8], BMW field (AUTHORED), grid at the back
-  (AUTHORED; the original draws a random slot), AI drift level from the AI difficulty (0.606 → level
+  career event], 7 AI cars [D: free-race battle maximum 8]; since F768 the field is drawn from the
+  original's `drift_battle` pool of drift cars (`series = drift_battle`, docs/SERIES.md), the player
+  drives the Silvia (s15, AUTHORED choice from the pool) from a random grid slot (the original's Race
+  Options default), AI drift level from the AI difficulty (0.606 → level
   1, bias 0.2) [I].
 - Interpretations and authored parts: impact = the largest solved contact impact (+0x3C), the scalar
   the body-impact listener receives [I]; the detector permission (+0x41) is always granted [I]; the
   results order by score with ties in race order [I]; a car that drops out is banked like a finisher
   [I]; the slip-angle sign side [I]; the HUD is text in the original's places only roughly.
-- Not ported: smoke multiplier, wrong-way message; collisionPenalty use; the original OSD look and
+- Left out because the original has no reader for them (§2, F768): smoke multiplier, drift
+  wrong-way threshold, collisionPenalty. Not ported: the original OSD look and
   sounds; Drift GP rounds and intros; freestyle. AI drift behaviour and flag touches followed in
   F367 (§4.1, §4.3), the result estimator in F386 (§4.2), Drift GP in F388 (§7).
 
@@ -401,15 +431,15 @@ driftInitiateGrip 1.2, driftRacingGrip 1.1, driftBrakeLineAdvance 8, driftLookAh
   line-change offset shift. drift_position_attempts has no reader in these paths (not searched
   elsewhere).
 
-**AI vehicle class.** Our BMW 320si is a touring car ([D] `ai_vehicle_type_track` = touring), so it
-keeps the `default` drift values; the original's Drift Battle grids use drift cars with the `drift*`
-classes. Solo two-lap runs of every class on longbeach_cl (`GRID_AI_CLASS`,
+**AI vehicle class.** Each car keeps its own class from its database row (no authored choice).
+Until F768 the field was the BMW 320si, a touring car ([D] `ai_vehicle_type_track` = touring) with the
+`default` drift values; since F768 it is the original's drift cars with their `drift*` classes (§4.4). Solo two-lap runs of every class on longbeach_cl (`GRID_AI_CLASS`,
 `local/drift-ai/runs/class-*.txt`) [V]: touring completes 2 laps (106 s) but scores 1 point (front
 grip ×10 snaps the car around); drift, drifts15, driftcor, driftgto, driftmop, driftimp hit
 barriers and stop before one lap; driftrx7 (252 points), driftsoa (674) and streetgt finish one lap.
-The port keeps the car's own class (no authored choice); the field results below follow from it.
+The BMW field results below follow from the touring class; §4.4 has the drift-car field.
 
-**Results [V]** (headless, BMW field, 7 + 1 AI cars, 16000 ticks, `local/drift-ai/runs/field-*`):
+**Results before F768 [V]** (headless, BMW field, 7 + 1 AI cars, 16000 ticks, `local/drift-ai/runs/field-*`):
 - longbeach_cl: scores 1–625, 3 cars banked; 5 classified, 3 DNF; 18223 contact records;
 - nurburgring_spr: 1019–17703 points; 3 classified, 1 wrecked, 4 DNF;
 - istanbul_int: 29–1555 points; 5 classified, 3 DNF.
@@ -545,7 +575,7 @@ them as obstacles. The Yokohama Docks route 1 and 9 bases (bHeavy 2000) stopped 
 
 ### 4.4 Routes (F367)
 
-Launch options (`settings/drift-battle-*.ini`, `Play GRID Drift Battle *.cmd`, 2 laps, 7 AI BMWs as
+Launch options (`settings/drift-battle-*.ini`, `Play GRID Drift Battle *.cmd`, 2 laps, 7 AI cars as
 `drift-battle.ini`): nurburgring_spr (route_1), istanbul_int (route_1), jarama_r (route_1),
 jarama_gp (route_0). Headless 4-car drift battles on all of them and on the reverse layouts
 longbeach_cl_r (Long Beach route_4), nurburgring_spr_r (Nürburgring route_3) and istanbul_int_r
@@ -597,13 +627,30 @@ Checks against the original, none of which showed a port difference that a 1:1 c
   `on_track` flickers at the limit Recovery re-activates (and resets, [V] 0x776990) every few ticks
   (car5 at Long Beach: 1,047 Recovery activations, 0.05 m/s for 170 s). Scores and activation
   semantics are the original's; the flicker comes from the shared on_track test.
-- The touring BMW uses the `default` drift values (driftGripFront 10); the original's drift grids
-  use the `drift*` classes (§4.1).
+- Until F768 the touring BMW field used the `default` drift values (driftGripFront 10); the drift
+  cars with the `drift*` classes race since F768 (§4.4).
 F406 (docs/SERIES.md, collision floor lift): the port's car body floor sat 7 cm too low, so bodies
 scraped the road. With the original's lift the Long Beach field spins far less (25.1 → 9.4 spins/lap),
 Nürburgring and Istanbul about as before; scores differ (see SERIES.md).
 The fields stay chaotic. Next candidates: a live drift trace of the original (not allowed in this
 session: no input to the original), the car-state angular velocity sign, the drift classes.
+
+**Drift-car field (F768) [V, headless].** `py -I tools/drift_soak.py OUT --field
+cor,imp,mop,gto,soa,s15,rx7` on every Drift Battle layout of the original's pool that DRIG loads
+(the 24 routes of §4.4), against the same run with the BMW field (`local/drift-soak/before`,
+`after`, `after-w`; per-route rows in each `summary.tsv`):
+
+| Field (24 layouts, 8 cars, 16,000 ticks) | laps | spins/lap | hits/lap | stalled s | cars with 2 laps | score median | p90 | best | sum |
+|---|---|---|---|---|---|---|---|---|---|
+| BMW stand-ins, `default` drift values (before F768) | 229.9 | 14.5 | 7.5 | 6,665 | 42 / 192 | 138 | 9,138 | 36,341 | 459,824 |
+| the pool's drift cars, `drift*` classes (F768) | 352.3 | 1.6 | 1.3 | 1,433 | 159 / 192 | 55,343 | 147,492 | 360,256 | 13,641,692 |
+
+Every scored car is scored by the drift scorer (no estimates). With the drift cars the scores
+reach the virtual race's scale (§4.2: 250,000–750,000 for one Normal car on longbeach_cl over two
+laps; field best per route 34,704–360,256). Remaining spread: Yokohama Docks (route_1 8.9 spins
+and 6.4 hits per lap, 2 of 8 cars finish two laps; routes 0/7/8 3.5–3.7 spins/lap) and Washington
+route_8 (2.7). F476's stall (recovery fires only against a frontal obstruction, score 0x78AB20) is
+the original's rule and stays as is.
 
 ## 5. Order for the remaining disciplines
 
