@@ -595,6 +595,9 @@ of scope for the port's recovery work.
 6. Behaviour drive.
 7. Default drive 0x797B50: PID target into req+0x60, heading error req+0x88, brake-line
    speed, limit-line ids from the limit types.
+   Its tail calls 0x7764C0 [V]: without a reverse request (req+0xAF) and above 0.5 m/s
+   (car state +0xD0), a car rolling backwards (forward +0x30 · velocity +0xA0 < 0) sets full
+   brake req+0xB2 and no steer req+0xA6. Ported in F753 (`BACKWARDS_BRAKE_SPEED`).
 8. Controls (§5).
 9. Next tick's track view applies req+0x98/+0x9C and the limit ids to the planned offsets.
 

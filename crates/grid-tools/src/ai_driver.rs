@@ -1049,6 +1049,11 @@ const RECOVERY_REVERSE_SPEED: f32 = 5.;
 const RECOVERY_STOPPED_SPEED: f32 = 0.1;
 /// avoid follow distance in side mode 0 (0x799DE0).
 const AVOID_FOLLOW_DISTANCE: f32 = 3.;
+/// Slip (rad, car state +0xD4) above which a firing alongside yield sets the
+/// full-brake flag +0xB2 (0x78991E, constant 0xCAFCD4 = 0.1).
+const YIELD_SLIP_FULL_BRAKE: f32 = 0.1;
+/// Speed (car state +0xD0) above which rolling backwards brakes (0x7764C0).
+const BACKWARDS_BRAKE_SPEED: f32 = 0.5;
 
 /// Built-in defaults for values absent from the shipped XML
 /// (docs/AI_DRIVER_RESEARCH.md §4).
@@ -3730,6 +3735,13 @@ impl AiDriver {
                     if let Some((_, _, r)) = chosen {
                         request.follow = Some((r, follow));
                         request.follow_brake_cap = max_brake;
+                        // 0x78990B..0x78992C: sliding while it yields (|car
+                        // state +0xD4| > 0.1, 0xCAFCD4) sets the full-brake
+                        // flag +0xB2, so the car scrubs speed beside the
+                        // other instead of driving on.
+                        if slip > YIELD_SLIP_FULL_BRAKE {
+                            request.full_brake = true;
+                        }
                     }
                 }
             }
@@ -3890,6 +3902,15 @@ impl AiDriver {
             | Behaviour::RetireFailure => {
                 self.drive_failure(data, &mut request, arc, speed, own.half_width(), dt);
             }
+        }
+        // Every behaviour drive returns 0, so the shared race drive 0x797B50
+        // follows each one. Its 0x7764C0: rolling backwards (forward · velocity
+        // < 0, car state +0x30 · +0xA0) above 0.5 m/s without a reverse request
+        // sets full brake (+0xB2) and no steer (+0xA6).
+        let rolling_back = dot3(forward, [view.velocity[0], view.velocity[1], view.velocity[2]]) < 0.;
+        if !request.reverse && speed > BACKWARDS_BRAKE_SPEED && rolling_back {
+            request.full_brake = true;
+            request.no_steer = true;
         }
         // Both planned offsets move toward the request at its merge rate
         // (0x7878F0 at the look-ahead, 0x788030 at the car).

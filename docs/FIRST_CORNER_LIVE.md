@@ -841,3 +841,74 @@ each tick, which the capture does not record). Next:
 - read the original's per-car pacing torque and grips in a capture (vehicle words beside +0xE00);
 - a single-car steady cornering comparison (port against original on the same inputs) at
   25–30 m/s and 5–15° slip.
+
+## 21. Yield full brake and backwards brake ported; the systematic losses are in the car's response (F753)
+
+Coordinator's task: continue the alongside and side-by-side port (backlog rows 30/31) and run the
+first-corner matrix before and after.
+
+**Static analysis [V, disassembly and `grid_re.py decompile`].**
+- The alongside drive 0x79C5A0 sets merge = cfg+0x43C, calls the squeeze 0x799630 and, when
+  map+0x5C > 0, the yield 0x78EC90 → 0x789780 (AI_OVERTAKING §8.3). Every behaviour drive returns 0
+  (all 16 read), so the arbitration 0x79A400 always runs the shared race drive 0x797B50 after it.
+- The yield's flag +0xB2 is the request's full-brake flag: 0x78E8A0 returns full brake outside
+  the ABS cap. 0x78990B..0x78992C sets it when |car state +0xD4| > 0.1 rad (0xCAFCD4). A car that
+  slides while it yields brakes fully beside the other car. The port set only the follow target
+  and its brake cap. **Ported.**
+- The tail of 0x797B50 calls 0x7764C0. Without a reverse request (+0xAF), above 0.5 m/s, a car whose
+  forward · velocity < 0 sets full brake (+0xB2) and no steer (+0xA6). It was missing from the port
+  and the docs. **Ported.**
+- Also read, nothing to port for the first corner:
+  - 0x789D30 is a timer on cfg+0xC70 that sets req+0xB5.
+  - 0x77B8F0 applies an external object's speed cap (+0x10 → req+0x84) and its follow of the
+    nearest car ahead within 8 m laterally (follow distance 32, req+0xA5 below 24 m). That looks
+    like race control, and its consumers are not traced.
+  - The squeezed flag +0x30 of the alongside slot has no consumer in 0x770000–0x7B0000.
+- Race start grip: the race manager 0x404C90 applies grip cfg+0xBFC (1.25) when the distance
+  0x4022A0 (race progress × lap length) < cfg+0xBF4 (750). Progress is negative before the line
+  (F649), so the original also has grip 1.25 at the first corner, as the port does. Closed.
+
+**Matrix.** 13 routes, 10/11/12 cars, seeds 0–5 (234 starts). The race manager is on (reference
+car n−1) and breakable props are on. A car counts as lost if it crashed or stalled within 1875
+ticks, retired, or was wrecked. Before is HEAD F752; after is this change.
+
+| route | before | after |
+|---|---|---|
+| Detroit 1 | 1 | 3 |
+| Jarama 0 | 0 | 4 |
+| Jarama 1 | 5 | 6 |
+| Long Beach 0 / 1 / 3 / 4 | 1 / 0 / 1 / 0 | 1 / 0 / 0 / 0 |
+| Nürburgring 0 | 6 | 6 |
+| Shibuya 0 | 6 | 6 |
+| Shibuya 1 | 12 | 3 |
+| Yokohama Docks 0 / 1 / 9 | 0 / 3 / 8 | 0 / 3 / 7 |
+| **total (12-car)** | **43 (16)** | **39 (19)** |
+| car contacts | 194 828 | 212 381 |
+
+By seed, before s0–s5 = 11/8/3/10/4/7 and after 10/0/0/15/8/6. The single multi-car clusters move
+between seeds, for example Shibuya 1 s1 11-car (7 lost before) and Nürburgring s3 12-car (6 after).
+So the net change is within the seed spread of §19. Solo identity and lap times are unchanged
+(84.766 s, 82.629 s). The 12-car identity race finishes with all cars running in both builds.
+
+**The losses that do not move [O port].** The same car is lost at 10, 11 and 12 cars, with the
+same seed, in both builds:
+- Jarama 1 car 7 s0;
+- Yokohama 1 car 7 s0;
+- Yokohama 9 car 8 s0;
+- Shibuya 0 cars 1–2 s3;
+- Yokohama 9 car 9 s3.
+
+These are 17 of the 39. Two were traced with `GRID_FIELD_DETAIL`:
+- *Yokohama 1 car 7*: inside a left-hand corner, in side contact (types 3/2) with car 8 from tick
+  360 to 450. Both cars are at full lock. The heading error of car 7 grows from 0.4 to 1.3 rad and
+  its line error from 0.4 to 11.6 m, at a yaw rate of only 0.1–0.4 rad/s. Below the line target of
+  34.2 m/s it holds full throttle and runs wide into the wall at tick ~460.
+- *Jarama 1 car 7*: side contact with the car on its right at tick 720 (type 3), then the yaw rate
+  turns to −0.7…−1.6 rad/s against full-lock steering. Slip grows from −4° to −44° and the car
+  spins. The throttle of 0.6–0.9 matches the slide lift 0x77A880 at 0.2–0.3 rad.
+
+In both cases every AI step matches its decompile (§15, §20). What differs is how the car responds
+to contact and lock, the same gap §20 measured: with the same inputs the port's car yaws at about
+60% of the original's rate. Next, still needing an original capture: the per-car pacing torque and
+grips, a steady cornering comparison at 25–30 m/s and 5–15° slip, and the side-contact impulse on
+yaw.

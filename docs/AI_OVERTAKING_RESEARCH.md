@@ -416,6 +416,11 @@ If only one side yields, it applies only if the other side is also tight
 nearer yielding car (+0x70), +0x74 = map[27] yield_follow_distance, +0x78 = map[24]
 yield_max_brake (follow-brake cap), flag +0xB2 when |own state +0xD4| > 0.1, behaviour +0xC = 1.
 
+The flag +0xB2 is the request's full-brake flag (0x78E8A0 brakes fully, outside the ABS cap),
+set at 0x78990B..0x78992C with the constant 0xCAFCD4 = 0.1 rad. A car that slides while it
+yields therefore brakes fully beside the other car. Ported in F753 (`ai_driver.rs`,
+`YIELD_SLIP_FULL_BRAKE`); before that the port only set the follow target and its brake cap.
+
 ## 9. Avoid, block, others (brief)
 
 - **avoid** (score 15): test 0x79A960 fires on a record whose time to contact
@@ -516,7 +521,8 @@ the owner permits one.
 1. Observable-list selection (how 5/2/200 m are applied, sort key) — routine not located.
 2. Exact corridor geometry of the path obstacle 0x78B560 and the different-heading branch of
    brake_for_vehicle; `braking_buffer_distance` consumer.
-3. Record state values 1/3 and the 0x777A20 → racing transition; flag +0xB2.
+3. Record state values 1/3 and the 0x777A20 → racing transition. (+0xB2 is the full-brake
+   flag, §8.3.)
 4. Signs: right vector orientation of the car state (+0x50) relative to offset sign — the side
    rules are self-consistent but should be confirmed with a live sample.
 5. asOffsetMultiplier consumer; avoid side selection details (0x799B30/0x799DE0).

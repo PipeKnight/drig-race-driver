@@ -5,6 +5,6 @@
 # on purpose updates the hashes here and names the change in its log entry.
 name	args	env	sha256
 solo	1 11200 ai	-	3670830ece631550d7c370e931ccd92a3d2b74d831324c1bf87ecbd1fe185360
-12-car	12 11200 ai	-	9bc7527d1c689371d24acc9621bd91aa3b11032fba16246e9c31da0958171317
-12-car-df	12 11200 ai	DF+AI	a0e0e2bd321756dc6ee42afe22ead953aaed018e0dbe56ff4d54b2b6a3f7e5fc
-derby-df	--route tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai	DF+AI	11dd8743f37b59ce412528f527802570b953b555f9fe849c04af6d1d27fc421e
+12-car	12 11200 ai	-	8515ac6e59bf136b38266c891e8d54293861bff3869b8afc7acb07af535419c9
+12-car-df	12 11200 ai	DF+AI	63e04836599b2659bdaad6a5425c196d31b144ba50d33c6f5740610308df4365
+derby-df	--route tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai	DF+AI	d4113d8f0650ceda460022e0c2b65a76abef0164acac22398549a3bdcdac53fc
