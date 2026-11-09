@@ -492,6 +492,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00470880	audio_name_format	func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:845	F623	[O]		`audio_name_format` (0x470880) writes it as `%c_%02d` (`M_01`, `F_55`, `N_42`; with a prefix
 0x004709D0		func	not ported	docs/AUDIO_RESEARCH.md:714		[O]		the state class with vtable CD77E0 reads `mode` (name lookup 4709D0 → 411AE0) and
 0x00470E40		func	not ported	docs/AUDIO_RESEARCH.md:715		[O]		`start_race` (5791A0); its enter method 579210 calls 411C10 through 470E40 and, with
+0x00477B80		func	not ported	docs/FRONT_END_FLOW.md:120		[V]		up `loading_stats` through FUN_00477B80 and reads exactly these keys (`definedanimations` to
 0x00480000		label	not ported	docs/SPEECH_CAREER_PARAMETERS.md:58		[O]		inside 0x0047FFC0; of record +0x40 was found (scan of 0x401000–0x480000 for `+0x14C]`/`+0x434]`, and of 0x438C10
 0x00484714		label	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:35				inside 0x00484640; VRAM-resolution XML only, PID 29472: still `0xc0000005`, but RVA changes to `0x484714`. This change affects execution and does not fix startup. Record: `vram...
 0x0049D760		func	not ported	docs/TOOLCHAIN.md:526				| `0x0049d760` | Pseudocode calls that helper and traverses/removes a keyed object; generated types include artifacts and require review |
@@ -515,6 +516,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004C7F50		func	not ported	docs/RACE_HUD.md:124		[I]		`.points` = Points, only when 0x4C7F50 holds (career [I]);
 0x004C8200	format_lemans_time	func	crates/grid-app/src/post_race.rs:592 grid-app::post_race (in time_text)	docs/RACE_HUD.md:416	F763	[D]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
 0x004C8280	results_gap	func	crates/grid-app/src/post_race.rs:574 grid-app::post_race::results_gap	docs/RACE_HUD.md:418	F763			The results list's difference text (0x4C8280, written into
+0x004C9910		func	not ported	docs/FRONT_END_FLOW.md:155		[V]		game (FUN_004C9910 on game+0xBA0), sets a counter at +0x40 to 1 and posts a
+0x004C9930		func	not ported	docs/FRONT_END_FLOW.md:148		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
+0x004CA6A0		func	not ported	docs/FRONT_END_FLOW.md:148		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
 0x004CAD80	available	func	crates/grid-tools/src/flashback.rs:72 grid-tools::flashback::available ; crates/grid-app/src/replay.rs:146 grid-app::replay	docs/FLASHBACK.md:57	F366	[D]		0x542A00: 0x937150 and 0x4CAD80).
 0x004CADD0		func	not ported	docs/FLASHBACK.md:59		[D]		Using one: `used += 1` (0x6A2260) through 0x4CADD0, called only from 0x59AFA0 [D], the enter
 0x004CB040		func	not ported	docs/CAREER_RESEARCH.md:225		[V]		+0xB0 (0x4CB040). Routine A (0x665560) and B (0x665890) add the event's credited money after each
@@ -531,19 +535,25 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004DBAD0	refuse_lemans	func	crates/grid-tools/src/career/state.rs:321 grid-tools::career::state::refuse_lemans	docs/CAREER_RESEARCH.md:163		[V]		not a function entry in the master analysis; Refuses Le Mans: the season ends (0x4DBAD0) [V].
 0x004DBB20	end_season	func	crates/grid-tools/src/career/state.rs:326 grid-tools::career::state::end_season	docs/CAREER_RESEARCH.md:146		[V]		not a function entry in the master analysis; Ends an ended season (0x4DBB20, 0x656760) [V]: archives it and
 0x004E1B50		func	not ported	docs/CAREER_RESEARCH.md:222				shows wages (0x4E1B50) and objectives (0x652270) in the first two rows. Total is the rows' sum;
+0x004EA770		func	not ported	docs/FRONT_END_FLOW.md:105		[V]		[V] FUN_004EA770 (one caller, FUN_004FF470) fills a table of 38 fact slots of 0xC4 bytes, three
 0x004EC820	lemans_results_order	func	crates/grid-tools/src/race.rs:562 grid-tools::race::lemans_results_order ; crates/grid-app/src/le_mans_event.rs:11 grid-app::le_mans_event	docs/LE_MANS.md:106	F429 G130	[V]		Le Mans results order [V 0x4EC820]: every car by progress, times its
 0x004EECE0	Outcome	func	crates/grid-tools/src/career/ebay.rs:325 grid-tools::career::ebay::Outcome					What a career event did to one listing (the popups of 0x4EECE0).
 0x004EF9C0	champ_one_two	func	crates/grid-tools/src/speech.rs:1587 grid-tools::speech ; crates/grid-app/src/career_screen.rs:1008 grid-app::career_screen (in speech_lines)	docs/SPEECH_CAREER_PARAMETERS.md:38 ; docs/SPEECH_AUDIO_RESEARCH.md:901	F624	[O]		0x4EF9C0: the player and the teammate are the championship's ranks 0 and 1 over the races
+0x004EFE40		func	not ported	docs/FRONT_END_FLOW.md:162		[V]		[V] The string `FileStreamThreadHighPriorityHack` is registered by FUN_004EFE40, beside
 0x004F10B0	is_test_offer	func	crates/grid-tools/src/career/rules.rs:338 grid-tools::career::rules::is_test_offer			[V]		appearance fee (0x4F10B0, 0x674940) [V].
 0x004F8B30		func	crates/grid-tools/src/career/state.rs:97 grid-tools::career::state					Races driven per `track_model` (the per-layout record 0x4F8B30 +8,
+0x004FF470		func	not ported	docs/FRONT_END_FLOW.md:105		[V]		[V] FUN_004EA770 (one caller, FUN_004FF470) fills a table of 38 fact slots of 0xC4 bytes, three
 0x004FF7B0		func	not ported	docs/PHASE0.md:78				The nearby function releases objects and clears pointers; an upstream routine at `0x004ff7b0` has a deleting-destructor pattern. **Interpretation, medium con...
 0x005035D0	GridOption	func	crates/grid-app/src/settings.rs:1172 grid-app::settings::GridOption	docs/SCREEN_FLOW.md:83	F756	[D]		lists Front, Middle, Back, Random (0x5035D0 [D]) with Random the default
+0x00504700		func	not ported	docs/FRONT_END_FLOW.md:119		[V]		not a function entry in the master analysis; [V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
+0x005048D0		func	not ported	docs/FRONT_END_FLOW.md:123		[V]		0x52B970 (takes the frame time) calls FUN_005048D0. That function calls `range` (0xA683E0)
 0x00507520		func	not ported	docs/RESET_AND_RESPAWN_RESEARCH.md:86				The pause menu's `reset_car` entry (state 0x507520, next to `retire_race`, `restart`
 0x00508A36	postrace_slowmo_bullet	label	not ported	docs/REPLAY_DIRECTOR_RESEARCH.md:178				inside 0x005088D0; `postrace_slowmo_tick` / `postrace_slowmo_bullet` (0x508A36) belong to the post-race front-end
 0x0050A200		func	not ported	docs/MECHANICAL_DAMAGE.md:118				FUN_0050A200 is a related per-component "health" getter, 1 − round(level × 100)/100, for eight types
 0x0051C930		func	not ported	docs/RACE_RULES_RESEARCH.md:319		[V]		not a function entry in the master analysis; [V] The column layout is built in 0x52E2C0 and 0x51C930. How each cell is formatted (gap or absolute
 0x0051E2C0		func	not ported	docs/DISCIPLINES.md:238				The drift-count stat of `post_race_stats_drift_scores` is read through 0x4D1890 (0x51E2C0), not
 0x0051EB72		label	not ported	docs/RACE_HUD.md:420				inside 0x0051E7E0; 0x54225A; the Touge stats' difference 0x51EB72 uses it too). Port: `post_race::time_text` writes
+0x0052B970		func	not ported	docs/FRONT_END_FLOW.md:123		[V]		not a function entry in the master analysis; 0x52B970 (takes the frame time) calls FUN_005048D0. That function calls `range` (0xA683E0)
 0x0052E2C0	le_mans_leaderboard	func	not ported	docs/LE_MANS.md:115 ; docs/RACE_RULES_RESEARCH.md:319	F429 G130	[V]		not a function entry in the master analysis; Headers 0x52E2C0 (`le_mans_leaderboard`): Pos, Driver, Class
 0x0052E4F0		func	crates/grid-app/src/post_race.rs:18 grid-app::post_race	docs/RACE_HUD.md:122	F353	[D]		not a function entry in the master analysis; Results columns [D 0x52E4F0..0x52E6A8, `race_results`]: position, driver,
 0x0053FE10		func	crates/grid-tools/src/race.rs:107 grid-tools::race::format_lemans_time ; crates/grid-tools/src/series.rs:563 grid-tools::series	docs/LE_MANS.md:117	F429 G130	[V]		not a function entry in the master analysis; 0x908860; 24 h prints as `1440:00.00`), `--:--:--` for zero [V 0x53FE10].
@@ -554,6 +564,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00553D40		func	not ported	docs/COCKPIT.md:17		[D]		`<mirrors enabled>` is never read: only the options menu (0x553D40) refers to the category. So the mirror is built and rendered at every preset, "off" includ...
 0x005554F0		func	not ported	docs/CAREER_RESEARCH.md:219				Bank screen** `ScreenRewardsBankAccount` (factory near 0x571400, constructor 0x5554F0, vtable
 0x00555620		func	crates/grid-app/src/career_screen.rs:1080 grid-app::career_screen (in payout_lines)	docs/CAREER_RESEARCH.md:220 ; docs/CAREER_SCREEN.md:100	F494	[V]		The bank screen's rows (0x555620) [V]: prize, sponsorship, team
+0x0055FD80		func	not ported	docs/FRONT_END_FLOW.md:119		[V]		not a function entry in the master analysis; [V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
 0x00560750		func	not ported	docs/AI_AVOID_RECOVERY_RESEARCH.md:568				type name "ai"). Device slots +4/+8 (0x560750, shared with the other input devices)
 0x00564AFB		label	not ported		F522	[V]		inside 0x00564A80; release grid-app.exe sha256 05ece190…564afb
 0x00571400		label	not ported	docs/CAREER_RESEARCH.md:219				inside 0x005713B0; Bank screen** `ScreenRewardsBankAccount` (factory near 0x571400, constructor 0x5554F0, vtable
@@ -563,12 +574,19 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0057AA5C		label	not ported	docs/CAMERA_VIEWS.md:228		[I]		inside 0x0057A9C0; Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
 0x0057AD79		label	not ported	docs/DRIVING_ASSISTS_RESEARCH.md:45		[D]		inside 0x0057AD60; when the options are applied and at race set-up (callers 57AD79, 6566AE, 65B897) [D]:
 0x0057B220		func	not ported	docs/FLASHBACK.md:69				The Instant Replay's update (0x57B220 / 0x57F630) follows `jump_in` when the Jump In action
+0x0057BA80		func	not ported	docs/FRONT_END_FLOW.md:153		[V]		its parse method 0x57BA80 maps `type` to_garage → 0 and to_race → 1 at +0x3C;
+0x0057BAE0		func	not ported	docs/FRONT_END_FLOW.md:157		[V]		not a function entry in the master analysis; its update method 0x57BAE0 decrements the counter and finishes once it drops below 0, so the
+0x0057BB00		func	not ported	docs/FRONT_END_FLOW.md:159		[V]		its exit method 0x57BB00 sends `exit` and sets a busy flag at +0x38;
+0x0057BCC0		func	not ported	docs/FRONT_END_FLOW.md:146		[V]		[V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
+0x0057BD20		func	not ported	docs/FRONT_END_FLOW.md:149		[V]		not a function entry in the master analysis; Otherwise it is `stats` (0xCD8E14). The link getter is 0x57BD20.
 0x0057D9B0		func	not ported	docs/PROGRESS_AND_SPAWN.md:18				`locked_timestep` references at `0x0057d9b0` and `0x0057dcf0` belong to sequences with slow motion, camera zoom and result presentation fields. These are not...
 0x0057DCF0		func	not ported	docs/PROGRESS_AND_SPAWN.md:18				`locked_timestep` references at `0x0057d9b0` and `0x0057dcf0` belong to sequences with slow motion, camera zoom and result presentation fields. These are not...
 0x0057E11E		label	not ported	docs/CAMERA_VIEWS.md:250				inside 0x0057E0B0; +0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
 0x0057F5C0		func	not ported	docs/REPLAY.md:64				not a function entry in the master analysis; at 0xDB4FEC, 10.0, as the rewind; 0x63EBC0 seeks to `now − 10.0` (and 0x57F5C0 / the flashback
 0x0057F630		func	not ported	docs/FLASHBACK.md:69				The Instant Replay's update (0x57B220 / 0x57F630) follows `jump_in` when the Jump In action
 0x00582750	restore	func	crates/grid-app/src/camera.rs:444 grid-app::camera::restore	docs/CAMERA_VIEWS.md:63	F349	[D]		view falls back to the first visible one, 0x582750) and saved at the end
+0x00582C90		func	not ported	docs/FRONT_END_FLOW.md:154		[V]		its enter method 0x582C90 registers with the `limbo` component, passes the type to the
+0x00582D20		func	not ported	docs/FRONT_END_FLOW.md:160		[V]		its message handler 0x582D20 clears the flag on a `complete` message.
 0x00583B00		func	crates/grid-app/src/post_race.rs:205 grid-app::post_race	docs/RACE_HUD.md:136 ; docs/RACE_RULES_RESEARCH.md:79		[I]		Stats → results: end the race (finalisation from the front end, 0x583B00).
 0x00584810		func	not ported	docs/CAMERA_VIEWS.md:228	F613 F499	[D]		Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
 0x00584842		label	not ported	docs/CAMERA_VIEWS.md:403				inside 0x00584810; Look capture** (F499, needs a live run): the controller's +0x1C..+0x1F bytes during a race (controller `[[car+0x90]+0x2250]` per 0x584842), and per frame cha...
@@ -586,6 +604,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0059AFA0		func	crates/grid-app/src/flashback.rs:532 grid-app::flashback (in jump_in) ; crates/grid-tools/src/flashback.rs:13 grid-tools::flashback	docs/FLASHBACK.md:59	F366	[D]		StateReplayJumpInPrepare uses one [D 0x59AFA0].
 0x005A0CC0		func	not ported	docs/DISCIPLINES.md:686		[D]		the other drift formats. `drift_gp_info.round/track_type/track_name` (0x5A0CC0) and the rival
 0x005A2840		func	not ported	docs/TOUGE.md:66				not a function entry in the master analysis; Meaning of `+4`.** `+4` in {2, 3} selects the Haruna drift intro and results scenes (`haruna_drift_intro_reveal`, `drift_results_intro_haruna`, 0x5A2840/0x5A...
+0x005A3FD0		func	not ported	docs/FRONT_END_FLOW.md:152		[V]		not a function entry in the master analysis; [V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
+0x005A3FE0		func	not ported	docs/FRONT_END_FLOW.md:146		[V]		not a function entry in the master analysis; [V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
 0x005A5990		func	not ported	docs/RACE_HUD.md:428	F763			not a function entry in the master analysis; timer of its own; its only own handler, 0x5A5990, sets a completion bit at +0x28, so it seems to
 0x005AB610		func	not ported	docs/RACE_HUD.md:427	F763			`StateTerminalDamageDelay` (registered at 0xC760D0, factory 0x5AB610, vtable 0xCDA548) has no
 0x005B0000		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:372				The setter's caller was not found in 0x401000–0x40C000 or 0x5B0000–0x5D0000.
@@ -3518,11 +3538,23 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CC0A64		vtable	not ported	docs/DISCIPLINES.md:439				The difficulty object (vtable 0xCC0A64, constructor 0x5F1B10) is filled by the `difficulty` row
 0x00CC3224		global	not ported	docs/RACE_RULES_RESEARCH.md:193		[V]		within distance_to_line of the line; default 250, from 0xCC3224.
 0x00CC4DA2		global	not ported	docs/PLATFORMS_AND_INPUT_RESEARCH.md:641				BC path unchanged:** the PNGs of the pre-change exe and the new BC path are byte-identical in all three scenes (sha256 `6a4ff6bd…`, `2d56e040…`, `00cc4da2…`).
+0x00CC6EA0		vtable	not ported	docs/FRONT_END_FLOW.md:173				| `StateTriggerLoadingSpinner` | 0xCD71D0 (vtable 0xCC6EA0) |
+0x00CCDBE0		vtable	not ported	docs/FRONT_END_FLOW.md:119		[V]		[V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
 0x00CD4AE8		global	not ported	docs/CAREER_RESEARCH.md:220		[V]		0xCD4AE8, filler 0x555620) [V]: rows prize (+0x5C), sponsorship (0x652010), Team Win Bonus (+0x64),
+0x00CD61F4		global	not ported	docs/FRONT_END_FLOW.md:170				| `ScreenLoadingStats` | 0xCD61F4 |
+0x00CD71BC		global	not ported	docs/FRONT_END_FLOW.md:174				| `ScreenUnloadRace` | 0xCD71BC |
+0x00CD71D0		global	not ported	docs/FRONT_END_FLOW.md:173				| `StateTriggerLoadingSpinner` | 0xCD71D0 (vtable 0xCC6EA0) |
 0x00CD77E0		vtable	not ported	docs/AUDIO_RESEARCH.md:714	F493	[O]		the state class with vtable CD77E0 reads `mode` (name lookup 4709D0 → 411AE0) and
+0x00CD8D60		vtable	not ported	docs/FRONT_END_FLOW.md:152		[V]		[V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
+0x00CD8DE0		vtable	not ported	docs/FRONT_END_FLOW.md:146		[V]		[V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
+0x00CD8E14		global	not ported	docs/FRONT_END_FLOW.md:149		[V]		Otherwise it is `stats` (0xCD8E14). The link getter is 0x57BD20.
+0x00CD8E1C		global	not ported	docs/FRONT_END_FLOW.md:147		[V]		chooses the link. `standings` (string 0xCD8E1C) is chosen only when the game mode at
 0x00CD9F24		vtable	not ported	docs/CAMERA_VIEWS.md:250				+0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
 0x00CDA548		vtable	not ported	docs/RACE_HUD.md:427	F763			`StateTerminalDamageDelay` (registered at 0xC760D0, factory 0x5AB610, vtable 0xCDA548) has no
 0x00CDB624		vtable	not ported	docs/CAMERA_VIEWS.md:228		[D]		Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
+0x00CDDD10		global	not ported	docs/FRONT_END_FLOW.md:175				| `StateRaceLoadCoordinator` | 0xCDDD10 |
+0x00CDDD4C		global	not ported	docs/FRONT_END_FLOW.md:172				| `StateLoading` | 0xCDDD4C |
+0x00CDDDEC		global	not ported	docs/FRONT_END_FLOW.md:171				| `StateLoadingScreenSelect` | 0xCDDDEC |
 0x00CDFA28		vtable	not ported	docs/BODY_SLEEPING.md:180	F548	[D]		5C6B90 is slot 1 of the EntityManager service (vtable CDFA28; constructor **5B4C10** names it
 0x00CE0624	resource_key_csm_shadow_mask	global	not ported	docs/SOURCE_SKY_LIGHTING.md		[D]		Pinned ASCII csm_shadow_mask; separate intermediate resource created into CSM+0x644.
 0x00CE0778		vtable	not ported	docs/CAR_REFLECTIONS.md:15				`env map`**: a pass object constructed by 0x5C1880, with vtable 0xCE0778. The renderer keeps it at +0xF20, and the global 0xE5E83C points to it.

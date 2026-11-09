@@ -87,6 +87,8 @@ mod force_feedback;
 #[cfg(any(windows, target_os = "android"))]
 mod ffb;
 mod event_menu;
+mod front_end_host;
+mod loading_screen;
 mod flashback;
 mod free_look;
 mod hud_sound;
@@ -1711,11 +1713,17 @@ fn main() {
         }
         return;
     }
-    // `--menu`: the event menu and the races it starts, each its own
-    // process (event_menu.rs).
+    // `--menu`: the event menu and the races it starts in one window
+    // (front_end_host.rs); `GRID_FRONT_END=processes`: each its own process
+    // (event_menu.rs).
     #[cfg(not(target_os = "android"))]
     if args.first().is_some_and(|a| a == "--menu") {
-        match event_menu::supervise(&args[1..]) {
+        let result = if std::env::var("GRID_FRONT_END").is_ok_and(|v| v == "processes") {
+            event_menu::supervise(&args[1..])
+        } else {
+            front_end_host::run(&args[1..])
+        };
+        match result {
             Ok(code) => std::process::exit(code),
             Err(error) => {
                 eprintln!("grid-app: {error}");
@@ -2187,7 +2195,40 @@ fn manual_base_mip_zero_admitted(
         && !graphics.dlaa_reset_every_frame
 }
 
+/// A launcher's race that returns to the event menu when it is left
+/// (`to_menu` in [`race_app`]); [`run`] then sets `event_menu::MENU_AFTER`.
+#[derive(Resource)]
+struct LauncherToMenu;
+
 fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut app) = race_app(args, false)? else {
+        return Ok(());
+    };
+    let to_menu = app.world().contains_resource::<LauncherToMenu>();
+    let exit = app.run();
+    // Leaving an event started from the menu (event_menu::leave).
+    if exit == AppExit::from_code(event_menu::BACK_TO_MENU as u8) {
+        if to_menu {
+            // main() opens the menu once this app is gone.
+            event_menu::MENU_AFTER.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Ok(());
+        }
+        std::process::exit(event_menu::BACK_TO_MENU);
+    }
+    if !matches!(exit, AppExit::Success) {
+        return Err("renderer exited with an error".into());
+    }
+    Ok(())
+}
+
+/// The race (or viewer) app of `args`, built but not run; `None` after
+/// `--help`. `hosted`: the one-window front end (front_end_host.rs) owns
+/// the window and drives this app, so it gets no winit plugin and never
+/// exits on a closed window (docs/FRONT_END_FLOW.md).
+pub(crate) fn race_app(
+    args: Vec<String>,
+    hosted: bool,
+) -> Result<Option<App>, Box<dyn std::error::Error>> {
     let headlight_lumens = headlight_pilot::requested()?;
     let temporal_pair = temporal_audit::pair_requested()?;
     let source_lighting_units = source_light_trial::requested()?;
@@ -3129,7 +3170,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--deformation PRIVATE_DF01: experimental source grid, wheel/shape rebuilding, physical callbacks and independently mapped body dents. Requires --drive and --body-contacts."
                 );
-                return Ok(());
+                return Ok(None);
             }
             _ => return Err(format!("unknown argument {arg}").into()),
         }
@@ -3692,7 +3733,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         grid_position = Some(option.slot(n + 1, |cars| rng.range(0, cars)) + 1);
     }
     if audio_check {
-        return engine_sound::check(&root);
+        return engine_sound::check(&root).map(|()| None);
     }
     if graphics.benchmark_frames.is_some() && output.is_none() {
         return Err("--benchmark-frames requires --render for bounded unattended exit".into());
@@ -4338,7 +4379,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if !track || collision {
             return Err("--float-audit requires a track scene".into());
         }
-        return float_audit::run(&root, &route, &car.parts, &car.bindings, &car.textures, out);
+        return float_audit::run(&root, &route, &car.parts, &car.bindings, &car.textures, out).map(|()| None);
     }
     let mut tree_cards = tree_cards::Cards::default();
     // After the audit, which covers the track's own placements; the forest
@@ -4515,7 +4556,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             return Err("geometry pixel exceeds resolution".into());
         }
         geometry_ray::audit(&car, camera_transform(&orbit), size, pixel);
-        return Ok(());
+        return Ok(None);
     }
     if (render_fixed_step || render_fps.is_some() || capture_orbit_rate.is_some() || motion_sequence.is_some())
         && (!drive || output.is_none())
@@ -4614,6 +4655,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     // fixed ticks catch up with the wall clock. Headless and offscreen
     // captures step a manual duration and keep one tick per frame.
     let interactive = !headless && output.is_none();
+    if hosted && !interactive {
+        return Err("the one-window front end hosts interactive races only".into());
+    }
     if headless {
         // The app's own simulation without a window, GPU or audio: the
         // renderer is never created (no wgpu backend) and every frame
@@ -4739,9 +4783,21 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                         desired_maximum_frame_latency: profile.frame_latency,
                         ..default()
                     }, windowed && drive_input.is_some())),
+                    // Hosted: the front end's window stays when a race ends.
+                    exit_condition: if hosted {
+                        ExitCondition::DontExit
+                    } else {
+                        ExitCondition::OnAllClosed
+                    },
                     ..default()
                 }),
         );
+        let plugins = if hosted { front_end_host::hosted(plugins, front_end_host::Gpu::Race) } else { plugins };
+        // Diagnostics GRID_MENU_LOOPS (front_end_host.rs): the scripted race
+        // ends at its tick limit and goes back to the menu, as headless.
+        if hosted && drive && std::env::var_os("GRID_MENU_LOOPS").is_some() {
+            app.add_systems(FixedLast, headless_exit);
+        }
         // GRID_AUDIO=off: silent research runs (frame_pacing.rs).
         app.add_plugins(if frame_pacing::audio_off() {
             plugins.disable::<bevy::audio::AudioPlugin>()
@@ -5312,8 +5368,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(pending) = exterior_drivers {
         app.insert_resource(pending);
     }
-    let exit = app
-        .insert_resource(body_occlusion)
+    app.insert_resource(body_occlusion)
         .insert_resource(reflection_masks)
         .insert_resource(field)
         .insert_resource(graphics)
@@ -5329,21 +5384,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         )
         .add_systems(Last, texture_upload::convert_added)
         .add_systems(Startup, setup)
-        .add_systems(Update, object_materials::update_night_emissive)
-        .run();
-    // Leaving an event started from the menu (event_menu::leave).
-    if exit == AppExit::from_code(event_menu::BACK_TO_MENU as u8) {
-        if to_menu {
-            // main() opens the menu once this app is gone.
-            event_menu::MENU_AFTER.store(true, std::sync::atomic::Ordering::Relaxed);
-            return Ok(());
-        }
-        std::process::exit(event_menu::BACK_TO_MENU);
+        .add_systems(Update, object_materials::update_night_emissive);
+    if to_menu {
+        app.insert_resource(LauncherToMenu);
     }
-    if !matches!(exit, AppExit::Success) {
-        return Err("renderer exited with an error".into());
-    }
-    Ok(())
+    Ok(Some(app))
 }
 fn camera_transform(orbit: &Orbit) -> Transform {
     let target = orbit.target;

@@ -18,11 +18,12 @@
 //!   here, so the launchers' profiles are unaffected) and written as a
 //!   settings profile `<data dir>/event-menu.ini` equal to the launchers'
 //!   `settings/*.ini` for the same event.
-//! - Process model (winit cannot create a second event loop in a process,
-//!   and the race is set up before its Bevy app starts): on the desktop
-//!   `grid-app --menu` supervises a menu process and a race process in turn
-//!   (exit codes [`MENU_GO`], [`BACK_TO_MENU`]); on Android the activity is
-//!   restarted (`MainActivity.relaunch`). Leaving a race that was started
+//! - Screens end with exit codes [`MENU_GO`] and [`BACK_TO_MENU`]. On the
+//!   desktop `grid-app --menu` shows the menu and the race in one window, each
+//!   its own app ([`screen_app`], `crate::race_app`) attached by the host in
+//!   front_end_host.rs (docs/FRONT_END_FLOW.md section 5);
+//!   `GRID_FRONT_END=processes` keeps [`supervise`], one process per screen.
+//!   On Android the activity is restarted (`MainActivity.relaunch`). Leaving a race that was started
 //!   from the menu (results Continue/Exit, Retire, Finish Test Drive) returns
 //!   here, as the original's `end_race_finish_race` returns to its front end.
 use crate::pause_menu::{Labels, Nav, Repeat, View};
@@ -1083,12 +1084,18 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
 #[cfg(not(target_os = "android"))]
 const ROUND_ENV: &str = "GRID_MENU_ROUND";
 
+/// The menu's round in the one-window front end (front_end_host.rs), which
+/// counts the races itself instead of setting `GRID_MENU_ROUND`.
+#[cfg(not(target_os = "android"))]
+pub(crate) static HOST_ROUND: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 /// Diagnostics `GRID_MENU_AUTO`: whether this menu presses Continue (its
 /// round is below `GRID_MENU_AUTO_RACES`, default 1) or Back (quits).
 #[cfg(not(target_os = "android"))]
 fn auto_continue() -> bool {
     let number = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<u32>().ok());
-    number(ROUND_ENV).unwrap_or(0) < number("GRID_MENU_AUTO_RACES").unwrap_or(1)
+    let round = number(ROUND_ENV).unwrap_or_else(|| HOST_ROUND.load(std::sync::atomic::Ordering::Relaxed));
+    round < number("GRID_MENU_AUTO_RACES").unwrap_or(1)
 }
 
 /// Diagnostics `GRID_MENU_AUTO=TICKS` (unattended checks, desktop; the build
@@ -1096,13 +1103,13 @@ fn auto_continue() -> bool {
 /// presses Continue after 3 s with its current choice, and the supervisor
 /// runs that race as a scripted run of TICKS ticks, so `GRID_AUTOPILOT` drives.
 #[cfg(not(target_os = "android"))]
-fn auto_ticks() -> Option<u64> {
+pub(crate) fn auto_ticks() -> Option<u64> {
     std::env::var("GRID_MENU_AUTO").ok()?.parse().ok()
 }
 
 /// Whether the saved choice is an experimental event (Le Mans Series).
 #[cfg(not(target_os = "android"))]
-fn experimental(dir: &Path) -> bool {
+pub(crate) fn experimental(dir: &Path) -> bool {
     let mut s = crate::settings::Settings::new();
     std::fs::read_to_string(dir.join("settings.ini"))
         .is_ok_and(|text| s.apply(text.trim_start_matches('\u{feff}'), dir).is_ok())
@@ -1243,6 +1250,16 @@ impl Catalog {
 /// Runs the menu as its own app (`--menu-screen`). Exits with [`MENU_GO`]
 /// after Continue (Android: restarts into the race), 0 after Back.
 pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    match screen_app(args, false)?.run() {
+        AppExit::Error(code) => std::process::exit(i32::from(code.get())),
+        AppExit::Success => Ok(()),
+    }
+}
+
+/// The menu app, built but not run. Its app exit is [`MENU_GO`] after
+/// Continue, success after Back. `hosted`: driven inside the one-window
+/// front end (front_end_host.rs), without a winit plugin of its own.
+pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::error::Error>> {
     let profile = crate::settings::load(args)?;
     let root = crate::game_root(profile.root.clone())?;
     println!("game_root path={}", root.display());
@@ -1276,7 +1293,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("drive_input {input_settings} pad_preset={pad} menu=on");
     let data = crate::settings::data_dir();
     let mut app = App::new();
-    app.add_plugins(crate::with_profile(DefaultPlugins.set(WindowPlugin {
+    let plugins = crate::with_profile(DefaultPlugins.set(WindowPlugin {
         // Centred like a supervised race window, or where the last race's
         // window was (transition::window).
         primary_window: Some(crate::transition::window(Window {
@@ -1286,8 +1303,14 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             present_mode: profile.present_mode.unwrap_or_default(),
             ..default()
         }, true)),
+        exit_condition: if hosted {
+            bevy::window::ExitCondition::DontExit
+        } else {
+            bevy::window::ExitCondition::OnAllClosed
+        },
         ..default()
-    })));
+    }));
+    app.add_plugins(if hosted { crate::front_end_host::hosted(plugins, crate::front_end_host::Gpu::Ui) } else { plugins });
     crate::ui_font::install(&mut app);
     // The original's overlay fade (docs/SCREEN_FLOW.md): the menu fades in
     // from black, and out to "Loading" on Continue.
@@ -1306,8 +1329,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             input_settings.device == crate::input::Device::Auto,
         );
     }
-    let exit = app
-        .insert_resource(menu)
+    app.insert_resource(menu)
         .insert_resource(labels)
         .insert_resource(Saving {
             settings: data.join("settings.ini"),
@@ -1315,12 +1337,8 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         })
         .insert_resource(ClearColor(Color::srgb(0.055, 0.07, 0.095)))
         .add_systems(Startup, spawn)
-        .add_systems(Update, (update, present).chain())
-        .run();
-    match exit {
-        AppExit::Error(code) => std::process::exit(i32::from(code.get())),
-        AppExit::Success => Ok(()),
-    }
+        .add_systems(Update, (update, present).chain());
+    Ok(app)
 }
 
 #[derive(Component)]
@@ -1415,7 +1433,7 @@ fn update(
     // Escape is both Pause and Menu Back.
     nav.back |= nav.pause;
     // Diagnostics GRID_MENU_AUTO: Continue with the current choice 3 s after
-    // start (each menu is its own process).
+    // start (each menu is its own process or, in the host, its own app).
     #[cfg(not(target_os = "android"))]
     if auto_ticks().is_some() && time.elapsed_secs() >= 3. {
         if auto_continue() {

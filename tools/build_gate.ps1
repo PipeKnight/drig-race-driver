@@ -9,6 +9,8 @@
 #              Graphics launchers excluded) and the event menu's default event, 60 s each.
 #              Fails on an ERROR line, "driving paused", an audio source failure, a panic, an
 #              early exit, peak private bytes over -MemoryCapMB or average FPS under -FpsFloor.
+#   4. front-end-loops: grid-app --menu, menu -> race -> menu 8 times in one process, alone
+#              after the queue (tools/front_end_loops.ps1); fails on the host's leak verdict.
 # Every run is muted (Windows mixer and [sound] effects = 0) and driven by the ported AI
 # (diagnostics autopilot). Known problems are listed in tools/build_gate/expected.tsv and
 # reported as xfail. Evidence: -Out (default local/build-gate/gate-<time>). Exit code 1 when
@@ -193,6 +195,21 @@ if ($specs.Count -gt 0) {
     }
     $null = Invoke-GateQueue -Specs $specs -Exe $Exe -OutDir $Out -PrivateDir $PrivateDir -Jobs $Jobs -MinFreeGB $MinFreeGB -OnFinish $onFinish
     Write-Host ("gate_phase app runs={0} seconds={1:N0}" -f $specs.Count, ((Get-Date) - $phase).TotalSeconds)
+}
+if (-not $SkipSmoke -and (-not $Only -or 'front-end-loops' -match $Only)) {
+    # One-window front end: menu -> race -> menu, 8 races in one process (tools/front_end_loops.ps1).
+    # Runs alone, after the queue, so the other gate windows do not move its memory samples.
+    $loopsStarted = Get-Date
+    $loopsOut = Join-Path $Out 'front-end-loops'
+    $lines = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'front_end_loops.ps1') -Exe $Exe -GameRoot $GameRoot -Out $loopsOut 2>&1 | ForEach-Object { "$_" }
+    $loopsCode = $LASTEXITCODE
+    $verdictLine = @($lines | Where-Object { $_ -match 'front_end_loops version=1 races=' }) | Select-Object -Last 1
+    $detail = if ($verdictLine) { ($verdictLine -replace '^.*?races=', 'races=' -replace ' (private_mb|handles|threads|host_entities)=\[[^\]]*\]', '') } else { 'no verdict line' }
+    $reasonsText = if ($loopsCode -eq 0) { '' } else { "front_end_loops exit $loopsCode; log $loopsOut\grid-app.log" }
+    $status = if ($loopsCode -eq 0) { 'pass' } else { 'fail' }
+    $results.Add([pscustomobject]@{ Name = 'front-end-loops'; Kind = 'smoke'; Status = $status; Detail = $detail; Seconds = ((Get-Date) - $loopsStarted).TotalSeconds
+        Reasons = $reasonsText; References = '' })
+    Write-Host ("gate_result front-end-loops {0} {1} {2:N0}s {3}" -f $status, $detail, ((Get-Date) - $loopsStarted).TotalSeconds, $reasonsText)
 }
 
 # ---- Summary ------------------------------------------------------------------------------
