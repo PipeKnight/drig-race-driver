@@ -3,7 +3,7 @@
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
        [--size WxH] [--shots S,S,...] [--expect-stale] [--expect-splits]
        [--expect-penalty [--contact-at S]] [--expect-brake] [--expect-drift]
-       [--expect-tag [--teammate K]]
+       [--expect-tag [--teammate K] [--rival R]]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1). RESIZE_AT seconds after launch it resizes
@@ -41,7 +41,8 @@ combo opened, printed on each combo change) after the resize, with the multiplie
 --expect-tag also requires the team-mate's name tag (name_tag.rs) up after the resize: shown before it and not yet hidden, or an `osd_tag ... event=shown`
 line after it (printed on each show and hide, within 60 m). The check runs a copy of the
 settings with `[game] teammate = K` added (--teammate, default 1), so use a race with opponents;
-a series event also gives the drivers' flags.
+a series event also gives the drivers' flags. --rival R also adds `[game] rival = R` (`leader` or an
+opponent number) and requires the rival's tag (tag 0, `tag=rival` lines) shown in the same way.
 """
 import argparse
 import ctypes
@@ -87,6 +88,7 @@ def main():
     ap.add_argument('--expect-drift', action='store_true')
     ap.add_argument('--expect-tag', action='store_true')
     ap.add_argument('--teammate', type=int, default=1)
+    ap.add_argument('--rival')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -102,7 +104,8 @@ def main():
     settings = args.settings
     if args.expect_tag:
         settings = str(out / 'settings-teammate.ini')
-        Path(settings).write_text(Path(args.settings).read_text() + f'\n[game]\nteammate = {args.teammate}\n')
+        Path(settings).write_text(Path(args.settings).read_text() + f'\n[game]\nteammate = {args.teammate}\n'
+                                  + (f'rival = {args.rival}\n' if args.rival else ''))
     log_path = out / 'grid-app.log'
     log = open(log_path, 'w')
     proc = subprocess.Popen([str(Path(args.exe).resolve()), '--data-dir', str(data), '--settings', settings,
@@ -190,18 +193,20 @@ def main():
         else:
             verdict += f'; {len(opened)} drift combo updates'
     mate = re.findall(r'^osd_tag version=1 event=team_mate (.*)$', text, re.M)
-    # The lines mark transitions, so a tag shown before the resize and not hidden yet is still up.
-    before = re.findall(r'^osd_tag version=1 event=(shown|hidden) ', text[:max(at, 0)], re.M)
-    up = bool(before) and before[-1] == 'shown'
-    tags = re.findall(r'^osd_tag version=1 event=(shown|hidden) (.*)$', text[max(at, 0):], re.M)
-    shown = [t for e, t in tags if e == 'shown']
-    print(f'osd_tag: team mate {mate[:1]}; {"up" if up else "down"} at the resize; after it {len(shown)} shown, '
-          f'{len(tags) - len(shown)} hidden; {shown[:3]}')
-    if args.expect_tag and verdict.startswith('PASS'):
-        if at < 0 or not (up or shown):
-            verdict = 'FAIL: no team-mate name tag up after the resize'
-        else:
-            verdict += f'; team-mate tag {"up at the resize, " if up else ""}shown {len(shown)} times after it'
+    rival = re.findall(r'^osd_tag version=1 event=rival (.*)$', text, re.M)
+    for who, label, wanted in [('team_mate', 'team-mate', True), ('rival', 'rival', bool(args.rival))]:
+        # The lines mark transitions, so a tag shown before the resize and not hidden yet is still up.
+        before = re.findall(rf'^osd_tag version=1 event=(shown|hidden) tag={who} ', text[:max(at, 0)], re.M)
+        up = bool(before) and before[-1] == 'shown'
+        tags = re.findall(rf'^osd_tag version=1 event=(shown|hidden) tag={who} (.*)$', text[max(at, 0):], re.M)
+        shown = [t for e, t in tags if e == 'shown']
+        print(f'osd_tag {label}: {(mate if who == "team_mate" else rival)[:1]}; {"up" if up else "down"} at the resize; '
+              f'after it {len(shown)} shown, {len(tags) - len(shown)} hidden; {shown[:3]}')
+        if args.expect_tag and wanted and verdict.startswith('PASS'):
+            if at < 0 or not (up or shown):
+                verdict = f'FAIL: no {label} name tag up after the resize'
+            else:
+                verdict += f'; {label} tag {"up at the resize, " if up else ""}shown {len(shown)} times after it'
     missing = [n for n in names if not (out / n).exists()]
     if missing:
         verdict += f' (shots missing: {", ".join(missing)})'

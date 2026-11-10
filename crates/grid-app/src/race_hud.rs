@@ -439,7 +439,7 @@ pub fn install(app: &mut App) {
         .init_resource::<HudView>();
     if osd {
         app.add_systems(Update, ((crate::speed_advice::update, frame, crate::race_osd::drive, crate::drift_osd::drive, crate::race_osd::minimap).chain(), crate::race_osd::place_help));
-        app.add_systems(Update, crate::name_tag::team_tag.after(crate::race_osd::minimap).after(crate::drive_present));
+        app.add_systems(Update, crate::name_tag::name_tags.after(crate::race_osd::minimap).after(crate::drive_present));
     } else {
         app.add_systems(Update, (spawn, frame, update).chain());
     }

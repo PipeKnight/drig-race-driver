@@ -125,7 +125,7 @@ fn halves<const N: usize>(
         })
         .collect())
 }
-fn color_words(data: &[u8], count: usize, offset: usize, stride: usize) -> Result<Vec<[u8; 4]>> {
+pub(crate) fn color_words(data: &[u8], count: usize, offset: usize, stride: usize) -> Result<Vec<[u8; 4]>> {
     if count == 0
         || count > 1_000_000
         || offset.checked_add(4).is_none_or(|end| end > stride)

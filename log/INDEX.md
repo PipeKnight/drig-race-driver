@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F785](F0785.md) | 2026-11-10 | HUD: front-end colour streams, drift ring shake and roll-up, rival name tag |
 | [F784](F0784.md) | 2026-11-10 | 3D loading world, pause bloom, race-intro bars scoped |
 | [F783](F0783.md) | 2026-11-10 | Drift GP and Freestyle drift cars, scaled joined props, on_track chords and gate progress |
 | [F782](F0782.md) | 2026-11-10 | HUD: team-mate name tag; original post-race art research (rows 68, 69) |

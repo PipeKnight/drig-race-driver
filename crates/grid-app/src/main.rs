@@ -5166,6 +5166,15 @@ pub(crate) fn race_app(
             println!("osd_tag version=1 event=team_mate car={} flag={:?}", mate.car, mate.flag);
             app.insert_resource(mate);
         }
+        // The career rival's name tag: a race with `[game] rival` (written by the career for a
+        // race of the player's own event, name_tag.rs `RivalRule`).
+        if let Some(rule) = profile.rival
+            && driving.opponents.is_some()
+        {
+            let rival = name_tag::Rival::load(&root, rule, &opponent_drivers);
+            println!("osd_tag version=1 event=rival rule={:?} flags={}", rival.rule, rival.flags.iter().flatten().count());
+            app.insert_resource(rival);
+        }
         if let Some((next, length)) = touge_run.take() {
             app.insert_resource(touge_event::TougeEvent::new(
                 grid_tools::touge::Settings::load(&root)?,

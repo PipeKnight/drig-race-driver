@@ -517,10 +517,20 @@ open).
 
 Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
 - The update runs while +0x2A8 is set and the game mode is not 2; its first frame hides every tag.
-- T 2, normal path (0x6BD0B0): tag 0 shows the rival (the career lookup 0x6BCE60, or in the
-  player's own career event the leader, the second car when the player leads, with more than two
-  cars); `driver_id_team` shows the team-mate (0x6AAB90). A rival who is the team-mate is dropped;
-  no rival and no team-mate hide the tag.
+- T 2, normal path (0x6BD0B0): tag 0 (`object/driver_id=driver_id_01`) shows the rival;
+  `driver_id_team` shows the team-mate (0x6AAB90). A rival who is the team-mate is dropped; no
+  rival and no team-mate hide the tag. The rival [D]:
+  - only in career mode (`[game+0x23D0]+0x50` = 0) with an event object E (mode object 0x640020,
+    its virtual 0x80) whose kind E+0x44 is 0, the player's own event (not an offer);
+  - E's virtual 0x2C (0x67CF00) returns E+0x34, the race index within the event;
+  - when the car count (+0x280) changes, 0x6BD0B0 calls 0x6B0C40, the team-mate lookup 0x6AAB90 and
+    the rival lookup 0x6BCE60. 0x6BCE60 clears +0x284; for a race index > 0 it builds the event
+    standing (0x66FF70) and takes its entry 0 (0x6C2D30, 20-byte entries), the championship leader.
+    Unless that driver is the player (+0x1C = 2) it finds the race car with the same driver (the
+    provider's slot 0x2C count and slot 0x30 get, the driver at vtable +0x58) and stores it in
+    +0x284;
+  - for race index 0 with more than two cars the rival is chosen every frame: provider slot 0x40(0),
+    the car in race position 1, or slot 0x40(1) when that car is the player.
 - T 2 with a driver offer of objective type 2 (0x6BD480, 0x6BD6B0): up to seven cars of the named
   team, nearest first, on tags 0..6.
 - T 3 (0x6BD900; probably online, it also drives the chat box [I]): the two nearest cars on one
@@ -544,8 +554,14 @@ Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
   traced]. The anchor is projected with the 3D camera and placed where the OSD camera's ray
   through the same screen point meets the tag group's plane (its authored depth −20 under the
   layout). Each part gets its own material copy for the faded alpha and the flag cell
-  (`Osd::fade`, `Osd::scroll_x`/`scroll_y`). The rival's tag (tag 0, the career lookup 0x6BCE60)
-  is not ported: a race does not receive the career rival.
+  (`Osd::fade`, `Osd::scroll_x`/`scroll_y`).
+- Port, rival (name_tag.rs, F785): the race takes `[game] rival = leader | K`
+  (SETTINGS.md). `leader` is the first-race rule (the race leader, the second car when the player
+  leads, more than two cars); K is opponent K, the career's standings leader (`RivalRule`;
+  `RivalRule::for_event_race` is the career-side rule). The rival's flag comes from its driver id
+  (one database read at race start). Both tags share the placement, fade and flag code; logs
+  `osd_tag ... tag=rival`. The career writer (`career_screen.rs`, career-ui's file) is requested,
+  not part of this change; until it lands, a race has a rival only when its settings name one.
 
 Boost [D: bind 0x8EFA60, dial start 0x8EFD50]: the only reader copies the player vehicle's +0xDE4
 block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
@@ -569,8 +585,11 @@ appended keep their rest position; visibility is separate (0x8CE5F0). The lap-ti
 - F 5/6 touge (0x6B8400): T 1 race, lap; T 2 main (not for F 6), race;
 - F 7/8 offers (0x6B80F0): main, a group whose name the decompile hides, best and offers.
 The position stacker (0x6B4E00, 0x6B4F90) appends `position_group` (T 2/3 with more than one car,
-or T 2) and `split_group`. Not ported: which layout a port event gets depends on T and slot 0x24,
-whose meaning is open.
+or T 2) and `split_group`. Not ported: which layout a port event gets depends on T and slot 0x24.
+T's source [D]: 0x5F4C70 writes T (data+0x1AC) and F (data+0x1FC) from M = [[game+0x234C]+0x80],
+a field of the race-setup object (constructor 0x5EA0D0): M 0 or 2 → T 2, M 3 → T 3, M 4 → T 4,
+any other → T 1. The writer of M (race setup +0x80) is not found, so which race kind gives which
+T is still open (static analysis only; no capture was allowed for this work).
 
 Not traced yet: the post-race art.
 
@@ -616,9 +635,19 @@ order (`drift_osd::DriftOsd::update`).
     2 s. A fail (+0x4C) plays `drop` (0x6B9910), also hidden after 2 s;
   - close-drift bonus (0x6B5D10): when a close drift ends, `bonus` (under `redflag`) shows the
     bonus "%d" or `osd_perfect` for a zero distance and plays `bonus`; after 1 s `bonus_off`.
-- Not ported: the ring shake near the end (0x6A77E0; its amplitude and threshold come from the
-  attach's construction, not traced), the points roll-up, `drift_message` (attach 0x6A8620, its
-  feeder not traced) and the battle position multiplier, which the plain text panel showed.
+- Ring shake [D]: the shaker attach (constructor 0x6ACAB0: amplitude +0xEC = 8.0, threshold
+  +0xF0 = 0.5, generator seed 0x5A5AA5A5) offsets the ring by a random step each frame while
+  f < 0.5 (0x6A77E0; generator x = x·0x41C64E6D + 0x40584C0F) and puts it back at rest when f
+  rises again or the ring banks (stop 0x6A72D0). Port: `drift_osd` `shake`/`stop_shake`, the offset
+  through `osd_scene::Osd::offset`.
+- Points roll-up [D: vtable 0xCECBF0 group {0x7157D0, update 0x6B8C50, reset 0x6B8CE0}]: the
+  update calls the mode functions (0x6B4410, 0x6B44C0, 0x6B4570, 0x6B4680), then the tick
+  0x6B4790(dt): shown = from + (to − from)·t, t += dt, and at t ≥ 1 (0xCAF888) shown = to. The
+  grouped text (0x6A63B0) goes to `numbers` and `points_total_echo`; a new total (0x6B4700) starts
+  a new roll from the shown value; the resets 0x6B8C10 and 0x6B8CE0 roll back to 0. Port:
+  `drift_osd` `roll`, one second per roll.
+- Not ported: `drift_message` (attach 0x6A8620, its feeder not traced) and the battle position
+  multiplier, which the plain text panel showed.
 
 ### 6.6 Original post-race art (row 69)
 
@@ -650,9 +679,20 @@ Screens and their glyphs [D, states.bin]:
   3 s fade).
 
 Blockers for a port [V/D]:
-- The port's OSD reader (`grid_formats::osd::read_scene`) stops on `fePersistentDatabase.pssg` at
-  0xCEA16: a `uint_color_argb` vertex stream (19 streams in the file; the OSD scenes use only float
-  and half streams). The glyph trees could not be dumped through it.
+- Fixed in this change: the OSD reader (`grid_formats::osd::read_scene`) used to stop on
+  `fePersistentDatabase.pssg` at 0xCEA16, a `uint_color_argb` vertex stream. It now decodes every
+  colour stream into `Mesh::colors_argb` (one ARGB word per vertex, the shared `mesh::color_words`
+  decoder; a count that does not match the positions is an error). All three front-end packages
+  read [V]: fePersistentDatabase 2014 nodes, 920 meshes, 19 coloured; feNonPersistentDatabase 96
+  coloured; fe_DLC_0 2 coloured.
+- feNonPersistentDatabase's animations also bind 284 channels in another package, for example
+  `channel="fePersistentDatabase.pssg#DiffuseColour!2"` on `matinst=pill_basic#DiffuseColour`
+  (DiffuseColour 98, RampMin 96, Alpha 47, GlowAmount 42, SpecularLevel 1; all into
+  fePersistentDatabase) [V]. The reader keeps them as `Animation::external` instead of failing; the
+  other two packages have none. Its cameras also animate a `lookAt` semantic (the channel names the
+  camera and its `#target=` node, e.g. `#camera=zone_01-04#target=zone_01-04`); the reader keeps
+  it as `Semantic::LookAt`. All three packages read in full [V]: fePersistentDatabase 2014 nodes,
+  feNonPersistentDatabase 2478 nodes (775 meshes), fe_DLC_0 1052 nodes (350 meshes).
 - The front-end glyphs use another shader family [D, effect names in the files]:
   `fePersistentDatabase.pssg` references `fe3d_generic` (66), `feov_colour` (26),
   `fe3d_genericGMPD` (24), `fe3d_genericGD`, `fe3d_ramp`, `fe3d_genericGPD`, `fe3d_genericI`,
@@ -663,6 +703,25 @@ Blockers for a port [V/D]:
 - `fepause_final` is shared with the pause menu, which the front-end session owns.
 - The post-race cutscene needs an AI RaceOver cruise (above).
 
-Next steps: accept `uint_color_argb` in the OSD stream reader (four bytes, ARGB → RGBA), dump the
-`leaderboards` and `post_race_stats` trees, and check whether the front-end shaders map onto the
-OSD material set; if so, the results screen can reuse `osd_scene` with its own scene.
+Glyph trees [V, dumped with the reader: `GRID_OSD_DUMP=1` on the ignored test
+`front_end_scenes_read_their_vertex_colours`; private copy `local/postrace/glyph-trees.txt`]:
+- A glyph is defined once under a root node `<glyph>_root`; a node `kind/glyph=instance` (kinds
+  `screen`, `gadget`, `object`, `component`, `kitpart`, …; e.g. `gadget/list_items=0`) instances it
+  and has no children in the file. Drawing a screen means grafting the glyph's `_root` subtree under
+  each instance, recursively [I: the grafting is inferred from the names and the empty instance
+  nodes; the original's instancing code is not traced].
+- `leaderboards_root` (the results screen; the same tree in fe_DLC_0): 19 nodes, 7 meshes, effects
+  `fe3d_generic` 3, `fe3d_genericGD` 3, `fe3d_genericGPD` 1; texts `title_0`, `title_1`,
+  `table_title`, `timer`; instances `gadget/list_items` ×2, `gadget/list_titles`,
+  `object/leaderboard_bg`, `object/h_pill_group`.
+- `post_race_stats_root`: 4 nodes, only the instances `component/post_race_stats_chunky` and
+  `component/post_race_stats_normal` ×2.
+- `drift_scoreboard_root`: 21 nodes, 7 meshes (`fe3d_genericGD` 5, `fe3d_genericGPD` 2), instances
+  `gadget/drift_list_items` ×2, `gadget/drift_list_titles`, `component/drift_cursor_half` ×6,
+  `component/drift_cursor_total`, `object/h_pill_group`.
+- The instances `screen/post_race_stats` and `screen/pause_leaderboards` sit in `pause_root`
+  (`helper=anim!3`), the pause menu's tree.
+
+Next steps: the results screen needs the glyph grafting and an `fe3d_*` material, which the pause
+art needs too (the front-end session ports it; asked to share one mechanism, 2026-11-10), then its
+own `osd_scene`-style driver for the rows, pills and texts.

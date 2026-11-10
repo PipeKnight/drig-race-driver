@@ -27,6 +27,8 @@ Grammar:
 | | `opponent_cars` | `STEM[,STEM...]`, cycled over the opponents (default: the player's car) | `--opponent-cars` |
 | | `series` | `pro_tuned`, `touring`, `gt1`, `gt2`, `le_mans_series`: the free-race series; the route must be in its pool, the opponents are its original free-race field (docs/SERIES.md; GRID_SERIES_SEED fixes the draw) | `--series` |
 | | `series_seed` | the seed of the series' field and grid (career Le Mans races, F507); `GRID_SERIES_SEED` overrides it, else the clock | – |
+| | `teammate` | the hired team mate's opponent number, `0` for none (written by the career, F771); shows the team mate's name tag | – |
+| | `rival` | `leader` (the race leader, or second place when the player leads; more than two cars) or opponent number K (the career standings leader); `0` or no key: no rival tag ([RACE_HUD.md](RACE_HUD.md), driver name tags) | – |
 | `[drive]` | `enabled` | `on`/`off` | `--drive` |
 | | `laps` | `0` (free practice) or 1..99 | `--time-trial-laps` |
 | | `opponents` | `0` or 1..11 | `--opponents` |

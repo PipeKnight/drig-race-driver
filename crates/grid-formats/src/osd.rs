@@ -43,6 +43,9 @@ pub struct Mesh {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
+    /// Vertex colours of a `Color` stream stored as `uint_color_argb` (front-end scenes), the four
+    /// bytes in file order, as `mesh::Mesh::colors_argb`; empty without one.
+    pub colors_argb: Vec<[u8; 4]>,
     pub indices: Vec<u16>,
 }
 
@@ -132,6 +135,9 @@ pub enum Semantic {
     Parameter,
     /// A camera's field of view (front-end cameras).
     Fov,
+    /// A camera's look-at target position (front-end cameras; the channel's
+    /// target names the camera and its `#target=` node).
+    LookAt,
 }
 
 /// A channel: its target (node id, or `material#parameter`) and components
@@ -157,6 +163,21 @@ pub struct Animation {
     pub id: String,
     pub ranges: Vec<Range>,
     pub channels: Vec<Channel>,
+    /// Channels whose curves live in another package (`file.pssg#id`): every
+    /// cross-file reference of the front-end packages is a material channel of
+    /// feNonPersistentDatabase that points into fePersistentDatabase [V].
+    pub external: Vec<ExternalChannel>,
+}
+
+/// A channel reference into another package, kept unresolved.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternalChannel {
+    pub target: String,
+    pub semantic: Semantic,
+    /// The package file name, e.g. `fePersistentDatabase.pssg`.
+    pub package: String,
+    /// The channel id inside that package.
+    pub channel: String,
 }
 
 impl Animation {
@@ -343,7 +364,7 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
                 b"float4" => 16,
                 b"half2" => 4,
                 b"half4" => 8,
-                // Vertex colours (front-end scenes); not decoded.
+                // Vertex colours (front-end scenes).
                 b"uint_color_argb" => 4,
                 _ => return fail(tree.nodes[desc].offset, "unsupported OSD stream format"),
             };
@@ -367,6 +388,12 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
                 b"Vertex" => mesh.positions = (0..count).map(|i| { let v = element(i); [v[0], v[1], v[2]] }).collect(),
                 b"Normal" => mesh.normals = (0..count).map(|i| { let v = element(i); [v[0], v[1], v[2]] }).collect(),
                 b"ST" if mesh.uvs.is_empty() => mesh.uvs = (0..count).map(|i| { let v = element(i); [v[0], v[1]] }).collect(),
+                b"Color" if format == b"uint_color_argb" => {
+                    if !mesh.colors_argb.is_empty() {
+                        return fail(tree.nodes[stream].offset, "duplicate OSD colour stream");
+                    }
+                    mesh.colors_argb = crate::mesh::color_words(data, count, offset, stride)?;
+                }
                 _ => {}
             }
         }
@@ -399,6 +426,7 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
         if mesh.indices.iter().any(|&i| usize::from(i) >= n)
             || (!mesh.uvs.is_empty() && mesh.uvs.len() != n)
             || (!mesh.normals.is_empty() && mesh.normals.len() != n)
+            || (!mesh.colors_argb.is_empty() && mesh.colors_argb.len() != n)
         {
             return fail(tree.nodes[source].offset, "OSD mesh streams disagree");
         }
@@ -522,6 +550,7 @@ pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
             None => Vec::new(),
         };
         let mut list = Vec::new();
+        let mut external = Vec::new();
         for r in children(tree, i, b"NECHANNELREF") {
             let semantic = match tree.string(r, b"semantic")? {
                 b"translation" => Semantic::Translation,
@@ -529,18 +558,26 @@ pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
                 b"scale" => Semantic::Scale,
                 b"parameter" => Semantic::Parameter,
                 b"fov" => Semantic::Fov,
+                b"lookAt" => Semantic::LookAt,
                 _ => return fail(tree.nodes[r].offset, "unknown animation semantic"),
             };
-            list.push(Channel {
-                target: text(tree, r, b"targetName")?,
-                semantic,
-                components: curves(&reference(tree, r, b"channel")?)?,
-            });
+            let target = text(tree, r, b"targetName")?;
+            let channel = text(tree, r, b"channel")?;
+            match channel.split_once('#') {
+                Some((package, id)) if !package.is_empty() => external.push(ExternalChannel {
+                    target,
+                    semantic,
+                    package: package.to_owned(),
+                    channel: id.to_owned(),
+                }),
+                _ => list.push(Channel { target, semantic, components: curves(&reference(tree, r, b"channel")?)? }),
+            }
         }
         out.push(Animation {
             id: text(tree, i, b"id")?,
             ranges,
             channels: list,
+            external,
         });
     }
     Ok(out)
@@ -904,6 +941,46 @@ mod tests {
             if std::env::var_os("GRID_OSD_DUMP").is_some() {
                 for g in glyphs {
                     println!("glyph {font} {} {:?} v{} {:?} {:?}", g.code, char::from_u32(g.code), g.mesh.positions.len(), g.bounds, g.mesh.positions.iter().zip(&g.mesh.uvs).collect::<Vec<_>>());
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased source"]
+    fn front_end_scenes_read_their_vertex_colours() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        for file in ["fePersistentDatabase.pssg", "feNonPersistentDatabase.pssg", "fe_DLC_0.pssg"] {
+            let bytes = std::fs::read(root.join("frontend").join(file)).unwrap();
+            let tree = crate::pssg::read_tree(&bytes).unwrap();
+            let scene = read_scene(&tree).unwrap_or_else(|e| panic!("{file}: {e}"));
+            let meshes: Vec<&Mesh> = scene.nodes.iter().filter_map(|n| n.render.as_ref().map(|r| &r.mesh)).collect();
+            let coloured: Vec<&&Mesh> = meshes.iter().filter(|m| !m.colors_argb.is_empty()).collect();
+            println!("{file}: {} nodes, {} meshes, {} with vertex colours", scene.nodes.len(), meshes.len(), coloured.len());
+            assert!(!coloured.is_empty(), "{file}");
+            assert!(coloured.iter().all(|m| m.colors_argb.len() == m.positions.len()), "{file}");
+            let external: Vec<&ExternalChannel> = scene.animations.iter().flat_map(|a| &a.external).collect();
+            println!("{file}: {} channels in another package", external.len());
+            assert!(external.iter().all(|e| e.package == "fePersistentDatabase.pssg"), "{file}");
+            if std::env::var_os("GRID_OSD_DUMP").is_some() {
+                // The post-race glyph trees (RACE_HUD §6.6): one line per node under a root.
+                // A glyph is defined once under `<glyph>_root`; `kind/glyph=instance` nodes instance it.
+                let roots = ["leaderboards_root", "post_race_stats_root", "drift_scoreboard_root"];
+                for (i, n) in scene.nodes.iter().enumerate() {
+                    let mut chain = vec![i];
+                    while let Some(p) = scene.nodes[*chain.last().unwrap()].parent {
+                        chain.push(p);
+                    }
+                    let Some(root) = chain.iter().rev().map(|&k| scene.nodes[k].name()).find(|name| roots.contains(name)) else {
+                        continue;
+                    };
+                    let w = scene.world(i);
+                    let r = n.render.as_ref().map(|r| {
+                        let m = &scene.materials[r.material];
+                        format!(" {} {} v{} c{}", m.id, m.effect, r.mesh.positions.len(), r.mesh.colors_argb.len())
+                    });
+                    let pad = " ".repeat(chain.len());
+                    println!("tree {file} {root}{pad}{} ({:.1},{:.1},{:.1}){}", n.id, w[12], w[13], w[14], r.unwrap_or_default());
                 }
             }
         }

@@ -319,6 +319,9 @@ pub struct Settings {
     /// them (docs/SPEECH_AUDIO_RESEARCH.md); older profiles have neither.
     pub opponent_drivers: Option<Vec<i32>>,
     pub teammate: Option<usize>,
+    /// `[game] rival`: the career rival whose name tag shows (`leader`, an opponent number
+    /// from 1, or 0 for none; name_tag.rs `RivalRule`, docs/RACE_HUD.md "Driver name tags").
+    pub rival: Option<crate::name_tag::RivalRule>,
     /// `[game] audio_name`: the profile's audio name the race engineer says,
     /// `M_01`…`M_100`, `F_01`…`F_55` or `N_01`…`N_42` (language ids
     /// `commentary_name_*`), or `off` ("Disable Audio Name"). Default `M_46`
@@ -577,6 +580,10 @@ impl Settings {
                             .collect::<Result<_, _>>()
                             .map_err(|_| at("[game] opponent_drivers needs numbers".into()))?,
                     )
+                }
+                ("game", "rival") => {
+                    self.rival = crate::name_tag::RivalRule::parse(value)
+                        .ok_or_else(|| at("[game] rival needs leader or an opponent number".into()))?
                 }
                 ("game", "teammate") => {
                     self.teammate =

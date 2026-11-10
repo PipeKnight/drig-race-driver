@@ -44,6 +44,21 @@ const BONUS_TIME: f32 = 1.;
 /// it at a 60 Hz reference rate so it does not depend on the frame rate [I].
 const SMOOTHING: f32 = 0.3;
 const REFERENCE_HZ: f32 = 60.;
+/// The ring shake [D 0x6B5EF0, 0x6A77E0; drifteffect constructor 0x6ACAB0]:
+/// below this fraction of the combo wait (+0xF0, 0.5 at 0xCAF88C) the
+/// multiplier slots and the ring segments jitter by up to
+/// `SHAKE_AMPLITUDE` × (1 − f / `SHAKE_BELOW`) scene units on x and y
+/// (+0xEC, 8.0 at 0xCB0C44). No reference writes either field after the
+/// constructor, so these are the values the game uses [D xrefs].
+const SHAKE_BELOW: f32 = 0.5;
+const SHAKE_AMPLITUDE: f32 = 8.;
+/// The shake's random generator [D 0x6A77E0]: state × 0x41C64E6D +
+/// 0x40584C0F, the low 16 bits / 65536 per draw, seeded 0x5A5AA5A5 (+0x20C).
+const SHAKE_SEED: u32 = 0x5A5A_A5A5;
+/// The points roll-up [D 0x6B4790]: `numbers` (the total in
+/// `multiplier_bag`) and `points_total_echo` count linearly from the shown
+/// value to the new total over 1 s (0xCAF888).
+const ROLL_TIME: f32 = 1.;
 
 /// What the drift OSD does to the scene: `Osd` in the game, a recorder in
 /// the tests.
@@ -55,6 +70,8 @@ pub(crate) trait Sink {
     fn show(&mut self, node: &str, on: bool);
     /// Sets a node's own `scrollY` (a digit glyph, 0x6A7AC0).
     fn scroll(&mut self, node: &str, y: f32);
+    /// Moves a node from its rest translation (0x8CEA60 -> 0x8CEA20).
+    fn offset(&mut self, node: &str, by: Vec3);
 }
 
 impl Sink for Osd {
@@ -73,6 +90,9 @@ impl Sink for Osd {
     }
     fn scroll(&mut self, node: &str, y: f32) {
         self.scroll_y(node, y);
+    }
+    fn offset(&mut self, node: &str, by: Vec3) {
+        Osd::offset(self, node, by);
     }
 }
 
@@ -104,6 +124,17 @@ pub(crate) struct DriftOsd {
     bonus: f32,
     exit: f32,
     total: f32,
+    /// The ring shake runs (+0x1E4 bit 2) and its random state (+0x20C;
+    /// 0 stands for the unused seed).
+    shaking: bool,
+    random: u32,
+    /// The points roll-up (points box +0x54 shown, +0x58 from, +0x5C to,
+    /// +0x60 t) and the total it last saw (owner +0x450).
+    shown: f32,
+    roll_from: f32,
+    roll_to: f32,
+    roll_t: f32,
+    rolled_total: f32,
 }
 
 impl DriftOsd {
@@ -111,7 +142,9 @@ impl DriftOsd {
     pub(crate) fn update(&mut self, s: &Scorer, settings: &Settings, texts: &Texts, dt: f32, sink: &mut impl Sink) {
         // Restart Race: the scorer starts again from zero.
         if self.started && s.total < self.total {
-            *self = Self::default();
+            // The box reset [D 0x6B8CE0] rolls the shown value down to 0.
+            let shown = self.shown;
+            *self = Self { roll_from: shown, ..Self::default() };
         }
         if !self.started {
             self.start(texts, sink);
@@ -148,6 +181,31 @@ impl DriftOsd {
         }
         self.timer_ring(s, settings, sink);
         self.close_bonus(s, texts, dt, sink);
+        self.roll(s, dt, sink);
+    }
+
+    /// The points roll-up. A new total [D 0x6BB368] restarts it from the
+    /// value now shown; the tick [D 0x6B4790] runs while t <= 1 s and writes
+    /// the truncated, grouped value (0x6A63B0).
+    fn roll(&mut self, s: &Scorer, dt: f32, sink: &mut impl Sink) {
+        if s.total != self.rolled_total {
+            self.rolled_total = s.total;
+            self.roll_from = self.shown;
+            self.roll_to = (s.total as i32) as f32;
+            self.roll_t = 0.;
+        }
+        if self.roll_t > ROLL_TIME {
+            return;
+        }
+        self.shown = self.roll_from + (self.roll_to - self.roll_from) * self.roll_t;
+        self.roll_t += dt;
+        if self.roll_t >= ROLL_TIME {
+            self.shown = self.roll_to;
+        }
+        let text = grouped(self.shown as i64);
+        for node in ["numbers", "points_total_echo"] {
+            sink.text(node, &text);
+        }
     }
 
     /// Bind time [D 0x6BB650, 0x6B5650]: titles, a zero total, the points box
@@ -278,6 +336,52 @@ impl DriftOsd {
         }
         self.lit = lit;
         self.fraction = f;
+        self.shake(sink);
+    }
+
+    /// The ring shake [D 0x6B5EF0, 0x6A77E0]: while the ring counts down
+    /// below half the wait, each multiplier slot gets its own random x/y
+    /// offset in ±amplitude every frame, and the eight segments share one.
+    /// A timer that rises again restarts the ring (0x6BBFE0 → 0x6A72D0,
+    /// 0x6B99D0), which puts the nodes back.
+    fn shake(&mut self, sink: &mut impl Sink) {
+        if !self.ring || self.fraction >= SHAKE_BELOW {
+            self.stop_shake(sink);
+            return;
+        }
+        self.shaking = true;
+        let amplitude = SHAKE_AMPLITUDE * (1. - self.fraction / SHAKE_BELOW);
+        // 0x6A77E0 walks the slots from the second (+0x17C) to the first (+0x148).
+        for slot in MULTIPLIER_SLOTS.iter().rev() {
+            let by = self.jitter(amplitude);
+            sink.offset(slot, by);
+        }
+        let by = self.jitter(amplitude);
+        for seg in &SEGMENTS {
+            sink.offset(seg, by);
+        }
+    }
+
+    /// One x/y draw of `[-amplitude, amplitude]`.
+    fn jitter(&mut self, amplitude: f32) -> Vec3 {
+        let mut draw = || {
+            let state = if self.random == 0 { SHAKE_SEED } else { self.random };
+            self.random = state.wrapping_mul(0x41C6_4E6D).wrapping_add(0x4058_4C0F);
+            (self.random & 0xFFFF) as f32 / 65536. * 2. * amplitude - amplitude
+        };
+        let x = draw();
+        Vec3::new(x, draw(), 0.)
+    }
+
+    /// Puts the shaken nodes back at rest [D 0x6A72D0].
+    fn stop_shake(&mut self, sink: &mut impl Sink) {
+        if !self.shaking {
+            return;
+        }
+        self.shaking = false;
+        for node in MULTIPLIER_SLOTS.iter().chain(&SEGMENTS) {
+            sink.offset(node, Vec3::ZERO);
+        }
     }
 
     /// The combo ends [D 0x6BBF20]: banked (0x6B9850, 0x6B4700, 0x6B4570) or
@@ -307,6 +411,7 @@ impl DriftOsd {
         self.exit = EXIT_TIME;
         self.open = false;
         self.ring = false;
+        self.stop_shake(sink);
         self.combo = 0;
         self.rating = 0;
     }
@@ -446,6 +551,7 @@ mod tests {
         shown: HashMap<String, bool>,
         fractions: HashMap<String, f32>,
         scrolls: HashMap<String, f32>,
+        offsets: HashMap<String, Vec3>,
     }
 
     impl Sink for Recorder {
@@ -463,6 +569,9 @@ mod tests {
         }
         fn scroll(&mut self, node: &str, y: f32) {
             self.scrolls.insert(node.into(), y);
+        }
+        fn offset(&mut self, node: &str, by: Vec3) {
+            self.offsets.insert(node.into(), by);
         }
     }
 
@@ -585,6 +694,45 @@ mod tests {
         osd.update(&s, &settings, &texts, 0.016, &mut rec);
         assert_eq!(rec.texts["points_total"], "0");
         assert!(rec.played("points_anim", "out"));
+        // The rolled value counts back down to 0 [D 0x6B8CE0].
+        for _ in 0..70 {
+            osd.update(&s, &settings, &texts, 0.016, &mut rec);
+        }
+        assert_eq!(rec.texts["numbers"], "0");
+    }
+
+    #[test]
+    fn a_new_total_rolls_up_over_a_second() {
+        let (settings, texts) = (settings(), texts());
+        let (mut osd, mut rec) = (DriftOsd::default(), Recorder::default());
+        let mut s = Scorer::new(false, None, true);
+        osd.update(&s, &settings, &texts, 0.1, &mut rec);
+        assert_eq!(rec.texts["numbers"], "0");
+        // A bank: the big total shows at once, `numbers` and the echo roll
+        // linearly from the shown value; the first frame still shows it.
+        s.total = 1000.;
+        let mut seen = Vec::new();
+        for _ in 0..12 {
+            osd.update(&s, &settings, &texts, 0.1, &mut rec);
+            assert_eq!(rec.texts["numbers"], rec.texts["points_total_echo"]);
+            seen.push(rec.texts["numbers"].clone());
+        }
+        assert_eq!(seen[..3], ["0", "100", "200"]);
+        assert_eq!(seen[8], "800");
+        assert_eq!(seen[10], "1,000");
+        assert_eq!(seen[11], "1,000");
+        // The next bank rolls on from where the roll stands.
+        s.total = 1500.;
+        osd.update(&s, &settings, &texts, 0.5, &mut rec);
+        osd.update(&s, &settings, &texts, 0.1, &mut rec);
+        assert_eq!(rec.texts["numbers"], "1,250");
+        // Nothing more is written once the roll has ended.
+        for _ in 0..10 {
+            osd.update(&s, &settings, &texts, 0.1, &mut rec);
+        }
+        rec.texts.remove("numbers");
+        osd.update(&s, &settings, &texts, 0.1, &mut rec);
+        assert!(!rec.texts.contains_key("numbers"));
     }
 
     #[test]
@@ -622,5 +770,41 @@ mod tests {
         assert!((rec.scrolls["text_single!8"] - 4. * DIGIT_STEP).abs() < 1e-6);
         assert_eq!(rec.scrolls["text_echo!8"], rec.scrolls["text_single!8"]);
         assert!(!rec.scrolls.contains_key("text_single!7"), "the X glyph keeps its own scroll");
+    }
+
+    #[test]
+    fn the_ring_shakes_below_half_the_wait() {
+        let (settings, texts) = (settings(), texts());
+        let (mut osd, mut rec) = (DriftOsd::default(), Recorder::default());
+        let mut s = Scorer::new(false, None, true);
+        (s.combo, s.combo_timer) = (2, 4.);
+        osd.update(&s, &settings, &texts, 0.016, &mut rec);
+        // Above half the wait nothing moves.
+        s.combo_timer = 2.4;
+        osd.update(&s, &settings, &texts, 0.016, &mut rec);
+        assert!(rec.offsets.is_empty());
+        // At f = 0.25 the amplitude is 8 × (1 − 0.25/0.5) = 4.
+        s.combo_timer = 1.;
+        let mut seen = Vec::new();
+        for _ in 0..50 {
+            osd.update(&s, &settings, &texts, 0.016, &mut rec);
+            let slot = [rec.offsets[MULTIPLIER_SLOTS[0]], rec.offsets[MULTIPLIER_SLOTS[1]]];
+            let seg = rec.offsets[SEGMENTS[0]];
+            assert!(SEGMENTS.iter().all(|n| rec.offsets[*n] == seg), "the segments share one offset");
+            for v in slot.iter().chain([&seg]) {
+                assert!(v.x.abs() <= 4. && v.y.abs() <= 4. && v.z == 0., "{v}");
+            }
+            seen.push(slot[0]);
+        }
+        assert!(seen.iter().any(|v| v.x.abs() > 2.) && seen.windows(2).any(|w| w[0] != w[1]));
+        // The timer rises again: the nodes go back to rest.
+        s.combo_timer = 4.;
+        osd.update(&s, &settings, &texts, 0.016, &mut rec);
+        assert!(rec.offsets.values().all(|v| *v == Vec3::ZERO));
+        // The first draws follow the original generator from its seed.
+        let mut fresh = DriftOsd::default();
+        let first = fresh.jitter(1.);
+        let x = 0x5A5A_A5A5u32.wrapping_mul(0x41C6_4E6D).wrapping_add(0x4058_4C0F);
+        assert_eq!(first.x, (x & 0xFFFF) as f32 / 65536. * 2. - 1.);
     }
 }

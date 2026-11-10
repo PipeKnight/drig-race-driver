@@ -439,8 +439,9 @@ pub struct Osd {
     texts: HashMap<String, TextNode>,
     fonts: Vec<Font>,
     shown: HashMap<Entity, bool>,
-    /// Added to an animated node's translation (authored layout moves).
-    offsets: HashMap<Entity, Vec3>,
+    /// Added to a node's translation (authored layout moves, the drift ring
+    /// shake): the wanted offset and the one now in the node's transform.
+    offsets: HashMap<Entity, (Vec3, Vec3)>,
     /// The scene material of each render node.
     node_materials: HashMap<Entity, usize>,
     /// Per-node `scrollX`, `scrollY` and alpha over the node's scene material.
@@ -512,10 +513,10 @@ impl Osd {
             t.want = text.to_owned();
         }
     }
-    /// Moves an animated node by `offset` on top of its animated translation.
+    /// Moves a node by `offset` on top of its animated (or rest) translation.
     pub fn offset(&mut self, node: &str, offset: Vec3) {
         if let Some(&e) = self.entities.get(node) {
-            self.offsets.insert(e, offset);
+            self.offsets.entry(e).or_default().0 = offset;
         }
     }
     /// Sets a render node's own `scrollY` material value (a digit strip's
@@ -1031,6 +1032,8 @@ fn animate(
     };
     let dt = time.map_or(0., |t| t.delta_secs());
     let osd = &mut *osd;
+    // Offset nodes whose translation an animation wrote this frame.
+    let mut moved: Vec<Entity> = Vec::new();
     for a in &mut osd.anims {
         if a.time < a.stop {
             a.time = (a.time + dt).min(a.stop);
@@ -1045,7 +1048,13 @@ fn animate(
                     let mut next = *t;
                     match c.semantic {
                         osd::Semantic::Translation if v.len() == 3 => {
-                            next.translation = Vec3::new(v[0], v[1], v[2]) + osd.offsets.get(e).copied().unwrap_or_default();
+                            let mut at = Vec3::new(v[0], v[1], v[2]);
+                            if let Some(o) = osd.offsets.get_mut(e) {
+                                at += o.0;
+                                o.1 = o.0;
+                                moved.push(*e);
+                            }
+                            next.translation = at;
                         }
                         osd::Semantic::Scale if v.len() == 3 => next.scale = Vec3::new(v[0], v[1], v[2]),
                         osd::Semantic::Rotation if v.len() == 3 => {
@@ -1067,6 +1076,16 @@ fn animate(
                 }
                 Target::None => {}
             }
+        }
+    }
+    // A node no animation moves keeps its rest translation plus the offset.
+    for (e, o) in &mut osd.offsets {
+        if o.0 != o.1
+            && !moved.contains(e)
+            && let Ok(mut t) = transforms.get_mut(*e)
+        {
+            t.translation += o.0 - o.1;
+            o.1 = o.0;
         }
     }
     for (e, s) in &mut osd.scrolls {
@@ -1162,6 +1181,7 @@ mod tests {
                 positions: vec![[0., 0., 0.], [0., -height, 0.], [width, -height, 0.], [width, 0., 0.]],
                 normals: vec![],
                 uvs: vec![[0., 0.]; 4],
+                colors_argb: vec![],
                 indices: vec![0, 1, 2, 0, 2, 3],
             },
             bounds: [0., -height, 0., width, 0., 0.],
@@ -1288,6 +1308,7 @@ mod tests {
                 semantic: osd::Semantic::Rotation,
                 components: vec![osd::Curve(vec![key(0., -std::f32::consts::FRAC_PI_2), key(1. / 6., 0.), key(1. / 3., std::f32::consts::FRAC_PI_2)])],
             }],
+            external: vec![],
         };
         let mut osd = Osd {
             entities: HashMap::new(),
