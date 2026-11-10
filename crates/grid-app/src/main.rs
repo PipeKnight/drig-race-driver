@@ -126,6 +126,7 @@ mod temporal_audit;
 mod temporal_colour;
 #[cfg(feature = "dlaa")]
 mod thin_motion;
+mod name_tag;
 #[cfg(feature = "dlaa")]
 mod native_dlaa;
 #[cfg(feature = "dlaa")]
@@ -5154,6 +5155,15 @@ pub(crate) fn race_app(
             world_record.0
         );
         app.insert_resource(world_record);
+        // The team-mate's name tag (name_tag.rs): a race with `[game] teammate` (the career
+        // field's team-mate) and that opponent in the field.
+        if let Some(k) = profile.teammate.filter(|&k| k > 0)
+            && driving.opponents.as_ref().is_some_and(|o| k < o.multi.cars.len())
+        {
+            let mate = name_tag::TeamMate::load(&root, k, opponent_drivers.get(k - 1).copied().flatten());
+            println!("osd_tag version=1 event=team_mate car={} flag={:?}", mate.car, mate.flag);
+            app.insert_resource(mate);
+        }
         if let Some((next, length)) = touge_run.take() {
             app.insert_resource(touge_event::TougeEvent::new(
                 grid_tools::touge::Settings::load(&root)?,

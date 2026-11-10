@@ -3,6 +3,7 @@
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
        [--size WxH] [--shots S,S,...] [--expect-stale] [--expect-splits]
        [--expect-penalty [--contact-at S]] [--expect-brake] [--expect-drift]
+       [--expect-tag [--teammate K]]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1). RESIZE_AT seconds after launch it resizes
@@ -36,6 +37,11 @@ required, since the autopilot need not overspeed. Use a circuit whose route ship
 --expect-drift also requires the drift OSD groups (drift_osd.rs): an `osd_drift open=true` line (a
 combo opened, printed on each combo change) after the resize, with the multiplier's digit scroll
 (`scroll=` units of the double, units and tens of the treble). Use a drift settings file.
+
+--expect-tag also requires the team-mate's name tag (name_tag.rs) up after the resize: shown before it and not yet hidden, or an `osd_tag ... event=shown`
+line after it (printed on each show and hide, within 60 m). The check runs a copy of the
+settings with `[game] teammate = K` added (--teammate, default 1), so use a race with opponents;
+a series event also gives the drivers' flags.
 """
 import argparse
 import ctypes
@@ -79,6 +85,8 @@ def main():
     ap.add_argument('--contact-at', type=float, default=30.)
     ap.add_argument('--expect-brake', action='store_true')
     ap.add_argument('--expect-drift', action='store_true')
+    ap.add_argument('--expect-tag', action='store_true')
+    ap.add_argument('--teammate', type=int, default=1)
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -91,9 +99,13 @@ def main():
     env = dict(os.environ, GRID_AUDIO='off', GRID_AUTOPILOT='1', GRID_TICK_INTERPOLATION='1', GRID_WINDOW_SHOTS=args.shots)
     if args.expect_penalty:
         env['GRID_SMOKE_CONTACT'] = str(args.contact_at)
+    settings = args.settings
+    if args.expect_tag:
+        settings = str(out / 'settings-teammate.ini')
+        Path(settings).write_text(Path(args.settings).read_text() + f'\n[game]\nteammate = {args.teammate}\n')
     log_path = out / 'grid-app.log'
     log = open(log_path, 'w')
-    proc = subprocess.Popen([str(Path(args.exe).resolve()), '--data-dir', str(data), '--settings', args.settings,
+    proc = subprocess.Popen([str(Path(args.exe).resolve()), '--data-dir', str(data), '--settings', settings,
                              '--resolution', '1280x800', '--drive-ticks', '72000'],
                             stdout=log, stderr=subprocess.STDOUT, env=env)
     start = time.time()
@@ -177,6 +189,19 @@ def main():
             verdict = 'FAIL: no drift combo opened after the resize'
         else:
             verdict += f'; {len(opened)} drift combo updates'
+    mate = re.findall(r'^osd_tag version=1 event=team_mate (.*)$', text, re.M)
+    # The lines mark transitions, so a tag shown before the resize and not hidden yet is still up.
+    before = re.findall(r'^osd_tag version=1 event=(shown|hidden) ', text[:max(at, 0)], re.M)
+    up = bool(before) and before[-1] == 'shown'
+    tags = re.findall(r'^osd_tag version=1 event=(shown|hidden) (.*)$', text[max(at, 0):], re.M)
+    shown = [t for e, t in tags if e == 'shown']
+    print(f'osd_tag: team mate {mate[:1]}; {"up" if up else "down"} at the resize; after it {len(shown)} shown, '
+          f'{len(tags) - len(shown)} hidden; {shown[:3]}')
+    if args.expect_tag and verdict.startswith('PASS'):
+        if at < 0 or not (up or shown):
+            verdict = 'FAIL: no team-mate name tag up after the resize'
+        else:
+            verdict += f'; team-mate tag {"up at the resize, " if up else ""}shown {len(shown)} times after it'
     missing = [n for n in names if not (out / n).exists()]
     if missing:
         verdict += f' (shots missing: {", ".join(missing)})'

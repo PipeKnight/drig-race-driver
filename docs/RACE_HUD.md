@@ -526,12 +526,26 @@ Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
 - T 3 (0x6BD900; probably online, it also drives the chat box [I]): the two nearest cars on one
   side and the nearest on the other; the `wrongway` tags when the car's byte +0x1550 is set. Skipped
   for F 3 and 9; the distance is Euclidean for F 4, else signed along the track (0x90BDB0).
-- Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)³ × (base −
-  [0xE6DFF4]). Text: the position ("%d"), the name (32 characters) and the nationality flag
-  (0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
-  behind the camera it goes off screen, with no edge clamp. The tag plays the "expand" range.
-- Open: what T and game mode 2 are, the sources of the parameters +0x2B0/+0x2B4 and of the base
-  alphas (+0x210). Not ported: the port has no career rival or team-mate data in a race yet.
+- Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)^3 × (base −
+  [0xE6DFF4]): the fade range 60 (0xDB4F5C), the exponent 3.0 (0xDB4F68), and the minimum
+  [0xE6DFF4] is in .bss with no writer found, so 0 [I]. The alpha goes to parameter 2 of seven
+  parameter tables at +0x120 (stride 0x1C), one per tag part; the bases at +0x210 are the parts'
+  authored material alphas [I]. Text: the position ("%d", 0xCB86FC), the name (32 characters) and
+  the nationality flag: `driver.nationality_id` → `nationality.flag_id` (0x69C860), shown as the
+  `flag` part's scrollX = (n / 9) / 7 and scrollY = (n mod 9) / 9 (0x6A0820, parameters 0 and 1);
+  −1 or a cell outside 0..1 hides the flag. Anchor (0x6B0820): the car position raised by
+  1.5 + 0.04 |d| m, projected; behind the camera it goes off screen, with no edge clamp. The tag
+  plays the "expand" range (`driver_id_team`'s range also animates the name pill's colour).
+- Open: what T and game mode 2 are, the sources of the parameters +0x2B0/+0x2B4.
+- Port (name_tag.rs, F782): the team-mate's tag in a race with `[game] teammate` (the career
+  field's team-mate, F771). d is the signed distance along the AI racing line (the route's
+  `reset_line`, wrapped the short way round a closed circuit), |d| for the fade and the lift;
+  Euclidean without a line. The lift is along world up [I: the original's up vector is not
+  traced]. The anchor is projected with the 3D camera and placed where the OSD camera's ray
+  through the same screen point meets the tag group's plane (its authored depth −20 under the
+  layout). Each part gets its own material copy for the faded alpha and the flag cell
+  (`Osd::fade`, `Osd::scroll_x`/`scroll_y`). The rival's tag (tag 0, the career lookup 0x6BCE60)
+  is not ported: a race does not receive the career rival.
 
 Boost [D: bind 0x8EFA60, dial start 0x8EFD50]: the only reader copies the player vehicle's +0xDE4
 block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
@@ -605,3 +619,50 @@ order (`drift_osd::DriftOsd::update`).
 - Not ported: the ring shake near the end (0x6A77E0; its amplitude and threshold come from the
   attach's construction, not traced), the points roll-up, `drift_message` (attach 0x6A8620, its
   feeder not traced) and the battle position multiplier, which the plain text panel showed.
+
+### 6.6 Original post-race art (row 69)
+
+Static research only (F782). Sources: `system/states.bin` and `system/flow.bin` decoded with
+`tools/validate_binxml.py`'s decoder (private copies `local/postrace/states.xml`, `flow.xml`),
+`frontend/fePersistentDatabase.pssg`, `postprocess/effects.xml`.
+
+Screens and their glyphs [D, states.bin]:
+
+| Screen id | Class | Glyph |
+|---|---|---|
+| `post_race_stats_free_race` (and `_touge`, `_do_timetrial`, `_do_speedtest`, `_drift_*`) | `ScreenPostRaceStats` | `post_race_stats` |
+| `post_race_results_generic` (and `_dd`, `_lemans`, `_drift`, `_touge_*`) | `ScreenPostRaceResults*` | `leaderboards` |
+| `post_race_drift_scoreboard` | `ScreenPostRaceDriftScoreboard` | `drift_scoreboard` |
+| `post_race_menu` | `ScreenPostRacePlaceholder` | `menu` |
+
+- The glyph roots live in `frontend/fePersistentDatabase.pssg` (raw name counts: `post_race_stats`
+  198, `leaderboards` 117, `drift_scoreboard` 90) [D]; `feNonPersistentDatabase.pssg` and
+  `fe_DLC_0.pssg` reuse the `leaderboards` name for their own screens.
+- The results screen is a `RaceResultsAnimatedList` (axis y, 12 rows, cursor `cursor`), the pills
+  `pills.0..3` (Continue, View Replay, Exit, Restart Race, text glyph `pill_header`), and the texts
+  `title_1` and `table_title`; `animSpeed` 0.5 [D].
+- The stats screen lists `stat` items (free race: `position`, `fastest_lap`) and plays
+  `second_replay_cam="replay_roof1"` behind it [D].
+- Behind the screens [D]: `post_race_increase_blur` blends the post effect to `fepause_final`
+  (effects.xml id 17) over 2.0 s, the same effect as the pause menu (0.3 s there);
+  `results_screen_camera_instant` moves the camera 1000 back and 215 up (`StatePostRaceMoveCamera`,
+  `post_race_stats_cam`); the stats screen runs the `stats_funky_camera` (`replay_roof2`, after 4 s,
+  3 s fade).
+
+Blockers for a port [V/D]:
+- The port's OSD reader (`grid_formats::osd::read_scene`) stops on `fePersistentDatabase.pssg` at
+  0xCEA16: a `uint_color_argb` vertex stream (19 streams in the file; the OSD scenes use only float
+  and half streams). The glyph trees could not be dumped through it.
+- The front-end glyphs use another shader family [D, effect names in the files]:
+  `fePersistentDatabase.pssg` references `fe3d_generic` (66), `feov_colour` (26),
+  `fe3d_genericGMPD` (24), `fe3d_genericGD`, `fe3d_ramp`, `fe3d_genericGPD`, `fe3d_genericI`,
+  `fe3d_tracksurface`, `fe3d_particle`, `fe3d_video` …, mapped to instanced `fei3d_*` effects by
+  `frontend/fe_shadersetup.xml` (parameters `DiffuseColour`, `Alpha`, `GlowAmount`, `Scale`,
+  `RampMin/Max`). `Osd/dial2.pssg` uses only `osd3d_*`/`osd2d_font`, which `osd.wgsl` implements.
+  The port has no `fe3d_*` shader yet (the loading world, F773, waits for the same renderer).
+- `fepause_final` is shared with the pause menu, which the front-end session owns.
+- The post-race cutscene needs an AI RaceOver cruise (above).
+
+Next steps: accept `uint_color_argb` in the OSD stream reader (four bytes, ARGB → RGBA), dump the
+`leaderboards` and `post_race_stats` trees, and check whether the front-end shaders map onto the
+OSD material set; if so, the results screen can reuse `osd_scene` with its own scene.

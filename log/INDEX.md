@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F782](F0782.md) | 2026-11-10 | HUD: team-mate name tag; original post-race art research (rows 68, 69) |
 | [F781](F0781.md) | 2026-11-10 | Night level, tree sheet shadows, world clear colour |
 | [F780](F0780.md) | 2026-11-10 | Replay/Flashback round 4: terminal window from the crash, TerminalFX_01 wreck grade, linear PPS blend, packed solver rows |
 | [F779](F0779.md) | 2026-11-10 | Front-end hand-off in the one-window host, loading bars, circle and sounds, pause art findings |

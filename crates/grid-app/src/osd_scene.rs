@@ -168,15 +168,34 @@ fn mode(effect: &str) -> f32 {
     }
 }
 
-/// A node's own copy of its scene material with `scrollY` set, as the
-/// original's per-instance shader parameter (the combodigit attach,
-/// 0x6A7AC0). The copy follows the scene material's animated values.
+/// A node's own copy of its scene material with `scrollX`, `scrollY` or a
+/// faded alpha set, as the original's per-instance shader parameters (the
+/// combodigit attach 0x6A7AC0, the name tag 0x6A80A0). The copy follows the
+/// scene material's animated values.
 #[derive(Clone, Debug)]
 struct Scroll {
     source: usize,
-    y: f32,
+    x: Option<f32>,
+    y: Option<f32>,
+    /// Factor on the scene material's `alphaScaler`.
+    fade: Option<f32>,
     handle: Option<Handle<OsdMaterial>>,
     dirty: bool,
+}
+
+impl Scroll {
+    fn apply(&self, mut params: Params) -> Params {
+        if let Some(x) = self.x {
+            params.a.x = x;
+        }
+        if let Some(y) = self.y {
+            params.a.y = y;
+        }
+        if let Some(f) = self.fade {
+            params.colour.w *= f;
+        }
+        params
+    }
 }
 
 /// CPU copy of a material's animatable values.
@@ -424,7 +443,7 @@ pub struct Osd {
     offsets: HashMap<Entity, Vec3>,
     /// The scene material of each render node.
     node_materials: HashMap<Entity, usize>,
-    /// Per-node `scrollY` values over the node's scene material.
+    /// Per-node `scrollX`, `scrollY` and alpha over the node's scene material.
     scrolls: HashMap<Entity, Scroll>,
     image: Handle<Image>,
     /// The UI material that shows `image` over the 3D view.
@@ -502,21 +521,35 @@ impl Osd {
     /// Sets a render node's own `scrollY` material value (a digit strip's
     /// glyph), leaving other nodes that share its material unchanged.
     pub fn scroll_y(&mut self, node: &str, y: f32) {
+        self.look(node, |s| &mut s.y, y);
+    }
+    /// Sets a render node's own `scrollX` material value (a flag atlas
+    /// column).
+    pub fn scroll_x(&mut self, node: &str, x: f32) {
+        self.look(node, |s| &mut s.x, x);
+    }
+    /// Scales a render or text node's own alpha: its scene material's
+    /// `alphaScaler` times `factor`.
+    pub fn fade(&mut self, node: &str, factor: f32) {
+        self.look(node, |s| &mut s.fade, factor);
+    }
+    fn look(&mut self, node: &str, field: impl Fn(&mut Scroll) -> &mut Option<f32>, value: f32) {
         let Some(&e) = self.entities.get(node) else {
             return;
         };
         let Some(&source) = self.node_materials.get(&e) else {
             return;
         };
-        let s = self.scrolls.entry(e).or_insert(Scroll { source, y: f32::NAN, handle: None, dirty: true });
-        if s.y != y {
-            s.y = y;
+        let s = self.scrolls.entry(e).or_insert(Scroll { source, x: None, y: None, fade: None, handle: None, dirty: true });
+        let slot = field(s);
+        if *slot != Some(value) {
+            *slot = Some(value);
             s.dirty = true;
         }
     }
     /// A node's own `scrollY`, once set.
     pub fn scroll_of(&self, node: &str) -> Option<f32> {
-        self.scrolls.get(self.entities.get(node)?).map(|s| s.y)
+        self.scrolls.get(self.entities.get(node)?).and_then(|s| s.y)
     }
     /// Shows or hides a node and its children.
     pub fn show(&mut self, node: &str, on: bool) {
@@ -1042,8 +1075,7 @@ fn animate(
             continue;
         }
         s.dirty = false;
-        let mut params = state.params;
-        params.a.y = s.y;
+        let params = s.apply(state.params);
         match &s.handle {
             Some(h) => {
                 if let Some(mut m) = materials.get_mut(h) {
@@ -1146,6 +1178,20 @@ mod tests {
             descender: -0.2,
             glyphs: vec![glyph('0', 0.4, 0.7, 0.5, 0.7), glyph('.', 0.1, 0.1, 0.2, 0.1)],
         })
+    }
+
+    #[test]
+    fn a_node_copy_sets_its_scroll_and_fades_the_scene_alpha() {
+        let scene = Params { colour: Vec4::new(1., 0.5, 0.25, 0.8), a: Vec4::new(0.1, 0.2, 0.3, 0.4), b: Vec4::ONE, c: Vec4::ONE };
+        let mut s = Scroll { source: 0, x: None, y: Some(0.5), fade: None, handle: None, dirty: true };
+        // Only the set values change; the rest follows the scene material.
+        let p = s.apply(scene);
+        assert_eq!((p.a, p.colour), (Vec4::new(0.1, 0.5, 0.3, 0.4), scene.colour));
+        s.x = Some(0.25);
+        s.fade = Some(0.5);
+        let p = s.apply(scene);
+        assert_eq!(p.a, Vec4::new(0.25, 0.5, 0.3, 0.4));
+        assert_eq!(p.colour, Vec4::new(1., 0.5, 0.25, 0.4));
     }
 
     #[test]
