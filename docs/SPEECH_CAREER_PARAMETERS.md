@@ -202,9 +202,9 @@ In collector offsets: `bonusObjWinPos` +0x88, `teammateNumber` +0x94, +0x98, `nu
 - So: career (and intro) race wins before this race, kept in the profile; read at the race start,
   not updated during the speech of that race [I: the block is not refreshed until the next reset].
 - Message: raceEndFirst `firstWinEver` (== 0).
-- Port: today 1 [AUTHORED]. `Career.races_won` exists but is counted at the event end over the
-  event's races, own events and offers, career only [O state.rs:678]; not the same counter
-  (intro race, time of counting). No profile race history in the port.
+- Port (F772): career races get `Career.races_won` plus the wins earlier in the running event or
+  offer (`speech_race_wins`); free races keep 1 [AUTHORED]. [I] Not the same counter: no intro
+  race, offer races are not kept after the offer, no game+0x31C condition.
 
 ### numEventWins
 - Getter 0x418DB0 → collector +0xB8 = block +0x58 (unsigned) [O].
@@ -213,8 +213,8 @@ In collector offsets: `bonusObjWinPos` +0x88, `teammateNumber` +0x94, +0x98, `nu
   the event row found, and the player's championship rank (class rank for multi-class) == 0.
   The same code counts events (+0x40).
 - Message: raceEndOther `wonChampionshipFirstTime` (== 0).
-- Port: no counter. `Career.event_results` (best place per event) could give a lower bound
-  (distinct events won), not the original count of event wins with repeats.
+- Port (F772): the distinct events won in `Career.event_results` (`speech_event_wins`). [I] Repeat
+  wins count once; `== 0`, the only test, agrees.
 
 ### racesCurTrack
 - Getter 0x418DD0 → collector +0xBC = block +0x5C (unsigned) [O].

@@ -300,6 +300,8 @@ pub struct PauseMenu {
     /// Where leaving a settings screen saves the options (the app's
     /// `<data dir>/settings.ini`); `None` keeps them for the session (tests).
     pub save_to: Option<std::path::PathBuf>,
+    /// Menu widget sounds of the last steps (hud_sound::menu_cue).
+    pub(crate) sounds: Vec<grid_tools::hud_audio::Cue>,
 }
 
 impl PauseMenu {
@@ -318,6 +320,7 @@ impl PauseMenu {
             undo: values,
             repeat: Repeat::default(),
             save_to: None,
+            sounds: Vec::new(),
         }
     }
 
@@ -343,7 +346,30 @@ impl PauseMenu {
 
     /// One frame of menu input. Closed, only Pause does anything (it opens on
     /// Continue, `c_pause_initial_decision_maker` -> main menu).
+    /// One frame of input; queues its widget sounds in `sounds`: the
+    /// screen whoosh on opening and closing [I: the pause screen's base
+    /// enter/leave], a list move, a value step, activate or back.
     pub fn step(&mut self, nav: Nav) -> Option<Command> {
+        use grid_tools::hud_audio::Cue;
+        let (open, screen, values) = (self.open, self.screen, self.values);
+        let place = (self.main, self.options, self.row, self.answer);
+        let command = self.navigate(nav);
+        if !open && self.open {
+            self.sounds.push(Cue::ScreenWhooshIn);
+        } else if open {
+            let side = matches!(self.screen, Screen::Setup(_));
+            let cursor = place != (self.main, self.options, self.row, self.answer);
+            let left = screen != self.screen || !self.open;
+            let cue = crate::hud_sound::menu_cue(&nav, left, cursor, values != self.values, side);
+            self.sounds.extend(cue);
+            if !self.open {
+                self.sounds.push(Cue::ScreenWhooshOut);
+            }
+        }
+        command
+    }
+
+    fn navigate(&mut self, nav: Nav) -> Option<Command> {
         if !self.open {
             if nav.pause {
                 self.open = true;
@@ -772,6 +798,7 @@ pub fn update(
         crate::transition::Leave,
     ),
     mut replay: Option<ResMut<crate::replay::Replay>>,
+    sink: Option<Res<crate::hud_sound::HudSink>>,
 ) {
     // A replay owns the input; after it the menu shows again. The front end
     // owns it before the race. Nothing more after leaving (the fade runs).
@@ -793,7 +820,9 @@ pub fn update(
     let mut repeat = menu.repeat;
     let nav = nav(&actions, &mut repeat, dt);
     menu.repeat = repeat;
-    let Some(command) = menu.step(nav) else {
+    let command = menu.step(nav);
+    crate::hud_sound::drain(&mut menu.sounds, sink.as_deref());
+    let Some(command) = command else {
         return;
     };
     let log = |action: &str| {
@@ -1057,6 +1086,51 @@ mod tests {
         let mut nav = Nav::default();
         f(&mut nav);
         nav
+    }
+
+    /// The widget sounds (AUDIO_RESEARCH.md "Menu sounds"): whoosh in on
+    /// opening, moves, activate, a slider step and its dead end at the top,
+    /// back, and back plus whoosh out on closing.
+    #[test]
+    fn steps_queue_the_menu_widget_sounds() {
+        use grid_tools::hud_audio::Cue;
+        let mut menu = PauseMenu::new(Variant::FreeRace, false, true, Options::default());
+        menu.step(Nav::default());
+        assert!(menu.sounds.is_empty());
+        menu.step(press(|n| n.pause = true));
+        for _ in 0..3 {
+            menu.step(press(|n| n.down = true));
+        }
+        menu.step(press(|n| n.select = true));
+        assert_eq!(menu.screen, Screen::Options);
+        menu.step(press(|n| n.select = true));
+        assert_eq!(menu.screen, Screen::Setup(Setup::Sound));
+        assert_eq!(menu.values.effects, 100);
+        menu.step(press(|n| n.right = true));
+        menu.step(press(|n| n.left = true));
+        assert_eq!(menu.values.effects, 90);
+        menu.step(press(|n| n.back = true));
+        menu.step(press(|n| n.back = true));
+        assert_eq!(menu.screen, Screen::Main);
+        menu.step(press(|n| n.pause = true));
+        assert!(!menu.open);
+        assert_eq!(
+            menu.sounds,
+            [
+                Cue::ScreenWhooshIn,
+                Cue::UdlrMove,
+                Cue::UdlrMove,
+                Cue::UdlrMove,
+                Cue::Select,
+                Cue::Select,
+                Cue::DeadEnd,
+                Cue::ItemDiscrete,
+                Cue::Back,
+                Cue::Back,
+                Cue::Back,
+                Cue::ScreenWhooshOut,
+            ]
+        );
     }
 
     #[test]

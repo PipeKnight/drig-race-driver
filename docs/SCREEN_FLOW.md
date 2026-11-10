@@ -32,7 +32,6 @@ Its alpha channel is `Anim!169`, a BEZIERFLOAT with keys frame 0 → 0 and frame
 ### 1.3 Not ported (yet)
 
 - The 3D loading world (`loading` root, track preview and `loading_stats` tips/facts), and the top and bottom bar shutters of `overlay`.
-- Front-end sounds on transitions.
 - `fade_to_half_black_quick` (popups).
 
 ## 2. DRIG
@@ -70,6 +69,10 @@ A launcher race (`Play GRID Prototype.cmd`, the `race-*` launchers) used to clos
 ### 2.4 Career
 
 Joined in F771 (backlog row 60, docs/CAREER_SCREEN.md "Processes"). `career_screen::supervise` runs its children through `run_supervised`; the career screen calls `transition::install(…, Start::Screen)` and `transition::window`, and leaves with `Fade::leave` (`career_go`, code 22; `career_quit`, Close). A career race hands back with 21 like a menu race and writes its result when that fade starts. `Fade::next()` (added for this) tells a screen which way it is leaving. `tools/career_loop_smoke.ps1` checks the loop screen → race → screen with both hand-offs.
+
+### 2.5 Screen and widget sounds
+
+A front-end screen app calls `hud_sound::install_front_end` after `transition::install`. It plays the original's plain `fe_fx` effects on the HUD group: `screen_whoosh_in` on the first frame, `screen_whoosh_out` once `Fade::leaving()` is true, and the menu's widget sounds (move, value step, dead end, activate, back). The pause menu and the pre-race screens play the race's `low_` set. The sounds hook only reads `Fade`; the transition code is unchanged. Details: AUDIO_RESEARCH.md §36.
 
 ## 3. Race Options: Difficulty and Grid Position
 

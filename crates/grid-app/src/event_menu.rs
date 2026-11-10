@@ -724,6 +724,8 @@ pub struct Menu {
     pub choice: Choice,
     cursor: usize,
     repeat: Repeat,
+    /// Menu widget sounds of the last steps (hud_sound::menu_cue).
+    pub(crate) sounds: Vec<grid_tools::hud_audio::Cue>,
 }
 
 fn step_in<T: Clone + PartialEq>(list: &[T], current: &T, right: bool) -> T {
@@ -745,6 +747,7 @@ impl Menu {
             // Continue, like the original's `active_default` race buttons.
             cursor: 0,
             repeat: Repeat::default(),
+            sounds: Vec::new(),
         }
         .at_continue()
     }
@@ -858,7 +861,17 @@ impl Menu {
         }
     }
 
+    /// One frame of input; queues its widget sound in `sounds`.
     pub fn step(&mut self, nav: Nav) -> Option<Command> {
+        let (cursor, choice) = (self.cursor, self.choice.clone());
+        let command = self.navigate(nav);
+        let side = self.rows().get(self.cursor) != Some(&Row::Continue);
+        let cue = crate::hud_sound::menu_cue(&nav, command.is_some(), self.cursor != cursor, self.choice != choice, side);
+        self.sounds.extend(cue);
+        command
+    }
+
+    fn navigate(&mut self, nav: Nav) -> Option<Command> {
         let rows = self.rows();
         let n = rows.len();
         self.cursor = self.cursor.min(n - 1);
@@ -890,6 +903,18 @@ impl Menu {
     /// Mouse: a click selects a row; a click on the selected row changes it
     /// to the next value, or on Continue starts the event.
     pub fn click(&mut self, index: usize) -> Option<Command> {
+        let (cursor, choice) = (self.cursor, self.choice.clone());
+        let command = self.pick(index);
+        let nav = Nav {
+            select: true,
+            ..default()
+        };
+        let cue = crate::hud_sound::menu_cue(&nav, command.is_some(), self.cursor != cursor, self.choice != choice, false);
+        self.sounds.extend(cue);
+        command
+    }
+
+    fn pick(&mut self, index: usize) -> Option<Command> {
         let rows = self.rows();
         let row = *rows.get(index)?;
         if self.cursor != index {
@@ -1321,6 +1346,9 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
     // The original's overlay fade (docs/SCREEN_FLOW.md): the menu fades in
     // from black, and out to "Loading" on Continue.
     crate::transition::install(&mut app, labels.get("loading"), crate::transition::Start::Screen);
+    // The menu widget and screen sounds (unprefixed front-end set).
+    let effects = profile.sound_effects.unwrap_or(crate::pause_menu::Options::default().effects);
+    crate::hud_sound::install_front_end(&mut app, &root, effects);
     crate::frame_pacing::install_window_shots(&mut app);
     #[cfg(target_os = "android")]
     crate::android_display::install(&mut app, profile.video_refresh_hz());
@@ -1421,6 +1449,7 @@ fn spawn(mut commands: Commands) {
 
 // Android restarts the activity instead of exiting.
 #[cfg_attr(target_os = "android", allow(unused_variables, unused_mut))]
+#[allow(clippy::too_many_arguments)]
 fn update(
     mut menu: ResMut<Menu>,
     actions: Res<crate::input::Actions>,
@@ -1429,6 +1458,7 @@ fn update(
     time: Res<Time<Real>>,
     mut fade: ResMut<crate::transition::Fade>,
     mut done: Local<bool>,
+    sink: Option<Res<crate::hud_sound::HudSink>>,
 ) {
     if *done || fade.leaving() {
         return;
@@ -1455,6 +1485,7 @@ fn update(
             command = command.or(menu.click(row.0));
         }
     }
+    crate::hud_sound::drain(&mut menu.sounds, sink.as_deref());
     match command {
         Some(Command::Go(choice)) => {
             *done = true;
@@ -1680,6 +1711,34 @@ mod tests {
         let mut nav = Nav::default();
         f(&mut nav);
         nav
+    }
+
+    /// The widget sounds (AUDIO_RESEARCH.md "Menu sounds"): a move, a value
+    /// step, Continue and Back, by keys and by mouse.
+    #[test]
+    fn steps_queue_the_menu_widget_sounds() {
+        use grid_tools::hud_audio::Cue;
+        let mut menu = Menu::new(catalog(), &Choice::default());
+        menu.step(Nav::default());
+        assert!(menu.sounds.is_empty());
+        menu.step(press(|n| n.down = true));
+        assert_eq!(menu.rows()[menu.cursor], Row::Discipline);
+        menu.step(press(|n| n.right = true));
+        menu.step(press(|n| n.left = true));
+        menu.step(press(|n| n.up = true));
+        assert!(matches!(menu.step(press(|n| n.select = true)), Some(Command::Go(_))));
+        assert_eq!(menu.step(press(|n| n.back = true)), Some(Command::Quit));
+        assert_eq!(
+            std::mem::take(&mut menu.sounds),
+            [Cue::UdlrMove, Cue::ItemDiscrete, Cue::ItemDiscrete, Cue::UdlrMove, Cue::Select, Cue::Back]
+        );
+        // Mouse: selecting a row moves, a click on the selected row steps it.
+        menu.click(0);
+        menu.click(0);
+        let last = menu.rows().len() - 1;
+        menu.click(last);
+        assert!(menu.click(last).is_some());
+        assert_eq!(menu.sounds, [Cue::UdlrMove, Cue::ItemDiscrete, Cue::UdlrMove, Cue::Select]);
     }
 
     #[test]

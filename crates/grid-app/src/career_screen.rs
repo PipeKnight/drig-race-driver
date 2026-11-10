@@ -971,7 +971,13 @@ pub fn new_career(_cat: &Catalogue) -> Career {
 /// The race engineer's career values for the next race
 /// (docs/SPEECH_AUDIO_RESEARCH.md §19) as `[game] speech_*` lines.
 /// `points` is the own event's points table (none: no standings).
-pub fn speech_lines(cat: &Catalogue, e: &InProgress, next: &Planned, points: Option<&[i32]>) -> String {
+pub fn speech_lines(
+    cat: &Catalogue,
+    career: &Career,
+    e: &InProgress,
+    next: &Planned,
+    points: Option<&[i32]>,
+) -> String {
     use grid_tools::career::rules::{self, Entrant};
     let on = |b: bool| if b { "on" } else { "off" };
     let own = e.offer.is_none();
@@ -984,9 +990,19 @@ pub fn speech_lines(cat: &Catalogue, e: &InProgress, next: &Planned, points: Opt
         rank.is_some_and(|r| r.name.ends_with("international"))
     };
     let final_event = own && cat.event(e.event_id).is_some_and(|ev| ev.head_to_head && international(ev));
+    // The race history (§19): numRaceWins counts the career races won before this one
+    // (0x6105F0, per race end). The career counts an event's races when the event ends, so the
+    // wins earlier in this event are added. numEventWins counts the own events won (0x60A960);
+    // [I] the career keeps each event's best place, so an event won twice counts once. Both
+    // drive only `== 0` tests (firstWinEver, wonChampionshipFirstTime).
+    let won_here = e.results.iter().filter(|r| r.position(Entrant::Player) == Some(0)).count();
+    let race_wins = career.races_won.max(0) as usize + won_here;
+    let event_wins = career.event_results.values().filter(|&&place| place == 0).count();
     let mut lines = format!(
         "speech_final_race = {}
 speech_final_event = {}
+speech_race_wins = {race_wins}
+speech_event_wins = {event_wins}
 ",
         on(final_race),
         on(final_event)
@@ -2520,7 +2536,7 @@ impl Screen {
         }
         profile = profile.replacen("[game]
 ", &format!("[game]
-{}", speech_lines(&self.cat, e, next, points.as_deref())), 1);
+{}", speech_lines(&self.cat, &self.career, e, next, points.as_deref())), 1);
         std::fs::write(self.dir.join(PROFILE), profile).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=go event_id={} race={} route={} laps={} grid={}",
@@ -3329,15 +3345,25 @@ opponent_names = Ann Example,Lee Niven
                 top_mph: None,
                 lemans: None,
             };
-            speech_lines(&cat, &e, &race, None)
+            speech_lines(&cat, &Career::new(), &e, &race, None)
         };
         // 78 `i_h2h` (international rank); 73 is the United States rookie head-to-head.
-        assert_eq!(lines(78), "speech_final_race = on
+        assert_eq!(
+            lines(78),
+            "speech_final_race = on
 speech_final_event = on
-");
-        assert_eq!(lines(73), "speech_final_race = on
+speech_race_wins = 0
+speech_event_wins = 0
+"
+        );
+        assert_eq!(
+            lines(73),
+            "speech_final_race = on
 speech_final_event = off
-");
+speech_race_wins = 0
+speech_event_wins = 0
+"
+        );
     }
 
     #[test]
@@ -3429,7 +3455,10 @@ speech_final_event = off
             top_mph: None,
             lemans: None,
         };
-        let lines = speech_lines(&cat, &e, &planned[1], Some(points));
+        let mut history = career.clone();
+        history.races_won = 3;
+        history.event_results = BTreeMap::from([(1, 0), (2, 1), (3, 0)]);
+        let lines = speech_lines(&cat, &history, &e, &planned[1], Some(points));
         let mut s = crate::settings::Settings::new();
         s.apply(&format!("[game]
 {lines}"), Path::new(".")).unwrap();
@@ -3440,6 +3469,8 @@ speech_final_event = off
         assert_eq!(speech.standing[0], 20);
         assert_eq!(speech.standing.iter().filter(|&&p| p == 18).count(), 1, "{lines}");
         assert_eq!((speech.absent_best, speech.bonus_place, speech.no_damage), (None, 0, false));
+        // Three earlier career wins plus race 1 of this event; two events won.
+        assert_eq!((speech.race_wins, speech.event_wins), (Some(4), Some(2)), "{lines}");
         let mut c = career.clone();
         let win = out(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], false);
         let p = apply_event(&cat, &mut c, 7, &[win.result.clone(), win.result], &win.settings).unwrap();

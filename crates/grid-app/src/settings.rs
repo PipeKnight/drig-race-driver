@@ -323,8 +323,9 @@ pub struct Settings {
     /// `speech_final_event`, `speech_one_two`, `speech_no_damage` (on/off),
     /// `speech_standing` (each car's points before this race, the player
     /// first), `speech_standing_absent` (the best points of the event's
-    /// entrants not in this race) and `speech_bonus_place`. The points
-    /// table is `[game] points`. Without any of them the race is not a
+    /// entrants not in this race), `speech_bonus_place`, and the career's
+    /// `speech_race_wins` (races won before this one) and `speech_event_wins`
+    /// (events won). The points table is `[game] points`. Without any of them the race is not a
     /// career race for speech.
     pub career_speech: Option<grid_tools::speech::CareerRace>,
     /// `[game] points`: the event's points table by finishing position
@@ -588,6 +589,17 @@ impl Settings {
                         }
                         "speech_standing_absent" => c.absent_best = Some(int(value)?),
                         "speech_bonus_place" => c.bonus_place = int(value)?,
+                        "speech_race_wins" | "speech_event_wins" => {
+                            let wins = value
+                                .trim()
+                                .parse::<u32>()
+                                .map_err(|_| at(format!("[game] {key} needs a count")))?;
+                            if key == "speech_race_wins" {
+                                c.race_wins = Some(wins);
+                            } else {
+                                c.event_wins = Some(wins);
+                            }
+                        }
                         _ => return Err(at(format!("unknown setting `{key}`"))),
                     }
                 }

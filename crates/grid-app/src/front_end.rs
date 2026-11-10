@@ -364,6 +364,8 @@ pub struct FrontEnd {
     pub auto_rows: Option<u32>,
     /// Where the choice is saved (`<data dir>/settings.ini`).
     pub settings: std::path::PathBuf,
+    /// Menu widget sounds of the last steps (hud_sound::menu_cue).
+    pub(crate) sounds: Vec<grid_tools::hud_audio::Cue>,
 }
 
 impl FrontEnd {
@@ -384,6 +386,7 @@ impl FrontEnd {
             saved: values,
             repeat: Repeat::default(),
             settings: crate::settings::data_dir().join("settings.ini"),
+            sounds: Vec::new(),
         }
     }
 
@@ -402,8 +405,25 @@ impl FrontEnd {
         }
     }
 
-    /// One frame of menu input.
+    /// One frame of menu input; queues its widget sounds in `sounds`.
     pub fn step(&mut self, nav: Nav) -> Option<Command> {
+        let before = (self.open, self.screen, self.item, self.row);
+        let values = (self.values, self.video, self.perf);
+        let command = self.navigate(nav);
+        if before.0 {
+            let left = before.1 != self.screen || !self.open;
+            let cursor = (before.2, before.3) != (self.item, self.row);
+            let value = values != (self.values, self.video, self.perf);
+            let side = self.screen != Screen::RaceOptions;
+            self.sounds.extend(crate::hud_sound::menu_cue(&nav, left, cursor, value, side));
+            if !self.open {
+                self.sounds.push(grid_tools::hud_audio::Cue::ScreenWhooshOut);
+            }
+        }
+        command
+    }
+
+    fn navigate(&mut self, nav: Nav) -> Option<Command> {
         if !self.open {
             return None;
         }
@@ -639,6 +659,7 @@ pub fn update(
     actions: Res<Actions>,
     mut shifts: ResMut<crate::input::ShiftQueue>,
     time: Option<Res<Time<Real>>>,
+    sink: Option<Res<crate::hud_sound::HudSink>>,
 ) {
     if !front.open {
         return;
@@ -651,7 +672,9 @@ pub fn update(
     front.repeat = repeat;
     // Escape is both Pause and Menu Back.
     nav.pause = false;
-    match front.step(nav) {
+    let command = front.step(nav);
+    crate::hud_sound::drain(&mut front.sounds, sink.as_deref());
+    match command {
         Some(Command::Save(aids)) => {
             match crate::settings::save_driver_aids(&front.settings, &aids) {
                 Ok(()) => log_line!(
@@ -922,6 +945,33 @@ mod tests {
         let mut nav = Nav::default();
         f(&mut nav);
         nav
+    }
+
+    /// The widget sounds (AUDIO_RESEARCH.md "Menu sounds"): moves, activate,
+    /// a toggle, back, and Go to race with the whoosh out.
+    #[test]
+    fn steps_queue_the_menu_widget_sounds() {
+        use grid_tools::hud_audio::Cue;
+        let mut front = FrontEnd::new(Assists::default(), video());
+        front.step(Nav::default());
+        // Back does nothing on Race options and plays nothing.
+        front.step(press(|n| n.back = true));
+        assert!(front.sounds.is_empty());
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.select = true));
+        assert_eq!(front.screen, Screen::DriverAids);
+        front.step(press(|n| n.right = true));
+        front.step(press(|n| n.right = true));
+        front.step(press(|n| n.back = true));
+        assert_eq!(front.screen, Screen::RaceOptions);
+        let go = ITEMS.iter().position(|i| matches!(i.0, Item::Race)).unwrap();
+        while front.item != go {
+            front.step(press(|n| n.down = true));
+        }
+        front.sounds.clear();
+        assert!(matches!(front.step(press(|n| n.select = true)), Some(Command::Race(_))));
+        assert_eq!(front.sounds, [Cue::Select, Cue::ScreenWhooshOut]);
     }
 
     #[test]

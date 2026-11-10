@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F772](F0772.md) | 2026-11-10 | Menu and screen sounds; speech race and event win counts |
 | [F771](F0771.md) | 2026-11-10 | Career GRID World front end: pages, offers, rewards, supervised loop |
 | [F770](F0770.md) | 2026-11-10 | HUD: touge penalty pill, brake light, wreck delay; name tags, boost and stacker traced |
 | [F769](F0769.md) | 2026-11-10 | Replayed skid marks, smoke and debris; replay slow motion and frame step; Flashback drops the abandoned future's effects |

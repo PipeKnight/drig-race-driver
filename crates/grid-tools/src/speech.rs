@@ -1591,6 +1591,11 @@ pub struct CareerRace {
     pub bonus_place: i32,
     /// `hasNoDamageObj`: a race driver offer with the no-damage objective.
     pub no_damage: bool,
+    /// `numRaceWins` (race history +0x44, 0x6105F0): the career races the player won before this
+    /// race. `None` keeps the default ([`Params::default`]).
+    pub race_wins: Option<u32>,
+    /// `numEventWins` (race history +0x30, 0x60A960): the own career events the player won.
+    pub event_wins: Option<u32>,
 }
 
 /// A car record (0x438C10) with the collector's time in position.
@@ -1760,6 +1765,9 @@ pub struct Collector {
     bonus_place: i32,
     no_damage: bool,
     damage_indicator: bool,
+    /// Race history `numRaceWins`, `numEventWins` (0x418DA0, 0x418DB0).
+    race_wins: Option<u32>,
+    event_wins: Option<u32>,
     /// +0xB720 `playerVehicleID`.
     player_id: u32,
     slots: [Slot; AI_SLOTS],
@@ -1860,6 +1868,8 @@ impl Default for Collector {
             bonus_place: 0,
             no_damage: false,
             damage_indicator: false,
+            race_wins: None,
+            event_wins: None,
             player_id: 0,
             slots: [Slot::default(); AI_SLOTS],
             ai_spin: false,
@@ -2378,6 +2388,8 @@ impl Collector {
         self.bonus_place = c.map_or(0, |c| c.bonus_place);
         self.no_damage = c.is_some_and(|c| c.no_damage);
         self.damage_indicator = self.no_damage && v.damage_indicator;
+        self.race_wins = c.and_then(|c| c.race_wins);
+        self.event_wins = c.and_then(|c| c.event_wins);
         if let Some(c) = c
             && c.final_race
             && !c.standing.is_empty()
@@ -2471,6 +2483,12 @@ impl Collector {
         p.set(BonusObjWinPos, self.bonus_place as f32);
         p.flag(HasNoDamageObj, self.no_damage);
         p.flag(AnyDamageIndOn, self.damage_indicator);
+        if let Some(wins) = self.race_wins {
+            p.set(NumRaceWins, wins as f32);
+        }
+        if let Some(wins) = self.event_wins {
+            p.set(NumEventWins, wins as f32);
+        }
         p.set(CurrentTrackLaps, self.track_laps as f32);
         p.set(CurrentPaceTime, self.pace);
         p.set(NumRunningCars, self.running as f32);
@@ -3305,6 +3323,24 @@ mod tests {
         assert_eq!(c.update(&v, 0.1).get(Param::OneTwoFinish), 1.);
         v.career.as_mut().unwrap().one_two = false;
         assert_eq!(c.update(&v, 0.1).get(Param::OneTwoFinish), 1.);
+    }
+
+    #[test]
+    fn the_career_history_sets_the_win_counts() {
+        let mut c = Collector::default();
+        c.restart();
+        let mut v = racing(1.5);
+        // A free race keeps the defaults: one race win, so firstWinEver stays quiet.
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::NumRaceWins), p.get(Param::NumEventWins)), (1., 0.));
+        // A career race: no win yet, two events won.
+        v.career = Some(CareerRace {
+            race_wins: Some(0),
+            event_wins: Some(2),
+            ..CareerRace::default()
+        });
+        let p = c.update(&v, 0.1).clone();
+        assert_eq!((p.get(Param::NumRaceWins), p.get(Param::NumEventWins)), (0., 2.));
     }
 
     #[test]

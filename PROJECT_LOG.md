@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F772](log/F0772.md) | 2026-11-10 | Menu and screen sounds; speech race and event win counts |
 | [F771](log/F0771.md) | 2026-11-10 | Career GRID World front end: pages, offers, rewards, supervised loop |
 | [F770](log/F0770.md) | 2026-11-10 | HUD: touge penalty pill, brake light, wreck delay; name tags, boost and stacker traced |
 | [F769](log/F0769.md) | 2026-11-10 | Replayed skid marks, smoke and debris; replay slow motion and frame step; Flashback drops the abandoned future's effects |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F715](log/F0715.md) | 2026-11-03 | Dynamic prop parts tagged at spawn; static scenes hide unbroken pieces |
 | [F714](log/F0714.md) | 2026-11-03 | F710 skinned-mesh render regression fixed; prepush render smoke |
 | [F713](log/F0713.md) | 2026-11-03 | Ornament shadows fade across D (shadow proxies) |
-| [F712](log/F0712.md) | 2026-11-03 | Baseline draws no source forest on any track; branch baseline-trees prepared |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -2270,3 +2270,81 @@ is ported.
 - The camera-4 reference point.
 - The voice filter-preset offsets.
 - The wrap_oal resampler and mix period.
+
+## 36. Menu sounds ported (backlog row 70, F772)
+
+Static analysis of the master project (no live run). The widgets of the front-end screens call
+the HUD manager's Play 0x43E770 (§7.1) through the wrapper 0x440E10. In a race the wrapper looks
+up the `low_` name; on the front end it looks up the plain name.
+
+**Play's third argument [O].** `Play(effect, a2, a3)` with a3 = 0 walks the 20 slots in order:
+- a slot that still holds this effect, playing or not, drops the play;
+- a free slot holding another effect forgets it.
+
+So a non-continuous effect plays again only after a later play has taken its slot. The effect
+pointer at slot +4 (+0x76C) stays set after the voice ends. With a3 = 1 the walk is skipped and the
+same effect may overlap itself.
+
+**Callers [O].**
+
+| Effect | a3 | Caller |
+| --- | --- | --- |
+| `UDLR_move` | 1 | list widget 0x490F40, on a selection move (0x4910DF) |
+| `select` | 0 | list widget 0x490F40, on activate (0x491151) |
+| `item_discrete` | 1 | itemflow FUN_0049DA70 through 0x474100, on a value step |
+| `dead_end` | 0 | itemflow through 0x474130, when the value cannot move (end of a non-wrapping list) |
+| `item_continous` | 1 | slider 0x4A0CC0 on a step; the name is absent from FEMappings, so slider steps are silent; `dead_end` at the ends |
+| `screen_whoosh_in` | 1 | base screen enter virtual 0x4799E0 |
+| `screen_whoosh_out` | 1 | base screen leave virtual 0x479A10 |
+| `back` | 0 | base screen back virtual 0x479930 |
+| `overlay_on` / `overlay_off` | 1 | popup overlay show 0x49CFA0, hide 0x4936A0 and 0x4942F0 |
+
+**FEMappings levels [O].**
+- Front end: `UDLR_move` −13.4 dB, `dead_end` −2.4, `item_discrete` −6.4, `select` −6.4,
+  `back` −1.0, `screen_whoosh_in`/`_out` −14.4, `overlay_on`/`_off` −13.4.
+- In a race, every `low_` variant plays at −4.4 dB (the `ah_*` varieties; the whooshes use
+  `raceintro_cam`).
+- `low_back` (and `low_chat_cancel`) play `ah_back` at −4.4 dB.
+- The HUD group on a front-end screen is mode Normal with the FrontEnd camera, trimmed by Effects
+  Volume.
+
+**Port.**
+- grid-tools:
+  - `hud_audio::Bank::load_front_end` loads the plain set, and `Bank::load` loads the `low_` set.
+    Each decodes only the samples of its effects.
+  - `Bank::effect` maps a cue to the set's name.
+  - `Player::play` follows the a3 = 0 walk for `select`, `back` and `dead_end`.
+- grid-app:
+  - `hud_sound::HudSink` is the one HUD voice queue of an app.
+  - `hud_sound::menu_cue` chooses one widget sound per input frame: activate or back when the
+    screen changes or the menu opens or closes, a move when the cursor moves, a value step when
+    a value changes, or a dead end when left/right changes nothing on a value row.
+  - The event menu (front-end screen app, F767) plays the plain set:
+    - `hud_sound::install_front_end`, with the level from `front_end_db`;
+    - whoosh in on the first frame and out when `transition::Fade::leaving()` starts;
+    - `transition.rs` is not changed.
+  - The pause menu and the pre-race screens run in the race app and play the `low_` set. Pause
+    open and close also play the whooshes [I: the pause screen's enter and leave].
+
+**Deviations [I].**
+- The pre-race screens (Race options, Driver aids, Video) are front-end screens in the original,
+  so they play the plain set there. The port plays them from the race app's `low_` set.
+- The settings sliders (volumes, tuning) play `item_discrete` in place of the silent
+  `item_continous`. Their ends play `dead_end`, as in the original.
+- The event menu's mouse clicks play the same cues as keys.
+- Overlays (popups) are not ported, so `overlay_on`/`_off` have no caller yet.
+
+**Not ported, by the original's own behaviour.**
+- Wind is never started (§26, F583).
+- The OSD timer box beeps `countdown_timer`/`countdown_go` are online-only (§28, F589).
+- The start lights, drift and flashback cues were already ported (§7.1, F452).
+
+**Tests.**
+- grid-tools:
+  - `a_non_continuous_effect_replays_only_after_another_took_its_slot`;
+  - `a_race_set_plays_the_low_variants`;
+  - ignored `shipped_front_end_menu_effects_load`: both sets from the shipped banks, the levels,
+    `low_back`, and a whoosh with a non-zero peak.
+- grid-app:
+  - `hud_sound::tests`;
+  - `steps_queue_the_menu_widget_sounds` in `event_menu`, `pause_menu` and `front_end`.

@@ -35,6 +35,8 @@ pub struct Effect {
 pub struct Bank {
     pub sounds: Vec<Sound>,
     pub effects: HashMap<String, Effect>,
+    /// The front-end set (unprefixed names) instead of the in-race one.
+    pub front_end: bool,
 }
 
 fn attr<'a>(e: &binxml::Element<'a>, name: &str) -> Option<&'a str> {
@@ -77,46 +79,64 @@ pub fn wip_sound(bank: &audio_dictionary::Bank, index: usize, data: &[u8]) -> Re
     })
 }
 
+/// Whether a FEMappings name belongs to the front-end or the in-race set
+/// (0x440E10 prefixes `low_` in a race).
+fn in_scope(name: &str, front_end: bool) -> bool {
+    name.starts_with("low_") != front_end
+}
+
 impl Bank {
+    /// The in-race set (`low_` effects, bank `audiohud`).
     pub fn load(root: &Path) -> Result<Arc<Self>, String> {
+        Self::load_set(root, false)
+    }
+
+    /// The front-end set (unprefixed effects, mostly bank `fe_fx`).
+    pub fn load_front_end(root: &Path) -> Result<Arc<Self>, String> {
+        Self::load_set(root, true)
+    }
+
+    fn load_set(root: &Path, front_end: bool) -> Result<Arc<Self>, String> {
         let audio = root.join("audio");
         Ok(Arc::new(Self::parse(
             &read(&audio.join("CMSamples.dic"))?,
-            &read(&audio.join("audiohud.WIP"))?,
             &read(&audio.join("audioVarieties.bin"))?,
             &read(&audio.join("FEMappings.bin"))?,
+            front_end,
+            |bank| read(&audio.join(format!("{}.{}", bank.name, bank.extension))),
         )?))
     }
 
-    pub fn parse(dictionary: &[u8], data: &[u8], varieties: &[u8], mappings: &[u8]) -> Result<Self, String> {
+    /// Keeps the pan-0 effects of one set and decodes only the samples
+    /// they use; `data` reads a bank's sample file (once per bank).
+    pub fn parse(
+        dictionary: &[u8],
+        varieties: &[u8],
+        mappings: &[u8],
+        front_end: bool,
+        mut data: impl FnMut(&audio_dictionary::Bank) -> Result<Vec<u8>, String>,
+    ) -> Result<Self, String> {
         let dictionary = audio_dictionary::read(dictionary).map_err(|e| format!("{e:?}"))?;
-        let bank = dictionary
-            .banks
-            .iter()
-            .find(|b| b.name == "audiohud")
-            .ok_or("audiohud bank absent")?;
-        let mut sounds = Vec::new();
-        let mut index = HashMap::new();
-        for (i, s) in bank.samples.iter().enumerate() {
-            index.insert(s.name, sounds.len());
-            sounds.push(wip_sound(bank, i, data)?);
-        }
         let doc = binxml::read(varieties).map_err(|e| format!("audioVarieties: {e:?}"))?;
         let e = &doc.elements;
-        let mut variety: HashMap<&str, Vec<usize>> = HashMap::new();
+        // Variety -> (bank, sample name) list.
+        let mut variety: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
         for (i, v) in e.iter().enumerate() {
-            if v.name != "AudioVariety" || attr(v, "bank") != Some("audiohud") {
+            let (Some(name), Some(bank)) = (attr(v, "name"), attr(v, "bank")) else {
+                continue;
+            };
+            if v.name != "AudioVariety" {
                 continue;
             }
             let list = e
                 .iter()
                 .filter(|s| s.name == "Sample" && s.parent.is_some_and(|p| e[p].parent == Some(i)))
-                .filter_map(|s| attr(s, "index").and_then(|n| index.get(n).copied()))
+                .filter_map(|s| attr(s, "index").map(|n| (bank, n)))
                 .collect();
-            variety.insert(attr(v, "name").ok_or("unnamed variety")?, list);
+            variety.insert(name, list);
         }
         let doc = binxml::read(mappings).map_err(|e| format!("FEMappings: {e:?}"))?;
-        let mut effects = HashMap::new();
+        let mut wanted = Vec::new();
         for m in doc.elements.iter().filter(|m| m.name == "Effect") {
             let (Some(name), Some(samples)) =
                 (attr(m, "name"), attr(m, "variety").and_then(|v| variety.get(v)))
@@ -130,26 +150,64 @@ impl Bank {
                     .unwrap_or(default)
             };
             // Only pan 0 effects are 2D HUD voices; the data has no others.
-            if number("pan", 0.) != 0. || samples.is_empty() {
+            if !in_scope(name, front_end) || number("pan", 0.) != 0. || samples.is_empty() {
                 continue;
             }
-            effects.insert(
-                name.to_owned(),
-                Effect {
-                    samples: samples.clone(),
-                    // Constants 0xCB0BC0 (-48), 0xCAF88C (0.5), 0xCB8DA4 (2).
-                    volume_db: number("volume", 0.).clamp(-48., 0.),
-                    pitch: number("pitch", 1.).clamp(0.5, 2.),
-                    monophonic: attr(m, "monophonic").is_some_and(|v| v != "0" && v != "false"),
-                },
-            );
+            let effect = Effect {
+                samples: Vec::new(),
+                // Constants 0xCB0BC0 (-48), 0xCAF88C (0.5), 0xCB8DA4 (2).
+                volume_db: number("volume", 0.).clamp(-48., 0.),
+                pitch: number("pitch", 1.).clamp(0.5, 2.),
+                monophonic: attr(m, "monophonic").is_some_and(|v| v != "0" && v != "false"),
+            };
+            wanted.push((name, samples, effect));
         }
-        Ok(Self { sounds, effects })
+        // Decode the used samples bank by bank.
+        let mut sounds = Vec::new();
+        let mut decoded: HashMap<(&str, &str), Option<usize>> = HashMap::new();
+        for bank in &dictionary.banks {
+            let used: Vec<usize> = bank
+                .samples
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| wanted.iter().any(|w| w.1.contains(&(bank.name, s.name))))
+                .map(|(i, _)| i)
+                .collect();
+            if used.is_empty() {
+                continue;
+            }
+            let bytes = data(bank)?;
+            for i in used {
+                // An undecodable sample leaves its variety one choice short.
+                let sound = wip_sound(bank, i, &bytes).ok().map(|s| {
+                    sounds.push(s);
+                    sounds.len() - 1
+                });
+                decoded.insert((bank.name, bank.samples[i].name), sound);
+            }
+        }
+        let mut effects = HashMap::new();
+        for (name, samples, mut effect) in wanted {
+            effect.samples = samples.iter().filter_map(|k| decoded.get(k).copied().flatten()).collect();
+            if !effect.samples.is_empty() {
+                effects.insert(name.to_owned(), effect);
+            }
+        }
+        Ok(Self {
+            sounds,
+            effects,
+            front_end,
+        })
     }
 
-    /// The in-race effect for `name` (0x440E10 prefixes `low_`).
-    pub fn race_effect(&self, name: &str) -> Option<&Effect> {
-        self.effects.get(&format!("low_{name}"))
+    /// The effect a cue named `name` plays in this set (0x440E10 prefixes
+    /// `low_` in a race).
+    pub fn effect(&self, name: &str) -> Option<&Effect> {
+        if self.front_end {
+            self.effects.get(name)
+        } else {
+            self.effects.get(&format!("low_{name}"))
+        }
     }
 }
 
@@ -173,6 +231,20 @@ pub enum Cue {
     FlashbackShot1,
     FlashbackShot2,
     FlashbackZoomUp,
+    /// Menu widgets (docs/AUDIO_RESEARCH.md "Menu sounds"): a list cursor
+    /// move (0x4910DF), an itemflow value step (0x474100) or a step at its
+    /// end (0x474130), activate (0x491151) and the screen's back (0x479930).
+    UdlrMove,
+    ItemDiscrete,
+    DeadEnd,
+    Select,
+    Back,
+    /// Base screen enter (0x4799E0) and leave (0x479A10).
+    ScreenWhooshIn,
+    ScreenWhooshOut,
+    /// An overlay panel shown (0x49CFA0) or hidden (0x4936A0, 0x4942F0).
+    OverlayOn,
+    OverlayOff,
 }
 
 impl Cue {
@@ -190,7 +262,23 @@ impl Cue {
             Cue::FlashbackShot1 => "flashback_shot_1".into(),
             Cue::FlashbackShot2 => "flashback_shot_2".into(),
             Cue::FlashbackZoomUp => "flashback_zoomup".into(),
+            Cue::UdlrMove => "UDLR_move".into(),
+            Cue::ItemDiscrete => "item_discrete".into(),
+            Cue::DeadEnd => "dead_end".into(),
+            Cue::Select => "select".into(),
+            Cue::Back => "back".into(),
+            Cue::ScreenWhooshIn => "screen_whoosh_in".into(),
+            Cue::ScreenWhooshOut => "screen_whoosh_out".into(),
+            Cue::OverlayOn => "overlay_on".into(),
+            Cue::OverlayOff => "overlay_off".into(),
         }
+    }
+
+    /// Play's third argument: false for the callers that pass 0 (select,
+    /// back, dead end), which may not retrigger an effect still playing or
+    /// remembered by a free slot.
+    pub fn continuous(self) -> bool {
+        !matches!(self, Cue::Select | Cue::Back | Cue::DeadEnd)
     }
 }
 
@@ -220,6 +308,8 @@ pub fn light_cue(previous: Option<f64>, elapsed: f64, stages: usize) -> Option<C
 #[derive(Clone, Copy, Default)]
 struct Slot {
     sound: Option<usize>,
+    /// The effect last started here (+0x76C), kept after the voice ends.
+    effect: Option<u32>,
     position: f64,
     step: f64,
     gain: f32,
@@ -265,15 +355,28 @@ impl Player {
         }
     }
 
-    /// Play(name, 0, 1) as every in-race caller does: retriggering the same
-    /// effect is allowed; with no free slot the play is dropped. Returns
-    /// whether a voice started.
+    /// Play(name, 0, continuous) of 0x43E770. With no free slot the play is
+    /// dropped. A non-continuous play walks the slots in order: a free slot
+    /// that remembers this effect, or a busy one playing it, drops the play;
+    /// other free slots forget theirs. So select, back and dead end replay
+    /// only after another HUD effect took their slot. Returns whether a
+    /// voice started.
     pub fn play(&mut self, cue: Cue) -> bool {
         let name = cue.name();
-        let Some(effect) = self.bank.race_effect(&name).cloned() else {
+        let Some(effect) = self.bank.effect(&name).cloned() else {
             return false;
         };
         let id = self.effect_id(&name);
+        if !effect.monophonic && !cue.continuous() {
+            for slot in &mut self.slots {
+                if slot.effect == Some(id) {
+                    return false;
+                }
+                if slot.sound.is_none() {
+                    slot.effect = None;
+                }
+            }
+        }
         // 0x413B80: a uniform pick that avoids repeating the last sample [I: RNG].
         let mut pick = effect.samples[0];
         if effect.samples.len() > 1 {
@@ -291,6 +394,7 @@ impl Player {
             position: 0.,
             step: f64::from(effect.pitch) * f64::from(sound.rate) / f64::from(self.rate),
             gain: 10f32.powf(effect.volume_db / 20.),
+            effect: Some(id),
         };
         let slot = if effect.monophonic {
             // Ping-pong: the new play stops the other slot's voice.
@@ -379,18 +483,119 @@ mod tests {
         assert_eq!(Cue::LightGreen.name(), "race_light_green");
     }
 
+    fn synthetic(front_end: bool) -> Arc<Bank> {
+        let effect = |sample| Effect {
+            samples: vec![sample],
+            volume_db: 0.,
+            pitch: 1.,
+            monophonic: false,
+        };
+        let prefix = if front_end { "" } else { "low_" };
+        Arc::new(Bank {
+            sounds: (0..2)
+                .map(|_| Sound {
+                    pcm: vec![0.5; 100].into(),
+                    channels: 1,
+                    rate: 48_000,
+                    looped: false,
+                })
+                .collect(),
+            effects: HashMap::from([
+                (format!("{prefix}select"), effect(0)),
+                (format!("{prefix}UDLR_move"), effect(1)),
+            ]),
+            front_end,
+        })
+    }
+
+    #[test]
+    fn a_non_continuous_effect_replays_only_after_another_took_its_slot() {
+        let mut player = Player::new(synthetic(true), 48_000);
+        let finish = |p: &mut Player| {
+            while p.active() > 0 {
+                p.frame();
+            }
+        };
+        assert!(player.play(Cue::Select));
+        assert!(!player.play(Cue::Select), "still playing");
+        finish(&mut player);
+        assert!(!player.play(Cue::Select), "its free slot remembers it");
+        // A continuous effect retriggers freely and takes the first free slot.
+        assert!(player.play(Cue::UdlrMove));
+        assert!(player.play(Cue::UdlrMove));
+        assert_eq!(player.active(), 2);
+        assert!(player.play(Cue::Select));
+        finish(&mut player);
+        // Select ended in slot 2; a move plays in slot 0, so select is still
+        // remembered by slot 2 until another effect takes that slot.
+        assert!(!player.play(Cue::Select));
+        assert!(player.play(Cue::UdlrMove) && player.play(Cue::UdlrMove) && player.play(Cue::UdlrMove));
+        assert!(player.play(Cue::Select));
+    }
+
+    #[test]
+    fn a_race_set_plays_the_low_variants() {
+        let race = synthetic(false);
+        assert!(race.effect("select").is_some() && race.effect("low_select").is_none());
+        let front = synthetic(true);
+        assert!(front.effect("select").is_some());
+        assert!(Player::new(race, 48_000).play(Cue::Select));
+        assert!(Cue::UdlrMove.continuous() && !Cue::Back.continuous() && !Cue::DeadEnd.continuous());
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn shipped_front_end_menu_effects_load() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let front = Bank::load_front_end(Path::new(&root)).unwrap();
+        let race = Bank::load(Path::new(&root)).unwrap();
+        let menu = [
+            Cue::UdlrMove,
+            Cue::ItemDiscrete,
+            Cue::DeadEnd,
+            Cue::Select,
+            Cue::Back,
+            Cue::ScreenWhooshIn,
+            Cue::ScreenWhooshOut,
+            Cue::OverlayOn,
+            Cue::OverlayOff,
+        ];
+        for cue in menu {
+            assert!(front.effect(&cue.name()).is_some(), "front {cue:?}");
+            assert!(race.effect(&cue.name()).is_some(), "race {cue:?}");
+        }
+        assert_eq!(front.effect("UDLR_move").unwrap().volume_db, -13.4);
+        assert_eq!(front.effect("back").unwrap().volume_db, -1.);
+        assert_eq!(race.effect("select").unwrap().volume_db, -4.4);
+        assert_eq!(race.effect("back").unwrap().volume_db, -4.4);
+        println!(
+            "front effects={} sounds={}; race effects={} sounds={}",
+            front.effects.len(),
+            front.sounds.len(),
+            race.effects.len(),
+            race.sounds.len()
+        );
+        let mut player = Player::new(front, 48_000);
+        player.group_db = -9.;
+        assert!(player.play(Cue::ScreenWhooshIn));
+        let mut peak = 0f32;
+        for _ in 0..48_000 {
+            peak = peak.max(player.frame()[0].abs());
+        }
+        assert!(peak > 0.001 && peak < 1., "{peak}");
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn shipped_hud_effects_load_and_play() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let bank = Bank::load(Path::new(&root)).unwrap();
-        assert_eq!(bank.sounds.len(), 87);
         assert!(bank.sounds.iter().all(|s| s.rate == 40_000));
         assert!(bank.sounds.iter().any(|s| s.channels == 2));
         // Race lights are +6 dB in the file, clamped to 0 by Play.
-        let red = bank.race_effect("race_light_red").unwrap();
+        let red = bank.effect("race_light_red").unwrap();
         assert_eq!((red.volume_db, red.pitch), (0., 1.));
-        assert_eq!(bank.race_effect("drift_combo_bank").unwrap().volume_db, -1.);
+        assert_eq!(bank.effect("drift_combo_bank").unwrap().volume_db, -1.);
         for cue in [
             Cue::LightRed,
             Cue::LightGreen,
@@ -407,7 +612,7 @@ mod tests {
             Cue::FlashbackShot2,
             Cue::FlashbackZoomUp,
         ] {
-            assert!(bank.race_effect(&cue.name()).is_some(), "{cue:?}");
+            assert!(bank.effect(&cue.name()).is_some(), "{cue:?}");
         }
         let mut player = Player::new(bank.clone(), 48_000);
         player.group_db = -9.;

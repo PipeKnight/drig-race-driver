@@ -295,8 +295,9 @@ plays the lines.
   others are parsed and skipped. Their messages' parameters all resolve (`unknown_params` is
   empty for the purchased file).
 - The manager runs once per vehicle tick (16 ms) [I: the original once per audio frame].
-- Parameters the port does not have keep 0, except `numRaceWins` = 1 [AUTHORED], so
-  `firstWinEver` does not play at every win. Key drivers, teams, the cars ahead and behind on the
+- Parameters the port does not have keep 0, except `numRaceWins` = 1 [AUTHORED] outside the
+  career, so `firstWinEver` does not play at every free-race win. Career races set `numRaceWins`
+  and `numEventWins` from the career (§19, F772). Key drivers, teams, the cars ahead and behind on the
   track, career and profile values are 0. So `inRaceCarAheadLess3s`, `inRaceCarFirst`, the team
   lines and the lapping lines (`inRacePlus1`) do not play.
 - The generator is MT19937 (`series::Mt`) with an authored seed (5489); the line choice uses
@@ -914,8 +915,17 @@ except −1 at block +0x28, +0x34, +0x38, +0x3C, +0x44 and +0x48.
 - `FinalRaceNoBonus` and `FinalRaceLapBonus` need `bonusObjWinPos` and `isFinalRace` together,
   which never happens (offers are not own events): dead.
 - The race history counters (`numRaceWins`, `numEventWins`, `racesCurTrack`; writers 0x6105F0,
-  0x60A960, 0x60F950) have no port counterpart. `Career.races_won` and `layout_races` count
-  differently. They keep the port's defaults: `numRaceWins` 1 [AUTHORED, §7], the others 0.
+  0x60A960, 0x60F950). Since F772 a career race writes `[game] speech_race_wins` and
+  `speech_event_wins` (career_screen `speech_lines`, `CareerRace::race_wins`/`event_wins`):
+  - `numRaceWins` = `Career.races_won` (counted at each event end, own events) plus the races the
+    player won earlier in the current event or offer: the career races won before this one.
+    [I] Driver-offer races count only while their offer runs (`apply_driver_offer` does not add
+    to `races_won`), and the game+0x31C condition of 0x6105F0 is not applied.
+  - `numEventWins` = the events with best place 0 in `Career.event_results`. [I] An event won
+    twice counts once; the messages test only `== 0` (`firstWinEver`, `wonChampionshipFirstTime`),
+    where the two counts agree.
+  - `racesCurTrack` stays 0: its message group is dead in the original (above).
+  - Free races keep the defaults: `numRaceWins` 1 [AUTHORED, §7], `numEventWins` 0.
 - Not established:
   - the extra race-win condition on game +0x31C;
   - game modes 2, 3 and 5;
