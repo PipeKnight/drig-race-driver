@@ -92,6 +92,7 @@ mod front_end_host;
 mod loading_screen;
 #[cfg(not(target_os = "android"))]
 mod fe_world;
+mod fe3d;
 mod balance_pass;
 mod flashback;
 mod free_look;
@@ -137,6 +138,7 @@ mod opaque_conservative_motion;
 mod particles;
 mod pause_menu;
 mod post_race;
+mod results_art;
 mod ornament_lod;
 mod osd_scene;
 mod shadow_cull;
@@ -5089,6 +5091,7 @@ pub(crate) fn race_app(
                 profile.osd_fps.unwrap_or(cfg!(target_os = "android")),
             );
             post_race::install(&mut app, variant);
+            results_art::install(&mut app, &root);
         }
         // Drift Battle on top of the race, Drift GP on top of the solo run
         // (docs/DISCIPLINES.md).

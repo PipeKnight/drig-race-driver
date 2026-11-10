@@ -254,14 +254,8 @@ mod tests {
                     continue;
                 }
                 let (w, h) = (t.width as usize, t.height as usize);
-                let rgba = crate::texture_upload::decode_levels(
-                    t.base_blocks,
-                    t.width,
-                    t.height,
-                    1,
-                    t.format == Format::Bc3,
-                )
-                .unwrap();
+                let rgba =
+                    crate::texture_upload::decode_format_levels(t.base_blocks, t.width, t.height, 1, t.format).unwrap();
                 let alpha = rgba.as_chunks::<4>().0.iter().any(|p| p[3] != 255);
                 let start = Instant::now();
                 let mut blocks =

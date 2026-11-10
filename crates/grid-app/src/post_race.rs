@@ -753,6 +753,9 @@ fn ordinal(n: usize, l: &dyn Fn(&'static str) -> String) -> String {
 
 #[derive(Component)]
 struct Panel;
+/// The panel's own box (transparent while the results art draws the table).
+#[derive(Component)]
+struct Inner;
 #[derive(Component)]
 enum Part {
     Title,
@@ -769,6 +772,8 @@ const COLUMNS: [(&str, f32); 5] = [
     ("post_race_positions_table_team_column", 90.),
 ];
 const BEST_COLUMN: f32 = 130.;
+const DIM: Color = Color::srgba(0., 0., 0., 0.5);
+const PANEL: Color = Color::srgba(0.025, 0.04, 0.065, 0.94);
 /// The header and up to 20 cars (the routes' grid slots; Le Mans Series
 /// fields have 15-17, F409).
 const TABLE_ROWS: usize = 21;
@@ -797,7 +802,7 @@ fn spawn(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0., 0., 0., 0.5)),
+            BackgroundColor(DIM),
             Visibility::Hidden,
             GlobalZIndex(9),
             UiTargetCamera(camera),
@@ -805,13 +810,14 @@ fn spawn(
         .with_children(|screen| {
             screen
                 .spawn((
+                    Inner,
                     Node {
                         flex_direction: FlexDirection::Column,
                         padding: UiRect::all(px(24.)),
                         row_gap: px(6.),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(0.025, 0.04, 0.065, 0.94)),
+                    BackgroundColor(PANEL),
                 ))
                 .with_children(|panel| {
                     panel.spawn((Part::Title, Text::new(""), font(30.), TextColor(Color::WHITE)));
@@ -1103,14 +1109,17 @@ type Events<'w> = (
     Option<Res<'w, RacePoints>>,
 );
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn present(
     post: Res<PostRace>,
     labels: Res<Labels>,
     driving: Res<crate::Driving>,
     (trial, drift, touge, classes, le_mans, points): Events,
     mut panel: Query<&mut Visibility, With<Panel>>,
+    mut boxes: Query<(&mut BackgroundColor, &mut Node, Has<Panel>), (Or<(With<Panel>, With<Inner>)>, Without<Part>)>,
     mut parts: Query<(&Part, &mut Text, &mut TextColor, &mut Node)>,
-    mut shown: Local<Option<View>>,
+    (mut art, ready): (Option<ResMut<crate::results_art::Shown>>, Option<Res<crate::results_art::Ready>>),
+    mut shown: Local<Option<(View, bool)>>,
 ) {
     for mut visibility in &mut panel {
         let want = if post.active() {
@@ -1121,6 +1130,12 @@ fn present(
         if *visibility != want {
             *visibility = want;
         }
+    }
+    let results = matches!(post.stage, Stage::Results | Stage::Confirm(_, Return::Results));
+    if (!post.active() || !results)
+        && let Some(art) = art.as_mut().filter(|a| a.board.is_some())
+    {
+        art.board = None;
     }
     if !post.active() {
         *shown = None;
@@ -1148,8 +1163,37 @@ fn present(
         }
     }
     let view = post.view_with(&rows, &labels, board.as_ref());
-    if shown.as_ref() == Some(&view) {
+    // The results table in the front-end art once it is loaded
+    // (results_art.rs); this panel keeps the other stages and the pills.
+    let art_on = results && ready.is_some_and(|r| r.0);
+    if results && let Some(art) = art.as_mut() {
+        let fourth = if rows.iter().any(|r| r.touge.is_some()) {
+            crate::results_art::Fourth::Round
+        } else if rows.iter().any(|r| r.class.is_some()) {
+            crate::results_art::Fourth::Class
+        } else if rows.iter().any(|r| r.points.is_some()) {
+            crate::results_art::Fourth::Points
+        } else {
+            crate::results_art::Fourth::Team
+        };
+        let board = Some(crate::results_art::Board { view: view.clone(), drift: post.drift, fourth });
+        if art.board != board {
+            art.board = board;
+        }
+    }
+    if shown.as_ref().is_some_and(|(v, a)| *v == view && *a == art_on) {
         return;
+    }
+    for (mut colour, mut node, outer) in &mut boxes {
+        colour.0 = match (art_on, outer) {
+            (true, _) => Color::NONE,
+            (false, true) => DIM,
+            (false, false) => PANEL,
+        };
+        // Over the art only the button pills remain, at the foot of the screen.
+        if outer {
+            node.align_items = if art_on { AlignItems::FlexEnd } else { AlignItems::Center };
+        }
     }
     // The shown table, one line per row (unattended runs check it).
     if matches!(post.stage, Stage::Results) {
@@ -1158,14 +1202,21 @@ fn present(
         }
     }
     for (part, mut text, mut colour, mut node) in &mut parts {
+        let drawn = |on: bool| if on && !art_on { Display::Flex } else { Display::None };
         let value = match part {
-            Part::Title => view.title.clone(),
-            Part::Body => view.body.clone(),
+            Part::Title => {
+                node.display = drawn(true);
+                view.title.clone()
+            }
+            Part::Body => {
+                node.display = drawn(true);
+                view.body.clone()
+            }
             Part::Pills => view.pills.clone(),
             Part::Table(cell) => {
                 let (row, column) = (cell / 8, cell % 8);
                 let value = view.table.get(row).map(|r| r[column].clone());
-                node.display = if value.is_some() {
+                node.display = if value.is_some() && !art_on {
                     Display::Flex
                 } else {
                     Display::None
@@ -1184,7 +1235,7 @@ fn present(
             text.0 = value;
         }
     }
-    *shown = Some(view);
+    *shown = Some((view, art_on));
 }
 
 #[cfg(test)]

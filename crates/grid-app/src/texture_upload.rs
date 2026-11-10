@@ -164,6 +164,8 @@ fn is_bc(format: TextureFormat) -> bool {
         format,
         TextureFormat::Bc1RgbaUnorm
             | TextureFormat::Bc1RgbaUnormSrgb
+            | TextureFormat::Bc2RgbaUnorm
+            | TextureFormat::Bc2RgbaUnormSrgb
             | TextureFormat::Bc3RgbaUnorm
             | TextureFormat::Bc3RgbaUnormSrgb
     )
@@ -276,13 +278,15 @@ pub(crate) fn summary() -> String {
     )
 }
 
-/// Replaces BC1/BC3 levels by RGBA8 levels; other formats are kept.
+/// Replaces BC1/BC2/BC3 levels by RGBA8 levels; other formats are kept.
 pub(crate) fn decode_in_place(image: &mut Image) -> Result<bool, TextureError> {
-    let (decoded, alpha) = match image.texture_descriptor.format {
-        TextureFormat::Bc1RgbaUnormSrgb => (TextureFormat::Rgba8UnormSrgb, false),
-        TextureFormat::Bc1RgbaUnorm => (TextureFormat::Rgba8Unorm, false),
-        TextureFormat::Bc3RgbaUnormSrgb => (TextureFormat::Rgba8UnormSrgb, true),
-        TextureFormat::Bc3RgbaUnorm => (TextureFormat::Rgba8Unorm, true),
+    let (decoded, kind) = match image.texture_descriptor.format {
+        TextureFormat::Bc1RgbaUnormSrgb => (TextureFormat::Rgba8UnormSrgb, Block::Bc1),
+        TextureFormat::Bc1RgbaUnorm => (TextureFormat::Rgba8Unorm, Block::Bc1),
+        TextureFormat::Bc2RgbaUnormSrgb => (TextureFormat::Rgba8UnormSrgb, Block::Bc2),
+        TextureFormat::Bc2RgbaUnorm => (TextureFormat::Rgba8Unorm, Block::Bc2),
+        TextureFormat::Bc3RgbaUnormSrgb => (TextureFormat::Rgba8UnormSrgb, Block::Bc3),
+        TextureFormat::Bc3RgbaUnorm => (TextureFormat::Rgba8Unorm, Block::Bc3),
         _ => return Ok(false),
     };
     let size = image.texture_descriptor.size;
@@ -293,7 +297,7 @@ pub(crate) fn decode_in_place(image: &mut Image) -> Result<bool, TextureError> {
     }
     let levels = image.texture_descriptor.mip_level_count;
     let data = image.data.take().unwrap_or_default();
-    let out = decode_levels(&data, size.width, size.height, levels, alpha)
+    let out = decode_blocks(&data, size.width, size.height, levels, kind)
         .ok_or_else(|| TextureError::InvalidData("truncated BC levels".into()))?;
     image.data = Some(out);
     image.texture_descriptor.format = decoded;
@@ -308,7 +312,45 @@ pub(crate) fn decode_levels(
     levels: u32,
     alpha: bool,
 ) -> Option<Vec<u8>> {
-    let block = if alpha { 16 } else { 8 };
+    decode_blocks(data, width, height, levels, if alpha { Block::Bc3 } else { Block::Bc1 })
+}
+
+/// A package texture's tightly packed levels (any [`Format`]) to tightly
+/// packed RGBA8.
+///
+/// [`Format`]: grid_formats::texture::Format
+pub(crate) fn decode_format_levels(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    levels: u32,
+    format: grid_formats::texture::Format,
+) -> Option<Vec<u8>> {
+    use grid_formats::texture::Format;
+    let kind = match format {
+        Format::Bc1 => Block::Bc1,
+        Format::Bc2 => Block::Bc2,
+        Format::Bc3 => Block::Bc3,
+        Format::Bgra8 => {
+            let size: usize = (0..levels).map(|l| format.level_size((width >> l).max(1), (height >> l).max(1))).sum();
+            let data = data.get(..size)?;
+            return Some(data.as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0], p[3]]).collect());
+        }
+    };
+    decode_blocks(data, width, height, levels, kind)
+}
+
+/// The block-compressed layouts: BC1 (8 bytes), BC2 (explicit 4-bit alpha,
+/// then a four-colour BC1 block) and BC3 (interpolated alpha, then the same).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Block {
+    Bc1,
+    Bc2,
+    Bc3,
+}
+
+fn decode_blocks(data: &[u8], width: u32, height: u32, levels: u32, kind: Block) -> Option<Vec<u8>> {
+    let block = if kind == Block::Bc1 { 8 } else { 16 };
     let mut out = Vec::new();
     let mut offset = 0;
     for level in 0..levels {
@@ -322,17 +364,17 @@ pub(crate) fn decode_levels(
         for by in 0..bh {
             for bx in 0..bw {
                 let bytes = &level_data[(by * bw + bx) * block..][..block];
-                let texels = if alpha {
-                    let mut t = colour_block(bytes[8..].try_into().unwrap(), true);
-                    for (texel, a) in t
-                        .iter_mut()
-                        .zip(alpha_block(bytes[..8].try_into().unwrap()))
-                    {
-                        texel[3] = a;
+                let texels = match kind {
+                    Block::Bc1 => colour_block(bytes.try_into().unwrap(), false),
+                    Block::Bc2 | Block::Bc3 => {
+                        let mut t = colour_block(bytes[8..].try_into().unwrap(), true);
+                        let alpha = bytes[..8].try_into().unwrap();
+                        let alpha = if kind == Block::Bc2 { explicit_alpha(alpha) } else { alpha_block(alpha) };
+                        for (texel, a) in t.iter_mut().zip(alpha) {
+                            texel[3] = a;
+                        }
+                        t
                     }
-                    t
-                } else {
-                    colour_block(bytes.try_into().unwrap(), false)
                 };
                 for (i, texel) in texels.iter().enumerate() {
                     let (x, y) = (bx * 4 + i % 4, by * 4 + i / 4);
@@ -384,6 +426,12 @@ fn colour_block(bytes: &[u8; 8], opaque: bool) -> [[u8; 4]; 16] {
     };
     let indices = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
     std::array::from_fn(|i| palette[(indices >> (2 * i) & 3) as usize])
+}
+
+/// One 4x4 BC2 alpha block in texel order: 4 bits a texel, low nibble first.
+fn explicit_alpha(bytes: &[u8; 8]) -> [u8; 16] {
+    let bits = u64::from_le_bytes(*bytes);
+    std::array::from_fn(|i| (bits >> (4 * i) & 15) as u8 * 17)
 }
 
 /// One 4x4 BC3 alpha block in texel order.
@@ -506,5 +554,21 @@ mod tests {
         block[8..10].copy_from_slice(&0xf800u16.to_le_bytes());
         let out = decode_levels(&block, 4, 4, 1, true).unwrap();
         assert_eq!(&out[..4], &[255, 0, 0, 77]);
+    }
+
+    #[test]
+    fn bc2_explicit_alpha() {
+        // Alpha nibbles 0..15 in texel order, then white over black with
+        // c0 <= c1, which BC2 still reads in four-colour mode (index 3 opaque).
+        let mut block = [0u8; 16];
+        for (i, b) in block[..8].iter_mut().enumerate() {
+            *b = (2 * i as u8) | (2 * i as u8 + 1) << 4;
+        }
+        block[8..].copy_from_slice(&[0, 0, 0xff, 0xff, 0xff, 0, 0, 0]);
+        let out = decode_format_levels(&block, 4, 4, 1, grid_formats::texture::Format::Bc2).unwrap();
+        let alpha: Vec<u8> = out.chunks(4).map(|t| t[3]).collect();
+        assert_eq!(alpha, (0..16).map(|n| n * 17).collect::<Vec<u8>>());
+        assert_eq!(&out[..3], &[170, 170, 170]);
+        assert!(decode_format_levels(&block[..15], 4, 4, 1, grid_formats::texture::Format::Bc2).is_none());
     }
 }

@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F810](log/F0810.md) | 2026-11-10 | Results screen in the front-end art (row 69): fe3d materials, pause_root camera, row driver, DXT3 textures |
 | [F809](log/F0809.md) | 2026-11-10 | GRID World garage scene and livery 3D preview: static research |
 | [F808](log/F0808.md) | 2026-11-10 | Sponsor designer: slots, replace, remove, swap, best-sponsor fill |
 | [F807](log/F0807.md) | 2026-11-10 | Livery designer carousels: clamp, dead end, Randomise |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F753](log/F0753.md) | 2026-11-09 | AI yield full brake when sliding and backwards brake (0x78990B, 0x7764C0); first-corner matrix |
 | [F752](log/F0752.md) | 2026-11-05 | Playable 343de39742df for the PC and both APKs (first tyre smoke builds no pipeline mid-race) |
 | [F751](log/F0751.md) | 2026-11-05 | Tyre smoke pipelines warmed behind the start cover |
-| [F750](log/F0750.md) | 2026-11-05 | Playable 989dd8305b37 for the PC and both APKs (tree shadows no longer turn with the camera) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

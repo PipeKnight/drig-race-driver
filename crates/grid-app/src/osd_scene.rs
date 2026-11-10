@@ -137,6 +137,28 @@ pub struct OsdDisplay {
     image: Handle<Image>,
 }
 
+impl OsdDisplay {
+    /// The display of a scene rendered into `image` (premultiplied; the
+    /// results art draws its own scene this way, results_art.rs).
+    pub(crate) fn new(image: Handle<Image>) -> Self {
+        OsdDisplay { image }
+    }
+    /// Re-points the display at its image after a resize (F737).
+    pub(crate) fn touch(&mut self) {
+        self.image = self.image.clone();
+    }
+}
+
+/// Registers the display material and its shader (once).
+pub(crate) fn display_plugin(app: &mut App) {
+    if app.is_plugin_added::<UiMaterialPlugin<OsdDisplay>>() {
+        return;
+    }
+    app.add_plugins(UiMaterialPlugin::<OsdDisplay>::default());
+    let shader = Shader::from_wgsl(include_str!("osd_display.wgsl"), "grid_osd_display.wgsl");
+    let _ = app.world_mut().resource_mut::<Assets<Shader>>().insert(DISPLAY_SHADER.id(), shader);
+}
+
 impl UiMaterial for OsdDisplay {
     fn fragment_shader() -> ShaderRef {
         DISPLAY_SHADER.into()
@@ -248,13 +270,13 @@ struct Glyph {
 }
 
 #[derive(Clone, Debug, Default)]
-struct Font {
+pub(crate) struct Font {
     glyphs: HashMap<char, Glyph>,
     ascender: f32,
     descender: f32,
 }
 
-fn font(f: osd::Font) -> Font {
+pub(crate) fn font(f: osd::Font) -> Font {
     let glyphs = f
         .glyphs
         .into_iter()
@@ -298,27 +320,73 @@ fn layout(font: &Font, text: &str, x0: f32, x1: f32, y0: f32, y1: f32) -> osd::M
     };
     let width: f32 = (0..chars.len()).map(step).sum::<f32>() * em;
     let eps = 1e-2 * (x1 - x0).abs().max(1.);
-    let mut pen = if x0.abs() < eps {
+    let pen = if x0.abs() < eps {
         x0
     } else if x1.abs() < eps {
         x1 - width
     } else {
         (x0 + x1) / 2. - width / 2.
     };
-    let baseline = y0 - font.descender * em;
+    glyphs(font, &chars, em, 0., pen, y0 - font.descender * em)
+}
+
+/// Glyph meshes of `text` in a front-end text node (`FETEXTLAYOUT`,
+/// docs/RACE_HUD.md §6.7): glyphs `height` from the font's descender to its
+/// ascender [I], `tracking` em apart [I], the case applied [D enum], and the
+/// line aligned in the node's bounds by `h_align` / `v_align` [D enums;
+/// I: against the bounds].
+pub(crate) fn text_mesh(font: &Font, text: &str, t: &osd::TextLayout, bounds: &[f32; 6]) -> osd::Mesh {
+    let text = match t.case {
+        1 => text.to_lowercase(),
+        2 => text.to_uppercase(),
+        _ => text.to_owned(),
+    };
+    let chars: Vec<char> = text.chars().collect();
+    let em = t.height.max(1e-3) / (font.ascender - font.descender).max(0.1);
+    let width = chars
+        .iter()
+        .enumerate()
+        .map(|(i, c)| match font.glyphs.get(c) {
+            Some(g) => g.advance + chars.get(i + 1).and_then(|n| g.kerning.get(n)).copied().unwrap_or(0.),
+            None => MISSING,
+        })
+        .sum::<f32>()
+        * em
+        + t.tracking * em * chars.len().saturating_sub(1) as f32;
+    let [x0, y0, _, x1, y1, _] = *bounds;
+    let pen = match t.h_align {
+        1 => x1 - width,
+        2 => (x0 + x1 - width) / 2.,
+        _ => x0,
+    };
+    let baseline = match t.v_align {
+        0 => y1 - font.ascender * em,
+        1 => y0 - font.descender * em,
+        _ => (y0 + y1) / 2. - (font.ascender + font.descender) * em / 2.,
+    };
+    glyphs(font, &chars, em, t.tracking, pen, baseline)
+}
+
+/// The glyphs of `chars` from `pen` along `baseline`, `em` units per em,
+/// `tracking` em added after each.
+fn glyphs(font: &Font, chars: &[char], em: f32, tracking: f32, mut pen: f32, baseline: f32) -> osd::Mesh {
     let mut out = osd::Mesh::default();
     for (i, c) in chars.iter().enumerate() {
-        if let Some(g) = font.glyphs.get(c) {
-            let base = out.positions.len() as u16;
-            let (ox, oy) = (pen + g.bearing_x * em, baseline + g.bearing_y * em);
-            for (k, p) in g.mesh.positions.iter().enumerate() {
-                out.positions.push([ox + p[0] * em, oy + p[1] * em, p[2] * em]);
-                out.normals.push(g.mesh.normals.get(k).copied().unwrap_or([0., 0., 1.]));
-                out.uvs.push(g.mesh.uvs.get(k).copied().unwrap_or([0., 0.]));
+        let advance = match font.glyphs.get(c) {
+            Some(g) => {
+                let base = out.positions.len() as u16;
+                let (ox, oy) = (pen + g.bearing_x * em, baseline + g.bearing_y * em);
+                for (k, p) in g.mesh.positions.iter().enumerate() {
+                    out.positions.push([ox + p[0] * em, oy + p[1] * em, p[2] * em]);
+                    out.normals.push(g.mesh.normals.get(k).copied().unwrap_or([0., 0., 1.]));
+                    out.uvs.push(g.mesh.uvs.get(k).copied().unwrap_or([0., 0.]));
+                }
+                out.indices.extend(g.mesh.indices.iter().map(|i| i + base));
+                g.advance + chars.get(i + 1).and_then(|n| g.kerning.get(n)).copied().unwrap_or(0.)
             }
-            out.indices.extend(g.mesh.indices.iter().map(|i| i + base));
-        }
-        pen += step(i) * em;
+            None => MISSING,
+        };
+        pen += (advance + tracking) * em;
     }
     // An empty text keeps one degenerate triangle: Bevy's mesh allocator
     // does not accept empty buffers.
@@ -657,13 +725,10 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         let tree = grid_formats::pssg::read_tree(&bytes).map_err(|e| format!("{f}: {e}"))?;
         fonts.push(font(osd::read_font(&tree).map_err(|e| format!("{f}: {e}"))?));
     }
-    app.add_plugins((MaterialPlugin::<OsdMaterial>::default(), UiMaterialPlugin::<OsdDisplay>::default()));
+    app.add_plugins(MaterialPlugin::<OsdMaterial>::default());
+    display_plugin(app);
     let world = app.world_mut();
     world.resource_mut::<Assets<Shader>>().insert(SHADER.id(), Shader::from_wgsl(include_str!("osd.wgsl"), "grid_osd.wgsl")).map_err(|e| e.to_string())?;
-    world
-        .resource_mut::<Assets<Shader>>()
-        .insert(DISPLAY_SHADER.id(), Shader::from_wgsl(include_str!("osd_display.wgsl"), "grid_osd_display.wgsl"))
-        .map_err(|e| e.to_string())?;
     let mut images = HashMap::new();
     {
         let mut assets = world.resource_mut::<Assets<Image>>();
@@ -1182,6 +1247,7 @@ mod tests {
                 normals: vec![],
                 uvs: vec![[0., 0.]; 4],
                 colors_argb: vec![],
+                texcoord1: vec![],
                 indices: vec![0, 1, 2, 0, 2, 3],
             },
             bounds: [0., -height, 0., width, 0., 0.],

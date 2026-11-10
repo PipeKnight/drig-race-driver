@@ -55,15 +55,11 @@ pub fn tint(diffuse: [u8; 4], m: [u8; 4], tints: &Tints) -> [u8; 4] {
     out
 }
 
-/// A texture's mip chain as RGBA8 (BC1, BC3 or BGRA8).
+/// A texture's mip chain as RGBA8 (BC1, BC2, BC3 or BGRA8).
 pub fn decode(t: &Texture<'_>) -> Option<Levels> {
     let levels = t.declared_mip_levels + 1;
     let data = [t.base_blocks, t.remaining_data].concat();
-    let pixels = match t.format {
-        Format::Bc1 => crate::texture_upload::decode_levels(&data, t.width, t.height, levels, false)?,
-        Format::Bc3 => crate::texture_upload::decode_levels(&data, t.width, t.height, levels, true)?,
-        Format::Bgra8 => data.as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0], p[3]]).collect(),
-    };
+    let pixels = crate::texture_upload::decode_format_levels(&data, t.width, t.height, levels, t.format)?;
     let mut out = Vec::new();
     let mut offset = 0;
     for level in 0..levels {

@@ -25,13 +25,15 @@ pub fn instance_glyph(id: &str) -> Option<&str> {
 }
 
 /// One node as drawn: the package it comes from, its index there, its world
-/// matrix after grafting and how many instances lead to it.
+/// matrix after grafting, how many instances lead to it and the index (in
+/// the expansion) of the node it hangs below (`None` for the root).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Placed {
     pub scene: usize,
     pub node: usize,
     pub world: [f32; 16],
     pub depth: usize,
+    pub parent: Option<usize>,
 }
 
 /// Every node at or below `root` of `scenes[scene]`, with each instance's
@@ -39,6 +41,22 @@ pub struct Placed {
 /// package, or which would graft a glyph into itself (directly or through
 /// other glyphs), stays a leaf.
 pub fn expand(scenes: &[&Scene<'_>], scene: usize, root: usize) -> Vec<Placed> {
+    let parent_world = match scenes[scene].nodes[root].parent {
+        Some(p) => scenes[scene].world(p),
+        None => IDENTITY,
+    };
+    expand_with(scenes, scene, root, &parent_world, &|s, n| scenes[s].nodes[n].local)
+}
+
+/// [`expand`] below `parent_world`, with each node's local matrix from
+/// `local(scene, node)` (an animated pose instead of the saved one).
+pub fn expand_with(
+    scenes: &[&Scene<'_>],
+    scene: usize,
+    root: usize,
+    parent_world: &[f32; 16],
+    local: &dyn Fn(usize, usize) -> [f32; 16],
+) -> Vec<Placed> {
     let children: Vec<Vec<Vec<usize>>> = scenes
         .iter()
         .map(|s| {
@@ -51,14 +69,11 @@ pub fn expand(scenes: &[&Scene<'_>], scene: usize, root: usize) -> Vec<Placed> {
             c
         })
         .collect();
-    let parent_world = match scenes[scene].nodes[root].parent {
-        Some(p) => scenes[scene].world(p),
-        None => IDENTITY,
-    };
     let mut out = Vec::new();
     // The expanded root is on the stack, so a glyph that instances itself stays a leaf.
     let mut stack = vec![(scene, root)];
-    walk(scenes, &children, scene, root, &parent_world, &mut stack, &mut out);
+    let mut walker = Walker { scenes, children: &children, local, stack: &mut stack, out: &mut out };
+    walker.walk(scene, root, parent_world, None);
     out
 }
 
@@ -72,38 +87,41 @@ fn definition(scenes: &[&Scene<'_>], scene: usize, glyph: &str) -> Option<(usize
         .find_map(|s| scenes[s].node(&id).map(|n| (s, n)))
 }
 
-fn walk(
-    scenes: &[&Scene<'_>],
-    children: &[Vec<Vec<usize>>],
-    scene: usize,
-    node: usize,
-    parent_world: &[f32; 16],
-    stack: &mut Vec<(usize, usize)>,
-    out: &mut Vec<Placed>,
-) {
-    let n = &scenes[scene].nodes[node];
-    let world = crate::scene::compose(&n.local, parent_world);
-    out.push(Placed { scene, node, world, depth: stack.len() - 1 });
-    for &c in &children[scene][node] {
-        walk(scenes, children, scene, c, &world, stack, out);
+struct Walker<'a, 'b> {
+    scenes: &'a [&'a Scene<'b>],
+    children: &'a [Vec<Vec<usize>>],
+    local: &'a dyn Fn(usize, usize) -> [f32; 16],
+    stack: &'a mut Vec<(usize, usize)>,
+    out: &'a mut Vec<Placed>,
+}
+
+impl Walker<'_, '_> {
+    fn walk(&mut self, scene: usize, node: usize, parent_world: &[f32; 16], parent: Option<usize>) {
+        let world = crate::scene::compose(&(self.local)(scene, node), parent_world);
+        let me = self.out.len();
+        self.out.push(Placed { scene, node, world, depth: self.stack.len() - 1, parent });
+        let children = self.children;
+        for &c in &children[scene][node] {
+            self.walk(scene, c, &world, Some(me));
+        }
+        if !children[scene][node].is_empty() || self.stack.len() > MAX_DEPTH {
+            return;
+        }
+        let Some(glyph) = instance_glyph(&self.scenes[scene].nodes[node].id) else {
+            return;
+        };
+        let Some(def) = definition(self.scenes, scene, glyph) else {
+            return;
+        };
+        if self.stack.contains(&def) {
+            return;
+        }
+        self.stack.push(def);
+        for &c in &children[def.0][def.1] {
+            self.walk(def.0, c, &world, Some(me));
+        }
+        self.stack.pop();
     }
-    if !children[scene][node].is_empty() || stack.len() > MAX_DEPTH {
-        return;
-    }
-    let Some(glyph) = instance_glyph(&n.id) else {
-        return;
-    };
-    let Some(def) = definition(scenes, scene, glyph) else {
-        return;
-    };
-    if stack.contains(&def) {
-        return;
-    }
-    stack.push(def);
-    for &c in &children[def.0][def.1] {
-        walk(scenes, children, def.0, c, &world, stack, out);
-    }
-    stack.pop();
 }
 
 #[cfg(test)]
@@ -125,7 +143,7 @@ mod tests {
             materials: vec![],
             nodes: nodes
                 .iter()
-                .map(|&(id, parent, x)| Node { id: id.into(), parent, local: at(x), bounds: [0.; 6], render: None })
+                .map(|&(id, parent, x)| Node { id: id.into(), parent, local: at(x), bounds: [0.; 6], render: None, text: None })
                 .collect(),
             camera: None,
             cameras: vec![],
@@ -173,6 +191,15 @@ mod tests {
                 (0, "object/results=loop", 40., 0),
             ]
         );
+        // Each node names the one it hangs below; a grafted child hangs below its instance.
+        let parents: Vec<Option<usize>> = placed.iter().map(|p| p.parent).collect();
+        assert_eq!(parents, [None, Some(0), Some(1), Some(2), Some(0), Some(4), Some(5), Some(0), Some(0)]);
+        // A posed expansion moves every instance of a glyph node alike.
+        let posed = expand_with(&[&screen, &library], 0, 0, &IDENTITY, &|s, n| {
+            if (s, n) == (1, 1) { at(3.) } else { [&screen, &library][s].nodes[n].local }
+        });
+        let xs: Vec<f32> = posed.iter().map(|p| p.world[12]).collect();
+        assert_eq!(xs, [0., 10., 13., 13.5, 20., 23., 23.5, 30., 40.]);
     }
 
     /// Needs GRID_GAME_ROOT. The post-race glyphs of RACE_HUD §6.6 expand to more drawn

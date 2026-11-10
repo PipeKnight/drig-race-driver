@@ -319,7 +319,7 @@ mod tests {
     fn node(id: &str, parent: Option<usize>, x: f32) -> osd::Node {
         let mut local = Mat4::IDENTITY.to_cols_array();
         local[12] = x;
-        osd::Node { id: id.into(), parent, local, bounds: [0.; 6], render: None }
+        osd::Node { id: id.into(), parent, local, bounds: [0.; 6], render: None, text: None }
     }
 
     #[test]

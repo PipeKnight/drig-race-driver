@@ -69,6 +69,9 @@ Grammar:
 | | `replay_slow` | on/off: every replay starts in slow motion, as after the Replay Slow Motion key (docs/REPLAY.md); for replay checks without key presses | `GRID_REPLAY_SLOW=1` |
 | | `replay_terminal` | on/off: the `replay_capture` replay is the terminal-damage replay (TERMINAL cameras, TerminalFX_02), as from the wreck screen's Replay (docs/REPLAY.md) | `GRID_REPLAY_TERMINAL=1` |
 | | `max_ticks_per_frame` | interactive window only: at most this many 16 ms ticks per rendered frame, default 4; `0` restores Bevy's 250 ms clamp, for comparisons (docs/FRAME_STEPPING.md) | `GRID_MAX_TICKS_PER_FRAME=N` |
+| | `results_continue` | seconds: a scripted run selects Continue on the stats and results screens by itself (docs/CAREER_SCREEN.md) | `GRID_RESULTS_CONTINUE=S` |
+| | `results_shot` | seconds: once the results screen shows its board (the front-end art loaded), save `window-shot-results.png` in the data directory (docs/RACE_HUD.md §6.7, `tools/results_window_check.py`) | `GRID_RESULTS_SHOT=S` |
+| | `results_art_off` | on/off, experimental: the results screen keeps the plain panel instead of the front-end art (before/after comparisons only) | `GRID_RESULTS_ART_OFF=1` |
 | | `tick_delay_ms` | milliseconds slept in every vehicle tick: a forced slow tick for frame-rate checks (docs/FRAME_STEPPING.md) | `GRID_TICK_DELAY_MS=MS` |
 | | `camera_fps` | frames per second of race time: the in-race views step by the original's per-frame rules at this rate (head-cam springs, look smoothing, follow damp, spin hold), for comparisons with the original at 60 or 165 fps; unset, one step per 16 ms tick (docs/CAMERA_VIEWS.md §3 "Camera clock") | `GRID_CAMERA_FPS=F` |
 | | `tick_interpolation` | interactive window only: `on` (default) draws the cars, their parts and the camera between the last two 16 ms ticks; `off` draws the last tick, for comparisons (docs/FRAME_STEPPING.md §6) | `GRID_TICK_INTERPOLATION=0` |

@@ -1,9 +1,12 @@
-//! Borrowed BC1/BC3 blocks with count/size-validated tightly packed mip chains.
+//! Borrowed BC1/BC2/BC3 blocks with count/size-validated tightly packed mip chains.
 use crate::{Result, fail, pssg::Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Bc1,
+    /// `dxt3`: a BC1 colour block after explicit 4-bit alpha (the front-end
+    /// bundle's pattern, dirt and icon textures).
+    Bc2,
     Bc3,
     /// `ui8x4`: uncompressed 32-bit texels, B, G, R, A byte order.
     Bgra8,
@@ -13,7 +16,7 @@ impl Format {
     pub fn level_size(self, width: u32, height: u32) -> usize {
         match self {
             Format::Bc1 => width.div_ceil(4) as usize * height.div_ceil(4) as usize * 8,
-            Format::Bc3 => width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16,
+            Format::Bc2 | Format::Bc3 => width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16,
             Format::Bgra8 => width as usize * height as usize * 4,
         }
     }
@@ -58,7 +61,7 @@ impl Texture<'_> {
         }
         let stored_size = self.base_blocks.len() + self.remaining_data.len();
         let used_tail = size.saturating_sub(self.base_blocks.len());
-        let padded_full_bc = matches!(self.format, Format::Bc1 | Format::Bc3)
+        let padded_full_bc = matches!(self.format, Format::Bc1 | Format::Bc2 | Format::Bc3)
             && self.width != self.height
             && self.width.is_power_of_two()
             && self.height.is_power_of_two()
@@ -105,6 +108,7 @@ impl Texture<'_> {
         }
         match self.format {
             Format::Bc1 => bytes[84..88].copy_from_slice(b"DXT1"),
+            Format::Bc2 => bytes[84..88].copy_from_slice(b"DXT3"),
             Format::Bc3 => bytes[84..88].copy_from_slice(b"DXT5"),
             Format::Bgra8 => {
                 // Uncompressed A8R8G8B8: pitch flag instead of linear size.
@@ -184,6 +188,7 @@ fn read_matching<'a>(
         }
         let format = match tree.string(i, b"texelFormat")? {
             b"dxt1" => Format::Bc1,
+            b"dxt3" => Format::Bc2,
             b"dxt5" => Format::Bc3,
             b"ui8x4" if uncompressed => Format::Bgra8,
             _ => return fail(tree.nodes[i].offset, "unsupported texture format"),

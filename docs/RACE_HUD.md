@@ -592,8 +592,17 @@ The position stacker (0x6B4E00, 0x6B4F90) appends `position_group` (T 2/3 with m
 or T 2) and `split_group`. Not ported: which layout a port event gets depends on T and slot 0x24.
 T's source [D]: 0x5F4C70 writes T (data+0x1AC) and F (data+0x1FC) from M = [[game+0x234C]+0x80],
 a field of the race-setup object (constructor 0x5EA0D0): M 0 or 2 → T 2, M 3 → T 3, M 4 → T 4,
-any other → T 1. The writer of M (race setup +0x80) is not found, so which race kind gives which
-T is still open (static analysis only; no capture was allowed for this work).
+any other → T 1.
+M's writer [D] (static trace, F810): the only store to race setup +0x80 is 0x611F30, which runs
+once per race-setup object (its flag +8). It finds the setup through the type key 0xE5EBEC (the
+setup registers itself there, 0x4CE0A0) and also calls 0x60BEF0 with M. Its one caller 0x582BF0
+(a virtual, .rdata 0xCD8D38) picks M = 2, or 4 when the game mode `[game+0x23D0]+0x50` is 4 (test
+drive), or 3 when the online session `[[[x+0x1048]+0x1058]+0x1CC]` (0x6D9B20, as in 0x6572D0 and
+0x6F9D70) exists and its flag (session+0x10)+0x30 (0x8D9480) is set. The constructor 0x5EA0D0 does
+not set +0x80, and no other function that loads `game+0x234C`, uses the type key or is a setup
+virtual stores there. So T is 2 for every offline race, 3 online and 4 in a test drive; T 1 is not
+reached through this writer. [I] The online flag means an active online session; not traced
+further. Provider slot 0x24 is still not traced, and the re-flow is not ported.
 
 Not traced yet: the post-race art.
 
@@ -751,3 +760,97 @@ Next steps: the results screen needs the `fe3d_generic`/`GD`/`GPD` materials (`f
 unlit `fe3d_tracksurface` term), the camera that views `pause_root`'s screens, and its own
 `osd_scene`-style driver for the rows, pills and texts. The front-end session ports the pause art
 but builds neither the grafting nor these materials (their reply, 2026-11-10).
+
+### 6.7 Front-end materials and the results art (row 69)
+
+Static research and port (F810). The results screen now draws the original's art: the
+`screen/pause_leaderboards` glyph of `fePersistentDatabase.pssg`, its glyphs grafted in (§6.6), seen
+through the `pause_root` camera, lit by the shared front-end materials and filled from the post-race
+results view. Ported in grid-app `fe3d` (materials, shared) and `results_art` (the screen).
+
+Front-end materials (`fe3d`, shared by every screen that draws front-end package nodes) [D]:
+- Families by effect name: `fe3d_generic`, `fe3d_genericGD`, `fe3d_genericGPD`, `fe3d_genericI`,
+  `fe3d_genericGMPD`; the arithmetic follows the in-game `feig3d_*` programs of `shaderpack.pssg`,
+  with the instance streams of `frontend/fe_shadersetup.xml` (`DiffuseColour`, `Alpha`,
+  `GlowAmount`). Textures hold raw (gamma-space) values (`Rgba8Unorm`); the shader converts only its
+  result for the target.
+- Lighting comes from `frontend/fe_paramcontrol.xml`, read as `FE::MaterialLibrary` does: zones
+  0x4D04B0, values 0x4D6EE0, defaults 0x4CFA70 (used for every value a zone leaves out), zone change
+  ease 0x4D0100, constant registration 0x4D0960. The global constants are built as 0x4DFC00 does,
+  with the light directions of 0x4CFE40 and the glow pulse. The results screen uses group `ingame`,
+  zone `leaderboards`.
+- [I] A zero-extent bounds axis adds nothing to the glow falloff (the original divides by zero);
+  no screen-space shadow mask (the zone's third light is black).
+- Reflection cubes [I]: the `TR1` slot takes a cube; the writer of the original's front-end
+  reflection cube was not found (0x4E2750, the front-end render setup, registers the reflection
+  slots; 0x497E70 finds or creates a texture-name slot). The port uses `env_soft`/`env_sharp` of
+  `Osd/dial2.pssg` as a stand-in.
+
+Text layouts [D]: `FETEXTLAYOUT` nodes give each text node its font, height, alignment, wrapping,
+tracking and case; the enums are numbered as the original's style parsers do (0x47A4F0 horizontal
+alignment, 0x47A5B0 vertical alignment, 0x47A660 wrapping, 0x47A800 case). Read into
+`grid_formats::osd::Node::text` (`TextLayout`); `Mesh::texcoord1` keeps a second UV stream.
+
+The camera [D/I]: `pause_root` holds the camera `camera=camera1` and its `target=camera1`; the
+package's `Anim!96` flies both between the pause screens (the loader 0x58B380 and update 0x583E10
+of the pause world; 0x5A5630 builds `MovePauseWorldToCamera`, dispatched by 0x4ED780; 0x4DCDF0
+applies the race camera matrix to the helper). [I] The results pose is the first key time from 0
+of that animation's `screen/pause_leaderboards` translation at which the screen lies at the
+target's distance along the view, within 1 % of it: t ≈ 1.667 s (relative error 0.6 %). Its later
+hold (3.333 to 4.667 s, error 0.5 to 1.4 %) brings the screen about 30 % closer, and the art then
+reaches NDC y 1.36 on a 16:10 view with the title clipped at the top edge; the first hold keeps it
+inside (NDC x −0.81 to 0.87, y −0.68 to 0.94). The least-error key (4.667 s) is the fallback when
+no key arrives. Which hold the original shows for the results was not traced. Other three-key
+animations that start at a node's saved translation are read as slides; their middle key is the
+on-screen place.
+
+Rows [D]: the row filler 0x54D270 instances one row glyph per entry (`list.%d`, state `player`,
+`friends` or `deactivate`). The port [I]:
+- Twelve visible rows (`RaceResultsAnimatedList`, §6.6), the window centred on the player; row
+  `gadget/list_items=0` repeated at the pitch between `list_items=0` and `=1`.
+- Text node names pick the column: `position`, `driver`, `time`/`score`, `car`, then the fourth
+  column `team`, `class` or `points` by race kind, and `difference` only for the touge's second run.
+- The player's row shows the row cursor pill; never drawn: the race timer, the row arrows and
+  flags, the pill helper, the frame of a list that does not scroll.
+- Titles: `title_0`/`title_1` the view's title, `table_title` its body line.
+
+Drawing [I]: the art is rendered on its own layer (24) by a camera into an image, shown under a 50 %
+dim over the race; the post-race panel keeps only its pills (Continue, View Replay, Exit, Restart)
+at the screen's foot while the art is shown, and falls back to the full text panel while the
+packages load or when they fail to read.
+
+Textures [O]: the screen's pattern, dirt and icon textures live in `frontend/b_persistent.pssg` as
+`dxt3` (BC2: 8 bytes of explicit 4-bit alpha, then a four-colour BC1 block). The shared texture
+reader (grid-formats `texture`) reads them as `Format::Bc2` (DDS FourCC `DXT3`) and every RGBA8
+decode path (`texture_upload::decode_format_levels`, the BC fallback) decodes them, so any package
+that ships `dxt3` loads through the same path; before, the bundle failed to read.
+
+Checks: `tools/results_window_check.py` runs a 1-lap autopilot race in a real window and saves the
+results screen (`[diagnostics] results_shot = S`, GRID_RESULTS_SHOT). `results_art_off` (GRID_RESULTS_ART_OFF=1)
+is experimental: it keeps the plain panel, for the "before" side of a matched pair only.
+
+Not ported: the screen's in/out animations (it appears in its held pose), `fepause_final` behind it
+(the front-end session owns the blur), the stats and drift scoreboard screens, the pill art.
+
+Row state colour [I]. The text materials carry DiffuseColour 0.1 (`fe_shadersetup.xml` gives the
+front-end instances a DiffuseColour/Alpha and a GlowAmount stream), which reads dark on the grey
+panel. Every animation of `text_pill_optiontitles#DiffuseColour` and
+`text_pill_subtitles#DiffuseColour` in the three packages has the same keys, with no time ranges:
+0.10 at 0 s, 0.83 from 0.33 to 0.67 s, 0.10 from 1.00 to 1.33 s, 0.83 at 1.67 s. The authored 0.1 is
+the first key. 0x54D270 sends each row (`list.%d` and `list.%d.cursor`) the state `player` (when
+FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
+message, and `persistentdatacommon.xml` gives `activate`, `reactivate` and `deactivate` 0.21 s each.
+The cursor pill (`pill_glow_txtrd_3`, in the same 1.67 s animations, beside `text_pill_titles`) is
+0.10 at 0.67 s, orange (1.0, 0.79, 0) at 1.00 s and 0.60 at 1.33 s. So each animation has two held
+windows on its DiffuseColour curves, ending at 0.67 s and 1.33 s. The port reads the first as
+`deactivate` (light text on the grey panel) and the second as `player` (dark text on the lit pill).
+Each animated material gets one instance per state, sampled at the window end
+(`results_art::hold_ends`, `animation_states`, `state_colours`). The player's row uses the
+`player` instances; the other rows and the fixed items use `deactivate`. Each material takes its states from
+the shortest animation that gives both: the 8.63 s animation of fePersistentDatabase keys dozens
+of components at once, and its merged windows end elsewhere (the pill would read 0.2 in both). This
+works for any material whose DiffuseColour an animation keys. The first window shot (F810), with the authored
+0.15 pill, showed the player's row dark on dark. Which key range each state plays was not traced. The pause post-process of
+`persistentdatarender.xml` (`fepause_final`: ToneMapFast with lumMin 0.2, lumMax 0.6, adaptMax 0.5,
+bloomAmount 0.4) also
+brightens the screen in the original; the port draws without a tone map (`Tonemapping::None`).

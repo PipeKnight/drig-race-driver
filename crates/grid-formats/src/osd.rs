@@ -46,6 +46,9 @@ pub struct Mesh {
     /// Vertex colours of a `Color` stream stored as `uint_color_argb` (front-end scenes), the four
     /// bytes in file order, as `mesh::Mesh::colors_argb`; empty without one.
     pub colors_argb: Vec<[u8; 4]>,
+    /// A three-component `ST` stream (`float3`), which `fe3d_genericGMPD` binds as `TEXCOORD1`: the
+    /// per-vertex glow falloff vector (docs/RACE_HUD.md §6.7); empty without one.
+    pub texcoord1: Vec<[f32; 3]>,
     pub indices: Vec<u16>,
 }
 
@@ -66,6 +69,29 @@ pub struct Node {
     /// Local bounds (min xyz, max xyz).
     pub bounds: [f32; 6],
     pub render: Option<Render>,
+    /// The text layout of a front-end `text=` node (its `USERDATA` object).
+    pub text: Option<TextLayout>,
+}
+
+/// A front-end text node's layout (`FETEXTLAYOUT`, docs/RACE_HUD.md §6.7). The
+/// enums as the original's style parsers number them [D 0x47A4F0, 0x47A5B0,
+/// 0x47A660, 0x47A800].
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextLayout {
+    /// A font of `frontend/fonts/font_list.xml`.
+    pub font: String,
+    pub height: f32,
+    pub depth: f32,
+    /// 0 left, 1 right, 2 centre.
+    pub h_align: u32,
+    /// 0 top, 1 bottom, 2 centre.
+    pub v_align: u32,
+    /// 0 none, 1 wordwrap, 2 clampwidth, 3 clampuniform, 4 wordwrapup.
+    pub wrapping: u32,
+    pub line_spacing: f32,
+    pub tracking: f32,
+    /// 0 as written, 1 lower, 2 upper.
+    pub case: u32,
 }
 
 impl Node {
@@ -387,6 +413,13 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
             match tree.string(desc, b"renderType")? {
                 b"Vertex" => mesh.positions = (0..count).map(|i| { let v = element(i); [v[0], v[1], v[2]] }).collect(),
                 b"Normal" => mesh.normals = (0..count).map(|i| { let v = element(i); [v[0], v[1], v[2]] }).collect(),
+                b"ST" if format == b"float3" && mesh.texcoord1.is_empty() => {
+                    mesh.texcoord1 = (0..count).map(|i| { let v = element(i); [v[0], v[1], v[2]] }).collect();
+                    // The first ST stream still fills `uvs`, as before.
+                    if mesh.uvs.is_empty() {
+                        mesh.uvs = mesh.texcoord1.iter().map(|v| [v[0], v[1]]).collect();
+                    }
+                }
                 b"ST" if mesh.uvs.is_empty() => mesh.uvs = (0..count).map(|i| { let v = element(i); [v[0], v[1]] }).collect(),
                 b"Color" if format == b"uint_color_argb" => {
                     if !mesh.colors_argb.is_empty() {
@@ -592,6 +625,24 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
         .enumerate()
         .map(|(i, m)| (m.id.as_str(), i))
         .collect();
+    let mut layouts = BTreeMap::new();
+    for i in 0..tree.nodes.len() {
+        if tree.name(i) == b"FETEXTLAYOUT" {
+            let int = |k: &[u8]| tree.integer(i, k);
+            let layout = TextLayout {
+                font: text(tree, i, b"fontName")?,
+                height: float(tree, i, b"height")?,
+                depth: float(tree, i, b"depth")?,
+                h_align: int(b"hAlign")?,
+                v_align: int(b"vAlign")?,
+                wrapping: int(b"wrapping")?,
+                line_spacing: float(tree, i, b"linespacing")?,
+                tracking: float(tree, i, b"tracking")?,
+                case: int(b"case")?,
+            };
+            layouts.insert(text(tree, i, b"id")?, layout);
+        }
+    }
     let mut nodes: Vec<Node> = Vec::new();
     let mut cameras = Vec::new();
     let mut index_of = BTreeMap::new();
@@ -613,6 +664,10 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
                 });
             }
         }
+        let text_layout = match children(tree, i, b"USERDATA").next() {
+            Some(u) if tree.attribute(u, b"object").is_ok() => layouts.get(&reference(tree, u, b"object")?).cloned(),
+            _ => None,
+        };
         index_of.insert(i, nodes.len());
         nodes.push(Node {
             id: text(tree, i, b"id")?,
@@ -620,6 +675,7 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
             local,
             bounds,
             render,
+            text: text_layout,
         });
         // Orthographic cameras (front-end overlays) have no FOV.
         if kind == b"CAMERANODE" && tree.attribute(i, b"FOV").is_ok() {

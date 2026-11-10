@@ -95,6 +95,13 @@ pub struct Diagnostics {
     /// Continue by themselves after this long (unattended career checks,
     /// docs/CAREER_SCREEN.md).
     pub results_continue: Option<f64>,
+    /// Seconds: once the results screen shows its board (with the front-end
+    /// art loaded, unless `results_art_off`), save the window as
+    /// `window-shot-results.png` in the data directory (docs/RACE_HUD.md §6.7).
+    pub results_shot: Option<f64>,
+    /// Experimental: the results screen keeps the plain panel instead of the
+    /// front-end art (before/after comparisons of row 69 only).
+    pub results_art_off: bool,
     /// Milliseconds slept in every vehicle tick: a forced slow tick for
     /// frame-rate checks (docs/FRAME_STEPPING.md).
     pub tick_delay_ms: Option<f64>,
@@ -141,6 +148,8 @@ impl Default for Diagnostics {
             replay_slow: false,
             replay_terminal: false,
             results_continue: None,
+            results_shot: None,
+            results_art_off: false,
             tick_delay_ms: None,
             max_ticks_per_frame: None,
             camera_fps: None,
@@ -176,6 +185,8 @@ impl Diagnostics {
             replay_slow: text("GRID_REPLAY_SLOW").is_some_and(|v| v == "1"),
             replay_terminal: text("GRID_REPLAY_TERMINAL").is_some_and(|v| v == "1"),
             results_continue: text("GRID_RESULTS_CONTINUE").and_then(|v| v.parse().ok()),
+            results_shot: text("GRID_RESULTS_SHOT").and_then(|v| v.parse().ok()),
+            results_art_off: text("GRID_RESULTS_ART_OFF").is_some_and(|v| v == "1"),
             tick_delay_ms: text("GRID_TICK_DELAY_MS").and_then(|v| v.parse().ok()),
             max_ticks_per_frame: text("GRID_MAX_TICKS_PER_FRAME").and_then(|v| v.parse().ok()),
             camera_fps: text("GRID_CAMERA_FPS").and_then(|v| v.parse().ok()),
@@ -213,6 +224,8 @@ impl Diagnostics {
             "results_continue" => {
                 self.results_continue = Some(value.parse().map_err(|_| number(key))?)
             }
+            "results_shot" => self.results_shot = Some(value.parse().map_err(|_| number(key))?),
+            "results_art_off" => self.results_art_off = on(key, value)?,
             "tick_delay_ms" => self.tick_delay_ms = Some(value.parse().map_err(|_| number(key))?),
             "max_ticks_per_frame" => {
                 self.max_ticks_per_frame = Some(value.parse().map_err(|_| number(key))?)

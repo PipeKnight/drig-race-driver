@@ -242,12 +242,8 @@ fn group<'a>(tree: &pssg::Tree<'a>, instance: &[u8]) -> &'a [u8] {
 /// A cockpit texture's base level as RGBA8.
 fn rgba(tree: &pssg::Tree, id: &[u8]) -> Result<(UVec2, Vec<u8>), Box<dyn Error>> {
     let t = texture::read_named(tree, &[id])?.into_iter().next().ok_or("dash texture missing")?;
-    let pixels = match t.format {
-        texture::Format::Bc1 => crate::texture_upload::decode_levels(t.base_blocks, t.width, t.height, 1, false),
-        texture::Format::Bc3 => crate::texture_upload::decode_levels(t.base_blocks, t.width, t.height, 1, true),
-        texture::Format::Bgra8 => Some(t.base_blocks.as_chunks::<4>().0.iter().flat_map(|p| [p[2], p[1], p[0], p[3]]).collect()),
-    }
-    .ok_or("dash texture undecodable")?;
+    let pixels = crate::texture_upload::decode_format_levels(t.base_blocks, t.width, t.height, 1, t.format)
+        .ok_or("dash texture undecodable")?;
     Ok((UVec2::new(t.width, t.height), pixels))
 }
 
