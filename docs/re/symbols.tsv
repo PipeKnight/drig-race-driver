@@ -585,6 +585,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004C9860	livery_clear_choice	func	not ported		F807	[V]		Task (coordinator, after F799): step 2 of the livery series, the livery page's colour grid. Static analysis only (`tools/re/grid_re.py`, master project); gri...
 0x004C9910		func	not ported	docs/FRONT_END_FLOW.md:201		[V]		game (FUN_004C9910 on game+0xBA0), sets a counter at +0x40 to 1 and posts a
 0x004C9930		func	not ported	docs/FRONT_END_FLOW.md:194		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
+0x004C9A70	param_read_vector	func	crates/grid-app/src/fe_world.rs grid-app::fe_world::group_vector	docs/FRONT_END_FLOW.md	F813	[V]		Reads a parameter vector: valueX, valueY, valueZ into x, y, z and valueY again into w (static analysis).
 0x004CA6A0		func	not ported	docs/FRONT_END_FLOW.md:194		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
 0x004CAD80	available	func	crates/grid-tools/src/flashback.rs:72 grid-tools::flashback::available ; crates/grid-app/src/replay.rs:260 grid-app::replay	docs/FLASHBACK.md:68	F366	[D]		0x542A00: 0x937150 and 0x4CAD80).
 0x004CADD0		func	not ported	docs/FLASHBACK.md:70		[D]		Using one: `used += 1` (0x6A2260) through 0x4CADD0, called only from 0x59AFA0 [D], the enter
@@ -616,6 +617,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004D27F0	tier_tile_unlocked	func	not ported	docs/CAREER_RESEARCH.md:763	F771	[V]		0x4D27F0 (`tier_tile_unlocked`): a tier tile is unlocked when the tile is valid and 0x628EF0
 0x004D5420		func	not ported	docs/FLASHBACK.md:50		[D]		options 0x4D5420 and a career state 0x58ABC0) [D]:
 0x004D6EE0	FeMaterialLibrary_ReadValues	func	crates/grid-app/src/fe3d.rs:8 grid-app::fe3d	docs/RACE_HUD.md:778				not a function entry in the master analysis; read as `FE::MaterialLibrary` does (0x4D04B0 zones, 0x4D6EE0 values,
+0x004D7140	lighting_group_read	func	crates/grid-app/src/fe_world.rs grid-app::fe_world::install	docs/FRONT_END_FLOW.md	F813	[V]		Lighting-group parameter reader; the reflection area reads r_gamma +0x1A0, r_scale +0x1A4, r_min +0x10, r_max +0x20 (static analysis).
 0x004D75E0		func	not ported	docs/GARAGE_WORLD.md:47				not a function entry in the master analysis; | `pregarage` | 0xCC1D0C | 0x4D75E0 |
 0x004D99B0		func	not ported	docs/RACE_HUD.md:841				FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
 0x004D9A00		func	not ported	docs/RACE_HUD.md:841				FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
@@ -630,7 +632,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004E1B50		func	not ported	docs/CAREER_RESEARCH.md:233				shows wages (0x4E1B50) and objectives (0x652270) in the first two rows. Total is the rows' sum;
 0x004E20A0	career_received_sponsor_count	func	not ported		F808	[V]		Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...
 0x004E20D0	career_available_sponsor_at	func	not ported		F808	[V]		Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...
-0x004E2750	FeRender_Setup	func	not ported	docs/RACE_HUD.md:785		[I]		reflection cube was not found (0x4E2750, the front-end render setup, registers the reflection
+0x004E2750	FeRender_Setup	func	crates/grid-app/src/fe_world.rs grid-app::fe_world::install	docs/FRONT_END_FLOW.md	F813	[V]		The front-end render setup; it loads the default reflection cube (reflection_load.dds from b_persistent.pssg), which 0x4DCFA0 selects (static analysis).
 0x004E30C0		func	not ported	docs/GARAGE_WORLD.md:27		[V]		[V] The reflection cube follows a mode in 0x4DCFA0 (called from 0x4E30C0 and the message handler 0x4ED780):
 0x004E4890	fill_required_to_unlock	func	not ported	docs/CAREER_RESEARCH.md:772		[V]		cheat or debug path). 0x4E4890 (`fill_required_to_unlock`) fills the tile's "required to unlock"
 0x004E4A20	career_slot_sponsor	func	not ported		F808	[V]		Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...

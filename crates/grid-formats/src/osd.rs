@@ -616,6 +616,50 @@ pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
     Ok(out)
 }
 
+/// Every `CUBEMAPTEXTURE` of a package, in file order (an OSD scene's
+/// environment pair, or a front-end bundle's `reflection_load.dds`).
+pub fn read_cubemaps<'a>(tree: &Tree<'a>) -> Result<Vec<Cubemap<'a>>> {
+    let mut cubemaps = Vec::new();
+    for i in 0..tree.nodes.len() {
+        if tree.name(i) != b"CUBEMAPTEXTURE" {
+            continue;
+        }
+        let size = tree.integer(i, b"width")?;
+        if tree.string(i, b"texelFormat")? != b"dxt1" || tree.integer(i, b"height")? != size || size % 4 != 0 {
+            return fail(tree.nodes[i].offset, "unsupported OSD cubemap");
+        }
+        let mut faces: [&[u8]; 6] = [&[]; 6];
+        for block in children(tree, i, b"TEXTUREIMAGEBLOCK") {
+            let face = match tree.string(block, b"typename")? {
+                b"Raw" => 0,
+                b"RawNegativeX" => 1,
+                b"RawPositiveY" => 2,
+                b"RawNegativeY" => 3,
+                b"RawPositiveZ" => 4,
+                b"RawNegativeZ" => 5,
+                _ => return fail(tree.nodes[block].offset, "unknown cubemap face"),
+            };
+            let data = children(tree, block, b"TEXTUREIMAGEBLOCKDATA")
+                .next()
+                .and_then(|d| tree.nodes[d].data)
+                .unwrap_or_default();
+            if data.len() != (size as usize / 4).pow(2) * 8 {
+                return fail(tree.nodes[block].offset, "cubemap face size mismatch");
+            }
+            faces[face] = data;
+        }
+        if faces.iter().any(|f| f.is_empty()) {
+            return fail(tree.nodes[i].offset, "cubemap face missing");
+        }
+        cubemaps.push(Cubemap {
+            id: text(tree, i, b"id")?,
+            size,
+            faces,
+        });
+    }
+    Ok(cubemaps)
+}
+
 /// The whole OSD scene package.
 pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
     let materials = materials(tree)?;
@@ -691,44 +735,7 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
         .filter(|&i| tree.name(i) == b"TEXTURE")
         .map(|i| tree.string(i, b"id"))
         .collect::<Result<_>>()?;
-    let mut cubemaps = Vec::new();
-    for i in 0..tree.nodes.len() {
-        if tree.name(i) != b"CUBEMAPTEXTURE" {
-            continue;
-        }
-        let size = tree.integer(i, b"width")?;
-        if tree.string(i, b"texelFormat")? != b"dxt1" || tree.integer(i, b"height")? != size || size % 4 != 0 {
-            return fail(tree.nodes[i].offset, "unsupported OSD cubemap");
-        }
-        let mut faces: [&[u8]; 6] = [&[]; 6];
-        for block in children(tree, i, b"TEXTUREIMAGEBLOCK") {
-            let face = match tree.string(block, b"typename")? {
-                b"Raw" => 0,
-                b"RawNegativeX" => 1,
-                b"RawPositiveY" => 2,
-                b"RawNegativeY" => 3,
-                b"RawPositiveZ" => 4,
-                b"RawNegativeZ" => 5,
-                _ => return fail(tree.nodes[block].offset, "unknown cubemap face"),
-            };
-            let data = children(tree, block, b"TEXTUREIMAGEBLOCKDATA")
-                .next()
-                .and_then(|d| tree.nodes[d].data)
-                .unwrap_or_default();
-            if data.len() != (size as usize / 4).pow(2) * 8 {
-                return fail(tree.nodes[block].offset, "cubemap face size mismatch");
-            }
-            faces[face] = data;
-        }
-        if faces.iter().any(|f| f.is_empty()) {
-            return fail(tree.nodes[i].offset, "cubemap face missing");
-        }
-        cubemaps.push(Cubemap {
-            id: text(tree, i, b"id")?,
-            size,
-            faces,
-        });
-    }
+    let cubemaps = read_cubemaps(tree)?;
     let textures = texture::read_named(tree, &ids)?;
     let wraps = textures.iter().map(|t| texture::wrap(tree, t.id)).collect::<Result<_>>()?;
     let mut scene = Scene {

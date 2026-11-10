@@ -10,10 +10,11 @@
 //!   box-projected cube reflection (`r_min`/`r_max`, `r_gamma`, `r_scale`)
 //!   times a Fresnel term of at most `FresnelMax` and the texture's alpha;
 //!   alpha = the instance colour's. Its vertex program passes no lighting, so
-//!   the group's directional lights do not reach these surfaces [D]. Ported:
-//!   the first term, unlit, with the material's `DiffuseColour` as the
-//!   instance colour [I]; the reflection is open (at most 0.2 × 0.8 of the
-//!   cube at grazing angles).
+//!   the group's directional lights do not reach these surfaces [D]. Ported
+//!   whole in `fe_world.wgsl` ([`Surface`]), with the material's
+//!   `DiffuseColour` as the instance colour [I]; the box, gamma and scale
+//!   come from the parameter group and its zone ([`Spec::zone`]), the cube
+//!   from the bundle ([`Spec::reflection`]).
 //! - Camera: `camera=NAME` looks at `target=NAME` (the saved matrix's view
 //!   axis points at the target, roll free [D]); both follow their
 //!   `Translation` channels from the world's start (held before the first
@@ -28,9 +29,13 @@
 //!   by name [D]), not part of the world [I]. `loading_root` places 16 of
 //!   them (2434 meshes, mostly the `fe3d_generic` family); none is drawn here.
 use bevy::{
-    asset::RenderAssetUsages,
+    asset::{RenderAssetUsages, uuid_handle},
     core_pipeline::tonemapping::Tonemapping,
+    mesh::MeshVertexBufferLayoutRef,
+    pbr::{MaterialPipeline, MaterialPipelineKey},
     prelude::*,
+    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError},
+    shader::ShaderRef,
 };
 use grid_formats::osd;
 use grid_formats::osd_glyph::{self, Placed};
@@ -53,21 +58,78 @@ pub struct Spec<'a> {
     pub camera: &'a str,
     /// The `fe_paramcontrol.xml` parameter group that lights it.
     pub lights: &'a str,
+    /// The group's zone the world is seen in, whose values replace the
+    /// group's own.
+    pub zone: Option<&'a str>,
+    /// The bundle's cubemap its surfaces reflect.
+    pub reflection: &'a str,
     /// The `frontend/persistentdatarender.xml` `<camera_tweaks>` block
     /// whose `noise_tweaks` move its camera.
     pub tweaks: &'a str,
 }
 
 /// The loading screen's world [D fePersistentDatabase.pssg, b_persistent.pssg,
-/// fe_paramcontrol.xml].
+/// fe_paramcontrol.xml]. Its stats screen sits in `l_zone_loading_stats`,
+/// zone 9 [D flow.xml]. The cube is the renderer's default one,
+/// `reflection_load.dds` (loaded by 0x4E2750, chosen by 0x4DCFA0 outside the
+/// garage and track modes) [D]; that the tracksurface's `TR1` is that
+/// default is [I] (its materials name no cube).
 pub const LOADING: Spec<'static> = Spec {
     package: "frontend/fePersistentDatabase.pssg",
     bundle: "frontend/b_persistent.pssg",
     root: "loading_root",
     camera: "load_cam",
     lights: "loading",
+    zone: Some("zone_09"),
+    reflection: "reflection_load.dds",
     tweaks: "loading",
 };
+
+const SHADER: Handle<Shader> = uuid_handle!("3d1c6f0a-8b52-4e7d-9a41-5f2e0c7b9d18");
+
+/// A `fe3d_tracksurface` surface (`fe_world.wgsl`).
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct Surface {
+    #[texture(0)]
+    #[sampler(1)]
+    diffuse: Handle<Image>,
+    #[texture(2, dimension = "cube")]
+    #[sampler(3)]
+    reflection: Handle<Image>,
+    #[uniform(4)]
+    params: SurfaceParams,
+}
+
+/// The pixel program's constants: `_refMinGamma`, `_refMaxScale`, the
+/// texture factor (with the instance alpha) and FresnelMin/Max/Power.
+#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+pub struct SurfaceParams {
+    min_gamma: Vec4,
+    max_scale: Vec4,
+    factor: Vec4,
+    fresnel: Vec4,
+}
+
+impl Material for Surface {
+    fn fragment_shader() -> ShaderRef {
+        SHADER.into()
+    }
+    fn enable_prepass() -> bool {
+        false
+    }
+    fn enable_shadows() -> bool {
+        false
+    }
+    fn specialize(
+        _: &MaterialPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _: &MeshVertexBufferLayoutRef,
+        _: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        Ok(())
+    }
+}
 
 /// A position over time: three curves in the parent's space.
 struct Path3 {
@@ -137,20 +199,48 @@ fn path(scene: &osd::Scene<'_>, node: usize) -> Path3 {
     }
 }
 
-/// An RGB parameter (`valueR`/`valueG`/`valueB`, 0–255) of a parameter
-/// group's own values (before its first `Zone`), as 0–1.
-pub fn group_colour(xml: &str, group: &str, param: &str) -> Option<[f32; 3]> {
+/// The `<Param name="NAME" … />` element of a parameter group: the zone's
+/// own when `zone` names one that sets it, else the group's own (before its
+/// first `Zone`). A zone replaces the group's value once the screen has
+/// entered it [I; the blend between zones is not ported].
+fn param<'x>(xml: &'x str, group: &str, zone: Option<&str>, name: &str) -> Option<&'x str> {
     let start = xml.find(&format!("<ParameterGroup name=\"{group}\""))?;
     let body = &xml[start..];
-    let end = [body.find("<Zone"), body.find("</ParameterGroup>")].into_iter().flatten().min()?;
-    let body = &body[..end];
-    let at = body.find(&format!("name=\"{param}\""))?;
-    let line = &body[at..at + body[at..].find("/>")?];
-    let value = |key: &str| -> Option<f32> {
-        let v = &line[line.find(&format!("{key}=\""))? + key.len() + 2..];
-        v[..v.find('"')?].trim().parse::<f32>().ok().map(|v| v / 255.)
+    let body = &body[..body.find("</ParameterGroup>")?];
+    let find = |scope: &'x str| -> Option<&'x str> {
+        let at = scope.find(&format!("name=\"{name}\""))?;
+        Some(&scope[at..at + scope[at..].find("/>")?])
     };
-    Some([value("valueR")?, value("valueG")?, value("valueB")?])
+    let zoned = zone.and_then(|zone| {
+        let z = &body[body.find(&format!("<Zone id=\"{zone}\""))?..];
+        find(&z[..z.find("</Zone>")?])
+    });
+    zoned.or_else(|| find(&body[..body.find("<Zone").unwrap_or(body.len())]))
+}
+
+/// The number in `key="…"` of a `Param` element.
+fn attr(line: &str, key: &str) -> Option<f32> {
+    let v = &line[line.find(&format!("{key}=\""))? + key.len() + 2..];
+    v[..v.find('"')?].trim().parse().ok()
+}
+
+/// An RGB parameter (`valueR`/`valueG`/`valueB`, 0–255) as 0–1.
+pub fn group_colour(xml: &str, group: &str, zone: Option<&str>, name: &str) -> Option<[f32; 3]> {
+    let line = param(xml, group, zone, name)?;
+    Some([attr(line, "valueR")? / 255., attr(line, "valueG")? / 255., attr(line, "valueB")? / 255.])
+}
+
+/// A scalar parameter (`value`).
+pub fn group_value(xml: &str, group: &str, zone: Option<&str>, name: &str) -> Option<f32> {
+    attr(param(xml, group, zone, name)?, "value")
+}
+
+/// A vector parameter (`valueX`/`valueY`/`valueZ`), read as x, y, z: the
+/// reader 0x4C9A70 stores them in that order, whatever the file's comment
+/// about swapped axes says [D].
+pub fn group_vector(xml: &str, group: &str, zone: Option<&str>, name: &str) -> Option<Vec3> {
+    let line = param(xml, group, zone, name)?;
+    Some(Vec3::new(attr(line, "valueX")?, attr(line, "valueY")?, attr(line, "valueZ")?))
 }
 
 /// The unlit factor of a `fe3d_tracksurface` surface per channel: instance
@@ -197,7 +287,17 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
     let bundle_bytes = read(spec.bundle)?;
     let bundle = grid_formats::pssg::read_tree(&bundle_bytes).map_err(|e| format!("{}: {e}", spec.bundle))?;
     let params = String::from_utf8_lossy(&read("frontend/fe_paramcontrol.xml")?).into_owned();
-    let ambient = group_colour(&params, spec.lights, "ambient").ok_or(format!("no {} ambient", spec.lights))?;
+    let lights = |name: &str| format!("no {} {name}", spec.lights);
+    let ambient = group_colour(&params, spec.lights, spec.zone, "ambient").ok_or_else(|| lights("ambient"))?;
+    let value = |name: &str| group_value(&params, spec.lights, spec.zone, name).ok_or_else(|| lights(name));
+    let vector = |name: &str| group_vector(&params, spec.lights, spec.zone, name).ok_or_else(|| lights(name));
+    let min_gamma = vector("r_min")?.extend(value("r_gamma")?);
+    let max_scale = vector("r_max")?.extend(value("r_scale")?);
+    let cubes = grid_formats::osd::read_cubemaps(&bundle).map_err(|e| format!("{}: {e}", spec.bundle))?;
+    let cube = cubes
+        .iter()
+        .find(|c| c.id == spec.reflection)
+        .ok_or(format!("{}: no {}", spec.bundle, spec.reflection))?;
     let root = scene.node(spec.root).ok_or(format!("no {}", spec.root))?;
     let (nodes, screens) = drawn(&scene, root);
     let camera_id = format!("camera={}", spec.camera);
@@ -222,7 +322,15 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
         ..default()
     });
 
+    if !app.is_plugin_added::<MaterialPlugin<Surface>>() {
+        app.add_plugins(MaterialPlugin::<Surface>::default());
+    }
     let world = app.world_mut();
+    world
+        .resource_mut::<Assets<Shader>>()
+        .insert(SHADER.id(), Shader::from_wgsl(include_str!("fe_world.wgsl"), "grid_fe_world.wgsl"))
+        .map_err(|e| e.to_string())?;
+    let reflection = world.resource_mut::<Assets<Image>>().add(crate::osd_scene::cube(cube));
     let mut textures = HashMap::new();
     let mut materials = HashMap::new();
     let mut parts = Vec::new();
@@ -274,15 +382,18 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
                 };
                 let colour = m.floats("DiffuseColour").filter(|c| c.len() >= 3).map_or([1.; 3], |c| [c[0], c[1], c[2]]);
                 let emissive = m.floats("Emmisive").and_then(|v| v.first().copied()).unwrap_or(0.);
-                let [r, g, b] = surface_factor(colour, emissive, ambient);
-                // The original works on the texture's stored (sRGB) values;
-                // an sRGB factor on linear texels keeps that product [I].
-                let handle = world.resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
-                    base_color: Color::srgb(r, g, b),
-                    base_color_texture: texture,
-                    unlit: true,
-                    cull_mode: None,
-                    ..default()
+                let fresnel = |name: &str, default: f32| m.floats(name).and_then(|v| v.first().copied()).unwrap_or(default);
+                let handle = world.resource_mut::<Assets<Surface>>().add(Surface {
+                    // No texture: white (the default image).
+                    diffuse: texture.unwrap_or_default(),
+                    reflection: reflection.clone(),
+                    params: SurfaceParams {
+                        min_gamma,
+                        max_scale,
+                        // The instance colour is the material's DiffuseColour, opaque [I].
+                        factor: Vec3::from(surface_factor(colour, emissive, ambient)).extend(1.),
+                        fresnel: Vec4::new(fresnel("FresnelMin", 0.), fresnel("FresnelMax", 0.), fresnel("FresnelPower", 1.), 0.),
+                    },
                 });
                 materials.insert(render.material, handle.clone());
                 handle
@@ -292,11 +403,14 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
         parts.push((Mesh3d(mesh), MeshMaterial3d(material), Transform::from_matrix(mat(&placed.world))));
     }
     println!(
-        "fe_world root={} parts={} grafted={grafted} screens_left={screens} materials={} textures={} camera={} fov={:.1}",
+        "fe_world root={} parts={} grafted={grafted} screens_left={screens} materials={} textures={} reflection={} r_gamma={} r_scale={} camera={} fov={:.1}",
         spec.root,
         parts.len(),
         materials.len(),
         textures.len(),
+        spec.reflection,
+        min_gamma.w,
+        max_scale.w,
         spec.camera,
         camera.fov_degrees
     );
@@ -321,14 +435,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_group_colour_skips_zones() {
+    fn a_zone_replaces_only_the_values_it_sets() {
         let xml = r#"<ParameterGroup name="loading" >
             <Param name="ambient" valueR="5" valueG="20" valueB="36" />
+            <Param name="r_gamma" value="1.5" />
+            <!-- NOTE: valueY - max Z -->
+            <Param name="r_min" valueX="-5.139" valueY="0.132" valueZ="-7.832" />
             <Zone id="zone_01"><Param name="ambient" valueR="15" valueG="36" valueB="58" /></Zone>
-            </ParameterGroup>"#;
-        let c = group_colour(xml, "loading", "ambient").unwrap();
+            <Zone id="zone_09"><Param name="r_gamma" value="1.0" /></Zone>
+            </ParameterGroup>
+            <ParameterGroup name="ingame" ><Param name="r_scale" value="3" /></ParameterGroup>"#;
+        let c = group_colour(xml, "loading", None, "ambient").unwrap();
         assert!((c[0] - 5. / 255.).abs() < 1e-6 && (c[2] - 36. / 255.).abs() < 1e-6);
-        assert!(group_colour(xml, "other", "ambient").is_none());
+        assert_eq!(group_colour(xml, "loading", Some("zone_09"), "ambient"), Some(c));
+        assert!((group_colour(xml, "loading", Some("zone_01"), "ambient").unwrap()[0] - 15. / 255.).abs() < 1e-6);
+        assert_eq!(group_value(xml, "loading", None, "r_gamma"), Some(1.5));
+        assert_eq!(group_value(xml, "loading", Some("zone_09"), "r_gamma"), Some(1.));
+        assert_eq!(group_value(xml, "loading", Some("zone_01"), "r_gamma"), Some(1.5));
+        assert_eq!(group_vector(xml, "loading", Some("zone_09"), "r_min"), Some(Vec3::new(-5.139, 0.132, -7.832)));
+        assert!(group_value(xml, "loading", None, "r_scale").is_none(), "another group's value");
+        assert!(group_colour(xml, "other", None, "ambient").is_none());
     }
 
     #[test]
@@ -427,6 +553,26 @@ mod tests {
             let moved = camera.advance(30., 0.05);
             assert!((moved.translation.distance(aim) - eye.distance(aim)).abs() < 0.01);
             assert!((moved.translation - aim).angle_between(eye - aim) < 0.2);
+        }
+        // The reflection: the bundle's one cube, and zone 9's gamma and
+        // scale over the group's box.
+        let cubes = grid_formats::osd::read_cubemaps(&bundle).unwrap();
+        let ids: Vec<_> = cubes.iter().map(|c| (c.id.as_str(), c.size)).collect();
+        assert_eq!(ids, [(LOADING.reflection, 128)]);
+        let params = std::fs::read_to_string(Path::new(&root).join("frontend/fe_paramcontrol.xml")).unwrap();
+        let get = |name| group_value(&params, LOADING.lights, LOADING.zone, name);
+        assert_eq!((get("r_gamma"), get("r_scale")), (Some(1.), Some(1.)));
+        assert_eq!(group_value(&params, LOADING.lights, None, "r_gamma"), Some(1.5));
+        assert_eq!(group_vector(&params, LOADING.lights, LOADING.zone, "r_max"), Some(Vec3::new(3.737, 4.235, 9.674)));
+        let ambient = group_colour(&params, LOADING.lights, LOADING.zone, "ambient").unwrap();
+        assert!((ambient[2] - 36. / 255.).abs() < 1e-6, "zone 9 keeps the group's ambient");
+        // Every drawn material has the program's Fresnel constants.
+        for p in &nodes {
+            if let Some(r) = &scene.nodes[p.node].render {
+                let m = &scene.materials[r.material];
+                let max = m.floats("FresnelMax").and_then(|v| v.first().copied());
+                assert_eq!(max, Some(0.2), "{}", scene.nodes[p.node].id);
+            }
         }
     }
 }

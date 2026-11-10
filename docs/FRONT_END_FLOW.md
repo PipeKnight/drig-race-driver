@@ -116,9 +116,42 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   one [I]; the instance colour taken as `DiffuseColour` [I]), no back-face culling [I], no tone
   map. The camera follows the two `Translation` channels by the screen's own clock (held before
   1.0 s and after 18.333 s), vertical FOV 55.4 [I]. The same `fe_world::Spec` takes any other
-  root, camera and lighting group. Open: the cube reflection (at most 0.16 of the cube at grazing
-  angles), the floor reflection (`loading_reflection`), the stick spring, the particle emitter,
-  the `fe_loading_world` post effect and the stat panel. The noise rotation is ported (next item).
+  root, camera and lighting group. Open: the floor reflection (`loading_reflection`), the stick
+  spring, the particle emitter, the `fe_loading_world` post effect and the stat panel. The noise
+  rotation and the cube reflection are ported (next items).
+- **Cube reflection (F813, static analysis).** `fe3d_tracksurface.cg.fp` in full [D, shaderpack
+  disassembly]: V = normalize(eye − pos), N = normalize(normal), f = sat((1 − N·V)^FresnelPower);
+  R = N(−2 N·V) + V; ray = normalize(−R / (r_max − r_min)); d = 2·ray (1e-5 on an axis at zero);
+  p = sat((pos − r_min)/(r_max − r_min)); q = p + d·min((sat(p + d) − p)/d) (where the ray leaves
+  the box); cube direction (2q − 1)·(−1, 1, −1); reflection = cube^r_gamma × r_scale ×
+  sat(lerp(FresnelMin, FresnelMax, f)) × texture alpha; colour = sat(texture × v2 × light +
+  reflection), all on stored (sRGB) values. The parameters come from the lighting group:
+  `r_min`/`r_gamma` fill `_refMinGamma`, `r_max`/`r_scale` `_refMaxScale` (the area of the
+  group reader 0x4D7140 that reads r_gamma +0x1A0, r_scale +0x1A4, r_min +0x10, r_max +0x20);
+  the vector reader 0x4C9A70 stores valueX, valueY, valueZ as x, y, z (and valueY again as w),
+  so the file's own "max Z" comment on the third value does not change the axis [D]. The
+  `loading` group: r_gamma 1.5, r_scale 0.8, r_min (−5.139, 0.132, −7.832), r_max (3.737, 4.235,
+  9.674); its `zone_09` (`l_zone_loading_stats`, the loading screen's zone) sets r_gamma 1 and
+  r_scale 1 and no ambient [D]; that a zone's value replaces the group's and the rest falls back
+  to the group is [I]. The cube: `b_persistent.pssg` holds one CUBEMAPTEXTURE,
+  `reflection_load.dds` (128², DXT1, six faces, no mips), the default cube that 0x4E2750 loads
+  and 0x4DCFA0 selects; that `fe3d_tracksurface`'s cube sampler gets this default is [I]. The
+  camera sits far outside the box (x ≈ −105…−149 against −5…4), and so does every loading-world
+  surface (the floor is at y −120, the box at y 0.1…4.2), so p is clamped to a face. Where the
+  ray points away from the box on a clamped axis, that axis's exit is 0, q = p and the lookup
+  collapses to the nearest box corner; where it points back, q moves along the ray. The switch
+  happens where an axis of the ray changes sign (a line through the point under the camera) and
+  where p stops being clamped (a box plane, for example z = r_min.z). On the floor this leaves a
+  hard-edged quad: inside it, the lookup reaches the cube's bright upper half, and outside it, the
+  corner's dark lower half. A debug render measured this: texture alpha 1 everywhere, a smooth
+  Fresnel term, and the cube's green jumping from 34 to 213 at the edge. The barrier shows a
+  smaller rectangle of the same kind. This follows from the [D] formula once pos is world space.
+  [I] the original's pos may be in another space, because a box of about 9 × 4 × 17 around the
+  origin looks like a car's; only a grid.exe capture of the loading screen settles it. The port
+  keeps the formula literal.
+  Port: `fe_world.wgsl` (a `Material` with the formula above, sRGB re-encoded after sampling and
+  decoded for the linear target), `fe_world::Surface`; the zone is `Spec::zone`, the cube
+  `Spec::reflection`, read through `grid_formats::osd::read_cubemaps`.
 - **Camera noise (static analysis of the unpacked exe).** The `<noise_tweaks>` of a
   `<camera_tweaks>` block (`default`, `pause`, `loading`, `in_game_cameras`) are read by
   0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,

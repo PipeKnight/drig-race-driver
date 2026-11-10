@@ -425,7 +425,8 @@ fn transform(m: &[f32; 16]) -> Transform {
     Transform::from_matrix(Mat4::from_cols_array(m))
 }
 
-fn cube(c: &osd::Cubemap<'_>) -> Image {
+/// A DXT1 cubemap as an sRGB cube image (also the front-end world's reflection).
+pub(crate) fn cube(c: &osd::Cubemap<'_>) -> Image {
     let mut data = Vec::new();
     for face in c.faces {
         data.extend(crate::texture_upload::decode_levels(face, c.size, c.size, 1, false).unwrap_or_default());
