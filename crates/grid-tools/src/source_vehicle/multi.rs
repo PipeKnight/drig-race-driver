@@ -2999,9 +2999,18 @@ mod tests {
                 )
                 .unwrap();
                 multi.enable_dynamic_props(root).unwrap();
-                // The stacks the field broke at ticks 13308-13310.
+                // The stacks the field broke at ticks 13308-13310: indices in
+                // the catalog before F789, which made the props with several
+                // shape behaviours of one type breakable too.
                 let props = multi.props.as_mut().unwrap();
-                for b in [954, 956, 959] {
+                let several = ["cushion_orange_a"];
+                let before: Vec<usize> = (0..props.catalog.breakables.len())
+                    .filter(|&b| {
+                        let t = &props.catalog.breakables[b].template;
+                        !several.iter().any(|s| t.starts_with(s))
+                    })
+                    .collect();
+                for b in [954, 956, 959].map(|b| before[b]) {
                     assert!(props.catalog.breakables[b].template.starts_with("tyrestack"));
                     props.queue_break(b);
                 }

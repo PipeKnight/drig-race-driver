@@ -505,16 +505,25 @@ mod tests {
             *templates.entry(&b.template).or_default() += 1;
         }
         // The barrels stand on cylinders (128 cylinder route shapes) and
-        // break, and the armco sections (F501) and all 21 drift flags (the 4
-        // scaled ones joined since F783, 0x7CC1E0); the crates, chevrons and
-        // armco ends stay static.
+        // break, and the armco sections (F501), all 21 drift flags (the 4
+        // scaled ones joined since F783, 0x7CC1E0) and the cardboxes, logs,
+        // pipes and signs with several shape behaviours of one type (0x7D64B0);
+        // the crates, chevrons and armco ends stay static.
         assert_eq!(props.boxes.len(), 4258);
         assert_eq!(
             templates,
-            [("armco_main_section.max", 42), ("close_drift_flag.max", 21), ("gg_barrel.max", 77)]
-                .into()
+            [
+                ("armco_main_section.max", 42),
+                ("cardbox_group_01.max", 29),
+                ("close_drift_flag.max", 21),
+                ("gg_barrel.max", 77),
+                ("logs_01.max", 15),
+                ("misc_signs_c.max", 21),
+                ("pipes_piles_a.max", 10),
+            ]
+            .into()
         );
-        assert_eq!(catalog.unported.values().sum::<usize>(), 429);
+        assert_eq!(catalog.unported.values().sum::<usize>(), 354);
         assert!(!catalog.unported.contains_key("close_drift_flag.max"));
     }
 
@@ -593,7 +602,7 @@ mod tests {
         // route boxes, breakable entities, unported placements)
         for (path, name, gates, distance, splits, slots, line, boxes, breakables, unported) in [
             (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2296, 1376, 87),
-            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 2848, 0, 363),
+            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 2848, 91, 272),
             (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 2270, 239, 1),
         ] {
             let route = Route::new(path).unwrap();
@@ -627,9 +636,12 @@ mod tests {
                 "{path}"
             );
             // Tyre stacks, the joined Milan green cushions and San
-            // Francisco tyre walls (F484), and Milan's armco (F501).
+            // Francisco tyre walls (F484), Milan's armco (F501) and Shibuya's
+            // cushions with several shape behaviours of one type (F789).
             assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")
                 || b.template == "green_cushion_a.max"
+                || b.template == "cushion_combo_a.max"
+                || b.template == "cushion_orange_a.max"
                 || b.template.starts_with("armco_main_section_large")
                 || b.template == "tyrewall_black.max"
                 || b.template == "close_drift_flag.max"));

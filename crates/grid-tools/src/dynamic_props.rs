@@ -605,13 +605,15 @@ impl Catalog {
             let Some(&(owner, behaviour)) = behaviours.first() else {
                 continue;
             };
-            // Only the flags are checked with several (other templates with
-            // them, such as Yokohama's crates and signs, stay intact).
-            if (behaviours.len() > 1 && !crate::entity_geometry::static_damage_ported(&template))
-                || behaviours.iter().any(|(o, b)| {
-                    o.component != owner.component || b.behaviour_type != behaviour.behaviour_type
-                })
-            {
+            // [D] 0x7D64B0 breaks a queued entity by the first shape whose
+            // behaviour fired and applies that behaviour's type (0x7D5180), so
+            // several shape behaviours are one break when they share the owner
+            // component and the type; each box keeps its own threshold and
+            // explosion (`limits`). Shibuya's cushions, Yokohama's crates and
+            // signs, the close-drift flags.
+            if behaviours.iter().any(|(o, b)| {
+                o.component != owner.component || b.behaviour_type != behaviour.behaviour_type
+            }) {
                 *catalog.unported.entry(template).or_default() += 1;
                 continue;
             }
@@ -3608,8 +3610,11 @@ mod tests {
                         }
                         touching += 1;
                         deepest = deepest.max(h.contact.penetration);
+                        // Up to 0.1 m allowed: a Shibuya cushion_combo_a piece
+                        // (breakable since F789) spawns 0.04 m into the
+                        // underside of a raised barrier_meshfence_long box.
                         assert!(
-                            h.contact.normal[1] > -0.5,
+                            h.contact.normal[1] > -0.5 || h.contact.penetration < 0.1,
                             "{path} {} at {:?}: {:?} {}",
                             b.template,
                             p.pose[3],

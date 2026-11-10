@@ -138,10 +138,9 @@ impl PropBox {
     }
 }
 
-/// Whether a template's damage state with static (`infMass`) pieces, or a
-/// body with several shape behaviours, is ported: so far only the close-drift
-/// flags. Others (the Long Beach and Spa tyre walls, Yokohama's crates and
-/// signs) stay intact until their breaks are checked.
+/// Whether a template's damage state with static (`infMass`) pieces is
+/// ported: so far only the close-drift flags. Others (the Long Beach and Spa
+/// tyre walls) stay intact until their breaks are checked.
 pub fn static_damage_ported(template: &str) -> bool {
     template.contains("close_drift_flag")
 }

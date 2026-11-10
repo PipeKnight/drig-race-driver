@@ -537,6 +537,33 @@ joint, so there is nothing to draw in the original either; grid-app counts them 
 cylinder, centred 0.12 m higher. That is data, not an offset, and the test allows a post's mesh
 up to 20% of the cylinder's height beyond it.
 
+## Several shape behaviours of one break (F789)
+
+[D] `0x7D64B0` walks each queued entity's subentities (+0x94) and, in each, the physics
+shape records (+0xC); the first record whose fired behaviour is set gives
+`0x7D5180(entity, 0, behaviour props +4, &v, 0)` with ECX = that behaviour, then
+`0x7D5540(..., 1)`, then the scan restarts from the queue head. `0x7BDFD0` records the
+behaviour per shape (threshold = behaviour +0x3C, else props +0x2C, else 1000). So an
+entity whose shapes carry several behaviours breaks once, by the shape that was hit,
+and gets that behaviour's type (deleted and added components) and explosion factor.
+
+Port: a template with several shape behaviours is breakable when they share the owner
+component and the behaviour type (each intact box keeps its own threshold and explosion
+in `Breakable::limits`). Until F789 only the close-drift flags passed, through a
+template-name test. Over the 94 race routes the structural rule adds 1641 entities:
+`cushion_combo_a` (740, Shibuya), `cushion_orange_a` (357), `cardbox_group_01` (292),
+`misc_signs_c` (91), `logs_01` (80), `pipes_piles_a` (67), `spa_sign_b` (14) on Shibuya,
+Yokohama Docks, Washington and Haruna. Probe: `local/drift-soak/shib/p3-*.txt`.
+
+Still static, for a different reason: damage states whose dynamic pieces have several
+shapes (0x7CDCD0 attaches all of an added body's shapes, `0x7C6350` each, and the mass
+comes from all of them; a `PieceSpec` holds one primitive). These are the foam posts
+(`post_foam_*`: cylinder plus foot box, 2403 placements), `railing_plastic_combo` (two boxes
+per piece) and `cone_plastic_emisive_a` (two cylinders). Damage states with `infMass`
+pieces still pass only for the close-drift flags (`entity_geometry::static_damage_ported`);
+the general rule would add about 4700 tyre walls on Spa and Long Beach, whose breaks
+are not checked.
+
 ## Not yet established
 
 - Armco end pieces (`link0`, a rail of three shapes) and scaled jointed entities stay
