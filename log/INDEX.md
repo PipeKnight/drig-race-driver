@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F823](F0823.md) | 2026-11-10 | Drift scoreboard in the front-end art |
+| [F822](F0822.md) | 2026-11-10 | Results screens slide in and out |
 | [F821](F0821.md) | 2026-11-11 | Loading stat panel and particle emitter evidence |
 | [F820](F0820.md) | 2026-11-10 | Front-end camera stick spring |
 | [F819](F0819.md) | 2026-11-10 | Loading reflection box space (static evidence) |

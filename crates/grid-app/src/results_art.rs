@@ -1,10 +1,12 @@
-//! The race results screen in the original's front-end art (docs/RACE_HUD.md
-//! §6.7, docs/FIDELITY_BACKLOG.md row 69): the `screen/pause_leaderboards`
-//! glyph of fePersistentDatabase with its glyphs grafted in
+//! The race results screens in the original's front-end art (docs/RACE_HUD.md
+//! §6.7, docs/FIDELITY_BACKLOG.md row 69): a screen glyph of
+//! fePersistentDatabase ([`Screen`]: `screen/pause_leaderboards`,
+//! `screen/drift_scoreboard`) with its glyphs grafted in
 //! (`grid_formats::osd_glyph`), seen through the `pause_root` camera
 //! `camera1`, drawn with the shared front-end materials (`fe3d`) into an image
 //! shown over the race, and filled from the post-race results view
-//! (`post_race::View`).
+//! (`post_race::View`). Each screen is a [`Def`] of names; the layout, pose,
+//! row filler and text binding are shared.
 //!
 //! [D] The tree, materials and text layouts; the camera, its target and the
 //! animation that moves both with the screen (`Anim!96` of the package); the
@@ -48,22 +50,87 @@ pub(crate) const PARAMS: &str = "frontend/fe_paramcontrol.xml";
 /// `reflection_sharp.dds`, which the race OSD package holds as `env_soft.dds`
 /// / `env_sharp.dds` [I: the same images under the OSD's names].
 pub(crate) const CUBES: &str = "Osd/dial2.pssg";
-const SCREEN: &str = "screen/pause_leaderboards=leaderboards";
 const CAMERA: &str = "camera=camera1";
 const TARGET: &str = "target=camera1";
-/// Rows drawn at once [I: the list's frame holds twelve].
-pub const VISIBLE_ROWS: usize = 12;
-/// Subtrees never drawn: the race timer, the row arrows and flags, the pill
-/// helper, the frame without scroller [I: the frame of a list that scrolls].
-const HIDDEN: [&str; 5] = [
-    "text=timer",
-    "{30}component/leaderboard_arrow=arrow",
-    "null=pill_helper",
-    "library/image_flag=flag",
-    "component/leaderboard_noscroll=noscroll",
+
+/// A results screen the art draws.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Screen {
+    /// `screen/pause_leaderboards`: the race and drift results.
+    #[default]
+    Results,
+    /// `screen/drift_scoreboard`: the drift statistics and the drift types
+    /// (states.xml `post_race_drift_scoreboard`, glyph `drift_scoreboard`).
+    DriftScoreboard,
+}
+
+/// Every screen, in the order of [`DEFS`].
+const SCREENS: [Screen; 2] = [Screen::Results, Screen::DriftScoreboard];
+
+impl Screen {
+    fn def(self) -> &'static Def {
+        &DEFS[self as usize]
+    }
+}
+
+/// The names the art reads of one screen glyph.
+#[derive(Debug)]
+struct Def {
+    /// The screen node.
+    screen: &'static str,
+    /// The row glyphs' name up to the row number (`{rows}0` is the first).
+    rows: &'static str,
+    /// The column titles' glyph.
+    header: &'static str,
+    /// Rows drawn at once.
+    visible: usize,
+    /// The `library_simple=content` children drawn, with the event kind; any
+    /// other child is never drawn.
+    content: &'static [(&'static str, Variant)],
+    /// Text nodes showing the view's title and body.
+    title: &'static [&'static str],
+    body: &'static [&'static str],
+    /// Subtrees never drawn.
+    hidden: &'static [&'static str],
+}
+
+const DEFS: [Def; 2] = [
+    Def {
+        screen: "screen/pause_leaderboards=leaderboards",
+        rows: "gadget/list_items=",
+        header: "gadget/list_titles=titles",
+        // [I] The list's frame holds twelve.
+        visible: 12,
+        content: &[("null=race_results", Variant::Race), ("null=drift_results", Variant::Drift)],
+        title: &["title_0", "title_1"],
+        body: &["table_title"],
+        // The race timer, the row arrows and flags, the pill helper, the
+        // frame without scroller [I: the frame of a list that scrolls].
+        hidden: &[
+            "text=timer",
+            "{30}component/leaderboard_arrow=arrow",
+            "null=pill_helper",
+            "library/image_flag=flag",
+            "component/leaderboard_noscroll=noscroll",
+        ],
+    },
+    Def {
+        screen: "screen/drift_scoreboard=drift_scoreboard",
+        rows: "gadget/drift_list_items=",
+        header: "gadget/drift_list_titles=drift_titles",
+        // [I] Row 7 would cover the total (rows 8 apart from y 36, the
+        // total at -20).
+        visible: 7,
+        // states.xml binds both lists' content to these objects [D].
+        content: &[("null=online_leaderboard", Variant::Any), ("null=event_standings", Variant::Any)],
+        // `title_01` = drift_scoreboard_screen_title; `title_00` and
+        // `table_title` are not bound [D].
+        title: &["title_01"],
+        body: &[],
+        // The pills (`h_pill_group`, the post-race panel's for now).
+        hidden: &["object/h_pill_group=undefined"],
+    },
 ];
-const ROW: &str = "gadget/list_items=0";
-const HEADER: &str = "gadget/list_titles=titles";
 
 // ------------------------------------------------------------------ the board
 
@@ -83,6 +150,7 @@ pub struct Board {
     pub view: crate::post_race::View,
     pub drift: bool,
     pub fourth: Fourth,
+    pub screen: Screen,
 }
 
 /// Written by the post-race screen: the results to draw, `None` to hide.
@@ -117,27 +185,24 @@ struct Gate {
     scrollbar: bool,
 }
 
-/// The gate of a node from its name and its ancestors' (`names[0]` the node,
-/// then up to the screen).
-fn gate(names: &[&str]) -> Gate {
+/// The gate of a node of screen `def` from its name and its ancestors'
+/// (`names[0]` the node, then up to the screen).
+fn gate(names: &[&str], def: &Def) -> Gate {
     let any = |n: &str| names.contains(&n);
-    let hidden = names.iter().any(|n| {
-        HIDDEN.contains(n) || n.strip_prefix("gadget/list_items=").is_some_and(|k| k != "0")
-    }) || names.first() == Some(&"scroller_v_manual=centre_face");
+    let hidden = names.iter().any(|n| def.hidden.contains(n) || n.strip_prefix(def.rows).is_some_and(|k| k != "0"))
+        || names.first() == Some(&"scroller_v_manual=centre_face");
     let variant = names
         .windows(2)
         .find(|w| w[1].ends_with("library_simple=content"))
-        .map_or(Variant::Any, |w| match w[0] {
-            "null=race_results" => Variant::Race,
-            "null=drift_results" => Variant::Drift,
-            _ => Variant::Never,
-        });
+        .map_or(Variant::Any, |w| def.content.iter().find(|c| c.0 == w[0]).map_or(Variant::Never, |c| c.1));
+    let row = names.iter().any(|n| n.strip_prefix(def.rows) == Some("0"));
     Gate {
         hidden,
         variant,
-        row: any(ROW),
-        header: any(HEADER),
-        player_only: any("null=track_info_pill"),
+        row,
+        header: any(def.header),
+        // The row cursor pill; the drift statistics' pills are always lit.
+        player_only: row && any("null=track_info_pill"),
         scrollbar: any("null=scrollbar"),
     }
 }
@@ -153,6 +218,9 @@ enum Column {
     Points,
     Class,
     Difference,
+    /// The drift scoreboard's drift type and count.
+    DriftType,
+    Amount,
 }
 
 fn column(text: &str) -> Option<Column> {
@@ -165,6 +233,8 @@ fn column(text: &str) -> Option<Column> {
         "points" => Column::Points,
         "class" => Column::Class,
         "difference" => Column::Difference,
+        "drift_type" => Column::DriftType,
+        "amount" | "drift_amount" => Column::Amount,
         _ => return None,
     })
 }
@@ -181,6 +251,8 @@ fn view_column(c: Column, fourth: Fourth) -> Option<usize> {
         Column::Class => (fourth == Fourth::Class).then_some(4),
         // The touge's second run [I: the gap column's place].
         Column::Difference => (fourth == Fourth::Round).then_some(5),
+        Column::DriftType => Some(0),
+        Column::Amount => Some(1),
     }
 }
 
@@ -190,32 +262,53 @@ enum Field {
     Body,
     Header(Column),
     Cell(Column),
+    /// A drift statistic (`View::stats` index): its label, or its value.
+    Stat(usize, bool),
 }
 
-fn field(names: &[&str], g: &Gate) -> Option<Field> {
+/// The drift statistic a node belongs to: its `drift_cursor_half` or
+/// `drift_cursor_total` glyph, by the states.xml item id [D].
+fn stat(names: &[&str]) -> Option<usize> {
+    names
+        .iter()
+        .find_map(|n| n.strip_prefix("component/drift_cursor_half=").or_else(|| n.strip_prefix("component/drift_cursor_total=")))
+        .and_then(|k| crate::post_race::DRIFT_STATS.iter().position(|s| *s == k))
+}
+
+fn field(names: &[&str], g: &Gate, def: &Def) -> Option<Field> {
     let text = names.first()?.strip_prefix("text=")?;
-    match text {
-        "title_0" | "title_1" => Some(Field::Title),
-        "table_title" => Some(Field::Body),
-        _ => {
-            let c = column(text)?;
-            if g.row {
-                Some(Field::Cell(c))
-            } else if g.header {
-                Some(Field::Header(c))
-            } else {
-                None
-            }
-        }
+    if def.title.contains(&text) {
+        return Some(Field::Title);
+    }
+    if def.body.contains(&text) {
+        return Some(Field::Body);
+    }
+    if let Some(i) = stat(names) {
+        // states.xml binds `drift_type` (`total` in the total) to the label;
+        // `score` shows the value [D].
+        return match text {
+            "drift_type" | "total" => Some(Field::Stat(i, false)),
+            "score" => Some(Field::Stat(i, true)),
+            _ => None,
+        };
+    }
+    let c = column(text)?;
+    if g.row {
+        Some(Field::Cell(c))
+    } else if g.header {
+        Some(Field::Header(c))
+    } else {
+        None
     }
 }
 
-/// The first data row drawn: the player's row in the middle of the window.
-fn window(rows: usize, player: Option<usize>) -> usize {
-    if rows <= VISIBLE_ROWS {
+/// The first data row drawn of `visible`: the player's row in the middle of
+/// the window.
+fn window(rows: usize, player: Option<usize>, visible: usize) -> usize {
+    if rows <= visible {
         return 0;
     }
-    player.unwrap_or(0).saturating_sub(VISIBLE_ROWS / 2).min(rows - VISIBLE_ROWS)
+    player.unwrap_or(0).saturating_sub(visible / 2).min(rows - visible)
 }
 
 /// The string a text field shows for `board` (row `slot` of the window).
@@ -230,9 +323,10 @@ fn text_of(field: Field, slot: Option<usize>, board: &Board) -> String {
         Field::Header(c) => cell(0, c),
         Field::Cell(c) => {
             let rows = v.table.len().saturating_sub(1);
-            let start = window(rows, v.player_row.map(|p| p.saturating_sub(1)));
+            let start = window(rows, v.player_row.map(|p| p.saturating_sub(1)), board.screen.def().visible);
             cell(1 + start + slot.unwrap_or(0), c)
         }
+        Field::Stat(i, value) => v.stats.get(i).map(|s| s[usize::from(value)].clone()).unwrap_or_default(),
     }
 }
 
@@ -240,7 +334,7 @@ fn text_of(field: Field, slot: Option<usize>, board: &Board) -> String {
 fn on_player_row(slot: Option<usize>, board: &Board) -> bool {
     let rows = board.view.table.len().saturating_sub(1);
     let player = board.view.player_row.map(|p| p.saturating_sub(1));
-    slot.is_some_and(|k| Some(window(rows, player) + k) == player)
+    slot.is_some_and(|k| Some(window(rows, player, board.screen.def().visible) + k) == player)
 }
 
 /// Whether an item of `gate` in row `slot` is drawn for `board`.
@@ -253,13 +347,14 @@ fn visible(gate: &Gate, slot: Option<usize>, board: &Board) -> bool {
     };
     let rows = board.view.table.len().saturating_sub(1);
     let player = board.view.player_row.map(|p| p.saturating_sub(1));
-    let start = window(rows, player);
+    let shown = board.screen.def().visible;
+    let start = window(rows, player, shown);
     let row = slot.map(|k| start + k);
     variant
         && !gate.hidden
         && row.is_none_or(|r| r < rows)
         && (!gate.player_only || (row.is_some() && row == player))
-        && (!gate.scrollbar || rows > VISIBLE_ROWS)
+        && (!gate.scrollbar || rows > shown)
 }
 
 // ------------------------------------------------------------------ pose
@@ -402,6 +497,71 @@ struct Item {
     bounds: [f32; 6],
     shape: Shape,
     gate: Gate,
+    /// The [`Layout::motions`] entries of the node and its ancestors.
+    motion: Vec<usize>,
+}
+
+/// Which event of a screen's own animations plays: the flow 0x4A6670 sends
+/// the leaving screen `exit` and waits for it before the next screen's
+/// `enter` [D].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Play {
+    Enter,
+    Exit,
+}
+
+/// A node of the screen that its own animation slides on `enter` and `exit`
+/// (`helper=anim` of `leaderboards_root`: X -180 at frame 0, 0 at 1, 150 at
+/// 2, each event 0.4 s) [D].
+#[derive(Clone, Debug)]
+struct Motion {
+    channel: osd::Channel,
+    /// The world matrix of the node's parent.
+    parent: Mat4,
+    /// The translation the layout placed it at.
+    rest: Vec3,
+    enter: Option<osd::Event>,
+    exit: Option<osd::Event>,
+    /// The frame `enter` ends at (where `exit` starts).
+    held: f32,
+}
+
+impl Motion {
+    fn event(&self, play: Play) -> Option<&osd::Event> {
+        match play {
+            Play::Enter => self.enter.as_ref(),
+            Play::Exit => self.exit.as_ref(),
+        }
+    }
+
+    /// The animation frame `t` seconds into `play`.
+    fn frame(&self, play: Play, t: f32) -> f32 {
+        self.event(play).map_or(self.held, |e| e.at(self.held, t).0)
+    }
+
+    /// The channel's translation at `frame`.
+    fn at(&self, frame: f32) -> Vec3 {
+        let c = &self.channel.components;
+        Vec3::new(
+            c.first().map_or(self.rest.x, |k| k.sample(frame)),
+            c.get(1).map_or(self.rest.y, |k| k.sample(frame)),
+            c.get(2).map_or(self.rest.z, |k| k.sample(frame)),
+        )
+    }
+
+    /// The world offset of the node at `frame` from where the layout put it,
+    /// which is where `enter` leaves it: the authored move from the held
+    /// frame. Some nodes rest a little away from their channel's held key
+    /// (the results title: x 0.76 against 0.6), so the delta, not the
+    /// absolute key, is applied [I].
+    fn offset(&self, frame: f32) -> Vec3 {
+        self.parent.transform_vector3(self.at(frame) - self.at(self.held))
+    }
+}
+
+/// How long `play` runs on a screen: its longest event.
+fn play_seconds(motions: &[Motion], play: Play) -> f32 {
+    motions.iter().filter_map(|m| m.event(play).map(|e| e.seconds(m.held))).fold(0., f32::max)
 }
 
 #[derive(Clone, Debug)]
@@ -426,6 +586,8 @@ struct Layout {
     materials: Vec<MaterialDef>,
     /// World offset from one row to the next.
     pitch: Vec3,
+    /// The nodes the screen's `enter` and `exit` slide.
+    motions: Vec<Motion>,
     /// What was left out, for the log.
     skipped: HashMap<&'static str, usize>,
 }
@@ -503,10 +665,10 @@ fn state_colours<'s>(s: &'s osd::Scene) -> HashMap<&'s str, [Option<Vec3>; 2]> {
     best.into_iter().map(|(id, (_, states))| (id, states)).collect()
 }
 
-fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
+fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
     let s0 = scenes[0];
     let find = |name: &str| s0.nodes.iter().position(|n| n.name() == name).ok_or(format!("no {name}"));
-    let (screen, camera, target) = (find(SCREEN)?, find(CAMERA)?, find(TARGET)?);
+    let (screen, camera, target) = (find(def.screen)?, find(CAMERA)?, find(TARGET)?);
     let anim = s0
         .animations
         .iter()
@@ -535,6 +697,23 @@ fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
                 }
                 for c in an.channels.iter().filter(|c| c.semantic == osd::Semantic::Translation) {
                     m.entry(c.target.as_str()).or_insert(c);
+                }
+            }
+            m
+        })
+        .collect();
+    // Translation channels of animations with their own `enter` or `exit`.
+    let moving: Vec<HashMap<&str, (&osd::Animation, &osd::Channel)>> = scenes
+        .iter()
+        .enumerate()
+        .map(|(si, s)| {
+            let mut m = HashMap::new();
+            for (ai, an) in s.animations.iter().enumerate() {
+                if (si == 0 && ai == anim) || (an.event("enter").is_none() && an.event("exit").is_none()) {
+                    continue;
+                }
+                for c in an.channels.iter().filter(|c| c.semantic == osd::Semantic::Translation) {
+                    m.entry(c.target.as_str()).or_insert((an, c));
                 }
             }
             m
@@ -573,16 +752,67 @@ fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
     let placed = osd_glyph::expand_with(scenes, 0, screen, &parent_world, &local);
     let name = |p: &osd_glyph::Placed| scenes[p.scene].nodes[p.node].name();
     let at = |n: &str| placed.iter().find(|p| name(p) == n).map(|p| Vec3::new(p.world[12], p.world[13], p.world[14]));
-    let pitch = match (at("gadget/list_items=0"), at("gadget/list_items=1")) {
+    let pitch = match (at(&format!("{}0", def.rows)), at(&format!("{}1", def.rows))) {
         (Some(a), Some(b)) => b - a,
-        _ => return Err("no row pitch".into()),
+        _ => return Err(format!("{}: no row pitch", def.screen)),
     };
     let mut skipped: HashMap<&'static str, usize> = HashMap::new();
     let mut materials = Vec::new();
     let mut material_index: HashMap<(usize, usize), usize> = HashMap::new();
     let states: Vec<HashMap<&str, [Option<Vec3>; 2]>> = scenes.iter().map(|s| state_colours(s)).collect();
     let mut items = Vec::new();
-    for p in &placed {
+    let mut motions = Vec::new();
+    // Every animated ancestor moves the subtree; translations alone leave the
+    // linear part of the world matrices as they are, so the moves add up.
+    let mut motion_of: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut motion = |q: usize| -> Vec<usize> {
+        let mut path = Vec::new();
+        let mut at = Some(q);
+        let mut known = Vec::new();
+        while let Some(i) = at {
+            if let Some(m) = motion_of.get(&i) {
+                known = m.clone();
+                break;
+            }
+            path.push(i);
+            at = placed[i].parent;
+        }
+        for &i in path.iter().rev() {
+            let pl = &placed[i];
+            let node = &scenes[pl.scene].nodes[pl.node];
+            if let Some(&(an, c)) = moving[pl.scene].get(node.id.as_str()).or_else(|| moving[pl.scene].get(node.name())) {
+                let saved = Vec3::new(node.local[12], node.local[13], node.local[14]);
+                let enter = an.event("enter").cloned();
+                // The frame the screen rests at: the slide key the layout put
+                // the node at; else where an `enter` that sets the frame
+                // leaves it; else the key nearest the saved pose (`text=team`
+                // of Anim!59: an instant `enter`, then `exit` from frame 1) [I].
+                let moves = |e: &osd::Event| e.steps.iter().any(|s| !matches!(s, osd::Step::Trigger(_)));
+                let at = |t: f32| Vec3::from_array(std::array::from_fn(|k| c.components.get(k).map_or(saved[k], |k| k.sample(t))));
+                let held = match (slide(c, saved), enter.as_ref().filter(|e| moves(e))) {
+                    (Some(_), _) => c.components[0].0[1].time,
+                    (None, Some(e)) => e.at(an.default_frame, f32::MAX).0,
+                    (None, None) => c
+                        .components
+                        .first()
+                        .and_then(|k| k.0.iter().map(|k| k.time).min_by(|a, b| at(*a).distance(saved).total_cmp(&at(*b).distance(saved))))
+                        .unwrap_or(an.default_frame),
+                };
+                motions.push(Motion {
+                    channel: c.clone(),
+                    parent: pl.parent.map_or(Mat4::from_cols_array(&parent_world), |r| Mat4::from_cols_array(&placed[r].world)),
+                    rest: slide(c, saved).unwrap_or(saved),
+                    enter,
+                    exit: an.event("exit").cloned(),
+                    held,
+                });
+                known.push(motions.len() - 1);
+            }
+            motion_of.insert(i, known.clone());
+        }
+        known
+    };
+    for (pi, p) in placed.iter().enumerate() {
         let node = &scenes[p.scene].nodes[p.node];
         let Some(render) = &node.render else {
             continue;
@@ -593,7 +823,7 @@ fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
             names.push(name(&placed[q]));
             up = placed[q].parent;
         }
-        let g = gate(&names);
+        let g = gate(&names, def);
         if g.hidden || g.variant == Variant::Never {
             *skipped.entry("gated").or_default() += 1;
             continue;
@@ -604,7 +834,7 @@ fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
             continue;
         };
         let shape = match &node.text {
-            Some(t) => match field(&names, &g) {
+            Some(t) => match field(&names, &g, def) {
                 Some(field) => Shape::Text { layout: t.clone(), field },
                 None => {
                     *skipped.entry("text").or_default() += 1;
@@ -625,7 +855,15 @@ fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
             });
             materials.len() - 1
         });
-        items.push(Item { world: Mat4::from_cols_array(&p.world), material, family, bounds: node.bounds, shape, gate: g });
+        items.push(Item {
+            world: Mat4::from_cols_array(&p.world),
+            material,
+            family,
+            bounds: node.bounds,
+            shape,
+            gate: g,
+            motion: motion(pi),
+        });
     }
     Ok(Layout {
         pose,
@@ -634,6 +872,7 @@ fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
         items,
         materials,
         pitch,
+        motions,
         skipped,
     })
 }
@@ -641,13 +880,14 @@ fn layout(scenes: &[&osd::Scene]) -> Result<Layout, String> {
 // ------------------------------------------------------------------ loading
 
 struct Prepared {
-    layout: Layout,
+    /// Per screen, in the order of [`SCREENS`].
+    layouts: Vec<Layout>,
     /// Bundle textures by name.
     images: HashMap<String, Image>,
     cubes: [Image; 2],
     fonts: HashMap<String, osd_scene::Font>,
-    /// The Bevy mesh of each static item.
-    meshes: Vec<Option<Mesh>>,
+    /// Per screen, the Bevy mesh of each static item.
+    meshes: Vec<Vec<Option<Mesh>>>,
     lights: fe3d::Lights,
 }
 
@@ -680,11 +920,11 @@ fn prepare(root: &Path) -> Result<Prepared, String> {
     let scenes: Vec<osd::Scene> =
         trees.iter().zip(PACKAGES).map(|(t, p)| osd::read_scene(t).map_err(|e| format!("{p}: {e}"))).collect::<Result<_, _>>()?;
     let refs: Vec<&osd::Scene> = scenes.iter().collect();
-    let layout = layout(&refs)?;
+    let layouts: Vec<Layout> = SCREENS.iter().map(|s| layout(&refs, s.def())).collect::<Result<_, _>>()?;
     // Bundle textures.
-    let wanted: HashSet<&str> = layout
-        .materials
+    let wanted: HashSet<&str> = layouts
         .iter()
+        .flat_map(|l| &l.materials)
         .flat_map(|m| [&m.dirt, &m.pattern, &m.diffuse])
         .filter_map(|t| t.as_deref())
         .collect();
@@ -707,7 +947,7 @@ fn prepare(root: &Path) -> Result<Prepared, String> {
     let cubes = [cube_of("env_soft.dds")?, cube_of("env_sharp.dds")?];
     // Fonts.
     let mut fonts = HashMap::new();
-    for item in &layout.items {
+    for item in layouts.iter().flat_map(|l| &l.items) {
         if let Shape::Text { layout: t, .. } = &item.shape
             && !fonts.contains_key(&t.font)
         {
@@ -721,17 +961,21 @@ fn prepare(root: &Path) -> Result<Prepared, String> {
             fonts.insert(t.font.clone(), osd_scene::font(osd::read_font(&tree).map_err(|e| format!("{}: {e}", path.display()))?));
         }
     }
-    let meshes = layout
-        .items
+    let meshes = layouts
         .iter()
-        .map(|i| match &i.shape {
-            Shape::Static(m) => Some(fe3d::mesh(m, &i.bounds, i.family)),
-            Shape::Text { .. } => None,
+        .map(|l| {
+            l.items
+                .iter()
+                .map(|i| match &i.shape {
+                    Shape::Static(m) => Some(fe3d::mesh(m, &i.bounds, i.family)),
+                    Shape::Text { .. } => None,
+                })
+                .collect()
         })
         .collect();
     let xml = String::from_utf8_lossy(&read(PARAMS)?).into_owned();
     let lights = fe3d::Lights::read(&xml, "ingame", Some("leaderboards")).unwrap_or_default();
-    Ok(Prepared { layout, images, cubes, fonts, meshes, lights })
+    Ok(Prepared { layouts, images, cubes, fonts, meshes, lights })
 }
 
 #[derive(Resource)]
@@ -794,10 +1038,11 @@ fn shot(
         *done = true;
         let path = crate::settings::data_dir().join("window-shot-results.png");
         println!(
-            "results_shot path={} art={} rows={}",
+            "results_shot path={} art={} rows={} screen={:?}",
             path.display(),
             if art.is_some() { "on" } else { "off" },
-            shown.board.as_ref().map_or(0, |b| b.view.table.len().saturating_sub(1))
+            shown.board.as_ref().map_or(0, |b| b.view.table.len().saturating_sub(1)),
+            shown.board.as_ref().map(|b| b.screen).unwrap_or_default()
         );
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
     }
@@ -808,19 +1053,34 @@ fn shot(
 #[derive(Component)]
 struct ResultsCamera;
 
-/// One drawn copy of a layout item (`slot`: its row in the window).
+/// One drawn copy of a layout item of `screen` (`slot`: its row in the
+/// window; `text`: what its mesh spells).
 #[derive(Component)]
 struct Art {
+    screen: Screen,
     item: usize,
     slot: Option<usize>,
+    text: Option<String>,
+}
+
+/// A screen's items, materials and camera.
+struct LiveScreen {
+    items: Vec<Item>,
+    /// Per material: authored, `deactivate` state (the same when unanimated).
+    materials: Vec<[Handle<Fe3dMaterial>; 2]>,
+    camera: Transform,
+    fov_degrees: f32,
+    near: f32,
+    far: f32,
+    motions: Vec<Motion>,
+    pitch: Vec3,
 }
 
 #[derive(Resource)]
 struct Live {
-    items: Vec<Item>,
+    /// Per screen, in the order of [`SCREENS`].
+    screens: Vec<LiveScreen>,
     fonts: HashMap<String, osd_scene::Font>,
-    /// Per material: authored, `deactivate` state (the same when unanimated).
-    materials: Vec<[Handle<Fe3dMaterial>; 2]>,
     lights: fe3d::Lights,
     pulse: fe3d::Pulse,
     camera_world: Mat4,
@@ -831,6 +1091,8 @@ struct Live {
     size: UVec2,
     /// The board the entities were last set up for.
     board: Option<Board>,
+    /// The event the drawn screen plays and how long it has run.
+    play: Option<(Play, f32)>,
 }
 
 /// A white texel for a texture slot whose image the bundle lacks.
@@ -869,21 +1131,22 @@ fn spawn(
             return;
         }
     };
-    let l = &p.layout;
-    let mut skipped: Vec<String> = l.skipped.iter().map(|(k, v)| format!("{k}:{v}")).collect();
-    skipped.sort();
-    log_line!(
-        "results_art version=1 loaded=true items={} materials={} textures={} pose_time={:.3} eye={:.1},{:.1},{:.1} fov={:.2} skipped={}",
-        l.items.len(),
-        l.materials.len(),
-        p.images.len(),
-        l.pose.time,
-        l.pose.eye.x,
-        l.pose.eye.y,
-        l.pose.eye.z,
-        l.pose.fov_degrees,
-        skipped.join(",")
-    );
+    for (screen, l) in SCREENS.iter().zip(&p.layouts) {
+        let mut skipped: Vec<String> = l.skipped.iter().map(|(k, v)| format!("{k}:{v}")).collect();
+        skipped.sort();
+        log_line!(
+            "results_art version=1 loaded=true items={} materials={} textures={} pose_time={:.3} eye={:.1},{:.1},{:.1} fov={:.2} skipped={} screen={screen:?}",
+            l.items.len(),
+            l.materials.len(),
+            p.images.len(),
+            l.pose.time,
+            l.pose.eye.x,
+            l.pose.eye.y,
+            l.pose.eye.z,
+            l.pose.fov_degrees,
+            skipped.join(",")
+        );
+    }
     let white = images.add(white());
     let [soft, sharp] = p.cubes.map(|c| images.add(c));
     let named: HashMap<String, Handle<Image>> = p.images.into_iter().map(|(k, v)| (k, images.add(v))).collect();
@@ -891,8 +1154,8 @@ fn spawn(
     let constants = p.lights.constants(None, None, 0.);
     // Per material: the authored colour (the player's row) and the
     // `deactivate` state colour (the other rows and the fixed items).
-    let handles: Vec<[Handle<Fe3dMaterial>; 2]> = l
-        .materials
+    let mut handles_of = |l: &Layout| -> Vec<[Handle<Fe3dMaterial>; 2]> {
+        l.materials
         .iter()
         .map(|m| {
             let authored = Fe3dMaterial {
@@ -913,7 +1176,9 @@ fn spawn(
             let authored = materials.add(authored);
             [player.unwrap_or_else(|| authored.clone()), rest.unwrap_or(authored)]
         })
-        .collect();
+        .collect()
+    };
+    let l = &p.layouts[0];
     let image = images.add(Image::new_target_texture(16, 16, TextureFormat::Rgba8UnormSrgb, None));
     let display = displays.add(OsdDisplay::new(image.clone()));
     let transform = Transform::from_translation(l.pose.eye).looking_at(l.pose.target, Vec3::Y);
@@ -954,26 +1219,39 @@ fn spawn(
     let shown = commands
         .spawn((full, MaterialNode(display.clone()), GlobalZIndex(8), Visibility::Hidden, Pickable::IGNORE, UiTargetCamera(viewer)))
         .id();
-    for (i, item) in l.items.iter().enumerate() {
-        let mesh = p.meshes[i].clone().map(|m| meshes.add(m)).unwrap_or_default();
-        let slots: Vec<Option<usize>> = if item.gate.row { (0..VISIBLE_ROWS).map(Some).collect() } else { vec![None] };
-        for slot in slots {
-            let world = Mat4::from_translation(l.pitch * slot.unwrap_or(0) as f32) * item.world;
-            commands.spawn((
-                Art { item: i, slot },
-                Transform::from_matrix(world),
-                Visibility::Hidden,
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(handles[item.material][1].clone()),
-                RenderLayers::layer(LAYER),
-                bevy::camera::visibility::NoFrustumCulling,
-            ));
+    let mut screens = Vec::new();
+    for ((&screen, l), mesh_of) in SCREENS.iter().zip(&p.layouts).zip(&p.meshes) {
+        let handles = handles_of(l);
+        for (i, item) in l.items.iter().enumerate() {
+            let mesh = mesh_of[i].clone().map(|m| meshes.add(m)).unwrap_or_default();
+            let slots: Vec<Option<usize>> = if item.gate.row { (0..screen.def().visible).map(Some).collect() } else { vec![None] };
+            for slot in slots {
+                let world = Mat4::from_translation(l.pitch * slot.unwrap_or(0) as f32) * item.world;
+                commands.spawn((
+                    Art { screen, item: i, slot, text: None },
+                    Transform::from_matrix(world),
+                    Visibility::Hidden,
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(handles[item.material][1].clone()),
+                    RenderLayers::layer(LAYER),
+                    bevy::camera::visibility::NoFrustumCulling,
+                ));
+            }
         }
+        screens.push(LiveScreen {
+            items: l.items.clone(),
+            materials: handles,
+            camera: Transform::from_translation(l.pose.eye).looking_at(l.pose.target, Vec3::Y),
+            fov_degrees: l.pose.fov_degrees,
+            near: l.near,
+            far: l.far,
+            motions: l.motions.clone(),
+            pitch: l.pitch,
+        });
     }
     commands.insert_resource(Live {
-        items: l.items.clone(),
+        screens,
         fonts: p.fonts,
-        materials: handles,
         lights: p.lights,
         pulse: fe3d::Pulse::default(),
         camera_world: transform.to_matrix(),
@@ -983,18 +1261,23 @@ fn spawn(
         display,
         size: UVec2::ZERO,
         board: None,
+        play: None,
     });
     ready.0 = true;
 }
+
+/// The art camera, apart from the art meshes.
+type ArtCamera<'w, 's> =
+    Query<'w, 's, (&'static mut Camera, &'static mut Transform, &'static mut Projection), (With<ResultsCamera>, Without<Art>)>;
 
 #[allow(clippy::too_many_arguments)]
 fn update(
     live: Option<ResMut<Live>>,
     shown: Res<Shown>,
     time: Option<Res<Time<Real>>>,
-    mut cameras: Query<&mut Camera, With<ResultsCamera>>,
+    mut cameras: ArtCamera,
     mut nodes: Query<&mut Visibility, Without<Art>>,
-    mut art: Query<(&Art, &mut Visibility, &mut Mesh3d, &mut MeshMaterial3d<Fe3dMaterial>)>,
+    mut art: Query<(&mut Art, &mut Visibility, &mut Mesh3d, &mut MeshMaterial3d<Fe3dMaterial>, &mut Transform)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<Fe3dMaterial>>,
 ) {
@@ -1002,7 +1285,7 @@ fn update(
         return;
     };
     let on = shown.board.is_some();
-    if let Ok(mut camera) = cameras.get_mut(live.camera)
+    if let Ok((mut camera, ..)) = cameras.get_mut(live.camera)
         && camera.is_active != on
     {
         camera.is_active = on;
@@ -1014,14 +1297,56 @@ fn update(
     }
     let Some(board) = &shown.board else {
         live.board = None;
+        live.play = None;
         return;
     };
     let live = &mut *live;
+    let dt = time.as_ref().map_or(0., |t| t.delta_secs());
+    if let Some((_, t)) = &mut live.play {
+        *t += dt;
+    }
+    // A new screen waits for the drawn one's `exit` (flow 0x4A6670) [D].
+    let mut board = board;
+    if let Some(drawn) = &live.board
+        && drawn.screen != board.screen
+    {
+        let seconds = play_seconds(&live.screens[drawn.screen as usize].motions, Play::Exit);
+        match live.play {
+            Some((Play::Exit, t)) if t >= seconds => {
+                println!("results_art exit screen={:?} seconds={seconds:.2} done", drawn.screen);
+            }
+            Some((Play::Exit, _)) => board = drawn,
+            _ if seconds > 0. => {
+                live.play = Some((Play::Exit, 0.));
+                board = drawn;
+            }
+            _ => {}
+        }
+    }
+    let board = &board.clone();
     if live.board.as_ref() != Some(board) {
+        if live.board.as_ref().is_none_or(|d| d.screen != board.screen) {
+            live.play = Some((Play::Enter, 0.));
+        }
+        let current = &live.screens[board.screen as usize];
+        // The camera of the board's screen.
+        if let Ok((_, mut transform, mut projection)) = cameras.get_mut(live.camera) {
+            transform.set_if_neq(current.camera);
+            if let Projection::Perspective(p) = projection.as_mut() {
+                p.fov = current.fov_degrees.to_radians();
+                p.near = current.near;
+                p.far = current.far;
+            }
+        }
+        live.camera_world = current.camera.to_matrix();
         let mut drawn = 0;
-        for (a, mut visibility, mut mesh, mut material) in &mut art {
-            let item = &live.items[a.item];
-            let state = &live.materials[item.material][usize::from(!on_player_row(a.slot, board))];
+        for (mut a, mut visibility, mut mesh, mut material, _) in &mut art {
+            if a.screen != board.screen {
+                visibility.set_if_neq(Visibility::Hidden);
+                continue;
+            }
+            let item = &current.items[a.item];
+            let state = &current.materials[item.material][usize::from(!on_player_row(a.slot, board))];
             if material.0 != *state {
                 material.0 = state.clone();
             }
@@ -1029,29 +1354,51 @@ fn update(
             if let Shape::Text { layout, field } = &item.shape {
                 let text = text_of(*field, a.slot, board);
                 on &= !text.trim().is_empty();
-                let was = live.board.as_ref().map(|b| text_of(*field, a.slot, b));
                 if on
-                    && was.as_deref() != Some(text.as_str())
+                    && a.text.as_deref() != Some(text.as_str())
                     && let Some(font) = live.fonts.get(&layout.font)
                 {
                     let m = osd_scene::text_mesh(font, &text, layout, &item.bounds);
                     mesh.0 = meshes.add(fe3d::mesh(&m, &item.bounds, item.family));
+                    a.text = Some(text);
                 }
             }
             visibility.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
             drawn += usize::from(on);
         }
         println!(
-            "results_art board rows={} drift={} drawn={drawn}",
+            "results_art board rows={} drift={} drawn={drawn} screen={:?} motions={}",
             board.view.table.len().saturating_sub(1),
-            board.drift
+            board.drift,
+            board.screen,
+            current.motions.len()
         );
         live.board = Some(board.clone());
     }
-    let dt = time.map_or(0., |t| t.delta_secs());
+    // The screen's own slides.
+    if let Some((play, t)) = live.play {
+        let current = &live.screens[board.screen as usize];
+        let seconds = play_seconds(&current.motions, play);
+        let frames: Vec<Vec3> = current.motions.iter().map(|m| m.offset(m.frame(play, t))).collect();
+        for (a, _, _, _, mut transform) in &mut art {
+            if a.screen != board.screen {
+                continue;
+            }
+            let item = &current.items[a.item];
+            if !item.motion.is_empty() {
+                let m: Vec3 = item.motion.iter().map(|&m| frames[m]).sum();
+                let world = Mat4::from_translation(current.pitch * a.slot.unwrap_or(0) as f32 + m) * item.world;
+                transform.set_if_neq(Transform::from_matrix(world));
+            }
+        }
+        if t >= seconds && play == Play::Enter {
+            println!("results_art enter screen={:?} seconds={seconds:.2} done", board.screen);
+            live.play = None;
+        }
+    }
     live.pulse.advance(dt, live.lights.g_rate);
     let constants = live.lights.constants(Some(&live.camera_world), None, live.pulse.value(live.lights.g_swing));
-    for h in live.materials.iter().flatten() {
+    for h in live.screens.iter().flat_map(|s| &s.materials).flatten() {
         if let Some(mut m) = materials.get_mut(h)
             && m.constants != constants
         {
@@ -1109,52 +1456,75 @@ mod tests {
     use super::*;
     use crate::post_race::View;
 
+    const ROW: &str = "gadget/list_items=0";
+    const HEADER: &str = "gadget/list_titles=titles";
+    const R: &Def = &DEFS[0];
+    const D: &Def = &DEFS[1];
+
     fn board(rows: usize, player: usize, drift: bool) -> Board {
         let mut table = vec![std::array::from_fn(|i| format!("h{i}"))];
         for r in 0..rows {
             table.push(std::array::from_fn(|i| format!("r{r}c{i}")));
         }
         Board {
-            view: View { title: "T".into(), body: "B".into(), table, player_row: Some(player + 1), pills: String::new() },
+            view: View { title: "T".into(), body: "B".into(), table, player_row: Some(player + 1), pills: String::new(), stats: Vec::new() },
             drift,
             fourth: Fourth::Team,
+            screen: Screen::Results,
         }
     }
 
     #[test]
     fn window_centres_the_player() {
-        assert_eq!(window(8, Some(7)), 0);
-        assert_eq!(window(20, Some(0)), 0);
-        assert_eq!(window(20, Some(10)), 4);
-        assert_eq!(window(20, Some(19)), 8);
-        assert_eq!(window(20, None), 0);
+        assert_eq!(window(8, Some(7), 12), 0);
+        assert_eq!(window(20, Some(0), 12), 0);
+        assert_eq!(window(20, Some(10), 12), 4);
+        assert_eq!(window(20, Some(19), 12), 8);
+        assert_eq!(window(20, None, 12), 0);
+        assert_eq!(window(10, None, 7), 0);
     }
 
     #[test]
     fn gates_follow_the_tree() {
-        let g = gate(&["text=driver", "null=race_results", "library_simple=content", "null=anim", ROW, "stacker_top=list"]);
+        let g = gate(&["text=driver", "null=race_results", "library_simple=content", "null=anim", ROW, "stacker_top=list"], R);
         assert_eq!((g.variant, g.row, g.header, g.hidden), (Variant::Race, true, false, false));
-        assert_eq!(gate(&["text=x", "null=online_leaderboard", "library_simple=content"]).variant, Variant::Never);
-        assert_eq!(gate(&["null=frame", "null=table"]).variant, Variant::Any);
-        assert!(gate(&["null=x", "gadget/list_items=1"]).hidden);
-        assert!(!gate(&["null=x", ROW]).hidden);
-        assert!(gate(&["unique=default", "library/image_flag=flag"]).hidden);
+        assert_eq!(gate(&["text=x", "null=online_leaderboard", "library_simple=content"], R).variant, Variant::Never);
+        assert_eq!(gate(&["null=frame", "null=table"], R).variant, Variant::Any);
+        assert!(gate(&["null=x", "gadget/list_items=1"], R).hidden);
+        assert!(!gate(&["null=x", ROW], R).hidden);
+        assert!(gate(&["unique=default", "library/image_flag=flag"], R).hidden);
         // The scroller face hides its own mesh only.
-        assert!(gate(&["scroller_v_manual=centre_face"]).hidden);
-        assert!(!gate(&["null=scrollbar", "scroller_v_manual=centre_face"]).hidden);
-        let g = gate(&["null=track_info_pill", "component/leaderboards_cursor_alt=cursor", ROW]);
+        assert!(gate(&["scroller_v_manual=centre_face"], R).hidden);
+        assert!(!gate(&["null=scrollbar", "scroller_v_manual=centre_face"], R).hidden);
+        let g = gate(&["null=track_info_pill", "component/leaderboards_cursor_alt=cursor", ROW], R);
         assert!(g.player_only);
+        // The drift scoreboard: its rows, content and always-lit statistic pills.
+        let row = ["text=amount", "null=online_leaderboard", "library_simple=content", "gadget/drift_list_items=0", "stacker_top=list"];
+        let g = gate(&row, D);
+        assert_eq!((g.variant, g.row, g.hidden), (Variant::Any, true, false));
+        assert_eq!(field(&row, &g, D), Some(Field::Cell(Column::Amount)));
+        assert!(gate(&["null=x", "gadget/drift_list_items=3"], D).hidden);
+        assert!(gate(&["null=anim_dummy", "object/h_pill_group=undefined"], D).hidden);
+        assert!(!gate(&["null=track_info_pill", "component/drift_cursor_half=avg_speed"], D).player_only);
+        let half = ["text=drift_type", "component/drift_cursor_half=avg_speed", "screen/drift_scoreboard=drift_scoreboard"];
+        assert_eq!(field(&half, &gate(&half, D), D), Some(Field::Stat(3, false)));
+        let total = ["text=score", "component/drift_cursor_total=total"];
+        assert_eq!(field(&total, &gate(&total, D), D), Some(Field::Stat(6, true)));
+        assert_eq!(field(&["text=title_01"], &gate(&["text=title_01"], D), D), Some(Field::Title));
+        assert_eq!(field(&["text=table_title"], &gate(&["text=table_title"], D), D), None, "not bound");
+        let header = ["text=drift_amount", "null=event_standings", "library_simple=content", "gadget/drift_list_titles=drift_titles"];
+        assert_eq!(field(&header, &gate(&header, D), D), Some(Field::Header(Column::Amount)));
     }
 
     #[test]
     fn fields_and_columns() {
-        let row = gate(&["text=time", "null=race_results", "library_simple=content", ROW]);
-        assert_eq!(field(&["text=time"], &row), Some(Field::Cell(Column::Time)));
-        let head = gate(&["text=points", "null=race_results", "library_simple=content", HEADER]);
-        assert_eq!(field(&["text=points"], &head), Some(Field::Header(Column::Points)));
-        assert_eq!(field(&["text=title_1"], &gate(&["text=title_1"])), Some(Field::Title));
-        assert_eq!(field(&["text=table_title"], &gate(&["text=table_title"])), Some(Field::Body));
-        assert_eq!(field(&["text=07"], &row), None);
+        let row = gate(&["text=time", "null=race_results", "library_simple=content", ROW], R);
+        assert_eq!(field(&["text=time"], &row, R), Some(Field::Cell(Column::Time)));
+        let head = gate(&["text=points", "null=race_results", "library_simple=content", HEADER], R);
+        assert_eq!(field(&["text=points"], &head, R), Some(Field::Header(Column::Points)));
+        assert_eq!(field(&["text=title_1"], &gate(&["text=title_1"], R), R), Some(Field::Title));
+        assert_eq!(field(&["text=table_title"], &gate(&["text=table_title"], R), R), Some(Field::Body));
+        assert_eq!(field(&["text=07"], &row, R), None);
         assert_eq!(view_column(Column::Team, Fourth::Team), Some(4));
         assert_eq!(view_column(Column::Team, Fourth::Points), None);
         assert_eq!(view_column(Column::Points, Fourth::Points), Some(4));
@@ -1223,6 +1593,8 @@ mod tests {
             ranges: Vec::new(),
             channels: vec![text, channel("pill#DiffuseColour", osd::Semantic::Parameter, [pill, pill, pill]), channel("pill#Alpha", osd::Semantic::Parameter, [k, k, k])],
             external: Vec::new(),
+            events: Vec::new(),
+            default_frame: 0.,
         };
         assert_eq!(hold_ends(&a), vec![0.667, 1.333], "the still alpha component and the Alpha channel add no window");
         let s = animation_states(&a);
@@ -1236,13 +1608,65 @@ mod tests {
         assert!(!on_player_row(None, &b), "fixed items keep the state colour");
     }
 
+    #[test]
+    fn drift_statistics_fill_their_glyphs() {
+        let mut b = board(3, 0, true);
+        b.screen = Screen::DriftScoreboard;
+        b.view.player_row = None;
+        b.view.stats = crate::post_race::DRIFT_STATS.iter().map(|k| [format!("{k} label"), format!("{k} value")]).collect();
+        assert_eq!(text_of(Field::Stat(1, false), None, &b), "drift_time label");
+        assert_eq!(text_of(Field::Stat(6, true), None, &b), "total value");
+        assert_eq!(text_of(Field::Cell(Column::DriftType), Some(2), &b), "r2c0");
+        let row = Gate { hidden: false, variant: Variant::Any, row: true, header: false, player_only: false, scrollbar: false };
+        assert!(visible(&row, Some(2), &b) && !visible(&row, Some(3), &b));
+        let cursor = Gate { player_only: true, ..row };
+        assert!(!visible(&cursor, Some(0), &b), "no player row on the scoreboard");
+    }
+
+    /// Needs GRID_GAME_ROOT: the drift scoreboard lays out with every
+    /// statistic, the drift type columns and its title, inside the view.
+    #[test]
+    #[ignore]
+    fn drift_scoreboard_lays_out() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let p = prepare(&root).unwrap();
+        let l = &p.layouts[Screen::DriftScoreboard as usize];
+        println!("pose {:?} pitch {} items {} skipped {:?}", l.pose, l.pitch, l.items.len(), l.skipped);
+        assert!((l.pitch.y + 8.).abs() < 0.5, "{}", l.pitch);
+        for i in 0..crate::post_race::DRIFT_STATS.len() {
+            for value in [false, true] {
+                let f = Field::Stat(i, value);
+                assert!(l.items.iter().any(|it| matches!(&it.shape, Shape::Text { field, .. } if *field == f)), "{f:?}");
+            }
+        }
+        for f in [Field::Title, Field::Header(Column::DriftType), Field::Header(Column::Amount), Field::Cell(Column::DriftType), Field::Cell(Column::Time)] {
+            assert!(l.items.iter().any(|i| matches!(&i.shape, Shape::Text { field, .. } if *field == f)), "{f:?}");
+        }
+        let view = Mat4::look_at_rh(l.pose.eye, l.pose.target, Vec3::Y);
+        let proj = Mat4::perspective_rh(l.pose.fov_degrees.to_radians(), 1.6, l.near, l.far);
+        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        for it in &l.items {
+            let b = it.bounds;
+            for k in 0..8 {
+                let c = Vec3::new(b[if k & 1 == 0 { 0 } else { 3 }], b[if k & 2 == 0 { 1 } else { 4 }], b[if k & 4 == 0 { 2 } else { 5 }]);
+                let q = proj * view * it.world.transform_point3(c).extend(1.);
+                assert!(q.w > 0., "art behind the camera");
+                let n = q.truncate().truncate() / q.w;
+                lo = lo.min(n);
+                hi = hi.max(n);
+            }
+        }
+        println!("ndc lo {lo:.2} hi {hi:.2}");
+        assert!(lo.cmpge(Vec2::splat(-1.)).all() && hi.cmple(Vec2::splat(1.)).all(), "art leaves the view: {lo} {hi}");
+    }
+
     /// Needs GRID_GAME_ROOT: the results screen lays out and loads.
     #[test]
     #[ignore]
     fn results_screen_lays_out() {
         let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
         let p = prepare(&root).unwrap();
-        let l = &p.layout;
+        let l = &p.layouts[0];
         let texts = l.items.iter().filter(|i| matches!(i.shape, Shape::Text { .. })).count();
         let rows = l.items.iter().filter(|i| i.gate.row).count();
         println!(
@@ -1295,5 +1719,35 @@ mod tests {
             assert!(l.items.iter().any(|i| matches!(&i.shape, Shape::Text { field, .. } if *field == f)), "{f:?}");
         }
         assert!(rows > 0 && texts > 0);
+        // The slide in and out: off to the left at the start of `enter`,
+        // at rest when it ends, off to the right at the end of `exit`.
+        let moved = l.items.iter().filter(|i| !i.motion.is_empty()).count();
+        println!("motions {} items moved {moved} enter {:.2}s exit {:.2}s", l.motions.len(), play_seconds(&l.motions, Play::Enter), play_seconds(&l.motions, Play::Exit));
+        assert!(!l.motions.is_empty() && moved * 2 > l.items.len(), "{moved} of {}", l.items.len());
+        assert!((play_seconds(&l.motions, Play::Enter) - 0.4).abs() < 1e-3);
+        for m in &l.motions {
+            println!(
+                "motion {} held {} enter {:?} exit {:?}",
+                m.channel.target,
+                m.held,
+                m.enter.as_ref().map(|e| (e.duration, &e.steps)),
+                m.exit.as_ref().map(|e| (e.duration, &e.steps))
+            );
+            // At rest when `enter` ends and when `exit` starts.
+            assert!(m.offset(m.frame(Play::Enter, 0.4)).length() < 1e-3);
+            assert!(m.offset(m.frame(Play::Exit, 0.)).length() < 1e-3);
+        }
+        // Per drawn item, all its animated ancestors together.
+        let (mut slides_in, mut slides_out, mut from_off) = (0, 0, 0);
+        for i in l.items.iter().filter(|i| !i.motion.is_empty()) {
+            let centre = i.world.transform_point3(Vec3::new((i.bounds[0] + i.bounds[3]) / 2., (i.bounds[1] + i.bounds[4]) / 2., (i.bounds[2] + i.bounds[5]) / 2.));
+            let x = |play, t| ndc(centre + i.motion.iter().map(|&m| l.motions[m].offset(l.motions[m].frame(play, t))).sum::<Vec3>()).x;
+            let rest = x(Play::Enter, 0.4);
+            slides_in += usize::from(x(Play::Enter, 0.) < rest - 0.1);
+            slides_out += usize::from(x(Play::Exit, 0.4) > rest + 0.1);
+            from_off += usize::from(x(Play::Enter, 0.) < -1.);
+        }
+        println!("items slide in {slides_in} out {slides_out} from off screen {from_off} of {moved}");
+        assert!(slides_out * 2 > moved && slides_in * 2 > moved && from_off > 0);
     }
 }

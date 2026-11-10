@@ -859,8 +859,64 @@ Checks: `tools/results_window_check.py` runs a 1-lap autopilot race in a real wi
 results screen (`[diagnostics] results_shot = S`, GRID_RESULTS_SHOT). `results_art_off` (GRID_RESULTS_ART_OFF=1)
 is experimental: it keeps the plain panel, for the "before" side of a matched pair only.
 
-Not ported: the screen's in/out animations (it appears in its held pose), `fepause_final` behind it
-(the front-end session owns the blur), the stats and drift scoreboard screens, the pill art.
+Drift scoreboard (F823). The drift scoreboard (`screen/drift_scoreboard`, §6.6) draws through
+the same path: `results_art::Screen` names the screen and a `Def` row holds what differs, so a
+further screen is one more row [D unless marked]:
+- rows `gadget/drift_list_items=N`, header `gadget/drift_list_titles=drift_titles`; [I] seven
+  visible rows (row 7 would cover the total: rows 8 apart from y 36, the total at −20);
+- both lists' content objects (`null=online_leaderboard`, `null=event_standings`) carry the list in
+  every race kind; title `title_01` (`drift_scoreboard_screen_title`), `title_00` and
+  `table_title` are not bound;
+- the statistics: each `component/drift_cursor_half=ID` or `drift_cursor_total=ID` glyph holds one
+  drift statistic by its states.xml item id (`post_race::DRIFT_STATS`: drift_speed, drift_time,
+  drift_score, avg_speed, avg_dist, avg_angle, total); `drift_type`/`total` take the label and
+  `score` the value;
+- the columns `drift_type` (the view's first table column, the drift type) and `amount`/`drift_amount`
+  (the second, the count);
+- hidden: the pills (`object/h_pill_group`; the post-race panel's pills stay).
+The camera follows the board: each screen keeps its own pose (the first key of `Anim!96` at which
+the screen lies at the target's distance, §6.7 above), field of view and clip planes, and the
+render camera takes them when the board changes. The game-data test `drift_scoreboard_lays_out`
+gives the pose t = 1.333 s, a row pitch of −8 and all seven statistics, inside the view (NDC x −0.92
+to 0.97, y −0.78 to 0.83). `tools/results_window_check.py --discipline drift_battle` shoots it.
+
+In and out (F822) [D unless marked]. A front-end animation's `USERDATA` object is an
+`FEANIMDATA` (`defaultFrame`, `firstchild`); its events are `FEEVENT`s chained by `nextevent`
+(reader 0x4B4FE0: `nickname`, `durationOverride`, `durationIntan`, `durationOuttan`, `firstchild`),
+each a chain of steps: `FEEVENTGOTO` (0x4BA0E0, `frame`), `FEEVENTPLAYTO` (0x4BA150, `frame`) and
+`FEEVENTTRIGGER` (0x4BA070, `nickname`). Absent or empty attributes read 0. All events lie flat in
+the package's LIBRARY, and many `FEANIMDATA` end in one shared tail (podium, region, medal, ko_tree
+and the row states `player`/`friends`/`activate`/`deactivate`); a lookup by nickname takes the first
+(0x478990). Advance 0x485790: with `durationOverride` D > 0 the whole event lasts D seconds, the
+natural length F (0x4855F0) is the sum of |PLAYTO frame − current frame| (GOTO jumps), u = t/D,
+and the budget F·h(u) runs the steps in order, h(u) = (a+b−2)u³ + (3−2a−b)u² + a·u with a, b the
+in and out tangents [I: h; the tangents D]. D below 0 plays the natural length, 0 is instant [I].
+`osd::Animation::events`, `Event::at` read and play them.
+
+The results and drift screens slide with `Anim!2` (`femad1332`, fePersistentDatabase): translation
+X of `helper=anim` −180 at frame 0, 0 at 1, 150 at 2. `enter` (0.4 s, tangents 1/0): GOTO 0, PLAYTO
+0.8333, `complete`, PLAYTO 1, so it comes in from the left at full speed and eases out; `exit`
+(0.4 s, 0/1): `complete`, PLAYTO 2, easing out to the right. The flow 0x4A6670 runs the leaving
+screen's `exit` and waits for it before the next screen's `enter`. The port finds, for every drawn
+item, every node (itself and its ancestors) with a translation channel in an animation of its
+own with `enter` or `exit` (not the camera-pose animation): `results_art::Motion`. Their moves add
+up, which is exact for translations (they leave the linear part of the world matrices alone). Each
+moves its subtree by the channel's change from the frame the screen rests at, not to the absolute
+key, because some nodes rest a little away from their held key (the table title at x 0.76 against
+the key's 0.6) [I]. The rest frame is the slide key the layout uses (F810), else where an `enter`
+with GOTO or PLAYTO steps leaves the animation, else the key nearest the saved pose [I]. On the
+results screen: `Anim!2` (`helper=anim`) slides the whole board in and out; `Anim!110`
+(`text=table_title`, `stacker_top=list`) has an instant `enter` (GOTO 1) and an `exit` that adds a
+second push to the right (GOTO 1, PLAYTO 1.5, `complete`, PLAYTO 2); `Anim!59` (`text=team`, four
+instances) has an instant `enter` (`complete` only) and the same `exit`. When a board
+first shows, its screen plays `enter`; when it changes screen (drift scoreboard → results), the
+drawn screen plays `exit`, then the new one `enter`. [I] When the board is taken away (the player
+continues), the art hides at once; `exitback`, `enterback` and `exitzone` (only on the BACK links)
+are not played. `results_art enter screen=X seconds=S done` is printed when the slide-in ends;
+`tools/results_window_check.py` requires it.
+
+Not ported: `fepause_final` behind the screen (the front-end session owns the blur), the stats
+screen, the pill art.
 
 Row state colour [I]. The text materials carry DiffuseColour 0.1 (`fe_shadersetup.xml` gives the
 front-end instances a DiffuseColour/Alpha and a GlowAmount stream), which reads dark on the grey

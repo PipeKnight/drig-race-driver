@@ -596,14 +596,18 @@ pub fn update(
         return;
     }
     // Diagnostics results_continue: a scripted run selects Continue on the
-    // stats and results screens by itself (unattended checks); on the wreck
+    // stats, drift scoreboard and results screens by itself (unattended checks); on the wreck
     // screen it retires and confirms, so an unattended career race still
     // reports a result.
     if let Some(after) = crate::settings::diagnostics().results_continue
         && driving.scripted_ticks.is_some()
         && matches!(
             post.stage,
-            Stage::Stats | Stage::Results | Stage::Wreck | Stage::Confirm(Confirm::RetireRace, Return::Wreck)
+            Stage::Stats
+                | Stage::Results
+                | Stage::Scoreboard
+                | Stage::Wreck
+                | Stage::Confirm(Confirm::RetireRace, Return::Wreck)
         )
     {
         *waited += dt;
@@ -871,7 +875,16 @@ pub struct View {
     pub table: Vec<[String; 6]>,
     pub player_row: Option<usize>,
     pub pills: String,
+    /// The drift scoreboard's statistics, label and value, in the order of
+    /// [`DRIFT_STATS`].
+    pub stats: Vec<[String; 2]>,
 }
+
+/// The drift scoreboard's statistic glyphs (`component/drift_cursor_half`
+/// and `drift_cursor_total` of `drift_scoreboard`), in the order
+/// `View::stats` holds them; states.xml `post_race_drift_scoreboard` binds
+/// each one's `drift_type` (`total` for the total) to the label [D].
+pub const DRIFT_STATS: [&str; 7] = ["drift_speed", "drift_time", "drift_score", "avg_speed", "avg_dist", "avg_angle", "total"];
 
 impl PostRace {
     #[cfg(test)]
@@ -931,7 +944,7 @@ impl PostRace {
             Stage::Scoreboard | Stage::Confirm(_, Return::Scoreboard) => {
                 view.title = l("drift_scoreboard_screen_title");
                 if let Some(b) = board {
-                    view.body = [
+                    view.stats = [
                         (l("drift_scoreboard_fastest_speed"), format!("{:.0} mph", b.fastest)),
                         (l("drift_scoreboard_longest_drift_time"), format!("{:.2} s", b.longest)),
                         (
@@ -946,10 +959,10 @@ impl PostRace {
                         (l("drift_scoreboard_average_angle"), format!("{:.0}°", b.average_angle)),
                         (l("drift_scoreboard_total_score"), crate::drift_event::grouped(b.total)),
                     ]
-                    .iter()
-                    .map(|(k, v)| format!("{k}: {v}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                    .into_iter()
+                    .map(|(k, v)| [k, v])
+                    .collect();
+                    view.body = view.stats.iter().map(|[k, v]| format!("{k}: {v}")).collect::<Vec<_>>().join("\n");
                     view.table.push([
                         l("drift_leaderboard_drift_type_column"),
                         l("drift_leaderboard_drift_count_column"),
@@ -1132,7 +1145,9 @@ fn present(
         }
     }
     let results = matches!(post.stage, Stage::Results | Stage::Confirm(_, Return::Results));
-    if (!post.active() || !results)
+    let scoreboard = matches!(post.stage, Stage::Scoreboard | Stage::Confirm(_, Return::Scoreboard));
+    let art_stage = results || scoreboard;
+    if (!post.active() || !art_stage)
         && let Some(art) = art.as_mut().filter(|a| a.board.is_some())
     {
         art.board = None;
@@ -1165,8 +1180,13 @@ fn present(
     let view = post.view_with(&rows, &labels, board.as_ref());
     // The results table in the front-end art once it is loaded
     // (results_art.rs); this panel keeps the other stages and the pills.
-    let art_on = results && ready.is_some_and(|r| r.0);
-    if results && let Some(art) = art.as_mut() {
+    // The drift scoreboard in the art once its statistics are known.
+    let wanted = results || (scoreboard && !view.stats.is_empty());
+    let art_on = wanted && ready.is_some_and(|r| r.0);
+    if !wanted && let Some(art) = art.as_mut().filter(|a| a.board.is_some()) {
+        art.board = None;
+    }
+    if wanted && let Some(art) = art.as_mut() {
         let fourth = if rows.iter().any(|r| r.touge.is_some()) {
             crate::results_art::Fourth::Round
         } else if rows.iter().any(|r| r.class.is_some()) {
@@ -1176,7 +1196,8 @@ fn present(
         } else {
             crate::results_art::Fourth::Team
         };
-        let board = Some(crate::results_art::Board { view: view.clone(), drift: post.drift, fourth });
+        let screen = if scoreboard { crate::results_art::Screen::DriftScoreboard } else { crate::results_art::Screen::Results };
+        let board = Some(crate::results_art::Board { view: view.clone(), drift: post.drift, fourth, screen });
         if art.board != board {
             art.board = board;
         }

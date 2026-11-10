@@ -1391,6 +1391,8 @@ mod tests {
                 components: vec![osd::Curve(vec![key(0., -std::f32::consts::FRAC_PI_2), key(1. / 6., 0.), key(1. / 3., std::f32::consts::FRAC_PI_2)])],
             }],
             external: vec![],
+            events: Vec::new(),
+            default_frame: 0.,
         };
         let mut osd = Osd {
             entities: HashMap::new(),

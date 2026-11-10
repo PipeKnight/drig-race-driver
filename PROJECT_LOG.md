@@ -158,6 +158,8 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F823](log/F0823.md) | 2026-11-10 | Drift scoreboard in the front-end art |
+| [F822](log/F0822.md) | 2026-11-10 | Results screens slide in and out |
 | [F821](log/F0821.md) | 2026-11-11 | Loading stat panel and particle emitter evidence |
 | [F820](log/F0820.md) | 2026-11-10 | Front-end camera stick spring |
 | [F819](log/F0819.md) | 2026-11-10 | Loading reflection box space (static evidence) |
@@ -216,8 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F766](log/F0766.md) | 2026-11-09 | Crowd gasps and the AI engine Treble low-pass (rows 70, 72) |
 | [F765](log/F0765.md) | 2026-11-09 | Graphics audit of all routes; night and container emissive objects drawn |
 | [F764](log/F0764.md) | 2026-11-09 | Flashback rewinds the marshal flags; career/free-race set-up labels |
-| [F763](log/F0763.md) | 2026-11-09 | Race HUD: split pills, needle blur, PB pill, OSD and results time formats from static RE |
-| [F762](log/F0762.md) | 2026-11-09 | Player reset job ported 1:1 (row 43) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

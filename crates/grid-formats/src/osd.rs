@@ -193,6 +193,104 @@ pub struct Animation {
     /// cross-file reference of the front-end packages is a material channel of
     /// feNonPersistentDatabase that points into fePersistentDatabase [V].
     pub external: Vec<ExternalChannel>,
+    /// The front-end events of its `FEANIMDATA` (`USERDATA` object), in
+    /// chain order: its own first, then the shared tail many animations end
+    /// in; [`Animation::event`] takes the first of a name, as the original's
+    /// lookup by nickname (0x478990) [D]. Empty for other animations.
+    pub events: Vec<Event>,
+    /// The `FEANIMDATA` `defaultFrame` (0 when absent).
+    pub default_frame: f32,
+}
+
+/// One step of a front-end event (FEEVENTGOTO 0x4BA0E0, FEEVENTPLAYTO
+/// 0x4BA150, FEEVENTTRIGGER 0x4BA070) [D].
+#[derive(Clone, Debug, PartialEq)]
+pub enum Step {
+    /// Jump to the frame.
+    Goto(f32),
+    /// Play to the frame.
+    PlayTo(f32),
+    /// Fire the named trigger (`complete`, `parameters` …).
+    Trigger(String),
+}
+
+/// A named front-end event (`FEEVENT`, reader 0x4B4FE0): its steps run in
+/// sequence over `duration` seconds, eased by the Hermite curve of its
+/// tangents (docs/RACE_HUD.md section 6.7) [D]. Absent attributes read 0.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Event {
+    pub name: String,
+    /// `durationOverride`: above 0 the event's real length; 0 instant; below
+    /// 0 the natural length (one frame unit per second) [I].
+    pub duration: f32,
+    /// `durationIntan`, `durationOuttan`.
+    pub tangents: [f32; 2],
+    pub steps: Vec<Step>,
+}
+
+impl Event {
+    /// The frames its PLAYTO steps cover from `from` (0x4855F0) [D].
+    pub fn length(&self, from: f32) -> f32 {
+        let mut at = from;
+        let mut length = 0.;
+        for step in &self.steps {
+            match *step {
+                Step::Goto(f) => at = f,
+                Step::PlayTo(f) => {
+                    length += (f - at).abs();
+                    at = f;
+                }
+                Step::Trigger(_) => {}
+            }
+        }
+        length
+    }
+
+    /// The real length in seconds of the event started at frame `from`.
+    pub fn seconds(&self, from: f32) -> f32 {
+        if self.duration > 0. {
+            self.duration
+        } else if self.duration < 0. {
+            self.length(from)
+        } else {
+            0.
+        }
+    }
+
+    /// The eased share of the event's frames played after the share `u` of
+    /// its time: h(u) = (a+b-2)u^3 + (3-2a-b)u^2 + a u, a and b its in and
+    /// out tangents [I: formula; tangents D].
+    pub fn ease(&self, u: f32) -> f32 {
+        let u = u.clamp(0., 1.);
+        let [a, b] = self.tangents;
+        ((a + b - 2.) * u + (3. - 2. * a - b)) * u * u + a * u
+    }
+
+    /// Where the event started at frame `from` stands `t` seconds in: the
+    /// animation frame, the triggers reached so far, and whether it ended
+    /// (advance 0x485790: the eased budget runs the steps in order) [D/I].
+    pub fn at(&self, from: f32, t: f32) -> (f32, Vec<&str>, bool) {
+        let seconds = self.seconds(from);
+        let u = if seconds > 0. { t / seconds } else { 1. };
+        let mut budget = self.length(from) * self.ease(u);
+        let mut at = from;
+        let mut fired = Vec::new();
+        for step in &self.steps {
+            match step {
+                Step::Goto(f) => at = *f,
+                Step::PlayTo(f) => {
+                    let span = (f - at).abs();
+                    if budget < span && u < 1. {
+                        return (at + budget * (f - at).signum(), fired, false);
+                    }
+                    budget -= span;
+                    at = *f;
+                }
+                Step::Trigger(name) => fired.push(name.as_str()),
+            }
+        }
+        (at, fired, u >= 1.)
+    }
 }
 
 /// A channel reference into another package, kept unresolved.
@@ -213,6 +311,10 @@ impl Animation {
     }
     pub fn range(&self, name: &str) -> Option<&Range> {
         self.ranges.iter().find(|r| r.name == name)
+    }
+    /// The first front-end event of this name.
+    pub fn event(&self, name: &str) -> Option<&Event> {
+        self.events.iter().find(|e| e.name == name)
     }
     /// The last key time of any channel.
     pub fn duration(&self) -> f32 {
@@ -528,6 +630,7 @@ pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
     let mut blocks = BTreeMap::new();
     let mut channels = BTreeMap::new();
     let mut vcrs = BTreeMap::new();
+    let mut fe = BTreeMap::new();
     for i in 0..tree.nodes.len() {
         match tree.name(i) {
             b"NEANIMKEYDATABLOCK" => {
@@ -535,6 +638,11 @@ pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
             }
             b"NEANIMCHANNEL_BEZIERFLOAT" | b"NEANIMCHANNEL_BEZIERFLOAT4" | b"NEANIMCHANNEL_GROUPXYZ" => {
                 channels.insert(text(tree, i, b"id")?, i);
+            }
+            b"FEANIMDATA" | b"FEEVENT" | b"FEEVENTGOTO" | b"FEEVENTPLAYTO" | b"FEEVENTTRIGGER" => {
+                if let Some(id) = optional_text(tree, i, b"id") {
+                    fe.insert(id, i);
+                }
             }
             b"NETIMERANGELIST" => {
                 let ranges = children(tree, i, b"NETIMERANGE")
@@ -578,10 +686,17 @@ pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
         if tree.name(i) != b"NEANIMATION" {
             continue;
         }
-        let ranges = match children(tree, i, b"USERDATA").next() {
-            Some(u) => vcrs.get(&reference(tree, u, b"object")?).cloned().unwrap_or_default(),
+        let object = match children(tree, i, b"USERDATA").next() {
+            Some(u) => Some(reference(tree, u, b"object")?),
+            None => None,
+        };
+        let ranges = object.as_ref().and_then(|o| vcrs.get(o)).cloned().unwrap_or_default();
+        let data = object.as_ref().and_then(|o| fe.get(o)).copied().filter(|&d| tree.name(d) == b"FEANIMDATA");
+        let events = match data {
+            Some(d) => fe_events(tree, &fe, d),
             None => Vec::new(),
         };
+        let default_frame = data.map_or(0., |d| optional_float(tree, d, b"defaultFrame"));
         let mut list = Vec::new();
         let mut external = Vec::new();
         for r in children(tree, i, b"NECHANNELREF") {
@@ -611,9 +726,64 @@ pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
             ranges,
             channels: list,
             external,
+            events,
+            default_frame,
         });
     }
     Ok(out)
+}
+
+/// A string attribute, `None` when absent or empty.
+fn optional_text(tree: &Tree<'_>, node: usize, name: &[u8]) -> Option<String> {
+    tree.string(node, name).ok().filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned())
+}
+
+/// A float attribute; 0 when absent or empty, as the original's event
+/// readers leave it [D].
+fn optional_float(tree: &Tree<'_>, node: usize, name: &[u8]) -> f32 {
+    tree.integer(node, name).map_or(0., f32::from_bits)
+}
+
+/// The nodes of a `firstchild` / `nextevent` chain, each once.
+fn fe_chain(tree: &Tree<'_>, fe: &BTreeMap<String, usize>, first: Option<String>) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut next = first;
+    while let Some(id) = next {
+        let Some(&n) = fe.get(id.strip_prefix('#').unwrap_or(&id)) else {
+            break;
+        };
+        if out.contains(&n) {
+            break;
+        }
+        out.push(n);
+        next = optional_text(tree, n, b"nextevent");
+    }
+    out
+}
+
+/// The `FEEVENT`s of a `FEANIMDATA` with their steps.
+fn fe_events(tree: &Tree<'_>, fe: &BTreeMap<String, usize>, data: usize) -> Vec<Event> {
+    fe_chain(tree, fe, optional_text(tree, data, b"firstchild"))
+        .into_iter()
+        .filter(|&e| tree.name(e) == b"FEEVENT")
+        .map(|e| Event {
+            name: optional_text(tree, e, b"nickname").unwrap_or_default(),
+            duration: optional_float(tree, e, b"durationOverride"),
+            tangents: [optional_float(tree, e, b"durationIntan"), optional_float(tree, e, b"durationOuttan")],
+            steps: fe_chain(tree, fe, optional_text(tree, e, b"firstchild"))
+                .into_iter()
+                .filter_map(|c| {
+                    let frame = optional_float(tree, c, b"frame");
+                    match tree.name(c) {
+                        b"FEEVENTGOTO" => Some(Step::Goto(frame)),
+                        b"FEEVENTPLAYTO" => Some(Step::PlayTo(frame)),
+                        b"FEEVENTTRIGGER" => Some(Step::Trigger(optional_text(tree, c, b"nickname").unwrap_or_default())),
+                        _ => None,
+                    }
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 /// Every `CUBEMAPTEXTURE` of a package, in file order (an OSD scene's
@@ -935,6 +1105,37 @@ mod tests {
     }
 
     #[test]
+    fn events_play_their_steps_eased() {
+        // The leaderboard slide's `enter` (Anim!2 of fePersistentDatabase).
+        let enter = Event {
+            name: "enter".into(),
+            duration: 0.4,
+            tangents: [1., 0.],
+            steps: vec![
+                Step::Trigger("parameters".into()),
+                Step::Goto(0.),
+                Step::PlayTo(0.8333),
+                Step::Trigger("complete".into()),
+                Step::PlayTo(1.),
+            ],
+        };
+        assert!((enter.length(2.) - 1.).abs() < 1e-6);
+        let (frame, fired, ended) = enter.at(2., 0.);
+        assert_eq!((frame, fired, ended), (0., vec!["parameters"], false));
+        let (frame, fired, ended) = enter.at(2., 0.4);
+        assert!((frame - 1.).abs() < 1e-6);
+        assert_eq!((fired, ended), (vec!["parameters", "complete"], true));
+        // In tangent 1, out 0: starts at full speed and eases out.
+        let (half, _, _) = enter.at(2., 0.2);
+        assert!((half - 0.625).abs() < 1e-6, "{half}");
+        // Below 0 the event runs its natural length; 0 is instant.
+        let natural = Event { duration: -1., ..enter.clone() };
+        assert!((natural.seconds(0.) - 1.).abs() < 1e-6);
+        let instant = Event { duration: 0., ..enter };
+        assert_eq!(instant.at(0., 0.).0, 1.);
+    }
+
+    #[test]
     #[ignore = "requires GRID_GAME_ROOT purchased source"]
     fn dial2_scene_and_osd_fonts_read() {
         let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
@@ -1024,6 +1225,15 @@ mod tests {
             assert!(coloured.iter().all(|m| m.colors_argb.len() == m.positions.len()), "{file}");
             let external: Vec<&ExternalChannel> = scene.animations.iter().flat_map(|a| &a.external).collect();
             println!("{file}: {} channels in another package", external.len());
+            if file == "fePersistentDatabase.pssg" {
+                // The leaderboard slide: own enter and exit, then the shared tail.
+                let slide = scene.animations.iter().find(|a| a.event("enter").is_some_and(|e| (e.duration - 0.4).abs() < 1e-6) && a.event("exit").is_some()).unwrap();
+                let exit = slide.event("exit").unwrap();
+                assert_eq!(exit.steps.last(), Some(&Step::PlayTo(2.)));
+                assert!((slide.event("enter").unwrap().at(2., 0.4).0 - 1.).abs() < 1e-6);
+                let events: usize = scene.animations.iter().map(|a| a.events.len()).sum();
+                println!("{file}: {events} front-end events, slide {}", slide.owner());
+            }
             assert!(external.iter().all(|e| e.package == "fePersistentDatabase.pssg"), "{file}");
             if std::env::var_os("GRID_OSD_DUMP").is_some() {
                 // The post-race glyph trees (RACE_HUD §6.6): one line per node under a root.
