@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F819](F0819.md) | 2026-11-10 | Loading reflection box space (static evidence) |
 | [F818](F0818.md) | 2026-11-11 | Car dust, scratch and damage gates and GhostCarValues |
 | [F817](F0817.md) | 2026-11-10 | Tyre walls with a static back row break; lift_sunk skips bodies that do not collide with fixed geometry |
 | [F816](F0816.md) | 2026-11-10 | Livery designer 3D pill carousel on fe3d |

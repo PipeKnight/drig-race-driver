@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F819](log/F0819.md) | 2026-11-10 | Loading reflection box space (static evidence) |
 | [F818](log/F0818.md) | 2026-11-11 | Car dust, scratch and damage gates and GhostCarValues |
 | [F817](log/F0817.md) | 2026-11-10 | Tyre walls with a static back row break; lift_sunk skips bodies that do not collide with fixed geometry |
 | [F816](log/F0816.md) | 2026-11-10 | Livery designer 3D pill carousel on fe3d |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F762](log/F0762.md) | 2026-11-09 | Player reset job ported 1:1 (row 43) |
 | [F761](log/F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
 | [F760](log/F0760.md) | 2026-11-09 | Graphics route audit: every raceable route, autopilot lap, chase and head-cam verdicts |
-| [F759](log/F0759.md) | 2026-11-09 | Circuit lap estimator 0x67FFB0 and marshal flags (rows 44, 47) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

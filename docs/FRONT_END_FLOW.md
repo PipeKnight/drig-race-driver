@@ -146,9 +146,26 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   corner's dark lower half. A debug render measured this: texture alpha 1 everywhere, a smooth
   Fresnel term, and the cube's green jumping from 34 to 213 at the edge. The barrier shows a
   smaller rectangle of the same kind. This follows from the [D] formula once pos is world space.
-  [I] the original's pos may be in another space, because a box of about 9 × 4 × 17 around the
-  origin looks like a car's; only a grid.exe capture of the loading screen settles it. The port
-  keeps the formula literal.
+  The space was traced in F817 [D unless marked], and no world-to-box transform was found:
+  - The constant builder 0x4DFC00 (0x4E031F–0x4E0393) only inserts w into `_refMinGamma` and
+    `_refMaxScale` (r_gamma, r_scale, with andps/orps masks). The box xyz go to the shader as
+    the vector reader stored them. Nothing else in the uniform table 0xDAB000 (14 names,
+    registered by 0x4D0960) carries a box transform.
+  - The pixel program's eye constant is declared `float3 EyePositionWS` (c0). The vertex program
+    writes the position as Model × instance rows × pos and the normal through the instance rows
+    only. V = eye − pos is consistent only if pos is world space as well.
+  - The `loading` group's box, together with its "valueX - max X" note, is a verbatim copy of
+    `garage_01`'s. garage_02 (−7.711…6.138, 0.008…4.772, −8.576…8.503) and garage_03 have their
+    own boxes, each of car size about the origin.
+  - `loading_root` (fePersistentDatabase.pssg) is laid out hundreds of units away: logo_plane
+    and tarmac_plane at y −120.34, load_cam's target at (−44.25, −54.22, −17.12), the screens at
+    x −160…−105.
+  - The only code that names `Model`/`ModelViewProj` (0xB0B600) builds them from the object's
+    own matrices. It is a separate draw path; [I] the general mesh path binds the same names
+    through the shader's parameter list, not traced.
+  So, as far as static analysis reaches, the loading floor's lookup uses a garage box that does
+  not enclose it, and the quad is the original's own result [I, strong]. A grid.exe capture
+  would settle it. The port keeps the formula literal.
   Port: `fe_world.wgsl` (a `Material` with the formula above, sRGB re-encoded after sampling and
   decoded for the linear target), `fe_world::Surface`; the zone is `Spec::zone`, the cube
   `Spec::reflection`, read through `grid_formats::osd::read_cubemaps`.
