@@ -1053,13 +1053,34 @@ pub fn standings_lines(points: &[i32], e: &InProgress, team_mate: &str) -> Vec<S
         .collect()
 }
 
-/// The payout lines (the original's bank text names, English): the paid
-/// items, then the balance and the season's earnings
-/// (`bank_rewards_balance_desc`, `bank_rewards_season_earnings_desc` [D]).
+/// The payout lines: the bank, the reputation and the news, in that order
+/// (the reward screens' text, [`payout_text`]).
+#[cfg(test)]
 pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
+    let t = payout_text(p, c);
+    [t.bank, t.reputation, t.news].concat()
+}
+
+/// A payout's text by reward screen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PayoutText {
+    /// Bank Account (`bank_rewards_*` [D] names, English): the paid items,
+    /// the total, the balance and the season's earnings.
+    pub bank: Vec<String>,
+    /// The reputation earned and the region it goes to.
+    pub reputation: Vec<String>,
+    /// Team news: unlocked cars, the founded team, new sponsor offers.
+    pub news: Vec<String>,
+}
+
+/// The payout's text by reward screen (the original's bank text names,
+/// English; `bank_rewards_balance_desc`, `bank_rewards_season_earnings_desc`
+/// [D]).
+pub fn payout_text(p: &Payout, c: &Career) -> PayoutText {
     let money = |v: i64| format!("${}", thousands(v));
     let offer = p.driver_offer_wages != 0 || p.driver_offer_bonus != 0 || p.driver_offer_reputation != 0;
     let mut lines = Vec::new();
+    let mut news = Vec::new();
     if p.head_to_head {
         // A head-to-head pays its prize for a win and no reputation
         // [V 0x6788D0]; the text is AUTHORED.
@@ -1092,16 +1113,16 @@ pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
     lines.push(format!("Season's Earnings: {}", money(c.season_earnings)));
     if !p.unlocked_cars.is_empty() {
         // AUTHORED text: the original shows no popup for it (0x65AD90).
-        lines.push(format!("Every car is unlocked: {} join your garage.", p.unlocked_cars.len()));
+        news.push(format!("Every car is unlocked: {} join your garage.", p.unlocked_cars.len()));
     }
     if p.team_founded {
-        lines.push("Your race team is founded: the founding sum is paid, and the rookie licences and the free car come with it.".into());
+        news.push("Your race team is founded: the founding sum is paid, and the rookie licences and the free car come with it.".into());
     }
     let region = p
         .region
         .and_then(|r| REGIONS.iter().find(|(x, _)| *x == r))
         .map_or("", |(_, n)| *n);
-    lines.push(if offer || p.head_to_head {
+    let reputation = vec![if offer || p.head_to_head {
         format!("Reputation: {} pts to {region}", thousands(p.reputation()))
     } else {
         format!(
@@ -1110,11 +1131,11 @@ pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
             thousands(p.reputation_base),
             thousands(p.reputation_bonus)
         )
-    });
+    }];
     if !p.new_sponsor_offers.is_empty() {
-        lines.push(format!("New sponsor offers: {}", p.new_sponsor_offers.len()));
+        news.push(format!("New sponsor offers: {}", p.new_sponsor_offers.len()));
     }
-    lines
+    PayoutText { bank: lines, reputation, news }
 }
 
 /// A sale listing's state in words (the `ebay_msg_*` popups [D]).
@@ -1246,20 +1267,29 @@ pub fn race_out(
     }
 }
 
-/// Writes the result when the race leaves to the career screen
-/// (`event_menu::leave`, exit code BACK_TO_MENU).
+/// Writes the result when the race leaves to the career screen: as soon as
+/// its fade out to the screen starts (the hand-off starts the screen before
+/// the race exits, and the screen reads the result when it opens), or on
+/// the BACK_TO_MENU exit of a race without the fade. Once.
+#[allow(clippy::too_many_arguments)]
 pub fn write_result(
     mut exits: MessageReader<AppExit>,
+    fade: Option<Res<crate::transition::Fade>>,
+    mut written: Local<bool>,
     path: Res<ResultPath>,
     driving: Res<crate::Driving>,
     trial: Option<Res<crate::time_trial::Trial>>,
     top: Option<Res<TopSpeed>>,
     flashback: Option<Res<crate::flashback::Flashback>>,
 ) {
-    let back = AppExit::from_code(crate::event_menu::BACK_TO_MENU as u8);
-    if !exits.read().any(|e| *e == back) {
+    let code = crate::event_menu::BACK_TO_MENU as u8;
+    let back = AppExit::from_code(code);
+    let exiting = exits.read().any(|e| *e == back);
+    let leaving = fade.is_some_and(|f| f.next() == Some(crate::transition::Next::Code(code)));
+    if *written || !(exiting || leaving) {
         return;
     }
+    *written = true;
     let rows = crate::post_race::table(&driving, trial.as_deref());
     let fb = flashback.map(|f| Flashbacks {
         used: f.manager.used,
@@ -1290,17 +1320,22 @@ pub fn write_result(
 /// so `GRID_AUTOPILOT` drives and `GRID_RESULTS_CONTINUE` leaves the results.
 fn auto() -> Option<Auto> {
     let v = std::env::var("GRID_CAREER_AUTO").ok()?;
+    if v == "offer" {
+        return Some(Auto::FirstOffer);
+    }
     match v.strip_prefix('o') {
         Some(o) => o.parse().ok().map(Auto::Offer),
         None => v.parse().ok().map(Auto::Event),
     }
 }
 
-/// What `GRID_CAREER_AUTO` takes: an event id, or `o` and a driver offer id.
+/// What `GRID_CAREER_AUTO` takes: an event id, `o` and a driver offer id,
+/// or `offer` (the first driver offer on show).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Auto {
     Event(i32),
     Offer(i32),
+    FirstOffer,
 }
 
 /// Scripted ticks of an unattended career race: 576 s, and 800 s for the
@@ -1324,71 +1359,108 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         .find(|w| w[0] == "--data-dir")
         .map(|w| PathBuf::from(&w[1]))
         .unwrap_or_else(crate::settings::default_data_dir);
-    loop {
-        let screen = std::process::Command::new(&exe)
-            .arg("--career-screen")
-            .args(&flags)
-            .status()?;
-        if screen.code() != Some(CAREER_GO) {
-            return Ok(screen.code().unwrap_or(1));
+    let screen = || {
+        let mut screen = std::process::Command::new(&exe);
+        screen.arg("--career-screen").args(&flags);
+        screen
+    };
+    // The screen and the race hand over with the shared fade
+    // (`transition::run_supervised`, docs/SCREEN_FLOW.md §2.4): the leaving
+    // one stays black with "Loading" until the next one shows.
+    let code = crate::transition::run_supervised(screen(), None, |code| match code {
+        CAREER_GO => {
+            let result = dir.join(RESULT);
+            let _ = std::fs::remove_file(&result);
+            let mut race = std::process::Command::new(&exe);
+            race.args(&flags)
+                .arg("--settings")
+                .arg(dir.join(PROFILE))
+                .arg("--from-menu")
+                .arg("--career-result")
+                .arg(&result);
+            if auto().is_some() {
+                let profile = std::fs::read_to_string(dir.join(PROFILE)).unwrap_or_default();
+                race.args(["--drive-ticks", auto_ticks(&profile)]);
+            }
+            Some(race)
         }
-        let result = dir.join(RESULT);
-        let _ = std::fs::remove_file(&result);
-        let mut race = std::process::Command::new(&exe);
-        race.args(&flags)
-            .arg("--settings")
-            .arg(dir.join(PROFILE))
-            .arg("--from-menu")
-            .arg("--career-result")
-            .arg(&result);
-        if auto().is_some() {
-            let profile = std::fs::read_to_string(dir.join(PROFILE)).unwrap_or_default();
-            race.args(["--drive-ticks", auto_ticks(&profile)]);
-        }
-        let race = race.status()?;
-        if race.code() != Some(crate::event_menu::BACK_TO_MENU) {
-            return Ok(race.code().unwrap_or(1));
-        }
-    }
+        crate::event_menu::BACK_TO_MENU => Some(screen()),
+        _ => None,
+    })?;
+    Ok(code)
 }
 
 // ---- The screen ----------------------------------------------------------
 
+/// The career screen's pages: the original's GRID World screens
+/// (`states.xml`/`flow.xml`, docs/CAREER_SCREEN.md "Pages") as text lists.
 #[derive(Clone, Debug, PartialEq)]
 enum Page {
+    /// GRID World (`career_menu`): the profile and the four buttons.
     Home,
-    Event,
-    Payout(Vec<String>),
-    /// Teammate search and hiring.
+    /// Race Events (`career_podium_choose_region`): the regions.
+    Regions,
+    /// A region's open events by tier (`podium_choose_event_*`).
+    Events(Region),
+    /// One open event (`career_podium_event_details`): `offers[i]`.
+    Details(usize),
+    /// Select Car (`event_vehicle_select`, `buy_vehicle_buttons`) for
+    /// `offers[i]`.
+    Cars(usize),
+    /// Driver Offers (`driver_offers_select`).
+    DriverOffers,
+    /// One driver offer (`driver_offers_details`): `driver_offers[i]`.
+    OfferDetails(usize),
+    /// My Team (`team_management`).
     Team,
-    /// Received sponsor offers and their slots.
+    /// Team Mate: search and hiring.
+    TeamMate,
+    /// Sponsors: received offers and their slots.
     Sponsors,
-    /// eBay Motors: used cars of the open events' models.
-    Ebay,
-    /// eBay Motors: the team's cars for sale.
-    EbaySell,
+    /// View Cars (`view_vehicles`): the team's cars.
+    Garage,
+    /// One team car (`view_vehicle_buttons`): sell, sell on eBay.
+    Car(usize),
+    /// Buy On eBay: used cars of one open event's models (`Some(i)`, from
+    /// Select Car) or of every open event's (from View Cars).
+    Ebay(Option<usize>),
+    /// The event in progress: its races and the next one.
+    Event,
+    /// The screens after an event, in the original's order, and the one
+    /// on show.
+    Rewards(Vec<RewardPage>, usize),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// One screen after an event: its title and lines.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RewardPage {
+    pub title: String,
+    pub lines: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 enum Action {
-    Enter(usize),
+    /// Opens a page.
+    Go(Page),
+    /// Enters `offers[i]` with the car (an owned model).
+    Start(usize, String),
+    /// Buys a new car (Select Car: Buy New).
+    BuyNew(i32),
     TakeOffer(usize),
-    OpenTeam,
-    OpenSponsors,
     CycleRegion,
     CycleFee,
     Hire(i32),
     /// Moves a received sponsor offer to its next slot.
     CycleSponsor(i32),
-    OpenEbay,
-    OpenEbaySell,
     /// Buys `used[i]`.
     BuyUsed(usize),
     /// Lists the team's car `i` on eBay.
     ListCar(usize),
-    Home,
+    /// Sells the team's car `i` to the dealer.
+    SellCar(usize),
     NextRace,
     Abandon,
+    /// The next reward screen, then GRID World.
     Continue,
     Quit,
 }
@@ -1414,82 +1486,263 @@ struct Screen {
     used: Vec<grid_tools::career::ebay::UsedCar>,
 }
 
+/// The regions of the Race Events page, in the original's header order
+/// (`cpodium_region_header_*` [D]; Le Mans AUTHORED).
+const EVENT_REGIONS: [(Region, &str); 5] = [
+    (Region::Europe, "cpodium_region_header_eu"),
+    (Region::UnitedStates, "cpodium_region_header_us"),
+    (Region::Japan, "cpodium_region_header_jp"),
+    (Region::International, "cpodium_region_header_int"),
+    (Region::LeMans, ""),
+];
+
 impl Screen {
+    /// A language string, or `fallback` when the language file lacks it.
+    fn text(&self, key: &str, fallback: &str) -> String {
+        let text = self.labels.get(key);
+        if key.is_empty() || text == key { fallback.to_owned() } else { text.to_owned() }
+    }
+
+    fn region_name(&self, region: Region) -> String {
+        let key = EVENT_REGIONS.iter().find(|(r, _)| *r == region).map_or("", |(_, k)| *k);
+        let name = REGIONS.iter().find(|(r, _)| *r == region).map_or("?", |(_, n)| *n);
+        self.text(key, name)
+    }
+
+    fn event_region(&self, event_id: i32) -> Option<Region> {
+        let event = self.cat.event(event_id)?;
+        self.cat.tier(event.tier_id).map(|t| t.region)
+    }
+
+    fn tier_name(&self, tier_id: i32) -> String {
+        self.cat
+            .tier(tier_id)
+            .map_or(format!("tier {tier_id}"), |t| self.text(&format!("db_{}", t.name), &t.name))
+    }
+
+    /// Whether the team owns a car of the model.
+    fn owns(&self, stem: &str) -> bool {
+        self.career
+            .cars
+            .iter()
+            .any(|c| self.cat.vehicles.get(&c.vehicle_id).is_some_and(|v| v.stem == stem))
+    }
+
+    /// The event's `event_vehicle` row of the model.
+    fn event_vehicle(&self, event_id: i32, stem: &str) -> Option<&grid_tools::career::data::Vehicle> {
+        let event = self.cat.event(event_id)?;
+        event
+            .vehicles
+            .iter()
+            .filter_map(|v| self.cat.vehicles.get(v))
+            .find(|v| v.stem == stem)
+    }
+
+    /// The page Back leads to (`None`: GRID World quits, the event page
+    /// leaves the event in progress).
+    fn parent(&self) -> Option<Page> {
+        Some(match &self.page {
+            Page::Home | Page::Event | Page::Rewards(..) => return None,
+            Page::Regions | Page::DriverOffers | Page::Team | Page::Garage => Page::Home,
+            Page::Events(_) => Page::Regions,
+            Page::Details(i) => match self.offers.get(*i).and_then(|o| self.event_region(o.event_id)) {
+                Some(region) => Page::Events(region),
+                None => Page::Regions,
+            },
+            Page::Cars(i) => Page::Details(*i),
+            Page::OfferDetails(_) => Page::DriverOffers,
+            Page::TeamMate | Page::Sponsors => Page::Team,
+            Page::Car(_) => Page::Garage,
+            Page::Ebay(Some(i)) => Page::Cars(*i),
+            Page::Ebay(None) => Page::Garage,
+        })
+    }
+
+    fn back_row(&self) -> (String, Action) {
+        let to = self.parent().map_or(Action::Quit, Action::Go);
+        (self.text("back", "Back"), to)
+    }
+
+    /// The page's title (language strings where the original has them).
+    fn title(&self) -> String {
+        match &self.page {
+            Page::Home => self.text("career_menu_screen_title", "GRID World"),
+            Page::Regions => self.text("career_menu_choose_region_button_title", "Race Events"),
+            Page::Events(r) => self.region_name(*r),
+            Page::Details(i) => self.offers.get(*i).map_or_else(String::new, |o| o.label.clone()),
+            Page::Cars(_) => self.text("vehicle_select_title", "Select Car"),
+            Page::DriverOffers | Page::OfferDetails(_) => self.text("driver_offers_screen_title", "Driver Offers"),
+            Page::Team => self.text("team_management_screen_title", "My Team"),
+            Page::TeamMate => self.text("team_management_team_mates_button_title", "Team Mate"),
+            Page::Sponsors => self.text("team_management_current_sponsors_button_title", "Sponsors"),
+            Page::Garage | Page::Car(_) => self.text("career_menu_view_vehicles_button_title", "View Cars"),
+            Page::Ebay(_) => self.text("buy_on_ebay_button_header", "Buy On eBay"),
+            Page::Event => self
+                .current
+                .as_ref()
+                .and_then(|e| self.cat.event(e.event_id))
+                .map_or("Event".into(), |ev| self.text(&format!("db_{}", ev.name), &ev.name)),
+            Page::Rewards(pages, at) => pages.get(*at).map_or_else(String::new, |p| p.title.clone()),
+        }
+    }
+
+    /// The selected row's help line (the buttons' `_subtitle` strings).
+    fn help(&self) -> String {
+        let key = match (&self.page, self.cursor) {
+            (Page::Home, 0) => "career_menu_choose_region_button_subtitle",
+            (Page::Home, 1) => "career_menu_driver_offers_button_subtitle",
+            (Page::Home, 2) => "career_menu_team_management_button_subtitle",
+            (Page::Home, 3) => "career_menu_view_vehicles_button_subtitle",
+            (Page::Team, 0) => "team_management_team_mates_button_subtitle",
+            (Page::Team, 1) => "team_management_current_sponsors_button_subtitle",
+            _ => return String::new(),
+        };
+        self.text(key, "")
+    }
+
     fn actions(&self) -> Vec<(String, Action)> {
+        let mut rows: Vec<(String, Action)> = Vec::new();
         match &self.page {
             Page::Home => {
-                let mut rows: Vec<(String, Action)> = self
+                rows.push((
+                    format!(
+                        "{} ({} open)",
+                        self.text("career_menu_choose_region_button_title", "Race Events"),
+                        self.offers.len()
+                    ),
+                    Action::Go(Page::Regions),
+                ));
+                rows.push((
+                    format!(
+                        "{} ({})",
+                        self.text("career_menu_driver_offers_button_title", "Driver Offers"),
+                        self.driver_offers.len()
+                    ),
+                    Action::Go(Page::DriverOffers),
+                ));
+                rows.push((self.text("career_menu_team_management_button_title", "My Team"), Action::Go(Page::Team)));
+                rows.push((
+                    format!(
+                        "{} ({})",
+                        self.text("career_menu_view_vehicles_button_title", "View Cars"),
+                        self.career.cars.len()
+                    ),
+                    Action::Go(Page::Garage),
+                ));
+                if self.current.is_some() {
+                    rows.push(("Event in progress".into(), Action::Go(Page::Event)));
+                }
+                rows.push((self.text("career_menu_buttontext_back", "Main Menu"), Action::Quit));
+                return rows;
+            }
+            Page::Regions => {
+                for (region, _) in EVENT_REGIONS {
+                    let n = self
+                        .offers
+                        .iter()
+                        .filter(|o| self.event_region(o.event_id) == Some(region))
+                        .count();
+                    rows.push((format!("{} ({n} open)", self.region_name(region)), Action::Go(Page::Events(region))));
+                }
+            }
+            Page::Events(region) => {
+                let mut list: Vec<(i32, i32, usize)> = self
                     .offers
                     .iter()
                     .enumerate()
-                    .map(|(i, o)| {
-                        let e = &self.cat.events[&o.event_id];
-                        (
-                            format!(
-                                "{} ({} races, {}, first ${})",
-                                o.label,
-                                o.races.len(),
-                                o.car,
-                                thousands(e.prize_money_for_first)
-                            ),
-                            Action::Enter(i),
-                        )
+                    .filter_map(|(i, o)| {
+                        let event = self.cat.event(o.event_id)?;
+                        let tier = self.cat.tier(event.tier_id)?;
+                        (tier.region == *region).then_some((tier.order_index, event.order_index, i))
                     })
                     .collect();
-                rows.extend(
-                    self.driver_offers
-                        .iter()
-                        .enumerate()
-                        .map(|(i, o)| (format!("{} [{}]", o.label, o.car), Action::TakeOffer(i))),
-                );
+                list.sort();
+                for (_, _, i) in list.into_iter().take(ROWS - 1) {
+                    let o = &self.offers[i];
+                    let e = &self.cat.events[&o.event_id];
+                    rows.push((
+                        format!(
+                            "{}: {} ({} races, first ${})",
+                            self.tier_name(e.tier_id),
+                            o.label,
+                            o.races.len(),
+                            thousands(e.prize_money_for_first)
+                        ),
+                        Action::Go(Page::Details(i)),
+                    ));
+                }
+            }
+            Page::Details(i) => {
+                if self.offers.get(*i).is_some() {
+                    rows.push((self.text("vehicle_select_title", "Select Car"), Action::Go(Page::Cars(*i))));
+                }
+            }
+            Page::Cars(i) => {
+                if let Some(o) = self.offers.get(*i) {
+                    for stem in &o.field_cars {
+                        if self.owns(stem) {
+                            rows.push((format!("{stem} (in your garage)"), Action::Start(*i, stem.clone())));
+                        } else if let Some(v) = self.event_vehicle(o.event_id, stem).filter(|v| v.purchasable) {
+                            rows.push((
+                                format!(
+                                    "{}: {stem} - ${}",
+                                    self.text("buy_new_button_header", "Buy New"),
+                                    thousands(v.purchase_price)
+                                ),
+                                Action::BuyNew(v.id),
+                            ));
+                        }
+                    }
+                    rows.push((self.text("buy_on_ebay_button_header", "Buy On eBay"), Action::Go(Page::Ebay(Some(*i)))));
+                }
+            }
+            Page::DriverOffers => {
+                for (i, o) in self.driver_offers.iter().enumerate().take(ROWS - 1) {
+                    rows.push((format!("{} [{}]", o.label, o.car), Action::Go(Page::OfferDetails(i))));
+                }
+            }
+            Page::OfferDetails(i) => {
+                if self.driver_offers.get(*i).is_some() {
+                    rows.push(("Accept the offer".into(), Action::TakeOffer(*i)));
+                }
+            }
+            Page::Team => {
                 if self.career.team_founded {
                     let mate = self
                         .career
                         .team_mate
                         .as_ref()
                         .map_or("none".to_owned(), |t| self.driver_name(t.driver_id));
-                    rows.push((format!("Team mate: {mate}"), Action::OpenTeam));
+                    rows.push((
+                        format!("{}: {mate}", self.text("team_management_team_mates_button_title", "Team Mate")),
+                        Action::Go(Page::TeamMate),
+                    ));
                     rows.push((
                         format!(
-                            "Sponsors: {} received, {} placed",
+                            "{}: {} received, {} placed",
+                            self.text("team_management_current_sponsors_button_title", "Sponsors"),
                             self.career.sponsor_offers.len(),
                             self.career.major_sponsor.iter().count()
                                 + self.career.minor_sponsors.iter().flatten().count()
                         ),
-                        Action::OpenSponsors,
-                    ));
-                    rows.push(("eBay Motors: used cars".into(), Action::OpenEbay));
-                    rows.push((
-                        format!("eBay Motors: sell a car ({} listed)", self.career.ebay.listings.len()),
-                        Action::OpenEbaySell,
+                        Action::Go(Page::Sponsors),
                     ));
                 }
-                rows.push(("Quit".into(), Action::Quit));
-                rows
             }
-            Page::Team => {
-                let mut rows = vec![
-                    (
-                        format!(
-                            "Region: {}",
-                            self.team_region.map_or("Any", |r| REGIONS[r as usize].1)
-                        ),
-                        Action::CycleRegion,
+            Page::TeamMate => {
+                rows.push((
+                    format!("Region: {}", self.team_region.map_or("Any", |r| REGIONS[r as usize].1)),
+                    Action::CycleRegion,
+                ));
+                rows.push((
+                    format!(
+                        "Signing fee: {}",
+                        self.team_fee
+                            .and_then(|i| self.cat.fee_ranges.get(i))
+                            .map_or("Any".to_owned(), |(lo, hi)| format!("${} - ${}", thousands(*lo), thousands(*hi)))
                     ),
-                    (
-                        format!(
-                            "Signing fee: {}",
-                            self.team_fee
-                                .and_then(|i| self.cat.fee_ranges.get(i))
-                                .map_or("Any".to_owned(), |(lo, hi)| format!(
-                                    "${} - ${}",
-                                    thousands(*lo),
-                                    thousands(*hi)
-                                ))
-                        ),
-                        Action::CycleFee,
-                    ),
-                ];
+                    Action::CycleFee,
+                ));
                 if self.career.can_hire(&self.cat) {
                     for h in self
                         .career
@@ -1510,23 +1763,38 @@ impl Screen {
                         ));
                     }
                 }
-                rows.push(("Back".into(), Action::Home));
-                rows
             }
             Page::Sponsors => {
-                let mut rows: Vec<(String, Action)> = self
-                    .career
-                    .sponsor_offers
-                    .iter()
-                    .take(ROWS - 1)
-                    .map(|&o| (self.sponsor_row(o), Action::CycleSponsor(o)))
-                    .collect();
-                rows.push(("Back".into(), Action::Home));
-                rows
+                for &o in self.career.sponsor_offers.iter().take(ROWS - 1) {
+                    rows.push((self.sponsor_row(o), Action::CycleSponsor(o)));
+                }
+            }
+            Page::Garage => {
+                for (i, c) in self.career.cars.iter().enumerate().take(ROWS - 2) {
+                    rows.push((self.garage_row(c), Action::Go(Page::Car(i))));
+                }
+                rows.push((self.text("buy_on_ebay_button_header", "Buy On eBay"), Action::Go(Page::Ebay(None))));
+            }
+            Page::Car(i) => {
+                if let Some(c) = self.career.cars.get(*i) {
+                    let value = self.cat.vehicles.get(&c.vehicle_id).map_or(0, |v| v.sale_price);
+                    let listed = self.career.ebay.listings.iter().any(|l| l.vehicle_id == c.vehicle_id);
+                    if !listed {
+                        rows.push((
+                            format!("{} - you receive ${}", self.text("sell_vehicle_button_header", "Sell Car"), thousands(value)),
+                            Action::SellCar(*i),
+                        ));
+                    }
+                    rows.push((self.sell_row(c), Action::ListCar(*i)));
+                }
+            }
+            Page::Ebay(_) => {
+                for (i, u) in self.used.iter().enumerate().take(ROWS - 1) {
+                    rows.push((self.used_row(u), Action::BuyUsed(i)));
+                }
             }
             Page::Event => {
                 let e = self.current.as_ref();
-                let mut rows = Vec::new();
                 if let Some((n, next)) = e.and_then(|e| e.next().map(|r| (e.results.len() + 1, r))) {
                     rows.push((
                         format!(
@@ -1539,34 +1807,26 @@ impl Screen {
                     ));
                 }
                 rows.push(("Abandon event".into(), Action::Abandon));
-                rows.push(("Quit".into(), Action::Quit));
-                rows
+                rows.push((self.text("career_menu_screen_title", "GRID World"), Action::Go(Page::Home)));
+                return rows;
             }
-            Page::Payout(_) => vec![("Continue".into(), Action::Continue)],
-            Page::Ebay => {
-                let mut rows: Vec<(String, Action)> = self
-                    .used
-                    .iter()
-                    .enumerate()
-                    .take(ROWS - 1)
-                    .map(|(i, u)| (self.used_row(u), Action::BuyUsed(i)))
-                    .collect();
-                rows.push(("Back".into(), Action::Home));
-                rows
-            }
-            Page::EbaySell => {
-                let mut rows: Vec<(String, Action)> = self
-                    .career
-                    .cars
-                    .iter()
-                    .enumerate()
-                    .take(ROWS - 1)
-                    .map(|(i, c)| (self.sell_row(c), Action::ListCar(i)))
-                    .collect();
-                rows.push(("Back".into(), Action::Home));
-                rows
-            }
+            Page::Rewards(..) => return vec![("Continue".into(), Action::Continue)],
         }
+        rows.push(self.back_row());
+        rows
+    }
+
+    /// A team car in View Cars: model, history and dealer value.
+    fn garage_row(&self, c: &grid_tools::career::state::OwnedCar) -> String {
+        let v = self.cat.vehicles.get(&c.vehicle_id);
+        format!(
+            "{}{}: {} race wins, {} event wins - value ${}",
+            self.stem(c.vehicle_id),
+            v.and_then(|v| v.region).map_or(String::new(), |r| format!(" ({})", self.region_name(r))),
+            c.race_wins,
+            c.event_wins,
+            thousands(v.map_or(0, |v| v.sale_price))
+        )
     }
 
     fn stem(&self, vehicle_id: i32) -> String {
@@ -1614,13 +1874,15 @@ impl Screen {
         }
     }
 
-    /// The used cars of the models the open events race and the team does
-    /// not own (the original offers "Buy On eBay" for a model the player
-    /// does not own on the event's car list [D]; which models its eBay list
-    /// shows was not traced).
-    fn refresh_used(&mut self) {
+    /// The used cars of the models an open event races (`Some(i)`: offer
+    /// `i`, from its Select Car page; `None`: every open event's) that the
+    /// team does not own (the original offers "Buy On eBay" for a model the
+    /// player does not own on the event's car list [D]; which models its
+    /// eBay list shows was not traced).
+    fn refresh_used(&mut self, of: Option<usize>) {
         let mut models: Vec<i32> = Vec::new();
-        for o in &self.offers {
+        let shown = self.offers.iter().enumerate().filter(|(i, _)| of.is_none_or(|of| of == *i));
+        for (_, o) in shown {
             for &v in self.cat.event(o.event_id).map(|e| e.vehicles.as_slice()).unwrap_or_default() {
                 let raceable = self
                     .cat
@@ -1716,27 +1978,127 @@ impl Screen {
         )
     }
 
+    /// The last race's sponsor objectives (paid with the event): one line
+    /// each.
+    fn sponsor_lines(&self, last: &RaceResult) -> Vec<String> {
+        self.career
+            .sponsor_pay(&self.cat, last)
+            .into_iter()
+            .map(|p| {
+                let met = |b: bool| if b { "met" } else { "failed" };
+                let mate = if self.career.team_mate.is_some() {
+                    format!(", team mate {}", met(p.teammate_met))
+                } else {
+                    String::new()
+                };
+                format!(
+                    "Sponsor {}{}: you {}{mate} - ${}",
+                    self.sponsor_name(p.sponsor_id),
+                    if p.major { " (major)" } else { "" },
+                    met(p.player_met),
+                    thousands(p.money)
+                )
+            })
+            .collect()
+    }
+
+    /// One open event's details (`career_podium_event_details`: Race Info).
+    fn details_lines(&self, o: &Offer) -> Vec<String> {
+        let Some(e) = self.cat.event(o.event_id) else {
+            return Vec::new();
+        };
+        let mut lines = vec![
+            format!(
+                "{} - {}",
+                self.event_region(o.event_id).map_or_else(String::new, |r| self.region_name(r)),
+                self.tier_name(e.tier_id)
+            ),
+            format!(
+                "Prize money for first: ${}   Reputation pot: {} pts",
+                thousands(e.prize_money_for_first),
+                thousands(e.reputation_pot)
+            ),
+            format!("{}:", self.text("cpodium_details_raceinfo_tab", "Race Info")),
+        ];
+        for (i, (r, route)) in o.races.iter().enumerate() {
+            lines.push(format!("    Race {}: {} - {} laps", i + 1, route_name(route), r.laps));
+        }
+        lines.push(format!("Cars: {}", o.field_cars.join(", ")));
+        if !o.field_cars.iter().any(|s| self.owns(s)) {
+            lines.push(format!(
+                "You don't own a car for this event: buy one new or on eBay ({}).",
+                self.text("vehicle_select_title", "Select Car")
+            ));
+        }
+        lines
+    }
+
     fn info(&self) -> Vec<String> {
-        let mut lines = status_lines(&self.cat, &self.career);
+        let mut lines = match &self.page {
+            Page::Home => status_lines(&self.cat, &self.career),
+            _ => vec![format!(
+                "{}: ${}",
+                self.text("bank_rewards_screen_title", "Bank Account"),
+                thousands(self.career.money)
+            )],
+        };
+        lines.push(String::new());
         match &self.page {
             Page::Home => {
-                lines.push(String::new());
                 if !self.career.team_founded {
                     lines.push(format!(
                         "No race team yet: drive for other teams until the bank reaches ${} to found your own.",
                         thousands(self.cat.start_money)
                     ));
                 }
-                lines.push(match (self.offers.is_empty(), self.driver_offers.is_empty()) {
-                    (true, true) => "No open event or driver offer can run in the port yet.".into(),
-                    (false, true) => "Open events:".into(),
-                    (true, false) => "Driver offers:".into(),
-                    (false, false) => "Open events, then driver offers:".into(),
-                });
+                if self.offers.is_empty() && self.driver_offers.is_empty() {
+                    lines.push("No open event or driver offer can run in the port yet.".into());
+                }
+            }
+            Page::Regions => lines.push("Choose a region: its open events by tier.".into()),
+            Page::Events(_) => {
+                if self.actions().len() <= 1 {
+                    lines.push("No open event in this region that the port can run.".into());
+                }
+            }
+            Page::Details(i) => {
+                if let Some(o) = self.offers.get(*i) {
+                    lines.extend(self.details_lines(o));
+                }
+            }
+            Page::Cars(i) => {
+                if let Some(o) = self.offers.get(*i) {
+                    lines.push(format!("{}: {}", o.label, o.field_cars.join(", ")));
+                    if !o.field_cars.iter().any(|s| self.owns(s)) {
+                        lines.push(self.text(
+                            "no_vehicles_in_region_subtitle",
+                            "You don't own any cars from this region.",
+                        ));
+                    }
+                }
+            }
+            Page::DriverOffers => {
+                if self.driver_offers.is_empty() {
+                    lines.push("No driver offer that the port can run.".into());
+                }
+            }
+            Page::OfferDetails(i) => {
+                if let Some(run) = self.driver_offers.get(*i)
+                    && let Some(o) = self.cat.driver_offers.get(&run.offer_id)
+                {
+                    let team = team_name(&self.cat, o.team_id, &self.labels);
+                    lines.push(format!("{} - {team}", run.label));
+                    lines.push(format!("Car: {}   Track: {}", run.car, route_name(&run.race.1)));
+                    lines.push(format!("Objective: {}", objective_text(&self.cat, o, &self.labels)));
+                }
+            }
+            Page::Team => {
+                if !self.career.team_founded {
+                    lines.push("You have no team yet.".into());
+                }
             }
             Page::Event => {
                 if let Some(e) = &self.current {
-                    lines.push(String::new());
                     let name = self.cat.event(e.event_id).map_or("?", |ev| ev.name.as_str());
                     match e.offer.and_then(|o| self.cat.driver_offers.get(&o)) {
                         Some(o) => lines.push(format!(
@@ -1759,7 +2121,11 @@ impl Screen {
                     if let Some(points) = self.event_points(e)
                         && !e.results.is_empty()
                     {
-                        lines.push("Event Standings - Drivers:".into());
+                        lines.push(format!(
+                            "{} - {}:",
+                            self.text("driver_event_standings_title", "Event Standings"),
+                            self.text("driver_event_standings_subtitle", "Drivers")
+                        ));
                         let mate = self
                             .career
                             .team_mate
@@ -1767,34 +2133,14 @@ impl Screen {
                             .map_or_else(|| "Team mate".into(), |t| self.driver_name(t.driver_id));
                         lines.extend(standings_lines(&points, e, &mate));
                     }
-                    // The last race's sponsor objectives (paid with the event).
-                    if e.offer.is_none()
-                        && let Some(last) = e.results.last()
-                    {
-                        for p in self.career.sponsor_pay(&self.cat, last) {
-                            let met = |b: bool| if b { "met" } else { "failed" };
-                            let mate = if self.career.team_mate.is_some() {
-                                format!(", team mate {}", met(p.teammate_met))
-                            } else {
-                                String::new()
-                            };
-                            lines.push(format!(
-                                "    Sponsor {}{}: you {}{mate} - ${}",
-                                self.sponsor_name(p.sponsor_id),
-                                if p.major { " (major)" } else { "" },
-                                met(p.player_met),
-                                thousands(p.money)
-                            ));
-                        }
-                    }
                 }
             }
-            Page::Payout(p) => {
-                lines.push(String::new());
-                lines.extend(p.iter().cloned());
+            Page::Rewards(pages, at) => {
+                if let Some(p) = pages.get(*at) {
+                    lines.extend(p.lines.iter().cloned());
+                }
             }
-            Page::Team => {
-                lines.push(String::new());
+            Page::TeamMate => {
                 match &self.career.team_mate {
                     Some(t) => lines.push(format!(
                         "Team mate: {}, keeps {}% of his prize money. Hiring another replaces him (no refund).",
@@ -1813,29 +2159,43 @@ impl Screen {
                 }
             }
             Page::Sponsors => {
-                lines.push(String::new());
                 lines.push(if self.career.sponsor_offers.is_empty() {
                     "Finish in the top three and sponsorship offers will start rolling in.".into()
                 } else {
                     "Select an offer to move it: not on the car, Major (pays double), Minor 1-7.".into()
                 });
             }
-            Page::Ebay => {
-                lines.push(String::new());
-                lines.push(if self.used.is_empty() {
-                    "No used cars of the open events' models on offer (or you own them all).".into()
-                } else {
-                    "Used cars at their Buy It Now price; select one to buy it. The offers change after every event.".into()
-                });
-            }
-            Page::EbaySell => {
-                lines.push(String::new());
+            Page::Garage => {
+                if self.career.cars.is_empty() {
+                    lines.push("Your team owns no cars yet.".into());
+                }
                 lines.push(format!(
-                    "Select a car to list it. Each event a bid of 70, 80, 90, 100 % of its value comes in; at the fixed price it sells at once. Sold so far: {} for ${}.",
+                    "eBay: {} listed, {} sold for ${} so far.",
+                    self.career.ebay.listings.len(),
                     self.career.ebay.sold,
                     thousands(self.career.ebay.earned)
                 ));
             }
+            Page::Car(i) => {
+                if let Some(c) = self.career.cars.get(*i) {
+                    lines.push(self.garage_row(c));
+                    lines.push(
+                        "On eBay a bid of 70, 80, 90, 100 % of its value comes in each event; at the fixed price it sells at once."
+                            .into(),
+                    );
+                }
+            }
+            Page::Ebay(_) => {
+                lines.push(if self.used.is_empty() {
+                    "No used cars of these models on offer (or you own them all).".into()
+                } else {
+                    "Used cars at their Buy It Now price; select one to buy it. The offers change after every event.".into()
+                });
+            }
+        }
+        let help = self.help();
+        if !help.is_empty() {
+            lines.push(help);
         }
         if !self.message.is_empty() {
             lines.push(self.message.clone());
@@ -1911,17 +2271,36 @@ impl Screen {
                 self.career.money,
                 self.career.team_founded
             );
-            let mut lines = vec![format!(
-                "Objective: {}",
-                if met { "achieved" } else { "failed" }
-            )];
-            lines.extend(payout_lines(&payout, &self.career));
-            lines.extend(ebay);
+            let pages = reward_pages(
+                |k, f| self.text(k, f),
+                Vec::new(),
+                Vec::new(),
+                Some(met),
+                false,
+                payout_text(&payout, &self.career),
+                ebay,
+            );
             self.current = None;
-            self.page = Page::Payout(lines);
+            self.cursor = 0;
+            self.page = Page::Rewards(pages, 0);
             return Ok(());
         }
         let settings = e.settings.unwrap_or_default();
+        // The standings and the last race's sponsor objectives, as the
+        // reward screens show them, before the event pays.
+        let standings = match self.event_points(&e) {
+            Some(points) => {
+                let mate = self
+                    .career
+                    .team_mate
+                    .as_ref()
+                    .map_or_else(|| "Team mate".into(), |t| self.driver_name(t.driver_id));
+                standings_lines(&points, &e, &mate)
+            }
+            None => Vec::new(),
+        };
+        let sponsors = e.results.last().map(|r| self.sponsor_lines(r)).unwrap_or_default();
+        let head_to_head = self.cat.event(e.event_id).is_some_and(|ev| ev.head_to_head);
         // Each car's class: the `vehicle_class_id` of its model (AUTHORED:
         // the first vehicle row of the stem; the original reads the
         // driver's livery row, 0x66BBA0). The F424 field has none.
@@ -1949,9 +2328,17 @@ impl Screen {
             self.career.total_reputation()
         );
         self.current = None;
-        let mut lines = payout_lines(&payout, &self.career);
-        lines.extend(ebay);
-        self.page = Page::Payout(lines);
+        let pages = reward_pages(
+            |k, f| self.text(k, f),
+            standings,
+            sponsors,
+            None,
+            head_to_head,
+            payout_text(&payout, &self.career),
+            ebay,
+        );
+        self.cursor = 0;
+        self.page = Page::Rewards(pages, 0);
         Ok(())
     }
 
@@ -2046,8 +2433,14 @@ impl Screen {
         Ok(())
     }
 
-    fn start(&mut self, index: usize) -> Result<(), String> {
-        let offer = self.offers.get(index).ok_or("no such event")?.clone();
+    /// Enters `offers[index]` with a car of the model `car` the team owns
+    /// (`event_vehicle_select` lists the team's cars of the event [D]).
+    fn start(&mut self, index: usize, car: &str) -> Result<(), String> {
+        let mut offer = self.offers.get(index).ok_or("no such event")?.clone();
+        if !offer.field_cars.iter().any(|c| c == car) || !self.owns(car) {
+            return Err(format!("the team owns no {car} for this event"));
+        }
+        offer.car = car.to_owned();
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(1, |d| d.as_secs() as u32);
@@ -2215,15 +2608,25 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     println!("drive_input {input_settings} pad_preset={pad} menu=on");
     let mut app = App::new();
     app.add_plugins(crate::with_profile(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "GRID Reassembly - Career".into(),
-            resolution: (1280, 800).into(),
-            present_mode: profile.present_mode.unwrap_or_default(),
-            ..default()
-        }),
+        // Centred like a supervised race window, or where the last race's
+        // window was (transition::window).
+        primary_window: Some(crate::transition::window(
+            Window {
+                title: "GRID Reassembly - Career".into(),
+                resolution: (1280, 800).into(),
+                position: bevy::window::WindowPosition::Centered(bevy::window::MonitorSelection::Primary),
+                present_mode: profile.present_mode.unwrap_or_default(),
+                ..default()
+            },
+            true,
+        )),
         ..default()
     })));
     crate::ui_font::install(&mut app);
+    // The original's overlay fade (docs/SCREEN_FLOW.md): GRID World fades
+    // in from black, and out to "Loading" when a race starts.
+    crate::transition::install(&mut app, labels.get("loading"), crate::transition::Start::Screen);
+    crate::frame_pacing::install_window_shots(&mut app);
     crate::input::install(&mut app, actions);
     let exit = app
         .insert_resource(screen)
@@ -2239,6 +2642,8 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[derive(Component)]
+struct Title;
 #[derive(Component)]
 struct Info;
 #[derive(Component)]
@@ -2270,25 +2675,71 @@ fn spawn(mut commands: Commands) {
                         flex_direction: FlexDirection::Column,
                         padding: UiRect::all(px(24.)),
                         row_gap: px(6.),
-                        min_width: px(620.),
-                        max_width: px(900.),
+                        // A definite width: the text wraps at it before the
+                        // panel's height is measured. With a shrink-to-fit
+                        // width (min/max only) long rows wrapped after the
+                        // height was set and ran past the panel.
+                        width: px(900.),
+                        max_width: percent(94.),
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.025, 0.04, 0.065, 0.92)),
                 ))
                 .with_children(|panel| {
-                    panel.spawn((Text::new("Career"), font(30.), TextColor(Color::WHITE)));
+                    panel.spawn((Title, Text::new(""), font(30.), TextColor(Color::WHITE)));
                     panel.spawn((Info, Text::new(""), font(17.), TextColor(Color::srgb(0.75, 0.8, 0.85))));
                     for i in 0..ROWS {
                         panel.spawn((RowText(i), Button, Text::new(""), font(21.), TextColor(Color::WHITE)));
                     }
                     panel.spawn((
-                        Text::new("Up/Down choose, Enter select, Escape quit. Career races are desktop-only and AUTHORED where docs/CAREER_SCREEN.md says so."),
+                        Text::new("Up/Down choose, Enter select, Escape back. Career races are desktop-only and AUTHORED where docs/CAREER_SCREEN.md says so."),
                         font(14.),
                         TextColor(Color::srgb(0.6, 0.65, 0.7)),
                     ));
                 });
         });
+}
+
+/// What `GRID_CAREER_AUTO` (diagnostics) picks on a page: the walk through
+/// GRID World to the target, one page at a time (time for a window shot).
+fn auto_action(s: &Screen, target: Auto) -> Action {
+    let offer = |id: i32| s.offers.iter().position(|o| o.event_id == id);
+    let driver_offer = || match target {
+        Auto::Offer(id) => s.driver_offers.iter().position(|o| o.offer_id == id),
+        _ => (!s.driver_offers.is_empty()).then_some(0),
+    };
+    match (&s.page, target) {
+        (Page::Home, _) if s.current.is_some() => Action::Go(Page::Event),
+        (Page::Home, Auto::Event(id)) if offer(id).is_some() => Action::Go(Page::Regions),
+        (Page::Home, Auto::Offer(_) | Auto::FirstOffer) if driver_offer().is_some() => {
+            Action::Go(Page::DriverOffers)
+        }
+        (Page::Regions, Auto::Event(id)) => s.event_region(id).map_or(Action::Quit, |r| Action::Go(Page::Events(r))),
+        (Page::Events(_), Auto::Event(id)) => offer(id).map_or(Action::Quit, |i| Action::Go(Page::Details(i))),
+        (Page::Details(i), _) => Action::Go(Page::Cars(*i)),
+        (Page::Cars(i), _) => s
+            .actions()
+            .into_iter()
+            .map(|r| r.1)
+            .find(|a| matches!(a, Action::Start(..)))
+            .or_else(|| {
+                // The cheapest new car of the event the team can afford.
+                let o = s.offers.get(*i)?;
+                o.field_cars
+                    .iter()
+                    .filter_map(|stem| s.event_vehicle(o.event_id, stem))
+                    .filter(|v| v.purchasable && v.purchase_price <= s.career.money)
+                    .min_by_key(|v| v.purchase_price)
+                    .map(|v| Action::BuyNew(v.id))
+            })
+            .unwrap_or(Action::Quit),
+        (Page::DriverOffers, _) => driver_offer().map_or(Action::Quit, |i| Action::Go(Page::OfferDetails(i))),
+        (Page::OfferDetails(i), _) => Action::TakeOffer(*i),
+        (Page::Event, _) if s.current.as_ref().is_some_and(|e| e.next().is_some()) => Action::NextRace,
+        (Page::Rewards(pages, at), _) if at + 1 < pages.len() => Action::Continue,
+        (Page::Home | Page::Event | Page::Rewards(..) | Page::Regions | Page::Events(_), _) => Action::Quit,
+        _ => Action::Go(Page::Home),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2299,11 +2750,11 @@ fn update(
     actions: Res<crate::input::Actions>,
     clicks: Query<(&Interaction, &RowText), Changed<Interaction>>,
     time: Res<Time<Real>>,
-    mut exit: MessageWriter<AppExit>,
+    mut fade: ResMut<crate::transition::Fade>,
     mut done: Local<bool>,
     mut auto_wait: Local<f32>,
 ) {
-    if *done {
+    if *done || fade.leaving() {
         return;
     }
     let mut repeat = screen.repeat;
@@ -2320,19 +2771,20 @@ fn update(
     }
     screen.cursor = screen.cursor.min(n - 1);
     if nav.select {
-        chosen = rows.get(screen.cursor).map(|r| r.1);
+        chosen = rows.get(screen.cursor).map(|r| r.1.clone());
     }
     if nav.back || nav.pause {
-        chosen = Some(if matches!(screen.page, Page::Payout(_) | Page::Team | Page::Sponsors) {
-            Action::Continue
-        } else {
-            Action::Quit
+        chosen = Some(match (&screen.page, screen.parent()) {
+            (_, Some(page)) => Action::Go(page),
+            (Page::Rewards(..), None) => Action::Continue,
+            (Page::Event, None) => Action::Go(Page::Home),
+            _ => Action::Quit,
         });
     }
     for (interaction, row) in &clicks {
         if *interaction == Interaction::Pressed && row.0 < rows.len() {
             if screen.cursor == row.0 {
-                chosen = Some(rows[row.0].1);
+                chosen = Some(rows[row.0].1.clone());
             }
             screen.cursor = row.0;
         }
@@ -2345,25 +2797,7 @@ fn update(
         *auto_wait += time.delta_secs();
         if *auto_wait >= 3. {
             *auto_wait = 0.;
-            chosen = Some(match &screen.page {
-                Page::Home => match target {
-                    Auto::Event(id) => screen
-                        .offers
-                        .iter()
-                        .position(|o| o.event_id == id)
-                        .map_or(Action::Quit, Action::Enter),
-                    Auto::Offer(id) => screen
-                        .driver_offers
-                        .iter()
-                        .position(|o| o.offer_id == id)
-                        .map_or(Action::Quit, Action::TakeOffer),
-                },
-                Page::Event if screen.current.as_ref().is_some_and(|e| e.next().is_some()) => {
-                    Action::NextRace
-                }
-                Page::Event | Page::Payout(_) => Action::Quit,
-                Page::Team | Page::Sponsors | Page::Ebay | Page::EbaySell => Action::Home,
-            });
+            chosen = Some(auto_action(&screen, target));
         }
     }
     let Some(action) = chosen else {
@@ -2371,7 +2805,16 @@ fn update(
     };
     screen.message.clear();
     let result = match action {
-        Action::Enter(i) => screen.start(i).and_then(|()| screen.go()).map(|()| true),
+        Action::Go(page) => {
+            if let Page::Ebay(of) = page {
+                screen.refresh_used(of);
+            }
+            log_line!("drive_career version=1 event=page page={}", page_name(&page));
+            screen.page = page;
+            screen.cursor = 0;
+            Ok(false)
+        }
+        Action::Start(i, car) => screen.start(i, &car).and_then(|()| screen.go()).map(|()| true),
         Action::TakeOffer(i) => screen.take_offer(i).and_then(|()| screen.go()).map(|()| true),
         Action::NextRace => screen.go().map(|()| true),
         Action::Abandon => {
@@ -2382,31 +2825,41 @@ fn update(
             screen.cursor = 0;
             Ok(false)
         }
-        Action::Continue | Action::Home => {
-            screen.page = Page::Home;
+        Action::Continue => {
+            screen.page = match std::mem::replace(&mut screen.page, Page::Home) {
+                Page::Rewards(pages, at) if at + 1 < pages.len() => Page::Rewards(pages, at + 1),
+                _ => Page::Home,
+            };
+            log_line!("drive_career version=1 event=page page={}", page_name(&screen.page));
             screen.cursor = 0;
             Ok(false)
         }
-        Action::OpenTeam => {
-            screen.page = Page::Team;
-            screen.cursor = 0;
-            Ok(false)
+        Action::BuyNew(vehicle) => {
+            let s = &mut *screen;
+            s.career.buy_car(&s.cat, vehicle).and_then(|()| s.save()).map(|()| {
+                let price = s.cat.vehicles.get(&vehicle).map_or(0, |v| v.purchase_price);
+                log_line!(
+                    "drive_career version=1 event=bought vehicle={vehicle} price={price} money={}",
+                    s.career.money
+                );
+                s.message = format!("Bought a new {} for ${}.", s.stem(vehicle), thousands(price));
+                false
+            })
         }
-        Action::OpenSponsors => {
-            screen.page = Page::Sponsors;
-            screen.cursor = 0;
-            Ok(false)
-        }
-        Action::OpenEbay => {
-            screen.refresh_used();
-            screen.page = Page::Ebay;
-            screen.cursor = 0;
-            Ok(false)
-        }
-        Action::OpenEbaySell => {
-            screen.page = Page::EbaySell;
-            screen.cursor = 0;
-            Ok(false)
+        Action::SellCar(i) => {
+            let s = &mut *screen;
+            let vehicle = s.career.cars.get(i).map(|c| c.vehicle_id);
+            s.career.sell_car(&s.cat, i).and_then(|price| s.save().map(|()| price)).map(|price| {
+                let vehicle = vehicle.unwrap_or(0);
+                log_line!(
+                    "drive_career version=1 event=sold vehicle={vehicle} price={price} money={}",
+                    s.career.money
+                );
+                s.message = format!("Sold the {} for ${}.", s.stem(vehicle), thousands(price));
+                s.page = Page::Garage;
+                s.cursor = 0;
+                false
+            })
         }
         Action::BuyUsed(i) => {
             let s = &mut *screen;
@@ -2419,7 +2872,11 @@ fn update(
                         s.career.money
                     );
                     s.message = format!("Bought a used {} for ${}.", s.stem(u.vehicle_id), thousands(u.price));
-                    s.refresh_used();
+                    let of = match s.page {
+                        Page::Ebay(of) => of,
+                        _ => None,
+                    };
+                    s.refresh_used(of);
                     false
                 }),
                 None => Ok(false),
@@ -2502,37 +2959,107 @@ fn update(
         Action::Quit => {
             *done = true;
             log_line!("drive_career version=1 event=quit");
-            exit.write(AppExit::Success);
+            // The original's `fade_to_black_quickest` back to the front end.
+            fade.leave(crate::transition::Next::Close, crate::transition::Speed::Quick, "career_quit");
             return;
         }
     };
     match result {
         Ok(true) => {
             *done = true;
-            exit.write(AppExit::from_code(CAREER_GO as u8));
+            // Out to "Loading" while the race starts (transition.rs).
+            fade.leave(
+                crate::transition::Next::Code(CAREER_GO as u8),
+                crate::transition::Speed::Quick,
+                "career_go",
+            );
         }
         Ok(false) => {
             screen.refresh_offers(&lookup.routes, &labels, &lookup.root);
         }
         Err(e) => {
             warn!("career: {e}");
+            log_line!("drive_career version=1 event=refused error={e:?}");
             screen.message = format!("Error: {e}");
         }
     }
 }
 
+/// A page's name in the log (`event=page`).
+fn page_name(page: &Page) -> String {
+    match page {
+        Page::Events(r) => format!("events:{r:?}"),
+        Page::Details(i) | Page::Cars(i) | Page::OfferDetails(i) | Page::Car(i) => {
+            format!("{}:{i}", format!("{page:?}").split('(').next().unwrap_or("?").to_lowercase())
+        }
+        Page::Ebay(of) => format!("ebay:{of:?}"),
+        Page::Rewards(pages, at) => format!("rewards:{at}/{}", pages.len()),
+        _ => format!("{page:?}").to_lowercase(),
+    }
+}
+
+/// The screens after an event in the original's order (driver standings,
+/// sponsors, reputation, bank; a driver offer's update in place of the
+/// standings and sponsors), then the team news and the eBay messages.
+/// Empty screens are left out. `text(key, fallback)` gives a title.
+pub fn reward_pages(
+    text: impl Fn(&str, &str) -> String,
+    standings: Vec<String>,
+    sponsors: Vec<String>,
+    objective: Option<bool>,
+    head_to_head: bool,
+    t: PayoutText,
+    ebay: Vec<String>,
+) -> Vec<RewardPage> {
+    let mut pages = Vec::new();
+    let mut page = |title: String, lines: Vec<String>| {
+        if !lines.is_empty() {
+            pages.push(RewardPage { title, lines });
+        }
+    };
+    page(
+        format!(
+            "{} - {}",
+            text("driver_event_standings_title", "Event Standings"),
+            text("driver_event_standings_subtitle", "Drivers")
+        ),
+        standings,
+    );
+    page(text("team_management_current_sponsors_button_title", "Sponsors"), sponsors);
+    match objective {
+        Some(met) => {
+            let mut lines = vec![format!("Objective: {}", if met { "achieved" } else { "failed" })];
+            lines.extend(t.reputation);
+            page(text("driver_offers_screen_title", "Driver Offers"), lines);
+        }
+        // A head-to-head pays no reputation [V 0x6788D0].
+        None if head_to_head => {}
+        None => page(
+            text("eos_rep_earned_header", "Reputation Earned:").trim_end_matches(':').to_owned(),
+            t.reputation,
+        ),
+    }
+    page(text("bank_rewards_screen_title", "Bank Account"), t.bank);
+    page("Team News".into(), [t.news, ebay].concat());
+    pages
+}
+
 #[allow(clippy::type_complexity)]
 fn present(
     screen: Res<Screen>,
-    mut info: Query<&mut Text, (With<Info>, Without<RowText>)>,
-    mut rows: Query<(&RowText, &mut Text, &mut TextColor, &mut Node), Without<Info>>,
-    mut shown: Local<Option<(Vec<String>, Vec<String>, usize)>>,
+    mut title: Query<&mut Text, (With<Title>, Without<Info>, Without<RowText>)>,
+    mut info: Query<&mut Text, (With<Info>, Without<Title>, Without<RowText>)>,
+    mut rows: Query<(&RowText, &mut Text, &mut TextColor, &mut Node), (Without<Info>, Without<Title>)>,
+    mut shown: Local<Option<(Vec<String>, Vec<String>, usize, String)>>,
 ) {
     let lines = screen.info();
     let actions: Vec<String> = screen.actions().into_iter().map(|a| a.0).collect();
-    let view = (lines, actions, screen.cursor);
+    let view = (lines, actions, screen.cursor, screen.title());
     if shown.as_ref() == Some(&view) {
         return;
+    }
+    for mut text in &mut title {
+        text.0 = view.3.clone();
     }
     for mut text in &mut info {
         text.0 = view.0.join("\n");
@@ -3141,5 +3668,45 @@ speech_final_event = off
         // Rival objective: AI cars 1 and 2 drive for the rival team.
         assert!(offer_met(&cat, 19, &out(&[0, 3, 1, 2], false), true));
         assert!(!offer_met(&cat, 19, &out(&[3, 1, 0, 2], false), true));
+    }
+
+    /// The screens after an event come in the original's order, each
+    /// payout line on its screen, and empty screens are left out.
+    #[test]
+    fn rewards_follow_the_original_order() {
+        let mut c = Career::new();
+        c.money = 52000;
+        let p = Payout {
+            position: Some(0),
+            prize: 30000,
+            reputation_base: 400,
+            new_sponsor_offers: vec![7],
+            ..Payout::default()
+        };
+        let t = payout_text(&p, &c);
+        assert!(t.bank.contains(&"Balance: $52,000".to_owned()));
+        assert!(t.reputation[0].starts_with("Reputation: 400 pts"));
+        assert_eq!(t.news, ["New sponsor offers: 1"]);
+        let text = |_: &str, fallback: &str| fallback.to_owned();
+        let titles = |pages: &[RewardPage]| pages.iter().map(|p| p.title.clone()).collect::<Vec<_>>();
+        let event = reward_pages(
+            text,
+            vec!["     1. You - 20 pts".into()],
+            Vec::new(),
+            None,
+            false,
+            t.clone(),
+            vec!["eBay: sold".into()],
+        );
+        assert_eq!(
+            titles(&event),
+            ["Event Standings - Drivers", "Reputation Earned", "Bank Account", "Team News"]
+        );
+        assert_eq!(event[3].lines, ["New sponsor offers: 1", "eBay: sold"]);
+        let offer = reward_pages(text, Vec::new(), Vec::new(), Some(true), false, t.clone(), Vec::new());
+        assert_eq!(titles(&offer), ["Driver Offers", "Bank Account", "Team News"]);
+        assert_eq!(offer[0].lines[0], "Objective: achieved");
+        let h2h = reward_pages(text, Vec::new(), vec!["Sponsor X: you met - $1".into()], None, true, t, Vec::new());
+        assert_eq!(titles(&h2h), ["Sponsors", "Bank Account", "Team News"]);
     }
 }

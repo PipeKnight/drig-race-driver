@@ -167,6 +167,11 @@ impl Fade {
         self.leaving.is_some()
     }
 
+    /// Where a running fade out leads (`None` while not leaving).
+    pub fn next(&self) -> Option<Next> {
+        self.leaving
+    }
+
     fn advance(&mut self, dt: f32) {
         self.elapsed = (self.elapsed + dt.min(MAX_STEP)).min(self.seconds.max(0.));
     }

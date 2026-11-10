@@ -6,9 +6,43 @@ A minimal career front end. It runs one own-team career event at a time with the
 
 Labels: **[D]** read from shipped data; **[V]** verified in the original's code (via CAREER_RESEARCH.md); **AUTHORED** a choice of this port.
 
+## Pages (F771, backlog row 60)
+
+Since F771 the screen follows the original's GRID World page tree (`states.xml`/`flow.xml`), as text lists in the port's own layout (the original's look, 3D backdrop and transitions beyond the fade are not ported). Titles and button help lines are the original's language strings where they exist (`career_menu_*`, `team_management_*`, `driver_offers_screen_title`, `vehicle_select_title`, `buy_new_button_header`, `buy_on_ebay_button_header`, `cpodium_region_header_*`, …), with an English fallback.
+
+| Page | Original screen | Rows | Back goes to |
+|---|---|---|---|
+| GRID World | `career_menu` | Race Events (n open), Driver Offers (n), My Team, View Cars (n), Event in progress, Main Menu; the status lines below | quit (`career_quit`) |
+| Race Events | `career_podium_choose_region` | Europe, USA, Japan, International, Le Mans, each with its open count | GRID World |
+| a region | `podium_choose_event_*` | its open events, sorted by tier `order_index`, then event `order_index`: "tier: event (n races, first $)" | Race Events |
+| event details | `career_podium_event_details` (Race Info tab) | Select Car; the info shows region, tier, prize for first, reputation pot, each race (route, laps) and the cars | the region |
+| Select Car | `event_vehicle_select`, `buy_vehicle_buttons` | each event car the team owns (starts the event with it), Buy New for each purchasable car it does not own, Buy On eBay | event details |
+| Driver Offers | `driver_offers_select` | the offers the port can run, with their car | GRID World |
+| offer details | `driver_offers_details` | Accept the offer; the info shows team, car, track and objective | Driver Offers |
+| My Team | `team_management` | Team Mate, Sponsors (own team only) | GRID World |
+| Team Mate, Sponsors | team mate search, sponsor slots | as before (F466) | My Team |
+| View Cars | `view_vehicles` | the team's cars; Buy On eBay | GRID World |
+| a car | car options (`sell_vehicle_button_header`, `sell_on_ebay_button_header`) | Sell, List on eBay | View Cars |
+| Buy On eBay | eBay Motors | used cars of the open events' models the team does not own (from Select Car: that event's models only) | Select Car or View Cars |
+| the event | (in-event state) | each race and its place, the standings so far, Next race / Abandon event | — (Escape: GRID World) |
+| rewards | the post-event screens (below) | Continue | — (Escape: Continue) |
+
+Car ownership is enforced as in the original: an event starts only with a car of its `event_vehicle` list that the team owns (`event_vehicle_select` lists the team's cars [D]); before F771 the port started an event with its first raceable car whether owned or not. Founding the team still gives the free car (F466).
+
+### Rewards after an event or a driver offer
+
+The original shows the post-event results as a series of screens (`states.xml` `f_e_*`; order [D] from `flow.xml`). The port shows them as pages in that order and skips an empty one:
+1. **Event Standings - Drivers** (`driver_event_standings_title`/`_subtitle`): the event points table (own-team events with points).
+2. **Sponsors**: each placed sponsor's objectives for the last race (player and team mate met/failed) and its pay.
+3. **Driver Offers**: "Objective: achieved/failed" and the reputation (driver offers); **Reputation Earned** (`eos_rep_earned_header`) for other events; none for a head-to-head (it pays no reputation, F478).
+4. **Bank Account** (`bank_rewards_screen_title`): the bank rows (Championship position, Prize Money, Teammate Prize Money, Team Win Bonus, Sponsorship Money, Flashback Bonus, total, Balance, Season's Earnings).
+5. **Team News**: new sponsor offers and the eBay sales and bids of this event.
+
+The standings and sponsor lines are computed before the event is paid (`apply_event_in_classes` moves the money). Continue (or Escape) goes to the next page, and after the last one to GRID World.
+
 ## What the screen shows
 
-- Status: money, total reputation and overall rank, the five regional reputations with each region's rank (`Career::rank`), licences out of 7 (`Career::licences`) and the season (`season_number`, `season_state`, counted entries).
+- Status (GRID World page; the other pages show the Bank Account line): money, total reputation and overall rank, the five regional reputations with each region's rank (`Career::rank`), licences out of 7 (`Career::licences`) and the season (`season_number`, `season_state`, counted entries).
 - Open events: `Career::event_open` events that the port can run:
   - circuit races: `competition_format_id` 1, not head-to-head, no `use_lemans_selection`;
   - at least one `event_vehicle` model in `series::RACEABLE` whose `cars/<stem>` folder exists. The first one is the player's car, and every one is used for the field;
@@ -16,7 +50,7 @@ Labels: **[D]** read from shipped data; **[V]** verified in the original's code 
 - During an event: its races, each finished place, the event standings so far, and the next race (layout, laps, grid slot), or Abandon event.
 - After the last race: the payout lines (Championship position, Prize Money, Teammate Prize Money, Team Win Bonus, Sponsorship Money, total, Balance, Season's Earnings, reputation with its base and bonus, new sponsor offers).
 - Text is plain English (AUTHORED). An event's name is `db_<name>` from the language file when that string exists, else the database name.
-- Controls: Up/Down, Select, Back/Escape (quits, or continues from the payout), and mouse: click a row, then click it again.
+- Controls: Up/Down, Select, Back/Escape (the page's parent, see the table; quits from GRID World, continues on a rewards page), and mouse: click a row, then click it again. Each page also has a Back row.
 
 ## Running an event
 
@@ -179,9 +213,11 @@ The same process model as the event menu (winit allows one event loop per proces
 - `grid-app --career` supervises `grid-app --career-screen`. The screen's exit code 22 (`CAREER_GO`) means the race profile is written.
 - It then runs `grid-app --settings <data dir>/career-race.ini --from-menu --career-result <data dir>/career-race.result`.
 - When the race ends with exit code 21 (`event_menu::BACK_TO_MENU`), the career screen opens again. Any other exit ends the supervisor.
+- Since F771 the supervisor is `transition::run_supervised` (docs/SCREEN_FLOW.md §2.4): the career screen fades in from black (`Start::Screen`), and leaves with `Fade::leave` (`career_go` with code 22, `career_quit` with Close). The leaving window stays black with "Loading" until the next process shows its first frame (go/ready markers), so there is no desktop gap between the screen and the race in either direction. The screen window opens centred, or where the last window was (`transition::window`).
+- The screen writes the race profile before it starts the fade. A career race writes its result file (`write_result`) when its fade to the screen starts (`Fade::next() == Code(21)`), not when the process exits: with the hand-off the next screen is already starting while the race window still shows. The supervisor removes the result file before each race.
 - `--game-root`, `--data-dir` and `--settings` are passed on.
 - Desktop only. Android has no career supervisor (AUTHORED).
-- Log lines: `drive_career version=1 event=new_career|open|entered|go|race_result|race_added|paid|abandoned|quit`.
+- Log lines: `drive_career version=1 event=new_career|open|page|entered|offer_taken|go|race_result|race_added|paid|offer_paid|bought|sold|refused|abandoned|quit`; `event=page page=NAME` names each page change (`regions`, `events:Europe`, `details:3`, `cars:3`, `driveroffers`, `offerdetails:0`, `rewards:1/4`, …).
 
 ## Expected first-play figures (bmw_si_tour, CAREER_RESEARCH.md §3)
 
@@ -208,10 +244,12 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
   - ignored, on the purchased data: bmw_si_tour is offered with the BMW; its plan is route_1 × 3 laps and route_2 × 2 laps from slot 12; wins, 2nd places and aids-off wins pay as above.
 - The in-app run of bmw_si_tour is recorded in PROJECT_LOG F424.
 - Unattended runs: diagnostics `results_continue = SECONDS` (or `GRID_RESULTS_CONTINUE`) makes a scripted run (`--drive-ticks` with `autopilot`) select Continue on the stats and results screens after that many seconds. A career race then runs and returns its result with no input.
-- Fully unattended career: `GRID_CAREER_AUTO=EVENT_ID` (or `o` and a driver offer id, e.g. `o15`) with `GRID_AUTOPILOT=1` and `GRID_RESULTS_CONTINUE=3`, then `grid-app --career`. Each screen page acts by itself after 3 s: it enters the event, starts each next race, and quits after the payout. The supervisor runs the races with `--drive-ticks 36000` (50000 for the Le Mans 24 Hours, whose 720 s limit outlasts 576 s; grid-app now allows up to 72000), so the autopilot drives. No keyboard or mouse input reaches the desktop. Driving is unchanged; it acts only on the post-race screens of scripted runs.
+- Interactive loop smoke (F771): `tools/career_loop_smoke.ps1` runs `grid-app --career` on a fresh career with `GRID_CAREER_AUTO=offer` and checks, in order: open, fade in, Driver Offers, offer details, offer taken, fade out with code 22, hand-off, race shows and fades in, hand-off back with 21, career shows, race added, offer paid, rewards fade in, quit, Close, exit 0. `-PagesOnly` runs the screen alone (for window shots of the pages before the race), `-Shots` passes `GRID_WINDOW_SHOTS`.
+- Fully unattended career: `GRID_CAREER_AUTO=EVENT_ID` (or `o` and a driver offer id, e.g. `o15`, or `offer` for the first driver offer on show) with `GRID_AUTOPILOT=1` and `GRID_RESULTS_CONTINUE=3`, then `grid-app --career`. Each screen page acts by itself after 3 s, walking the page tree as a player would (GRID World → Race Events → the region → event details → Select Car → an owned car, else Buy New of the cheapest affordable one; or GRID World → Driver Offers → offer details → Accept): it enters the event, starts each next race, pages through the rewards and quits. The supervisor runs the races with `--drive-ticks 36000` (50000 for the Le Mans 24 Hours, whose 720 s limit outlasts 576 s; grid-app now allows up to 72000), so the autopilot drives. No keyboard or mouse input reaches the desktop. Driving is unchanged; it acts only on the post-race screens of scripted runs.
 
 ## Not done
 
-- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, the sponsor designer and logos, car buying and selling, the head-to-head reward cars, Le Mans entry, season-end screens, and the original's career look.
+- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, the sponsor designer and logos, the head-to-head reward cars, Le Mans entry, season-end screens, and the original's career look (3D garage backdrop, tiles, car turntable, the bar shutters of the transitions).
+- Tier availability uses the port's live-rank rule (`Career::tier_open`), not the original's granted per-region licences (CAREER_RESEARCH.md §11.1): the initial licence value is not settled and the save would need the licence array.
 - The Ravenwest guest cars, Le Mans selection fields (`lemans_restrictions`) and the original's player car and livery choice in an own-team field.
 - Flashback limits per difficulty and pro mode's restart ban (§8).

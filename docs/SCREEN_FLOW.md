@@ -69,7 +69,7 @@ A launcher race (`Play GRID Prototype.cmd`, the `race-*` launchers) used to clos
 
 ### 2.4 Career
 
-`career_screen::supervise` still uses plain `.status()`: the career race fades out and exits with no hand-off. To join, the career screen calls `transition::install(…, Start::Screen)`, replaces its exits with `Fade::leave`, and runs its children through `run_supervised` (the career session, backlog row 60).
+Joined in F771 (backlog row 60, docs/CAREER_SCREEN.md "Processes"). `career_screen::supervise` runs its children through `run_supervised`; the career screen calls `transition::install(…, Start::Screen)` and `transition::window`, and leaves with `Fade::leave` (`career_go`, code 22; `career_quit`, Close). A career race hands back with 21 like a menu race and writes its result when that fade starts. `Fade::next()` (added for this) tells a screen which way it is leaving. `tools/career_loop_smoke.ps1` checks the loop screen → race → screen with both hand-offs.
 
 ## 3. Race Options: Difficulty and Grid Position
 

@@ -531,17 +531,21 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004D1600		func	not ported	docs/LE_MANS.md:108	F429 G130	[V]		with no finished-first rule. 0x4D1600 is the adjustment's only reader, so
 0x004D166B		label	not ported	docs/SERIES.md:228				inside 0x004D1600; Not ported: `lemans_progress_adjustment` (read only at 0x4D166B, the time-limited races' progress
 0x004D1890		func	crates/grid-app/src/drift_event.rs:405 grid-app::drift_event (in board)	docs/DISCIPLINES.md:238	F362			The stats screen's count comes from 0x4D1890 (not traced); the
+0x004D27F0	tier_tile_unlocked	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		tile valid && licence_covers_rank (§14.1).
 0x004D5420		func	not ported	docs/FLASHBACK.md:50		[D]		options 0x4D5420 and a career state 0x58ABC0) [D]:
 0x004DA430		func	not ported	docs/CAREER_RESEARCH.md:227		[V]		0x4DA430 is true; otherwise the balance shown adds `start_race_team` (40,000) [I: the flag is "own
 0x004DA640	garages	func	crates/grid-tools/src/career/state.rs:221 grid-tools::career::state::garages	docs/CAREER_RESEARCH.md:63		[V]		Garages: 1, 2 after the first licence, 3 after the fourth (0x4DA640)
 0x004DBAD0	refuse_lemans	func	crates/grid-tools/src/career/state.rs:321 grid-tools::career::state::refuse_lemans	docs/CAREER_RESEARCH.md:163		[V]		not a function entry in the master analysis; Refuses Le Mans: the season ends (0x4DBAD0) [V].
 0x004DBB20	end_season	func	crates/grid-tools/src/career/state.rs:326 grid-tools::career::state::end_season	docs/CAREER_RESEARCH.md:146		[V]		not a function entry in the master analysis; Ends an ended season (0x4DBB20, 0x656760) [V]: archives it and
+0x004DD090	grant_all_global	func	not ported	docs/CAREER_RESEARCH.md:682		[I]		grants every licence; looks like a cheat/debug path (§14.1).
 0x004E1B50		func	not ported	docs/CAREER_RESEARCH.md:222				shows wages (0x4E1B50) and objectives (0x652270) in the first two rows. Total is the rows' sum;
+0x004E4890	fill_required_to_unlock	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		fills a tier tile required_to_unlock text (§14.1).
 0x004EA770		func	not ported	docs/FRONT_END_FLOW.md:105		[V]		[V] FUN_004EA770 (one caller, FUN_004FF470) fills a table of 38 fact slots of 0xC4 bytes, three
 0x004EC820	lemans_results_order	func	crates/grid-tools/src/race.rs:562 grid-tools::race::lemans_results_order ; crates/grid-app/src/le_mans_event.rs:11 grid-app::le_mans_event	docs/LE_MANS.md:106	F429 G130	[V]		Le Mans results order [V 0x4EC820]: every car by progress, times its
 0x004EECE0	Outcome	func	crates/grid-tools/src/career/ebay.rs:325 grid-tools::career::ebay::Outcome					What a career event did to one listing (the popups of 0x4EECE0).
 0x004EF9C0	champ_one_two	func	crates/grid-tools/src/speech.rs:1587 grid-tools::speech ; crates/grid-app/src/career_screen.rs:1008 grid-app::career_screen (in speech_lines)	docs/SPEECH_CAREER_PARAMETERS.md:38 ; docs/SPEECH_AUDIO_RESEARCH.md:901	F624	[O]		0x4EF9C0: the player and the teammate are the championship's ranks 0 and 1 over the races
 0x004EFE40		func	not ported	docs/FRONT_END_FLOW.md:162		[V]		[V] The string `FileStreamThreadHighPriorityHack` is registered by FUN_004EFE40, beside
+0x004F0FF0	wrapper_eq	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		comparison wrapper (==) used by the licence checks (§14.1).
 0x004F10B0	is_test_offer	func	crates/grid-tools/src/career/rules.rs:338 grid-tools::career::rules::is_test_offer			[V]		appearance fee (0x4F10B0, 0x674940) [V].
 0x004F8B30		func	crates/grid-tools/src/career/state.rs:97 grid-tools::career::state					Races driven per `track_model` (the per-layout record 0x4F8B30 +8,
 0x004FF470		func	not ported	docs/FRONT_END_FLOW.md:105		[V]		[V] FUN_004EA770 (one caller, FUN_004FF470) fills a table of 38 fact slots of 0xC4 bytes, three
@@ -600,7 +604,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00584E70	saved	func	crates/grid-app/src/camera.rs:462 grid-app::camera::saved	docs/CAMERA_VIEWS.md:64	F349	[D]	save	(a reverse view saves its owner, 0x584E70), here `<data dir>/camera.ini`.
 0x00585E00		func	not ported	docs/RACE_RULES_RESEARCH.md:79 ; docs/RACE_HUD.md:135	F308	[V]		front end (0x583B00) or from retiring (0x585E00). An unfinished human makes every AI car still
 0x00587580	ebay_after_event	func	crates/grid-tools/src/career/ebay.rs:611 grid-tools::career::ebay::ebay_after_event	docs/CAREER_RESEARCH.md:630				not a function entry in the master analysis; After a career event (0x587580 → 0x65ABA0, 0x65E9E0) [I: once per
-0x0058A200	tier_open	func	crates/grid-tools/src/career/state.rs:233 grid-tools::career::state::tier_open	docs/CAREER_RESEARCH.md:158				not a function entry in the master analysis; overall rank 3, the Le Mans tiers a pending Le Mans entry (0x58A200).
+0x0058A200	le_mans_flow_branch	func	crates/grid-tools/src/career/state.rs:233 grid-tools::career::state::tier_open	docs/CAREER_RESEARCH.md:158 ; docs/CAREER_RESEARCH.md:682		[V]		branches on season_state == 1 (Le Mans flow); was named tier_open after the port function (§14.1).
 0x0058ABC0		func	not ported	docs/FLASHBACK.md:50		[D]		options 0x4D5420 and a career state 0x58ABC0) [D]:
 0x0058AC70		label	not ported	docs/AI_CHOREOGRAPHER_PORT.md:37	F439 G130	[V]		inside 0x0058ABC0; setup (caller 0x58AC70 → 0x6AF7C0) copies it and reads desc+0x84 as `available_flashbacks`
 0x0058BAF0		func	crates/grid-tools/src/crowd_audio.rs:493 grid-tools::crowd_audio (in tick)	docs/AUDIO_RESEARCH.md:2047	F673	[O]		(0x58BAF0); the port has no intro, so the first tick outside Intro.
@@ -791,6 +795,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00619DA0		func	not ported	docs/LACETTI_GRAPHICS_MATERIALS.md:97				not a function entry in the master analysis; Research corrections retained: the first analyzed-containing query failed because no analyzed function covered0x61a255; Ghidra nevertheless returned process ...
 0x0061FD50	subscribe_terminal_damage	func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:441				`TerminalDamageMessage` (helper 0x61FD50, type name at 0xCB14FC) → 0x41BC70 → 0x417C10;
 0x00620A20	rear_view_mirror_slot_visitor	func	not ported					note: scene visitor (vtable 0xCE41E0) -> 0x5F9F80 for render nodes
+0x00628EF0	licence_covers_rank	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		tier.rank <= licence[tier.region] (§14.1).
 0x006298D0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:186				effects stopped, `0x6298D0`); effective reduction distance = reductionDist·budget.
 0x0062A5D0	is_le_mans_24	func	crates/grid-tools/src/series.rs:73 grid-tools::series::is_le_mans_24	docs/LE_MANS.md:76		[V]		not a function entry in the master analysis; The time-limited Le Mans 24 Hours (free race `Le_Mans` [V 0x62A5D0]).
 0x0062A5F0		func	not ported	docs/SERIES.md:503				Call chain.** 0x67B790 → 0x62A5F0 (reads the `free_race_track_pool` row: `max_cars`, pool name) →
@@ -927,6 +932,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0064E3F0	ebay_Ebay	func	crates/grid-tools/src/career/ebay.rs:303 grid-tools::career::ebay::Ebay				Ebay	not a function entry in the master analysis; The eBay manager's state (`EBAY_MANAGER_SAVE`, 0x64E3F0).
 0x0064E4D0	random_driver	func	crates/grid-tools/src/career/ebay.rs:417 grid-tools::career::ebay::random_driver					The seller, a hireable driver (0x64E4D0); `None` for the price-only
 0x0064E760	ebay_step	func	crates/grid-tools/src/career/ebay.rs:658 grid-tools::career::ebay::step	docs/CAREER_RESEARCH.md:658	F487	[D]	step	event the bid rises by a fixed step of the car's value (0x64E760).
+0x0064E9B0	set_event_available	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		marks an event available (from grant_licence) (§14.1).
 0x0064EA20		func	crates/grid-tools/src/career/state.rs:91 grid-tools::career::state			[V]		Head-to-head events made available (0x656D40 -> 0x64EA20) [V].
 0x0064ECD0	replay_setup	func	crates/grid-app/src/replay_effects.rs:10 grid-app::replay_effects	docs/REPLAY.md:75	F769	[V]		(0x64ECD0) registers recordables for "skidmarks" (SkidmarksPlugin+0x78),
 0x0064EDDF		label	crates/grid-app/src/replay/stream.rs:6 grid-app::replay::stream	docs/REPLAY.md:55		[D]		inside 0x0064ECD0; 0x64EDDF/0x936670 inside the 7.5 MiB `REPLAY` pool of
@@ -987,7 +993,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0065FE40	free_race_teams	func	not ported	docs/SERIES.md:504				0x65FE40 (`free_race_teams`) → 0x676F50(player vehicle, player livery, discipline). 0x676F50 takes the
 0x0065FF70	Field	func	crates/grid-tools/src/series.rs:53 grid-tools::series::DRIFT_SERIES	docs/SERIES.md:506	F401	[V]	DRIFT_SERIES	circuit series' (0x65FF70 reads the pool by name, not the discipline
 0x00660229		label	not ported	docs/SERIES.md:499				inside 0x0065FF70; stream: the vehicle shuffle uses a local generator seeded QPC × 10000 (0x660229), the grid one seeded
-0x00660E90	player_team_first	func	crates/grid-tools/src/career/rules.rs:277 grid-tools::career::rules::player_team_first ; crates/grid-tools/src/career/state.rs:645 grid-tools::career::state::apply_event_in_classes	docs/CAREER_RESEARCH.md:200		[V]		(0x660E90); routine A does the same for `use_lemans_selection` events;
+0x00660E90	player_team_position	func	crates/grid-tools/src/career/rules.rs:277 grid-tools::career::rules::player_team_first ; crates/grid-tools/src/career/state.rs:645 grid-tools::career::state::apply_event_in_classes	docs/CAREER_RESEARCH.md:200 ; docs/CAREER_RESEARCH.md:682		[V]		class-filtered team sums sorted descending; player team first on ties; was player_team_first (§14.2).
 0x00661830		func	not ported	docs/LE_MANS.md:110 ; docs/SPEECH_CAREER_PARAMETERS.md:138	F429 G130	[V]		[V observation, I bug] 0x661830 takes best lap and time of result row i
 0x00662850	HiredTeamMate	func	crates/grid-tools/src/career/data.rs:320 grid-tools::career::data::Hireable ; crates/grid-tools/src/career/state.rs:30 grid-tools::career::state::HiredTeamMate ; crates/grid-tools/src/career/mod.rs:713 grid-tools::career (in catalogue_reads_the_career_tables)	docs/CAREER_RESEARCH.md:365 ; docs/CAREER_SCREEN.md:164	F466	[V]	Hireable	candidate pool 0x662850, object 0x649320) [V]. The `team_mate` table is
 0x00663470		func	crates/grid-tools/src/career/field.rs:120 grid-tools::career::field::field					test offer: the player alone (0x663470);
@@ -1009,6 +1015,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00668930		func	not ported	docs/TOUGE.md:60				Touge state.** `[race+0x23EC]` is a 0xF0-byte object (vtable 0xCEA328, constructor 0x668930: `+4 = 0`, `+8 = 2`, two 0x50-byte records).
 0x00668BB0	offers	func	crates/grid-tools/src/career/ebay.rs:390 grid-tools::career::ebay::offers	docs/CAREER_RESEARCH.md:633				fixed price, generated from a per-model seed (0x668BB0, 0x653360); the
 0x00668D20	loaded	func	crates/grid-tools/src/career/ebay.rs:347 grid-tools::career::ebay::loaded					A loaded state (0x668D20): the generators restart from the reset
+0x00669060	grant_licence	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		raises licence[region], opens its tiers and their non-H2H events; licence 3 grants ranks 0..3 in every region (§14.1).
 0x00669700		func	crates/grid-app/src/main.rs:3649 grid-app::main (in race_app) ; crates/grid-tools/src/race.rs:18 grid-tools::race ; crates/grid-tools/src/time_of_day.rs:10 grid-tools::time_of_day	docs/DISCIPLINES.md:551 ; docs/LE_MANS.md:74 ; docs/SERIES.md:500	F681 F429 G130	[V]		real seconds (720 in the career [D]) running 24 h of day [V 0x669700]; | note: merge retained additional port provenance: crates/grid-app/src/main.rs:1968 grid-app::main (in run)
 0x00669B0D		label	not ported	docs/RACE_RULES_RESEARCH.md:63 ; docs/LE_MANS.md:74		[V]		inside 0x00669700; Race setup 0x669700 writes the race type at 0x669B0D. Mode vf 0x98 ("Le Mans
 0x00669C53	drift_flag_format_check	label	crates/grid-tools/src/route.rs:113 grid-tools::route::with_drift_flags ; crates/grid-tools/src/dynamic_props.rs:3250 grid-tools::dynamic_props	docs/DISCIPLINES.md:552 ; docs/FIDELITY_BACKLOG.md:150	F681	[V]	with_drift_flags	inside 0x00669700; [V 0x669C53, 0x62FEB0] outside the drift formats the flags take no
@@ -1022,7 +1029,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0066E1C0		func	not ported	docs/CAREER_RESEARCH.md:236				gain = base + bonus to the reputation of the event's tier region (0x66E1C0 -> 0x642850)
 0x0066E2E0		func	not ported	docs/CAREER_RESEARCH.md:226		[V]		event; the season end (0x4DBB20 → 0x66E2E0 → 0x665BA0) zeroes every entry. The row shows only while
 0x0066E3A0		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:161 ; docs/CAREER_RESEARCH.md:350		[O]		`driver_offer.objective_type_id` (0x66E3A0) [O]. Sponsor objectives live elsewhere (0x69B120).
-0x0066F640		func	crates/grid-tools/src/career/state.rs:179 grid-tools::career::state::add_money	docs/CAREER_RESEARCH.md:67 ; docs/CAREER_SCREEN.md:59		[V]		`initial_vehicle_id` car (0x66F640, 0x656100). Returns true when the
+0x0066F640	found_team_grant_rookie	func	crates/grid-tools/src/career/state.rs:179 grid-tools::career::state::add_money	docs/CAREER_RESEARCH.md:67 ; docs/CAREER_SCREEN.md:59 ; docs/CAREER_RESEARCH.md:682		[V]		founding the team: initial car, rookie licence in EU/US/JP (§14.1).
 0x0066F940		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:122				`0x66FA80` (secondary base mgr+4 of the vehicle PFX manager, constructor `0x66F940`,
 0x0066FA80		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:122				`0x66FA80` (secondary base mgr+4 of the vehicle PFX manager, constructor `0x66F940`,
 0x0066FF70	Standing	func	crates/grid-tools/src/career/rules.rs:148 grid-tools::career::rules::Standing	docs/CAREER_RESEARCH.md:187 ; docs/SPEECH_CAREER_PARAMETERS.md:62		[V]		One line of the event standings (0x66FF70) [V].
@@ -1040,8 +1047,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00674CC2		label	crates/grid-tools/src/career/rules.rs:344 grid-tools::career::rules::appearance_fee			[V]		inside 0x00674940; (0x637980, 0x674CC2) [V].
 0x00675210		func	crates/grid-tools/src/career/ebay.rs:2 grid-tools::career::ebay	docs/CAREER_RESEARCH.md:612				§13; static analysis of the eBay manager, ctor 0x675210) [V unless
 0x006758B0		func	crates/grid-app/src/wheel_debris.rs:2 grid-app::wheel_debris ; crates/grid-tools/src/tyre_smoke.rs:1382 grid-tools::tyre_smoke (in sprites)	docs/TYRE_SMOKE_RESEARCH.md:131		[V]		(docs/GROUND_EFFECTS_RESEARCH.md, original kick-up chain 6758B0 -> 6587A0
-0x00675F40		func	not ported	docs/CAREER_RESEARCH.md:122		[I]		overall rank 3. The availability code (0x6766B0, 0x675F40) was not fully traced.
-0x006766B0		func	crates/grid-tools/src/career/state.rs:234 grid-tools::career::state::tier_open	docs/CAREER_RESEARCH.md:122		[I]		not a function entry in the master analysis; The tier availability code (0x6766B0) was not fully traced.
+0x00675F40	win_earns_next_licence	func	not ported	docs/CAREER_RESEARCH.md:122 ; docs/CAREER_RESEARCH.md:682		[V]		a win earns the next licence; not availability code (§14.1).
+0x006766B0	pre_event_audio_index	func	not ported	docs/CAREER_RESEARCH.md:122 ; docs/CAREER_RESEARCH.md:682		[V]		picks a pre-event speech index; not tier availability (CAREER_RESEARCH §14.1).
 0x00676A80		func	not ported	docs/CAREER_RESEARCH.md:580		[V]		12.2 Career field [V 0x676A80, 0x673F20, 0x663D40, 0x66D350]
 0x00676DA4		label	not ported	docs/CAREER_RESEARCH.md:153				inside 0x00676C70; its slot (0x676DA4).
 0x00676F50	build_lemans_field	func	crates/grid-tools/src/series.rs:476 grid-tools::series::build_lemans_field	docs/SERIES.md:194		[V]		The Le Mans Series free-race field (0x676F50 → 0x663860 for the mode
@@ -1074,6 +1081,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0067BE50		label	not ported	docs/CAREER_RESEARCH.md:576				inside 0x0067BDA0; No RNG. The list is built when the event is entered (0x67BE50).
 0x0067BF2D		label	crates/grid-tools/src/career/state.rs:314 grid-tools::career::state::count_in_season	docs/CAREER_RESEARCH.md:136		[V]		inside 0x0067BDA0; team is active and the season has room (0x6427A0, 0x67BF2D) [V].
 0x0067C200	cross	func	crates/grid-world/src/round_contacts.rs:37 grid-world::round_contacts::cross ; crates/grid-world/src/phantom_post.rs:55 grid-world::phantom_post::cross ; crates/grid-world/src/joint.rs:87 grid-world::joint::cross	docs/VEHICLE_CHASSIS.md:3 ; docs/FORCE_VIEW.md:23 ; docs/JOINTS_RESEARCH.md:200	F506	[D]		0x67C200.
+0x0067C440	wrapper_gt	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		comparison wrapper (>) used by the licence checks (§14.1).
 0x0067C590	speed_band	func	crates/grid-app/src/wheel_debris.rs:29 grid-app::wheel_debris::LOW_SPEED ; crates/grid-tools/src/tyre_smoke.rs:1399 grid-tools::tyre_smoke::speed_band	docs/TYRE_SMOKE_RESEARCH.md:160 ; docs/GROUND_EFFECTS_RESEARCH.md:252		[D]	LOW_SPEED	4..10, medium 10..15; the high band keeps the medium multiplier [D 67C590].
 0x0067C5FB		label	not ported	docs/GROUND_EFFECTS_RESEARCH.md:259				inside 0x0067C590; forced to 0 at `67C5FB`.
 0x0067C9B0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:124				(`0x67C9B0`) 200/0.5/0.1/40/0.75/0.5/200 are overridden by the file.
@@ -1096,6 +1104,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00683E50		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:84		[O]		(0x683E50 → E vf 0x38 = 0x81A500, the current leaf race; its +0x64/+0x68 vector), and not
 0x006850F0	result	func	crates/grid-tools/src/virtual_race.rs:266 grid-tools::virtual_race::result	docs/DISCIPLINES.md:480	F367	[I]		(0x6850F0 → 0x67D6C0 → 0x680B20), remove it (0x67D660);
 0x00685190		func	not ported	docs/DISCIPLINES.md:496	F367	[I]		0x6850F0 result of one car, +0x14 0x685190, +0x18 0x67FFB0 (the lap estimate of a
+0x0068F970	team_sum_insertion_sort	func	crates/grid-tools/src/career/rules.rs grid-tools::career::rules::player_team_first	docs/CAREER_RESEARCH.md:682		[V]		insertion sort keeping the earlier (player) team ahead on equal sums (§14.2).
 0x00697D60		func	not ported	docs/DISCIPLINES.md:247				0x65F250, 0x5A42B0) with the Settings object at +8 (vtable 0xCEA030: 0x697D60, the parser 0x62FAE0,
 0x00697D80		func	not ported	docs/DISCIPLINES.md:246				the drift manager: FUN_00668720 builds it (vtable 0xCEA03C: 0x697D80, the per-step update
 0x006994E0	state_hire	func	crates/grid-tools/src/career/state.rs:421 grid-tools::career::state::hire	docs/CAREER_RESEARCH.md:371 ; docs/CAREER_SCREEN.md:166	F466	[V]	hire hire_driver	Hires a teammate for his `signing_fee` (0x6994E0) [V]; replaces the

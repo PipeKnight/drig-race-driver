@@ -119,7 +119,8 @@ offers the livery designer.
 
 - Own-team events are entered with an owned car from the event's `event_vehicle` list.
 - [I] A regional tier opens when the region's rank reaches the tier's rank, the International tier at
-  overall rank 3. The availability code (0x6766B0, 0x675F40) was not fully traced.
+  overall rank 3 (the port's rule). §14.1 traces the original: tiers open by granted per-region
+  licences, not the live rank; 0x6766B0 and 0x675F40 are not availability code.
 - [I] Every event of an open tier is offered and can be repeated: the per-event records only
   accumulate, and no lockout was found. Repeats pay less reputation (§3.2).
 - **Head-to-head** (0x656D40, after every event) [V]: a tier's head-to-head becomes available when
@@ -201,6 +202,7 @@ The differences are listed in §3.4.
   - 0x660E90 sums a per-car value per team within the player's class (player and teammate are one
     team) and ranks the teams.
   - [I] The value is the event points, and the bonus is paid when the player's team leads.
+  - [V] A tie goes to the player's team (§14.2).
 - **Money credited** (0x674610) = prize + teammate share + Team Win Bonus + sponsor money (§5.1) +
   the Flashback Bonus (career +0x68, the sum 0x652200 of the per-race records' +0x5C).
 - **Flashback Bonus** [V, 20 October 2026; corrects the earlier "not paid"]:
@@ -546,7 +548,8 @@ AUTHORED or [I] in the port:
 ## 11. Open questions
 
 1. Routine A vs B (game-mode virtual +0x98) and the class-position flag at run +0x48.
-2. The availability code of tiers and events (0x6766B0, 0x675F40); the "Licences" fact formula.
+2. Answered in §14.1: tier availability (granted licences). Still open: the initial licence value
+   (-1 or 0) and the "Licences" fact formula.
 3. The writer of event record +0x64 (head-to-head unlock); the `head_to_head_rewards` car branch.
 4. The no-damage flag threshold; 0x652200 (record +0x5C) in the event money.
 5. Driver-offer slot rotation after a failed offer; whether offer races also pay the event pot.
@@ -675,3 +678,43 @@ the hash-pinned image; Capstone checks of the float code). Ported as `grid_tools
 - Which models the eBay list shows (unlock, licence, region filters), the event-22 eBay unlock,
   whether the hook runs per race or per event (the port: per event and per driver offer), and
   how the garage car's history grows with races (the port: only eBay cars carry one).
+
+## 14. Tier licences and the team win (10 November 2026)
+
+Static analysis of the master Ghidra project (no live run), for the GRID World front end (backlog
+row 60). Labels as above.
+
+### 14.1 Tier tiles open by granted licences [V]
+
+- 0x4D27F0 (`tier_tile_unlocked`): a tier tile is unlocked when the tile is valid and 0x628EF0
+  (`licence_covers_rank`) holds: `tier.rank <= licence[tier.region]`. The licence array has one entry
+  per region (Europe, USA, Japan, International, Le Mans).
+- 0x669060 (`grant_licence`) raises `licence[region]`, opens every tier with that rank and region,
+  and marks their events available except the head-to-heads (0x64E9B0, `set_event_available`).
+  When a region's licence reaches 3, every other region (0..4) is granted ranks 0..3: the first
+  rank-3 licence cascades to International and Le Mans.
+- Callers: 0x66B1D0 (a countdown), 0x66F640 (`found_team_grant_rookie`: founding the team grants
+  the rookie licence in Europe, USA and Japan) and 0x4DD090 (`grant_all_global`, grants all; [I] a
+  cheat or debug path). 0x4E4890 (`fill_required_to_unlock`) fills the tile's "required to unlock"
+  text.
+- Roles corrected: 0x6766B0 is `pre_event_audio_index` (it picks a pre-event speech index), and
+  0x675F40 is `win_earns_next_licence`, not availability code. 0x58A200 (named `tier_open` after the
+  port function) is `le_mans_flow_branch`: it branches on `season_state == 1`.
+- 0x656D40 (head-to-head, §2.2) is unchanged: a head-to-head opens when every other event of its tier
+  has its record set.
+- How the port differs (`Career::tier_open`, AUTHORED until ported): it tests the live regional rank,
+  International at overall rank 3 and Le Mans while an entry is pending; the original tests the
+  granted licences, which only rise, and opens International and Le Mans through licence[3]/[4]
+  from the cascade. Not ported yet: the starting licence value is not settled (-1 or 0 before the
+  team is founded), and the port's save has no licence array (§9.4).
+
+### 14.2 Team win: ties go to the player [V]
+
+- 0x6779C0 tests 0x660E90 (`player_team_position`) only when its flag +0x48 is set.
+- 0x660E90 keeps the cars of the player's class, sums each team's value, and sorts the teams by the
+  sum, descending, with the insertion sort 0x68F970 (`team_sum_insertion_sort`), which keeps the
+  player's team (inserted first) ahead of an equal sum. The bonus is paid when the player's team is
+  at index 0, so a tie pays.
+- [I] An AI car without a team has key 0, the player's key, and so adds to the player's sum.
+  The port keeps each AI car as its own team (§3.1), so this is not ported.
+- Port: `rules::player_team_first` now pays on a tie (test `a_tied_team_standing_goes_to_the_player`).

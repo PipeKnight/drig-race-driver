@@ -274,9 +274,11 @@ pub fn class_position(
 }
 
 /// Whether the player's team leads the team standings of the event
-/// (0x660E90 returns 0). [I] The summed value is the event points of each
-/// team's cars; the player and the teammate are one team, AI cars count by
-/// `team.id` (an AI with team 0 is its own team).
+/// (0x660E90 `player_team_position` returns 0). Its sort (0x68F970) puts
+/// the player's team first on equal sums [V], so a tie wins. [I] The summed
+/// value is the event points of each team's cars; the player and the
+/// teammate are one team, AI cars count by `team.id` (an AI with team 0 is
+/// its own team; the original probably merges it into the player's key 0).
 pub fn player_team_first(standings: &[Standing]) -> bool {
     use std::collections::BTreeMap;
     let mut ours = 0;
@@ -290,7 +292,7 @@ pub fn player_team_first(standings: &[Standing]) -> bool {
             }
         }
     }
-    teams.values().all(|&p| p < ours)
+    teams.values().all(|&p| p <= ours)
 }
 
 /// A driver-offer objective met in one race (0x62CB50, 0x62CBD0, 0x6556B0,
@@ -344,4 +346,23 @@ pub fn is_test_offer(offer: &DriverOffer) -> bool {
 /// (0x637980, 0x674CC2) [V].
 pub fn appearance_fee(offer: &DriverOffer) -> i64 {
     offer.per_race_wage * offer.races.len().max(1) as i64
+}
+
+#[cfg(test)]
+mod team_win_tests {
+    use super::*;
+
+    fn standing(entrant: Entrant, points: i32) -> Standing {
+        Standing { entrant, points, wins: 0, races: 1, rank: 0 }
+    }
+
+    /// 0x68F970: equal sums put the player's team first.
+    #[test]
+    fn a_tied_team_standing_goes_to_the_player() {
+        let ai = |driver, team| Entrant::Ai { driver, team };
+        let tied = [standing(Entrant::Player, 10), standing(Entrant::TeamMate, 8), standing(ai(5, 3), 18)];
+        assert!(player_team_first(&tied));
+        let behind = [standing(Entrant::Player, 10), standing(Entrant::TeamMate, 8), standing(ai(5, 3), 19)];
+        assert!(!player_team_first(&behind));
+    }
 }
