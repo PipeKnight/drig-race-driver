@@ -58,6 +58,7 @@ pub mod speech;
 pub mod time_of_day;
 pub mod standard_car;
 pub mod start_lights;
+pub mod street_lights;
 mod standard_car_fields;
 pub mod time_trial;
 pub mod touge;

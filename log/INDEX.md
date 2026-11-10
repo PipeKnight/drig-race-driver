@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F776](F0776.md) | 2026-11-10 | Night lights: street lights, night shader term and car headlight beams on every night route |
 | [F775](F0775.md) | 2026-11-10 | Replay frame compaction and the Flashback transition effects |
 | [F774](F0774.md) | 2026-11-10 | Career season end, Le Mans entry, team name and livery (row 60) |
 | [F773](F0773.md) | 2026-11-10 | Launcher race to menu hand-off; window-show hang and ready-marker fixes |

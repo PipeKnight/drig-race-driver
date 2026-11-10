@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F776](log/F0776.md) | 2026-11-10 | Night lights: street lights, night shader term and car headlight beams on every night route |
 | [F775](log/F0775.md) | 2026-11-10 | Replay frame compaction and the Flashback transition effects |
 | [F774](log/F0774.md) | 2026-11-10 | Career season end, Le Mans entry, team name and livery (row 60) |
 | [F773](log/F0773.md) | 2026-11-10 | Launcher race to menu hand-off; window-show hang and ready-marker fixes |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F719](log/F0719.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
 | [F718](log/F0718.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
 | [F717](log/F0717.md) | 2026-11-03 | Baseline track and infield specular from the original programs' Phong lobe |
-| [F716](log/F0716.md) | 2026-11-03 | Baseline sun from the route's lighting.xml plus the original's back/ambient fill (owner's decision) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

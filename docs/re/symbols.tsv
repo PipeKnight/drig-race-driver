@@ -1244,6 +1244,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0070D316		label	not ported	docs/MECHANICAL_DAMAGE.md:203				inside 0x0070D0E0; +7BF1 is set only by game-mode code (70558E, 70574E, 70D316) and cleared by repair 9FF170, so it stays 0.
 0x007157D0		func	not ported	docs/AI_OVERTAKING_RESEARCH.md:169				Test object: +0 vtable, +4 type, +8 fired, +9 enabled; vtable = {+0 0x7157D0, +4 update,
 0x00726A50	lighting_xml_control_defaults	func	crates/grid-app/src/graphics.rs:250 grid-app::graphics::SAO_SCALE_DEFAULT	docs/ROAD_MATERIAL_RESPONSE.md:87	F738	[O]	SAO_SCALE_DEFAULT	`sao_scale` of a lighting.xml without one (0x726A50 stores 0.9 at +0x298).
+0x007274C0	nightlights_cell_sort	func	not ported	docs/NIGHT_LIGHTS.md:52	F776	[D]		screen-cell light pre-pass (at most 2 headlights + 4 street lights per cell); the port sums clustered lights per pixel
 0x00727B20		func	crates/grid-tools/src/time_of_day.rs:16 grid-tools::time_of_day	docs/LE_MANS.md:203	F430 G130	[V]		not a function entry in the master analysis; 3–9 s delay per car [V 0x73B890, 0x727B20, 0x736020].
 0x00728040	particle_bind_reduced_depthmap	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:422		[D]		`0x728040` binds the final reduced-depth texture as `depthmap` for three shader entries,
 0x00728170		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:436				then edge-related or blur-related work under manager options. `0x728170` is edge work,
@@ -1260,6 +1261,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0072C134	lighting_xml_pfx_colours	label	crates/grid-formats/src/track_lighting.rs:249 grid-formats::track_lighting::ParticleLight	docs/TYRE_SMOKE_RESEARCH.md:1224			ParticleLight	inside 0x0072BB40; `pfx_unlitambient`). XML completion 0x72C134..0x72C1A0 parses them into
 0x0072C277	lighting_xml_pack_back_colour	label	not ported	docs/SOURCE_SKY_LIGHTING.md	G330	[V]		Shared HDR colour normalizer receives lighting+1C0 and scale+308; result stored packed+2FC.
 0x0072C299	lighting_xml_pack_ambient_colour	label	not ported	docs/SOURCE_SKY_LIGHTING.md	G330	[V]		Shared HDR colour normalizer receives lighting+1D0 and scale+30C; result stored packed+300.
+0x0072C460	nightlights_gather_street_lights	func	crates/grid-app/src/night_lights.rs grid-app::night_lights	docs/NIGHT_LIGHTS.md:30	F776	[V]		unnamed street lights within ±500 x/z of the camera; weight brightness*sat(F/9); up = cross(dir, normalize(cross(Y,dir))) else (1,0,0); right cookie half
+0x0072CF10	nightlights_defaults	func	crates/grid-app/src/night_lights.rs grid-app::night_lights	docs/NIGHT_LIGHTS.md:22	F776	[V]		headlightdirectional 0.3, lightStrength 1, lightColour (1,1,1)
 0x0072E170	nightlights_bind_shared_shader_inputs	func	not ported	docs/TRACK_ENVIRONMENT.md:334		[D]		the result at NightLights+94;0x0072E170 binds that same headlightMap. Purchased
 0x0072E7D0	particle_draw_compose_shader	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:442		[D]		`0x72E7D0` binds reduced colour to sampler0 of its supplied shader and draws it.
 0x0072ECD0	csm_mask_quality_read	func	crates/grid-app/src/shadow_layout.rs:445 grid-app::shadow_layout::filter	docs/SUN_SHADOWS.md:65	F677	[O]	filter	`maskQuality` (shadowMaskQuality0..2, 0x72ECD0): medium (1) the `_0`
@@ -1268,7 +1271,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00730FBA		label	not ported	docs/ROAD_MATERIAL_RESPONSE.md:100				inside 0x00730F90; when linked, instruction `0x00730FBA` copies packed SUN+0x2F8 to packed SPEC+0x310,
 0x007314B1		label	not ported	docs/ROAD_MATERIAL_RESPONSE.md:107				inside 0x00730F90; `0x007314B1`..`0x00731585` reconstructs SPEC RGB into +0x1E0 using bytes/255 alone:
 0x00731585		label	not ported	docs/ROAD_MATERIAL_RESPONSE.md:107				inside 0x00730F90; `0x007314B1`..`0x00731585` reconstructs SPEC RGB into +0x1E0 using bytes/255 alone:
-0x00732970	nightlights_load_configuration_and_cookie	func	not ported	docs/GRAPHICS_AUDIT.md:86 ; docs/LE_MANS.md:210	F765	[D]		parser 0x732970, and the `shadowmask.gba` term above) and car headlight projection (the original's
+0x00732970	nightlights_load_configuration_and_cookie	func	crates/grid-formats/src/street_lights.rs grid-formats::street_lights	docs/GRAPHICS_AUDIT.md:86 ; docs/LE_MANS.md:210	F765 F771	[D]		parser 0x732970, and the `shadowmask.gba` term above) and car headlight projection (the original's
 0x00733500	PostprocessResourceProcess	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		resource role->pending effect description slots; allocator guard
 0x00733A70	Sampler0InputProvider_construct	func	not ported	docs/ORIGINAL_POSTPROCESS.md:135	G348	[D]		through RCPPS plus one refinement. Constructor `0x00733A70` installs its table; | note: Installs CF4188 with 72A920 at virtual+10; initializes input fields. Direct caller73AA00 and virtual+0 initializer733B80 identify a depth-prepass construction route; formal registered class and exclusive use unproven.
 0x00733B80	Sampler0InputProvider_initializeDepthPrepassResources	func	not ported	docs/ORIGINAL_POSTPROCESS.md:136		[D]		caller `0x0073AA00` constructs it and invokes initializer `0x00733B80`. | note: Virtual+0 of CF4188 resolves depthPrePassQuad/depth_prepass/depthPrePassShaderInstance and prevViewProj/prevModel/motionPartition slots; conditionally invokes virtual+10 with +4 as both inputs. No selected final-merge association or exclusive-use claim.
@@ -1278,6 +1281,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00735740		func	not ported	docs/LE_MANS.md:198				`CMR6Lighting` (0x735740) registers `enableHeadlights` (bool, > 0.5),
 0x00735BD0	vehicle_lights_night_off	func	not ported	docs/COCKPIT.md:296	F678	[V]		on a forced-night or day/night route the night-lights pass (0x736020, only while the light fade F is above 0) sets each car's lights to (F − d_i)·4 > 0 with ...
 0x00736020	vehicle_lights_night_fade	func	crates/grid-app/src/dash.rs:327 grid-app::dash::backlight_on ; crates/grid-tools/src/time_of_day.rs:16 grid-tools::time_of_day	docs/COCKPIT.md:296 ; docs/LE_MANS.md:204	F678 F430 G130	[V]	backlight_on	"Backlight"): on a forced-night route always (0x736020 with the light
+0x00736B70	nightlights_prepass	func	not ported	docs/NIGHT_LIGHTS.md:52	F776	[D]		pre-pass that builds the per-cell light lists (with 0x7274C0)
+0x00736D80	nightlights_bind_records	func	crates/grid-app/src/night_lights.wgsl	docs/NIGHT_LIGHTS.md:41	F776	[V]		binds the projector records: weight 3*min(w,1), range, cookie half, lightBias (0,d,1-d,strength)
 0x00736E60	nightlights_upload_projector_basis_and_weights	func	not ported	docs/TRACK_ENVIRONMENT.md:319	G366	[D]		Uploads camera projector basis divided by radial cutoff and dimensionless clamped weight*2.5; source optical/working-space units separate
 0x00737D20	particle_resource_config_callback	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:357	G247	[D]		bounded follow-ups: `0x737D20`, `0x738920`, `0x738E80` and `0x62E350`; other links below
 0x00738890	particle_plugin_resolve_plugins	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1176				`0x738890` resolves two plugins by name: `DebugRendererPlugin` into +0x88 and
@@ -3970,6 +3975,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00DB4F60		global	not ported	docs/RACE_HUD.md:499				Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)³ × (base −
 0x00DB4FE4		global	not ported	docs/REPLAY.md:65		[D]		path to `t − 10.0` with 0xDB4FE4, also 10.0) [D]. PAUSE_MENU.md earlier said 15 s; that was not
 0x00DB4FEC	INSTANT_REWIND	global	crates/grid-app/src/replay.rs:42 grid-app::replay::INSTANT_REWIND	docs/FLASHBACK.md:84 ; docs/PAUSE_MENU.md:57 ; docs/REPLAY.md:64	F360	[D]		last 10 s [D: 0xDB4FEC, read by StateInstantReplayRewind and 0x63EBC0],
+0x00DB79D4	nightlights_other_car_range	data	crates/grid-app/src/night_lights.rs grid-app::night_lights::OTHER_RANGE	docs/NIGHT_LIGHTS.md:36	F776	[V]		float 60: headlight range of non-focus cars
+0x00DB79D8	nightlights_focus_car_range	data	crates/grid-app/src/night_lights.rs grid-app::night_lights::FOCUS_RANGE	docs/NIGHT_LIGHTS.md:36	F776	[V]		float 110: headlight range of the focus car
+0x00DB79DC	headlight_beam_pitch_timeline	data	crates/grid-app/src/headlight_frame.rs grid-app::headlight_frame	docs/NIGHT_LIGHTS.md:37	F776	[V]		float -0.45: beam y in timeline mode (forced night -0.8)
 0x00DB84E0		vtable	not ported	docs/TYRE_SMOKE_RESEARCH.md:1172				The sampler is a sub-object of the particle plugin (static instance `0xDB84E0`, vtable
 0x00E3B058		global	not ported	docs/VEHICLE_STATE.md:7				The original named-plugin lookup uses registry base `0x00e59148`, 32-byte name slots and a separate pointer array. Looking up `VehicleManagerPlugin` returns ...
 0x00E3B9A0		vtable	not ported	docs/TYRE_SMOKE_RESEARCH.md:1180				`0x8F2300` (ShadowMapPlugin, static instance `0xE3B9A0`, vtable `0xCF2B14`): returns 0 unless

@@ -137,7 +137,7 @@ Shared lookups preceded all new-address reads. No new Ghidra project/decompile o
 
 The selected CSM stage0x005CD5F0 draws into intermediate owner+0x644, then smooths into final owner+0x648. Its smoothing fragment samples four interpolated UV pairs, each offset by half the inverse texture dimensions, and averages their R values with equal1/4 weights. It explicitly zeros GBA. There is no scene-depth sampler or unequal/Gaussian weighting in that fragment. Vertex-generated coordinates and sampler state still determine the effective footprint; this does not establish a four-pixel radius or physical penumbra.
 
-The three selected NightLights fragments saturate accumulated projected texture contributions, multiply the result by `lightColour.rgb`, then pack RGB into GBA. Shared-input binding0x0072E170 connects `headlightMap` and `screenDepthMap` to these shaders. Wrapper0x0073CA10 draws into the same final mask target.
+The port of the NightLights term is in docs/NIGHT_LIGHTS.md. The three selected NightLights fragments saturate accumulated projected texture contributions, multiply the result by `lightColour.rgb`, then pack RGB into GBA. Shared-input binding0x0072E170 connects `headlightMap` and `screenDepthMap` to these shaders. Wrapper0x0073CA10 draws into the same final mask target.
 
 Selector0x0062E0F0 returns after its selected NightLights branch, before the alternative CSM branch. Camera wrapper0x006430A0 completes mask work before colour dispatch0x0063AEB0. Saved NightLights blending is disabled; the observed dataflow therefore does not support inventing an additive NightLights-plus-CSM compositor.
 

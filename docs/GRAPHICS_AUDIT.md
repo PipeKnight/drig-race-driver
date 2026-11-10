@@ -82,9 +82,9 @@ colour to the original's factor times the light unit, the baseline sun's lux ove
 `update_night_emissive` follows the Le Mans clock. `GRID_OBJECT_EMISSIVE=off` leaves all maps out
 for matched before/after renders. The start-light board keeps its own path (exposure weight 0).
 
-Not ported, open for every night route: the night light (street lights from `street_lights.xml`,
-parser 0x732970, and the `shadowmask.gba` term above) and car headlight projection (the original's
-NightLights pass, docs/SOURCE_SKY_LIGHTING.md; docs/LE_MANS.md §3.4 "nothing is drawn").
+The night light (street lights from `street_lights.xml`, parser 0x732970, the `shadowmask.gba` term
+above) and the car headlight beams are ported for every night route as one shared pass
+(docs/NIGHT_LIGHTS.md, `night_lights.rs`).
 
 ## Results
 

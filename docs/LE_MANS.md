@@ -206,9 +206,9 @@ weight `clamp((F − d_i) · 4, 0.001, 1)`. Mode 2: always on.
 `headlights.pssg` holds only the projector texture `headlight.tga`.
 Night-emissive objects (`object_simple_night_emissive*`) take the `emissive`
 curve in mode 1 (3.0 at night; 0x9790E0, ported as
-`object_materials::emissive_time`, docs/GRAPHICS_AUDIT.md "Emissive objects"). `street_lights.xml` (163 lights: position,
-direction, range 8–20, brightness 0.8–4, parsed by 0x732970) has no
-time-based switching found [I: it follows the night light path].
+`object_materials::emissive_time`, docs/GRAPHICS_AUDIT.md "Emissive objects"). `street_lights.xml` (162 lights: position,
+direction, range, brightness, parsed by 0x732970) is switched with the
+same fade: weight `brightness × sat(F / 9)` (0x72C460, docs/NIGHT_LIGHTS.md).
 
 ### 3.4 Port
 
@@ -219,8 +219,8 @@ time-based switching found [I: it follows the night light path].
 and `f + 1` of six, blend `frac(f)`), `Headlights` (fade, delays, per-car
 weight). The app keeps the state in `le_mans_event::LeMansEvent` (also on
 Sarthe lap races, where the clock stays at 15:00) and logs it. AUTHORED: the
-per-car delays come from a fixed generator. Nothing is drawn: no app
-headlight geometry exists to switch.
+per-car delays come from a fixed generator. The beams and street lights
+are drawn by the shared night-light pass (docs/NIGHT_LIGHTS.md).
 
 ### 3.5 Renderer hand-off (graphics side, not ported here)
 
@@ -242,9 +242,9 @@ Per frame in mode 1, `Timeline::value(name, t)` gives:
 | enableHeadlights, lightStrength, headlightdirectional, lightColour_* | headlight projectors: `lightBias = (0, d, 1 − d, strength)`, `lightColour × lightStrength`, beam y −0.45 (mode 1) / −0.8 (mode 2) |
 | emissive | night-emissive objects |
 
-Open on the graphics side: the projector maths and `renderScale`, the
-exposure target 0xE5EBE8, renderer branches 0x96F420 / 0x971A20 in mode 1,
-the street-light binding.
+Open on the graphics side: `renderScale`, the exposure target 0xE5EBE8,
+renderer branches 0x96F420 / 0x971A20 in mode 1. The projector maths and
+the street-light binding are ported (docs/NIGHT_LIGHTS.md).
 
 ## 4. Open
 

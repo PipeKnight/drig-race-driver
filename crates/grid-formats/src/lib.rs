@@ -43,6 +43,7 @@ pub mod scene;
 pub mod skidmarks;
 pub mod sky;
 pub mod start_lights;
+pub mod street_lights;
 pub mod surface;
 pub mod texture;
 pub mod tuning;

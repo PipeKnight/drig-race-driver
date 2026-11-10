@@ -208,6 +208,9 @@ not a full-suite gate or playable rebuild. No application/GPU run, projector,
 street-light renderer, rendered road contribution or optical/parity completion
 is implied.
 
+Since F776 the shared night-light pass (docs/NIGHT_LIGHTS.md) draws the street lights and
+the car headlight beams from these lamp states on every night route.
+
 ## Source headlight preparation diagnostic (G356)
 
 The source front-point writer0x00904440 selects a complete pair of part codes:

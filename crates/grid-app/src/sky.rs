@@ -159,13 +159,7 @@ pub fn install(
             exponent: 1.,
         },
     };
-    // Diagnostic: GRID_SKY_HOUR (0..24) sets the start look of a static
-    // render; a Le Mans drive follows its own clock.
-    let start = std::env::var("GRID_SKY_HOUR")
-        .ok()
-        .and_then(|h| h.parse::<f64>().ok())
-        .filter(|h| (0.0..24.0).contains(h))
-        .map_or_else(|| time_of_day::day_fraction(0., None), |h| h / 24.);
+    let start = static_start();
     source.look = source.look_at(start);
     let look = source.look;
     println!(
@@ -380,6 +374,16 @@ fn follow_camera(
     for mut sky in &mut skies {
         sky.translation = centre;
     }
+}
+
+/// Day fraction a static render shows. Diagnostic: GRID_SKY_HOUR (0..24)
+/// sets it; a Le Mans drive follows its own clock.
+pub(crate) fn static_start() -> f64 {
+    std::env::var("GRID_SKY_HOUR")
+        .ok()
+        .and_then(|h| h.parse::<f64>().ok())
+        .filter(|h| (0.0..24.0).contains(h))
+        .map_or_else(|| time_of_day::day_fraction(0., None), |h| h / 24.)
 }
 
 #[cfg(test)]

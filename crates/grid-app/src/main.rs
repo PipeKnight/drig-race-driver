@@ -146,6 +146,7 @@ mod scene_probe;
 mod settings;
 mod sidewall_filter;
 mod skid_marks;
+mod night_lights;
 mod sky;
 mod sky_environment;
 mod source_trees;
@@ -1290,7 +1291,7 @@ fn append_objects(
         _ => None,
     };
     car.emissive_time =
-        object_materials::emissive_time(mode, timeline.as_ref(), grid_tools::time_of_day::day_fraction(0., None));
+        object_materials::emissive_time(mode, timeline.as_ref(), sky::static_start());
     let light_shafts = object_materials::light_shaft_materials(&tree)?;
     let mut light_shaft_draws = 0;
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
@@ -4355,6 +4356,24 @@ pub(crate) fn race_app(
         // has just admitted bounded actual live baseline reference driving.
         Some((headlight_frame::Preparation::load(&root, &field.models, &field.car_model)?, source_projector::load_cookie(&root, &route)?.0))
     } else {None};
+    // Night routes: street lights and car beams (docs/NIGHT_LIGHTS.md). The
+    // research projector pilots replace the beams, so they exclude the pass.
+    // GRID_NIGHT_LIGHTS=off leaves the pass out for matched before/after renders.
+    let night_off = std::env::var("GRID_NIGHT_LIGHTS").is_ok_and(|v| v == "off");
+    let night_mode = if track && !collision && !headless && !night_off && source_projector_request.is_none() && headlight_lumens.is_none() {
+        grid_tools::time_of_day::Mode::for_route(&root, &route).unwrap_or(grid_tools::time_of_day::Mode::None)
+    } else {
+        grid_tools::time_of_day::Mode::None
+    };
+    let mut night_preparation = if night_mode != grid_tools::time_of_day::Mode::None && reference && !field.models.is_empty() {
+        // A static scene draws model 0 only.
+        let loaded = if driving.is_some() {
+            headlight_frame::Preparation::load(&root, &field.models, &field.car_model)
+        } else {
+            headlight_frame::Preparation::load(&root, &field.models[..1], &[0])
+        };
+        loaded.inspect_err(|error| eprintln!("night_lights headlights skipped: {error}")).ok()
+    } else { None };
     let mut headlight_preparation = if let Some(lumens) = headlight_lumens {
         if !drive || !reference || headless || collision || output.is_none()
             || !drive_ticks.is_some_and(|n| (1..=1800).contains(&n)) {
@@ -4407,6 +4426,9 @@ pub(crate) fn race_app(
         };
         append_car(&root, &lod, &mut car, model, &player_car, 0)?;
         if let Some(p) = &mut headlight_preparation { p.retain_anchor(0, model)?; }
+        if let Some(p) = &mut night_preparation {
+            p.retain_anchor(0, if driving.is_some() { model } else { Mat4::IDENTITY })?;
+        }
         #[cfg(feature = "source-projector")]
         if let Some((p,_)) = &mut source_projector_preparation {p.retain_anchor(0,model)?;}
         // The cockpit of the player only (0x6138D0), when driving.
@@ -4447,6 +4469,7 @@ pub(crate) fn race_app(
                 let append_anchor = model_offset(&opponents.multi.cars[k]);
                 append_car(&root, &lod, &mut car, append_anchor, model, m)?;
                 if let Some(p) = &mut headlight_preparation { p.retain_anchor(m, append_anchor)?; }
+                if let Some(p) = &mut night_preparation { p.retain_anchor(m, append_anchor)?; }
                 #[cfg(feature = "source-projector")]
                 if let Some((p,_)) = &mut source_projector_preparation {p.retain_anchor(m,append_anchor)?;}
             }
@@ -5199,6 +5222,26 @@ pub(crate) fn race_app(
     // The route's own sky on every track and preset (docs/SKY.md).
     if graphics.source_sky && track {
         sky::install(&mut app, &root, &route, graphics.source_ibl, graphics.source_sky_tone)?;
+    }
+    if night_mode != grid_tools::time_of_day::Mode::None {
+        let (street, cookie, timeline) = night_lights::load(&root, &route);
+        let headlights = night_preparation
+            .take()
+            .map(headlight_frame::Preparation::finish)
+            .transpose()
+            .unwrap_or_else(|error| {
+                eprintln!("night_lights headlights skipped: {error}");
+                None
+            });
+        night_lights::install(&mut app, night_lights::Setup {
+            mode: night_mode,
+            unit: graphics.emissive_unit.unwrap_or(graphics.sun_illuminance() / std::f32::consts::PI),
+            street,
+            headlights,
+            still: (!drive).then(|| anchor.unwrap_or(Mat4::IDENTITY)),
+            cookie,
+            timeline,
+        })?;
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);

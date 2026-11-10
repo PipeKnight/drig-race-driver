@@ -294,6 +294,12 @@ impl Headlights {
     pub fn delays(&self) -> &[f64] {
         &self.delays
     }
+
+    /// Street-light fade `sat(F / 9)`: the factor 0x72C460 multiplies every
+    /// street light's brightness by (docs/NIGHT_LIGHTS.md).
+    pub fn street_light_fade(&self) -> f64 {
+        (self.fade / 9.).clamp(0., 1.)
+    }
 }
 
 #[cfg(test)]
@@ -416,5 +422,20 @@ mod tests {
         assert_eq!(h.car(0), Some(1.));
         let forced = Headlights::new(Mode::ForcedNight, 1, || 0);
         assert!(forced.car(0).is_some());
+        assert_eq!(forced.street_light_fade(), 1.);
+    }
+
+    #[test]
+    fn street_lights_fade_over_nine_seconds() {
+        let mut h = Headlights::new(Mode::Timeline, 1, || 0);
+        assert_eq!(h.street_light_fade(), 0.);
+        h.step(true, 10., 4.5);
+        assert!((h.street_light_fade() - 0.5).abs() < 1e-12);
+        h.step(true, 10., 20.);
+        assert_eq!(h.street_light_fade(), 1.);
+        h.step(false, 20., 3.);
+        assert!((h.street_light_fade() - 6. / 9.).abs() < 1e-12);
+        h.step(false, 20., 30.);
+        assert_eq!(h.street_light_fade(), 0.);
     }
 }
