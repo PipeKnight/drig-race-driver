@@ -555,19 +555,90 @@ template-name test. Over the 94 race routes the structural rule adds 1641 entiti
 `misc_signs_c` (91), `logs_01` (80), `pipes_piles_a` (67), `spa_sign_b` (14) on Shibuya,
 Yokohama Docks, Washington and Haruna. Probe: `local/drift-soak/shib/p3-*.txt`.
 
-Still static, for a different reason: damage states whose dynamic pieces have several
-shapes (0x7CDCD0 attaches all of an added body's shapes, `0x7C6350` each, and the mass
-comes from all of them; a `PieceSpec` holds one primitive). These are the foam posts
-(`post_foam_*`: cylinder plus foot box, 2403 placements), `railing_plastic_combo` (two boxes
-per piece) and `cone_plastic_emisive_a` (two cylinders). Damage states with `infMass`
+Damage states whose dynamic pieces have several shapes break since F804 (next section).
+Damage states with `infMass`
 pieces still pass only for the close-drift flags (`entity_geometry::static_damage_ported`);
 the general rule would add about 4700 tyre walls on Spa and Long Beach, whose breaks
 are not checked.
 
+## Pieces with several shapes (F804)
+
+[D] 0x7CDCD0 attaches every shape of an added body (0x7C6350 each). 0xB11520 then builds the
+body's mass from all of them. Per shape it takes the mass (density x the shell-grown volume, as
+for one shape) and the diagonal inertia, then:
+- 0xB10800 turns the inertia into the placement axes (M^T diag M, with M the shape's rotation);
+- 0xB10D00 moves it from the origin to the shape's position, I += m (S(from) - S(to)), where
+  S(c) has the diagonal -(the other two squares) and the off-diagonals c_i c_j;
+- 0xB10BD0 adds the masses and the tensors, and keeps the centre as a running mass-weighted mean.
+
+After the loop, 0xB10D00 moves the total to the centre of mass. The sphericalise blend and the
+inverse (+0x150) follow, as for one shape.
+
+Port (`dynamic_props.rs`, `PieceSpec::shapes`, `compound_mass`):
+- A piece with one shape keeps the shape's frame as the body frame (bit-identical to before).
+- A piece with several shapes has the body frame [axes | centre of mass], composed with the
+  placement. Each shape keeps its pose relative to that frame (`PieceShape::local`).
+- The axes:
+  - when the products of inertia are at most 1e-4 of the largest diagonal term, the axes are the
+    placement's;
+  - otherwise they are the principal axes (Jacobi), which diagonalise the tensor. [I] This is
+    equivalent to the original's full tensor only when the body's per-axis parameters (angular
+    damping, maximum angular velocity, air resistance) are the same on all three axes, so such a
+    template stays unported otherwise. No surveyed template needed this fallback.
+  - The sphericalise blend acts on the eigenvalues and so commutes with the rotation.
+- Contacts are kept per shape. Two shapes of one body never pair. The road depth is the lowest
+  point over the shapes. Continuous sweeps (0xB15B70) run when any shape is fast; every shape is
+  swept, and the responses are averaged [I].
+
+Survey over the 94 race routes (shapes per dynamic piece, no phantom shapes, sphericalise 0):
+
+| Template | placements | shapes |
+|---|---|---|
+| `post_foam_red` | 1526 | box + cylinder |
+| `post_foam_orange` | 716 | box (d2610) + cylinder (d700) |
+| `post_foam_green` | 161 | box + cylinder |
+| `pole_b` | 1374 | several |
+| `fence_wood_01` | 827 | several |
+| `barrier_direction_a` | 806 | several |
+| `railing_plastic_combo` | 462 | two boxes, unrotated |
+| `crate_wood_a`, `crate_wood_b` | 307, 332 | several |
+| `animated_chevron_a`, `_b` | about 220 each | four rotated boxes |
+| `cone_plastic_emisive_a` | 184 | two cylinders, rotated |
+| `gg_barrier_cone_*` | 182, 16, 478, 428 | several |
+| `barrier_plas_white`, `_red` | 126, 146 | five boxes |
+
+Before F804 all of these stayed static at the compound gate.
+
+Results (F804):
+- Shibuya route_2 has no unported template left (it had the four foam-post, railing and cone
+  templates). In a test, 25 `cone_plastic_emisive_a`, 35 `post_foam_orange`, 24 `post_foam_red`
+  and 158 `railing_plastic_combo` entities spawn compound bodies and break.
+- Matched `grid-opponent-race` builds (F789 against F804), the same 8-car field, 16 AI seeds on
+  Shibuya route_2, 16 laps each: 0.43 spins per lap and 12 s stalled per seed before, 0.03 and
+  0 s after (lap-weighted 0.426 against 0.031). The car-to-prop contact rows fell from 16326
+  (11427 of them on the foam posts, which had held as static boxes) to 2081.
+- Yokohama Docks route_1, 8 seeds: seed 3 stays at about 57 spins per lap in both builds (a
+  car tunnels through the road after hitting a tall fence plate, docs/RESET_AND_RESPAWN_RESEARCH.md
+  section 10.5); the other seven fall from 0.26 to 0.13.
+- Two authored offsets show up as test allowances, not as port changes:
+  - the Yokohama chevron signs' feet (0.2 m boxes) are authored half sunk into the road,
+    0.13 m deep, so they spawn pressed down by the road;
+  - Le Mans' `armco_02_end_left_dam_link1` mesh sits 0.13 m beside its single 4.7 cm box;
+  - Milan's cone entity 831 (`gg_barrier_cone_02_f`): its 2 cm base plate touches a steep road
+    triangle 3.5 mm deep (normal y -0.59);
+  - Shibuya route_0 railing entity 349 (`railing_plastic_combo`): one 4 cm foot plate is
+    authored 4.3-6.4 cm into the road, so the road pushes it out downwards;
+  - a post's mesh may stand on its shapes (Le Mans `post_foam_green`: a 9 cm base under a
+    33 cm mesh), as a single box's may.
+- Catalog after F804: no unported template is left on the circuits except the `infMass` tyre walls,
+  Spa's 709 `tyrewall_a_red`/`_white` and Long Beach's 275 `tyrewall_*`. Breakable entities:
+  Shibuya route_0 363 (was 91), San Francisco 240, Milan 1463, Yokohama Docks route_0 569,
+  Jarama route_1 1241, Istanbul 1263, Le Mans 1231, Spa 449, Long Beach 124.
+
 ## Not yet established
 
-- Armco end pieces (`link0`, a rail of three shapes) and scaled jointed entities stay
-  static (the close-drift flags break since F509); uproot (rail bodies switching to `rbDefault`) is not
+- Scaled jointed entities stay static (the close-drift flags break since F509); the Armco
+  end pieces (`link0`, a rail of three shapes) break since F804. Uproot (rail bodies switching to `rbDefault`) is not
   ported, its trigger is not found. Armco and tyre-wall joints are ported since F501 and
   F484 (docs/JOINTS_RESEARCH.md).
 - Sleeping: ported in F541 (BODY_SLEEPING.md); parking (status 2) is not.

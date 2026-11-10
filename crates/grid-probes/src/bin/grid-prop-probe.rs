@@ -275,7 +275,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let spec = &props.catalog.breakables[b].pieces[p];
         println!(
             "piece {} {:?} mass={:.1} centre=({x:.2},{y:.3},{z:.2}) ground={ground:?} up=({:.2},{:.2},{:.2})",
-            spec.anchor, spec.primitive, spec.mass, m[1][0], m[1][1], m[1][2]
+            spec.anchor, spec.primitive(), spec.mass, m[1][0], m[1][1], m[1][2]
         );
     }
     println!(

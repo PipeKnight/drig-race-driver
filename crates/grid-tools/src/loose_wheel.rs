@@ -260,7 +260,7 @@ mod tests {
         let s = spawn(&nodes(), 2, false, &car, &motion, 50., [0.; 3]).unwrap();
         // 0.2 x 0.62 x 0.62 x 600 = 46 kg, capped at 0.015 x 1140.
         assert!((s.spec.mass - 17.1).abs() < 1e-4);
-        let crate::dynamic_props::Primitive::Cylinder { radius, height } = s.spec.primitive else {
+        let crate::dynamic_props::Primitive::Cylinder { radius, height } = s.spec.shapes[0].primitive else {
             panic!("a cylinder");
         };
         assert!((radius - 0.31).abs() < 1e-6 && (height - 0.2).abs() < 1e-6);

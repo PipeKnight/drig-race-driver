@@ -2044,7 +2044,7 @@ mod tests {
                         .unwrap();
                 multi.enable_dynamic_props(root).unwrap();
                 let props = multi.props.as_mut().unwrap();
-                let wall = 969;
+                let wall = le_mans_wall(&props.catalog);
                 let entry = &props.catalog.breakables[wall];
                 assert_eq!(entry.template, "tyrewall_yellow.max");
                 eprintln!("pieces {} joints {}", entry.pieces.len(), entry.joints.len());
@@ -2076,6 +2076,12 @@ mod tests {
             .unwrap();
     }
 
+    /// The Le Mans tyre wall the prop tests drive into (`tyrewall_yellow`,
+    /// catalog index 969 before F804).
+    fn le_mans_wall(catalog: &crate::dynamic_props::Catalog) -> usize {
+        (catalog.breakables.iter()).position(|b| b.entity == 1254).unwrap()
+    }
+
     /// Far pieces rest before they stop (F561, owner's request; BODY_SLEEPING
     /// section 8): car 1 breaks a Le Mans tyre wall more than 80 m from the
     /// player's car 0. B7B850 parked the moving pieces on their first static
@@ -2101,7 +2107,8 @@ mod tests {
                     MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
                         .unwrap();
                 multi.enable_dynamic_props(root).unwrap();
-                let at = multi.props.as_ref().unwrap().catalog.breakables[969].placement;
+                let catalog = &multi.props.as_ref().unwrap().catalog;
+                let at = catalog.breakables[le_mans_wall(catalog)].placement;
                 let z = [at[8], at[9], at[10]];
                 let centre = [at[12], at[13], at[14]];
                 let player = crate::dynamic_props::park_reference(&multi.bodies()[0]).0;
@@ -2162,7 +2169,8 @@ mod tests {
                     MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
                         .unwrap();
                 multi.enable_dynamic_props(root).unwrap();
-                let at = multi.props.as_ref().unwrap().catalog.breakables[969].placement;
+                let catalog = &multi.props.as_ref().unwrap().catalog;
+                let at = catalog.breakables[le_mans_wall(catalog)].placement;
                 let z = [at[8], at[9], at[10]];
                 let centre = [at[12], at[13], at[14]];
                 let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);
@@ -2324,7 +2332,7 @@ mod tests {
                     props.catalog.breakables[centre].template
                 );
                 for p in &props.catalog.breakables[centre].pieces {
-                    eprintln!("pile piece {:?} shell={} mass={}", p.primitive, p.shell, p.mass);
+                    eprintln!("pile piece {:?} shell={:?} mass={}", p.primitive(), p.shapes.first().map(|s| s.shell), p.mass);
                 }
                 if drive > 0 {
                     let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 60. * at[8 + k]);
@@ -2406,7 +2414,7 @@ mod tests {
                             let b = &bodies[i];
                             if b[0x400 / 4] == contact_groups::ASLEEP {
                                 if let Some(p) = multi.props.as_ref().and_then(|p| p.pieces.iter().find(|q| q.body == i).map(|q| (q, p))) {
-                                    eprintln!("asleep {i} pos={:.3},{:.3},{:.3} {:?}", f(b, 0x1c0), f(b, 0x1c4), f(b, 0x1c8), p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive);
+                                    eprintln!("asleep {i} pos={:.3},{:.3},{:.3} {:?}", f(b, 0x1c0), f(b, 0x1c4), f(b, 0x1c8), p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive());
                                 }
                                 continue;
                             }
@@ -2427,7 +2435,7 @@ mod tests {
                                 f(b, 0x1c8)
                             );
                             if let Some(p) = multi.props.as_ref().and_then(|p| p.pieces.iter().find(|q| q.body == i).map(|q| (q, p))) {
-                                eprintln!("  piece {:?} breakable {}", p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive, p.0.breakable);
+                                eprintln!("  piece {:?} breakable {}", p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive(), p.0.breakable);
                             }
                             for c in &multi.world.groups.contacts {
                                 let (a, o) = (c[1] as usize, c[2] as usize);
@@ -2999,18 +3007,11 @@ mod tests {
                 )
                 .unwrap();
                 multi.enable_dynamic_props(root).unwrap();
-                // The stacks the field broke at ticks 13308-13310: indices in
-                // the catalog before F789, which made the props with several
-                // shape behaviours of one type breakable too.
+                // The stacks the field broke at ticks 13308-13310 (catalog
+                // indices 954, 956 and 959 before F789).
                 let props = multi.props.as_mut().unwrap();
-                let several = ["cushion_orange_a"];
-                let before: Vec<usize> = (0..props.catalog.breakables.len())
-                    .filter(|&b| {
-                        let t = &props.catalog.breakables[b].template;
-                        !several.iter().any(|s| t.starts_with(s))
-                    })
-                    .collect();
-                for b in [954, 956, 959].map(|b| before[b]) {
+                for entity in [1231, 1234, 1238] {
+                    let b = (props.catalog.breakables.iter()).position(|b| b.entity == entity).unwrap();
                     assert!(props.catalog.breakables[b].template.starts_with("tyrestack"));
                     props.queue_break(b);
                 }
@@ -3105,7 +3106,8 @@ mod tests {
                     MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
                         .unwrap();
                 multi.enable_dynamic_props(root).unwrap();
-                let at = multi.props.as_ref().unwrap().catalog.breakables[969].placement;
+                let catalog = &multi.props.as_ref().unwrap().catalog;
+                let at = catalog.breakables[le_mans_wall(catalog)].placement;
                 let (x, z) = ([at[0], at[1], at[2]], [at[8], at[9], at[10]]);
                 let centre = [at[12], at[13], at[14]];
                 let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);

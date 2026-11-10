@@ -79,16 +79,29 @@ pub struct PieceSpec {
     /// Damage renderable node in objects.pssg and the body's scene anchor.
     pub renderable: String,
     pub anchor: String,
-    pub primitive: Primitive,
-    /// World pose of the shape centre in the intact placement (row vectors).
+    /// World pose of the body in the intact placement (row vectors): the
+    /// shape centre for a piece with one shape, the placement's rows at the
+    /// shapes' centre of mass for several ([`compound_mass`]).
     pub pose: Matrix,
     pub mass: f32,
     pub inertia: [f32; 3],
     pub body: physparams::Body,
-    pub shell: f32,
     /// Body descriptor +0xE8 (constructor +0xEC): 50 for entity pieces,
     /// the descriptor default FLT_MAX for a loose wheel (6174F0).
     pub limit: f32,
+    /// The body's collision shapes (body +0x328 list); empty for a body
+    /// that collides with nothing (no shapes, a phantom post).
+    pub shapes: Vec<PieceShape>,
+}
+
+/// One collision shape of a piece body.
+#[derive(Clone)]
+pub struct PieceShape {
+    pub primitive: Primitive,
+    pub shell: f32,
+    /// The shape's matrix in the body frame (row vectors); `None` where the
+    /// body frame is the shape's own (every body with one shape).
+    pub local: Option<Matrix>,
     hull: collision_mesh::Mesh,
     points: Vec<[f32; 4]>,
     triangles: Vec<[u32; 3]>,
@@ -485,6 +498,141 @@ fn scaled_shape(shape: &Matrix, primitive: Primitive, scale: [f32; 3]) -> (Matri
     (unit, primitive)
 }
 
+const IDENTITY: Matrix = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+
+/// B10D00's parallel-axis move of a tensor for mass `m` from centre `from`
+/// to centre `to`: I += m (S(from) - S(to)), with S(c) = c c^T - |c|^2 E
+/// written per element (diagonal -(the other two squares)).
+fn shift_tensor(m: f32, from: [f32; 3], to: [f32; 3], tensor: &mut [[f32; 3]; 3]) {
+    let s = |c: [f32; 3]| -> [[f32; 3]; 3] {
+        std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                if i == j {
+                    let (u, v) = (c[(i + 1) % 3], c[(i + 2) % 3]);
+                    -(u * u + v * v)
+                } else {
+                    c[i] * c[j]
+                }
+            })
+        })
+    };
+    let (a, b) = (s(from), s(to));
+    for i in 0..3 {
+        for j in 0..3 {
+            tensor[i][j] += m * (a[i][j] - b[i][j]);
+        }
+    }
+}
+
+/// 0xB11520's sums over a body's shapes ([D], docs/DYNAMIC_PROPS_RESEARCH.md
+/// "Pieces with several shapes"): per shape (mass, diagonal inertia, matrix
+/// in the unit placement), the inertia turned into the placement axes
+/// (B10800: M^T I M), moved to the shape's position (B10D00), and the
+/// masses, centres and tensors summed (B10BD0: the centre is the running
+/// mass-weighted mean); after the loop the total moves to the centre of
+/// mass (B10D00 by -com). Returns the mass, the centre of mass in the unit
+/// placement and the tensor about it.
+fn compound_mass<'a>(
+    shapes: impl IntoIterator<Item = (f32, [f32; 3], &'a Matrix)>,
+) -> (f32, [f32; 3], [[f32; 3]; 3]) {
+    let mut total: Option<(f32, [f32; 3], [[f32; 3]; 3])> = None;
+    for (m, diagonal, local) in shapes {
+        let mut tensor: [[f32; 3]; 3] = std::array::from_fn(|a| {
+            std::array::from_fn(|b| (0..3).map(|k| local[k][a] * diagonal[k] * local[k][b]).sum())
+        });
+        let at = [local[3][0], local[3][1], local[3][2]];
+        shift_tensor(m, [0.; 3], at, &mut tensor);
+        total = Some(match total {
+            None => (m, at, tensor),
+            Some((mass, centre, sum)) => {
+                let combined = mass + m;
+                (
+                    combined,
+                    std::array::from_fn(|k| (mass * centre[k] + m * at[k]) / combined),
+                    std::array::from_fn(|a| std::array::from_fn(|b| sum[a][b] + tensor[a][b])),
+                )
+            }
+        });
+    }
+    let Some((mass, centre, mut tensor)) = total else {
+        return (0., [0.; 3], [[0.; 3]; 3]);
+    };
+    if centre != [0.; 3] {
+        shift_tensor(mass, centre, [0.; 3], &mut tensor);
+    }
+    (mass, centre, tensor)
+}
+
+/// The principal axes of a symmetric tensor (cyclic Jacobi in f64): the
+/// moments and the axes as rows of a proper rotation (determinant +1), so
+/// that the tensor is the sum of moment x axis x axis.
+fn principal_axes(tensor: &[[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) {
+    let mut a: [[f64; 3]; 3] = tensor.map(|r| r.map(f64::from));
+    // Columns of `v` are the eigenvectors.
+    let mut v = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    for _ in 0..32 {
+        let off = a[0][1].abs() + a[0][2].abs() + a[1][2].abs();
+        if off <= 1e-15 * (a[0][0].abs() + a[1][1].abs() + a[2][2].abs()) {
+            break;
+        }
+        for (p, q) in [(0, 1), (0, 2), (1, 2)] {
+            if a[p][q] == 0. {
+                continue;
+            }
+            let theta = (a[q][q] - a[p][p]) / (2. * a[p][q]);
+            let t = theta.signum() / (theta.abs() + (theta * theta + 1.).sqrt());
+            let t = if theta == 0. { 1. } else { t };
+            let c = 1. / (t * t + 1.).sqrt();
+            let s = t * c;
+            for row in &mut a {
+                let (akp, akq) = (row[p], row[q]);
+                row[p] = c * akp - s * akq;
+                row[q] = s * akp + c * akq;
+            }
+            let (row_p, row_q) = (a[p], a[q]);
+            a[p] = std::array::from_fn(|k| c * row_p[k] - s * row_q[k]);
+            a[q] = std::array::from_fn(|k| s * row_p[k] + c * row_q[k]);
+            for row in &mut v {
+                let (vp, vq) = (row[p], row[q]);
+                row[p] = c * vp - s * vq;
+                row[q] = s * vp + c * vq;
+            }
+        }
+    }
+    let mut axes: [[f32; 3]; 3] = std::array::from_fn(|k| std::array::from_fn(|i| v[i][k] as f32));
+    let [x, y, z] = axes;
+    let determinant = x[0] * (y[1] * z[2] - y[2] * z[1]) - x[1] * (y[0] * z[2] - y[2] * z[0])
+        + x[2] * (y[0] * z[1] - y[1] * z[0]);
+    if determinant < 0. {
+        axes[2] = z.map(|c| -c);
+    }
+    ([0, 1, 2].map(|k| a[k][k] as f32), axes)
+}
+
+/// Whether a body's per-axis properties are the same on every axis, so the
+/// choice of body axes does not change its motion.
+fn isotropic(body: &physparams::Body) -> bool {
+    let same = |v: [f32; 3]| v[0] == v[1] && v[1] == v[2];
+    same(body.angular_damping)
+        && same(body.max_angular_velocity)
+        && same(body.forward_air_resistance)
+        && same(body.backward_air_resistance)
+}
+
+/// The inverse of a rigid row-vector matrix (orthonormal rows).
+fn rigid_inverse(m: &Matrix) -> Matrix {
+    let mut inverse = IDENTITY;
+    for r in 0..3 {
+        for c in 0..3 {
+            inverse[r][c] = m[c][r];
+        }
+    }
+    for c in 0..3 {
+        inverse[3][c] = -(0..3).map(|k| m[3][k] * m[c][k]).sum::<f32>();
+    }
+    inverse
+}
+
 fn reference(uri: &[u8]) -> Result<&str, &'static str> {
     physparams::reference(uri).ok_or("invalid physics property reference")
 }
@@ -667,14 +815,10 @@ impl Catalog {
                     static_pieces.push(primaries.contains(&index) && targets.contains(added.body));
                     continue;
                 }
-                // A piece kind the port cannot break (several shapes, static,
-                // sphericalised, fixed mass, a sphere; first seen on Haruna):
-                // the template stays static, like armco.
-                let [shape] = &added.shapes[..] else {
-                    *catalog.unported.entry(template).or_default() += 1;
-                    continue 'entities;
-                };
-                if shape.phantom {
+                // A piece kind the port cannot break (static, sphericalised,
+                // fixed mass, a phantom shape, a full inertia tensor; first
+                // seen on Haruna): the template stays static, like armco.
+                if added.shapes.iter().any(|s| s.phantom) {
                     *catalog.unported.entry(template).or_default() += 1;
                     continue 'entities;
                 }
@@ -683,33 +827,81 @@ impl Catalog {
                     *catalog.unported.entry(template).or_default() += 1;
                     continue 'entities;
                 }
-                let (_, source) = parameters.shape(reference(shape.properties)?)?;
-                let physparams::MassSource::Density(density) = source else {
-                    *catalog.unported.entry(template).or_default() += 1;
-                    continue 'entities;
-                };
-                let primitive = match shape.primitive {
-                    entities::Primitive::Box {
-                        width,
-                        height,
-                        length,
-                    } => Primitive::Box([width, height, length]),
-                    entities::Primitive::Cylinder { radius, height } => {
-                        Primitive::Cylinder { radius, height }
+                // (primitive, shell, matrix in the unit placement, mass, inertia)
+                let mut parts = Vec::new();
+                for shape in &added.shapes {
+                    let (_, source) = parameters.shape(reference(shape.properties)?)?;
+                    let physparams::MassSource::Density(density) = source else {
+                        *catalog.unported.entry(template).or_default() += 1;
+                        continue 'entities;
+                    };
+                    let primitive = match shape.primitive {
+                        entities::Primitive::Box {
+                            width,
+                            height,
+                            length,
+                        } => Primitive::Box([width, height, length]),
+                        entities::Primitive::Cylinder { radius, height } => {
+                            Primitive::Cylinder { radius, height }
+                        }
+                        entities::Primitive::Sphere { radius } => Primitive::Sphere { radius },
+                    };
+                    // The body sits at the unit entity rows (0x7D3C40 hands it
+                    // entity +0x40); the entity's scale (Nürburgring tyre
+                    // stacks 0.9718, Yokohama's close-drift flags) goes into
+                    // the shape's dimensions and so its mass (0x7C6350), the
+                    // shell unscaled.
+                    let (shape_matrix, primitive) =
+                        scaled_shape(&matrix(&shape.transform), primitive, scale);
+                    let (mass, inertia) = mass_properties(primitive, density, shape.shell);
+                    if !(mass.is_finite() && mass > 0.) {
+                        return Err("invalid prop piece mass".into());
                     }
-                    entities::Primitive::Sphere { radius } => Primitive::Sphere { radius },
-                };
-                // The body sits at the unit entity rows (0x7D3C40 hands it
-                // entity +0x40); the entity's scale (Nürburgring tyre stacks
-                // 0.9718, Yokohama's close-drift flags) goes into the shape's
-                // dimensions and so its mass (0x7C6350), the shell unscaled.
-                let (shape_matrix, primitive) =
-                    scaled_shape(&matrix(&shape.transform), primitive, scale);
-                let (mass, inertia) = mass_properties(primitive, density, shape.shell);
-                if !(mass.is_finite() && mass > 0.) {
-                    return Err("invalid prop piece mass".into());
+                    parts.push((primitive, shape.shell, shape_matrix, mass, inertia));
                 }
-                let pose = compose(&shape_matrix, &placement);
+                // One shape: the body frame is the shape's. Several (0xB11520,
+                // [`compound_mass`]): the placement's rows at the centre of
+                // mass, each shape at its matrix less that centre.
+                let (pose, mass, inertia, locals) = if let [(_, _, shape_matrix, mass, inertia)] =
+                    parts[..]
+                {
+                    (compose(&shape_matrix, &placement), mass, inertia, vec![None])
+                } else {
+                    let (mass, centre, tensor) =
+                        compound_mass(parts.iter().map(|p| (p.3, p.4, &p.2)));
+                    if !(mass.is_finite() && mass > 0.) {
+                        return Err("invalid prop piece mass".into());
+                    }
+                    // The original keeps the placement axes and the full
+                    // tensor (inverse at +0x150); the port's body takes a
+                    // diagonal one. Products of inertia (shapes turned other
+                    // than by right angles: armco ends, chevrons, signs) put
+                    // the body frame on the principal axes, which is the same
+                    // rigid body when the per-axis body properties are the
+                    // same on every axis [I]; otherwise the template stays
+                    // static.
+                    let largest = (0..3).map(|i| tensor[i][i].abs()).fold(0f32, f32::max);
+                    let products = [(0, 1), (0, 2), (1, 2)]
+                        .iter()
+                        .map(|&(i, j)| tensor[i][j].abs().max(tensor[j][i].abs()))
+                        .fold(0f32, f32::max);
+                    let (inertia, axes) = if products <= largest * 1e-4 {
+                        ([0, 1, 2].map(|i| tensor[i][i]), [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
+                    } else if isotropic(&body) {
+                        principal_axes(&tensor)
+                    } else {
+                        *catalog.unported.entry(template).or_default() += 1;
+                        continue 'entities;
+                    };
+                    let mut frame = IDENTITY;
+                    for (row, axis) in frame.iter_mut().zip(axes) {
+                        row[..3].copy_from_slice(&axis);
+                    }
+                    frame[3] = [centre[0], centre[1], centre[2], 1.];
+                    let inverse = rigid_inverse(&frame);
+                    let locals = (parts.iter()).map(|p| Some(compose(&p.2, &inverse))).collect();
+                    (compose(&frame, &placement), mass, inertia, locals)
+                };
                 let [x, y, z] = [0, 1, 2].map(|i| pose[i]);
                 let determinant = x[0] * (y[1] * z[2] - y[2] * z[1])
                     - x[1] * (y[0] * z[2] - y[2] * z[0])
@@ -717,22 +909,20 @@ impl Catalog {
                 if !(determinant.is_finite() && determinant > 1e-3) {
                     return Err("degenerate prop piece placement".into());
                 }
-                let (points, triangles) = hull(primitive);
-                let hull = collision_mesh::build(&points, &triangles, 0)?;
+                let shapes = (parts.iter().zip(locals))
+                    .map(|(&(primitive, shell, ..), local)| {
+                        PieceShape::new(primitive, shell, !matches!(primitive, Primitive::Box(_)), local)
+                    })
+                    .collect::<Result<_, _>>()?;
                 pieces.push(PieceSpec {
                     renderable: String::from_utf8_lossy(added.node).into_owned(),
                     anchor: String::from_utf8_lossy(added.body_node).into_owned(),
-                    primitive,
                     pose,
                     mass,
                     inertia,
                     body,
-                    shell: shape.shell,
                     limit: DESCRIPTOR_EC,
-                    hull,
-                    points,
-                    triangles,
-                    round: !matches!(primitive, Primitive::Box(_)),
+                    shapes,
                 });
                 static_pieces.push(primaries.contains(&index) && targets.contains(added.body));
             }
@@ -826,8 +1016,7 @@ impl Catalog {
             // (0xA692F0).
             for &k in &posts {
                 let piece = &mut pieces[joints[k].a];
-                piece.points.clear();
-                piece.triangles.clear();
+                piece.shapes.clear();
                 piece.limit = f32::MAX;
             }
             for (spec, o) in pieces.iter_mut().zip(overrides) {
@@ -1037,23 +1226,21 @@ impl PieceSpec {
             turn_off_time: 1.,
             gravity_scale: 1.,
         };
-        let (points, triangles) = hull(primitive);
-        let hull = collision_mesh::build(&points, &triangles, 0)?;
         Ok(Self {
             renderable: String::new(),
             anchor: String::new(),
-            primitive,
             pose,
             mass,
             inertia: [side, mass * radius * radius * 0.5, side],
             body,
-            shell: f32::from_bits(0x3ca3_d70a), // 0.02 (CB0934, 9A8BB0)
             limit: f32::MAX,
-            hull,
-            points,
-            triangles,
             // The lost wheel keeps its prism (FIDELITY_BACKLOG row 24).
-            round: false,
+            shapes: vec![PieceShape::new(
+                primitive,
+                f32::from_bits(0x3ca3_d70a), // 0.02 (CB0934, 9A8BB0)
+                false,
+                None,
+            )?],
         })
     }
 
@@ -1081,18 +1268,13 @@ impl PieceSpec {
         let primitive = Primitive::Box(size);
         let outer = size.map(|v| v + 2. * shell);
         let [x, y, z] = outer.map(|v| v * v);
-        let (points, triangles) = hull(primitive);
-        spec.hull = collision_mesh::build(&points, &triangles, 0)?;
-        spec.points = points;
-        spec.triangles = triangles;
-        spec.primitive = primitive;
+        spec.shapes = vec![PieceShape::new(primitive, shell, false, None)?];
         spec.inertia = [
             mass * (y + z) / 12.,
             mass * (x + z) / 12.,
             mass * (x + y) / 12.,
         ];
         spec.body.angular_damping = [angular_damping; 3];
-        spec.shell = shell;
         Ok(spec)
     }
 
@@ -1102,34 +1284,50 @@ impl PieceSpec {
     /// nothing. Its pose is the entity placement [I: the subentity carries
     /// no transform].
     fn shapeless(renderable: String, anchor: String, pose: Matrix, body: physparams::Body) -> Result<Self, Error> {
-        let primitive = Primitive::Sphere { radius: 0. };
-        // A placeholder mesh; `points` stay empty, so the piece never
-        // enters the contact passes.
-        let (points, triangles) = hull(Primitive::Box([0.01; 3]));
-        let hull = collision_mesh::build(&points, &triangles, 0)?;
         Ok(Self {
             renderable,
             anchor,
-            primitive,
             pose,
             mass: 1.,
             inertia: [1.; 3],
             body,
-            shell: 0.,
             limit: DESCRIPTOR_EC,
-            hull,
-            points: Vec::new(),
-            triangles: Vec::new(),
-            round: false,
+            shapes: Vec::new(),
         })
     }
 
     /// Whether the piece has a collision shape.
     pub fn collides(&self) -> bool {
-        !self.points.is_empty()
+        !self.shapes.is_empty()
     }
 
-    /// The piece's collision shape for the world, the cars and the road.
+    /// The first shape's primitive (a lost wheel's or panel's only shape).
+    pub fn primitive(&self) -> Option<Primitive> {
+        self.shapes.first().map(|s| s.primitive)
+    }
+}
+
+impl PieceShape {
+    fn new(primitive: Primitive, shell: f32, round: bool, local: Option<Matrix>) -> Result<Self, Error> {
+        let (points, triangles) = hull(primitive);
+        let hull = collision_mesh::build(&points, &triangles, 0)?;
+        Ok(Self {
+            primitive,
+            shell,
+            local,
+            hull,
+            points,
+            triangles,
+            round,
+        })
+    }
+
+    /// The shape's world pose for the body's world pose `body` (+0x1D0).
+    pub fn pose(&self, body: &Matrix) -> Matrix {
+        self.local.map_or(*body, |local| compose(&local, body))
+    }
+
+    /// The shape for the world, the cars and the road.
     pub fn collider(&self) -> convex_distance::Hull<'_> {
         match (self.round, self.primitive) {
             (true, Primitive::Cylinder { radius, height }) => convex_distance::Hull::Cylinder {
@@ -1198,27 +1396,30 @@ fn pressing_at(
     surfaces: &Surfaces,
     directions: &convex_distance::ContactSettings,
 ) -> Result<Pressing, Error> {
-    let query = convex_distance::ContactSettings {
-        margin: spec.shell,
-        directions: directions.directions,
-    };
-    let hits = track.body_contacts(
-        spec.collider(),
-        pose,
-        &query,
-        TRACK_CONTACTS,
-        grid_world::MAX_WORLD_CONTACTS,
-        |code| surfaces.sheet(code),
-    )?;
-    let down = |h: &&crate::track::BodyContact| h.contact.normal[1] < -0.5;
-    Ok(Pressing {
-        road: hits.iter().any(|h| h.prop.is_none()),
-        road_down: hits.iter().filter(down).any(|h| h.prop.is_none()),
-        entity_down: (hits.iter().filter(down)).any(|h| h.prop.is_some_and(|i| !own.contains(&i))),
-        deep_road: hits
+    let mut pressing = Pressing::default();
+    for shape in &spec.shapes {
+        let query = convex_distance::ContactSettings {
+            margin: shape.shell,
+            directions: directions.directions,
+        };
+        let hits = track.body_contacts(
+            shape.collider(),
+            shape.pose(&pose),
+            &query,
+            TRACK_CONTACTS,
+            grid_world::MAX_WORLD_CONTACTS,
+            |code| surfaces.sheet(code),
+        )?;
+        let down = |h: &&crate::track::BodyContact| h.contact.normal[1] < -0.5;
+        pressing.road |= hits.iter().any(|h| h.prop.is_none());
+        pressing.road_down |= hits.iter().filter(down).any(|h| h.prop.is_none());
+        pressing.entity_down |=
+            (hits.iter().filter(down)).any(|h| h.prop.is_some_and(|i| !own.contains(&i)));
+        pressing.deep_road |= hits
             .iter()
-            .any(|h| h.prop.is_none() && h.contact.penetration > DEEP_ROAD),
-    })
+            .any(|h| h.prop.is_none() && h.contact.penetration > DEEP_ROAD);
+    }
+    Ok(pressing)
 }
 
 /// [`PropWorld::pressing_now`]: what presses a body at its current pose.
@@ -1295,8 +1496,8 @@ struct Convex {
 }
 
 impl Convex {
-    fn new(spec: &PieceSpec, pose: &Matrix) -> Self {
-        Self::build(&spec.points, &spec.triangles, pose)
+    fn new(shape: &PieceShape, pose: &Matrix) -> Self {
+        Self::build(&shape.points, &shape.triangles, pose)
     }
     fn build(local: &[[f32; 4]], triangles: &[[u32; 3]], pose: &Matrix) -> Self {
         let points: Vec<[f32; 4]> = local
@@ -1438,8 +1639,8 @@ fn convex_contacts(
         .collect()
 }
 
-fn world_triangles(spec: &PieceSpec, pose: &Matrix) -> Vec<[[f32; 3]; 3]> {
-    let p: Vec<[f32; 3]> = spec
+fn world_triangles(shape: &PieceShape, pose: &Matrix) -> Vec<[[f32; 3]; 3]> {
+    let p: Vec<[f32; 3]> = shape
         .points
         .iter()
         .map(|q| {
@@ -1448,7 +1649,7 @@ fn world_triangles(spec: &PieceSpec, pose: &Matrix) -> Vec<[[f32; 3]; 3]> {
             })
         })
         .collect();
-    spec.triangles
+    shape.triangles
         .iter()
         .map(|t| t.map(|i| p[i as usize]))
         .collect()
@@ -1757,16 +1958,22 @@ impl PropWorld {
         let cast = |k: usize| {
             let (spec, body, _) = parts[k];
             let mut cache = grid_world::rectangle_cull::Cache::default();
-            let pose = body_pose(&bodies[body]);
-            let centre = pose[3];
-            let lowest = match spec.collider() {
-                convex_distance::Hull::Cylinder { radius, half_height } => {
-                    let a = pose[1][1].clamp(-1., 1.);
-                    centre[1] - (half_height * a.abs() + radius * (1. - a * a).max(0.).sqrt())
-                }
-                convex_distance::Hull::Sphere { radius } => centre[1] - radius,
-                hull => hull.world_bounds(pose, 0.).ok()?[0][1],
-            };
+            let body_pose = body_pose(&bodies[body]);
+            let centre = body_pose[3];
+            // The lowest point over the body's shapes.
+            let lowest = spec.shapes.iter().try_fold(f32::MAX, |low, shape| {
+                let pose = shape.pose(&body_pose);
+                let y = pose[3][1];
+                let l = match shape.collider() {
+                    convex_distance::Hull::Cylinder { radius, half_height } => {
+                        let a = pose[1][1].clamp(-1., 1.);
+                        y - (half_height * a.abs() + radius * (1. - a * a).max(0.).sqrt())
+                    }
+                    convex_distance::Hull::Sphere { radius } => y - radius,
+                    hull => hull.world_bounds(pose, 0.).ok()?[0][1],
+                };
+                Some(low.min(l))
+            })?;
             let (start, end) = (centre[1] + 0.05, centre[1] - 100.);
             let hit = track
                 .query([centre[0], start, centre[2], 1.], [centre[0], end, centre[2], 1.], &mut cache)
@@ -1898,6 +2105,15 @@ impl PropWorld {
                     .ok_or(Error("missing prop piece body"))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // One entry per collision shape (part index, shape, world pose): a
+        // body with several shapes (0xB11520) collides through each, and its
+        // own shapes never pair.
+        let shapes: Vec<(usize, &PieceShape, Matrix)> = (parts.iter().enumerate())
+            .flat_map(|(k, p)| {
+                let pose = poses[k];
+                p.0.shapes.iter().map(move |s| (k, s, s.pose(&pose)))
+            })
+            .collect();
         // Pairs with static geometry need body byte +0x416 (B18300); an
         // asleep body makes no pair with static geometry or with another
         // asleep body (B18300 takes pairs only from the active list).
@@ -1906,17 +2122,17 @@ impl PropWorld {
                 .get(body)
                 .is_some_and(|b| b[0x400 / 4] == contact_groups::ASLEEP)
         };
-        let sleeping: Vec<bool> = parts.iter().map(|p| asleep(p.1)).collect();
-        let awake: Vec<usize> = (0..parts.len()).filter(|&k| !sleeping[k]).collect();
+        let sleeping: Vec<bool> = shapes.iter().map(|s| asleep(parts[s.0].1)).collect();
+        let awake: Vec<usize> = (0..shapes.len()).filter(|&k| !sleeping[k]).collect();
         // A cheap upper bound of each hull's reach, to skip far pairs before
         // building hulls: the hull's centre is its pose's translation and the
         // pose is rigid, so a world point lies |local point| from the centre;
         // the slack covers rounding. Skipping on it drops only pairs the exact
         // test below also drops, so the contacts are unchanged.
-        let loose: Vec<f32> = parts
+        let loose: Vec<f32> = shapes
             .iter()
-            .map(|p| {
-                let r = (p.0.points.iter())
+            .map(|s| {
+                let r = (s.1.points.iter())
                     .map(|q| (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt())
                     .fold(0f32, f32::max);
                 r * 1.001 + 0.01
@@ -1924,10 +2140,10 @@ impl PropWorld {
             .collect();
         // World hulls on first use, with the largest centre-to-vertex reach.
         let convexes: Vec<std::sync::OnceLock<(Convex, f32)>> =
-            (0..parts.len()).map(|_| std::sync::OnceLock::new()).collect();
+            (0..shapes.len()).map(|_| std::sync::OnceLock::new()).collect();
         let hull = |k: usize| {
             let (convex, reach) = convexes[k].get_or_init(|| {
-                let convex = Convex::new(parts[k].0, &poses[k]);
+                let convex = Convex::new(shapes[k].1, &shapes[k].2);
                 let reach = convex
                     .points
                     .iter()
@@ -1949,15 +2165,15 @@ impl PropWorld {
         let placed: Vec<std::sync::OnceLock<Result<crate::body_geometry::Placed, Error>>> =
             (0..cars.len()).map(|_| std::sync::OnceLock::new()).collect();
         let placed = &placed[..];
-        // Piece `k`'s contacts with `room0` pool slots left before it.
+        // Shape `k`'s contacts with `room0` pool slots left before it.
         let piece = |k: usize, room0: usize| -> Result<Vec<contact_groups::Contact>, Error> {
-            let (spec, piece_body, piece_token) = parts[k];
+            let (part, spec, pose) = shapes[k];
+            let (_, piece_body, piece_token) = parts[part];
             let mut out = Vec::new();
             let query = convex_distance::ContactSettings {
                 margin: spec.shell,
                 directions: directions.directions,
             };
-            let pose = poses[k];
             let room = room0 - out.len();
             if room == 0 {
                 return Ok(out);
@@ -2000,10 +2216,14 @@ impl PropWorld {
             let later: Vec<usize> = if sleeping[k] {
                 awake.iter().copied().filter(|&j| j > k).collect()
             } else {
-                (k + 1..parts.len()).collect()
+                (k + 1..shapes.len()).collect()
             };
             for j in later {
-                let (other_spec, other_body, other_token) = parts[j];
+                let (other_part, other_spec, other_pose) = shapes[j];
+                if other_part == part {
+                    continue;
+                }
+                let (_, other_body, other_token) = parts[other_part];
                 let room = room0 - out.len();
                 if room == 0 {
                     break;
@@ -2011,9 +2231,9 @@ impl PropWorld {
                 let margin = spec.shell.max(other_spec.shell);
                 // The hull centres are the poses' translations.
                 let d = [
-                    poses[k][3][0] - poses[j][3][0],
-                    poses[k][3][1] - poses[j][3][1],
-                    poses[k][3][2] - poses[j][3][2],
+                    pose[3][0] - other_pose[3][0],
+                    pose[3][1] - other_pose[3][1],
+                    pose[3][2] - other_pose[3][2],
                     0.,
                 ];
                 let bound = loose[k] + loose[j] + margin + 0.01;
@@ -2041,10 +2261,10 @@ impl PropWorld {
                 // face; other pairs keep the AUTHORED face-axis test.
                 let capacity = room.min(PAIR_CONTACTS);
                 let directions = directions.directions;
-                let cylinder = |s: &PieceSpec| {
+                let cylinder = |s: &PieceShape| {
                     matches!(s.collider(), convex_distance::Hull::Cylinder { .. })
                 };
-                let block = |s: &PieceSpec, pose: &Matrix| match (s.round, s.primitive) {
+                let block = |s: &PieceShape, pose: &Matrix| match (s.round, s.primitive) {
                     (false, Primitive::Box(d)) => Some(BoxShape {
                         matrix: *pose,
                         half: d.map(|v| v * 0.5),
@@ -2053,11 +2273,11 @@ impl PropWorld {
                     _ => None,
                 };
                 let (hits, order) = if let (true, Some(shape @ RoundShape::Cylinder(_))) =
-                    (cylinder(spec), other_spec.round_shape(&poses[j]))
+                    (cylinder(spec), other_spec.round_shape(&other_pose))
                 {
                     let hits = round_contacts::pair_contacts(spec.collider(), pose, &shape, &query, capacity)?;
                     (hits, false)
-                } else if let (true, Some(shape)) = (cylinder(spec), block(other_spec, &poses[j])) {
+                } else if let (true, Some(shape)) = (cylinder(spec), block(other_spec, &other_pose)) {
                     let hits = box_contacts::contacts(spec.collider(), pose, &shape, &query, capacity)?;
                     (hits, false)
                 } else if let (Some(shape), true) = (block(spec, &pose), cylinder(other_spec)) {
@@ -2067,7 +2287,7 @@ impl PropWorld {
                     };
                     let hits = box_contacts::contacts(
                         other_spec.collider(),
-                        poses[j],
+                        other_pose,
                         &shape,
                         &query,
                         capacity,
@@ -2135,8 +2355,8 @@ impl PropWorld {
             }
             Ok(out)
         };
-        if parallel && parts.len() >= PARALLEL_PIECES && crate::parallel::threads() > 1 {
-            let lists = crate::parallel::map(parts.len(), true, |k| piece(k, remaining));
+        if parallel && shapes.len() >= PARALLEL_PIECES && crate::parallel::threads() > 1 {
+            let lists = crate::parallel::map(shapes.len(), true, |k| piece(k, remaining));
             let total = lists
                 .iter()
                 .try_fold(0usize, |n, l| l.as_ref().ok().map(|l| n + l.len()));
@@ -2149,7 +2369,7 @@ impl PropWorld {
             }
         }
         let mut out = Vec::new();
-        for k in 0..parts.len() {
+        for k in 0..shapes.len() {
             let room0 = remaining - out.len();
             if room0 == 0 {
                 break;
@@ -2182,22 +2402,30 @@ impl PropWorld {
                 continue;
             }
             let (displacement, previous, start, end) = grid_world::continuous::step(body);
-            if !grid_world::continuous::is_fast(grid_world::continuous::radius(spec.collider()), displacement) {
+            // B15B70: fast when one of its shapes is; every shape of a fast
+            // body is swept [I: a several-shape body's sweep set was not
+            // traced] and the responses are averaged as one body.
+            if !(spec.shapes.iter()).any(|shape| {
+                grid_world::continuous::is_fast(grid_world::continuous::radius(shape.collider()), displacement)
+            }) {
                 continue;
             }
-            let query = convex_distance::ContactSettings {
-                margin: spec.shell,
-                directions: directions.directions,
-            };
-            let room = grid_world::continuous::MAX_RECORDS - records;
-            let hits = track.sweep_road(spec.collider(), start, end, &query, room, |code| {
-                surfaces.sheet(code)
-            })?;
-            let mut hits = hits;
-            // AE34B0: the route boxes and round primitives, too (B15B70
-            // pairs a fast body with static shapes when +0x416 is set).
-            let room = room - hits.len();
-            hits.extend(track.sweep_props(spec.collider(), start, end, &query, room)?);
+            let mut hits = Vec::new();
+            for shape in &spec.shapes {
+                let query = convex_distance::ContactSettings {
+                    margin: shape.shell,
+                    directions: directions.directions,
+                };
+                let (start, end) = (shape.pose(&start), shape.pose(&end));
+                let room = grid_world::continuous::MAX_RECORDS - records - hits.len();
+                hits.extend(track.sweep_road(shape.collider(), start, end, &query, room, |code| {
+                    surfaces.sheet(code)
+                })?);
+                // AE34B0: the route boxes and round primitives, too (B15B70
+                // pairs a fast body with static shapes when +0x416 is set).
+                let room = grid_world::continuous::MAX_RECORDS - records - hits.len();
+                hits.extend(track.sweep_props(shape.collider(), start, end, &query, room)?);
+            }
             records += hits.len();
             let inverse_mass = f32::from_bits(body[0x3f4 / 4]);
             let positions: Vec<_> = hits
@@ -2923,6 +3151,89 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compound_mass_follows_the_parallel_axis_rule() {
+        let at = |x: f32, y: f32, z: f32| {
+            let mut m = IDENTITY;
+            m[3] = [x, y, z, 1.];
+            m
+        };
+        // Centre of mass at the origin: each mass adds m d^2 about the
+        // axes across its offset.
+        let (a, b) = (at(0., 1., 0.), at(0., -2., 0.));
+        let (mass, centre, tensor) = compound_mass([(2., [1.; 3], &a), (1., [0.5; 3], &b)]);
+        assert_eq!((mass, centre), (3., [0.; 3]));
+        let expected = [[7.5, 0., 0.], [0., 1.5, 0.], [0., 0., 7.5]];
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((tensor[i][j] - expected[i][j]).abs() < 1e-5, "{tensor:?}");
+            }
+        }
+        // Off the origin: the total moves back to the centre of mass.
+        let (a, b) = (at(1., 0., 0.), at(3., 0., 0.));
+        let (mass, centre, tensor) = compound_mass([(1., [0.; 3], &a), (1., [0.; 3], &b)]);
+        assert_eq!((mass, centre), (2., [2., 0., 0.]));
+        let expected = [[0., 0., 0.], [0., 2., 0.], [0., 0., 2.]];
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((tensor[i][j] - expected[i][j]).abs() < 1e-5, "{tensor:?}");
+            }
+        }
+        // A shape turned 30 degrees about y gives products of inertia; the
+        // principal axes give them back as a diagonal in a proper rotation.
+        let (s, c) = 30f32.to_radians().sin_cos();
+        let mut turned = at(0.5, 0.2, -0.1);
+        turned[0] = [c, 0., -s, 0.];
+        turned[2] = [s, 0., c, 0.];
+        let (_, _, tensor) =
+            compound_mass([(3., [0.2, 0.5, 0.9], &turned), (1., [0.1; 3], &at(-0.4, 0., 0.3))]);
+        assert!(tensor[0][2].abs() > 1e-3, "{tensor:?}");
+        let (moments, axes) = principal_axes(&tensor);
+        let [x, y, z] = axes;
+        let determinant = x[0] * (y[1] * z[2] - y[2] * z[1]) - x[1] * (y[0] * z[2] - y[2] * z[0])
+            + x[2] * (y[0] * z[1] - y[1] * z[0]);
+        assert!((determinant - 1.).abs() < 1e-5);
+        for i in 0..3 {
+            for j in 0..3 {
+                let back: f32 = (0..3).map(|k| moments[k] * axes[k][i] * axes[k][j]).sum();
+                assert!((back - tensor[i][j]).abs() < 1e-5, "{i} {j} {back} {tensor:?}");
+            }
+        }
+        // A rigid frame and its inverse.
+        let mut frame = turned;
+        frame[3] = [1., 2., 3., 1.];
+        let one = compose(&frame, &rigid_inverse(&frame));
+        for (r, row) in one.iter().enumerate() {
+            for (k, v) in row.iter().enumerate() {
+                assert!((v - IDENTITY[r][k]).abs() < 1e-6, "{one:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn pieces_with_several_shapes_break() {
+        // Shibuya route_2 (F789): the foam posts, the plastic railings and
+        // the emissive cones break into bodies of two shapes each (0xB11520).
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let route = Route::new("tracks/japan/shibuya/route_2").unwrap();
+        let props = Props::read_route(root, &route).unwrap();
+        let catalog = Catalog::read(root, &route, &props).unwrap();
+        let mut compound = BTreeMap::<&str, usize>::new();
+        for b in &catalog.breakables {
+            for p in b.pieces.iter().filter(|p| p.shapes.len() > 1) {
+                *compound.entry(b.template.as_str()).or_default() += 1;
+                assert!(p.shapes.iter().all(|s| s.local.is_some()), "{}", b.template);
+            }
+        }
+        eprintln!("compound={compound:?} unported={:?}", catalog.unported);
+        for template in ["post_foam_orange.max", "post_foam_red.max", "railing_plastic_combo.max", "cone_plastic_emisive_a.max"] {
+            assert!(compound.contains_key(template), "{template}: {compound:?}");
+            assert!(!catalog.unported.contains_key(template), "{template}: {:?}", catalog.unported);
+        }
+    }
+
+    #[test]
     fn hulls_face_outward_and_masses_follow_density() {
         for primitive in [
             Primitive::Box([0.94, 0.47, 0.16]),
@@ -3099,7 +3410,36 @@ mod tests {
                         }
                         let mid: [f32; 3] = std::array::from_fn(|r| (lo[r] + hi[r]) * 0.5);
                         let half: [f32; 3] = std::array::from_fn(|r| (hi[r] - lo[r]) * 0.5);
-                        let ok = match piece.primitive {
+                        let ok = match piece.shapes.first().map(|s| (s.primitive, s.local)) {
+                            // A shapeless piece (the flag's base) only
+                            // carries its mesh.
+                            None => mid.iter().all(|v| v.abs() < 0.05),
+                            // Several shapes: the mesh centre lies in the
+                            // union of their bounds in the body frame.
+                            Some((_, Some(_))) => {
+                                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                                for s in &piece.shapes {
+                                    let m = s.local.unwrap();
+                                    let h = match s.primitive {
+                                        Primitive::Box(size) => size.map(|v| v * 0.5),
+                                        Primitive::Cylinder { radius, height } => [radius, height * 0.5, radius],
+                                        Primitive::Sphere { radius } => [radius; 3],
+                                    };
+                                    for r in 0..3 {
+                                        let e = (0..3).map(|k| (m[k][r] * h[k]).abs()).sum::<f32>();
+                                        lo[r] = lo[r].min(m[3][r] - e);
+                                        hi[r] = hi[r].max(m[3][r] + e);
+                                    }
+                                }
+                                // A post's mesh may stand on its shapes (Le
+                                // Mans' foam post: a 9 cm base under a
+                                // 33 cm mesh), as a single box's may.
+                                let inside = |r: usize, v: f32| v >= lo[r] - 0.05 && v <= hi[r] + 0.05;
+                                inside(0, mid[0])
+                                    && inside(2, mid[2])
+                                    && (inside(1, mid[1]) || inside(1, mid[1] - half[1]))
+                            }
+                            Some((primitive, None)) => match primitive {
                             // A tyre fills its cylinder: radius across, height
                             // along. A post's mesh (Donington's Armco link,
                             // 1.01 m on a 0.76 m cylinder) may stand above it.
@@ -3118,10 +3458,26 @@ mod tests {
                                 mid.iter().all(|v| v.abs() < 0.05)
                                     && (radius == 0. || half.iter().all(|h| (h - radius).abs() < 0.06))
                             }
-                            Primitive::Box(size) => (0..3).all(|r| mid[r].abs() <= size[r] * 0.5 + 0.05),
+                            // Le Mans' left Armco end post is authored 0.13 m
+                            // beside its 4.7 cm box (the right-hand end's
+                            // post has three shapes and fits).
+                            Primitive::Box(_) if piece.anchor == "armco_02_end_left_dam_link1" => {
+                                (mid[0] + 0.13).abs() < 0.01
+                            }
+                            // A mesh may also stand on its box: Le Mans'
+                            // green foam post top (a 0.33 m mesh on a 2 cm
+                            // plate, breakable since F804).
+                            Primitive::Box(size) => {
+                                let inside = |r: usize, v: f32| v.abs() <= size[r] * 0.5 + 0.05;
+                                inside(0, mid[0])
+                                    && inside(2, mid[2])
+                                    && (inside(1, mid[1]) || inside(1, mid[1] - half[1]))
+                            }
+                            },
                         };
                         if !ok {
-                            failures.push(format!("{what}: mesh centre {mid:?} half {half:?} shape {:?}", piece.primitive));
+                            let shapes: Vec<_> = piece.shapes.iter().map(|s| (s.primitive, s.local.map(|m| m[3]))).collect();
+                            failures.push(format!("{what}: mesh centre {mid:?} half {half:?} shapes {shapes:?}"));
                         }
                         checked += 1;
                     }
@@ -3408,15 +3764,15 @@ mod tests {
                 }
                 if b.template.starts_with("tyrestack") {
                     // sRubber d700 over the scaled cylinder grown by its shell.
-                    assert_eq!(p.mass, mass_properties(p.primitive, 700., p.shell).0);
+                    assert_eq!(p.mass, mass_properties(p.shapes[0].primitive, 700., p.shapes[0].shell).0);
                 }
                 if lengths.iter().all(|l| (l - 1.).abs() < 1e-4) {
-                    unit.insert((b.template.clone(), s), p.primitive);
+                    unit.extend(p.primitive().map(|q| ((b.template.clone(), s), q)));
                 } else if b.template.starts_with("tyrestack") {
                     // Uniform: the entity scale, not a shear.
                     assert!(lengths.iter().all(|l| (l - lengths[0]).abs() < 1e-4));
                     assert!((lengths[0] - 0.9718).abs() < 1e-3, "{lengths:?}");
-                    scaled.push((b.template.clone(), s, lengths[0], p.primitive));
+                    scaled.extend(p.primitive().map(|q| (b.template.clone(), s, lengths[0], q)));
                 }
             }
         }
@@ -3545,23 +3901,26 @@ mod tests {
                 .iter()
                 .min_by(|p, q| p.pose[3][1].total_cmp(&q.pose[3][1]))
                 .unwrap();
-            let query = convex_distance::ContactSettings {
-                margin: lower.shell,
-                directions: geometry.query().directions,
-            };
-            let ground = track
-                .body_contacts(
-                    lower.collider(),
-                    lower.pose,
-                    &query,
-                    TRACK_CONTACTS,
-                    64,
-                    |code| runtime.surfaces().sheet(code),
-                )
-                .unwrap()
-                .into_iter()
-                .filter(|h| h.prop.is_none() && h.contact.normal[1] > 0.9)
-                .count();
+            let mut ground = 0;
+            for shape in &lower.shapes {
+                let query = convex_distance::ContactSettings {
+                    margin: shape.shell,
+                    directions: geometry.query().directions,
+                };
+                ground += track
+                    .body_contacts(
+                        shape.collider(),
+                        shape.pose(&lower.pose),
+                        &query,
+                        TRACK_CONTACTS,
+                        64,
+                        |code| runtime.surfaces().sheet(code),
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .filter(|h| h.prop.is_none() && h.contact.normal[1] > 0.9)
+                    .count();
+            }
             assert!(ground > 0, "breakable {i} at {:?}", lower.pose[3]);
             boards += 1;
         }
@@ -3594,15 +3953,20 @@ mod tests {
                 // A shapeless post collides with nothing.
                 for p in b.pieces.iter().filter(|p| p.collides()) {
                     pieces += 1;
-                    let query = convex_distance::ContactSettings {
-                        margin: p.shell,
-                        directions: geometry.query().directions,
-                    };
-                    let hits = track
-                        .body_contacts(p.collider(), p.pose, &query, TRACK_CONTACTS, 4096, |code| {
-                            runtime.surfaces().sheet(code)
-                        })
-                        .unwrap();
+                    let mut hits = Vec::new();
+                    for shape in &p.shapes {
+                        let query = convex_distance::ContactSettings {
+                            margin: shape.shell,
+                            directions: geometry.query().directions,
+                        };
+                        hits.extend(
+                            track
+                                .body_contacts(shape.collider(), shape.pose(&p.pose), &query, TRACK_CONTACTS, 4096, |code| {
+                                    runtime.surfaces().sheet(code)
+                                })
+                                .unwrap(),
+                        );
+                    }
                     for h in hits {
                         // Basic-entity boxes are the prop boxes without an entity.
                         if h.prop.is_none_or(|k| props.boxes[k].entity.is_some()) {
@@ -3640,7 +4004,12 @@ mod tests {
         // 14, body 90 in the replay) starts with its centre 3 cm below the
         // road. The road triangles press it down at its spawn pose
         // (docs/ROBUSTNESS_RESEARCH.md); grid-soak counts such a loss as
-        // expected. No piece on the other circuits is pressed by the road.
+        // expected. Since F804 the Yokohama Docks route_0 chevron signs
+        // (animated_chevron_a/_b, one piece of four boxes) break: their
+        // spawn pose is the authored shape pose, and their feet (0.2 m tall
+        // boxes) are authored half sunk into the road, 0.13 m deep both up
+        // and down. Milan has one cone and Shibuya one railing (below). No
+        // other piece on the other circuits is pressed by the road.
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
         let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
@@ -3667,6 +4036,18 @@ mod tests {
             if path == crate::route::JARAMA {
                 assert!(road.contains(&(1297, 14, "tyrestack_yell_double.max".into())));
                 assert!(road.iter().all(|r| r.2.starts_with("tyrestack_")), "{road:?}");
+            } else if path == crate::route::YOKOHAMA {
+                assert!(road.iter().all(|r| r.2.starts_with("animated_chevron_")), "{road:?}");
+            } else if path == crate::route::MILAN {
+                // One traffic cone (breakable since F804): its 2 cm base
+                // plate touches a steep road triangle 3.5 mm deep (normal
+                // y -0.59) at its authored pose.
+                assert_eq!(road, [(831, 0, "gg_barrier_cone_02_f.max".into())]);
+            } else if path == crate::route::SHIBUYA {
+                // One plastic railing (breakable since F804): its 4 cm foot
+                // plate is authored 4.3-6.4 cm into the road, so the road
+                // pushes it out downwards (normal y -1.0).
+                assert_eq!(road, [(349, 0, "railing_plastic_combo.max".into())]);
             } else if path != crate::route::NURBURGRING {
                 assert!(road.is_empty(), "{path}: {road:?}");
             }
@@ -3772,7 +4153,6 @@ mod tests {
         let spec = PieceSpec {
             renderable: String::new(),
             anchor: String::new(),
-            primitive: Primitive::Box([1., 1., 1.]),
             pose,
             mass: 70.,
             inertia: [70. / 6.; 3],
@@ -3793,12 +4173,16 @@ mod tests {
                 turn_off_time: 1.,
                 gravity_scale: 1.,
             },
-            shell: 0.02,
             limit: DESCRIPTOR_EC,
-            hull: collision_mesh::build(&points, &triangles, 0).unwrap(),
-            round: false,
-            points,
-            triangles,
+            shapes: vec![PieceShape {
+                primitive: Primitive::Box([1., 1., 1.]),
+                shell: 0.02,
+                local: None,
+                hull: collision_mesh::build(&points, &triangles, 0).unwrap(),
+                round: false,
+                points,
+                triangles,
+            }],
         };
         let (body, (inverse_mass, inverse_inertia)) =
             piece_body(&spec, [0., 1., 0., 0.], [0.; 4]).unwrap();

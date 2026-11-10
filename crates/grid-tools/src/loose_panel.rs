@@ -155,14 +155,14 @@ pub fn settle(
         let Some(b) = world.groups.bodies.get(w.body) else {
             continue;
         };
-        let crate::dynamic_props::Primitive::Box(size) = w.spec.primitive else {
+        let crate::dynamic_props::Primitive::Box(size) = w.spec.shapes[0].primitive else {
             continue;
         };
         if (b[0x410 / 4] >> 24) & 255 != 0 || tipping.get(&w.body).is_some_and(|t| *t >= GIVE_UP) {
             continue; // parked far from the player, or given up
         }
         let pose = crate::dynamic_props::body_pose(b);
-        let half = size.map(|v| v * 0.5 + w.spec.shell);
+        let half = size.map(|v| v * 0.5 + w.spec.shapes[0].shell);
         let Some(thin) = (0..3).min_by(|&i, &j| half[i].total_cmp(&half[j])) else {
             continue;
         };
@@ -285,11 +285,11 @@ pub fn poses(
         .filter_map(|w| {
             let part = w.panel?;
             let b = bodies.get(w.body)?;
-            let crate::dynamic_props::Primitive::Box(size) = w.spec.primitive else {
+            let crate::dynamic_props::Primitive::Box(size) = w.spec.shapes[0].primitive else {
                 return None;
             };
             let pose = crate::dynamic_props::body_pose(b);
-            let half = size.map(|v| v * 0.5 + w.spec.shell);
+            let half = size.map(|v| v * 0.5 + w.spec.shapes[0].shell);
             let thin = (0..3).min_by(|&i, &j| half[i].total_cmp(&half[j]))?;
             let mut gaps: Vec<f32> = (0..8)
                 .map(|k| {
@@ -348,8 +348,8 @@ mod tests {
         };
         let s = spawn(&nodes, "bonnet", &car).unwrap();
         // Rounding: half the smallest half extent (0.04 / 2), below 0.2.
-        assert!((s.spec.shell - 0.02).abs() < 1e-6);
-        match s.spec.primitive {
+        assert!((s.spec.shapes[0].shell - 0.02).abs() < 1e-6);
+        match s.spec.shapes[0].primitive {
             crate::dynamic_props::Primitive::Box(size) => {
                 for (got, want) in size.iter().zip([1.36, 0.04, 1.16]) {
                     assert!((got - want).abs() < 1e-5, "{size:?}");
