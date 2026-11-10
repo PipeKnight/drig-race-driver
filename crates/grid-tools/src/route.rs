@@ -505,16 +505,17 @@ mod tests {
             *templates.entry(&b.template).or_default() += 1;
         }
         // The barrels stand on cylinders (128 cylinder route shapes) and
-        // break, and the armco sections (F501) and 17 of the 21 drift flags;
-        // the crates, chevrons and armco ends stay static.
+        // break, and the armco sections (F501) and all 21 drift flags (the 4
+        // scaled ones joined since F783, 0x7CC1E0); the crates, chevrons and
+        // armco ends stay static.
         assert_eq!(props.boxes.len(), 4258);
         assert_eq!(
             templates,
-            [("armco_main_section.max", 42), ("close_drift_flag.max", 17), ("gg_barrel.max", 77)]
+            [("armco_main_section.max", 42), ("close_drift_flag.max", 21), ("gg_barrel.max", 77)]
                 .into()
         );
-        assert_eq!(catalog.unported.values().sum::<usize>(), 433);
-        assert_eq!(catalog.unported["close_drift_flag.max"], 4);
+        assert_eq!(catalog.unported.values().sum::<usize>(), 429);
+        assert!(!catalog.unported.contains_key("close_drift_flag.max"));
     }
 
     #[test]

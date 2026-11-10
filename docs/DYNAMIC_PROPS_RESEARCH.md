@@ -329,13 +329,26 @@ dumps in the main checkout's `local/soak-fixes/`.
   the render-component path of `0x7D3C40` normalises each row (RSQRTPS + Newton,
   `0x4B4440` stores the three lengths) and hands the lengths to `0x7C4FF0` /
   `0xAD1040` as a separate scale.
-- [I] So a piece body keeps the scaled basis; shapes and contact hulls scale
-  with it, the mass stays density x unscaled template volume, and nothing
-  re-orthonormalises it (only the world's special body, B13E10). The port now
-  does the same: `Catalog::read` keeps the composed pose and rejects only a
-  degenerate (non-positive or non-finite determinant) basis. The face-axis
-  shortcut in the piece pair query assumes an orthogonal triple, which a uniform
-  scale keeps. Test: `nurburgring_scaled_tyre_stacks_keep_their_placement_scale`.
+- [D, F783] **Correction.** The matrix at entity +0x40 is already unit:
+  the entity loader `0x7CD3F0` (`TEMPLATEENTITYINSTANCE`) splits the
+  `objects.ens` placement into normalised rows at +0x40 and the row lengths at
+  +0x80 (the entity's scale vector); when any length is below 1e-5 (0x4B1A70)
+  it keeps identity rows and a scale of (1, 1, 1). So "unnormalised" above
+  means only that `0x7D3C40` does not normalise again. The scale reaches the
+  physics through the shapes: the shape builder `0x7C6350` multiplies the
+  template shape's rows and position lane by lane by the scale vector, takes
+  the resulting row lengths as the shape's own scale and normalises the rows;
+  the kind's builder scales the dimensions (box `0x7C1E60` per axis, cylinders
+  `0x7B94F0`/`0x7B96D0` the radius by the smaller of x and z and the height by
+  y, sphere `0x7B9840` the radius by one lane [I: the decompile loses the lane
+  select]). The mass follows the scaled shapes (density x scaled volume). The
+  joints take one scalar, `0x7CC1E0`'s lane choice (JOINTS_RESEARCH.md).
+- Port since F783: `split_scale`, `scaled_shape` and `joint_scale` in
+  `dynamic_props.rs`. Piece bodies sit at the unit entity rows; the scale is
+  in the shapes, the mass and the joint request. The earlier port that kept the
+  scaled basis in the body (and refused joined scaled entities, among them the
+  16 `close_drift_flag`s of Yokohama Docks route 1 and 4 of route 0) is replaced. Test:
+  `nurburgring_scaled_tyre_stacks_carry_their_scale_in_the_shapes`.
 
 ### Track contact budget per shape pair
 

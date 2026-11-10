@@ -13,7 +13,8 @@ Usage:
                              [--routes SUBSTR,...] [--exe PATH]
 Environment: GRID_GAME_ROOT (default the Steam path); private tables from local/ of this
 checkout, else of the main checkout (body-contact-directions.bin, body-impact-parameters.bin,
-deformation-parameters.bin, ai-driver-characteristics.tsv), all set as in the windowed race.
+deformation-parameters.bin, ai-driver-characteristics.tsv), all set as in the windowed race,
+and GRID_DYNAMIC_PROPS=1 (breakable props, as grid-app).
 Without --field each car keeps the tool's default model order.
 """
 import argparse
@@ -88,6 +89,9 @@ def main() -> int:
     env = dict(os.environ)
     env["GRID_DEFORMATION_PARAMETERS"] = str(priv / "deformation-parameters.bin")
     env["GRID_AI_CHARACTERISTICS"] = str(priv / "ai-driver-characteristics.tsv")
+    # Breakable route props, as grid-app always enables them (enable_dynamic_props); without
+    # this the close-drift flags are unbreakable boxes (FIRST_CORNER_LIVE §13 harness gap).
+    env.setdefault("GRID_DYNAMIC_PROPS", "1")
     ctx = {"env": env, "CD": str(priv / "body-contact-directions.bin"),
            "BP": str(priv / "body-impact-parameters.bin"),
            "GRID_GAME_ROOT": os.environ.get(

@@ -813,6 +813,30 @@ impl Event {
 mod tests {
     use super::*;
 
+    /// The three free-race drift formats' pools [D].
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn drift_pools_hold_the_drift_cars() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let mut drift_cars = ["cor", "imp", "mop", "gto", "soa", "s15", "rx7"];
+        drift_cars.sort_unstable();
+        for name in ["drift_battle", "drift_gp", "Free_Drift"] {
+            let s = Series::load(&root, name).unwrap();
+            let cars = s.raceable_cars();
+            let mut stems: Vec<&str> = cars.iter().map(Car::stem).collect();
+            stems.sort_unstable();
+            assert_eq!(stems, drift_cars, "{name}");
+        }
+        let free = Series::load(&root, "Free_Drift").unwrap();
+        let routes: Vec<&str> = free.layouts.iter().map(|l| l.route.as_str()).collect();
+        assert_eq!(
+            routes,
+            (3..7)
+                .map(|n| format!("tracks/japan/yokohama_docks/route_{n}"))
+                .collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn series_cars_and_pools_come_from_the_database() {

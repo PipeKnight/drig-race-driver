@@ -375,7 +375,7 @@ Port of docs/AI_AVOID_RECOVERY_RESEARCH.md §7. The authored stuck recovery is d
 | Test | Port |
 |---|---|
 | spun 0x77E5B0 | \|heading error to the planned look-ahead point\| > π/2. Held while slip > 0.1π (π − slip when moving backwards), heading error > π/3, or speed < 3 m/s. |
-| on_track 0x79B250 | More than half of the wheels inside the track limits at their projected arc. |
+| on_track 0x79B250 | More than half of the wheels inside both track-limit chords of the view's link (right limit end gate → start gate, left limit start → end; side test 0x7771E0). The link follows the gate progress 0x793F60 (front point against the gate lines, one step a tick; AI_AVOID_RECOVERY_RESEARCH §3.4). |
 | collided_obstruction 0x776FE0 | Sum non-zero. Frontal when the angle to our nose exceeds 120°. |
 | contacted_vehicle 0x784650 | Box overlap with contactZone 0.1. Types 1–4 for our corner inside the other box; 5–8 for its corner inside ours, by nearest face. The two-corner length-ratio refinement is not ported. |
 | retire stuck 0x77E3B0 | 20 s within 5 m and no non-reversing car within 100 m. |

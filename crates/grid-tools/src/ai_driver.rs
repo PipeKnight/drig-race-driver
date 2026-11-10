@@ -93,6 +93,9 @@ pub struct Line {
     limits: Vec<[f32; 2]>,
     /// Track-limit offsets (ai_track types 3/4) relative to the racing line.
     track_limits: Vec<[f32; 2]>,
+    /// Left and right track-limit points of each gate (the type 3 and 4
+    /// waypoints 0x7983E0 returns: gate position + normal x length).
+    edges: Vec<[[f32; 3]; 2]>,
     start: Vec<f32>,
     pub length: f32,
     /// Line index of each AI gate.
@@ -104,6 +107,13 @@ fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 }
 fn dot2(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[2] * b[2]
+}
+/// 0x7771E0: `p` strictly on the inner side of the chord `a` -> `b` in the
+/// horizontal plane, in the original's operation order (0xCB1F40 = -0.5).
+fn inside_chord(p: [f32; 3], a: [f32; 3], b: [f32; 3]) -> bool {
+    let dx = b[0] - a[0];
+    let half = ((a[2] + b[2]) * dx + (a[0] + b[0]) * (a[2] - b[2])) * -0.5;
+    (a[2] - b[2]) * p[0] + p[2] * dx + half > 0.
 }
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
@@ -168,6 +178,7 @@ impl Line {
             lateral: Vec::with_capacity(n),
             limits: Vec::with_capacity(n),
             track_limits: Vec::with_capacity(n),
+            edges: Vec::with_capacity(n),
             start: Vec::with_capacity(n),
             length: 0.,
             gate_index: vec![0; n],
@@ -187,6 +198,11 @@ impl Line {
                 g_data.left_track_limit - g_data.racing_line,
                 g_data.right_track_limit - g_data.racing_line,
             ]);
+            line.edges.push(
+                [g_data.left_track_limit, g_data.right_track_limit].map(|length| {
+                    std::array::from_fn(|k| g_data.position[k] + g_data.normal[k] * length)
+                }),
+            );
         }
         for i in 0..n {
             line.start.push(line.length);
@@ -504,16 +520,78 @@ impl Line {
     }
 
     /// The driver test of type 11 (`on_track`, 0x79B250) for `wheels` (world
-    /// positions): more than half of them inside the track limits at their
-    /// projection. [I] Projects without a segment hint, as for a car whose
-    /// driver has none (the player's, which the speech collector reads).
+    /// positions), on the link of the wheels' mean. [I] Projects without a
+    /// segment hint, as for a car whose driver has none (the player's, which
+    /// the speech collector reads).
     pub fn on_track(&self, wheels: &[[f32; 3]]) -> bool {
+        let k = 1. / wheels.len().max(1) as f32;
+        let centre = std::array::from_fn(|i| wheels.iter().map(|w| w[i]).sum::<f32>() * k);
+        self.on_track_at(self.project(centre, None).0, wheels)
+    }
+
+    /// One step of the track view's gate progress (0x793F60, from 0x79C360):
+    /// the link advances when `p` has reached the line of its end gate
+    /// (view +0x20, side test 0x778B40 against gate position -> position +
+    /// span), else steps back when `p` is behind the line of its start gate
+    /// (view +0x24); at most one link per tick, and an open line stays on its
+    /// links [V structure]. The gate lines are the gates' own, so every
+    /// racing-line kind shares them. [I] The side sign: ahead along the
+    /// travel `(n_z, -n_x)` of the gate normal `n = (-t_z, t_x)` (0x7787A0).
+    pub(crate) fn gate_link(&self, link: usize, p: [f32; 3]) -> usize {
+        let n = self.points.len();
+        let ahead = |i: usize| {
+            let normal = self.lateral[i];
+            let d = sub(p, self.points[i]);
+            d[0] * normal[2] - d[2] * normal[0]
+        };
+        let last = if self.open { n.saturating_sub(2) } else { n - 1 };
+        let end = (link + 1) % n;
+        if ahead(end) >= 0. {
+            if link < last {
+                link + 1
+            } else if self.open {
+                link
+            } else {
+                0
+            }
+        } else if ahead(link) < 0. {
+            if link > 0 {
+                link - 1
+            } else if self.open {
+                0
+            } else {
+                n - 1
+            }
+        } else {
+            link
+        }
+    }
+
+    /// Links between the two segments `a` and `b` of the line, the shorter way
+    /// round on a loop.
+    pub(crate) fn link_distance(&self, a: usize, b: usize) -> usize {
+        let n = self.points.len();
+        let d = a.abs_diff(b);
+        if self.open { d } else { d.min(n - d) }
+    }
+
+    /// on_track (0x79B250) on line segment `segment` (the view's current
+    /// link): more than half of `wheels` inside both of the link's
+    /// track-limit chords (0x7771E0), `(w, G1.right, G2.right)` and
+    /// `(w, G2.left, G1.left)` with G1 = view +0x20 and G2 = view +0x24 [V].
+    /// [I, from the data] G1 is the link's end gate: the gate normals are
+    /// the original's lateral `(-t_z, t_x)` (0x7787A0) of the travel, and
+    /// only that order keeps the track inside both chords. So the right chord
+    /// runs from the end gate back to the start gate and the left one
+    /// forward. The chords are lines: a wheel past either gate still counts
+    /// by its side of them.
+    pub(crate) fn on_track_at(&self, segment: usize, wheels: &[[f32; 3]]) -> bool {
+        let [start_left, start_right] = self.edges[segment];
+        let [end_left, end_right] = self.edges[(segment + 1) % self.edges.len()];
         let inside = wheels
             .iter()
             .filter(|&&w| {
-                let (_, s, lat) = self.project(w, None);
-                let [left_limit, right_limit] = self.track_limits_at(s);
-                left_limit <= lat && lat <= right_limit
+                inside_chord(w, end_right, start_right) && inside_chord(w, start_left, end_left)
             })
             .count();
         2 * inside > wheels.len()
@@ -2573,6 +2651,8 @@ pub struct AiDriver {
     seed: u32,
     random: u32,
     segment: Option<usize>,
+    /// The track view's gate link (0x793F60), which on_track reads.
+    gate_link: Option<usize>,
     /// Racing-line segment of each other car's last projection (by id).
     other_segments: Vec<(u32, usize)>,
     look_ahead: f32,
@@ -2763,6 +2843,7 @@ impl AiDriver {
             seed,
             random: seed,
             segment: None,
+            gate_link: None,
             other_segments: Vec::new(),
             curvature: 0.,
             offset: 0.,
@@ -3185,17 +3266,23 @@ impl AiDriver {
                 && (held_slip.abs() > SPUN_HOLD_SLIP
                     || view_heading.abs() > SPUN_HOLD_HEADING
                     || speed < SPUN_HOLD_SPEED));
-        // on_track (0x79B250): more than half the wheels inside the track limits.
-        let inside = view
-            .wheels
-            .iter()
-            .filter(|&&w| {
-                let (_, s, lat) = data.line.project(w, Some(segment));
-                let [left_limit, right_limit] = data.line.track_limits_at(s);
-                left_limit <= lat && lat <= right_limit
-            })
-            .count();
-        let on_track = 2 * inside > view.wheels.len();
+        // on_track (0x79B250): more than half the wheels inside the track-limit
+        // chords of the view's link, which the gate progress 0x793F60 keeps
+        // from the gate lines and the car's front point (car +0xF0, copied to
+        // view +0x40 by 0x79C360), not the racing-line projection. [I] It
+        // starts on the projected segment and rejoins it after a jump of more
+        // than four links (a reset or a respawn), which one step a tick
+        // cannot follow.
+        let front: [f32; 3] =
+            std::array::from_fn(|k| position[k] + forward[k] * view.extents.front);
+        let link = match self.gate_link {
+            Some(link) if data.line.link_distance(link, segment) <= 4 => {
+                data.line.gate_link(link, front)
+            }
+            _ => segment,
+        };
+        self.gate_link = Some(link);
+        let on_track = data.line.on_track_at(link, &view.wheels);
         // collided_obstruction (0x776FE0): frontal when the summed normal is
         // more than 120 degrees from our nose.
         let o = view.obstruction;
@@ -4882,6 +4969,7 @@ mod tests {
             lateral: vec![[0., 0., 1.]; 4],
             limits: vec![[-5., 5.]; 4],
             track_limits: vec![[-8., 8.]; 4],
+            edges: Vec::new(),
             start: vec![0., 20., 40., 60.],
             length: 80.,
             gate_index: (0..4).collect(),
@@ -4917,6 +5005,104 @@ mod tests {
         let half = abs_cap(&abs, 20., &[20., 10., 20., 20.]);
         assert!((half - 0.6).abs() < 1e-6, "{half}");
         assert_eq!(abs_cap(&abs, 20., &[20., 20., 0., 20.]), 0.2);
+    }
+
+    #[test]
+    fn the_chord_test_keeps_the_side_left_of_the_chord() {
+        // 0x7771E0: n.(p - mid) > 0 with n = (az - bz, bx - ax), the side to
+        // the left of a -> b seen from above (+y up, x right, z forward).
+        let (a, b) = ([0., 0., 0.], [0., 0., 10.]);
+        assert!(inside_chord([-1., 5., 5.], a, b));
+        assert!(!inside_chord([1., 0., 5.], a, b));
+        // Strictly: a point on the chord is outside, also past its ends.
+        assert!(!inside_chord([0., 0., 30.], a, b));
+        assert!(inside_chord([-0.1, 0., -30.], a, b));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn track_centre_wheels_are_on_track_and_the_gate_progress_follows_the_gates() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let mut failed = Vec::new();
+        let mut links = 0;
+        // Donington and every Drift Battle layout of the soak (docs/DISCIPLINES.md §4.5).
+        let routes = [
+            "europe/donington/route_0",
+            "europe/istanbul_park/route_1",
+            "europe/istanbul_park/route_3",
+            "europe/jarama/route_0",
+            "europe/jarama/route_1",
+            "europe/nurburgring/route_1",
+            "europe/nurburgring/route_3",
+            "japan/okutama/route_2",
+            "japan/okutama/route_5",
+            "japan/shibuya/route_0",
+            "japan/shibuya/route_1",
+            "japan/shibuya/route_2",
+            "japan/shibuya/route_3",
+            "japan/yokohama_docks/route_0",
+            "japan/yokohama_docks/route_1",
+            "japan/yokohama_docks/route_2",
+            "japan/yokohama_docks/route_7",
+            "japan/yokohama_docks/route_8",
+            "japan/yokohama_docks/route_9",
+            "usa/long_beach/route_1",
+            "usa/long_beach/route_4",
+            "usa/washington/route_2",
+            "usa/washington/route_3",
+            "usa/washington/route_7",
+            "usa/washington/route_8",
+        ];
+        for route in routes.map(|r| format!("tracks/{r}")) {
+            let route = route.as_str();
+            let line = Line::load(&root, route).unwrap();
+            let n = line.points.len() - usize::from(line.open);
+            for i in 0..n {
+                let j = (i + 1) % line.points.len();
+                // A link between two copies of one gate (Yokohama Docks route 7
+                // link 141, Long Beach route 1 link 49 and route 4 link 164)
+                // has no area: the side test is 0, so the original never
+                // counts a wheel inside it.
+                if line.edges[i] == line.edges[j] {
+                    continue;
+                }
+                links += 1;
+                let right = lerp3(line.edges[i][1], line.edges[j][1], 0.5);
+                let left = lerp3(line.edges[i][0], line.edges[j][0], 0.5);
+                let centre = lerp3(left, right, 0.5);
+                let wheels = [-0.5f32, 0.5].map(|t| lerp3(left, right, 0.5 + 0.1 * t));
+                // Two wheels 3 m beyond each limit's chord midpoint.
+                let past = |edge: [f32; 3]| {
+                    let d = dot2(sub(edge, centre), sub(edge, centre)).sqrt().max(1e-3);
+                    let out = lerp3(centre, edge, 1. + 3. / d);
+                    [out, out]
+                };
+                // The gate progress keeps the link at its centre, advances past
+                // its end gate and steps back behind its start gate.
+                let k = (j + 1) % line.points.len();
+                let next = lerp3(lerp3(line.edges[j][0], line.edges[j][1], 0.5), lerp3(line.edges[k][0], line.edges[k][1], 0.5), 0.1);
+                let back = lerp3(lerp3(line.edges[i][0], line.edges[i][1], 0.5), centre, -0.2);
+                let previous = (i + line.points.len() - 1) % line.points.len();
+                for (what, p, expected) in [("stay", centre, i), ("advance", next, j % n.max(1)), ("back", back, previous)] {
+                    let opened_edge = line.open && (what == "advance" && j + 1 >= line.points.len() || what == "back" && i == 0);
+                    let got = line.gate_link(i, p);
+                    if !opened_edge && line.edges[j] != line.edges[k] && got != expected {
+                        failed.push(format!("{route} link {i} {what}: {got}"));
+                    }
+                }
+                for (what, wheels, expected) in [
+                    ("centre", wheels, true),
+                    ("right", past(right), false),
+                    ("left", past(left), false),
+                ] {
+                    if line.on_track_at(i, &wheels) != expected {
+                        failed.push(format!("{route} link {i} {what}"));
+                    }
+                }
+            }
+        }
+        assert!(links > 100, "{links}");
+        assert!(failed.is_empty(), "{} of {links} links: {failed:?}", failed.len());
     }
 
     #[test]

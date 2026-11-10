@@ -1863,7 +1863,10 @@ mod tests {
                     .iter()
                     .map(|j| distance(pose(&multi, j.a), pose(&multi, j.b.unwrap())))
                     .collect();
-                for _ in 0..300 {
+                // 15 s: since F783 the loose tyres carry their shapes' own scale
+                // in their dimensions on unit bodies (0x7C6350), and the last ones
+                // topple off the blocks after about 13 s (5 s before).
+                for _ in 0..900 {
                     multi.tick(&drive).unwrap();
                 }
                 let props = multi.dynamic_props().unwrap();
@@ -1880,7 +1883,7 @@ mod tests {
                     let now = pose(&multi, piece.body);
                     assert!(now.iter().all(|v| v.is_finite()));
                     assert!((now[1] - spawn[1]).abs() < 1.5, "{piece:?} {spawn:?} {now:?}");
-                    // Settled: no piece still moving fast after five seconds.
+                    // Settled: no piece still moving fast after 15 seconds.
                     let v = &multi.bodies()[piece.body][0x220 / 4..0x22c / 4];
                     let speed = v.iter().map(|&w| f32::from_bits(w).powi(2)).sum::<f32>().sqrt();
                     assert!(speed < 1., "{piece:?} {speed}");
@@ -2212,7 +2215,9 @@ mod tests {
                     crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
                         .unwrap(),
                 );
-                // Breakable 2276 counts the close-drift flags (a drift event).
+                // The stack is entity 2510 (catalogue index 2276 before F783
+                // joined the scaled stacks; the index counts the close-drift
+                // flags, a drift event).
                 let route =
                     Route::new("tracks/europe/nurburgring/route_1").unwrap().with_drift_flags();
                 let mut multi =
@@ -2221,8 +2226,9 @@ mod tests {
                 multi.enable_dynamic_props(root).unwrap();
                 multi.parking = false;
                 let props = multi.props.as_ref().unwrap();
-                let at = props.catalog.breakables[2276].placement;
-                assert!(props.catalog.breakables[2276].template.starts_with("tyrestack_white"));
+                let stack = (props.catalog.breakables.iter()).position(|b| b.entity == 2510).unwrap();
+                let at = props.catalog.breakables[stack].placement;
+                assert!(props.catalog.breakables[stack].template.starts_with("tyrestack_white"));
                 let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 60. * at[8 + k]);
                 multi.place_at_rest(0, start, [-at[8], -at[9], -at[10]]).unwrap();
                 let mut go = [Controls::default(); 2];
@@ -2241,7 +2247,7 @@ mod tests {
                 let count = stopped.iter().filter(|b| **b).count();
                 eprintln!("car speed {speed:.3} broken {count}");
                 assert!(speed < 0.5, "{speed}");
-                assert!(stopped[2276] && count >= 2, "{count}");
+                assert!(stopped[stack] && count >= 2, "{count}");
                 for _ in 0..1200 {
                     multi.tick(&stop).unwrap();
                 }
@@ -2282,7 +2288,9 @@ mod tests {
                 };
                 let route = std::env::var("GRID_PILE_ROUTE")
                     .unwrap_or_else(|_| "tracks/europe/nurburgring/route_1".into());
-                // GRID_PILE_CENTRE counts the close-drift flags (a drift event).
+                // GRID_PILE_CENTRE (a catalogue index) counts the close-drift
+                // flags (a drift event); the default is wall 1745 of F549, entity
+                // 1917 (index 1769 since F783 joined the scaled stacks).
                 let route = Route::new(&route).unwrap().with_drift_flags();
                 let mut multi =
                     MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
@@ -2292,7 +2300,10 @@ mod tests {
                 let props = multi.props.as_mut().unwrap();
                 let template =
                     std::env::var("GRID_PILE_TEMPLATE").unwrap_or_else(|_| "tyrewall_black_yok".into());
-                let centre = env("GRID_PILE_CENTRE", 1745);
+                let centre = env(
+                    "GRID_PILE_CENTRE",
+                    (props.catalog.breakables.iter()).position(|b| b.entity == 1917).unwrap(),
+                );
                 let at = props.catalog.breakables[centre].placement;
                 let radius = env("GRID_PILE_RADIUS", 30) as f32;
                 // GRID_PILE_DRIVE=ticks: car 0 drives into the centre wall at full

@@ -346,6 +346,47 @@ Inputs: `h = |view+0x64|` (heading error to the planned look-ahead target).
   current link's gates (view+0x20/+0x24; 0x7983E0, side test 0x7771E0).
 - +0xC = number of wheels inside. **Fired when more than half the wheels are inside the
   track limits.** Off track = not fired.
+- [V, disassembly, F783] The geometry. The view is the driver's +0x10; its gates A
+  (view+0x20) and B (view+0x24) must both be set, else the result is false. 0x7983E0 returns
+  a gate's waypoint of the given type: the map entry at gate +0x34 (+0x20), or the gate
+  position (+0x10) without one. A wheel is inside when `0x7771E0(w, A4, B4)` and
+  `0x7771E0(w, B3, A3)`: two infinite lines, the right limit from A to B and the left limit
+  from B to A, both on the current link. `0x7771E0(p, a, b)` is n·(p − mid) > 0 with
+  n = (az − bz, bx − ax) and mid = (a + b)/2 in the horizontal plane, written as
+  (az − bz)·px + pz·(bx − ax) + ((az + bz)·(bx − ax) + (ax + bx)·(az − bz))·(−0.5) > 0
+  (0xCB1F40 = −0.5, 0xD85A50 = 0). The flag (+8) is count > count >> 1.
+- [I, from the data, F783] A is the link's **end** gate and B its start gate. The gate
+  normals point from the left limit (offset 0) to the right one and equal the original's
+  lateral `(−t_z, 0, t_x)` of the travel (0x7787A0; Donington route_0 link 0: travel
+  (−50.8, −8.2), normal (0.175, −0.984)). With A as the start gate the track centre fails
+  both side tests on every link; with A as the end gate it passes both, and points 3 m past
+  either limit fail. So the right chord runs from the end gate back to the start gate and
+  the left chord forward (a wheel is inside when it is left of the first and right of the
+  second, seen from above).
+- [V structure, F783] The view's link comes from the gate progress 0x793F60, which the track
+  view update 0x79C360 calls each tick with the car's front point (car +0xF0, copied to view
+  +0x40). It tests that point against the line of gate A (position +0x10 → position + span
+  +0x20, side test 0x778B40): on or past it, the link index (+0x18) steps forward (it stops
+  at the last link, +0xC); otherwise, when the point is behind gate B's line, it steps back.
+  At most one step a tick; 0x7921D0 sets the new link's gates. So the link follows gate
+  lines, not the nearest racing-line segment. [I] The crossing side is ahead along the
+  travel `(n_z, −n_x)` of the gate normal; the ignored data test checks it on every link of
+  25 routes (stays at the centre, advances past the end gate, steps back behind the start).
+- [I] Why the port flickered: it projected each wheel onto the line and compared its offset
+  with limits interpolated along the arc, so a wheel near the limit at a gate's corner could
+  change sides between ticks as its projected segment changed. The original keeps the
+  current link (the view's gates) and straight chords. Port since F783:
+  `Line::on_track_at`, `inside_chord` and `Line::gate_link` (ai_driver.rs); the driver keeps
+  its gate link from the front point. [I] It starts on the projected segment and rejoins it
+  after a jump of more than four links (a reset or a respawn), which one step a tick cannot
+  follow.
+- [V headless, F783] Shibuya route_2 (drift cars, props off): with the projected segment as
+  the link 3.4 spins/lap and 100 s stalled, with the gate link 1.5 and 51 s (the old projected
+  limits: 0.2 and 3 s). The rest is geometry: the drift line runs 0.7–1.4 m from the inner
+  limit at links 14–22, 28, 43, so a drifting car's inner wheels lie on that limit; the
+  rear-inner wheel is outside in both tests, and the front-inner one flips by about 0.3 m
+  between the straight chord (outside) and the old projected limit (inside), which makes 2 of
+  4 wheels and so off track. The original's own wheel points (car vfunc +4) were not compared.
 
 ### 3.5 contacted_vehicle 0x784650 (type 17) and contact types [V]
 

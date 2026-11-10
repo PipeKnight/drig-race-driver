@@ -626,7 +626,13 @@ Checks against the original, none of which showed a port difference that a 1:1 c
 - Stalled cars: a spun car on the track scores recovery 11 against drift 12/13, so Drift wins; when
   `on_track` flickers at the limit Recovery re-activates (and resets, [V] 0x776990) every few ticks
   (car5 at Long Beach: 1,047 Recovery activations, 0.05 m/s for 170 s). Scores and activation
-  semantics are the original's; the flicker comes from the shared on_track test.
+  semantics are the original's; the flicker came from the shared on_track test. F783 [V,
+  disassembly; gate order from the data]: the original tests each wheel against two straight
+  chords of the current link, the right track limit from its end gate back to its start gate and
+  the left one forward (0x79B250, side test 0x7771E0; AI_AVOID_RECOVERY_RESEARCH §3.4); the port
+  projected each wheel onto the line and compared it with interpolated limits. The port now uses
+  the original's chords on the view's link, which the gate progress 0x793F60 keeps from the
+  car's front point and the gate lines.
 - Until F768 the touring BMW field used the `default` drift values (driftGripFront 10); the drift
   cars with the `drift*` classes race since F768 (§4.4).
 F406 (docs/SERIES.md, collision floor lift): the port's car body floor sat 7 cm too low, so bodies
@@ -644,12 +650,21 @@ cor,imp,mop,gto,soa,s15,rx7` on every Drift Battle layout of the original's pool
 |---|---|---|---|---|---|---|---|---|---|
 | BMW stand-ins, `default` drift values (before F768) | 229.9 | 14.5 | 7.5 | 6,665 | 42 / 192 | 138 | 9,138 | 36,341 | 459,824 |
 | the pool's drift cars, `drift*` classes (F768) | 352.3 | 1.6 | 1.3 | 1,433 | 159 / 192 | 55,343 | 147,492 | 360,256 | 13,641,692 |
+| F768 code, props on (`local/drift-soak/before-props`, F783) | 361.9 | 0.6 | 0.7 | 556 | 168 / 192 | 52,102 | 145,270 | 292,702 | 13,414,878 |
+| scaled joined props (`after-props`, F783) | 380.1 | 0.3 | 0.4 | 204 | 184 / 192 | 50,924 | 138,766 | 499,884 | 13,615,882 |
+| and on_track on the gate link's chords (`after-gatelink`, F783) | 382.2 | 0.2 | 0.4 | 130 | 186 / 192 | 53,600 | 148,312 | 584,576 | 13,940,726 |
 
 Every scored car is scored by the drift scorer (no estimates). With the drift cars the scores
 reach the virtual race's scale (§4.2: 250,000–750,000 for one Normal car on longbeach_cl over two
-laps; field best per route 34,704–360,256). Remaining spread: Yokohama Docks (route_1 8.9 spins
-and 6.4 hits per lap, 2 of 8 cars finish two laps; routes 0/7/8 3.5–3.7 spins/lap) and Washington
-route_8 (2.7). F476's stall (recovery fires only against a frontal obstruction, score 0x78AB20) is
+laps; field best per route 34,704–360,256). F768's table ran without dynamic props, which
+the soak now loads by default (`GRID_DYNAMIC_PROPS=1`, as grid-app). F783: Yokohama Docks
+route_1's spins (8.9 per lap with props, 2 of 8 cars finish two laps) came from its 16 scaled
+`close_drift_flag`s, which the port built at unit size (DYNAMIC_PROPS_RESEARCH, scaled entities);
+with the original's scale it runs 0.1 spins/lap, 8 of 8 cars finish two laps. Washington
+route_8's 2.7 spins/lap was a props-off artifact (0.0 with props). After F783 the worst route is
+Shibuya route_2 (1.5 spins/lap, 51 s stalled, was 0.2 and 3 s with the old projected limits):
+its drift line runs 0.7–1.4 m from the inner limit, so a drifting car's inner wheels lie on the
+chord and on_track flips (AI_AVOID_RECOVERY_RESEARCH §3.4). F476's stall (recovery fires only against a frontal obstruction, score 0x78AB20) is
 the original's rule and stays as is.
 
 ## 5. Order for the remaining disciplines
@@ -755,6 +770,21 @@ pre-results scene, or on the grid) was not traced.
 - `grid-opponent-race --discipline drift_grand_prix` runs one car (an AI drift driver with the
   drift_battle config stands in for the player, AUTHORED) and estimates the rivals.
 - Not ported: rounds, the pre-results scene and intros, parked rival cars.
+
+**Cars and setups (F783) [D, static].** The free-race `drift_gp` pool holds the same seven
+drift cars as `drift_battle` (cor, imp, mop, gto, s15, rx7, soa), and `Free_Drift` the same seven;
+all are raceable (asset test `drift_pools_hold_the_drift_cars`). The event menu now offers each
+pool's raceable cars for Drift GP and Freestyle through the same `Series::raceable_cars` path as
+the Drift Battle (F768), and both launchers drive the Silvia (s15, AUTHORED choice from the pool).
+There is no separate drift setup: race setup 0x5F8940 calls the car builder 0xA100A0 with no
+source block (param 2 = 0), which takes the branch that calls the constructor 0xA0E880 with
+null setup sources (params 9 and 10 = 0). With no source, 0xA0E880 fills the sliders with 0.5 and
+applies the car's default setup 0x9C3C30 → 0x9E5680 → 0x9C32F0 (docs/SERIES.md, "Cause"). The
+other branch (a saved block's +0xB0 and +0xCC30) is the repair and re-attach path (0x9FF170,
+0x9FF3E0; docs/MECHANICAL_DAMAGE.md). So every drift car races on its own data plus the shared
+default setup, as every other car does; the port applies its downforce part
+(`standard_car::apply_default_downforce_setup`, F420), and the other 29 values are still open
+there, for all cars alike.
 
 **Checks.** Unit test `a_drift_gp_estimates_its_virtual_rivals_and_ranks_them`; headless runs
 `local/drift-est/runs/gp-*` (longbeach_cl stand-in 1 point against the rival's 262,259; istanbul_int

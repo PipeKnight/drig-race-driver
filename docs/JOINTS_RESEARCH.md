@@ -240,8 +240,11 @@ Port: `grid_formats::entities::Constraint` (typed `TEMPLATECONSTRAINT`s of a dam
 - `Catalog::read` keeps a breakable whose constraints join two of its own pieces
   (`JointSpec`: the pieces, the request at unit scale, the two collision flags). Still
   static: a constraint to the world or `link1`, a body override, uproot props, a phantom
-  post filter, soft friction different from the hard friction, or a placement with a
-  non-unit scale (0x7CC1E0's lane choice for the props' scale is not ported).
+  post filter, or soft friction different from the hard friction. A scaled placement
+  is joined since F783: the request takes `0x7CC1E0`'s scale, x when strictly the
+  smallest lane, else y when strictly the smallest, else z (a tie of x and y below z takes
+  z), and the frames' positions take the scale vector lane by lane before the unit entity
+  matrix (`joint_scale`, `joint_template::descriptor`).
 - `PropWorld::apply` builds each joint after the entity's pieces, in the damage state's
   order: the descriptor from the request and the placement, `joint::construct` on the
   pieces' spawn poses, appended to the world's joint list (B825E0), with body byte +0x416

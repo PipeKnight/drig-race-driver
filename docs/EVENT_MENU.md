@@ -27,8 +27,8 @@ Labels: **[D]** read from shipped data; **[I]** interpretation; **AUTHORED** a c
 | Pro Tuned, Touring Cars, GT1, GT2 | `free_race_discipline` | pool ∩ raced tracks (`Series::supported_layouts` rule), 21 each | `Series::raceable_cars` | Laps (3); the field is the original's grid fill |
 | Le Mans Series | `le_mans_series` (F409) | pool ∩ raced tracks (4) | the series' raceable cars (7) | Laps (3); the original's 15–17-car field; experimental like its launcher (the desktop supervisor sets `GRID_SERIES_EXPERIMENTAL=1` for this race), help line says so |
 | Drift Battle | `drift_battle` | pool ∩ raced tracks (9) | the `drift_battle` pool's raceable drift cars (`Series::raceable_cars`, F768); the field is the original's grid fill | Laps (2), Opponents 1–7 (7, pool `max_cars` − 1) |
-| Drift GP | `drift_gp` | pool ∩ raced tracks (9) | BMW, Lacetti (stand-ins) | Laps (2) |
-| Freestyle Drift | `Free_Drift` | the four Yokohama arenas | BMW, Lacetti (stand-ins) | Time (`free_race_times`; 2 minutes AUTHORED default) |
+| Drift GP | `drift_gp` | pool ∩ raced tracks (9) | the `drift_gp` pool's raceable drift cars (7, `Series::raceable_cars`) | Laps (2) |
+| Freestyle Drift | `Free_Drift` | the four Yokohama arenas | the `Free_Drift` pool's raceable drift cars (7) | Time (`free_race_times`; 2 minutes AUTHORED default) |
 | Midnight Touge | `illegal_touge` | Haruna route 1 (`route::HARUNA`), the validated road | Lacetti, then the pool's raceable 350Z, Skyline, Supra | Direction Downhill/Uphill (subroute 0/1) |
 | Pro Touge | `legal_touge` (F412) | Haruna route 1, as its launcher (the pool holds the legal `haruna_leg_*` layouts; AUTHORED) | Lacetti, then the pool's raceable cars | two runs, downhill then uphill (`discipline = pro_touge`) |
 | Demolition Derby | `Demolition_D` (F421) | the Detroit stadium routes 8 and 9 (`route::DETROIT_STADIUM`, `_SHORT`) | the stock car `stk` | laps (6 [D]), opponents (11), `discipline = demolition_derby` (docs/DEMOLITION_DERBY.md) |

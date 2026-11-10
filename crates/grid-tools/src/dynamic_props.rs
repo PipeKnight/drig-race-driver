@@ -420,12 +420,69 @@ fn hull(primitive: Primitive) -> (Vec<[f32; 4]>, Vec<[u32; 3]>) {
     }
 }
 
-/// Unit-length placement rows (no entity scale).
-fn unit_scale(m: &[f32; 16]) -> bool {
-    (0..3).all(|r| {
-        let l = (m[4 * r] * m[4 * r] + m[4 * r + 1] * m[4 * r + 1] + m[4 * r + 2] * m[4 * r + 2]).sqrt();
-        (l - 1.).abs() < 1e-4
-    })
+/// The entity placement split as 0x7CD3F0 (`TEMPLATEENTITYINSTANCE` load)
+/// keeps it: unit rows (entity +0x40, the matrix every body and joint of the
+/// entity is placed with) and the row lengths as the entity's scale vector
+/// (+0x80). A row shorter than 1e-5 (0x4B1A70) leaves identity rows and a
+/// unit scale; the position row stays.
+fn split_scale(m: &Matrix) -> (Matrix, [f32; 3]) {
+    let lengths = [0, 1, 2].map(|r| dot3(m[r], m[r]).sqrt());
+    let mut unit = *m;
+    if lengths.iter().all(|&l| l >= 1e-5) {
+        for r in 0..3 {
+            for c in 0..3 {
+                unit[r][c] = m[r][c] / lengths[r];
+            }
+        }
+        (unit, lengths)
+    } else {
+        for (r, row) in unit.iter_mut().take(3).enumerate() {
+            *row = std::array::from_fn(|c| if c == r { 1. } else { 0. });
+        }
+        (unit, [1.; 3])
+    }
+}
+
+/// 0x7CC1E0: the one scale a joint's limits, springs and break impulses take
+/// from the entity's scale vector: x when it is strictly the smallest, else
+/// y when it is strictly the smallest, else z (so a tie of x and y below z
+/// takes z).
+fn joint_scale([x, y, z]: [f32; 3]) -> f32 {
+    if x < y && x < z {
+        x
+    } else if y < x && y < z {
+        y
+    } else {
+        z
+    }
+}
+
+/// 0x7C6350: a template shape placed in a scaled entity. The shape's rows and
+/// position are multiplied lane-wise by the entity scale; the row lengths of
+/// the result are the shape's own scale and its rows are normalised. The
+/// kind's builder scales the dimensions by that scale: a box (0x7C1E60) per
+/// axis, a cylinder (0x7B96D0) its radius by the smaller of x and z and its
+/// height by y, a sphere (0x7B9840) its radius by one lane [I: the
+/// decompile loses the lane select; the joint's choice is assumed].
+fn scaled_shape(shape: &Matrix, primitive: Primitive, scale: [f32; 3]) -> (Matrix, Primitive) {
+    let mut m = *shape;
+    for row in &mut m {
+        for (v, s) in row.iter_mut().zip(scale) {
+            *v *= s;
+        }
+    }
+    let (unit, e) = split_scale(&m);
+    let primitive = match primitive {
+        Primitive::Box([w, h, l]) => Primitive::Box([w * e[0], h * e[1], l * e[2]]),
+        Primitive::Cylinder { radius, height } => Primitive::Cylinder {
+            radius: radius * if e[0] < e[2] { e[0] } else { e[2] },
+            height: height * e[1],
+        },
+        Primitive::Sphere { radius } => Primitive::Sphere {
+            radius: radius * joint_scale(e),
+        },
+    };
+    (unit, primitive)
 }
 
 fn reference(uri: &[u8]) -> Result<&str, &'static str> {
@@ -577,7 +634,7 @@ impl Catalog {
                     None => (f32::MAX, 0.),
                 });
             }
-            let placement = matrix(&e.transform);
+            let (placement, scale) = split_scale(&matrix(&e.transform));
             let mut pieces = Vec::new();
             let mut static_pieces = Vec::new();
             for added in &behaviour.added {
@@ -640,16 +697,17 @@ impl Catalog {
                     }
                     entities::Primitive::Sphere { radius } => Primitive::Sphere { radius },
                 };
+                // The body sits at the unit entity rows (0x7D3C40 hands it
+                // entity +0x40); the entity's scale (Nürburgring tyre stacks
+                // 0.9718, Yokohama's close-drift flags) goes into the shape's
+                // dimensions and so its mass (0x7C6350), the shell unscaled.
+                let (shape_matrix, primitive) =
+                    scaled_shape(&matrix(&shape.transform), primitive, scale);
                 let (mass, inertia) = mass_properties(primitive, density, shape.shell);
                 if !(mass.is_finite() && mass > 0.) {
                     return Err("invalid prop piece mass".into());
                 }
-                // 0x7D3C40 hands the entity matrix to the body constructor
-                // unnormalised (only the render path splits off the row
-                // lengths), so a scaled placement (Nürburgring tyre stacks,
-                // 0.9718) keeps its scale in the body basis; mass stays the
-                // template's density x the unscaled shape grown by its shell.
-                let pose = compose(&matrix(&shape.transform), &placement);
+                let pose = compose(&shape_matrix, &placement);
                 let [x, y, z] = [0, 1, 2].map(|i| pose[i]);
                 let determinant = x[0] * (y[1] * z[2] - y[2] * z[1])
                     - x[1] * (y[0] * z[2] - y[2] * z[0])
@@ -681,12 +739,6 @@ impl Catalog {
             // Body override per piece (0x7B85A0): the highest
             // `bodyOverridePriority` above -1 among the constraints on it.
             let mut overrides: Vec<Option<(i32, String)>> = vec![None; pieces.len()];
-            if !behaviour.constraints.is_empty() && !unit_scale(&e.transform) {
-                // 0x7CC1E0 scales the joint by the entity's scale vector (the
-                // lane choice is not ported): scaled joined entities stay static.
-                *catalog.unported.entry(template).or_default() += 1;
-                continue;
-            }
             for c in &behaviour.constraints {
                 let body = |uri: &[u8]| {
                     let id = uri.strip_prefix(b"#")?;
@@ -757,7 +809,12 @@ impl Catalog {
                     a,
                     b,
                     link,
-                    request: joint_template::request(&frames, &template_props, 1., c.display),
+                    request: joint_template::request(
+                        &frames,
+                        &template_props,
+                        joint_scale(scale),
+                        c.display,
+                    ),
                     dont_collide_with_any: props.dont_collide_with_any,
                     dont_collide_with_fixed: props.dont_collide_with_fixed,
                 });
@@ -2371,9 +2428,11 @@ impl PropWorld {
                 grouped_physical_frame::wake(make.world, if sa { a } else { b });
             }
         }
-        let placement = matrix(&entry.placement);
+        // 0x7CC1E0: frame positions times the entity scale, placed by the
+        // unit entity rows (0x7CD3F0).
+        let (placement, scale) = split_scale(&matrix(&entry.placement));
         let mut descriptor =
-            joint_template::descriptor(&spec.request, &placement, [1.; 3], b.is_none());
+            joint_template::descriptor(&spec.request, &placement, scale, b.is_none());
         let mut made = joint::Joint::filled(0);
         joint::construct(
             &mut made,
@@ -3257,12 +3316,22 @@ mod tests {
         let root = Path::new(&root);
         for (path, count) in [
             ("tracks/europe/jarama/route_0", 16),
-            ("tracks/japan/yokohama_docks/route_0", 17),
-            ("tracks/japan/yokohama_docks/route_1", 0),
+            ("tracks/japan/yokohama_docks/route_0", 21),
+            ("tracks/japan/yokohama_docks/route_1", 16),
         ] {
             let flags = |route: &Route| {
                 let props = Props::read_route(root, route).unwrap();
                 let catalog = Catalog::read(root, route, &props).unwrap();
+                // Scaled flags (Yokohama Docks: all 16 of route 1, 4 of route 0) are
+                // ported too (0x7CD3F0).
+                assert!(
+                    !catalog
+                        .unported
+                        .keys()
+                        .any(|k| k.contains("close_drift_flag")),
+                    "{:?}",
+                    catalog.unported
+                );
                 let boxes = props.boxes.iter().filter(|b| b.template.contains("close_drift_flag")).count();
                 let breakables =
                     catalog.breakables.iter().filter(|b| b.template.contains("close_drift_flag")).count();
@@ -3313,33 +3382,74 @@ mod tests {
         }
     }
 
+    /// 0x7CD3F0/0x7C6350: a scaled entity's bodies sit at its unit rows and
+    /// its scale goes into the shapes (the Nürburgring tyre stacks, 0.9718).
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
-    fn nurburgring_scaled_tyre_stacks_keep_their_placement_scale() {
+    fn nurburgring_scaled_tyre_stacks_carry_their_scale_in_the_shapes() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
         let route = Route::new("tracks/europe/nurburgring/route_0").unwrap();
         let props = Props::read_route(root, &route).unwrap();
         let catalog = Catalog::read(root, &route, &props).unwrap();
-        let mut scaled = BTreeMap::<String, usize>::new();
+        let mut unit = BTreeMap::<(String, usize), Primitive>::new();
+        let mut scaled = Vec::new();
         for b in &catalog.breakables {
-            for p in &b.pieces {
-                let lengths = [0, 1, 2].map(|i| dot3(p.pose[i], p.pose[i]).sqrt());
-                if lengths.iter().any(|l| (l - 1.).abs() > 1e-3) {
+            let (_, lengths) = split_scale(&matrix(&b.placement));
+            for (s, p) in b.pieces.iter().enumerate() {
+                for i in 0..3 {
+                    assert!(
+                        (dot3(p.pose[i], p.pose[i]).sqrt() - 1.).abs() < 1e-5,
+                        "{:?}",
+                        p.pose
+                    );
+                }
+                if b.template.starts_with("tyrestack") {
+                    // sRubber d700 over the scaled cylinder grown by its shell.
+                    assert_eq!(p.mass, mass_properties(p.primitive, 700., p.shell).0);
+                }
+                if lengths.iter().all(|l| (l - 1.).abs() < 1e-4) {
+                    unit.insert((b.template.clone(), s), p.primitive);
+                } else if b.template.starts_with("tyrestack") {
                     // Uniform: the entity scale, not a shear.
                     assert!(lengths.iter().all(|l| (l - lengths[0]).abs() < 1e-4));
                     assert!((lengths[0] - 0.9718).abs() < 1e-3, "{lengths:?}");
-                    *scaled.entry(b.template.clone()).or_default() += 1;
-                }
-                if b.template.starts_with("tyrestack") {
-                    // sRubber d700 over the unscaled template cylinder grown by its shell.
-                    assert_eq!(p.mass, mass_properties(p.primitive, 700., p.shell).0);
+                    scaled.push((b.template.clone(), s, lengths[0], p.primitive));
                 }
             }
         }
-        eprintln!("scaled={scaled:?} unported={:?}", catalog.unported);
-        assert_eq!(scaled["tyrestack_white.max"] % 12, 0);
-        assert!(scaled.contains_key("tyrestack_red.max"));
+        let mut counts = BTreeMap::<&str, usize>::new();
+        for (template, s, k, primitive) in &scaled {
+            *counts.entry(template).or_default() += 1;
+            let Some(&reference) = unit.get(&(template.clone(), *s)) else {
+                continue;
+            };
+            let close = |a: f32, b: f32| (a - b * k).abs() < 1e-4 * b.abs().max(1.);
+            match (*primitive, reference) {
+                (
+                    Primitive::Cylinder { radius, height },
+                    Primitive::Cylinder {
+                        radius: r,
+                        height: h,
+                    },
+                ) => {
+                    assert!(
+                        close(radius, r) && close(height, h),
+                        "{template} {primitive:?} {reference:?}"
+                    );
+                }
+                (Primitive::Box(d), Primitive::Box(r)) => {
+                    assert!(
+                        (0..3).all(|i| close(d[i], r[i])),
+                        "{template} {primitive:?} {reference:?}"
+                    );
+                }
+                _ => {}
+            }
+        }
+        eprintln!("scaled={counts:?} unported={:?}", catalog.unported);
+        assert_eq!(counts["tyrestack_white.max"] % 12, 0);
+        assert!(counts.contains_key("tyrestack_red.max"));
     }
 
     #[test]

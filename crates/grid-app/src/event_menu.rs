@@ -378,20 +378,20 @@ impl Catalog {
                     // The field draws from every one of them, so a series
                     // with one missing from the data subset is left out
                     // (F539: Touring Cars on the Donington bundle needs the BMW).
-                    // Drift Battle draws its free-race field from the
-                    // `drift_battle` pool like a series (docs/SERIES.md).
-                    Kind::Series | Kind::LeMans | Kind::DriftBattle => {
+                    // The drift formats draw their cars from their own pools
+                    // (`drift_battle`, `drift_gp`, `Free_Drift`) like a series
+                    // (docs/SERIES.md); Drift GP and Freestyle race solo against
+                    // virtual rivals, so the list is the player's choice.
+                    Kind::Series
+                    | Kind::LeMans
+                    | Kind::DriftBattle
+                    | Kind::DriftGp
+                    | Kind::Freestyle => {
                         let raceable = series.raceable_cars();
                         let stems: Vec<&str> = raceable.iter().map(Car::stem).collect();
                         let found = cars(&stems);
                         (if found.len() == stems.len() { found } else { Vec::new() }, false)
                     }
-                    // Drift GP and freestyle keep the launchers' BMW and the
-                    // Lacetti (their pools are not wired to the field yet).
-                    Kind::DriftGp | Kind::Freestyle => (
-                        cars(&[grid_tools::car::BMW, grid_tools::car::LACETTI]),
-                        true,
-                    ),
                     // The event's stock car (`Stock_Car` discipline) [D].
                     Kind::Demolition => (cars(&["stk"]), false),
                     // The pool's raceable cars (350Z, Skyline, Supra) after
