@@ -31,9 +31,9 @@ Its alpha channel is `Anim!169`, a BEZIERFLOAT with keys frame 0 → 0 and frame
 
 ### 1.3 Not ported (yet)
 
-- The 3D loading world (`loading` root, track preview and the `loading_stats` panel). `language_eng.lng` has no tip or hint strings (90 ids with load/tip/hint, all load/save or network messages), so `loading_stats` shows facts of the event, not tips [I]. It needs the PSSG front-end scene renderer; not cheap.
+- The 3D loading world's stat panel (`loading_stats`), its reflections and camera noise. The world itself is drawn since F784 (`fe_world.rs`, docs/FRONT_END_FLOW.md §2). `language_eng.lng` has no tip or hint strings (90 ids with load/tip/hint, all load/save or network messages), so `loading_stats` shows facts of the event, not tips [I].
 - `fade_to_half_black_quick` (popups).
-- The bars in the race: there the original slides them off only at the intro to in-game camera hand-over (`FUN_0058BAF0` posts `border_off`); DRIG has no race intro, so the race shows none.
+- The bars in the race: there the original slides them off only at the intro to in-game camera hand-over (`FUN_0058BAF0` posts `border_off`); DRIG has no race intro, so the race shows none. Scoped in F784: the bars belong to the intro camera (`FUN_0058BAF0` hands the intro camera to the in-game camera, then posts `border_off`) [D]; bars without that intro would only cover the start for 0.3 s with nothing to hand over, so they wait for an intro port.
 
 ### 1.4 The bars and the loading circle [D unless marked]
 

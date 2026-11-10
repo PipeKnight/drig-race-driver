@@ -3,13 +3,15 @@
 //! word, its named time ranges and every channel's keys (time, value);
 //! then the matching nodes: local translation and scale, bounds, and the
 //! drawn mesh's extent and material (when the whole scene reads).
-//! Usage: grid-fe-anim PACKAGE.pssg [WORD ...]
+//! Usage: grid-fe-anim PACKAGE.pssg [--under=NODE] [WORD ...]; `--under` keeps only
+//! the nodes below NODE (all of them when no word is given).
 use grid_formats::{osd, pssg};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let path = args.next().ok_or("usage: grid-fe-anim PACKAGE.pssg [WORD ...]")?;
-    let words: Vec<String> = args.collect();
+    let mut words: Vec<String> = args.collect();
+    let under = words.iter().position(|w| w.starts_with("--under=")).map(|i| words.remove(i)[8..].to_string());
     let bytes = std::fs::read(&path)?;
     let tree = pssg::read_tree(&bytes)?;
     let animations = osd::animations(&tree)?;
@@ -36,7 +38,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match osd::read_scene(&tree) {
         Ok(scene) => {
             for (i, n) in scene.nodes.iter().enumerate() {
-                if !hit(&n.id) {
+                let below = |root: &str| {
+                    let mut p = n.parent;
+                    while let Some(k) = p {
+                        if scene.nodes[k].id == root {
+                            return true;
+                        }
+                        p = scene.nodes[k].parent;
+                    }
+                    false
+                };
+                if under.as_deref().is_some_and(|r| !below(r)) || !hit(&n.id) {
                     continue;
                 }
                 nodes += 1;

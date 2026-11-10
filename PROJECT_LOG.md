@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F784](log/F0784.md) | 2026-11-10 | 3D loading world, pause bloom, race-intro bars scoped |
 | [F783](log/F0783.md) | 2026-11-10 | Drift GP and Freestyle drift cars, scaled joined props, on_track chords and gate progress |
 | [F782](log/F0782.md) | 2026-11-10 | HUD: team-mate name tag; original post-race art research (rows 68, 69) |
 | [F781](log/F0781.md) | 2026-11-10 | Night level, tree sheet shadows, world clear colour |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F727](log/F0727.md) | 2026-11-04 | Playable e66e1c24963c for the PC (tree edge culling and pipeline warm-up) |
 | [F726](log/F0726.md) | 2026-11-03 | Pipeline warm-up at the race start: no objects missing while their pipeline compiles |
 | [F725](log/F0725.md) | 2026-11-03 | Near full trees: edge-vanish evidence for F724 |
-| [F724](log/F0724.md) | 2026-11-03 | Facing trees keep their expanded bounds; no culling at the screen edge |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

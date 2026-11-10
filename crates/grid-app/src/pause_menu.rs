@@ -756,7 +756,57 @@ pub fn install(app: &mut App, menu: PauseMenu, labels: Labels) {
     app.insert_resource(menu)
         .insert_resource(labels)
         .add_systems(Update, update.before(crate::drive_actions))
-        .add_systems(Update, (spawn, present).chain().after(update));
+        .add_systems(Update, (spawn, present).chain().after(update))
+        .add_systems(Update, pause_bloom.after(update));
+}
+
+/// The pause effect keeps the race's look and overrides `FinalMix`
+/// `bloomAmount` to 0.4 [D frontend/persistentdatarender.xml
+/// `pause_post_process`, over the race's 1.0 in postprocess/effects.xml
+/// `Effect_0000`]; `pause_increase_blur` reaches it in 0.3 s and
+/// `pause_decrease_blur` returns in 0.29 s [D flow.bin, states.bin]. Ported
+/// as a factor on the camera's bloom, linear in time [I]. Its ToneMapFast
+/// override needs the original tone map (backlog row 77).
+const PAUSE_BLOOM: f32 = 0.4;
+const PAUSE_IN: f32 = 0.3;
+const PAUSE_OUT: f32 = 0.29;
+
+/// How far the pause effect is in (0 = race, 1 = paused) after `dt` seconds.
+fn pause_share(share: f32, open: bool, dt: f32) -> f32 {
+    if open {
+        (share + dt / PAUSE_IN).min(1.)
+    } else {
+        (share - dt / PAUSE_OUT).max(0.)
+    }
+}
+
+/// A camera's bloom intensity without the pause effect.
+#[derive(Component)]
+struct RaceBloom(f32);
+
+fn pause_bloom(
+    menu: Res<PauseMenu>,
+    time: Res<Time<Real>>,
+    mut share: Local<f32>,
+    mut commands: Commands,
+    mut cameras: Query<(Entity, &mut bevy::post_process::bloom::Bloom, Option<&RaceBloom>)>,
+) {
+    let next = pause_share(*share, menu.open, time.delta_secs());
+    if next == *share && next == 0. {
+        return;
+    }
+    *share = next;
+    let factor = 1. + (PAUSE_BLOOM - 1.) * next;
+    for (entity, mut bloom, race) in &mut cameras {
+        let base = match race {
+            Some(race) => race.0,
+            None => {
+                commands.entity(entity).insert(RaceBloom(bloom.intensity));
+                bloom.intensity
+            }
+        };
+        bloom.intensity = base * factor;
+    }
 }
 
 /// Applies the advanced controls to every steering, accelerate and brake binding.
@@ -1081,6 +1131,44 @@ fn present(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pause_effect_fades_in_and_out() {
+        let mut s = 0.;
+        for _ in 0..3 {
+            s = pause_share(s, true, 0.1);
+        }
+        assert!((s - 1.).abs() < 1e-5);
+        assert!((pause_share(1., false, 0.145) - 0.5).abs() < 1e-5);
+        assert_eq!(pause_share(0.2, false, 1.), 0.);
+    }
+
+    /// The system on a race camera: the bloom drops to 0.4 of the race's
+    /// while the menu is open and comes back after it closes.
+    #[test]
+    fn the_pause_menu_dims_the_bloom() {
+        use bevy::post_process::bloom::Bloom;
+        use bevy::time::TimeUpdateStrategy;
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(100)))
+            .insert_resource(PauseMenu::new(Variant::FreeRace, false, true, Options::default()))
+            .add_systems(Update, pause_bloom);
+        let camera = app.world_mut().spawn(Bloom { intensity: 0.04, ..Bloom::NATURAL }).id();
+        let bloom = |app: &App| app.world().get::<Bloom>(camera).unwrap().intensity;
+        app.update();
+        assert_eq!(bloom(&app), 0.04);
+        app.world_mut().resource_mut::<PauseMenu>().open = true;
+        for _ in 0..6 {
+            app.update();
+        }
+        assert!((bloom(&app) - 0.016).abs() < 1e-6, "{}", bloom(&app));
+        app.world_mut().resource_mut::<PauseMenu>().open = false;
+        for _ in 0..6 {
+            app.update();
+        }
+        assert!((bloom(&app) - 0.04).abs() < 1e-6, "{}", bloom(&app));
+    }
 
     fn press(f: impl Fn(&mut Nav)) -> Nav {
         let mut nav = Nav::default();

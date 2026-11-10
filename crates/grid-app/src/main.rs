@@ -90,6 +90,8 @@ mod event_menu;
 mod front_end_host;
 #[cfg(not(target_os = "android"))]
 mod loading_screen;
+#[cfg(not(target_os = "android"))]
+mod fe_world;
 mod balance_pass;
 mod flashback;
 mod free_look;

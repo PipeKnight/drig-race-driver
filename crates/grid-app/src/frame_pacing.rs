@@ -115,17 +115,26 @@ fn presented(drawn: Option<Res<Drawn>>) {
 
 /// `window_shots` alone, for the front-end screens (event menu, career).
 pub(crate) fn install_window_shots(app: &mut App) {
+    install_window_shots_as(app, "");
+}
+
+/// `window_shots` of a screen whose shots must not replace another
+/// screen's of the same time: `window-shot-<screen>-<t>.png`.
+pub(crate) fn install_window_shots_as(app: &mut App, screen: &'static str) {
     if !crate::settings::diagnostics().window_shots.is_empty() {
-        app.add_systems(Last, window_shots);
+        app.add_systems(Last, move |commands: Commands, time: Res<Time<Real>>, next: Local<usize>| {
+            window_shots(screen, commands, time, next)
+        });
     }
 }
 
-fn window_shots(mut commands: Commands, time: Res<Time<Real>>, mut next: Local<usize>) {
+fn window_shots(screen: &str, mut commands: Commands, time: Res<Time<Real>>, mut next: Local<usize>) {
     use bevy::render::view::screenshot::{save_to_disk, Screenshot};
     while let Some(&at) = crate::settings::diagnostics().window_shots.get(*next)
         && time.elapsed_secs() >= at
     {
-        let path = crate::settings::data_dir().join(format!("window-shot-{at:05.1}.png"));
+        let name = if screen.is_empty() { String::new() } else { format!("{screen}-") };
+        let path = crate::settings::data_dir().join(format!("window-shot-{name}{at:05.1}.png"));
         println!("window_shot at_s={at} path={}", path.display());
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
         *next += 1;

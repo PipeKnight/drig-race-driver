@@ -180,6 +180,8 @@ impl Animation {
 /// `CAMERANODE` values.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Camera {
+    /// Its node in [`Scene::nodes`].
+    pub node: usize,
     pub fov_degrees: f32,
     pub near: f32,
     pub far: f32,
@@ -202,7 +204,11 @@ pub struct Scene<'a> {
     pub cubemaps: Vec<Cubemap<'a>>,
     pub materials: Vec<Material>,
     pub nodes: Vec<Node>,
+    /// The last perspective camera (the OSD scene has one).
     pub camera: Option<Camera>,
+    /// Every perspective camera, in file order (a front-end package has
+    /// many: `camera=load_cam`, `camera=zone_03` …).
+    pub cameras: Vec<Camera>,
     pub animations: Vec<Animation>,
 }
 
@@ -550,7 +556,7 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
         .map(|(i, m)| (m.id.as_str(), i))
         .collect();
     let mut nodes: Vec<Node> = Vec::new();
-    let mut camera = None;
+    let mut cameras = Vec::new();
     let mut index_of = BTreeMap::new();
     for i in 0..tree.nodes.len() {
         let kind = tree.name(i);
@@ -580,7 +586,7 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
         });
         // Orthographic cameras (front-end overlays) have no FOV.
         if kind == b"CAMERANODE" && tree.attribute(i, b"FOV").is_ok() {
-            camera = Some((
+            cameras.push((
                 nodes.len() - 1,
                 float(tree, i, b"FOV")?,
                 float(tree, i, b"nearPlane")?,
@@ -639,14 +645,20 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
         materials,
         nodes,
         camera: None,
+        cameras: Vec::new(),
         animations: animations(tree)?,
     };
-    scene.camera = camera.map(|(node, fov_degrees, near, far)| Camera {
-        fov_degrees,
-        near,
-        far,
-        world: scene.world(node),
-    });
+    scene.cameras = cameras
+        .into_iter()
+        .map(|(node, fov_degrees, near, far)| Camera {
+            node,
+            fov_degrees,
+            near,
+            far,
+            world: scene.world(node),
+        })
+        .collect();
+    scene.camera = scene.cameras.last().cloned();
     Ok(scene)
 }
 

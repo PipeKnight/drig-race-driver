@@ -192,7 +192,7 @@ struct Loading;
 struct Circle;
 /// The loading ring's texture, redrawn each frame while loading.
 #[derive(Component)]
-struct RingImage(Handle<Image>);
+pub(crate) struct RingImage(Handle<Image>);
 #[derive(Component)]
 struct Bars;
 #[derive(Component)]
@@ -525,20 +525,7 @@ fn spawn(
         return;
     };
     *done = true;
-    let ring = images.map(|mut images| {
-        let side = Extent3d {
-            width: RING_TEXELS,
-            height: RING_TEXELS,
-            depth_or_array_layers: 1,
-        };
-        images.add(Image::new_fill(
-            side,
-            TextureDimension::D2,
-            &[0; 4],
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::default(),
-        ))
-    });
+    let ring = images.map(|mut images| ring_image(&mut images));
     if borders.is_some() {
         // Over the screen, under the fade (both black, so the order between
         // them does not show).
@@ -589,39 +576,72 @@ fn spawn(
             UiTargetCamera(camera),
         ))
         .with_children(|screen| {
-            screen
-                .spawn((
-                    Loading,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: px(56.),
-                        bottom: px(44.),
-                        align_items: AlignItems::Center,
-                        column_gap: px(16.),
-                        ..default()
-                    },
-                    Visibility::Hidden,
-                ))
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new(text.0.clone()),
-                        TextFont {
-                            font_size: FontSize::Px(20.),
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.85, 0.87, 0.9)),
-                    ));
-                    row.spawn((
-                        Circle,
-                        Node {
-                            width: px(RING_SIZE),
-                            height: px(RING_SIZE),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|circle| spawn_ring(circle, ring));
-                });
+            loading_row(screen, text.0.clone(), ring, (Loading, Visibility::Hidden));
         });
+}
+
+/// A blank loading-circle texture, which [`draw_rings`] fills.
+pub(crate) fn ring_image(images: &mut Assets<Image>) -> Handle<Image> {
+    let side = Extent3d {
+        width: RING_TEXELS,
+        height: RING_TEXELS,
+        depth_or_array_layers: 1,
+    };
+    images.add(Image::new_fill(
+        side,
+        TextureDimension::D2,
+        &[0; 4],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    ))
+}
+
+/// The "Loading" text and circle at the bottom right (AUTHORED placement),
+/// with `extra` on the row; shared by the overlay and the loading screen.
+pub(crate) fn loading_row(screen: &mut ChildSpawnerCommands, text: String, ring: Option<Handle<Image>>, extra: impl Bundle) {
+    screen
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                right: px(56.),
+                bottom: px(44.),
+                align_items: AlignItems::Center,
+                column_gap: px(16.),
+                ..default()
+            },
+            extra,
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Text::new(text),
+                TextFont {
+                    font_size: FontSize::Px(20.),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.85, 0.87, 0.9)),
+            ));
+            row.spawn((
+                Circle,
+                Node {
+                    width: px(RING_SIZE),
+                    height: px(RING_SIZE),
+                    ..default()
+                },
+            ))
+            .with_children(|circle| spawn_ring(circle, ring));
+        });
+}
+
+/// Redraws every loading circle `t` seconds after it started.
+pub(crate) fn draw_rings(t: f32, rings: &Query<&RingImage>, images: &mut Assets<Image>) {
+    let t = t % CIRCLE_SECONDS;
+    for ring in rings {
+        if let Some(mut image) = images.get_mut(&ring.0)
+            && let Some(data) = image.data.as_mut()
+        {
+            ring_texels(t, data);
+        }
+    }
 }
 
 // ---- The loading circle ---------------------------------------------------
@@ -760,15 +780,8 @@ fn present(
     if fade.loading {
         // From empty when the loading text shows (`circle_rotate`).
         let start = *since.get_or_insert(time.elapsed_secs());
-        let t = (time.elapsed_secs() - start) % CIRCLE_SECONDS;
         if let Some(images) = images.as_mut() {
-            for ring in &rings {
-                if let Some(mut image) = images.get_mut(&ring.0)
-                    && let Some(data) = image.data.as_mut()
-                {
-                    ring_texels(t, data);
-                }
-            }
+            draw_rings(time.elapsed_secs() - start, &rings, images);
         }
     } else {
         *since = None;

@@ -152,9 +152,9 @@ AUTHORED presentation:
 - a centred plain panel: title, subtitle (confirmations), up to eight rows with the selected row
   highlighted and unavailable rows dimmed, and a button-help line;
 - slider steps of 10 % (volume) and 5 % (controls);
-- none of the original's animated glyphs, pause blur, paused-world camera or audio ducking.
+- none of the original's animated glyphs, paused-world camera or audio ducking.
 
-**The pause art (2026-11-10, static data only, not ported).** What the original shows behind the
+**The pause art (2026-11-10; bloom ported in F784).** What the original shows behind the
 menu is a post-process change, not a picture:
 
 - Entering pause, `flow.bin` runs `pause_copy_game_pps_final` (`StateCopyPostProcessEffect`: copies
@@ -172,10 +172,19 @@ menu is a post-process change, not a picture:
   current Bloom, ToneMap, FinalMix and ColourBalance [D].
 - The menu glyphs (`in_game_N_button`, `pause_root`) live in `fePersistentDatabase.pssg` [D].
 
-Porting this needs the original's post-process chain (tone map, bloom, vignette:
-docs/ORIGINAL_POSTPROCESS.md; backlog row 77, graphics) and the front-end PSSG renderer that the
-3D loading world also needs (docs/SCREEN_FLOW.md §1.3). Neither exists yet, and an AUTHORED
-darkening would only add a look the data does not give, so the panel stays plain.
+What this leaves on screen: the OSD goes (DRIG's HUD already hides while the menu is open,
+`race_hud.rs`); the race's own Bloom, ToneMap, FinalMix and ColourBalance stay (the copy), so
+`fepause_final`'s own vignette is replaced by the race's; MotionBlur goes to 0 (nothing moves while
+paused); `type2.xml` has no depth-of-field pass, so "blur" in the state names is not a blur of
+the picture [D]. What changes is the override: `bloomAmount` 0.4 over the race's 1.0 and
+ToneMapFast's adaptation range. Which of the three `pause_post_process` variants a race uses was
+not traced; the plain one is taken [I].
+
+Port (F784, `pause_menu::pause_bloom`): the race camera's bloom intensity times
+1 − 0.6 × share, share going 0 → 1 in 0.3 s when the menu opens and back in 0.29 s when it closes
+(by real time, linear [I]). The ToneMapFast override needs the original's tone map (backlog row
+77, docs/ORIGINAL_POSTPROCESS.md) and is open; `restart_darken` is not ported because DRIG
+restarts at once on Yes, so a 0.1 s darkening would never show.
 
 **Autosave (F480).** The original saves the profile whenever a settings screen is left: every
 `*_st_*_optionsscreen` has a link to an `*_st_*_autosave` state [D]. The port does the same.

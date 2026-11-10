@@ -629,7 +629,7 @@ impl Osd {
 /// drew a thin line along its far edges from the opposite edge (bilinear
 /// filtering and mips across the wrap): two lines beside the rotated needle
 /// and its blur (F739).
-fn sampler([u, v]: [grid_formats::texture::Wrap; 2]) -> ImageSampler {
+pub(crate) fn sampler([u, v]: [grid_formats::texture::Wrap; 2]) -> ImageSampler {
     let mode = |w| match w {
         grid_formats::texture::Wrap::Repeat => ImageAddressMode::Repeat,
         grid_formats::texture::Wrap::Clamp => ImageAddressMode::ClampToEdge,

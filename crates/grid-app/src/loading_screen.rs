@@ -2,27 +2,29 @@
 //! (docs/FRONT_END_FLOW.md): shown by the one-window front end
 //! (front_end_host.rs) while the next screen is built.
 //!
-//! - The original's loading screen is a small 3D world with a stat panel of
-//!   the player's profile facts (`fact_*`), a rotating load circle and fades
-//!   [D, FRONT_END_FLOW.md section 2]. The port has no profile statistics
-//!   yet, so the panel shows the `loading` string ("Loading, please wait")
-//!   (AUTHORED); the 3D world and the facts are open.
+//! - The original's loading screen is a small 3D world (`loading_root` of
+//!   fePersistentDatabase.pssg, seen from `load_cam` as it drifts) with a
+//!   stat panel of the player's profile facts (`fact_*`), a load circle and
+//!   fades [D, FRONT_END_FLOW.md section 2]. The world is drawn by
+//!   [`crate::fe_world`]; the port has no profile statistics yet, so the
+//!   facts panel is open.
 //! - Fades up from black over 0.5 s (`load_world_fade_up`) [D]; the load
-//!   circle is twelve dots with a sweep, one turn a second (AUTHORED).
+//!   circle and the `loading` text are the transition overlay's
+//!   (transition.rs, F779), in the same place, so a hand-off from the
+//!   overlay's "Loading" does not move it.
+//! - Without the install's world (a read error, or `GRID_LOADING_WORLD=off`
+//!   for A/B shots) it falls back to a plain dark screen.
 //! - Its own small app: no audio, no gamepad, no size request.
 
 use crate::pause_menu::Labels;
+use crate::transition::{RingImage, draw_rings, loading_row, ring_image};
 use bevy::prelude::*;
 
 /// `load_world_fade_up` [D persistentdatacommon.xml].
 const FADE_UP: f32 = 0.5;
-const DOTS: usize = 12;
-const RING: f32 = 22.;
 
 #[derive(Component)]
 struct Fade;
-#[derive(Component)]
-struct Dot(usize);
 
 /// The loading screen app, built but not run, for the front end host.
 pub fn app(args: &[String]) -> Result<App, Box<dyn std::error::Error>> {
@@ -47,61 +49,45 @@ pub fn app(args: &[String]) -> Result<App, Box<dyn std::error::Error>> {
         .insert_resource(Text2Show(text))
         .add_systems(Startup, spawn)
         .add_systems(Update, animate);
+    crate::frame_pacing::install_window_shots_as(&mut app, "loading");
+    // `GRID_LOADING_WORLD=off`: the plain fallback, for A/B shots and its smoke.
+    let world = if std::env::var_os("GRID_LOADING_WORLD").is_some_and(|v| v == "off") {
+        Err("GRID_LOADING_WORLD=off".to_owned())
+    } else {
+        crate::fe_world::install(&mut app, &root, &crate::fe_world::LOADING)
+    };
+    let camera = match world {
+        Ok(camera) => Some(camera),
+        Err(e) => {
+            eprintln!("loading screen: no 3D world ({e})");
+            None
+        }
+    };
+    app.insert_resource(WorldCamera(camera));
     Ok(app)
 }
 
 #[derive(Resource)]
 struct Text2Show(String);
 
-fn spawn(mut commands: Commands, text: Res<Text2Show>) {
-    let camera = commands.spawn(Camera2d).id();
+/// The 3D world's camera, which the UI draws over, if the world loaded.
+#[derive(Resource)]
+struct WorldCamera(Option<Entity>);
+
+fn spawn(mut commands: Commands, text: Res<Text2Show>, world: Res<WorldCamera>, mut images: ResMut<Assets<Image>>) {
+    let camera = world.0.unwrap_or_else(|| commands.spawn(Camera2d).id());
+    let ring = ring_image(&mut images);
     commands
         .spawn((
             Node {
+                position_type: PositionType::Absolute,
                 width: percent(100.),
                 height: percent(100.),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: px(28.),
                 ..default()
             },
             UiTargetCamera(camera),
         ))
-        .with_children(|screen| {
-            screen
-                .spawn(Node {
-                    width: px(2. * RING + 12.),
-                    height: px(2. * RING + 12.),
-                    ..default()
-                })
-                .with_children(|ring| {
-                    for i in 0..DOTS {
-                        let angle = i as f32 / DOTS as f32 * std::f32::consts::TAU;
-                        ring.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: px(RING + RING * angle.sin()),
-                                top: px(RING - RING * angle.cos()),
-                                width: px(12.),
-                                height: px(12.),
-                                border_radius: BorderRadius::MAX,
-                                ..default()
-                            },
-                            BackgroundColor(Color::WHITE),
-                            Dot(i),
-                        ));
-                    }
-                });
-            screen.spawn((
-                Text::new(text.0.clone()),
-                TextFont {
-                    font_size: FontSize::Px(26.),
-                    ..default()
-                },
-                TextColor(Color::srgb(0.85, 0.88, 0.92)),
-            ));
-        });
+        .with_children(|screen| loading_row(screen, text.0.clone(), Some(ring), ()));
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -116,12 +102,13 @@ fn spawn(mut commands: Commands, text: Res<Text2Show>) {
     ));
 }
 
-/// The fade up and the circle's sweep, by the app's own clock (each loading
-/// screen is a new app, so it starts at zero).
+/// The fade up and the circle, by the app's own clock (each loading screen
+/// is a new app, so it starts at zero).
 fn animate(
     time: Res<Time>,
-    mut fade: Query<&mut BackgroundColor, (With<Fade>, Without<Dot>)>,
-    mut dots: Query<(&mut BackgroundColor, &Dot), Without<Fade>>,
+    mut fade: Query<&mut BackgroundColor, With<Fade>>,
+    rings: Query<&RingImage>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let t = time.elapsed_secs();
     for mut colour in &mut fade {
@@ -130,11 +117,5 @@ fn animate(
             colour.0.set_alpha(alpha);
         }
     }
-    let head = (t * DOTS as f32).rem_euclid(DOTS as f32);
-    for (mut colour, dot) in &mut dots {
-        // The dot under the sweep is brightest; the trail fades over a turn.
-        let behind = (head - dot.0 as f32).rem_euclid(DOTS as f32);
-        let alpha = 0.15 + 0.85 * (1. - behind / DOTS as f32).powi(2);
-        colour.0 = Color::srgba(0.85, 0.88, 0.92, alpha);
-    }
+    draw_rings(t, &rings, &mut images);
 }

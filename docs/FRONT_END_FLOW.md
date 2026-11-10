@@ -86,6 +86,38 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   30 to 5 over 30 units of height (`loading_reflection`) [D].
 - Post effect `fe_loading_world` (id 19, chain Type4): fast tone map and a 4x-downsampled bloom
   [D effects.xml].
+- **The drawn meshes and their shader (F784).** Below `loading_root` six nodes carry meshes, all
+  with effect `fe3d_tracksurface.fx`, `DiffuseColour` (1, 1, 1), `FresnelMax` 0.2, one-sided:
+  `building`, `barriers`, `gantry` (material `barrier`, texture `extra_text`, Emmisive 0.5),
+  `sky` (`sky`, Emmisive 0.75), and under `floor` the `tarmac_plane` and `logo_plane`
+  (`tarmac_d`, `tarmac_logo`, Emmisive 0.5) [D pssg, `grid-fe-anim --under=loading_root`]. The
+  `screen/…` nodes are panel anchors without meshes. The shaderpack's pixel program
+  `fe3d_tracksurface.cg.fp` computes colour = texture × v2 × (ambient + Emmisive × (1 − ambient))
+  plus a box-projected cube reflection (`r_min`/`r_max`, raised to `r_gamma`, × `r_scale`) times
+  a Fresnel term of at most `FresnelMax` and the texture's alpha; alpha = v2's. Its vertex
+  program `.vp_instanced` sets v2 from a per-instance colour and passes no light, so the
+  group's directional lights do not reach these surfaces [D, private disassembly in the main
+  checkout's `local/front-end-flow/shaders/`].
+- **Textures come from the bundle.** In `fePersistentDatabase.pssg` all four textures are
+  4 × 4 DXT1 stubs (drawn, they give a black screen: F784's first build). The boot dataset
+  `system/render_persistent_data.xml` loads that package as the `FE::DatabaseHandler`
+  "database" and `frontend/b_persistent.pssg` as its "bundle"; the bundle holds the same ids at
+  512 × 512 (`extra_text`, `tarmac_d`, `tarmac_logo` with 9 further mip levels, `sky` with
+  none) [D]. That the bundle's copy replaces the stub is [I] (same ids, the stubs are
+  unusable); the other `b_*.pssg` (garage, DLC) presumably pair with their databases the same way.
+- **`load_cam`'s path.** `camera=load_cam` looks at `target=load_cam` (the saved matrix's view
+  axis points at the target with no roll) [D]. `Anim!0` (18.333 s) moves the camera from
+  (−104.96, −80.00, 169.71) at 1.0 s to (−148.68, −85.16, 144.59) and the target from
+  (−44.25, −54.22, −17.12) to (−51.83, −63.96, −16.85) [D]: a slow drift and turn.
+- **Port (F784, `fe_world.rs`).** The loading screen draws these meshes from the install,
+  each texture from the bundle where it has one (`Spec::bundle`), unlit, texture × `DiffuseColour` × (ambient + Emmisive (1 − ambient)) with the `loading`
+  group's ambient (an sRGB factor on the texture, so the product is the original's gamma-space
+  one [I]; the instance colour taken as `DiffuseColour` [I]), no back-face culling [I], no tone
+  map. The camera follows the two `Translation` channels by the screen's own clock (held before
+  1.0 s and after 18.333 s), vertical FOV 55.4 [I]. The same `fe_world::Spec` takes any other
+  root, camera and lighting group. Open: the cube reflection (at most 0.16 of the cube at grazing
+  angles), the floor reflection (`loading_reflection`), the camera's noise rotation and stick
+  spring, the particle emitter, the `fe_loading_world` post effect and the stat panel.
 - No per-track loading art and no progress bar were found. `raceload.jpk` is race data (physics
   and material parameters, docs/BINARY_XML.md), not loading art [D].
 
@@ -253,9 +285,9 @@ the window:
 screen at the same time. The loading screen attaches as soon as it is ready; the next screen
 attaches when it is ready and the loading screen has been up for 0.8 s (the stat panel's
 `on_time minimum`, section 2), so a fast load does not flash. The loading screen fades up from
-black over 0.5 s (`load_world_fade_up`), shows the `loading` string and a load circle (twelve
-dots with a sweep, one turn a second), on the menu's dark background. Not ported yet: the 3D
-tarmac world and the `fact_*` stat panel (the port keeps no profile statistics). The fade to
+black over 0.5 s (`load_world_fade_up`), draws the 3D loading world (section 2, F784) and shows the `loading` string with the overlay's
+load circle at the bottom right, where the leaving screen's overlay showed them (transition.rs,
+F779). Not ported yet: the `fact_*` stat panel (the port keeps no profile statistics). The fade to
 black before leaving the menu or the race, and the race's fade in, are F756's overlay fade
 (`transition.rs`, docs/SCREEN_FLOW.md): each screen app plays it itself, so the host shows
 menu → black → loading screen → race fading in from black.
