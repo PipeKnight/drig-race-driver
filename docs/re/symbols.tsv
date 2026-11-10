@@ -512,6 +512,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00474100	itemflow_play_discrete	func	crates/grid-tools/src/hud_audio.rs:235 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2303	F772	[V]		not a function entry in the master analysis; move (0x4910DF), an itemflow value step (0x474100) or a step at its
 0x00474130	itemflow_play_dead_end	func	crates/grid-tools/src/hud_audio.rs:236 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2304	F772	[V]		not a function entry in the master analysis; end (0x474130), activate (0x491151) and the screen's back (0x479930).
 0x00475F70	osd_state_message_new	func	not ported	docs/RACE_HUD.md:841	F810	[I]		FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
+0x004766F0	noise3_reset	func	not ported	docs/FRONT_END_FLOW.md		[D]		noise generator reset: calls each octave +8
+0x00476720	noise3_evaluate	func	crates/grid-app/src/camera_noise.rs:102 grid-app::camera_noise::Generator	docs/FRONT_END_FLOW.md:126		[D]		0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
 0x00477940		func	not ported	docs/GARAGE_WORLD.md:25		[V]		[V] 0x4CC8E0 fills the `dynamic_screen_list` with an item for each `targetzone_01..99` found that has `magnets`. The garage named items are matched through 0...
 0x00477B80		func	not ported	docs/FRONT_END_FLOW.md:166		[V]		up `loading_stats` through FUN_00477B80 and reads exactly these keys (`definedanimations` to
 0x00479930	screen_back_sound	func	crates/grid-app/src/career_screen.rs:3453 grid-app::career_screen::sounds ; crates/grid-tools/src/hud_audio.rs:236 grid-tools::hud_audio ; crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2308	F772	[V]		screen back 0x479930, `ScreenOverlay` 0x49CFA0 / 0x4936A0), played now.
@@ -524,10 +526,20 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0047A5B0	FeTextStyle_ParseVAlign	func	crates/grid-formats/src/osd.rs:77 grid-formats::osd::TextLayout	docs/RACE_HUD.md:791				enums as the original's style parsers number them [D 0x47A4F0, 0x47A5B0,
 0x0047A660	FeTextStyle_ParseWrapping	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:791				0x47A660, 0x47A800].
 0x0047A800	FeTextStyle_ParseCase	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:791				0x47A660, 0x47A800].
+0x0047C2E0	camera_frame_from_target	func	not ported	docs/FRONT_END_FLOW.md:139		[D]		first about the camera's side axis (row 0 of the frame from 0x47C2E0, side = up × (eye −
+0x0047C7F0	camera_orbit_by_angles	func	crates/grid-app/src/camera_noise.rs:154 grid-app::camera_noise::orbit	docs/FRONT_END_FLOW.md:138		[D]		(0x47C7F0): the first about the camera's side axis (pitch), the second
+0x0047D100	camera_noise_apply_alt	func	not ported	docs/FRONT_END_FLOW.md:141		[D]		(0x47D100, flag byte +0x190) is off by default.
+0x0047EBA0	camera_noise_read_tweaks	func	not ported	docs/FRONT_END_FLOW.md:124		[D]		0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
+0x0047ECB0	camera_noise_update	func	crates/grid-app/src/camera_noise.rs:8 grid-app::camera_noise	docs/FRONT_END_FLOW.md:125		[D]		0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
 0x00480000		label	not ported	docs/SPEECH_CAREER_PARAMETERS.md:58		[O]		inside 0x0047FFC0; of record +0x40 was found (scan of 0x401000–0x480000 for `+0x14C]`/`+0x434]`, and of 0x438C10
+0x00484640	noise_octave_ctor	func	crates/grid-app/src/camera_noise.rs:64 grid-app::camera_noise::lattice	docs/FRONT_END_FLOW.md:128		[D]	Octave Rand	of index `n`, in (−1, 1] [D 0x484640].
 0x00484714		label	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:35				inside 0x00484640; VRAM-resolution XML only, PID 29472: still `0xc0000005`, but RVA changes to `0x484714`. This change affects execution and does not fix startup. Record: `vram...
+0x00484780	noise_octave_eval	func	crates/grid-app/src/camera_noise.rs:72 grid-app::camera_noise::Octave	docs/FRONT_END_FLOW.md:128		[D]		not a function entry in the master analysis; 0x484780].
 0x00486E20	StateSFXTrigger_enter	func	not ported	docs/AUDIO_RESEARCH.md:2386	F788	[O]		not a function entry in the master analysis; states.bin has one `StateSFXTrigger` (vtable 0xCBACF8, enter 0x486E20 plays its `sfx`
 0x00487680		func	not ported	docs/GARAGE_WORLD.md:32		[V]		Both reflection slots +0x1DC and +0x1E0 are set by 0x487680.
+0x00487D00	camera_noise_ctor	func	crates/grid-app/src/camera_noise.rs:28 grid-app::camera_noise::DEFAULT	docs/FRONT_END_FLOW.md:124		[D]		0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
+0x0048FBA0	camera_tweaks_read_components	func	not ported	docs/FRONT_END_FLOW.md:143		[I]		0x48FBA0); that the loading world uses the `loading` block is [I] by the name.
+0x00490410	camera_tweaks_read_components_member	func	not ported	docs/FRONT_END_FLOW.md:142		[I]		The wiring to the loading camera goes through component tables (0x490410 from 0x4CD3B0,
 0x00490F40	list_widget_input	func	crates/grid-app/src/career_screen.rs:3452 grid-app::career_screen::sounds ; crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2301	F772	[V]	sounds	not a function entry in the master analysis; `overlay_cue`; the list widget 0x490F40, the itemflow 0x49DA70, the
 0x004910DF		func	crates/grid-tools/src/hud_audio.rs:235 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2301				not a function entry in the master analysis; move (0x4910DF), an itemflow value step (0x474100) or a step at its
 0x00491151		func	crates/grid-tools/src/hud_audio.rs:236 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2302				not a function entry in the master analysis; end (0x474130), activate (0x491151) and the screen's back (0x479930).

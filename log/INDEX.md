@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F812](F0812.md) | 2026-11-10 | Loading camera noise rotation |
 | [F811](F0811.md) | 2026-11-10 | Pause Restart darkening; pause tone map blocked on row 77 |
 | [F810](F0810.md) | 2026-11-10 | Results screen in the front-end art (row 69): fe3d materials, pause_root camera, row driver, DXT3 textures |
 | [F809](F0809.md) | 2026-11-10 | GRID World garage scene and livery 3D preview: static research |

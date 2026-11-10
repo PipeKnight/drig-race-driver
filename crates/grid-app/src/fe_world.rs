@@ -18,7 +18,9 @@
 //!   axis points at the target, roll free [D]); both follow their
 //!   `Translation` channels from the world's start (held before the first
 //!   key and after the last); vertical field of view `FOV` [I, as the OSD
-//!   camera]. The original's noise rotation and stick spring are open.
+//!   camera]. On top, the camera noise of the world's `camera_tweaks`
+//!   block orbits it slowly about its target ([`crate::camera_noise`]); the
+//!   stick spring (player-turned view) is open.
 //! - Instances: a node `kind/glyph=instance` draws the glyph `<glyph>_root`
 //!   below its transform (`grid_formats::osd_glyph`, F787), except a
 //!   `screen/` instance: that is a front-end screen's panel, which its screen
@@ -51,6 +53,9 @@ pub struct Spec<'a> {
     pub camera: &'a str,
     /// The `fe_paramcontrol.xml` parameter group that lights it.
     pub lights: &'a str,
+    /// The `frontend/persistentdatarender.xml` `<camera_tweaks>` block
+    /// whose `noise_tweaks` move its camera.
+    pub tweaks: &'a str,
 }
 
 /// The loading screen's world [D fePersistentDatabase.pssg, b_persistent.pssg,
@@ -61,6 +66,7 @@ pub const LOADING: Spec<'static> = Spec {
     root: "loading_root",
     camera: "load_cam",
     lights: "loading",
+    tweaks: "loading",
 };
 
 /// A position over time: three curves in the parent's space.
@@ -85,12 +91,27 @@ impl Path3 {
 pub struct WorldCamera {
     eye: Path3,
     target: Path3,
+    noise: Option<crate::camera_noise::CameraNoise>,
 }
 
 impl WorldCamera {
     /// The camera's transform `t` seconds into the world.
     pub fn transform(&self, t: f32) -> Transform {
         Transform::from_translation(self.eye.at(t)).looking_at(self.target.at(t), Vec3::Y)
+    }
+
+    /// The transform `t` seconds in, `dt` after the last call, with the
+    /// noise orbit on the path's place.
+    pub fn advance(&mut self, t: f32, dt: f32) -> Transform {
+        let (eye, target) = (self.eye.at(t), self.target.at(t));
+        let eye = match &mut self.noise {
+            Some(noise) => {
+                let (pitch, yaw) = noise.angles(dt);
+                crate::camera_noise::orbit(eye, target, Vec3::Y, pitch, yaw)
+            }
+            None => eye,
+        };
+        Transform::from_translation(eye).looking_at(target, Vec3::Y)
     }
 }
 
@@ -186,9 +207,12 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
         .find(|c| scene.nodes[c.node].id == camera_id)
         .ok_or(format!("no {camera_id}"))?;
     let target = scene.node(&format!("target={}", spec.camera)).ok_or(format!("no target={}", spec.camera))?;
+    let render = String::from_utf8_lossy(&read("frontend/persistentdatarender.xml")?).into_owned();
+    let tweaks = crate::camera_noise::Tweaks::read(&render, spec.tweaks).ok_or(format!("no {} camera tweaks", spec.tweaks))?;
     let world_camera = WorldCamera {
         eye: path(&scene, camera.node),
         target: path(&scene, target),
+        noise: Some(crate::camera_noise::CameraNoise::new(tweaks)),
     };
     let start = world_camera.transform(0.);
     let projection = Projection::Perspective(PerspectiveProjection {
@@ -286,9 +310,9 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
 
 /// Moves the camera along its paths by the app's clock (each loading screen
 /// is a new app, so the world starts at zero).
-fn follow(time: Res<Time>, mut cameras: Query<(&WorldCamera, &mut Transform)>) {
-    for (camera, mut transform) in &mut cameras {
-        *transform = camera.transform(time.elapsed_secs());
+fn follow(time: Res<Time>, mut cameras: Query<(&mut WorldCamera, &mut Transform)>) {
+    for (mut camera, mut transform) in &mut cameras {
+        *transform = camera.advance(time.elapsed_secs(), time.delta_secs());
     }
 }
 
@@ -366,9 +390,10 @@ mod tests {
         let cam = scene.cameras.iter().find(|c| scene.nodes[c.node].id == "camera=load_cam").unwrap();
         assert!((cam.fov_degrees - 55.4).abs() < 0.1, "{}", cam.fov_degrees);
         let target = scene.node("target=load_cam").unwrap();
-        let camera = WorldCamera {
+        let mut camera = WorldCamera {
             eye: path(&scene, cam.node),
             target: path(&scene, target),
+            noise: None,
         };
         // Before its first key (1 s) the camera holds its saved place; its
         // forward axis matches the saved matrix's -Z.
@@ -391,5 +416,17 @@ mod tests {
         assert!(t.forward().dot(forward) > 0.9999, "{:?} {forward:?}", t.forward());
         // It drifts to its last key by 18.333 s.
         assert!((camera.transform(30.).translation.x - -148.6768).abs() < 0.01);
+        // The loading tweaks orbit it by at most about 0.1 rad about its
+        // target, keeping the distance.
+        let render = std::fs::read_to_string(Path::new(&root).join("frontend/persistentdatarender.xml")).unwrap();
+        let tweaks = crate::camera_noise::Tweaks::read(&render, LOADING.tweaks).unwrap();
+        assert_eq!((tweaks.rotation[0], tweaks.rate), (0.1, 0.066));
+        camera.noise = Some(crate::camera_noise::CameraNoise::new(tweaks));
+        let (eye, aim) = (camera.eye.at(30.), camera.target.at(30.));
+        for _ in 0..600 {
+            let moved = camera.advance(30., 0.05);
+            assert!((moved.translation.distance(aim) - eye.distance(aim)).abs() < 0.01);
+            assert!((moved.translation - aim).angle_between(eye - aim) < 0.2);
+        }
     }
 }

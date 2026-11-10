@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F812](log/F0812.md) | 2026-11-10 | Loading camera noise rotation |
 | [F811](log/F0811.md) | 2026-11-10 | Pause Restart darkening; pause tone map blocked on row 77 |
 | [F810](log/F0810.md) | 2026-11-10 | Results screen in the front-end art (row 69): fe3d materials, pause_root camera, row driver, DXT3 textures |
 | [F809](log/F0809.md) | 2026-11-10 | GRID World garage scene and livery 3D preview: static research |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F755](log/F0755.md) | 2026-11-09 | AI retire 1:1: stuck latch, Racing gate, terminal damage stops then leaves |
 | [F754](log/F0754.md) | 2026-11-09 | Water probes at authored markers; original shadow depth offsets and disc radii |
 | [F753](log/F0753.md) | 2026-11-09 | AI yield full brake when sliding and backwards brake (0x78990B, 0x7764C0); first-corner matrix |
-| [F752](log/F0752.md) | 2026-11-05 | Playable 343de39742df for the PC and both APKs (first tyre smoke builds no pipeline mid-race) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

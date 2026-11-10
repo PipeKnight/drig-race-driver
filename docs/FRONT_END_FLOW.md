@@ -117,8 +117,36 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   map. The camera follows the two `Translation` channels by the screen's own clock (held before
   1.0 s and after 18.333 s), vertical FOV 55.4 [I]. The same `fe_world::Spec` takes any other
   root, camera and lighting group. Open: the cube reflection (at most 0.16 of the cube at grazing
-  angles), the floor reflection (`loading_reflection`), the camera's noise rotation and stick
-  spring, the particle emitter, the `fe_loading_world` post effect and the stat panel.
+  angles), the floor reflection (`loading_reflection`), the stick spring, the particle emitter,
+  the `fe_loading_world` post effect and the stat panel. The noise rotation is ported (next item).
+- **Camera noise (static analysis of the unpacked exe).** The `<noise_tweaks>` of a
+  `<camera_tweaks>` block (`default`, `pause`, `loading`, `in_game_cameras`) are read by
+  0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
+  rate 1.066, dampen 1 s). Its update 0x47ECB0 (camera, dt) [D]:
+  - Two generators (vtable 0xCB8570, evaluate 0x476720) each sum three octaves at
+    frequencies 1, 2, 4 with weights 1, ½, ¼ and divide by 1.75. An octave (constructor
+    0x484640, evaluate 0x484780) keeps four values of the integer noise
+    1 − hash(n)/2³⁰ (`n = (n<<13)^n`, `(n(n²·15731 + 789221) + 1376312589) & 0x7fffffff`) from a
+    start index `rand() % 100`. Each call advances t by its step; past 1 it shifts in the next
+    value. It returns the cubic P t³ + Q t² + R t + S with P = (v3 − v2) − (v0 − v1),
+    Q = (v0 − v1) − P, R = v2 − v0 and S = v1.
+  - The step is `rotation_rate × dt`, so `rotation_rate` is lattice steps per second (0.066:
+    about 15 s each, as the file's comment says).
+  - Angles: `noise_rotation_x` × first generator and `noise_rotation_y` × second, times
+    clamp(2f² − f³), f = 1 − dampen share. The share moves at ±dt/`dampen_to_zero` in a direction
+    that is 0 by default; at 1 both generators reset. `noise_rotation_z` is read but unused here.
+  - 0x47C7F0 orbits the camera position about its target by these two angles in radians: the
+    first about the camera's side axis (row 0 of the frame from 0x47C2E0, side = up × (eye −
+    target), rolled by the camera's roll), the second about its up axis (row 1). Another path
+    (0x47D100, flag byte +0x190) is off by default.
+  - The wiring to the loading camera goes through component tables (0x490410 from 0x4CD3B0,
+    0x48FBA0); that the loading world uses the `loading` block is [I] by the name.
+  - Port (`camera_noise.rs`, any block by name; `fe_world::Spec::tweaks`): the same octaves, the
+    MSVC `rand` from its default seed 1 for the start indices (the original seed is unknown [I]),
+    the dampen share kept at 0 (no setter found on this path [I]), and the orbit with world up,
+    yaw then pitch (the order and signs are not resolved; with symmetric random angles they do
+    not show [I]). With the `loading` values (0.1, 0.1, rate 0.066) the camera turns up to about
+    0.1 rad about its target.
 - **Screens placed in the world (F791).** `loading_root`'s 16 `screen/<glyph>=…` nodes are
   instances (F787, `grid_formats::osd_glyph`): grafted, they add 2434 meshes, nearly all of
   the `fe3d_generic` family (generic, G, GD, GMPD, GPD, I), `fe3d_particle` and `fe3d_ramp`, from
