@@ -158,6 +158,9 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F797](log/F0797.md) | 2026-11-10 | Replay sound and highlight monitors traced; engine sound replayed |
+| [F796](log/F0796.md) | 2026-11-10 | Damage parts, glass, lights and shards replayed; crash replay tested with a real wreck |
+| [F795](log/F0795.md) | 2026-11-10 | Flashback count across career multi-race events |
 | [F794](log/F0794.md) | 2026-11-10 | Replay and Flashback round 5: automatic crash replay, Restart reload, bonus, TERMINAL flag, checkpoint heap |
 | [F793](log/F0793.md) | 2026-11-10 | Career team sum: an AI car without a team counts for the player (0x660E90) |
 | [F792](log/F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |
@@ -215,9 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F740](log/F0740.md) | 2026-11-05 | Row 115: tree shadows built mid-race; shadow cull keeps unculled casters so the warm-up builds every shadow variant |
 | [F739](log/F0739.md) | 2026-11-05 | OSD sprites clamp as the original's wrapS/wrapT say: no thin lines beside the speedometer needle |
 | [F738](log/F0738.md) | 2026-11-05 | Track surfaces take the route's macro AO scale; Washington black void gone (row 119) |
-| [F737](log/F0737.md) | 2026-11-05 | Race OSD froze after a mid-race window resize: the display material kept the old texture; rebind on resize, render-world bind check, window check tool |
-| [F736](log/F0736.md) | 2026-11-05 | Row 117 crash as a cinematic clip: the owner's race replayed exactly from its input log (GRID_CINE) |
-| [F735](log/F0735.md) | 2026-11-05 | Trees switch to their card where the original cross-fades, not at d0 |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

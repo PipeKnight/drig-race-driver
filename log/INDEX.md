@@ -8,6 +8,9 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F797](F0797.md) | 2026-11-10 | Replay sound and highlight monitors traced; engine sound replayed |
+| [F796](F0796.md) | 2026-11-10 | Damage parts, glass, lights and shards replayed; crash replay tested with a real wreck |
+| [F795](F0795.md) | 2026-11-10 | Flashback count across career multi-race events |
 | [F794](F0794.md) | 2026-11-10 | Replay and Flashback round 5: automatic crash replay, Restart reload, bonus, TERMINAL flag, checkpoint heap |
 | [F793](F0793.md) | 2026-11-10 | Career team sum: an AI car without a team counts for the player (0x660E90) |
 | [F792](F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |

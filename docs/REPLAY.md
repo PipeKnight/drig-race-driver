@@ -79,8 +79,8 @@ The original stores **state snapshots** and interpolates them; it does not re-si
   collision sounds are replay channels of their own [D]; their record formats were not traced.
 - Sound: not recorded as such; the replay states switch the audio mode
   (`set_audio_paused_replay`/`PausedReplay`, `StateAudioStopReplayMusic`) and the post-race replay
-  plays `audio/music/replay%i.WIM` [D]. Whether engine sound is regenerated from replayed
-  vehicle state was not traced.
+  plays `audio/music/replay%i.WIM` [D]. Only collision sounds have a channel of their own
+  ("broadcast: audio collisions") [D]. The replay's level and shuttle cues are §2.7.
 - Camera: not recorded; the replay camera system chooses shots at playback (§2.5) [D].
 - Highlight monitors (`OverCliffMonitor`, `LoseWheelMonitor`, `BodyWorkDamageMonitor`,
   `ObjectCollisionMonitor` with `MinDeltaSpeed`/`MaxDamage`… parameters) feed the replay
@@ -179,6 +179,31 @@ The replay camera set is separate from the race cameras (F349):
   camera (`StatePostRaceSetReplayCamera`) [D].
 - The camera classes behind the parameters: docs/REPLAY_DIRECTOR_RESEARCH.md (zoom vtable 0xD001A8, static 0xD000D8).
 
+### 2.7 Replay sound (F797) [D static unless marked]
+
+Twelve functions read the replay controller's mode (world+0x2200, then +0xA30); the shuttle
+speed S is at +0xA7C and a flag at +0x9FC. The two sound readers are called from the swoosh
+manager's update 0x44E860 (docs/AUDIO_RESEARCH.md §7.4):
+
+- **0x4430C0, the replay level.** Its target T is 0, or −48 dB while +0x9FC is set. In mode 0
+  (playing) with S < 0.97, T is −96: it plays cue (bank 0x33, 0x1D) once (latch +0x374) and the
+  loop (0x33, 0x18) kept at +0x394. In another mode with the level below 0, T is −96; mode 2
+  (paused) gives −48. With S > 0.97 the loop is stopped. The level +0x38C steps 4 dB per call
+  toward T, clamped to [−48, 0], and is written to sound groups 0..7 through 0x46A7D0 on the
+  mixer DAT_00EBF758 (group chosen by PTR_00E50264 vf+4). Modes 3, 4, 5, 6 and 7/2 play cues
+  0x26, 0x20, 0x29, 0x26 and 0x22 with their own fade (+0x380: −0.8 per call down to −48, +4
+  toward −12 in modes 0xB and 2).
+- **0x442B30, the shuttle cues.** Cue (0x33, 0x25) when |S| falls to ≤ 0.2 from ≥ 0.9 (the
+  previous S is kept at +0x378), cue (0x33, 0x24) when it rises to ≥ 0.9 from ≤ 0.2; not in
+  mode 0xB.
+- So the car and world groups 0..7 sound at full level while a replay plays at normal speed
+  and fade to −48 dB when it is slowed or paused [D]. They must then be produced from the
+  replayed vehicles [I: no recorded sound channel other than collisions]. Bank 0x33's file and
+  the cues' samples were not identified [I].
+- The mix mode around a replay is the flow's (AUDIO_RESEARCH §33): a replay from the pause menu
+  is inside Paused (all groups −48 except Global Ambience and HUD), a replay from the results is
+  Normal, the terminal-damage replay changes nothing [D].
+
 ## 3. The port
 
 ### 3.1 Recording (`replay.rs`, `replay/frame.rs`, `replay/stream.rs`)
@@ -257,8 +282,13 @@ The replay camera set is separate from the race cameras (F349):
   - broken props and pieces;
   - the camera.
 
-  Damage parts that swing on the live car (bonnet, doors) ride on the replayed body. Bodywork
-  lying on the road more than 2 m from its place stays where it is (AUTHORED).
+  Damage parts (F796): each frame records every car's parts off their rest place (a hinged
+  part's swing angle, a detached part's world frame). The replay draws them as recorded at the
+  replay time: a part still attached then is drawn at rest, a swinging one at its replayed
+  angle on the replayed body, a detached one at its replayed world frame. Glass and lights are
+  found again from the replayed deformation (not latched: a rewind restores them); shards fall
+  each time the replayed glass breaks (no glass sound). When the replay ends the live
+  parts, glass and lights return.
 - Replayed effects ([`replay_effects.rs`](../crates/grid-app/src/replay_effects.rs)): skid marks,
   wheel debris and tyre smoke show the state they had in the race at the replay time, forwards,
   backwards, slowed and after a seek. The frame records each car's effect inputs (`Effects`:
@@ -283,7 +313,15 @@ The replay camera set is separate from the race cameras (F349):
 - HUD and menus are hidden while the replay plays (`osd_play_off`, `hide_pause_show_overlay`) [D].
   The replay panel (AUTHORED plain text) shows the title (the user's language strings), time,
   play state, camera and, for 6 s after the last input [D `timeOut`], the keys.
-- Engine and tyre sound stay muted (the simulation is paused); replay music is not played.
+- Engine sound (F797): every frame records each car's engine control (normalised engine
+  speed, applied throttle, gear; `frame::Effects`). While a replay is shown, `engine_sound`
+  sends the replayed controls to every car's engine voices once per frame and places them at
+  the replayed poses and velocities (levels, pan, Doppler); the live controls return when the
+  replay ends. The car groups get 0x4430C0's level (§2.7): full while playing at shuttle
+  ≥ 0.97 without slow motion, otherwise 4 dB per frame down to −48 dB. The mix mode stays the
+  flow's (a pause-menu replay is inside Paused). Tyre sound, the gear whine, backfires from the
+  tick model and collision sounds stay silent in a replay; replay music and the shuttle cues
+  (bank 0x33) are not played (§6).
 
 ### 3.3 Cameras (`replay/director.rs`)
 
@@ -359,14 +397,16 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 
 ## 6. Open items
 
-- The vehicle component's own replay fields, the director's event timeline
-  and highlight monitors were not traced; the terminal-damage replay's start position needs a
-  capture (below).
-- Not replayed (shown as they are when the replay starts): glass and light damage, shards,
-  damage-part swing angles, collision sparks and other particles than tyre smoke and wheel
-  debris, sound.
-- Replay Save has no consumer in the PC executable (§3.2). The director's traced timeline is
-  open.
+- The vehicle component's own replay fields were not traced; the highlight monitors'
+  structure is traced (REPLAY_DIRECTOR_RESEARCH.md §2.7) but not their parameter data; the
+  terminal-damage replay's start position needs a capture (below).
+- Replay sound (§2.7): engine sound is replayed (F797); tyre, whine and collision sound in a
+  replay, the shuttle cues and replay music are not; bank 0x33 is not identified. Whether the
+  original regenerates engine sound from replayed cars (rather than a recorded channel) is [I]:
+  only collisions have a recorded channel.
+- Not replayed: the port has no collision sparks; tyre smoke, skid marks and wheel debris are
+  replayed (`replay_effects.rs`), and since F796 damage parts, glass, lights and shards too.
+- Replay Save has no consumer in the PC executable (§3.2).
 - Terminal-damage replay (round 3, corrected in round 4): the wreck screen's Replay runs a
   terminal session (`Replay::request_terminal`): the director takes each zone's first `TERMINAL`
   camera (0x93F770 compares 8 characters; 0x93F840 passes both to 0x93C9D0, which shows it while

@@ -395,3 +395,83 @@ fn view_replay_plays_the_whole_race_from_the_results() {
         assert_eq!(digest(&app), before);
     });
 }
+
+/// The automatic crash replay with a real wreck: the player loses a wheel
+/// through the field's shared loose-wheel path (`MultiRuntime::
+/// force_wheel_loss`, as `grid-opponent-race`'s scripted crash does), and
+/// the car's own handling update then finds the damage terminal (status 4,
+/// 9E65B0). The wreck screen then plays the terminal-damage replay by itself
+/// (flow `terminal_damage_delay` → `instant_race_replay_silent`), from 10 s
+/// before the wreck, and its exit shows the wreck menu with the race still
+/// frozen.
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn a_real_wreck_plays_the_crash_replay_by_itself() {
+    use crate::post_race::Stage;
+    big_stack(|| {
+        let mut app = with_replay(race_app_with(DONINGTON, &["lac", "bmw"], 2, true), DONINGTON);
+        drive_to(&mut app, 900);
+        {
+            // The player is car 0 of the field only inside the tick (main.rs
+            // swaps it in around `MultiRuntime::tick`).
+            let mut d = app.world_mut().resource_mut::<Driving>();
+            let d = &mut *d;
+            let o = d.opponents.as_mut().expect("field race");
+            std::mem::swap(&mut d.runtime, &mut o.multi.cars[0]);
+            let lost = o.multi.force_wheel_loss(0, 2);
+            std::mem::swap(&mut d.runtime, &mut o.multi.cars[0]);
+            assert!(lost.unwrap(), "the rear-left wheel comes off");
+        }
+        let mut hits = 0;
+        while app.world().resource::<Driving>().runtime.terminal_wheel().is_none() {
+            assert!(hits < 120, "no terminal damage {hits} frames after the wheel loss");
+            hits += 1;
+            frame(&mut app);
+        }
+        let wreck = ticks(&app);
+        // The wreck transitions, then the crash replay starts by itself.
+        let mut frames = 0;
+        while replay(&app).session.is_none() {
+            assert!(frames < 1200, "no crash replay {frames} frames after the wreck");
+            frame(&mut app);
+            frames += 1;
+        }
+        assert_eq!(ticks(&app), wreck, "the wrecked car is frozen");
+        let before = digest(&app);
+        {
+            let r = replay(&app);
+            let s = r.session.as_ref().unwrap();
+            assert_eq!((s.kind, s.origin), (Kind::Instant, Origin::Results));
+            assert!(s.terminal, "the terminal-damage replay");
+            assert!(s.player.end >= seconds(wreck) - seconds(3));
+            let oldest = seconds(r.stream.tick(r.stream.frames().start));
+            assert!(
+                (s.player.start - (seconds(wreck) - INSTANT_REWIND).max(oldest)).abs() <= seconds(3),
+                "starts 10 s before the wreck: {} {}",
+                s.player.start,
+                seconds(wreck)
+            );
+        }
+        // The replay shows the recorded crash: the replayed player reaches
+        // the wrecked pose.
+        for _ in 0..900 {
+            frame(&mut app);
+            let s = replay(&app).session.as_ref().expect("the crash replay plays on");
+            if s.player.time >= s.player.end - seconds(2) {
+                break;
+            }
+        }
+        let shown = replay(&app).session.as_ref().unwrap().shown.clone().unwrap();
+        let live = Mat4::from_cols_array(&app.world().resource::<Driving>().runtime.pose());
+        assert!(
+            shown.cars[0].pose.translation().distance(live.w_axis.truncate()) < 5.,
+            "the replay ends at the wreck"
+        );
+        // Replay Exit: the wreck menu, nothing moved.
+        tap(&mut app, KeyCode::Escape);
+        assert!(replay(&app).session.is_none());
+        assert_eq!(app.world().resource::<PostRace>().stage, Stage::Wreck);
+        assert_eq!(digest(&app), before);
+        eprintln!("crash replay: hits={hits} wreck_tick={wreck} frames_to_replay={frames}");
+    });
+}

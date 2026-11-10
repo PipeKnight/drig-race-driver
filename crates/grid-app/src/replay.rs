@@ -297,6 +297,7 @@ impl Replay {
         runtimes: &[&Runtime],
         props: Option<Props>,
         lost: impl Fn(usize, usize) -> Option<Mat4>,
+        parts: impl Fn(usize) -> Vec<frame::Part>,
     ) {
         let Some(player) = runtimes.first() else {
             return;
@@ -333,7 +334,7 @@ impl Replay {
             cars: runtimes
                 .iter()
                 .enumerate()
-                .map(|(i, r)| car(r, |w| lost(i, w)))
+                .map(|(i, r)| car(r, |w| lost(i, w), parts(i)))
                 .collect(),
             props,
         };
@@ -580,7 +581,7 @@ fn terminal_start(oldest: f64, end: f64, wreck: f64) -> f64 {
     (wreck - INSTANT_REWIND).max(oldest).min(end)
 }
 
-fn car(runtime: &Runtime, lost: impl Fn(usize) -> Option<Mat4>) -> Car {
+fn car(runtime: &Runtime, lost: impl Fn(usize) -> Option<Mat4>, parts: Vec<frame::Part>) -> Car {
     let v = runtime.velocity();
     let wheels = runtime.wheels();
     let deformation = runtime
@@ -611,6 +612,7 @@ fn car(runtime: &Runtime, lost: impl Fn(usize) -> Option<Mat4>) -> Car {
         }),
         deformation,
         lost: std::array::from_fn(|k| lost(k).map(Pose::from_mat4)),
+        parts,
         effects: effects(runtime),
     }
 }
@@ -621,6 +623,13 @@ pub fn effects(runtime: &Runtime) -> frame::Effects {
     let f = |o: usize| f32::from_bits(b[o / 4]);
     let byte = |o: usize| (b[o / 4] >> (o % 4 * 8)) & 255;
     let w = runtime.angular_velocity();
+    // The engine sound's control as engine_sound builds it for a live car.
+    let throttle = if runtime.terminal_wheel().is_some() {
+        0.
+    } else {
+        grid_tools::engine_audio::Control::applied_throttle(b)
+    };
+    let engine = grid_tools::engine_audio::Control::vehicle(b, throttle, true, 0);
     frame::Effects {
         angular_velocity: Vec3::new(w[0], w[1], w[2]),
         speed: f(0x1648),
@@ -628,6 +637,9 @@ pub fn effects(runtime: &Runtime) -> frame::Effects {
         rear_coefficient: f(0x1008),
         handbrake: byte(0x1640) != 0,
         open_wheel: b[0xeda8 / 4] != 0,
+        rpm: engine.normalized_rpm,
+        throttle: engine.throttle,
+        gear: u8::try_from(engine.gear.min(15)).unwrap_or(0),
         wheels: std::array::from_fn(|i| {
             let o = 0x1990 + i * 0x150;
             frame::WheelEffects {
@@ -732,9 +744,13 @@ pub fn record(
             .dynamic_props()
             .map(|p| props(p, &driving.runtime.state.world.groups.bodies)),
     };
-    replay.record(driving.segment, &runtimes, props, |car, wheel| {
-        damage.as_ref().and_then(|d| d.lost_wheel(car, wheel))
-    });
+    replay.record(
+        driving.segment,
+        &runtimes,
+        props,
+        |car, wheel| damage.as_ref().and_then(|d| d.lost_wheel(car, wheel)),
+        |car| damage.as_ref().map_or_else(Vec::new, |d| d.shown_parts(car)),
+    );
 }
 
 fn input(actions: &Actions) -> player::Input {
@@ -968,6 +984,7 @@ type PartQuery<'w, 's> = Query<
         Option<&'static crate::DeformingPart>,
         &'static Mesh3d,
         &'static mut Aabb,
+        Entity,
     ),
     (Without<crate::OpponentPart>, Without<crate::ViewerCamera>),
 >;
@@ -980,15 +997,17 @@ type OpponentQuery<'w, 's> = Query<
         Option<&'static crate::OpponentDeforming>,
         &'static Mesh3d,
         &'static mut Aabb,
+        Entity,
     ),
     (Without<crate::MovingPart>, Without<crate::ViewerCamera>),
 >;
 
-/// Parts that moved this far from their rest place on the live car are
-/// lying on the road (detached bodywork): they stay where they are
-/// (AUTHORED).
-const DETACHED: f32 = 2.;
-
+/// Where a car part is drawn in the replay. A wheel follows the replayed
+/// wheel (or its lost-wheel frame); other parts keep their place relative to
+/// the live car (damage_parts draws them with the replayed swing angle) and
+/// follow the replayed body, except the detached parts damage_parts placed
+/// in the world (`world`), which stay where it put them.
+#[allow(clippy::too_many_arguments)]
 fn part_transform(
     replay_pose: Mat4,
     live_pose: Mat4,
@@ -997,6 +1016,7 @@ fn part_transform(
     wheel: Option<usize>,
     lost_with_wheel: bool,
     car: &Car,
+    world: bool,
 ) -> Option<Transform> {
     if let Some(w) = wheel {
         if lost_with_wheel && let Some(lost) = car.lost[w] {
@@ -1006,9 +1026,11 @@ fn part_transform(
             replay_pose * wheel_motion(&car.wheels[w], &car.geometry[w]) * rest,
         ));
     }
+    if world {
+        return None;
+    }
     let local = live_pose.inverse() * live.to_matrix();
-    let moved = (local * rest.inverse()).w_axis.truncate().length();
-    (moved <= DETACHED).then(|| Transform::from_matrix(replay_pose * local))
+    Some(Transform::from_matrix(replay_pose * local))
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1032,6 +1054,7 @@ pub fn present(
     mut meshes: ResMut<Assets<Mesh>>,
     mut presentation: ResMut<crate::DeformationPresentation>,
     labels: Option<Res<crate::pause_menu::Labels>>,
+    damage: Option<Res<crate::damage_parts::DamageParts>>,
 ) {
     let replay = &mut *replay;
     // A replay that ended: the live view and HUD come back.
@@ -1129,17 +1152,19 @@ pub fn present(
     let live_pose = |car: usize| driving.shown_pose(car);
     if let (Some(car), Some(live)) = (shown.cars.first(), live_pose(0)) {
         let pose = car.pose.to_mat4();
-        for (part, mut transform, ..) in &mut parts {
-            if let Some(t) = part_transform(pose, live, &transform, part.rest, part.wheel, part.lost_with_wheel, car) {
+        for (part, mut transform, .., entity) in &mut parts {
+            let world = damage.as_ref().is_some_and(|d| d.placed_in_world(entity));
+            if let Some(t) = part_transform(pose, live, &transform, part.rest, part.wheel, part.lost_with_wheel, car, world) {
                 *transform = t;
             }
         }
     }
-    for (part, mut transform, ..) in &mut opponents {
+    for (part, mut transform, .., entity) in &mut opponents {
         let (Some(car), Some(live)) = (shown.cars.get(part.car), live_pose(part.car)) else {
             continue;
         };
-        if let Some(t) = part_transform(car.pose.to_mat4(), live, &transform, part.rest, part.wheel, part.lost_with_wheel, car) {
+        let world = damage.as_ref().is_some_and(|d| d.placed_in_world(entity));
+        if let Some(t) = part_transform(car.pose.to_mat4(), live, &transform, part.rest, part.wheel, part.lost_with_wheel, car, world) {
             *transform = t;
         }
     }
@@ -1159,7 +1184,7 @@ pub fn present(
             live.with_current(&recorded.nodes, recorded.active).ok()
         };
         if let Some(f) = field(0) {
-            for (_, _, source, handle, mut bounds) in &mut parts {
+            for (_, _, source, handle, mut bounds, _) in &mut parts {
                 if let Some(source) = source
                     && let Ok(mesh) = crate::body_damage::project(&source.source, source.raw_bind, &f)
                     && let Some(next) = mesh.compute_aabb()
@@ -1171,7 +1196,7 @@ pub fn present(
             }
         }
         let fields: Vec<Option<grid_tools::body_deformation::Field>> = (0..shown.cars.len()).map(|c| if c == 0 { None } else { field(c) }).collect();
-        for (part, _, deforming, handle, mut bounds) in &mut opponents {
+        for (part, _, deforming, handle, mut bounds, _) in &mut opponents {
             if let (Some(crate::OpponentDeforming(source)), Some(Some(f))) = (deforming, fields.get(part.car))
                 && let Ok(mesh) = crate::body_damage::project(&source.source, source.raw_bind, f)
                 && let Some(next) = mesh.compute_aabb()

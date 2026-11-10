@@ -17,6 +17,7 @@
 use bevy::{asset::RenderAssetUsages, camera::primitives::Aabb, image::ImageSampler, prelude::*};
 use std::{collections::BTreeMap, path::Path};
 
+use crate::replay::frame;
 use grid_tools::loose_parts::{Config, EXHAUSTS, PARTS, State, WINDOWS, ZONES};
 #[cfg(test)]
 use grid_tools::loose_parts::Rule;
@@ -514,6 +515,31 @@ impl DamageParts {
         self.reset = true;
     }
 
+    /// Car `car`'s parts off their rest place after the tick, for the replay
+    /// recording: swing angle or detached world frame.
+    pub(crate) fn shown_parts(&self, car: usize) -> Vec<frame::Part> {
+        let Some(c) = self.cars.get(car) else {
+            return Vec::new();
+        };
+        c.parts
+            .iter()
+            .filter_map(|(name, part)| {
+                let index = u8::try_from(PARTS.iter().position(|p| p == name)?).ok()?;
+                let shown = match part.state {
+                    State::Attached => return None,
+                    State::Loose => frame::PartShown::Loose(part.angle),
+                    State::Detached => frame::PartShown::Detached(frame::Pose::from_mat4(part.world()?)),
+                };
+                Some(frame::Part { index, shown })
+            })
+            .collect()
+    }
+
+    /// The part was drawn at its world frame this frame (detached).
+    pub(crate) fn placed_in_world(&self, entity: Entity) -> bool {
+        self.world_placed.contains(&entity)
+    }
+
     /// Where car `car`'s wheel `wheel` is drawn once it has come off (world).
     pub(crate) fn lost_wheel(&self, car: usize, wheel: usize) -> Option<Mat4> {
         Some(self.cars.get(car)?.wheels.get(wheel)?.as_ref()?.matrix())
@@ -620,6 +646,11 @@ pub(crate) struct DamageParts {
     cracked: BTreeMap<(AssetId<StandardMaterial>, bool), Handle<StandardMaterial>>,
     shard_assets: Option<(Handle<Mesh>, Handle<StandardMaterial>)>,
     camera: Option<(usize, Vec3)>,
+    /// A replay is shown: parts, glass and lights are the replayed ones.
+    replaying: bool,
+    /// Detached parts drawn at their world frame this frame (crate::replay
+    /// leaves them there).
+    world_placed: Vec<Entity>,
 }
 
 /// lac.ppts: count, then 40-byte entries (32-byte name, point count, offset)
@@ -725,6 +756,8 @@ pub(crate) fn install(
         log_zones: crate::settings::diagnostics().damage_zones,
         cracked: BTreeMap::new(),
         shard_assets: None,
+        replaying: false,
+        world_placed: Vec::new(),
         camera: crate::settings::diagnostics()
             .damage_camera
             .as_deref()
@@ -734,7 +767,13 @@ pub(crate) fn install(
             }),
     })
     .add_systems(FixedUpdate, tick.after(crate::drive_tick))
-    .add_systems(Update, present.after(crate::drive_present).in_set(Presented))
+    .add_systems(
+        Update,
+        present
+            .after(crate::drive_present)
+            .after(crate::replay::control)
+            .in_set(Presented),
+    )
     .add_systems(Update, present_lost_wheels.after(crate::drive_present));
 }
 
@@ -1056,6 +1095,31 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
     }
 }
 
+/// A part as drawn: its state, swing angle and detached world frame, from
+/// the live part between the last two ticks or from the replayed car.
+fn drawn(
+    car: &CarDamage,
+    replayed: Option<&frame::Car>,
+    name: &str,
+    alpha: f32,
+) -> Option<(State, f32, Option<Mat4>)> {
+    match replayed {
+        Some(c) => {
+            let index = PARTS.iter().position(|p| *p == name)?;
+            let p = c.parts.iter().find(|p| usize::from(p.index) == index)?;
+            Some(match p.shown {
+                frame::PartShown::Loose(angle) => (State::Loose, angle, None),
+                frame::PartShown::Detached(pose) => (State::Detached, 0., Some(pose.to_mat4())),
+            })
+        }
+        None => car
+            .parts
+            .get(name)
+            .filter(|p| p.state != State::Attached)
+            .map(|p| (p.state, p.shown_angle(alpha), p.shown_world(alpha))),
+    }
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)] // Explicit Bevy resource/component ownership.
 fn present(
     mut commands: Commands,
@@ -1086,19 +1150,6 @@ fn present(
             damage.models[m].layout = Some(layout(&parts, m, &damage.car_model));
         }
     }
-    if damage.reset {
-        damage.reset = false;
-        for (entity, .., mut visibility, material, original) in &mut parts {
-            *visibility = Visibility::Inherited;
-            if let (Some(original), Some(mut material)) = (original, material) {
-                material.0 = original.0.clone();
-                commands.entity(entity).remove::<Original>();
-            }
-        }
-        for (entity, ..) in &shards {
-            commands.entity(entity).despawn();
-        }
-    }
     let runtimes: Vec<&grid_tools::source_vehicle::Runtime> = std::iter::once(&driving.runtime)
         .chain(
             driving
@@ -1108,16 +1159,52 @@ fn present(
         )
         .collect();
     damage.cars.resize_with(runtimes.len(), CarDamage::default);
+    // A replay shows the replayed parts, glass and lights (docs/REPLAY.md);
+    // glass and lights are found from the replayed deformation, at its start
+    // without shards, and from the live deformation again after it.
+    let replayed = replay
+        .as_deref()
+        .and_then(|r| r.session.as_ref())
+        .map(|s| s.shown.as_ref());
+    if replayed.is_some() != damage.replaying {
+        damage.replaying = replayed.is_some();
+        for car in &mut damage.cars {
+            car.field_key = None;
+        }
+        if !damage.replaying {
+            for car in &mut damage.cars {
+                car.windows = Default::default();
+                car.lights.clear();
+            }
+            damage.reset = true;
+        }
+    }
+    let replayed = replayed.flatten();
+    let replaying = damage.replaying;
     // Glass and lights from each car's deformation field, when it changes.
     let mut new_shards = Vec::new();
+    let mut reverted = false;
     for (index, (car, runtime)) in damage.cars.iter_mut().zip(&runtimes).enumerate() {
         if !runtime.deformation_enabled || runtime.ticks == 0 {
             continue;
         }
-        let Ok(field) = grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle)
+        let Ok(mut field) = grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle)
         else {
             continue;
         };
+        if replaying {
+            // Before the first replayed frame nothing changes.
+            let Some(recorded) = replayed
+                .and_then(|s| s.cars.get(index))
+                .and_then(|c| c.deformation.as_ref())
+            else {
+                continue;
+            };
+            let Ok(at) = field.with_current(&recorded.nodes, recorded.active) else {
+                continue;
+            };
+            field = at;
+        }
         let model = &damage.models[damage.car_model.get(index).copied().unwrap_or(0)];
         let (config, layout) = (&model.config, model.layout.as_ref().unwrap());
         let key = field.key();
@@ -1144,6 +1231,15 @@ fn present(
             let Some(now) = moved(rest) else { continue };
             let now: [Vec3; 5] = std::array::from_fn(|k| now[k]);
             let state = glass_state(rest, &now, config, config.crack_only[w]);
+            if replaying {
+                // The replayed time's glass: back to intact on a rewind.
+                reverted |= state < car.windows[w];
+                if heard && state == Glass::Smashed && car.windows[w] != Glass::Smashed {
+                    new_shards.push((index, WINDOWS[w].0));
+                }
+                car.windows[w] = state;
+                continue;
+            }
             if state > car.windows[w] {
                 car.windows[w] = state;
                 log_line!(
@@ -1161,11 +1257,17 @@ fn present(
         }
         car.lights.resize(layout.lights.len(), false);
         for (l, (joints, anchor)) in layout.lights.iter().enumerate() {
-            if car.lights[l] {
+            if car.lights[l] && !replaying {
                 continue;
             }
             if let Some(now) = moved(&[*anchor]) {
                 let distance = now[0].distance(*anchor);
+                if replaying {
+                    let smashed = distance > config.smash_light;
+                    reverted |= car.lights[l] && !smashed;
+                    car.lights[l] = smashed;
+                    continue;
+                }
                 if distance > config.smash_light {
                     car.lights[l] = true;
                     log_line!(
@@ -1175,6 +1277,22 @@ fn present(
                     );
                 }
             }
+        }
+    }
+    // Materials and visibility back to intact (a checkpoint, a replay's
+    // start, rewind or end); this frame's drawing applies the damage again.
+    let restored = damage.reset || reverted;
+    if restored {
+        damage.reset = false;
+        for (entity, .., mut visibility, material, original) in &mut parts {
+            *visibility = Visibility::Inherited;
+            if let (Some(original), Some(mut material)) = (original, material) {
+                material.0 = original.0.clone();
+                commands.entity(entity).remove::<Original>();
+            }
+        }
+        for (entity, ..) in &shards {
+            commands.entity(entity).despawn();
         }
     }
     let images: Vec<(Handle<Image>, Handle<Image>)> = damage
@@ -1210,6 +1328,7 @@ fn present(
         .enumerate()
         .map(|(car, r)| driving.shown_pose(car).unwrap_or_else(|| Mat4::from_cols_array(&r.pose())))
         .collect();
+    let mut world_placed = Vec::new();
     for (
         entity,
         joint,
@@ -1244,23 +1363,29 @@ fn present(
             "wing_mirror_r" if config.mirror_with_door => Some("door_fr"),
             _ => None,
         };
-        let own = car.parts.get(name).filter(|p| p.state != State::Attached);
-        let carried = carrier
-            .and_then(|door| car.parts.get(door).map(|p| (door, p)))
-            .filter(|(_, p)| p.state == State::Loose && own.is_none());
         let alpha = driving.shown.alpha;
+        let replayed_car = replayed.and_then(|s| s.cars.get(index));
+        let own = drawn(car, replayed_car, name, alpha);
+        let carried = carrier
+            .and_then(|door| drawn(car, replayed_car, door, alpha).map(|p| (door, p)))
+            .filter(|(_, p)| p.0 == State::Loose && own.is_none());
         let model = match (own, carried) {
-            (Some(part), _) if part.state == State::Detached => part.shown_world(alpha),
-            (Some(part), _) => layout
+            (Some((State::Detached, _, world)), _) => {
+                if world.is_some() {
+                    world_placed.push(entity);
+                }
+                world
+            }
+            (Some((_, angle, _)), _) => layout
                 .bounds
                 .get(name)
                 .and_then(|b| hinge(name, *b, config))
-                .map(|h| poses[index] * h.matrix(part.shown_angle(alpha))),
-            (None, Some((door, part))) => layout
+                .map(|h| poses[index] * h.matrix(angle)),
+            (None, Some((door, (_, angle, _)))) => layout
                 .bounds
                 .get(door)
                 .and_then(|b| hinge(door, *b, config))
-                .map(|h| poses[index] * h.matrix(part.shown_angle(alpha))),
+                .map(|h| poses[index] * h.matrix(angle)),
             _ => None,
         };
         if let Some(model) = model {
@@ -1285,7 +1410,7 @@ fn present(
                 .iter()
                 .zip(&car.lights)
                 .any(|((joints, _), smashed)| *smashed && joints.iter().any(|j| j == name));
-        if (glass == Glass::Cracked || light) && original.is_none()
+        if (glass == Glass::Cracked || light) && (original.is_none() || restored)
             && let Some(mut material) = material
         {
             let base = material.0.clone();
@@ -1306,6 +1431,7 @@ fn present(
             commands.entity(entity).insert(Original(base));
         }
     }
+    damage.world_placed = world_placed;
     // AUTHORED glass shards from the lac.ppts points of a smashed window.
     if !new_shards.is_empty() {
         let (mesh, material) = damage
@@ -1521,7 +1647,7 @@ mod tests {
         let model=ModelDamage {config:config(),shards:BTreeMap::new(),images:None,textures:Default::default(),layout:Some(Layout {
             bounds:BTreeMap::new(),windows:[None;6],lights:vec![(vec!["light_brake_pod_bl".into(),"light_brake_glass_bl".into()],Vec3::ZERO),(vec!["light_pod_fl".into()],Vec3::ZERO)]
         })};
-        let mut damage=DamageParts {models:vec![model],car_model:vec![0,0],cars:vec![CarDamage {lights:vec![true,false],..Default::default()},CarDamage::default()],last_tick:None,reset:false,log_zones:false,cracked:BTreeMap::new(),shard_assets:None,camera:None};
+        let mut damage=DamageParts {models:vec![model],car_model:vec![0,0],cars:vec![CarDamage {lights:vec![true,false],..Default::default()},CarDamage::default()],last_tick:None,reset:false,log_zones:false,cracked:BTreeMap::new(),shard_assets:None,camera:None,replaying:false,world_placed:Vec::new()};
         assert!(damage.light_smashed(0,"light_brake_pod_bl"));assert!(damage.light_smashed(0,"light_brake_glass_bl"));
         // Source cluster ordinal is compacted away here; actual semantic membership is authoritative.
         let member=crate::lamp_signals::runtime::member("x2_light_brake_pod_bl",2).unwrap();

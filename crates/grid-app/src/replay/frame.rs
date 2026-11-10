@@ -124,6 +124,12 @@ pub struct Effects {
     pub handbrake: bool,
     pub open_wheel: bool,
     pub wheels: [WheelEffects; 4],
+    /// The engine sound's inputs (`grid_tools::engine_audio::Control`):
+    /// normalised engine speed (`+1894 / +17A4`), applied throttle (`+E1C`,
+    /// 0 after terminal damage) and gear (`+196C`).
+    pub rpm: f32,
+    pub throttle: f32,
+    pub gear: u8,
 }
 
 impl Effects {
@@ -134,6 +140,8 @@ impl Effects {
         Self {
             angular_velocity: self.angular_velocity.lerp(other.angular_velocity, t),
             speed: l(self.speed, other.speed),
+            rpm: l(self.rpm, other.rpm),
+            throttle: l(self.throttle, other.throttle),
             wheels: std::array::from_fn(|k| {
                 let (a, b) = (&self.wheels[k], &other.wheels[k]);
                 WheelEffects {
@@ -159,8 +167,29 @@ pub struct Car {
     pub deformation: Option<Deformation>,
     /// World frame of each wheel that came off (damage_parts lost wheels).
     pub lost: [Option<Pose>; 4],
+    /// Body parts away from their rest place (damage_parts), by part.
+    pub parts: Vec<Part>,
     pub effects: Effects,
 }
+
+/// A body part off its rest place: `index` into
+/// `grid_tools::loose_parts::PARTS`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Part {
+    pub index: u8,
+    pub shown: PartShown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PartShown {
+    /// Swinging on its hinge at this angle (rad).
+    Loose(f32),
+    /// Detached: its world frame.
+    Detached(Pose),
+}
+
+const PART_LOOSE: u8 = 1;
+const PART_DETACHED: u8 = 2;
 
 /// A live piece of a broken prop: (breakable, piece spec, body pose).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -211,6 +240,7 @@ pub struct FrameCar {
     pub geometry: Shared<[WheelGeometry; 4]>,
     pub deformation: Option<Shared<Deformation>>,
     pub lost: [Option<Pose>; 4],
+    pub parts: Vec<Part>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -223,8 +253,9 @@ pub struct FrameProps {
 /// (12), velocity (3), per wheel displacement, steering pair, phase and spin
 /// (20), the effect inputs' angular velocity (3), speed, mass, rear
 /// coefficient, flag bits, and per wheel surface token, radius, width, load,
-/// excess, rear term, omega and steer pair (36).
-const WORDS: usize = 78;
+/// excess, rear term, omega and steer pair (36), then the engine speed and
+/// throttle (2). The flag bits carry the gear in bits 6..10.
+const WORDS: usize = 80;
 type Words = [u32; WORDS];
 const MASK: usize = WORDS.div_ceil(8);
 /// The mask a key frame leaves: no delta mask can equal it.
@@ -255,6 +286,7 @@ fn words(car: &Car) -> Words {
     for (k, w) in e.wheels.iter().enumerate() {
         bits |= u32::from(w.handbraked) << (2 + k);
     }
+    bits |= u32::from(e.gear.min(15)) << 6;
     let floats = car
         .pose
         .0
@@ -280,7 +312,8 @@ fn words(car: &Car) -> Words {
         ]
     });
     let mut n = 0;
-    for v in floats.chain([bits]).chain(wheels) {
+    let engine = [e.rpm, e.throttle].map(f32::to_bits);
+    for v in floats.chain([bits]).chain(wheels).chain(engine) {
         out[n] = v;
         n += 1;
     }
@@ -299,6 +332,9 @@ fn from_words(w: &Words) -> (Pose, Vec3, [Wheel; 4], Effects) {
         rear_coefficient: f(40),
         handbrake: bits & 1 != 0,
         open_wheel: bits & 2 != 0,
+        rpm: f(78),
+        throttle: f(79),
+        gear: ((bits >> 6) & 15) as u8,
         wheels: std::array::from_fn(|k| {
             let b = 42 + 9 * k;
             WheelEffects {
@@ -592,6 +628,20 @@ impl Encoder {
             for lost in car.lost.iter().flatten() {
                 w.pose(*lost);
             }
+            w.u8(u8::try_from(car.parts.len()).expect("at most 255 parts"));
+            for part in &car.parts {
+                w.u8(part.index);
+                match part.shown {
+                    PartShown::Loose(angle) => {
+                        w.u8(PART_LOOSE);
+                        w.f32(angle);
+                    }
+                    PartShown::Detached(pose) => {
+                        w.u8(PART_DETACHED);
+                        w.pose(pose);
+                    }
+                }
+            }
         }
         match &snapshot.props {
             None => w.u8(0),
@@ -684,11 +734,23 @@ pub fn decode(bytes: &[u8]) -> Option<Frame> {
                 *l = Some(r.pose()?);
             }
         }
+        let n = r.u8()?;
+        let mut parts = Vec::with_capacity(n.into());
+        for _ in 0..n {
+            let index = r.u8()?;
+            let shown = match r.u8()? {
+                PART_LOOSE => PartShown::Loose(r.f32()?),
+                PART_DETACHED => PartShown::Detached(r.pose()?),
+                _ => return None,
+            };
+            parts.push(Part { index, shown });
+        }
         cars.push(FrameCar {
             same_mask: flags & 8 != 0,
             geometry,
             deformation,
             lost,
+            parts,
         });
     }
     let props = match r.u8()? {
@@ -864,6 +926,7 @@ fn resolve(
             geometry,
             deformation,
             lost: c.lost,
+            parts: c.parts.clone(),
             effects,
         });
     }
@@ -928,6 +991,23 @@ pub fn interpolate(a: &Snapshot, b: &Snapshot, t: f32, seconds: f32) -> Snapshot
                     (Some(x), Some(y)) => Some(x.lerp(y, s)),
                     (x, _) => x,
                 }),
+                parts: ca
+                    .parts
+                    .iter()
+                    .map(|p| {
+                        let next = cb.parts.iter().find(|q| q.index == p.index);
+                        let shown = match (p.shown, next.map(|q| q.shown)) {
+                            (PartShown::Loose(x), Some(PartShown::Loose(y))) => {
+                                PartShown::Loose(x + (y - x) * s)
+                            }
+                            (PartShown::Detached(x), Some(PartShown::Detached(y))) => {
+                                PartShown::Detached(x.lerp(y, s))
+                            }
+                            (x, _) => x,
+                        };
+                        Part { index: p.index, shown }
+                    })
+                    .collect(),
                 effects: ca.effects.lerp(&cb.effects, s),
             }
         })
@@ -1064,6 +1144,7 @@ pub(crate) mod tests {
             }; 4],
             deformation: None,
             lost: [None; 4],
+            parts: Vec::new(),
             effects: Effects {
                 angular_velocity: Vec3::new(0.1, x, -0.2),
                 speed: x.abs(),
@@ -1071,6 +1152,9 @@ pub(crate) mod tests {
                 rear_coefficient: 0.5,
                 handbrake: phase > 1.,
                 open_wheel: false,
+                rpm: 0.3 + 0.01 * x,
+                throttle: 0.75,
+                gear: 3,
                 wheels: std::array::from_fn(|k| WheelEffects {
                     token: 0x7461_6d00 + k as u32,
                     radius: 0.31,
@@ -1127,6 +1211,10 @@ pub(crate) mod tests {
                 nodes: vec![[1., 2., 3., f32::from_bits(0x7f7f_ffff)]; 8],
             });
             s.cars[0].lost[2] = Some(s.cars[0].pose);
+            s.cars[0].parts = vec![
+                Part { index: 0, shown: PartShown::Loose(0.25 * n as f32) },
+                Part { index: 9, shown: PartShown::Detached(s.cars[0].pose) },
+            ];
         }
         if n >= 4 {
             s.props.as_mut().unwrap().broken[0] = true;

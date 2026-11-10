@@ -514,6 +514,7 @@ mod tests {
                 }; 4],
                 deformation: None,
                 lost: [None; 4],
+                parts: Vec::new(),
                 effects: Default::default(),
             }],
             props: None,

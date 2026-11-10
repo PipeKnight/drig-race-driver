@@ -54,8 +54,16 @@ All addresses are of the hash-pinned unpacked image `local/compatibility/grid-un
   - used = 0; max award = `flashback_bonus`;
   - published to the UI data store as `flashback_manager_maximum` / `_used` / `_max_award`
     (0x6AA200), read back by 0x6AA260 [D]. The writer is reached from 0x6AF7C0 and from the
-    thunk 0x6AF910, whose only caller is `StateNextRace`'s enter 0x58ABC0 (vtable 0xCD96E0): it
-    calls 0x6AF7C0 when no manager exists and otherwise publishes the current values. The reader
+    thunk 0x6AF910, whose only caller is `StateNextRace`'s enter 0x58ABC0 (vtable 0xCD96E0). That
+    state takes the current event (mode object 0x640020, vfunc +0x80 = 0x63F320) and its current
+    race (event vfunc +0x30 = 0x67DAE0, which indexes the event's race list with event+0x34
+    through vfunc +0x28 = 0x826A20). If the race's vfunc +0x7C is true it calls 0x6AF910 and
+    republishes the current manager; otherwise it calls 0x6AF7C0, which resets used to 0 [D].
+    vfunc +0x7C returns 1 only for a multi-part race class (vtable 0xCE93F0, +0x7C = 0x6BF990),
+    which itself walks a list of parts like an event (its +0x30 = 0x67DAE0, +0x34 = 0x7F7CE0) [D].
+    So each ordinary race of a multi-race career event starts with a fresh count, and only the
+    parts of one multi-part race share it. The event set-up 0x67BDA0 (mode vfunc +0x48: appearance
+    fee, `draw_races`) runs once per event and does not touch the manager [D]. The reader
     is reached through the thunk 0x6AF900 only from the race reset 0x65B2C0 (§3.2).
 - Remaining = maximum − used (0x6A2240) [D]. 0x4CAD80 allows a flashback when remaining ≥ 1
   (and not when `pro_mode` is set in a mode-0 race) [D].
@@ -272,9 +280,12 @@ The same end state is reached exactly another way (AUTHORED):
   reads the manager back from the data store (0x6AA260 through 0x6AF900): the values published at
   set-up. The flow goes restart_race → decision_maker → prerace, not through `StateNextRace`
   (FRONT_END_FLOW.md). The port keeps the set-up manager (`Flashback::published`) and restores it
-  on a restart (`four_flashbacks_at_normal_then_none`). [I] Whether a multi-race career event
-  carries `used` from one race to the next through `StateNextRace`'s publish of the current values
-  was not traced (the meaning of its manager test and vfunc +0x7C).
+  on a restart (`four_flashbacks_at_normal_then_none`). A multi-race career event does **not**
+  carry `used` between its races: `StateNextRace` calls 0x6AF7C0 for every race that is not a
+  multi-part race (§2.1 above) [D]. The port builds `Flashback::new` for every race it starts
+  (`flashback.rs`), which matches; it has no multi-part races. [I] Which shipped event formats
+  build multi-part races (constructors 0x641BE0, 0x66CD80, 0x670B20 reached through the
+  event-factory 0x6723E0 slots) and whether the first part inherits the previous race's count.
 
 ### 3.3 Flow and UI
 

@@ -144,6 +144,34 @@ The zone and activation flow is as F360 found it [D]: `ActivationZone` → `Even
 `ActivateCamera`, with one ordinary and one `TERMINAL_` camera per zone. No minimum shot length and
 no cut-timing rule was found in the camera code. A cut happens at the zone crossing.
 
+### 2.7 Highlight monitors and choreographers (F797) [D static unless marked]
+
+- **Names.** Sixteen monitor classes (strings 0xD0ED98–0xD0EEB8, name table in .rdata
+  0xD0F03C–0xD0F074): WheelSpin, TerminalDamage, Spin, RacePositionChanged, PitchedRoll,
+  OverCliff, ObjectScrape, ObjectCollision, LoseWheel, LoseBodyWork, LateralRoll, Jump,
+  DriveWell, MechanicalPartDamage, BodyWorkDamage (with `Monitor` appended). Each has a
+  `*_choreographer` (strings 0xD0EBE0–0xD0ED78, globals table 0xE4F5A8). The `highlite` debug
+  descriptor is at 0xE4F598–0xE4F5A4.
+- **Factories.** Monitors are built by name around 0x93CA00–0x93CE8F (LateralRoll → 0x937DA0,
+  0xE0 bytes; LoseWheel → 0x9388B0, 0xB0 bytes; LoseBodyWork 0x280 bytes). Choreographers come
+  from 0x92DB00 (a vtable method referenced at 0xD0F1AC; base 0x921450).
+- **Event finders.** 0x935D00 (OverCliff), 0x936040 (TerminalDamage), 0x935A70 (LoseWheel),
+  0x935B50 (ObjectCollision) and 0x935400 (BodyWorkDamage) walk the event ring at obj+0x7C
+  (+0x54 head, +0x58 count, +0x5C array), match the type name through vf+8 and keep the hit at
+  +0xE4.
+- **Parameters.** MaxDamage (0xD10340; binders 0x937380, 0x9379B0), MinDeltaSpeed (0xD103F8;
+  binder 0x938B90), MonitorCarCollisions, ScrapeTimeout and others in 0xD10340–0xD104EC.
+  `ReplayCameraDataManager` is 0x936B00.
+- **Per-frame update.** 0x941620 is the replay-camera manager's per-vehicle update: it adds the
+  frame time to +0xD28 and walks the vehicles (0x9AD030 / 0x9EE370, skipping one with +0x6C
+  set); per vehicle it calls 0x940A40 and 0x922780 (the camera slots at +0x30 and the TERMINAL
+  slot +0x4F0, chosen by +0xD20); the shown vehicle is +0xD14. At the end 0x93C920 runs the
+  monitors (+0xCF4..+0xCF8, vf+0x18) and the +0xD04 list, only while +0xD24 and +0xD21 are set.
+- **Data source [I].** The monitors' parameter values were not found in plain install files:
+  `car_monitor_setup.xml` is a different system (rolling angles), and the decoded
+  `replay_camera_config` files have no monitor blocks. So which events become highlights, and
+  how a choreographer turns one into shots, is open; the port keeps the zone director (§2.6).
+
 ## 3. Gaps and what was ported (F441)
 
 | Item | F360 port | Original | Now |
@@ -209,3 +237,4 @@ original.
 - The near plane's base value.
 - The spline's parametrisation: the port uses a uniform per-segment parameter [I].
 - A windowed comparison with the original's replays by a person.
+- The highlight monitors' parameter data and the choreographers' shot rules (§2.7).

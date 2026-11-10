@@ -42,6 +42,9 @@ pub(crate) struct EngineSound {
     /// `None` where the model's bank failed to load: that car is silent.
     banks: Vec<Option<Arc<EngineBank>>>,
     pub(crate) muted: bool,
+    /// The replay level in dB (0x4430C0's +0x38C), added to the car groups
+    /// while a replay is shown.
+    replay_db: f32,
 }
 impl EngineSound {
     pub(crate) fn new(bank: Arc<EngineBank>) -> Self {
@@ -60,6 +63,7 @@ impl EngineSound {
             bank: banks.first().cloned().flatten(),
             banks,
             muted: false,
+            replay_db: 0.,
         }
     }
     pub(crate) fn control(&self, driving: &super::Driving) -> Control {
@@ -586,6 +590,7 @@ pub(crate) struct Listening<'w, 's> {
     mode: Option<Res<'w, AudioMode>>,
     motion: Option<Res<'w, ListenerMotion>>,
     listener: Query<'w, 's, &'static GlobalTransform, With<super::ViewerCamera>>,
+    replay: Option<Res<'w, super::replay::Replay>>,
 }
 impl Listening<'_, '_> {
     /// Effects Volume as a group trim in dB (4124A0), not a linear gain.
@@ -617,6 +622,16 @@ impl Listening<'_, '_> {
             log_line!("audio_mode version=1 event=set mode=Crashed seconds={}", audio_mix::CRASH_SECONDS);
         }
         set
+    }
+    /// The replay shown this frame: its cars' recorded state and its level
+    /// target (`replay_level_target`).
+    pub(crate) fn replayed(&self) -> Option<(&[super::replay::frame::Car], f32)> {
+        let session = self.replay.as_ref()?.session.as_ref()?;
+        let p = &session.player;
+        Some((
+            session.shown.as_ref().map_or(&[][..], |s| &s.cars[..]),
+            replay_level_target(p.mode, p.shuttle, p.slow),
+        ))
     }
     pub(crate) fn camera(&self) -> Camera {
         self.cameras
@@ -657,8 +672,21 @@ fn update(
     let (trim, camera, modes) = (listening.trim(), listening.camera(), listening.modes());
     let table = sound.table.clone();
     let table = table.as_deref();
-    let ear = listening.ear(&driving.runtime.pose());
-    let player = Mat4::from_cols_array(&driving.runtime.pose());
+    // A replay sounds from its recorded cars, at 0x4430C0's level
+    // (docs/REPLAY.md 2.7).
+    let replayed = listening.replayed();
+    sound.replay_db = match replayed {
+        Some((_, target)) => step_replay_level(sound.replay_db, target),
+        None => 0.,
+    };
+    let trim = trim + sound.replay_db;
+    let replayed = replayed.map(|(cars, _)| cars);
+    let shown_pose = |car: usize, live: [f32; 16]| match replayed {
+        Some(cars) => cars.get(car).map_or(live, |c| c.pose.to_mat4().to_cols_array()),
+        None => live,
+    };
+    let ear = listening.ear(&shown_pose(0, driving.runtime.pose()));
+    let player = Mat4::from_cols_array(&shown_pose(0, driving.runtime.pose()));
     // EngineBay (0, 0, 4) and Exhaust (0, 0, -4) for a silent model.
     let emitters: Vec<_> = sound
         .banks
@@ -712,7 +740,9 @@ fn update(
     // Ticks publish their controls (`publish`); a change without a tick
     // (pause, mute, finish, failure) is published here.
     let finished = listening.stopped(&driving);
-    if Some(player_control(&sound, &driving, finished).pack()) != sound.pushed {
+    if let Some(cars) = replayed {
+        push_replayed(&mut sound, &driving, cars, &opponent_engines);
+    } else if Some(player_control(&sound, &driving, finished).pack()) != sound.pushed {
         push_controls(&mut sound, &driving, finished, &opponent_engines);
     }
     if let Some(opponents) = &driving.opponents {
@@ -721,13 +751,19 @@ fn update(
                 eprintln!("engine_audio version=2 event=decoder_failed car={} muted=car_only", engine.car);
             }
             let car = &opponents.multi.cars[engine.car];
-            let pose = car.pose();
+            let pose = shown_pose(engine.car, car.pose());
             let at = Vec3::new(pose[12], pose[13], pose[14]);
             engine.pan.set(listening.heard(ear, at));
             // Its engine voices carry the car's rigid-body velocity (0x42EF1B); the camera
             // listener moves with the camera (0x43F570).
-            let v = car.velocity();
-            let relative = Vec3::new(v[0], v[1], v[2]) - listening.camera_velocity();
+            let v = match replayed.and_then(|cars| cars.get(engine.car)) {
+                Some(c) => c.velocity,
+                None => {
+                    let v = car.velocity();
+                    Vec3::new(v[0], v[1], v[2])
+                }
+            };
+            let relative = v - listening.camera_velocity();
             engine.doppler.set(audio_mix::doppler((at - ear).to_array(), relative.to_array()));
             // 41DE10: the high frequencies fade with the car's distance from the listener.
             let treble = audio_mix::ai_engine_treble_db(camera, at.distance(ear));
@@ -806,6 +842,52 @@ fn push_controls(
         }
     }
 }
+/// 0x4430C0's replay level target in dB: full while the replay plays at
+/// normal speed or faster (mode 0, shuttle at least 0.97), faded to the
+/// floor when it is slowed, rewound, paused or scrubbed.
+pub(crate) fn replay_level_target(mode: super::replay::player::Mode, shuttle: f32, slow: bool) -> f32 {
+    if mode == super::replay::player::Mode::Play && !slow && shuttle >= REPLAY_FULL_SHUTTLE {
+        0.
+    } else {
+        REPLAY_FLOOR_DB
+    }
+}
+const REPLAY_FULL_SHUTTLE: f32 = 0.97;
+const REPLAY_FLOOR_DB: f32 = -48.;
+/// 0x4430C0 moves the level 4 dB per call toward its target, within
+/// [-48, 0] (+0x38C).
+pub(crate) fn step_replay_level(level: f32, target: f32) -> f32 {
+    (level + (target - level).clamp(-4., 4.)).clamp(REPLAY_FLOOR_DB, 0.)
+}
+/// A replayed car's engine control from its recorded inputs.
+fn replayed_control(e: &super::replay::frame::Effects, audible: bool, generation: u32) -> Control {
+    Control {
+        normalized_rpm: e.rpm,
+        throttle: e.throttle,
+        audible: audible && e.rpm > 0.,
+        generation,
+        gear: u32::from(e.gear),
+    }
+}
+/// Queue the replayed cars' controls, one per frame (the replay does not
+/// tick); the live controls are pushed again when it ends.
+fn push_replayed(
+    sound: &mut EngineSound,
+    driving: &super::Driving,
+    cars: &[super::replay::frame::Car],
+    opponent_engines: &Query<&OpponentEngine>,
+) {
+    let audible = !sound.muted && driving.failure.is_none();
+    let generation = driving.segment as u32;
+    let silent = Control { normalized_rpm: 0., throttle: 0., audible: false, generation, gear: 0 };
+    let control = |car: usize| cars.get(car).map_or(silent, |c| replayed_control(&c.effects, audible, generation));
+    let handbrake = cars.first().is_some_and(|c| c.effects.handbrake);
+    send(&sound.mailbox, control(0), if handbrake { HANDBRAKE_BIT } else { 0 });
+    sound.pushed = None;
+    for engine in opponent_engines {
+        send(&engine.mailbox, control(engine.car), 0);
+    }
+}
 /// Once per vehicle tick (FixedUpdate after the tick): queue its controls.
 fn publish(
     mut sound: ResMut<EngineSound>,
@@ -814,7 +896,8 @@ fn publish(
     opponent_engines: Query<&OpponentEngine>,
 ) {
     let now = (driving.segment, driving.runtime.ticks);
-    if sound.ticked == Some(now) {
+    // A replay's controls come from its frames (`push_replayed`).
+    if sound.ticked == Some(now) || listening.replayed().is_some() {
         return;
     }
     sound.ticked = Some(now);
@@ -890,6 +973,38 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Box<dyn std::error::Er
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// 0x4430C0: full level only while playing at normal speed or faster;
+    /// 4 dB per call toward the target, never below -48 dB.
+    #[test]
+    fn the_replay_level_follows_the_shuttle() {
+        use crate::replay::player::Mode;
+        assert_eq!(replay_level_target(Mode::Play, 1., false), 0.);
+        assert_eq!(replay_level_target(Mode::Play, 4.33, false), 0.);
+        assert_eq!(replay_level_target(Mode::Play, 1., true), -48.);
+        assert_eq!(replay_level_target(Mode::Play, -4.33, false), -48.);
+        assert_eq!(replay_level_target(Mode::Pause, 1., false), -48.);
+        assert_eq!(replay_level_target(Mode::Scrub, 2., false), -48.);
+        let mut level = 0.;
+        for _ in 0..11 {
+            level = step_replay_level(level, -48.);
+        }
+        assert_eq!(level, -44.);
+        level = step_replay_level(level, -96.);
+        assert_eq!(level, -48.);
+        level = step_replay_level(level, 0.);
+        assert_eq!(level, -44.);
+    }
+    /// A replayed car sounds from its recorded engine speed, throttle and
+    /// gear; a stopped engine stays silent.
+    #[test]
+    fn a_replayed_car_drives_its_engine_from_the_recorded_inputs() {
+        let effects = crate::replay::frame::Effects { rpm: 0.4, throttle: 0.8, gear: 3, ..Default::default() };
+        let c = replayed_control(&effects, true, 7);
+        assert_eq!((c.normalized_rpm, c.throttle, c.gear, c.generation, c.audible), (0.4, 0.8, 3, 7, true));
+        assert!(!replayed_control(&effects, false, 7).audible);
+        let stopped = crate::replay::frame::Effects { rpm: 0., ..effects };
+        assert!(!replayed_control(&stopped, true, 7).audible);
+    }
     /// A 50 ms frame (20 fps) runs three vehicle ticks back to back; the
     /// decoder plays them out one per 16 ms block instead of jumping to the
     /// last (docs/AUDIO_RESEARCH.md 8).
