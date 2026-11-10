@@ -252,62 +252,109 @@ pub struct View {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Views(pub Vec<View>);
 
-fn missing(view: &str, name: &str) -> String {
-    format!("camera view {view} lacks parameter {name}")
+/// Defaults of the original's view constructors for a parameter that a
+/// car's cameras.xml leaves out. The binders (chase 0x7F31B0, mounted
+/// 0x7F4BE0, head 0x7F3A70) write each parameter over a value the constructor
+/// set (chase 0x81E900, mounted 0x822300, head 0x820A40 over the base view
+/// 0x817D60: near 0.2, FOV 60 degrees); an absent parameter keeps it [D for
+/// the values, I that an absent name writes nothing]. docs/CAMERA_VIEWS.md
+/// "Parameter binding".
+mod view_defaults {
+    pub mod chase {
+        pub const LAG_MINIMUM: f32 = 3.0;
+        pub const LAG_MAXIMUM: f32 = 7.0;
+        pub const FOV: f32 = f32::from_bits(0x423e_f5c3);
+        pub const MINIMUM_TILT_SPEED: f32 = 0.0;
+        pub const MAXIMUM_TILT_SPEED: f32 = 20.0;
+        pub const MINIMUM_ROLL_SPEED: f32 = 0.0;
+        pub const MAXIMUM_ROLL_SPEED: f32 = 50.0;
+        pub const TILT_FALLBACK: f32 = 0.0;
+        pub const ROLL_ANGLE: f32 = f32::from_bits(0x4117_d70a);
+        pub const MAX_ROLL_PER_SECOND: f32 = 30.0;
+        pub const INVERT_ROLL: bool = false;
+        pub const POSITION: [f32; 3] = [0.0, f32::from_bits(0x3fee_147b), f32::from_bits(0xc0b4_28f6)];
+        pub const TARGET: [f32; 3] = [0.0; 3];
+        pub const GEAR_DROP_BACK: f32 = f32::from_bits(0x3def_9db2);
+        pub const GEAR_DROP_BACK_TIME: f32 = 1.4;
+        pub const GEAR_DROP_BACK_INITIAL: f32 = 0.4;
+        pub const FOLLOW_DAMP: f32 = 0.08;
+        pub const FOLLOW_Y_SCALE: f32 = 5.0;
+        pub const FOLLOW_Y_CLAMP: f32 = 0.22;
+        pub const SUSPENSION_SCALE: f32 = 3.0;
+        pub const SUSPENSION_MIX: f32 = 0.8;
+        pub const SUSPENSION_DEAD_ZONE: f32 = 0.1;
+        pub const ANGULAR_LIMIT: f32 = 10.0;
+        pub const ANGULAR_LIMIT_DAMPING: f32 = 1.0;
+    }
+    pub mod mounted {
+        pub const FOV: f32 = 60.0;
+        pub const NEAR: f32 = 0.2;
+        pub const FINAL_MOVEMENT_SCALE: f32 = 0.0;
+        pub const TILT_DISTANCE: f32 = 5.0;
+        pub const MOVEMENT_SPEED: f32 = 15.0;
+        pub const MAXIMUM_SHIFT: f32 = 0.05;
+        pub const AXIS_SCALE: [f32; 3] = [0.0; 3];
+        pub const AXIS_SCALE_FOR_TILT: [f32; 3] = [0.2; 3];
+        pub const TWIST_SCALE: [f32; 3] = [0.0; 3];
+        pub const OFFSET: [f32; 3] = [0.0, 2.0, -5.0];
+    }
+    pub mod head {
+        pub const FOV: f32 = 60.0;
+        pub const NEAR: f32 = 0.2;
+        pub const POSITION: [f32; 3] = [1.0, f32::from_bits(0x3f1c_28f6), f32::from_bits(0xbdf5_c28f)];
+        pub const TILT: f32 = 0.0;
+    }
 }
 
 impl Views {
     pub fn from_definition(def: &vehicle_views::Views) -> Result<Self, String> {
         let mut views = Vec::new();
         for v in &def.views {
-            let s = |n: &str| v.scalar(n).ok_or_else(|| missing(&v.ident, n));
-            let vec = |n: &str| {
-                v.vector(n)
-                    .map(Vec3::from_array)
-                    .ok_or_else(|| missing(&v.ident, n))
-            };
+            // A parameter the file leaves out keeps the constructor's value.
+            let s = |n: &str, d: f32| v.scalar(n).unwrap_or(d);
+            let vec = |n: &str, d: [f32; 3]| Vec3::from_array(v.vector(n).unwrap_or(d));
             let rig = match v.kind {
                 Kind::Chase => Rig::Chase(Chase {
-                    fov: s("fov")?,
-                    lag_minimum: s("lagMinimum")?,
-                    lag_maximum: s("lagMaximum")?,
-                    angular_limit: s("angularLimit")?,
-                    angular_limit_damping: s("angularLimitDamping")?,
-                    position: vec("position")?,
-                    target: vec("target")?,
-                    follow_damp: s("kCameraCloseFollowForwardsRollDamp")?,
-                    follow_y_scale: s("kCameraCloseFollowYScale")?,
-                    follow_y_clamp: s("kCameraCloseFollowYClamp")?,
-                    roll_angle: s("rollAngle")?,
-                    minimum_roll_speed: s("minimumRollSpeed")?,
-                    maximum_roll_speed: s("maximumRollSpeed")?,
-                    max_roll_per_second: s("maxRollPerSecond")?,
-                    invert_roll: v.flag("invertRoll").ok_or_else(|| missing(&v.ident, "invertRoll"))?,
-                    tilt_fallback: s("tiltFallback")?,
-                    minimum_tilt_speed: s("minimumTiltSpeed")?,
-                    maximum_tilt_speed: s("maximumTiltSpeed")?,
-                    gear_drop_back: s("gearUpDropBack")?,
-                    gear_drop_back_time: s("gearUpDropBackOverallTime")?,
-                    gear_drop_back_initial: s("gearUpDropBackInitialTime")?,
-                    suspension_scale: s("suspScale")?,
-                    suspension_mix: s("suspMixScale")?,
-                    suspension_dead_zone: s("suspDeadZone")?,
+                    fov: s("fov", view_defaults::chase::FOV),
+                    lag_minimum: s("lagMinimum", view_defaults::chase::LAG_MINIMUM),
+                    lag_maximum: s("lagMaximum", view_defaults::chase::LAG_MAXIMUM),
+                    angular_limit: s("angularLimit", view_defaults::chase::ANGULAR_LIMIT),
+                    angular_limit_damping: s("angularLimitDamping", view_defaults::chase::ANGULAR_LIMIT_DAMPING),
+                    position: vec("position", view_defaults::chase::POSITION),
+                    target: vec("target", view_defaults::chase::TARGET),
+                    follow_damp: s("kCameraCloseFollowForwardsRollDamp", view_defaults::chase::FOLLOW_DAMP),
+                    follow_y_scale: s("kCameraCloseFollowYScale", view_defaults::chase::FOLLOW_Y_SCALE),
+                    follow_y_clamp: s("kCameraCloseFollowYClamp", view_defaults::chase::FOLLOW_Y_CLAMP),
+                    roll_angle: s("rollAngle", view_defaults::chase::ROLL_ANGLE),
+                    minimum_roll_speed: s("minimumRollSpeed", view_defaults::chase::MINIMUM_ROLL_SPEED),
+                    maximum_roll_speed: s("maximumRollSpeed", view_defaults::chase::MAXIMUM_ROLL_SPEED),
+                    max_roll_per_second: s("maxRollPerSecond", view_defaults::chase::MAX_ROLL_PER_SECOND),
+                    invert_roll: v.flag("invertRoll").unwrap_or(view_defaults::chase::INVERT_ROLL),
+                    tilt_fallback: s("tiltFallback", view_defaults::chase::TILT_FALLBACK),
+                    minimum_tilt_speed: s("minimumTiltSpeed", view_defaults::chase::MINIMUM_TILT_SPEED),
+                    maximum_tilt_speed: s("maximumTiltSpeed", view_defaults::chase::MAXIMUM_TILT_SPEED),
+                    gear_drop_back: s("gearUpDropBack", view_defaults::chase::GEAR_DROP_BACK),
+                    gear_drop_back_time: s("gearUpDropBackOverallTime", view_defaults::chase::GEAR_DROP_BACK_TIME),
+                    gear_drop_back_initial: s("gearUpDropBackInitialTime", view_defaults::chase::GEAR_DROP_BACK_INITIAL),
+                    suspension_scale: s("suspScale", view_defaults::chase::SUSPENSION_SCALE),
+                    suspension_mix: s("suspMixScale", view_defaults::chase::SUSPENSION_MIX),
+                    suspension_dead_zone: s("suspDeadZone", view_defaults::chase::SUSPENSION_DEAD_ZONE),
                 }),
                 Kind::Mounted => Rig::Mounted(Mounted {
-                    fov: s("fov")?,
-                    near: s("nearPlane")?,
-                    yaw: s("yaw")?,
-                    pitch: s("pitch")?,
-                    roll: s("roll")?,
-                    offset: vec("offset")?,
-                    axis_scale: vec("axisScale")?,
-                    maximum_shift: s("maximumShift")?,
-                    movement_speed: s("movementSpeed")?,
-                    final_movement_scale: s("finalMovementScale")?,
+                    fov: s("fov", view_defaults::mounted::FOV),
+                    near: s("nearPlane", view_defaults::mounted::NEAR),
+                    yaw: s("yaw", 0.),
+                    pitch: s("pitch", 0.),
+                    roll: s("roll", 0.),
+                    offset: vec("offset", view_defaults::mounted::OFFSET),
+                    axis_scale: vec("axisScale", view_defaults::mounted::AXIS_SCALE),
+                    maximum_shift: s("maximumShift", view_defaults::mounted::MAXIMUM_SHIFT),
+                    movement_speed: s("movementSpeed", view_defaults::mounted::MOVEMENT_SPEED),
+                    final_movement_scale: s("finalMovementScale", view_defaults::mounted::FINAL_MOVEMENT_SCALE),
                     offset_only: v.flag("offsetOnly").unwrap_or(false),
-                    axis_scale_for_tilt: vec("axisScaleForTilt")?,
-                    twist_scale: vec("twistScale")?,
-                    tilt_distance: s("tiltDistance")?,
+                    axis_scale_for_tilt: vec("axisScaleForTilt", view_defaults::mounted::AXIS_SCALE_FOR_TILT),
+                    twist_scale: vec("twistScale", view_defaults::mounted::TWIST_SCALE),
+                    tilt_distance: s("tiltDistance", view_defaults::mounted::TILT_DISTANCE),
                     // Absent shake parameters leave the shake off [AUTHORED].
                     shake: {
                         let o = |n: &str| v.scalar(n).unwrap_or(0.);
@@ -332,10 +379,10 @@ impl Views {
                     // Binder 0x7F3A70 over the constructor's defaults (0x820A40).
                     let o = |n: &str, d: f32| v.scalar(n).unwrap_or(d);
                     Rig::Head(Head {
-                        fov: s("fov")?,
-                        near: s("nearPlane")?,
-                        position: vec("position")?,
-                        tilt: s("tilt")?,
+                        fov: s("fov", view_defaults::head::FOV),
+                        near: s("nearPlane", view_defaults::head::NEAR),
+                        position: vec("position", view_defaults::head::POSITION),
+                        tilt: s("tilt", view_defaults::head::TILT),
                         body_length: o("bodyLength", 0.01),
                         body: Spring {
                             scale: Vec2::new(o("maxBodyOffsetScaleSide", 1.), o("maxBodyOffsetScaleUp", 0.)),
@@ -3181,6 +3228,72 @@ mod tests {
         assert!((shot.fov - 58f32.to_radians()).abs() < 1e-6, "{}", shot.fov.to_degrees());
         assert_eq!(cameras.shots[0].unwrap().fov, 52f32.to_radians());
         assert_eq!(Fov::DEFAULT.apply(Chase, 0.9), 0.9);
+    }
+
+    /// A view that leaves parameters out keeps the original constructors'
+    /// values (chase 0x81E900, mounted 0x822300, head 0x820A40) instead of
+    /// failing the whole car.
+    #[test]
+    fn absent_parameters_keep_the_constructor_defaults() {
+        use grid_formats::vehicle_views::{Kind as K, Value, View as Def, Views as Defs};
+        let view = |kind, ident: &str, parameters: Vec<(String, Value)>| Def {
+            kind,
+            ident: ident.into(),
+            reverse: None,
+            hidden: false,
+            transition: "switch".into(),
+            transition_speed: 0.4,
+            transition_strength: 0.,
+            parameters,
+        };
+        let def = Defs {
+            name: "x".into(),
+            views: vec![
+                view(K::Chase, "chase_close", vec![("lagMinimum".into(), Value::Scalar(2.5))]),
+                view(K::Mounted, "bonnet", vec![]),
+                view(K::Head, "head-cam", vec![]),
+            ],
+        };
+        let views = Views::from_definition(&def).unwrap();
+        let Rig::Chase(c) = &views.0[0].rig else { panic!("chase") };
+        assert_eq!((c.lag_minimum, c.lag_maximum), (2.5, 7.0));
+        assert_eq!((c.angular_limit, c.angular_limit_damping), (10.0, 1.0));
+        assert!((c.fov - 47.74).abs() < 0.01, "{}", c.fov);
+        assert!((c.position - Vec3::new(0., 1.86, -5.63)).length() < 1e-5, "{}", c.position);
+        assert_eq!((c.maximum_tilt_speed, c.maximum_roll_speed, c.max_roll_per_second), (20., 50., 30.));
+        assert_eq!((c.suspension_scale, c.suspension_mix, c.suspension_dead_zone), (3.0, 0.8, 0.1));
+        assert!(!c.invert_roll);
+        let Rig::Mounted(m) = &views.0[1].rig else { panic!("mounted") };
+        assert_eq!((m.fov, m.near, m.offset), (60., 0.2, Vec3::new(0., 2., -5.)));
+        assert_eq!((m.movement_speed, m.maximum_shift, m.tilt_distance), (15., 0.05, 5.));
+        assert_eq!(m.axis_scale_for_tilt, Vec3::splat(0.2));
+        let Rig::Head(h) = &views.0[2].rig else { panic!("head") };
+        assert_eq!((h.fov, h.near, h.tilt), (60., 0.2, 0.));
+        assert!((h.position - Vec3::new(1., 0.61, -0.12)).length() < 1e-5, "{}", h.position);
+    }
+
+    /// Every shipped car's cameras.xml loads (GRID_GAME_ROOT); before the
+    /// constructor defaults one car failed on a chase view without
+    /// angularLimit and fell back to the prototype chase.
+    #[test]
+    #[ignore]
+    fn every_shipped_car_loads_its_views() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT"));
+        let mut cars = 0;
+        let mut failed = Vec::new();
+        for entry in std::fs::read_dir(root.join("cars")).unwrap() {
+            let stem = entry.unwrap().file_name().to_string_lossy().into_owned();
+            if !root.join(format!("cars/{stem}/cameras.xml")).exists() {
+                continue;
+            }
+            cars += 1;
+            if let Err(error) = Views::load(&root, &stem) {
+                failed.push(format!("{stem}: {error}"));
+            }
+        }
+        println!("camera_views cars={cars} failed={}", failed.len());
+        assert!(cars >= 40, "{cars}");
+        assert!(failed.is_empty(), "{failed:?}");
     }
 
     /// The FOV of every view of every shipped car (GRID_GAME_ROOT), for

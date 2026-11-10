@@ -57,6 +57,25 @@ The per-frame update is vtable slot 11:
 
 The output stage stores `fov × 0.0174533` (degrees to radians) in the view record, together with the near plane.
 
+### Absent parameters keep the constructor's value [D, I]
+
+The binders only write the parameters a view names; the object keeps what its constructor set
+for the rest [I: no binder path resets a field it does not find]. Constructor values read from
+the image (round-3 trace, 2026-11-10):
+
+| Class (constructor) | Values |
+|---|---|
+| Chase (0x81E900) | lagMinimum 3, lagMaximum 7, fov 0x423EF5C3 (≈47.74), tilt speeds 0 / 20, roll speeds 0 / 50, tiltFallback 0, rollAngle 0x4117D70A (≈9.49), maxRollPerSecond 30, invertRoll false, position (0, 1.86, −5.63), target 0, gearUpDropBack 0x3DEF9DB2 (≈0.117), gearUpDropBackOverallTime 1.4, gearUpDropBackInitialTime 0.4, kCameraCloseFollow* 0.08 / 5 / 0.22, susp scale / mix / dead zone 3 / 0.8 / 0.1, angularLimit 10, angularLimitDamping 1 |
+| Mounted (0x822300) | fov 60, near 0.2, offset (0, 2, −5), movementSpeed 15, maximumShift 0.05, tiltDistance 5, axisScaleForTilt 0.2, finalMovementScale 0, axisScale / twistScale 0, yaw / pitch / roll 0 |
+| Head (0x820A40) | fov 60, near 0.2, position (1, 0.61, −0.12), tilt 0 |
+
+The base view constructor is 0x817D60. The port ([`camera.rs`](../crates/grid-app/src/camera.rs)
+`view_defaults`) used to refuse a car whose cameras.xml left a parameter out. Over the 44 shipped
+cars that have a cameras.xml (49 car folders), 1 failed: `tra`, whose chase views lack
+angularLimit, angularLimitDamping and the three gearUpDropBack parameters and whose mounted views
+lack finalMovementScale, axisScaleForTilt and roll. With the constructor values 0 fail (ignored
+test `every_shipped_car_loads_its_views`, `camera_views cars=44 failed=0`).
+
 ### Profile key and persistence [D]
 
 0x5F1100 registers the profile string `current_camera` with default `chase_close`.

@@ -81,6 +81,11 @@ pub enum Choice {
 pub struct Session {
     pub kind: Kind,
     pub origin: Origin,
+    /// The terminal-damage replay (flow `c_in_terminal_damage_loop`, state
+    /// `instant_race_replay_silent` terminal="true"): the director shows the
+    /// zones' `TERMINAL` cameras and the image takes TerminalFX_02
+    /// (`terminal_replay_interface` enter 0x57F530).
+    pub terminal: bool,
     pub player: player::Player,
     resume_paused: bool,
     pub cameras: Vec<Choice>,
@@ -139,6 +144,8 @@ pub struct Replay {
     frozen: bool,
     /// The Flashback transition's camera (`crate::flashback`).
     pub flash_camera: Option<FlashCamera>,
+    /// The requested session is the terminal-damage replay.
+    terminal_request: bool,
 }
 
 /// The camera a Flashback transition state selects [D 0x579D70]; flash 1's
@@ -179,6 +186,7 @@ impl Replay {
             flashback: None,
             frozen: false,
             flash_camera: None,
+            terminal_request: false,
         }
     }
 
@@ -253,6 +261,17 @@ impl Replay {
 
     pub fn request(&mut self, kind: Kind, origin: Origin) {
         self.request = Some((kind, origin));
+        self.terminal_request = false;
+    }
+
+    /// The wreck screen's Replay: the terminal-damage replay of the last
+    /// [`INSTANT_REWIND`] seconds (the original's start time is untraced:
+    /// the silent StateInstantReplay enter 0x596A40 zeroes the rewind and
+    /// messages the terminal flag). Flashback stays possible, as the
+    /// original's `terminal_replay_interface` has a `jump_in` link.
+    pub fn request_terminal(&mut self) {
+        self.request = Some((Kind::Instant, Origin::Results));
+        self.terminal_request = true;
     }
 
     fn clear(&mut self) {
@@ -384,12 +403,28 @@ impl Replay {
     /// The director's activation at `tick` and the tick of that activation
     /// (0 for the initial camera).
     pub fn activation_at(&self, tick: u64) -> Option<(director::Activation, u64)> {
+        let terminal = self.session.as_ref().is_some_and(|s| s.terminal);
+        self.activation_for(tick, terminal)
+    }
+
+    /// [`Self::activation_at`] for an ordinary (`terminal` false) or a
+    /// terminal-damage replay.
+    fn activation_for(&self, tick: u64, terminal: bool) -> Option<(director::Activation, u64)> {
         let d = self.director.as_ref()?;
         let n = self.entries.partition_point(|&(t, _)| t <= tick);
         self.entries[..n]
             .iter()
             .rev()
-            .find_map(|&(t, z)| d.zones[z].activation.clone().map(|a| (a, t)))
+            .find_map(|&(t, z)| {
+                let zone = &d.zones[z];
+                // A zone without a terminal camera keeps its ordinary one [I].
+                let a = if terminal {
+                    zone.terminal.clone().or_else(|| zone.activation.clone())
+                } else {
+                    zone.activation.clone()
+                };
+                a.map(|a| (a, t))
+            })
             .or_else(|| d.initial.clone().map(|a| (a, 0)))
     }
 
@@ -476,6 +511,7 @@ impl Replay {
 
     /// A new session, or `None` with nothing recorded.
     pub fn start(&mut self, kind: Kind, origin: Origin, paused: bool, views: &crate::camera::Views) -> bool {
+        let terminal = std::mem::take(&mut self.terminal_request);
         let Some((start, end)) = self.window(kind) else {
             return false;
         };
@@ -507,6 +543,7 @@ impl Replay {
         self.session = Some(Session {
             kind,
             origin,
+            terminal,
             player: player::Player::new(start, end, from),
             resume_paused: paused,
             cameras,
@@ -719,7 +756,11 @@ pub fn control(
         && driving.scripted_ticks.is_some_and(|n| driving.runtime.ticks >= n)
         && !driving.paused
     {
-        replay.request(Kind::Instant, Origin::Race);
+        if crate::settings::diagnostics().replay_terminal {
+            replay.request_terminal();
+        } else {
+            replay.request(Kind::Instant, Origin::Race);
+        }
     }
     // The Instant Replay action in the race (flow `c_in_instant_replay`).
     if replay.session.is_none()
@@ -741,13 +782,14 @@ pub fn control(
             s.player.slow = crate::settings::diagnostics().replay_slow;
             let s = &*s;
             log_line!(
-                "drive_race_replay version=1 event=start kind={kind:?} origin={origin:?} segment={} tick={} from={:.3} start={:.3} end={:.3} slow={} frames={} memory_bytes={} spooled_bytes={}",
+                "drive_race_replay version=1 event=start kind={kind:?} origin={origin:?} segment={} tick={} from={:.3} start={:.3} end={:.3} slow={} terminal={} frames={} memory_bytes={} spooled_bytes={}",
                 driving.segment,
                 driving.runtime.ticks,
                 s.player.time,
                 s.player.start,
                 s.player.end,
                 s.player.slow,
+                s.terminal,
                 replay.stream.frames().len(),
                 replay.stream.memory_bytes(),
                 replay.stream.spooled_bytes()

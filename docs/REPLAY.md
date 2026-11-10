@@ -122,7 +122,7 @@ Keys [D] (preset 0 / pad preset 4):
 | Replay Previous / Next Lap | F4 / F5 | — |
 | Replay Prev / Next Camera | F7 / F8 | LB / RB |
 | Replay Jump In (Flashback) | F12 | X |
-| Replay Save | S | — |
+| Replay Save | S | — (no consumer found, §3.2) |
 | Replay Exit | Escape | Y, Start |
 | Slow motion, frame step back / forward | F6, comma / period (AUTHORED) | — |
 
@@ -143,8 +143,12 @@ From `flow.bin` and `states.bin` [D]:
   `post_race_replay_play`; `loop` → fade → begin again; exit → back to the results.
 - The interface buttons: pause/play toggle, rewind and fast forward (hold), exit (hold), save
   (hold), jump in (Flashback icon), camera left/right [D].
-- The **terminal damage** replay (`terminal_damage_replay`, `TERMINAL_` cameras) starts a short
-  time before the wreck (0x596C90: a runtime value + 0.6 s + 2.0 s) [D].
+- The **terminal damage** replay (wreck menu link `terminal_damage_replay`): `osd_play_off` →
+  `terminal_flash` → `terminal_fade` → `terminal_damage_delay` → `instant_race_replay_silent`
+  (`terminal=true silent=true`) under `terminal_replay_interface`, with links BACK, `jump_in` and
+  `terminal_damage_menu` [O: flow.bin]. Its cameras are the ones whose name starts with
+  `TERMINAL` (0x93F770) [D]. The terminal rewind variants (0x596C90: 0xE6DFF8 + 0.6 s + 2.0 s)
+  are used by no flow node [O]; §6.
 
 ### 2.6 Replay cameras
 
@@ -219,8 +223,8 @@ The replay camera set is separate from the race cameras (F349):
   - starts 10 s before the newest frame, clamped to the in-memory window [D];
   - loops back to that point at the end [D `loop`].
 - View Replay (results) plays the whole recorded race from its first frame and loops to the start
-  [D]. The wreck screen's Replay plays the last 10 s (AUTHORED stand-in for the terminal-damage
-  replay with its TERMINAL cameras).
+  [D]. The wreck screen's Replay plays the terminal-damage replay: the last 10 s
+  (AUTHORED start, §6) with the zones' TERMINAL cameras and TerminalFX_02.
 - Interpolation between two samples: translation lerp and rotation slerp for car bodies, lost
   wheels and prop pieces [D 0x92F9E0]. Wheel displacement and steering lerp; the wheel angle is the
   sample's angle plus spin × time, as the live presentation does. Deformation, wheel geometry and
@@ -231,7 +235,13 @@ The replay camera set is separate from the race cameras (F349):
   player's lap starts (AUTHORED: next marker after now, previous more than 1 s before now). Slow
   motion (modes 5/6: play and its shuttle at 0.1×) and frame step (modes 8/9: ±1/60 s, then
   paused) are ported with AUTHORED keys F6 and comma/period (actions Replay Slow Motion, Replay
-  Step Back, Replay Step Forward), since the shipped presets bind none. Not ported: Replay Save.
+  Step Back, Replay Step Forward), since the shipped presets bind none. Replay Save (action id
+  0x1F in the action table 0xE4DFA0, string 0xD01C40) is bound to S, but no code queries it: the
+  input queries `push ID; call [vtable+0x2C]` exist for Jump In 0x1C (0x57B220, 0x57F630, 0x6DE370)
+  and Exit 0x20 (0x57B220, 0x57F630), and a scan of the whole `.text` for `push 0x1F` before a call
+  and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
+  immediate 0x1F found only unrelated sites (0x5BFF24, 0x942D7E). The interface draws a save (hold)
+  button (§2.5), but its action is never read [I: unused on PC]. Nothing to port.
   Replay Jump In (F12, pad X) is Flashback, docs/FLASHBACK.md.
 - The simulation is held for the replay. The live presentation still runs every frame, and the
   replay then overwrites it in `PostUpdate`:
@@ -276,8 +286,9 @@ The replay camera set is separate from the race cameras (F349):
   centres on every circuit, so a full-size box would never be entered; see §4]) is logged with its
   tick. At any replay time the active
   camera is that of the last zone crossed at or before it (else the initial camera), so seeking
-  and rewinding show the same shots as playing forward. Ordinary entries are used; `TERMINAL_`
-  ones are skipped.
+  and rewinding show the same shots as playing forward. Ordinary entries are used, and in a
+  terminal-damage replay each zone's first `TERMINAL` entry (a zone without one keeps its ordinary
+  camera [I]).
 - Track cameras: the original's zoom and static camera classes, decoded in
   docs/REPLAY_DIRECTOR_RESEARCH.md (F441 audit). In short:
   - target = car matrix x `targetOffset`, or a point on `targetPath`;
@@ -346,5 +357,18 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 - Not replayed (shown as they are when the replay starts): glass and light damage, shards,
   damage-part swing angles, collision sparks and other particles than tyre smoke and wheel
   debris, sound.
-- Replay Save is not ported. The director's traced timeline, the terminal-damage replay and its
-  TERMINAL cameras are open.
+- Replay Save has no consumer in the PC executable (§3.2). The director's traced timeline, the
+  terminal-damage replay's start time and TerminalFX_01 (the flash, per-corner vignette colours and
+  `vignetteBlendMode`) are open.
+- Terminal-damage replay (round 3): the wreck screen's Replay runs a terminal session
+  (`Replay::request_terminal`): the director takes each zone's first `TERMINAL` camera (0x93F770
+  compares 8 characters; 0x93F840 passes both to 0x93C9D0, which shows it while the director's
+  +0xD20 flag is set [I]) and keeps the ordinary one where a zone has none [I]; the image takes
+  TerminalFX_02 (`terminal_replay_interface` enter 0x57F530), whose shipped values equal
+  FlashbackFX_01's, so the balance pass draws it. The window stays the last 10 s (INSTANT_REWIND):
+  the terminal variants of `StateInstantReplayRewind` (`terminal_replay_rewind_forslow`, `_visual`,
+  `_special`), whose enter 0x596C90 rewinds by 0xE6DFF8 (the wreck-rest state's total time, stored
+  by exit 0x57F170) + 0.6 s (0xDB4FE8) or 10 s (0xDB4FE4) + 2.0 s, or by the whole elapsed time,
+  depending on two attribute flags [D; I: `for_slowmo`, `for_td_menu`], are used by no `flow.bin`
+  node [O]. The shipped crash replay starts where `terminal_damage_delay`
+  (`StateTerminalDamageDelay`) leaves the replay clock, not traced.

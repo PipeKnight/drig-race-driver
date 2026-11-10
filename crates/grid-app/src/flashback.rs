@@ -25,6 +25,7 @@ use grid_tools::source_vehicle::player_reset::PlayerReset;
 use grid_tools::source_vehicle::{Controls, DELTA, Runtime, assists::Shift};
 use grid_formats::graphics_grade::Balance;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 /// AUTHORED checkpoint interval: 4 s of simulation; a jump-in runs at most
 /// this many ticks again, spread over frames ([`RUN_BUDGET`]).
@@ -86,6 +87,84 @@ struct Checkpoint {
     trial: Option<(grid_tools::time_trial::State, Option<u64>)>,
     damage: Option<crate::damage_parts::Saved>,
     drift: Option<(Vec<grid_tools::drift::Entry>, u64, u64)>,
+    /// Per car (the player's runtime, then the shared world's cars): the
+    /// vehicle words and the deformation owner, moved out of the copied
+    /// runtimes ([`Checkpoint::pack`]).
+    packed: Vec<[Option<Packed>; 2]>,
+}
+
+/// The shared copies [`Packed`] words are stored against, per car: vehicle
+/// words, deformation owner.
+type Bases = Vec<[Option<Arc<[u32]>>; 2]>;
+
+/// A word vector stored as the runs of words that differ from a shared copy
+/// (an earlier checkpoint's full copy of the same car's words). A car's
+/// vehicle words and deformation owner (0x21000 bytes each) change in few
+/// words between checkpoints, and they were most of a checkpoint.
+#[derive(Clone)]
+struct Packed {
+    base: Arc<[u32]>,
+    len: usize,
+    /// `(start, count)`: `words` replace the base's from `start`.
+    runs: Vec<(u32, u32)>,
+    words: Vec<u32>,
+}
+
+impl Packed {
+    /// Equal words that end a run (fewer are stored with it).
+    const GAP: usize = 4;
+
+    /// `v` as runs against `base`; `v` becomes the new base (stored whole)
+    /// when there is none or more than a quarter of it differs.
+    fn pack(v: Vec<u32>, base: &mut Option<Arc<[u32]>>) -> Self {
+        if let Some(b) = base.as_ref() {
+            let differs = |i: usize| i >= b.len() || v[i] != b[i];
+            let (mut runs, mut words) = (Vec::new(), Vec::new());
+            let mut i = 0;
+            while i < v.len() {
+                if !differs(i) {
+                    i += 1;
+                    continue;
+                }
+                let mut end = i + 1;
+                let mut j = end;
+                while j < v.len() && j < end + Self::GAP {
+                    if differs(j) {
+                        end = j + 1;
+                    }
+                    j += 1;
+                }
+                runs.push((i as u32, (end - i) as u32));
+                words.extend_from_slice(&v[i..end]);
+                i = end;
+            }
+            if words.len() * 4 <= v.len() {
+                return Self { base: b.clone(), len: v.len(), runs, words };
+            }
+        }
+        let len = v.len();
+        let b: Arc<[u32]> = v.into();
+        *base = Some(b.clone());
+        Self { base: b, len, runs: Vec::new(), words: Vec::new() }
+    }
+
+    fn unpack(&self) -> Vec<u32> {
+        let mut v = Vec::with_capacity(self.len);
+        v.extend_from_slice(&self.base[..self.len.min(self.base.len())]);
+        v.resize(self.len, 0);
+        let mut k = 0;
+        for &(start, count) in &self.runs {
+            let (start, count) = (start as usize, count as usize);
+            v[start..start + count].copy_from_slice(&self.words[k..k + count]);
+            k += count;
+        }
+        v
+    }
+
+    /// Bytes of its own (the base is shared).
+    fn own_bytes(&self) -> usize {
+        std::mem::size_of_val(&self.runs[..]) + std::mem::size_of_val(&self.words[..])
+    }
 }
 
 #[derive(Clone)]
@@ -134,7 +213,30 @@ impl Checkpoint {
             trial: trial.map(|t| t.checkpoint()),
             damage: damage.map(|d| d.checkpoint()),
             drift: drift.map(|d| d.checkpoint()),
+            packed: Vec::new(),
         }
+    }
+
+    /// Moves every car's vehicle words and deformation owner out of the
+    /// copied runtimes into [`Packed`] form against `bases`.
+    fn pack(mut self, bases: &mut Bases) -> Self {
+        let cars = std::iter::once(&mut self.runtime)
+            .chain(self.opponents.iter_mut().flat_map(|f| f.multi.cars.iter_mut()));
+        let mut packed = Vec::new();
+        for (i, r) in cars.enumerate() {
+            if bases.len() <= i {
+                bases.resize_with(i + 1, Default::default);
+            }
+            let [vehicle, owner] = &mut bases[i];
+            packed.push([
+                Some(Packed::pack(std::mem::take(&mut r.state.car.owner.vehicle), vehicle)),
+                r.deformation_registration
+                    .as_mut()
+                    .map(|d| Packed::pack(std::mem::take(&mut d.owner), owner)),
+            ]);
+        }
+        self.packed = packed;
+        self
     }
 
     fn apply(&self, world: &mut World) {
@@ -157,6 +259,16 @@ impl Checkpoint {
             o.flags = f.flags.clone();
             o.yellow_flag = f.yellow_flag;
         }
+        let cars = std::iter::once(&mut driving.runtime)
+            .chain(driving.opponents.iter_mut().flat_map(|o| o.multi.cars.iter_mut()));
+        for (r, [vehicle, owner]) in cars.zip(&self.packed) {
+            if let Some(p) = vehicle {
+                r.state.car.owner.vehicle = p.unpack();
+            }
+            if let (Some(d), Some(p)) = (r.deformation_registration.as_mut(), owner) {
+                d.owner = p.unpack();
+            }
+        }
         if let (Some(mut t), Some(saved)) = (world.get_resource_mut::<crate::time_trial::Trial>(), &self.trial) {
             t.restore(saved);
         }
@@ -169,8 +281,8 @@ impl Checkpoint {
     }
 
     /// Approximate size (bytes) of the copied state: [vehicle words,
-    /// deformation owners, frames, bodies and contacts, solver rows, other]
-    /// (diagnostics).
+    /// deformation owners (both their own [`Packed`] bytes), frames, bodies
+    /// and contacts, solver rows, other] (diagnostics).
     fn bytes(&self) -> [usize; 6] {
         fn world(w: &grid_world::grouped_physical_frame::Output, out: &mut [usize; 6]) {
             out[3] += std::mem::size_of_val(&w.groups.bodies[..]) + std::mem::size_of_val(&w.groups.contacts[..]);
@@ -181,8 +293,6 @@ impl Checkpoint {
                 + std::mem::size_of_val(&m.workspace[..]);
         }
         fn car(r: &Runtime, out: &mut [usize; 6]) {
-            out[0] += r.state.car.owner.vehicle.len() * 4;
-            out[1] += r.deformation_registration.as_ref().map_or(0, |d| d.owner.len() * 4);
             out[2] += std::mem::size_of_val(&r.state.car.frame);
             world(&r.state.world, out);
             out[5] += std::mem::size_of::<Runtime>() + std::mem::size_of_val(&r.state.shapes[..]);
@@ -195,7 +305,19 @@ impl Checkpoint {
             }
             out[3] += std::mem::size_of_val(f.multi.bodies());
         }
+        for [vehicle, owner] in &self.packed {
+            out[0] += vehicle.as_ref().map_or(0, Packed::own_bytes);
+            out[1] += owner.as_ref().map_or(0, Packed::own_bytes);
+        }
         out
+    }
+
+    /// Bytes of the packed words: (stored, unpacked).
+    #[cfg(test)]
+    fn packed_bytes(&self) -> (usize, usize) {
+        self.packed.iter().flatten().flatten().fold((0, 0), |(own, all), p| {
+            (own + p.own_bytes(), all + p.len * 4)
+        })
     }
 }
 
@@ -213,6 +335,8 @@ pub struct Flashback {
     pub manager: Manager,
     pub stage: Stage,
     checkpoints: VecDeque<Checkpoint>,
+    /// The shared copies the checkpoints' packed words refer to.
+    bases: Bases,
     segment: Option<u64>,
     /// The player's tick, pose, velocity and reset state after the last
     /// tick (a change outside the tick shows as a difference at the same
@@ -232,6 +356,7 @@ impl Flashback {
             manager,
             stage: Stage::Idle,
             checkpoints: VecDeque::new(),
+            bases: Vec::new(),
             segment: None,
             last: None,
             refused: None,
@@ -258,6 +383,12 @@ impl Flashback {
     pub fn checkpoint_ticks(&self) -> Vec<u64> {
         self.checkpoints.iter().map(|c| c.tick).collect()
     }
+
+    /// Per checkpoint: the packed words' (stored, unpacked) bytes.
+    #[cfg(test)]
+    pub fn checkpoint_packed_bytes(&self) -> Vec<(usize, usize)> {
+        self.checkpoints.iter().map(Checkpoint::packed_bytes).collect()
+    }
 }
 
 /// Overlay of the flashback transition where its post effects could not be
@@ -274,6 +405,10 @@ struct Whiteout;
 pub struct Effects {
     pub whiteout: Balance,
     pub flashback: Balance,
+    /// TerminalFX_02, the terminal-damage replay's image
+    /// (`terminal_replay_interface` enter 0x57F530); the shipped values
+    /// equal FlashbackFX_01's.
+    pub terminal: Balance,
 }
 
 impl Effects {
@@ -282,6 +417,7 @@ impl Effects {
         Ok(Self {
             whiteout: read_balance(bytes, "IG_whiteout")?,
             flashback: read_balance(bytes, "FlashbackFX_01")?,
+            terminal: read_balance(bytes, "TerminalFX_02")?,
         })
     }
 
@@ -333,9 +469,10 @@ pub fn install(app: &mut App, ai_difficulty: f32, root: &std::path::Path) {
     {
         Ok(effects) => {
             log_line!(
-                "drive_flashback version=1 event=effects source=postprocess/effects.xml whiteout={:?} flashback={:?}",
+                "drive_flashback version=1 event=effects source=postprocess/effects.xml whiteout={:?} flashback={:?} terminal={:?}",
                 effects.whiteout,
-                effects.flashback
+                effects.flashback,
+                effects.terminal
             );
             app.insert_resource(effects);
             crate::balance_pass::install(app);
@@ -371,8 +508,45 @@ pub fn install(app: &mut App, ai_difficulty: f32, root: &std::path::Path) {
                 update
                     .after(crate::replay::control)
                     .before(crate::replay::frame_camera),
+                terminal_grade.after(update),
             ),
         );
+}
+
+/// TerminalFX_02 on the viewer camera while a terminal-damage replay shows
+/// and no Flashback transition grades the image; removed when it ends.
+fn terminal_grade(
+    replay: Option<Res<Replay>>,
+    flashback: Res<Flashback>,
+    effects: Option<Res<Effects>>,
+    cameras: Query<(Entity, Option<&crate::balance_pass::BalancePass>), With<crate::ViewerCamera>>,
+    mut graded: Local<bool>,
+    mut commands: Commands,
+) {
+    if flashback.stage != Stage::Idle {
+        // The transition owns the grade and removes it on resume.
+        *graded = false;
+        return;
+    }
+    let terminal = replay
+        .as_ref()
+        .and_then(|r| r.session.as_ref())
+        .is_some_and(|s| s.terminal);
+    let want = effects
+        .filter(|_| terminal)
+        .map(|e| crate::balance_pass::BalancePass::from(&e.terminal));
+    for (camera, current) in &cameras {
+        match want {
+            Some(w) if current != Some(&w) => {
+                commands.entity(camera).insert(w);
+            }
+            None if *graded => {
+                commands.entity(camera).remove::<crate::balance_pass::BalancePass>();
+            }
+            _ => {}
+        }
+    }
+    *graded = want.is_some();
 }
 
 type Last = (u64, [f32; 16], [f32; 4], PlayerReset);
@@ -408,6 +582,7 @@ pub fn capture(
         }
         flashback.segment = Some(driving.segment);
         flashback.checkpoints.clear();
+        flashback.bases.clear();
         flashback.last = None;
         inputs.log.clear();
     }
@@ -422,8 +597,11 @@ pub fn capture(
             damage.as_deref(),
             drift.as_deref(),
             false,
-        );
-        if flashback.checkpoints.is_empty() {
+        )
+        .pack(&mut flashback.bases);
+        // The first holds the shared copies of the packed words; the second
+        // shows a packed one.
+        if flashback.checkpoints.len() < 2 {
             log_line!(
                 "drive_flashback version=1 event=checkpoint segment={} tick={tick} approx_bytes={:?}",
                 driving.segment,
@@ -484,7 +662,8 @@ pub fn watch(
         damage.as_deref(),
         drift.as_deref(),
         true,
-    );
+    )
+    .pack(&mut flashback.bases);
     flashback.checkpoints.push_back(c);
 }
 
@@ -820,7 +999,38 @@ mod transition_tests {
                 vignette_amount: 0.6,
                 ..Balance::NEUTRAL
             },
+            terminal: Balance {
+                tint_amount: 0.3,
+                ..Balance::NEUTRAL
+            },
         }
+    }
+
+    #[test]
+    fn packed_words_unpack_exactly() {
+        let mut base = None;
+        let start: Vec<u32> = (0..1000).map(|i| i * 7).collect();
+        let full = Packed::pack(start.clone(), &mut base);
+        assert!(full.runs.is_empty() && full.unpack() == start);
+        // A few changed words, one beyond the base, one shorter: runs.
+        let mut v = start.clone();
+        v[3] = 1;
+        v[5] = 2;
+        v[900] = 3;
+        v.push(4);
+        let p = Packed::pack(v.clone(), &mut base);
+        assert_eq!(p.runs, [(3, 3), (900, 1), (1000, 1)]);
+        assert_eq!(p.unpack(), v);
+        assert!(Arc::ptr_eq(&p.base, base.as_ref().unwrap()));
+        let short = start[..10].to_vec();
+        assert_eq!(Packed::pack(short.clone(), &mut base).unpack(), short);
+        // More than a quarter differs: stored whole as the new base.
+        let other: Vec<u32> = (0..1000).map(|i| i * 3 + 1).collect();
+        let q = Packed::pack(other.clone(), &mut base);
+        assert!(q.runs.is_empty() && q.unpack() == other);
+        assert!(Arc::ptr_eq(&q.base, base.as_ref().unwrap()));
+        // Earlier packs keep their own base.
+        assert_eq!(p.unpack(), v);
     }
 
     #[test]
@@ -854,16 +1064,16 @@ mod transition_tests {
         assert_eq!(e.flashback.tint_amount, 0.2987);
         assert_eq!(e.flashback.vignette_amount, 0.6623);
         assert_eq!(e.flashback.vignette_offset, [0.0779, 0.2338]);
+        // TerminalFX_02 carries FlashbackFX_01's values.
+        assert_eq!(e.terminal, e.flashback);
         let mut cars = 0;
         for entry in std::fs::read_dir(root.join("cars")).unwrap() {
             let stem = entry.unwrap().file_name().to_string_lossy().into_owned();
             if !root.join(format!("cars/{stem}/cameras.xml")).exists() {
                 continue;
             }
-            // The raw list: a few cars lack a parameter of another view.
-            let bytes = std::fs::read(root.join(format!("cars/{stem}/cameras.xml"))).unwrap();
-            let views = grid_formats::vehicle_views::read(&bytes).unwrap();
-            assert!(views.views.iter().any(|v| v.ident == "replay_driver2"), "{stem}");
+            let views = crate::camera::Views::load(&root, &stem).unwrap();
+            assert!(views.0.iter().any(|v| v.ident == "replay_driver2"), "{stem}");
             cars += 1;
         }
         assert!(cars >= 40, "{cars}");

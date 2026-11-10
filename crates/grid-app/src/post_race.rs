@@ -223,10 +223,12 @@ pub enum Command {
     Exit,
     /// Retire from the wreck screen, then leave the event.
     RetireAndExit,
-    /// View Replay (`c_post_replay_interface`, the whole race) or the wreck
-    /// screen's Replay (the last 10 s, AUTHORED stand-in for the
-    /// terminal-damage replay); back to this screen on Replay Exit.
+    /// View Replay (`c_post_replay_interface`, the whole race); back to
+    /// this screen on Replay Exit.
     Replay(crate::replay::Kind),
+    /// The wreck screen's Replay: the terminal-damage replay
+    /// (`crate::replay::Replay::request_terminal`).
+    TerminalReplay,
 }
 
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -382,11 +384,11 @@ impl PostRace {
                     }
                     Pill::Continue => return Some(Command::Exit),
                     Pill::Replay => {
-                        return Some(Command::Replay(if self.stage == Stage::Wreck {
-                            crate::replay::Kind::Instant
+                        return Some(if self.stage == Stage::Wreck {
+                            Command::TerminalReplay
                         } else {
-                            crate::replay::Kind::Full
-                        }));
+                            Command::Replay(crate::replay::Kind::Full)
+                        });
                     }
                     Pill::Exit => self.stage = confirm(Confirm::Exit),
                     Pill::Restart => self.stage = confirm(Confirm::Restart),
@@ -561,6 +563,11 @@ pub fn update(
         Command::Replay(kind) => {
             if let Some(replay) = replay.as_mut() {
                 replay.request(kind, crate::replay::Origin::Results);
+            }
+        }
+        Command::TerminalReplay => {
+            if let Some(replay) = replay.as_mut() {
+                replay.request_terminal();
             }
         }
 
@@ -1179,6 +1186,18 @@ mod tests {
             view.body,
             "post_race_stats_drift_score_multiple\npost_race_stats_drift_amount_multiple"
         );
+    }
+
+    #[test]
+    fn wreck_screen_replay_is_the_terminal_damage_replay() {
+        let mut post = PostRace::new(Variant::FreeRace);
+        post.on_wreck(true, true, 2.0);
+        post.on_wreck(true, true, 1.0);
+        assert_eq!(post.stage, Stage::Wreck);
+        post.step(press(|n| n.down = true));
+        post.step(press(|n| n.down = true));
+        assert_eq!(post.step(press(|n| n.select = true)), Some(Command::TerminalReplay));
+        assert_eq!(post.stage, Stage::Wreck);
     }
 
     #[test]

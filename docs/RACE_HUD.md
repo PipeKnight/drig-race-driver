@@ -163,7 +163,8 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
   (AUTHORED).
   - Restart, after its confirmation.
   - Retire / Finish Test Drive, after its confirmation: the player retires and the app closes.
-  - Replay plays the last 10 s (F360; an AUTHORED stand-in for the terminal-damage replay).
+  - Replay plays the terminal-damage replay (TERMINAL cameras, TerminalFX_02) of the last 10 s
+    (the start time is AUTHORED, docs/REPLAY.md §6).
 - While a post-race screen is up, the pause menu is off and gear presses are dropped. Once the race
   is over the simulation is frozen.
 - Best laps:

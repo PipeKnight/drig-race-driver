@@ -3,7 +3,8 @@
 //! grid_formats::replay_cameras; docs/REPLAY.md, docs/REPLAY_DIRECTOR_RESEARCH.md).
 //!
 //! [D] from the data: each zone's `entry` handler activates one ordinary
-//! camera (and one `TERMINAL_` camera used by the terminal-damage replay);
+//! camera (and one `TERMINAL_` camera used by the terminal-damage replay,
+//! [`Zone::terminal`]);
 //! `target.NAME` activates the target car's own `cameras.xml` view NAME;
 //! `initialCamera` is used until the first zone. Zones are oriented boxes with
 //! `size` as half extents [I: on the four circuits the racing line passes
@@ -202,7 +203,16 @@ pub struct Zone {
     pub rotation: Quat,
     pub half: Vec3,
     pub activation: Option<Activation>,
+    /// The terminal-damage replay's camera: the first entry whose camera
+    /// ident starts with `TERMINAL` (0x93F770 compares 8 characters). The
+    /// zone handler 0x93F840 hands both cameras to the replay controller
+    /// (0x93C9D0), which shows this one while the director's terminal flag
+    /// (+0xD20, set by the terminal replay states) is on [I].
+    pub terminal: Option<Activation>,
 }
+
+/// The prefix of a terminal-damage camera (0x93F770).
+pub const TERMINAL: &str = "TERMINAL";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Director {
@@ -335,7 +345,12 @@ impl Director {
                 activation: z
                     .entry
                     .iter()
-                    .find(|i| !i.starts_with("TERMINAL_"))
+                    .find(|i| !i.starts_with(TERMINAL))
+                    .and_then(|i| activation(config, i, &index)),
+                terminal: z
+                    .entry
+                    .iter()
+                    .find(|i| i.starts_with(TERMINAL))
                     .and_then(|i| activation(config, i, &index)),
             })
             .collect();
@@ -607,6 +622,8 @@ mod tests {
         let d = Director::from_config(&config());
         assert_eq!(d.initial, Some(Activation::Track(0)));
         assert_eq!(d.zones[0].activation, Some(Activation::Track(2)));
+        // The terminal-damage replay's camera of the same zone.
+        assert_eq!(d.zones[0].terminal, Some(Activation::Track(1)));
         // A 3 m step across a 2 m thick gate is still seen.
         assert_eq!(d.crossed(Vec3::new(48.5, 0., 0.), Vec3::new(51.5, 0., 0.)), [0]);
         assert!(d.crossed(Vec3::new(40., 0., 0.), Vec3::new(45., 0., 0.)).is_empty());

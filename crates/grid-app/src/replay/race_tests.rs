@@ -8,6 +8,46 @@ use crate::{Driving, pause_menu::PauseMenu, post_race::PostRace};
 use grid_tools::route::{DONINGTON, ISTANBUL_PARK, LONG_BEACH, NURBURGRING, Route};
 use std::time::Duration;
 
+/// The wreck screen's replay asks for the terminal-damage session; its
+/// director takes each zone's `TERMINAL` camera and keeps the ordinary one
+/// where a zone has none. Any other request is an ordinary replay.
+#[test]
+fn terminal_replay_uses_the_zones_terminal_cameras() {
+    use director::{Activation, Director, Zone};
+    let zone = |activation, terminal| Zone {
+        centre: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        half: Vec3::ONE,
+        activation,
+        terminal,
+    };
+    let director = Director {
+        cameras: Vec::new(),
+        zones: vec![
+            zone(Some(Activation::Track(2)), Some(Activation::Track(1))),
+            zone(Some(Activation::Track(3)), None),
+        ],
+        initial: Some(Activation::Track(0)),
+    };
+    let mut r = Replay::new(stream::Stream::new(stream::Limits::default(), None), Some(director));
+    r.entries = vec![(10, 0), (20, 1)];
+    let at = |r: &Replay, tick, terminal| r.activation_for(tick, terminal).map(|(a, _)| a);
+    assert_eq!(at(&r, 5, true), Some(Activation::Track(0)));
+    assert_eq!(at(&r, 15, false), Some(Activation::Track(2)));
+    assert_eq!(at(&r, 15, true), Some(Activation::Track(1)));
+    assert_eq!(at(&r, 25, true), Some(Activation::Track(3)));
+    r.request_terminal();
+    assert_eq!(r.request, Some((Kind::Instant, Origin::Results)));
+    assert!(r.terminal_request);
+    // Nothing recorded: no session, and the flag does not outlive the request.
+    let (kind, origin) = r.request.take().unwrap();
+    assert!(!r.start(kind, origin, false, &crate::camera::Views::fallback()));
+    assert!(!r.terminal_request);
+    r.request_terminal();
+    r.request(Kind::Full, Origin::Results);
+    assert!(!r.terminal_request);
+}
+
 /// The race harness plus the recorder after each tick and the replay
 /// controls before the menus; real time advances 1/60 s per frame.
 pub(crate) fn with_replay(mut app: App, route: &str) -> App {

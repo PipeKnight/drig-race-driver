@@ -88,6 +88,9 @@ pub struct Diagnostics {
     /// Every replay starts in slow motion (the Replay Slow Motion action,
     /// docs/REPLAY.md): replay checks of the slow path without key presses.
     pub replay_slow: bool,
+    /// The `replay_capture` replay is the terminal-damage replay (the wreck
+    /// screen's Replay): TERMINAL cameras and TerminalFX_02 without a wreck.
+    pub replay_terminal: bool,
     /// Seconds: in a scripted run, the stats and results screens select
     /// Continue by themselves after this long (unattended career checks,
     /// docs/CAREER_SCREEN.md).
@@ -136,6 +139,7 @@ impl Default for Diagnostics {
             replay_capture: None,
             flashback_capture: None,
             replay_slow: false,
+            replay_terminal: false,
             results_continue: None,
             tick_delay_ms: None,
             max_ticks_per_frame: None,
@@ -170,6 +174,7 @@ impl Diagnostics {
             replay_capture: text("GRID_REPLAY_CAPTURE").and_then(|v| v.parse().ok()),
             flashback_capture: text("GRID_FLASHBACK_CAPTURE").and_then(|v| v.parse().ok()),
             replay_slow: text("GRID_REPLAY_SLOW").is_some_and(|v| v == "1"),
+            replay_terminal: text("GRID_REPLAY_TERMINAL").is_some_and(|v| v == "1"),
             results_continue: text("GRID_RESULTS_CONTINUE").and_then(|v| v.parse().ok()),
             tick_delay_ms: text("GRID_TICK_DELAY_MS").and_then(|v| v.parse().ok()),
             max_ticks_per_frame: text("GRID_MAX_TICKS_PER_FRAME").and_then(|v| v.parse().ok()),
@@ -204,6 +209,7 @@ impl Diagnostics {
                 self.flashback_capture = Some(value.parse().map_err(|_| number(key))?)
             }
             "replay_slow" => self.replay_slow = on(key, value)?,
+            "replay_terminal" => self.replay_terminal = on(key, value)?,
             "results_continue" => {
                 self.results_continue = Some(value.parse().map_err(|_| number(key))?)
             }

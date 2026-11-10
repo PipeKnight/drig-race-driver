@@ -195,6 +195,25 @@ The same end state is reached exactly another way (AUTHORED):
     0x21000-byte vehicle words and deformation owner). Peak working set of a 4000-tick (64 s)
     12-car scripted race: 1003 MB against 809 MB for the playable without Flashback (with a 2 s
     interval it was 1235 MB, which is why the interval is 4 s).
+  - Packed words (round 3): each car's vehicle words and deformation owner (0x21000 bytes each)
+    are moved out of the cloned runtimes and stored as the runs of words that differ from a shared
+    copy, an earlier checkpoint's whole copy of the same car's words (a run ends at 4 equal words;
+    more than a quarter changed stores the vector whole as the new copy). A jump-in unpacks them
+    exactly (`packed_words_unpack_exactly`, and the per-circuit restore tests compare every tick).
+    Measured [V] (`drive_flashback event=checkpoint approx_bytes`, settings/race.ini, 12 cars,
+    the player's car deforming, windowed run): before, the tick-1 checkpoint copied 1757184 bytes
+    of vehicle words and 135168 of deformation owner plus 1195148 of the rest (3.09 MB). Now the
+    tick-1 checkpoint holds them as the shared copies (1.89 MB once) and the tick-250 checkpoint
+    stores 20220 bytes of packed words: 1.22 MB a checkpoint. In the 3-car per-circuit tests a
+    later checkpoint's packed words are 6.7–77 kB of 811 kB.
+- **Force feedback** [D]: StateInstantReplay's enter 0x596A40 saves the FFB enabled flag (+0xA0)
+  and calls `ffb_enable(0)` 0x7EB110, which empties the snapshot queue and the playing effects
+  (0x7EADD0) and zeroes every device (0x7E8450); `StateIngameEnableFFB` (enter 0x57B180,
+  `enable_ffb` / `disable_ffb`) calls it with its flag, and the jump-in flow runs `enable_ffb`
+  after `osd_play_on`, two frames before the race resumes. The port holds `Driving::paused` for the
+  replay and the flashes, which zeroes and stops the feed the same way (`Ffb::set_paused`), and
+  feeds again on the first tick after the resume; the previous snapshot used for the gear event is
+  kept in both. No change needed.
 - **Player inputs**: `drive_tick` logs the player's controls and gear request of each tick.
 - **A car reset from the pause menu** changes state outside the tick. It requests the reset
   job, which then runs inside the ticks (RESET_AND_RESPAWN_RESEARCH §6). A checkpoint of the
@@ -252,7 +271,7 @@ The same end state is reached exactly another way (AUTHORED):
   intact again and found anew from the restored deformation; shards are removed. Skid marks, tyre
   smoke and wheel debris are those of the jump-in frame (3.3).
 - The transition's time scale (`slowMo` is off for the three flashes, so nothing is lost),
-  the `enable_ffb` state after the flashes (force feedback itself is ported), the Pro Mode switch
+  the Pro Mode switch
   (no race options screen) and career money (Flashback Bonus).
 - `drive_input` log lines after a jump-in go back in tick; `grid-soak replay-log` does not read
   `drive_flashback` lines yet.
@@ -298,8 +317,9 @@ The same end state is reached exactly another way (AUTHORED):
 
 ## 5. Open items
 
-- Memory: about 13 MB per 12-car checkpoint; a word-level delta against the shared start state
-  would cut most of it (the vehicle words barely change).
+- Memory: with the vehicle words and deformation owners packed (§3.2), a 12-car checkpoint is
+  about 1.2 MB, most of it the solver rows (0.64 MB), frames, bodies and contacts, which are still
+  cloned whole. The earlier 13 MB was an estimate for 12 deforming cars (F366).
 - The award formula of the Flashback Bonus, the mode-4 exception, the focus condition of
   0x937150 and which replay state calls 0x93DDA0 were not traced.
 - The vehicle recordable's own apply was not traced; [I] it restores the full car state like the

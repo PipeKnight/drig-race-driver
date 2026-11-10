@@ -65,6 +65,7 @@ Grammar:
 | | `replay_capture` | seconds: after a scripted drive (`--drive-ticks`), play an Instant Replay and delay `--render` until it has run this long (docs/REPLAY.md) | `GRID_REPLAY_CAPTURE=S` |
 | | `flashback_capture` | seconds: in that Instant Replay, Jump In (Flashback) once it has run this long; the drive continues from the jump-in frame (docs/FLASHBACK.md). Use a value below `replay_capture` | `GRID_FLASHBACK_CAPTURE=S` |
 | | `replay_slow` | on/off: every replay starts in slow motion, as after the Replay Slow Motion key (docs/REPLAY.md); for replay checks without key presses | `GRID_REPLAY_SLOW=1` |
+| | `replay_terminal` | on/off: the `replay_capture` replay is the terminal-damage replay (TERMINAL cameras, TerminalFX_02), as from the wreck screen's Replay (docs/REPLAY.md) | `GRID_REPLAY_TERMINAL=1` |
 | | `max_ticks_per_frame` | interactive window only: at most this many 16 ms ticks per rendered frame, default 4; `0` restores Bevy's 250 ms clamp, for comparisons (docs/FRAME_STEPPING.md) | `GRID_MAX_TICKS_PER_FRAME=N` |
 | | `tick_delay_ms` | milliseconds slept in every vehicle tick: a forced slow tick for frame-rate checks (docs/FRAME_STEPPING.md) | `GRID_TICK_DELAY_MS=MS` |
 | | `camera_fps` | frames per second of race time: the in-race views step by the original's per-frame rules at this rate (head-cam springs, look smoothing, follow damp, spin hold), for comparisons with the original at 60 or 165 fps; unset, one step per 16 ms tick (docs/CAMERA_VIEWS.md §3 "Camera clock") | `GRID_CAMERA_FPS=F` |

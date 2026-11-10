@@ -180,6 +180,11 @@ fn check(case: &Case) {
     run(&mut app, case, NOW, |_| {});
     assert_eq!(Some(state(&app)), expected[NOW as usize]);
     let checkpoints = flashback(&app).checkpoint_ticks();
+    let packed = flashback(&app).checkpoint_packed_bytes();
+    eprintln!(
+        "flashback_packed route={} stored_unpacked_bytes={packed:?}",
+        case.route
+    );
     // The Instant Replay key in the race, 1.4 s of rewind, then Jump In.
     release(&mut app);
     tap(&mut app, KeyCode::Enter);

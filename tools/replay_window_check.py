@@ -1,17 +1,19 @@
 """Interactive window check of the replay and Flashback: records a race, plays it back with the replayed effects, jumps in and races on (F-entry of the replay effects).
 
 Usage: py -I tools/replay_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--drive-ticks 900]
-       [--replay S] [--flashback S] [--slow] [--timeout S] [--shots S,S,...]
+       [--replay S] [--flashback S] [--slow] [--terminal] [--timeout S] [--shots S,S,...]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1).
 When the scripted drive ends, diagnostics `replay_capture` starts an Instant Replay and
 `flashback_capture` jumps in FLASHBACK seconds into it; the race goes on from the jump-in frame and
 reaches the script's end again (a second Instant Replay). `--slow` (GRID_REPLAY_SLOW=1) plays every
-replay in slow motion. No key presses, no focus change.
+replay in slow motion. `--terminal` (GRID_REPLAY_TERMINAL=1) makes the first replay the
+terminal-damage replay (TERMINAL cameras, TerminalFX_02). No key presses, no focus change.
 
 Verdict from the game's log lines:
-- `drive_race_replay version=1 event=start` (and `slow=true` with --slow);
+- `drive_race_replay version=1 event=start` (and `slow=true` with --slow; with --terminal
+  `terminal=true` and `graphics_balance_pass active=true` before the jump-in: TerminalFX_02 drawn);
 - `replay_effects version=1 event=start`: the race's skid strips, debris and smoke when the replay began;
 - `drive_flashback version=1 event=jump_in`, `event=restored` and `event=resume`;
 - `replay_effects version=1 event=adopt` at the resume tick, after it stepped the effects from the
@@ -44,6 +46,7 @@ def main():
     ap.add_argument('--replay', type=float, default=4.)
     ap.add_argument('--flashback', type=float, default=1.)
     ap.add_argument('--slow', action='store_true')
+    ap.add_argument('--terminal', action='store_true')
     ap.add_argument('--timeout', type=float, default=300.)
     ap.add_argument('--shots', default='')
     args = ap.parse_args()
@@ -58,6 +61,8 @@ def main():
                GRID_REPLAY_CAPTURE=str(args.replay), GRID_FLASHBACK_CAPTURE=str(args.flashback))
     if args.slow:
         env['GRID_REPLAY_SLOW'] = '1'
+    if args.terminal:
+        env['GRID_REPLAY_TERMINAL'] = '1'
     if shots:
         env['GRID_WINDOW_SHOTS'] = args.shots
     log_path = out / 'grid-app.log'
@@ -105,6 +110,13 @@ def main():
         problems.append('no replay started')
     elif args.slow and replays[0].get('slow') != 'true':
         problems.append('replay not in slow motion')
+    if args.terminal:
+        if replays and replays[0].get('terminal') != 'true':
+            problems.append('first replay not terminal')
+        first_jump = next((i for i, l in enumerate(lines) if l.startswith('drive_flashback version=1 event=jump_in')),
+                          len(lines))
+        if not any(l.startswith('graphics_balance_pass active=true') for l in lines[:first_jump]):
+            problems.append('no balance pass (TerminalFX_02) before the jump-in')
     if not fx_start:
         problems.append('no replay_effects start')
     if not (jump and restored and resume):
