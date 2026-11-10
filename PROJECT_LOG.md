@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F786](log/F0786.md) | 2026-11-10 | Career rival tag writer |
 | [F785](log/F0785.md) | 2026-11-10 | HUD: front-end colour streams, drift ring shake and roll-up, rival name tag |
 | [F784](log/F0784.md) | 2026-11-10 | 3D loading world, pause bloom, race-intro bars scoped |
 | [F783](log/F0783.md) | 2026-11-10 | Drift GP and Freestyle drift cars, scaled joined props, on_track chords and gate progress |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F729](log/F0729.md) | 2026-11-04 | Cars and camera drawn between fixed ticks: no motion judder above 62.5 FPS |
 | [F728](log/F0728.md) | 2026-11-04 | Owner playtest of e66e1c24963c: trees fixed; rows 114-116 recorded, on hold |
 | [F727](log/F0727.md) | 2026-11-04 | Playable e66e1c24963c for the PC (tree edge culling and pipeline warm-up) |
-| [F726](log/F0726.md) | 2026-11-03 | Pipeline warm-up at the race start: no objects missing while their pipeline compiles |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

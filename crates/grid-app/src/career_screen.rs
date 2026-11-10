@@ -1057,6 +1057,31 @@ speech_no_damage = {}
     lines
 }
 
+/// The career rival tag of the next race as a `[game] rival` line
+/// ([D 0x6BCE60, 0x6BD0B0]; `name_tag::RivalRule`): only in the player's
+/// own events with a field (event kind 0; never driver offers). The
+/// event's first race tags the race leader (`leader`); a later race tags
+/// the car of the driver who leads the event standings, nothing when that
+/// is the player or a driver not in this race. The race drops a rival who
+/// is the team mate.
+pub fn rival_line(e: &InProgress, next: &Planned, points: Option<&[i32]>) -> String {
+    use crate::name_tag::RivalRule;
+    if e.offer.is_some() || e.field.is_empty() {
+        return String::new();
+    }
+    let leader = points
+        .and_then(|p| grid_tools::career::rules::standings(p, &e.results).first().map(|s| s.entrant))
+        .and_then(|who| next.cars.iter().position(|&i| e.field.get(i).is_some_and(|f| f.entrant == who)))
+        .map(|k| k + 1);
+    match RivalRule::for_event_race(e.results.len(), leader) {
+        Some(RivalRule::Leader) => "rival = leader
+".into(),
+        Some(RivalRule::Car(k)) => format!("rival = {k}
+"),
+        None => String::new(),
+    }
+}
+
 /// Adds `[game] points` (the event's points table, the results' Points
 /// column) to a race profile.
 pub fn with_points(profile: &str, points: &[i32]) -> String {
@@ -2831,7 +2856,7 @@ impl Screen {
         }
         profile = profile.replacen("[game]
 ", &format!("[game]
-{}", speech_lines(&self.cat, &self.career, e, next, points.as_deref())), 1);
+{}{}", speech_lines(&self.cat, &self.career, e, next, points.as_deref()), rival_line(e, next, points.as_deref())), 1);
         std::fs::write(self.dir.join(PROFILE), profile).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=go event_id={} race={} route={} laps={} grid={}",
@@ -3913,6 +3938,19 @@ speech_event_wins = 0
         assert_eq!((speech.absent_best, speech.bonus_place, speech.no_damage), (None, 0, false));
         // Three earlier career wins plus race 1 of this event; two events won.
         assert_eq!((speech.race_wins, speech.event_wins), (Some(4), Some(2)), "{lines}");
+        // The rival tag: race 1 tags the race leader; race 2 none while the player leads the
+        // standings, else the standings leader's car in race 2's numbering.
+        let first = InProgress { results: Vec::new(), ..e.clone() };
+        assert_eq!(rival_line(&first, &planned[0], Some(points)), "rival = leader
+");
+        assert_eq!(rival_line(&e, &planned[1], Some(points)), "");
+        let mut ai_won = e.clone();
+        ai_won.results[0].order.swap(0, 1);
+        let k = planned[1].cars.iter().position(|&i| i == planned[0].cars[0]).unwrap() + 1;
+        assert_eq!(rival_line(&ai_won, &planned[1], Some(points)), format!("rival = {k}
+"));
+        let offer = InProgress { offer: Some(1), ..e.clone() };
+        assert_eq!(rival_line(&offer, &planned[1], Some(points)), "");
         let mut c = career.clone();
         let win = out(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], false);
         let p = apply_event(&cat, &mut c, 7, &[win.result.clone(), win.result], &win.settings).unwrap();

@@ -73,10 +73,6 @@ impl RivalRule {
     /// The value the career writes for race `race` (0-based) of the player's own event, with
     /// `leader` the car of the championship leader in this race's numbering (0 the player,
     /// `None` when the leader is not in the race).
-    #[allow(
-        dead_code,
-        reason = "the career writer in career_screen.rs calls it; remove this when it lands"
-    )]
     pub fn for_event_race(race: usize, leader: Option<usize>) -> Option<Self> {
         match (race, leader) {
             (0, _) => Some(Self::Leader),
