@@ -91,7 +91,8 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   `building`, `barriers`, `gantry` (material `barrier`, texture `extra_text`, Emmisive 0.5),
   `sky` (`sky`, Emmisive 0.75), and under `floor` the `tarmac_plane` and `logo_plane`
   (`tarmac_d`, `tarmac_logo`, Emmisive 0.5) [D pssg, `grid-fe-anim --under=loading_root`]. The
-  `screen/…` nodes are panel anchors without meshes. The shaderpack's pixel program
+  `screen/…` nodes have no meshes of their own but are glyph instances (see "Screens placed in the
+  world" below). The shaderpack's pixel program
   `fe3d_tracksurface.cg.fp` computes colour = texture × v2 × (ambient + Emmisive × (1 − ambient))
   plus a box-projected cube reflection (`r_min`/`r_max`, raised to `r_gamma`, × `r_scale`) times
   a Fresnel term of at most `FresnelMax` and the texture's alpha; alpha = v2's. Its vertex
@@ -118,6 +119,19 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   root, camera and lighting group. Open: the cube reflection (at most 0.16 of the cube at grazing
   angles), the floor reflection (`loading_reflection`), the camera's noise rotation and stick
   spring, the particle emitter, the `fe_loading_world` post effect and the stat panel.
+- **Screens placed in the world (F791).** `loading_root`'s 16 `screen/<glyph>=…` nodes are
+  instances (F787, `grid_formats::osd_glyph`): grafted, they add 2434 meshes, nearly all of
+  the `fe3d_generic` family (generic, G, GD, GMPD, GPD, I), `fe3d_particle` and `fe3d_ramp`, from
+  `bank_account`, `comp_tree`, `driver_offer_update`, the three leaderboards, `loading_stats`,
+  `profile_select`, `new_sponsors`, the options screens, `press_start`, `race_licence` and the two
+  sponsor screens [D, census in the worktree's `local/front-end-flow/loading-world/census.txt`].
+  Several lie in `load_cam`'s view (`race_licence` spans x −136 … 1809 at z ≈ 0), so drawing all
+  of them would stack every panel at once. A screen owns its instance (`ScreenLoadingStats` looks
+  up `loading_stats` by name [D]); that it is drawn only while its screen is active is [I].
+  `loading_stats` itself is three 4-vertex quads (`text=1..3` under `anim_top/mid/bot`, materials
+  `load_top/middle/bottom`, `fe3d_genericGPD`): the text is built at run time. **Port:**
+  `fe_world::drawn` grafts every instance below the root except `screen/` ones, which are left to
+  the screen that shows them; on `loading_root` that is still the six meshes above.
 - No per-track loading art and no progress bar were found. `raceload.jpk` is race data (physics
   and material parameters, docs/BINARY_XML.md), not loading art [D].
 

@@ -19,12 +19,19 @@
 //!   `Translation` channels from the world's start (held before the first
 //!   key and after the last); vertical field of view `FOV` [I, as the OSD
 //!   camera]. The original's noise rotation and stick spring are open.
+//! - Instances: a node `kind/glyph=instance` draws the glyph `<glyph>_root`
+//!   below its transform (`grid_formats::osd_glyph`, F787), except a
+//!   `screen/` instance: that is a front-end screen's panel, which its screen
+//!   shows while it is active (`ScreenLoadingStats` looks up `loading_stats`
+//!   by name [D]), not part of the world [I]. `loading_root` places 16 of
+//!   them (2434 meshes, mostly the `fe3d_generic` family); none is drawn here.
 use bevy::{
     asset::RenderAssetUsages,
     core_pipeline::tonemapping::Tonemapping,
     prelude::*,
 };
 use grid_formats::osd;
+use grid_formats::osd_glyph::{self, Placed};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -131,6 +138,35 @@ pub fn surface_factor(colour: [f32; 3], emissive: f32, ambient: [f32; 3]) -> [f3
     std::array::from_fn(|i| colour[i] * (ambient[i] + emissive * (1. - ambient[i])))
 }
 
+/// Whether an instance node belongs to a front-end screen (`screen/…=…`).
+fn is_screen(id: &str) -> bool {
+    osd_glyph::instance_glyph(id).is_some() && id.starts_with("screen/")
+}
+
+/// The nodes of the world below `root` (the root excluded), each instance's
+/// glyph grafted in except a screen's; returns them and the number of
+/// screen instances left out.
+pub fn drawn(scene: &osd::Scene<'_>, root: usize) -> (Vec<Placed>, usize) {
+    let mut screens = 0;
+    // A graft follows its instance directly (the instance is a leaf), so the
+    // last depth-0 node owns every deeper one.
+    let mut skip = false;
+    let nodes = osd_glyph::expand(&[scene], 0, root)
+        .into_iter()
+        .skip(1)
+        .filter(|p| {
+            if p.depth == 0 {
+                skip = is_screen(&scene.nodes[p.node].id);
+                screens += usize::from(skip);
+                true
+            } else {
+                !skip
+            }
+        })
+        .collect();
+    (nodes, screens)
+}
+
 /// Spawns the world and its camera; returns the camera (for the UI over it).
 pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity, String> {
     let read = |p: &str| std::fs::read(install_root.join(p)).map_err(|e| format!("{p}: {e}"));
@@ -142,15 +178,7 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
     let params = String::from_utf8_lossy(&read("frontend/fe_paramcontrol.xml")?).into_owned();
     let ambient = group_colour(&params, spec.lights, "ambient").ok_or(format!("no {} ambient", spec.lights))?;
     let root = scene.node(spec.root).ok_or(format!("no {}", spec.root))?;
-    let below = |mut i: usize| {
-        while let Some(p) = scene.nodes[i].parent {
-            if p == root {
-                return true;
-            }
-            i = p;
-        }
-        false
-    };
+    let (nodes, screens) = drawn(&scene, root);
     let camera_id = format!("camera={}", spec.camera);
     let camera = scene
         .cameras
@@ -174,10 +202,12 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
     let mut textures = HashMap::new();
     let mut materials = HashMap::new();
     let mut parts = Vec::new();
-    for (i, n) in scene.nodes.iter().enumerate() {
-        let Some(render) = n.render.as_ref().filter(|_| below(i)) else {
+    let mut grafted = 0;
+    for placed in &nodes {
+        let Some(render) = scene.nodes[placed.node].render.as_ref() else {
             continue;
         };
+        grafted += usize::from(placed.depth > 0);
         let m = &scene.materials[render.material];
         let material = match materials.get(&render.material) {
             Some(h) => Handle::clone(h),
@@ -235,10 +265,10 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
             }
         };
         let mesh = world.resource_mut::<Assets<Mesh>>().add(crate::osd_scene::mesh(&render.mesh));
-        parts.push((Mesh3d(mesh), MeshMaterial3d(material), Transform::from_matrix(mat(&scene.world(i)))));
+        parts.push((Mesh3d(mesh), MeshMaterial3d(material), Transform::from_matrix(mat(&placed.world))));
     }
     println!(
-        "fe_world root={} parts={} materials={} textures={} camera={} fov={:.1}",
+        "fe_world root={} parts={} grafted={grafted} screens_left={screens} materials={} textures={} camera={} fov={:.1}",
         spec.root,
         parts.len(),
         materials.len(),
@@ -286,6 +316,44 @@ mod tests {
         assert!((f[0] - 0.8).abs() < 1e-6);
     }
 
+    fn node(id: &str, parent: Option<usize>, x: f32) -> osd::Node {
+        let mut local = Mat4::IDENTITY.to_cols_array();
+        local[12] = x;
+        osd::Node { id: id.into(), parent, local, bounds: [0.; 6], render: None }
+    }
+
+    #[test]
+    fn worlds_graft_instances_but_leave_screens_to_their_screens() {
+        let scene = osd::Scene {
+            textures: vec![],
+            wraps: vec![],
+            cubemaps: vec![],
+            materials: vec![],
+            nodes: vec![
+                node("world_root", None, 0.),
+                node("null=floor", Some(0), 1.),
+                node("object/cone=a", Some(0), 10.),
+                node("screen/panel=p", Some(0), 20.),
+                node("null=sky", Some(0), 30.),
+                node("cone_root", None, 500.),
+                node("mesh=cone", Some(5), 2.),
+                node("panel_root", None, 0.),
+                node("text=1", Some(7), 3.),
+            ],
+            camera: None,
+            cameras: vec![],
+            animations: vec![],
+        };
+        let (nodes, screens) = drawn(&scene, 0);
+        let got: Vec<(&str, f32, usize)> =
+            nodes.iter().map(|p| (scene.nodes[p.node].id.as_str(), p.world[12], p.depth)).collect();
+        assert_eq!(
+            got,
+            [("null=floor", 1., 0), ("object/cone=a", 10., 0), ("mesh=cone", 12., 1), ("screen/panel=p", 20., 0), ("null=sky", 30., 0)]
+        );
+        assert_eq!(screens, 1);
+    }
+
     /// The loading world from the install: its six drawn meshes and the
     /// camera's saved start looking at its target.
     #[test]
@@ -305,6 +373,10 @@ mod tests {
         // Before its first key (1 s) the camera holds its saved place; its
         // forward axis matches the saved matrix's -Z.
         let t = camera.transform(0.);
+        // Six meshes of its own; the 16 screen panels it places stay with their screens.
+        let (nodes, screens) = drawn(&scene, scene.node(LOADING.root).unwrap());
+        let meshes = nodes.iter().filter(|p| scene.nodes[p.node].render.is_some()).count();
+        assert_eq!((meshes, screens), (6, 16));
         // Every drawn texture is a stub in the database and full in the bundle.
         let bundle_bytes = std::fs::read(Path::new(&root).join(LOADING.bundle)).unwrap();
         let bundle = grid_formats::pssg::read_tree(&bundle_bytes).unwrap();
