@@ -4,8 +4,11 @@
 # binary's tests. Add `-- --include-ignored` for the asset tests. The research
 # probes live in crates/grid-probes (no test harnesses, not a default member).
 t = ["test", "--workspace", "--release", "--lib", "--test", "*", "--bin", "grid-app"]
-# The same in the dev profile, for quick iteration on one package: `cargo td -p grid-world`.
-td = ["test", "--lib", "--test", "*"]
+# Dev-profile tests of one package for quick iteration: `cargo td -p grid-world`.
+# `--tests` takes every target with a test harness (library, binaries,
+# integration tests) and, unlike `--test "*"`, accepts a package without
+# integration tests (grid-app's tests are in its binary).
+td = ["test", "--tests"]
 
 # The LLVM linker shipped with the toolchain (rustlib\x86_64-pc-windows-msvc\bin):
 # links grid-app in about 2.5 s instead of 25 s with MSVC link.exe, with equal

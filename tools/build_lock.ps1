@@ -11,7 +11,8 @@ commands of the sessions:
     (Bash:  powershell.exe -NoProfile -File tools/build_lock.ps1 cargo clippy --release -p grid-app -- -D warnings)
 
 The wrapper waits for its turn, runs the command, releases the lock and exits with the
-command's exit code. Scripts dot-source it instead:
+command's exit code. `cargo t` and `cargo td` work through it in worktrees too: it expands
+the repository alias itself (Expand-CargoAlias, docs/TOOLCHAIN.md P9). Scripts dot-source it instead:
 
     . (Join-Path $PSScriptRoot 'build_lock.ps1')
     $lock = Enter-BuildLock -Purpose 'update_prototype'
@@ -212,6 +213,26 @@ function Show-BuildLockStatus {
     }
 }
 
+function Expand-CargoAlias {
+    # A worktree under C:\Dev\Reassembly\.claude\worktrees also reads the main checkout's
+    # .cargo/config.toml, and cargo joins the two alias arrays: `cargo td` then fails with
+    # "the argument '--lib' cannot be used multiple times" (docs/TOOLCHAIN.md, P9). The
+    # wrapper expands an array alias of this checkout's own config itself, so cargo gets the
+    # builtin command. Other arguments and unknown aliases pass unchanged.
+    param([string[]]$CargoArgs, [string]$ConfigPath = (Join-Path (Split-Path $PSScriptRoot -Parent) '.cargo\config.toml'))
+    if ($CargoArgs.Count -eq 0 -or -not (Test-Path $ConfigPath)) { return ,$CargoArgs }
+    $inAlias = $false
+    foreach ($line in Get-Content $ConfigPath) {
+        if ($line -match '^\s*\[(.+)\]\s*$') { $inAlias = ($Matches[1].Trim() -eq 'alias'); continue }
+        if (-not $inAlias) { continue }
+        if ($line -match '^\s*([A-Za-z0-9_-]+)\s*=\s*\[(.*)\]\s*$' -and $Matches[1] -eq $CargoArgs[0]) {
+            $expanded = @([regex]::Matches($Matches[2], '"([^"]*)"') | ForEach-Object { $_.Groups[1].Value })
+            return ,@($expanded + @($CargoArgs | Select-Object -Skip 1))
+        }
+    }
+    return ,$CargoArgs
+}
+
 # ---- wrapper mode: powershell -File tools\build_lock.ps1 [-Status] COMMAND ARGS... ----------
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
@@ -222,6 +243,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH" }
     $command = $rest[0]
     $commandArgs = @($rest | Select-Object -Skip 1)
+    if ($command -eq 'cargo') { $commandArgs = Expand-CargoAlias $commandArgs }
     $lock = Enter-BuildLock -Purpose ("$command " + ($commandArgs -join ' ')).Trim()
     $code = 1
     try {
