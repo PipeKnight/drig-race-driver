@@ -47,6 +47,7 @@ pub mod private_parameters;
 pub mod pursuit_driver;
 pub mod race;
 pub mod race_flags;
+pub mod reset_line_crossing;
 pub mod route;
 pub mod series;
 pub mod source_deformation;

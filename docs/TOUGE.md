@@ -169,7 +169,7 @@ Cars that finish drive on past the end of the road; terminal damage there happen
 
 - `grid-soak quick --seeds 29..32` (Haruna, 1/2/1/2 cars): 3/4 pass.
   - Seed 29, solo chaos driver: the car left the road over an edge with no boundary wall and fell (no contacts), ending 50 m below the road at tick 1423.
-  - [I] The original ships `route_N/resetlines.cqtc`, presumably its off-road reset lines; not read.
+  - The original ships `route_N/resetlines.cqtc` (Haruna routes 0–9 only). Every triangle is a final boundary (FBND): a car whose body origin crosses one is disqualified, in either direction (F806, RESET_AND_RESPAWN_RESEARCH §10). The port reads it since F806.
   - Seeds 29..32 stay outside the default set.
 - Survey (`survey-after/`): 78 of 92 routes byte-identical to F399's. The 14 that differ are Haruna 0–9, Yokohama 3–6 and Milan 3 (which now laps, 101.93 / 99.60 s); all failed before.
 
@@ -194,7 +194,7 @@ Cars that finish drive on past the end of the road; terminal damage there happen
 ## 6. Open
 
 - Pro Touge (F412, §7): the alongside fault geometry, the round sequence and decision state, the penalty HUD pills. Midnight Touge: traffic and the random direction (state 1) in the app.
-- `resetlines.cqtc`: falls off Haruna's edges.
+- `resetlines.cqtc` is read since F806: crossing a final boundary disqualifies the car. The original has no other below-world reset; a car that falls where no boundary exists keeps falling.
 - Route 9 forward grid; AI behaviour at the road end.
 - The app race and freestyle runs were measured before F406 and not rerun.
 - Freestyle HUD and timer display, and a scored arena run in the app; the arenas have no player auto-reset (no AI line).

@@ -312,7 +312,7 @@ Checks (2026-11-09, release, the Lacetti from `slot_00`, flipped on its roof on 
 3. The target of vehicle+0x2C90 vfunc +0x38; the reader of req+0x38 (still unknown after
    F620's look, section 8); and the `ResetCarToTrack`, `VehicleDisqualified` and
    `EnableAIControl` messages (handler 0x401380 → AI 0x79E240).
-4. What ResetLines' 0x20-byte elements (race+0x22AC) hold; the reset path above does not
+4. ~~What ResetLines' 0x20-byte elements (race+0x22AC) hold~~: answered in section 10.1 (F806). The reset path above does not
    read them.
 5. The record state of a retired car in the retire-stuck 100 m test. The port treats a
    held car as racing (it is not moving backwards). So a follower pinned within 100 m of a
@@ -494,3 +494,111 @@ spot: it first stops. A pursuit driver (no retire drive) still retires on termin
 Not ported: the RaceComplete, Cruise and Stopping states after an AI finishes (it keeps
 racing at pace), the stop test's state list, and the status byte 3 that moves the Racing
 state to Retire (writer not traced).
+
+## 10. Reset lines: final boundaries (F806)
+
+Static analysis of the master Ghidra project, 10 November 2026; no game run.
+
+### 10.1 The object [V]
+
+`ResetLines` (race+0x22AC) is a mesh test, not part of the player reset of section 3:
+
+- **Construction.** Ctor 0x7E6160 (size 0x54), called at 0x67A507 in the race set-up
+  (allocation tag "RESETLINES"). Vtable 0xCFB778 = [0x7E6FB0 dtor, 0x7E4DF0 update,
+  0x5A42B0]; the secondary vtable 0xCFB76C holds the resource callback 0x7DD3C0.
+- **Materials.** 0x7DBE30(race+0x2054) sets +0x48 and +0x44 = 0x7EF510(8, parser
+  0x7DBD30, 0), a per-material attribute set built from `surface_materials.xml`.
+- **RESET block (parser 0x7DBD30).** The parser reads each material's `RESET` block:
+  - key `type`: "warning", "reset" and "unrecoverable" all give **type 3**,
+    "finalboundary" gives **type 4**, anything else 0 (the disassembly compares the three
+    strings in turn and jumps to one store of 3);
+  - key `delay`, default 2.0.
+  - No parser value gives type 2, so the update's ResetCar branch (0x7DD1C0) is
+    unreachable from data.
+- **Mesh.** 0x7DD3C0 accepts the "binary" resource and calls 0x7DD280, which builds a
+  mesh shape (0xA73DC0, layer 0xC) into +0x28 and a static body (0xA74190, identity
+  pose) into +0x2C. The route file is `resetlines.cqtc`. 0x7E1250 sets +0x50 and the
+  loaded flag +0x41 (called from 0x669700 at 0x669ECD); 0x7E4D80 frees it (from 0x63E4E0).
+- **Cars.** 0x5ED5A0 calls 0x7E6220 for every vehicle whose +0x6C is not 3 or 4. 0x7E6220
+  needs vehicle+0x24 and its +0xDB0 body, skips a car already in the list, and adds a
+  query shape (0xA73490, flags 0x40000000, filter 0xD) to that body (0xA69250 with
+  ECX = (vehicle+0x24)+0xDB0, local pose zero). Each 0x20-byte element holds [0] the
+  vehicle, [1] the query shape, and words 4..7 the last position, zero at registration.
+  This answers section 7, item 4.
+
+### 10.2 Update 0x7E4DF0 [V]
+
+When the mesh is loaded (+0x28, +0x41) and enabled (+0x48, +0x4C), for each element:
+
+1. Read the query shape's world position (0xA69630): the car body's origin.
+2. d = now − last. If |d|² > 0.001:
+   - if |d|² < 25, run the segment query 0xA71F40(last, now, filter 0xD) → hit normal and
+     triangle sub-id;
+   - then store now as last.
+
+   A smaller move keeps the old position, so slow motion accumulates until it passes
+   0.001. A jump of 5 m or more (a reset, a teleport) is not tested.
+3. On a hit, 0x5E2730(sub-id, set +0x44) gives the material's {type, delay}.
+   `against` = dot(normal, now − last) < 0.
+4. Dispatch by type:
+   - 2 → 0x7DD1C0 ResetCar;
+   - 3 → 0x7DD430 UnrecoverableCar (handler 0x612BD0: a human with its conditions is
+     disqualified, otherwise a reset is requested through 0x60D0E0; the Car Monitor 0x9D1010
+     needs `against`);
+   - 4 → 0x7E1110 FinalBoundary (handler 0x5EBC90: no direction test; vehicle+0xA0 = 1
+     and 0x9E64E0(6, 0), the disqualify of `Runtime::disqualify`; for a human it also
+     holds the camera through +0x338, 0xE6E000, 0x832570 and +0x2C90 vfunc +0x38(1));
+   - otherwise → 0x7DD480.
+
+### 10.3 Data [V]
+
+Only Haruna routes 0–9 ship `resetlines.cqtc`, and every triangle's material is FBND
+(final boundary). The other 92 routes have none. So in the shipped game the mechanism means
+one thing: **a car that leaves Haruna's road over an edge crosses an FBND sheet and is
+disqualified**. Below the world, nothing else happens (section 3.2): there is no
+below-world reset.
+
+### 10.4 Port (F806)
+
+`grid_tools::reset_line_crossing`:
+- reads a route's `resetlines.cqtc` and the RESET records of `surface_materials.xml`;
+- `MultiRuntime` keeps one `Tracker` per car;
+- after every tick it runs the update above on each car still in the world, from the body
+  pose translation;
+- a final-boundary crossing calls `Runtime::disqualify`.
+
+The app already ends the player's race on a disqualification (`post_race`). Types 0 and 3
+are reported (`MultiRuntime::reset_line_crossings`) and not acted on, because no shipped
+data uses them.
+
+[I]:
+- the query shape's filter 0xD is taken to see only the reset mesh (layer 0xC);
+- the normal's winding is the CQTC triangle order;
+- the human camera hold is not ported.
+
+A disqualified AI keeps its disabled controls and is not removed from the standings.
+
+### 10.5 The tall fence plates are not raised boxes [V, O]
+
+The coordinator's question was whether the raised-bottom fence boxes push cars down. On Yokohama
+Docks route_1, seed 3 (F789 and F804 builds), car 6 drops through the road. A static look at the
+box it hits (read_route box 2481, trace numbering 2513, `barrier_tall_fence_a`) shows a thin
+plate, not a raised box: about 0.06 m thick, 3.9 m long, y 1.81–5.96 m, its bottom at the
+fence's foot level.
+
+The trace shows what happens [O]:
+- car 6 hits the plate at 21 m/s (normal (−0.906, 0, 0.423), impulses 2000–3191) and slows to
+  8.8 m/s;
+- its centre then reaches the plate itself (x −215.3 → −212.5 at z ≈ 261.3, plate at x ≈ −213.2);
+- from tick 2416 to 2435 the reported normal is downward (ny −0.99). With the car this deep, the
+  smallest separating axis is about 1 m down against about 2.4 m along the plate's normal;
+- at tick 2436 the car falls through the road (y 2.12 → 0.59).
+
+[I] The contact code is the port of 0xAE8AD0, the same algorithm as the original: a GJK
+witness, then 0xB7ED10's sampled penetration, oriented by the centres (0xAEE640). The shape
+path is the original's too (0x7CB440, 0x7C1E60). So the downward push is what that algorithm
+gives once the car has passed into a thin plate. The open question is how the car got that
+deep. The prop trace logs only impact events, so the missing rows at ticks 2409–2415 do not
+prove that the contacts vanished; a per-tick contact trace is needed. Section 10.3 holds here
+as well: the original does not reset a car that falls below the world, so the port does not
+add a reset.

@@ -158,6 +158,8 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F806](log/F0806.md) | 2026-11-10 | Reset lines: Haruna final boundaries disqualify; tall fence plates are not raised boxes |
+| [F805](log/F0805.md) | 2026-11-10 | Recovery obstruction toggle decrements on the toggle tick (0x78EE70) |
 | [F804](log/F0804.md) | 2026-11-10 | Pieces with several shapes break (compound bodies, B11520) |
 | [F803](log/F0803.md) | 2026-11-10 | Tyre, whine and collision sound replayed |
 | [F802](log/F0802.md) | 2026-11-10 | Car reflections: the original's material tuning and SpecularValues floors |
@@ -216,8 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F749](log/F0749.md) | 2026-11-05 | Release script drafts the APK test order's New-in section; F range from added log files |
 | [F748](log/F0748.md) | 2026-11-05 | Owner's prototype unmuted again; build gate never mutes the main checkout exe |
 | [F747](log/F0747.md) | 2026-11-05 | Row 122: tree shadows turned with the camera; sun-facing shadow twins |
-| [F746](log/F0746.md) | 2026-11-05 | Playable b6eaecaefa82 for the PC and both APKs (shadow kept through the whole LOD fade) |
-| [F745](log/F0745.md) | 2026-11-05 | Row 115: remaining shadow dropouts attributed; shadow level stops one fade step short |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

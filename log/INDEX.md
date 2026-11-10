@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F806](F0806.md) | 2026-11-10 | Reset lines: Haruna final boundaries disqualify; tall fence plates are not raised boxes |
+| [F805](F0805.md) | 2026-11-10 | Recovery obstruction toggle decrements on the toggle tick (0x78EE70) |
 | [F804](F0804.md) | 2026-11-10 | Pieces with several shapes break (compound bodies, B11520) |
 | [F803](F0803.md) | 2026-11-10 | Tyre, whine and collision sound replayed |
 | [F802](F0802.md) | 2026-11-10 | Car reflections: the original's material tuning and SpecularValues floors |

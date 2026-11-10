@@ -62,6 +62,12 @@ pub struct MultiRuntime {
     /// Per car: a reset car that other cars pass through (the original's
     /// collision layer 0xE, 0x5EBF90; [`Self::set_ghost`]).
     ghost: Vec<bool>,
+    /// The route's reset-line mesh (`resetlines.cqtc`, Haruna only), each
+    /// car's last tested position and the last tick's crossings
+    /// ([`Self::reset_line_crossings`]).
+    reset_lines: Option<Arc<crate::reset_line_crossing::ResetLines>>,
+    reset_tracker: crate::reset_line_crossing::Tracker,
+    reset_crossings: Vec<crate::reset_line_crossing::Crossing>,
     /// Independent per-car stages run on the shared compute pool
     /// ([`crate::parallel`]); results are identical either way.
     pub parallel: bool,
@@ -407,6 +413,8 @@ impl MultiRuntime {
             .map(|c| c.state.world.manager.properties[0])
             .collect();
         world.manager.workspace = vec![[[0.; 4]; 2]; n];
+        let reset_lines =
+            crate::reset_line_crossing::ResetLines::read_route(root, route)?.map(Arc::new);
         Ok(Self {
             cars,
             geometry,
@@ -430,6 +438,9 @@ impl MultiRuntime {
             retired: vec![None; n],
             newly_retired: Vec::new(),
             ghost: vec![false; n],
+            reset_lines,
+            reset_tracker: crate::reset_line_crossing::Tracker::new(n),
+            reset_crossings: Vec::new(),
             parallel: true,
             #[cfg(test)]
             fail_lap_timing: None,
@@ -688,6 +699,14 @@ impl MultiRuntime {
         self.newly_retired.clear();
         self.ghost = vec![false; self.cars.len()];
         self.panel_tipping.clear();
+        self.reset_tracker = crate::reset_line_crossing::Tracker::new(self.cars.len());
+        self.reset_crossings.clear();
+    }
+
+    /// The reset-line crossings of the last tick (ResetLines 0x7E4DF0). A
+    /// final boundary has already disqualified its car.
+    pub fn reset_line_crossings(&self) -> &[crate::reset_line_crossing::Crossing] {
+        &self.reset_crossings
     }
 
     /// Car `i` collides with no other car while `ghost` (the reset job puts
@@ -1397,6 +1416,23 @@ impl MultiRuntime {
                 for (j, car) in self.cars.iter_mut().enumerate() {
                     car.state.car.owner.physical[0x300 / 4] =
                         self.world.groups.bodies[j][0x300 / 4];
+                }
+            }
+        }
+        // Reset lines (0x7E4DF0) for every car still in the world: a car
+        // crossing a final boundary is disqualified (0x5EBC90).
+        self.reset_crossings.clear();
+        if let Some(lines) = &self.reset_lines {
+            for i in 0..n {
+                if self.retired[i].is_some() {
+                    continue;
+                }
+                let p = self.cars[i].pose();
+                if let Some(c) = self.reset_tracker.update(lines, i, [p[12], p[13], p[14]]) {
+                    if c.reset.kind == crate::reset_line_crossing::Kind::FinalBoundary {
+                        self.cars[i].disqualify();
+                    }
+                    self.reset_crossings.push(c);
                 }
             }
         }
