@@ -191,6 +191,12 @@ impl Replay {
         }
         // Shared items are written inline again.
         self.encoder = Encoder::default();
+        // The session's camera shots may reach past the cut (they run one
+        // frame ahead of the replay time); they are made again from the cut
+        // stream (the frame camera would index a frame no longer recorded).
+        if let Some(s) = self.session.as_mut() {
+            s.shots = None;
+        }
         self.recorded = Some((segment, tick));
         self.seen = Some((segment, tick));
         self.laps.retain(|&t| t <= tick);
@@ -252,6 +258,13 @@ impl Replay {
         let Some(player) = runtimes.first() else {
             return;
         };
+        // The race holds while a replay plays. A Flashback re-runs its ticks
+        // from a checkpoint before the cut frame under the session (over
+        // several frames); recording those as a rewound race would clear the
+        // stream, so recording resumes when the session ends.
+        if self.session.is_some() {
+            return;
+        }
         let tick = player.ticks;
         if self
             .seen
@@ -333,6 +346,7 @@ impl Replay {
                 geometry,
                 deformation,
                 lost: c.lost,
+                effects: c.effects,
             });
         }
         let props = match decoded.props {
@@ -569,6 +583,37 @@ fn car(runtime: &Runtime, lost: impl Fn(usize) -> Option<Mat4>) -> Car {
         }),
         deformation,
         lost: std::array::from_fn(|k| lost(k).map(Pose::from_mat4)),
+        effects: effects(runtime),
+    }
+}
+
+/// The ground effects' source words of `runtime` (see [`frame::Effects`]).
+pub fn effects(runtime: &Runtime) -> frame::Effects {
+    let b = &runtime.state.car.owner.vehicle;
+    let f = |o: usize| f32::from_bits(b[o / 4]);
+    let byte = |o: usize| (b[o / 4] >> (o % 4 * 8)) & 255;
+    let w = runtime.angular_velocity();
+    frame::Effects {
+        angular_velocity: Vec3::new(w[0], w[1], w[2]),
+        speed: f(0x1648),
+        mass: f(0x15a0),
+        rear_coefficient: f(0x1008),
+        handbrake: byte(0x1640) != 0,
+        open_wheel: b[0xeda8 / 4] != 0,
+        wheels: std::array::from_fn(|i| {
+            let o = 0x1990 + i * 0x150;
+            frame::WheelEffects {
+                token: b[(o + 0xc0) / 4],
+                radius: f(o + 0xe0),
+                width: f(o + 0xf8),
+                load: f(o + 0x138),
+                excess: f(o + 0xac),
+                rear_term: f(o + 0x148),
+                omega: f(o + 0x104),
+                steer: [f(o + 0x28), f(o + 0x2c)],
+                handbraked: byte(o + 0xfc) != 0,
+            }
+        }),
     }
 }
 
@@ -671,6 +716,9 @@ fn input(actions: &Actions) -> player::Input {
         fast_forward: actions.value(Action::ReplayFastForward),
         next_lap: actions.pressed(Action::ReplayNextLap),
         previous_lap: actions.pressed(Action::ReplayPreviousLap),
+        slow: actions.pressed(Action::ReplaySlowMotion),
+        step_back: actions.pressed(Action::ReplayStepBack),
+        step_forward: actions.pressed(Action::ReplayStepForward),
     }
 }
 
@@ -715,14 +763,17 @@ pub fn control(
         let views = cameras.as_ref().map_or(&fallback, |c| &c.views);
         if replay.start(kind, origin, driving.paused, views) {
             driving.paused = true;
-            let s = replay.session.as_ref().unwrap();
+            let s = replay.session.as_mut().unwrap();
+            s.player.slow = crate::settings::diagnostics().replay_slow;
+            let s = &*s;
             log_line!(
-                "drive_race_replay version=1 event=start kind={kind:?} origin={origin:?} segment={} tick={} from={:.3} start={:.3} end={:.3} frames={} memory_bytes={} spooled_bytes={}",
+                "drive_race_replay version=1 event=start kind={kind:?} origin={origin:?} segment={} tick={} from={:.3} start={:.3} end={:.3} slow={} frames={} memory_bytes={} spooled_bytes={}",
                 driving.segment,
                 driving.runtime.ticks,
                 s.player.time,
                 s.player.start,
                 s.player.end,
+                s.player.slow,
                 replay.stream.frames().len(),
                 replay.stream.memory_bytes(),
                 replay.stream.spooled_bytes()

@@ -72,6 +72,11 @@ The original stores **state snapshots** and interpolates them; it does not re-si
 - Props and loose parts: the physics world's rigid bodies [D: `rigid_body`, `loose_part`
   strings next to the recordable code], so detached wheels (F355) are bodies like props [I].
 - Particle effects: `pfx_recordable` [D].
+- The replay setup (0x64ECD0) registers its recordables by name through 0x942460 [D, static]:
+  "skidmarks" (SkidmarksPlugin+0x78), "pfx_recordable", "broadcast: PFX scrapes" and
+  "broadcast: PFX collisions", "broadcast: audio collisions", "mud", "scratches", "loose parts",
+  "replay cam" and the vehicle and physics channels. So skid marks, particle effects and the
+  collision sounds are replay channels of their own [D]; their record formats were not traced.
 - Sound: not recorded as such; the replay states switch the audio mode
   (`set_audio_paused_replay`/`PausedReplay`, `StateAudioStopReplayMusic`) and the post-race replay
   plays `audio/music/replay%i.WIM` [D]. Whether engine sound is regenerated from replayed
@@ -104,6 +109,7 @@ Input (0x944710, checked at the instruction level) [D]:
 - Paused: a press scrubs (mode 0xB) with shuttle `f`; a release returns to pause.
 - Released while playing: the shuttle returns to 1.
 - Replay Pause toggles play/pause. Another action toggles slow motion (no keyboard binding).
+  Frame step (modes 8/9) has no binding in the shipped presets either [D].
 
 Keys [D] (preset 0 / pad preset 4):
 
@@ -118,6 +124,7 @@ Keys [D] (preset 0 / pad preset 4):
 | Replay Jump In (Flashback) | F12 | X |
 | Replay Save | S | — |
 | Replay Exit | Escape | Y, Start |
+| Slow motion, frame step back / forward | F6, comma / period (AUTHORED) | — |
 
 ### 2.5 Instant Replay and post-race replay flow
 
@@ -213,9 +220,11 @@ The replay camera set is separate from the race cameras (F349):
   through (AUTHORED).
 - Controls: [`player.rs`](../crates/grid-app/src/replay/player.rs) ports §2.4: play/pause, the
   ±4.33× shuttle, scrub while paused, clamping at the window's start. Next/Previous Lap jump to the
-  player's lap starts (AUTHORED: next marker after now, previous more than 1 s before now). Not
-  ported: slow motion (no keyboard key), frame step, Replay Save. Replay Jump In (F12, pad X) is
-  Flashback, docs/FLASHBACK.md.
+  player's lap starts (AUTHORED: next marker after now, previous more than 1 s before now). Slow
+  motion (modes 5/6: play and its shuttle at 0.1×) and frame step (modes 8/9: ±1/60 s, then
+  paused) are ported with AUTHORED keys F6 and comma/period (actions Replay Slow Motion, Replay
+  Step Back, Replay Step Forward), since the shipped presets bind none. Not ported: Replay Save.
+  Replay Jump In (F12, pad X) is Flashback, docs/FLASHBACK.md.
 - The simulation is held for the replay. The live presentation still runs every frame, and the
   replay then overwrites it in `PostUpdate`:
   - car bodies and wheels; lost wheels at their recorded frames;
@@ -225,6 +234,23 @@ The replay camera set is separate from the race cameras (F349):
 
   Damage parts that swing on the live car (bonnet, doors) ride on the replayed body. Bodywork
   lying on the road more than 2 m from its place stays where it is (AUTHORED).
+- Replayed effects ([`replay_effects.rs`](../crates/grid-app/src/replay_effects.rs)): skid marks,
+  wheel debris and tyre smoke show the state they had in the race at the replay time, forwards,
+  backwards, slowed and after a seek. The frame records each car's effect inputs (`Effects`:
+  angular velocity, speed, mass, handbrake, rear coefficient, open-wheel flag, and per wheel the
+  surface token, radius, width, load, excess force, rear term, spin, steer pair and handbrake bit;
+  169 bytes a car, lerped between samples). Cost: a 12-car frame grows from about 2.06 to 4.09 kB
+  (measured on race.ini), so the 0x380000-byte memory window, and with it the Instant Replay
+  rewind and the Flashback reach, holds about 30 s instead of 59 s of a 12-car race; the
+  original's window also holds its effect channels, its reach in seconds is not known [I]. The replay re-runs the race's own effect systems
+  tick by tick from those inputs, starting at a checkpoint of their state: the race keeps one
+  every 2 s (all of the last 20 s, older ones every 30 s), the replay adds one every 0.4 s it
+  steps (48 at most), and the first recorded frame starts empty. Re-running is bounded to 6 ms a
+  frame; a long seek catches up over a few frames. The live effect systems skip while a session
+  exists (they are frozen anyway), and Replay Exit restores the race's effects exactly. This is
+  equivalent to the original's channels (§2.3) for what is seen, without a stream per effect
+  (AUTHORED mechanism). Reconstruction check: the replayed inputs equal the live ones bit for bit
+  at every sample (§4).
 - On Replay Exit the live view returns unchanged: drive_present redraws every part each frame, its
   deformation keys are cleared so live dents are projected again, and the HUD is shown again.
 - HUD and menus are hidden while the replay plays (`osd_play_off`, `hide_pause_show_overlay`) [D].
@@ -264,7 +290,8 @@ The replay camera set is separate from the race cameras (F349):
     re-writing forgotten references, interpolation at and between samples, teleports;
   - `replay::stream`: the memory-only ring, spool round trip with out-of-order reads, a full
     spool;
-  - `replay::player`: the shuttle formula, pause/scrub, clamping, loop, laps;
+  - `replay::player`: the shuttle formula, pause/scrub, clamping, loop, laps, slow motion and
+    slow reverse, frame step and its pause;
   - `replay::director`: zone crossing, the ordinary camera choice, zoom framing, path projection.
 - Asset (`--include-ignored`):
   - `grid_formats::replay_cameras::shipped_route_0_directors`: the four circuits' camera
@@ -273,7 +300,9 @@ The replay camera set is separate from the race cameras (F349):
     Nürburgring, Istanbul Park and Long Beach. Lacetti and BMW share the field, with 3 AI cars, and
     the AI drives the player's car, for 1600 ticks. Every recorded frame decodes to the live pose
     and velocity bit for bit, and the replayed body × wheel matrices equal the live
-    presentation's. The frame count is 12/25 of the ticks, memory stays within 0x380000 bytes,
+    presentation's. The effect inputs rebuilt from each frame (`wheel_ground::replayed`,
+    `tyre_smoke::replayed_input`) equal the live `wheel_ground::sample` and `CarInput::read` bit
+    for bit. The frame count is 12/25 of the ticks, memory stays within 0x380000 bytes,
     and the director's zones are crossed;
   - `replay::race_tests::instant_replay_leaves_the_race_bit_identical`: Donington, both cars,
     3 AI. Instant Replay from the pause menu at tick 900: 12 s of replay with fast forward, rewind
@@ -282,6 +311,10 @@ The replay camera set is separate from the race cameras (F349):
     returns to the race;
   - `replay::race_tests::view_replay_plays_the_whole_race_from_the_results`: Nürburgring. Retire,
     View Replay from the first frame, laps, Replay Exit back to the results, the race unchanged.
+- Interactive window: [`tools/replay_window_check.py`](../tools/replay_window_check.py) records a
+  race with the autopilot in a 1280×800 window (tick interpolation on, no audio), plays the
+  Instant Replay (optionally in slow motion, `replay_slow`), jumps in and races on to a second
+  replay; PASS from the `drive_race_replay`, `drive_flashback` and `replay_effects` lines.
 - Results: see the F entry in PROJECT_LOG.md.
 
 ## 5. Flashback
@@ -299,5 +332,10 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 - The vehicle component's own replay fields, the director's event timeline
   and highlight monitors, and the terminal-damage replay's start time were not traced.
 - Not replayed (shown as they are when the replay starts): glass and light damage, shards,
-  damage-part swing angles, tyre smoke and other particles, skid marks, sound.
-- Replay Save, slow motion and frame step are not ported.
+  damage-part swing angles, collision sparks and other particles than tyre smoke and wheel
+  debris, sound.
+- The effect inputs are recorded raw (169 bytes a car a frame, half of a 12-car frame); writing
+  the constant words (mass, radius, width) once like the wheel geometry, or only changed words,
+  would give back memory-window reach.
+- Replay Save is not ported. The director's traced timeline, the terminal-damage replay and its
+  TERMINAL cameras are open.

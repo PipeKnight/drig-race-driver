@@ -121,7 +121,88 @@ pub(crate) struct TyreSmoke {
     frames: u64,
 }
 
+/// What the smoke reads of a replayed car, as [`smoke::CarInput::read`]
+/// reads a live one (crate::replay_effects).
+pub(crate) fn replayed_input(car: &crate::replay::frame::Car, ai: bool) -> smoke::CarInput {
+    let e = &car.effects;
+    smoke::CarInput {
+        pose: car.pose.to_mat4().to_cols_array(),
+        velocity: car.velocity.to_array(),
+        speed: e.speed,
+        mass: e.mass,
+        handbrake: e.handbrake,
+        rear_coefficient: e.rear_coefficient,
+        open_wheel: e.open_wheel,
+        ai,
+        wheels: std::array::from_fn(|i| {
+            let g = &car.geometry[i];
+            let w = &e.wheels[i];
+            let mut contact: [f32; 3] = std::array::from_fn(|a| {
+                g.anchor[a] + g.deformation_translation[a] + g.axis[a] * car.wheels[i].displacement
+            });
+            contact[1] -= w.radius;
+            smoke::WheelInput {
+                token: w.token,
+                contact,
+                spin: w.omega,
+                load: w.load,
+                excess: w.excess,
+                handbraked: w.handbraked,
+                rear_term: w.rear_term,
+                steer: w.steer,
+                front: g.anchor[2] > 0.,
+                left: g.anchor[0] < 0.,
+            }
+        }),
+    }
+}
+
+/// The smoke's simulation state: a replay checkpoint (crate::replay_effects).
+#[derive(Clone)]
+pub(crate) struct Saved {
+    smoke: Smoke,
+    last: Option<(u64, u64)>,
+}
+
+impl Saved {
+    pub(crate) fn bytes(&self) -> usize {
+        self.smoke.particle_count() * 96
+    }
+}
+
 impl TyreSmoke {
+    pub(crate) fn save(&self) -> Saved {
+        Saved {
+            smoke: self.smoke.clone(),
+            last: self.last,
+        }
+    }
+
+    pub(crate) fn restore(&mut self, saved: &Saved) {
+        self.smoke.clone_from(&saved.smoke);
+        self.last = saved.last;
+    }
+
+    /// No smoke (a segment start).
+    pub(crate) fn reset(&mut self) {
+        self.smoke.clear();
+    }
+
+    /// One tick of every car (`tick`, and the replay's re-run).
+    pub(crate) fn step(&mut self, cars: &[smoke::CarInput]) {
+        let eye = self.eye;
+        self.smoke.tick(cars, eye, grid_tools::source_vehicle::DELTA);
+    }
+
+    /// The race goes on from `(segment, tick)` with this state (a jump-in).
+    pub(crate) fn continue_from(&mut self, key: (u64, u64)) {
+        self.last = Some(key);
+    }
+
+    pub(crate) fn particles(&self) -> usize {
+        self.smoke.particle_count()
+    }
+
     /// The smoke group meshes (Performance test, `perf_test`).
     pub(crate) fn mesh_handles(&self) -> &[Handle<Mesh>] {
         self.pool.as_ref().map_or(&self.meshes, |pool| &pool.meshes)
@@ -284,7 +365,16 @@ fn empty_mesh() -> Mesh {
 
 /// Advance once per successful player tick (opponents tick in the same
 /// FixedUpdate step); reset on a new driving segment.
-fn tick(mut state: ResMut<TyreSmoke>, driving: Res<super::Driving>) {
+pub(crate) fn tick(
+    mut state: ResMut<TyreSmoke>,
+    driving: Res<super::Driving>,
+    replay: Option<Res<crate::replay::Replay>>,
+) {
+    // A replay (and a jump-in's re-run) steps the smoke itself
+    // (crate::replay_effects).
+    if replay.is_some_and(|r| r.session.is_some()) {
+        return;
+    }
     let now = (driving.segment, driving.runtime.ticks);
     match state.last {
         Some(last) if last == now => return,
@@ -306,10 +396,7 @@ fn tick(mut state: ResMut<TyreSmoke>, driving: Res<super::Driving>) {
                 .map(|car| smoke::CarInput::read(car, true)),
         );
     }
-    let eye = state.eye;
-    state
-        .smoke
-        .tick(&cars, eye, grid_tools::source_vehicle::DELTA);
+    state.step(&cars);
     if now.1.is_multiple_of(25) {
         let player = state
             .smoke

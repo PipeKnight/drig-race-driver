@@ -672,6 +672,9 @@ fn advance(world: &mut World) {
 /// After the transition: the replay ends and the race goes on.
 fn resume(world: &mut World) {
     world.resource_mut::<Flashback>().stage = Stage::Idle;
+    // The effects as the replay shows them at the jump-in frame; the
+    // abandoned future's marks and smoke go.
+    crate::replay_effects::adopt(world);
     let origin = world.resource_mut::<Replay>().finish();
     world.resource_mut::<crate::Driving>().paused = false;
     if let Some(mut menu) = world.get_resource_mut::<crate::pause_menu::PauseMenu>()

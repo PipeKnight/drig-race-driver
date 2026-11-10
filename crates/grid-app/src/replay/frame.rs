@@ -85,6 +85,125 @@ pub struct Deformation {
     pub nodes: Vec<[f32; 4]>,
 }
 
+/// The source wheel words the ground effects read (skid marks, wheel debris,
+/// tyre smoke; wheel record `body+1990+i*150`, TYRE_AUDIO_RESEARCH.md).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct WheelEffects {
+    /// Contact material token (`+C0`, 0 = airborne).
+    pub token: u32,
+    /// Radius (`+E0`) and tyre width (`+F8`).
+    pub radius: f32,
+    pub width: f32,
+    /// Load (`+138`), smoothed excess force (`+AC`), rear term (`+148`).
+    pub load: f32,
+    pub excess: f32,
+    pub rear_term: f32,
+    /// Angular speed as stored (`+104`, not sanitised).
+    pub omega: f32,
+    /// Steering direction words (`+28`, `+2C`).
+    pub steer: [f32; 2],
+    /// Handbrake applies to this wheel (`+FC` byte).
+    pub handbraked: bool,
+}
+
+/// What the ground effects read of a car besides [`Car`]'s pose, velocity
+/// and wheel geometry, so a replay steps them as the race did
+/// (crate::replay_effects).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Effects {
+    pub angular_velocity: Vec3,
+    /// Speed (`body+1648`), mass (`+15A0`), rear coefficient (`+1008`).
+    pub speed: f32,
+    pub mass: f32,
+    pub rear_coefficient: f32,
+    /// Handbrake byte (`+1640`) and open-wheel car (`+EDA8 != 0`).
+    pub handbrake: bool,
+    pub open_wheel: bool,
+    pub wheels: [WheelEffects; 4],
+}
+
+impl Effects {
+    fn write(&self, w: &mut Writer) {
+        w.vec3(self.angular_velocity);
+        w.f32(self.speed);
+        w.f32(self.mass);
+        w.f32(self.rear_coefficient);
+        let mut bits = u8::from(self.handbrake) | u8::from(self.open_wheel) << 1;
+        for (k, wheel) in self.wheels.iter().enumerate() {
+            bits |= u8::from(wheel.handbraked) << (2 + k);
+        }
+        w.u8(bits);
+        for wheel in &self.wheels {
+            w.u32(wheel.token);
+            w.f32s(&[
+                wheel.radius,
+                wheel.width,
+                wheel.load,
+                wheel.excess,
+                wheel.rear_term,
+                wheel.omega,
+                wheel.steer[0],
+                wheel.steer[1],
+            ]);
+        }
+    }
+
+    fn read(r: &mut Reader) -> Option<Self> {
+        let angular_velocity = r.vec3()?;
+        let speed = r.f32()?;
+        let mass = r.f32()?;
+        let rear_coefficient = r.f32()?;
+        let bits = r.u8()?;
+        let mut wheels = [WheelEffects::default(); 4];
+        for (k, wheel) in wheels.iter_mut().enumerate() {
+            let token = r.u32()?;
+            let [radius, width, load, excess, rear_term, omega, s0, s1] = r.f32s()?;
+            *wheel = WheelEffects {
+                token,
+                radius,
+                width,
+                load,
+                excess,
+                rear_term,
+                omega,
+                steer: [s0, s1],
+                handbraked: bits & (4 << k) != 0,
+            };
+        }
+        Some(Self {
+            angular_velocity,
+            speed,
+            mass,
+            rear_coefficient,
+            handbrake: bits & 1 != 0,
+            open_wheel: bits & 2 != 0,
+            wheels,
+        })
+    }
+
+    /// Continuous values interpolate; tokens, constants and flags come from
+    /// `self` (the earlier sample).
+    pub fn lerp(&self, other: &Self, t: f32) -> Self {
+        let l = |a: f32, b: f32| a + (b - a) * t;
+        Self {
+            angular_velocity: self.angular_velocity.lerp(other.angular_velocity, t),
+            speed: l(self.speed, other.speed),
+            wheels: std::array::from_fn(|k| {
+                let (a, b) = (&self.wheels[k], &other.wheels[k]);
+                WheelEffects {
+                    load: l(a.load, b.load),
+                    excess: l(a.excess, b.excess),
+                    rear_term: l(a.rear_term, b.rear_term),
+                    omega: l(a.omega, b.omega),
+                    steer: [l(a.steer[0], b.steer[0]), l(a.steer[1], b.steer[1])],
+                    ..*a
+                }
+            }),
+            ..*self
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Car {
     pub pose: Pose,
@@ -94,6 +213,7 @@ pub struct Car {
     pub deformation: Option<Deformation>,
     /// World frame of each wheel that came off (damage_parts lost wheels).
     pub lost: [Option<Pose>; 4],
+    pub effects: Effects,
 }
 
 /// A live piece of a broken prop: (breakable, piece spec, body pose).
@@ -142,6 +262,7 @@ pub struct FrameCar {
     pub geometry: Shared<[WheelGeometry; 4]>,
     pub deformation: Option<Shared<Deformation>>,
     pub lost: [Option<Pose>; 4],
+    pub effects: Effects,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -249,6 +370,7 @@ impl Encoder {
             for lost in car.lost.iter().flatten() {
                 w.pose(*lost);
             }
+            car.effects.write(&mut w);
         }
         match &snapshot.props {
             None => w.u8(0),
@@ -340,6 +462,7 @@ pub fn decode(bytes: &[u8]) -> Option<Frame> {
                 *l = Some(r.pose()?);
             }
         }
+        let effects = Effects::read(&mut r)?;
         cars.push(FrameCar {
             pose,
             velocity,
@@ -347,6 +470,7 @@ pub fn decode(bytes: &[u8]) -> Option<Frame> {
             geometry,
             deformation,
             lost,
+            effects,
         });
     }
     let props = match r.u8()? {
@@ -429,6 +553,7 @@ pub fn interpolate(a: &Snapshot, b: &Snapshot, t: f32, seconds: f32) -> Snapshot
                     (Some(x), Some(y)) => Some(x.lerp(y, s)),
                     (x, _) => x,
                 }),
+                effects: ca.effects.lerp(&cb.effects, s),
             }
         })
         .collect();
@@ -551,6 +676,25 @@ pub(crate) mod tests {
             }; 4],
             deformation: None,
             lost: [None; 4],
+            effects: Effects {
+                angular_velocity: Vec3::new(0.1, x, -0.2),
+                speed: x.abs(),
+                mass: 1200.,
+                rear_coefficient: 0.5,
+                handbrake: phase > 1.,
+                open_wheel: false,
+                wheels: std::array::from_fn(|k| WheelEffects {
+                    token: 0x7461_6d00 + k as u32,
+                    radius: 0.31,
+                    width: 0.22,
+                    load: 3000. + x,
+                    excess: x * 10.,
+                    rear_term: 0.25,
+                    omega: 10. + x,
+                    steer: [1., 0.],
+                    handbraked: k < 2,
+                }),
+            },
         }
     }
 
@@ -596,6 +740,7 @@ pub(crate) mod tests {
                         },
                     }),
                     lost: c.lost,
+                    effects: c.effects,
                 })
                 .collect(),
             props: frame.props.map(|p| Props {

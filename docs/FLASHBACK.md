@@ -192,14 +192,19 @@ The same end state is reached exactly another way (AUTHORED):
 - The replay panel shows `F12 flashback   FLASHBACKS AVAILABLE: n` while a jump-in is possible,
   like the original's icon (AUTHORED plain text).
 - Logs: `drive_flashback version=1 event=install|checkpoint|checkpoint_after_change|jump_in|restored|refused|failed|resume`.
+- Effects: the replay shows the skid marks, wheel debris and tyre smoke of its time (REPLAY.md
+  3.2). At the end of the transition (`replay_effects::adopt`) they stay as they are at the
+  jump-in frame: the abandoned future's marks and smoke are gone, and the race lays on from the
+  heads at that frame, with no mark across the rewind. While the re-run and the frozen session
+  last, the live effect systems do not run (log `replay_effects version=1 event=adopt`).
 - Diagnostics `flashback_capture = S` (`GRID_FLASHBACK_CAPTURE`): in the `replay_capture` Instant
   Replay, Jump In after S seconds; the scripted drive then continues from the jump-in frame.
 
 ### 3.4 Not restored or not ported
 
-- Presentation only, kept from the abandoned future: skid marks, tyre smoke, wheel debris
-  particles, sounds. Glass and light damage are drawn intact again and found anew from the
-  restored deformation; shards are removed.
+- Presentation only, kept from the abandoned future: sounds. Glass and light damage are drawn
+  intact again and found anew from the restored deformation; shards are removed. Skid marks, tyre
+  smoke and wheel debris are those of the jump-in frame (3.3).
 - The transition's samples (`flashback_shot_1/2`, `flashback_zoomup`), its post effects and
   camera changes; force feedback; the Pro Mode switch (no race options screen); career money
   (Flashback Bonus).

@@ -283,7 +283,69 @@ pub(crate) struct SkidMarks {
 /// Packed position, normal, previous/current atlas UV and blend/opacity.
 type SkidVertex = ([f32; 3], [f32; 3], [f32; 2], [f32; 2], [f32; 4]);
 
+/// The marks' simulation state: a replay checkpoint (crate::replay_effects).
+#[derive(Clone)]
+pub(crate) struct Saved {
+    phases: [[f32; 2]; STRIPS],
+    strips: Vec<Strip>,
+    heads: Vec<[Option<Head>; 4]>,
+}
+
+impl Saved {
+    /// Approximate heap size, for the checkpoint budget.
+    pub(crate) fn bytes(&self) -> usize {
+        self.strips
+            .iter()
+            .map(|s| {
+                std::mem::size_of::<Strip>()
+                    + s.points.len() * std::mem::size_of::<Point>()
+                    + s.segments.len() * std::mem::size_of::<QuadUv>()
+            })
+            .sum::<usize>()
+            + self.heads.len() * std::mem::size_of::<[Option<Head>; 4]>()
+    }
+}
+
 impl SkidMarks {
+    pub(crate) fn save(&self) -> Saved {
+        Saved {
+            phases: self.phases,
+            strips: self.strips.clone(),
+            heads: self.heads.clone(),
+        }
+    }
+
+    pub(crate) fn restore(&mut self, saved: &Saved) {
+        self.phases = saved.phases;
+        self.strips.clone_from(&saved.strips);
+        self.heads.clone_from(&saved.heads);
+        self.dirty = true;
+    }
+
+    /// No marks (a segment start).
+    pub(crate) fn reset(&mut self) {
+        self.clear();
+    }
+
+    /// One tick of every car's wheels (`lay`, and the replay's re-run).
+    pub(crate) fn step(&mut self, cars: &[[Wheel; 4]], camera: Option<Vec3>) {
+        if let Some(camera) = camera {
+            self.camera = camera;
+        }
+        self.heads.resize(cars.len(), [None; 4]);
+        for (car, wheels) in cars.iter().enumerate() {
+            for (index, wheel) in wheels.iter().enumerate() {
+                self.advance(car, index, wheel);
+            }
+        }
+        self.maintain();
+    }
+
+    /// Strips holding marks.
+    pub(crate) fn used(&self) -> usize {
+        self.strips.iter().filter(|s| s.used).count()
+    }
+
     pub(crate) fn owned_ground_draw(&self) -> Option<super::ground_skid_pass::OwnedGroundSkid> {
         self.owned_ground.filter(|draw| draw.mesh == self.mesh.id())
     }
@@ -820,7 +882,7 @@ fn start(
     commands.insert_resource(marks);
 }
 
-fn lay(
+pub(crate) fn lay(
     marks: Option<ResMut<SkidMarks>>,
     ground: Res<WheelGround>,
     camera: Query<&GlobalTransform, With<super::ViewerCamera>>,
@@ -834,16 +896,7 @@ fn lay(
     if ground.reset {
         marks.clear();
     }
-    if let Ok(camera) = camera.single() {
-        marks.camera = camera.translation();
-    }
-    marks.heads.resize(ground.cars.len(), [None; 4]);
-    for (car, wheels) in ground.cars.iter().enumerate() {
-        for (index, wheel) in wheels.iter().enumerate() {
-            marks.advance(car, index, wheel);
-        }
-    }
-    marks.maintain();
+    marks.step(&ground.cars, camera.single().ok().map(|c| c.translation()));
     super::ground_effect_assets::charge(super::ground_effect_assets::TICK, start);
 }
 

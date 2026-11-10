@@ -64,9 +64,14 @@ pub enum Action {
     ReplayPreviousLap,
     ReplayExit,
     ReplayJumpIn,
+    // AUTHORED: the original's replay slow motion and frame step modes have
+    // no shipped binding (docs/REPLAY.md 2.4).
+    ReplaySlowMotion,
+    ReplayStepBack,
+    ReplayStepForward,
 }
 
-pub const ACTIONS: usize = 39;
+pub const ACTIONS: usize = 42;
 
 const ALL: [Action; ACTIONS] = {
     use Action::*;
@@ -110,6 +115,9 @@ const ALL: [Action; ACTIONS] = {
         ReplayPreviousLap,
         ReplayExit,
         ReplayJumpIn,
+        ReplaySlowMotion,
+        ReplayStepBack,
+        ReplayStepForward,
     ]
 };
 
@@ -154,6 +162,9 @@ const NAMES: [&str; ACTIONS] = [
     "Replay Previous Lap",
     "Replay Exit",
     "Replay Jump In",
+    "Replay Slow Motion",
+    "Replay Step Back",
+    "Replay Step Forward",
 ];
 
 impl Action {
@@ -331,6 +342,10 @@ impl ActionMap {
             (ReplayPreviousLap, &[KeyCode::F4], button),
             (ReplayExit, &[KeyCode::Escape], button),
             (ReplayJumpIn, &[KeyCode::F12], button),
+            // AUTHORED (no shipped key): slow motion and frame step.
+            (ReplaySlowMotion, &[KeyCode::F6], button),
+            (ReplayStepBack, &[KeyCode::Comma], button),
+            (ReplayStepForward, &[KeyCode::Period], button),
             (
                 MenuButton3,
                 &[KeyCode::ControlLeft, KeyCode::ControlRight],

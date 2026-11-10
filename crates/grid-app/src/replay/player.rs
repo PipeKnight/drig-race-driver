@@ -9,6 +9,10 @@
 //!   `3f + 1` (f >= 0) or `3f - 1` (f < 0), so a full key press runs at
 //!   +/-4.33x; paused, a press scrubs with shuttle `f`; released, the shuttle
 //!   returns to 1 and a scrub back to pause. Replay Pause toggles play/pause;
+//! - slow motion (mode 5) runs at `shuttle x dt x 0.1`, slow reverse
+//!   (mode 6) at `-0.1 x dt`; frame step (modes 8/9) moves `+/-1/60 s` and
+//!   pauses. The shipped presets bind no key to them; the port's
+//!   Replay Slow Motion and Replay Step actions are AUTHORED;
 //! - seeks clamp to the oldest buffered time (0x91CC00);
 //! - the flow's `loop` links: Instant Replay rewinds again
 //!   (`c_pause_instant_race_replay` -> `..._hide_screen` -> rewind), the
@@ -19,6 +23,9 @@ const DEAD_ZONE: f32 = 0.1;
 const AXIS_SCALE: f32 = 1. / 0.9;
 /// Shuttle gain while playing (0xCB1790).
 const SHUTTLE_GAIN: f32 = 3.;
+/// Slow motion rate (modes 5/6) and the frame step (modes 8/9) [D 0x944430].
+const SLOW: f64 = 0.1;
+pub const FRAME_STEP: f64 = 1. / 60.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -37,6 +44,11 @@ pub struct Input {
     pub fast_forward: f32,
     pub next_lap: bool,
     pub previous_lap: bool,
+    /// Toggles slow motion.
+    pub slow: bool,
+    /// One frame back or forward, then paused.
+    pub step_back: bool,
+    pub step_forward: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +68,8 @@ pub struct Player {
     pub loop_from: f64,
     pub mode: Mode,
     pub shuttle: f32,
+    /// Slow motion: play and its shuttle run at a tenth.
+    pub slow: bool,
 }
 
 impl Player {
@@ -68,6 +82,7 @@ impl Player {
             loop_from: from,
             mode: Mode::Play,
             shuttle: 1.,
+            slow: false,
         }
     }
 
@@ -80,6 +95,16 @@ impl Player {
                 Mode::Pause | Mode::Scrub => Mode::Play,
             };
             self.shuttle = 1.;
+        }
+        if input.slow {
+            self.slow = !self.slow;
+        }
+        if input.step_back || input.step_forward {
+            let sign = if input.step_forward { 1. } else { -1. };
+            self.mode = Mode::Pause;
+            self.shuttle = 1.;
+            self.time = (self.time + sign * FRAME_STEP).clamp(self.start, self.end);
+            return None;
         }
         let held = input.rewind > DEAD_ZONE || input.fast_forward > DEAD_ZONE;
         let f = (input.fast_forward - DEAD_ZONE) * AXIS_SCALE - (input.rewind - DEAD_ZONE) * AXIS_SCALE;
@@ -116,6 +141,7 @@ impl Player {
         }
         let rate = match self.mode {
             Mode::Pause => 0.,
+            Mode::Play if self.slow => f64::from(self.shuttle) * SLOW,
             Mode::Play | Mode::Scrub => f64::from(self.shuttle),
         };
         let next = self.time + rate * dt;
@@ -175,6 +201,35 @@ mod tests {
         for _ in 0..10 {
             p.step(input(1., 0.), 1., &[]);
         }
+        assert_eq!(p.time, 0.);
+    }
+
+    #[test]
+    fn slow_motion_and_frame_step() {
+        let mut p = Player::new(0., 20., 5.);
+        p.step(Input { slow: true, ..Default::default() }, 1., &[]);
+        assert!(p.slow);
+        assert!((p.time - 5.1).abs() < 1e-9, "{}", p.time);
+        // Slow reverse: -4.33 x 0.1.
+        p.step(input(1., 0.), 1., &[]);
+        assert!((p.time - (5.1 - (3. / 0.9 + 1.) * 0.1)).abs() < 1e-5);
+        // A frame step pauses one frame on; paused time stays.
+        let t = p.time;
+        p.step(Input { step_forward: true, ..Default::default() }, 1., &[]);
+        assert_eq!(p.mode, Mode::Pause);
+        assert!((p.time - (t + FRAME_STEP)).abs() < 1e-12);
+        p.step(Input::default(), 1., &[]);
+        assert!((p.time - (t + FRAME_STEP)).abs() < 1e-12);
+        p.step(Input { step_back: true, ..Default::default() }, 1., &[]);
+        p.step(Input { step_back: true, ..Default::default() }, 1., &[]);
+        assert!((p.time - (t - FRAME_STEP)).abs() < 1e-12);
+        // Toggled off: play at 1x again.
+        p.step(Input { pause: true, slow: true, ..Default::default() }, 1., &[]);
+        assert!(!p.slow);
+        assert!((p.time - (t - FRAME_STEP + 1.)).abs() < 1e-9);
+        // Steps stop at the window.
+        let mut p = Player::new(0., 20., 0.);
+        p.step(Input { step_back: true, ..Default::default() }, 1., &[]);
         assert_eq!(p.time, 0.);
     }
 

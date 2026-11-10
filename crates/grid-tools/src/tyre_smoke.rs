@@ -980,6 +980,7 @@ pub const SYSTEM_SLOTS: usize = 80;
 const GRAVITY: f32 = -9.81;
 
 /// Generic held-system particle runtime.
+#[derive(Clone)]
 pub struct Pfx {
     library: std::sync::Arc<Library>,
     instances: Vec<SystemInstance>,
@@ -1465,6 +1466,7 @@ struct WheelState {
 }
 
 /// Tyre smoke for every car: the driver plus the particle runtime.
+#[derive(Clone)]
 pub struct Smoke {
     pfx: Pfx,
     wheels: Vec<[WheelState; 4]>,

@@ -50,6 +50,9 @@ struct Live {
     velocities: Vec<[f32; 3]>,
     wheels: Vec<[Mat4; 4]>,
     pieces: Option<usize>,
+    /// What the ground effects and the tyre smoke read of each car.
+    ground: Vec<[crate::wheel_ground::Wheel; 4]>,
+    smoke: Vec<grid_tools::tyre_smoke::CarInput>,
 }
 
 fn live(app: &App) -> Live {
@@ -81,13 +84,21 @@ fn live(app: &App) -> Live {
             .multi
             .dynamic_props()
             .map(|p| p.poses(o.multi.bodies()).len()),
+        ground: cars.iter().map(|c| crate::wheel_ground::sample(c)).collect(),
+        smoke: cars
+            .iter()
+            .enumerate()
+            .map(|(i, c)| grid_tools::tyre_smoke::CarInput::read(c, i > 0))
+            .collect(),
     }
 }
 
 /// The recorded frames decode to the live race bit for bit, and the
 /// replayed presentation equals the live one at every sample.
 fn check(app: &mut App, lives: &[Live]) {
-    let mut replay = app.world_mut().resource_mut::<Replay>();
+    let world = app.world_mut();
+    let surfaces = world.resource::<Driving>().runtime.surfaces().clone();
+    let mut replay = world.resource_mut::<Replay>();
     let frames = replay.stream.frames();
     assert_eq!(frames.len(), lives.len());
     for (f, l) in frames.zip(lives) {
@@ -105,6 +116,20 @@ fn check(app: &mut App, lives: &[Live]) {
                     car.pose.to_mat4() * wheel_motion(&car.wheels[k], &car.geometry[k]);
                 assert_eq!(replayed, l.wheels[i][k], "tick {} car {i} wheel {k}", l.tick);
             }
+            // The replayed effects read the race's own inputs
+            // (crate::replay_effects).
+            assert_eq!(
+                crate::wheel_ground::replayed(car, |t| surfaces.code(t)),
+                l.ground[i],
+                "ground tick {} car {i}",
+                l.tick
+            );
+            assert_eq!(
+                crate::tyre_smoke::replayed_input(car, i > 0),
+                l.smoke[i],
+                "smoke tick {} car {i}",
+                l.tick
+            );
         }
         assert_eq!(s.props.as_ref().map(|p| p.pieces.len()), l.pieces);
         // Exactly the sample, also through the interpolating reader.

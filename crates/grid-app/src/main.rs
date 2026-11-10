@@ -140,6 +140,7 @@ mod race_hud;
 mod race_osd;
 mod render_scale;
 mod replay;
+mod replay_effects;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
@@ -5153,6 +5154,7 @@ pub(crate) fn race_app(
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);
             flashback::install(&mut app, ai_settings.difficulty);
+            replay_effects::install(&mut app);
         }
     }
     // Static references also spawn Hidden ornament levels; select them in every

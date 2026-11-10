@@ -921,6 +921,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0064E4D0	random_driver	func	crates/grid-tools/src/career/ebay.rs:417 grid-tools::career::ebay::random_driver					The seller, a hireable driver (0x64E4D0); `None` for the price-only
 0x0064E760	ebay_step	func	crates/grid-tools/src/career/ebay.rs:658 grid-tools::career::ebay::step	docs/CAREER_RESEARCH.md:658	F487	[D]	step	event the bid rises by a fixed step of the car's value (0x64E760).
 0x0064EA20		func	crates/grid-tools/src/career/state.rs:91 grid-tools::career::state			[V]		Head-to-head events made available (0x656D40 -> 0x64EA20) [V].
+0x0064ECD0	replay_setup	func	crates/grid-app/src/replay_effects.rs:1 grid-app::replay_effects	docs/REPLAY.md:75		[D]		replay system setup: 7.5 MiB REPLAY pool; registers the recordable channels by name via 0x942460 (skidmarks, pfx_recordable, broadcast: PFX scrapes/collisions, mud, scratches, loose parts).
 0x0064EDDF		label	crates/grid-app/src/replay/stream.rs:6 grid-app::replay::stream	docs/REPLAY.md:55		[D]		inside 0x0064ECD0; 0x64EDDF/0x936670 inside the 7.5 MiB `REPLAY` pool of
 0x0064EE25	CHUNK_BYTES	label	crates/grid-app/src/replay/stream.rs:29 grid-app::replay::stream::CHUNK_BYTES					inside 0x0064ECD0; 0x64EE25).
 0x006501B0	main_career	func	crates/grid-tools/src/career/state.rs:3 grid-tools::career::state	docs/CAREER_RESEARCH.md:466				save 0x6501B0, docs §9) where that is known; the rest is AUTHORED.
@@ -2200,6 +2201,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0093D000		func	not ported	docs/REPLAY.md:35	F360	[D]		(0x93D000) begins a frame at the replay time and calls every recordable's write (vtable +4),
 0x0093DDA0	replay_cut	func	crates/grid-app/src/replay.rs:183 grid-app::replay::cut ; crates/grid-app/src/replay/stream.rs:144 grid-app::replay::stream::truncate ; crates/grid-app/src/flashback/race_tests.rs:195 grid-app::flashback::race_tests (in check)	docs/FLASHBACK.md:83 ; docs/REPLAY.md:291	F366	[D]	cut truncate	The frame at or before the replay time [D 0x93DDA0]; the stream is cut
 0x0093DFE0		func	not ported	docs/REPLAY.md:50		[D]		@ 30Hz)" [D]. A frame is written per game update [D: 0x93DFE0 → 0x93D000]; the game update rate
+0x00942460	replay_register_recordable	func	not ported	docs/REPLAY.md:75		[D]		names a replay recordable (called from 0x64ECD0 with the channel name string).
 0x00943FF0		func	crates/grid-app/src/replay/player.rs:6 grid-app::replay::player	docs/REPLAY.md:97				paused 0, scrub `+0xA84 x shuttle x dt` (+0xA84 starts at 1.0, 0x943FF0);
 0x00944430		func	crates/grid-app/src/replay/player.rs:5 grid-app::replay::player	docs/REPLAY.md:88	F360	[D]		0x944430 advances replay time per frame by mode: play `shuttle x dt`,
 0x00944710		func	crates/grid-app/src/replay/player.rs:7 grid-app::replay::player	docs/REPLAY.md:99		[D]		0x944710 reads the rewind and fast-forward actions: when either is above

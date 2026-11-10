@@ -558,7 +558,7 @@ description is the first header found. Rows with a single file are validators wi
 | blink_detect | Blink detector for consecutive window frames: large on-screen regions whose brightness jumps for one or a few frames and returns (row 115). | [blink_detect.py](blink_detect.py) | [FIDELITY_BACKLOG](../docs/FIDELITY_BACKLOG.md) |
 | car_collision | Compare native car collision geometry, source bounds and saved live description words. | [validate_car_collision.py](validate_car_collision.py) | [CAR_COLLISION](../docs/CAR_COLLISION.md) |
 | diagnose_headlight_points | Report source headlight point selection from saved per-model data (CPU only). | [diagnose_headlight_points.py](diagnose_headlight_points.py) | [TRACK_ENVIRONMENT](../docs/TRACK_ENVIRONMENT.md) |
-| drift_soak | Headless Drift Battle soak on every Drift Battle layout: score and AI-quality summary. | [drift_soak.py](drift_soak.py) |  |
+| drift_soak | Headless Drift Battle soak on every Drift Battle layout: score and AI-quality summary. | [drift_soak.py](drift_soak.py) | [DISCIPLINES](../docs/DISCIPLINES.md) |
 | float_audit_all | Runs `grid-app --float-audit` (backlog row 102, docs/FLOATING_AUDIT.md) over every route folder with a track.jpk; one TSV and log per route plus a summary line each, in … | [float_audit_all.sh](float_audit_all.sh) | [FIDELITY_BACKLOG](../docs/FIDELITY_BACKLOG.md) |
 | front_end_loops | One-window front end smoke (docs/FRONT_END_FLOW.md "Port state machine"): grid-app --menu in one process, Menu -> Loading -> Race -> Loading -> Menu, -Races times, with … | [front_end_loops.ps1](front_end_loops.ps1) | [FRONT_END_FLOW](../docs/FRONT_END_FLOW.md) |
 | geometry_provider | Advanced-pose provider versus complete original retained geometry stages. | [validate_geometry_provider.py](validate_geometry_provider.py) |  |
@@ -579,6 +579,7 @@ description is the first header found. Rows with a single file are validators wi
 | source_drive | Source-only startup, retained original world and independent driving semantics. | [validate_source_drive.py](validate_source_drive.py) |  |
 | test_temporal_audit | Synthetic reverse-Z visibility controls for analyze_temporal_audit history classification. | [test_temporal_audit.py](test_temporal_audit.py) | [TEMPORAL_COLOUR_AUDIT](../docs/TEMPORAL_COLOUR_AUDIT.md) |
 | trace_bundle_files | Lists the GRID files grid-app reads for one bundled Android event (F608, docs/ANDROID.md "Bundle file list"): a desktop run of the event menu and the race, set up as the … | [trace_bundle_files.ps1](trace_bundle_files.ps1) | [ANDROID](../docs/ANDROID.md) |
+| window_check | Interactive window check of the replay and Flashback: records a race, plays it back with the replayed effects, jumps in and races on (F-entry of the replay effects). | [replay_window_check.py](replay_window_check.py) | [REPLAY](../docs/REPLAY.md) |
 
 ## Candidates to retire
 

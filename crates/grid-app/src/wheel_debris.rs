@@ -104,6 +104,7 @@ fn intensity(wheel: &Wheel, kick: &Kick, front_factor: f32, distance_factor: f32
     (rate, speed)
 }
 
+#[derive(Clone, Copy)]
 struct Random(u32);
 impl Random {
     fn unit(&mut self) -> f32 {
@@ -128,6 +129,60 @@ pub(crate) struct WheelDebris {
     /// Mesh per texture slot, and whether it currently holds particles.
     slots: Vec<(Handle<Mesh>, bool)>,
     pub emitted: u64,
+}
+
+/// The debris' simulation state: a replay checkpoint (crate::replay_effects).
+#[derive(Clone)]
+pub(crate) struct Saved {
+    particles: Vec<Particle>,
+    pending: Vec<[Vec<f32>; 4]>,
+    random: Random,
+}
+
+impl Saved {
+    pub(crate) fn bytes(&self) -> usize {
+        self.particles.len() * std::mem::size_of::<Particle>() + self.pending.len() * 64
+    }
+}
+
+impl WheelDebris {
+    pub(crate) fn save(&self) -> Saved {
+        Saved {
+            particles: self.store.particles.clone(),
+            pending: self.pending.clone(),
+            random: self.random,
+        }
+    }
+
+    pub(crate) fn restore(&mut self, saved: &Saved) {
+        self.store.particles.clone_from(&saved.particles);
+        self.pending.clone_from(&saved.pending);
+        self.random = saved.random;
+    }
+
+    /// No particles (a segment start).
+    pub(crate) fn reset(&mut self) {
+        self.store.particles.clear();
+        self.pending.clear();
+    }
+
+    /// One tick of every car's wheels (`simulate`, and the replay's re-run).
+    pub(crate) fn step(&mut self, cars: &[[Wheel; 4]], camera: Option<Vec3>, dt: f32) {
+        if let Some(camera) = camera {
+            self.camera = camera;
+        }
+        self.store.step(dt);
+        self.pending.resize_with(cars.len(), Default::default);
+        for (car, wheels) in cars.iter().enumerate() {
+            for (index, wheel) in wheels.iter().enumerate() {
+                self.emit(car, index, wheel, dt);
+            }
+        }
+    }
+
+    pub(crate) fn live(&self) -> usize {
+        self.store.particles.len()
+    }
 }
 
 struct Loaded {
@@ -428,7 +483,7 @@ fn start(
     });
 }
 
-fn simulate(
+pub(crate) fn simulate(
     debris: Option<ResMut<WheelDebris>>,
     ground: Res<WheelGround>,
     camera: Query<&GlobalTransform, With<super::ViewerCamera>>,
@@ -441,21 +496,9 @@ fn simulate(
     let start = std::time::Instant::now();
     let dt = grid_tools::source_vehicle::DELTA;
     if ground.reset {
-        debris.store.particles.clear();
-        debris.pending.clear();
+        debris.reset();
     }
-    if let Ok(camera) = camera.single() {
-        debris.camera = camera.translation();
-    }
-    debris.store.step(dt);
-    debris
-        .pending
-        .resize_with(ground.cars.len(), Default::default);
-    for (car, wheels) in ground.cars.iter().enumerate() {
-        for (index, wheel) in wheels.iter().enumerate() {
-            debris.emit(car, index, wheel, dt);
-        }
-    }
+    debris.step(&ground.cars, camera.single().ok().map(|c| c.translation()), dt);
     super::ground_effect_assets::charge(super::ground_effect_assets::TICK, start);
     if ground.key.is_some_and(|(_, t)| t.is_multiple_of(16))
         && crate::settings::diagnostics().ground_trace

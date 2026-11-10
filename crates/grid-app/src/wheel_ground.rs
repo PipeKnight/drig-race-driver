@@ -60,37 +60,82 @@ pub(crate) struct WheelGround {
     pub reset: bool,
 }
 
-fn f(b: &[u32], o: usize) -> f32 {
-    f32::from_bits(b[o / 4])
+/// The recorded state of one car that [`compose`] reads: what the race
+/// samples live, and what a replay frame holds (crate::replay::frame).
+pub(crate) struct Source<'a> {
+    pub pose: Mat4,
+    pub velocity: Vec3,
+    pub angular_velocity: Vec3,
+    /// Per wheel: anchor, axis, displacement and steering (WheelPose words).
+    pub anchor: [[f32; 3]; 4],
+    pub axis: [[f32; 3]; 4],
+    pub displacement: [f32; 4],
+    pub steering: [[f32; 2]; 4],
+    pub effects: &'a crate::replay::frame::Effects,
 }
 
 pub(crate) fn sample(runtime: &Runtime) -> [Wheel; 4] {
-    let b = &runtime.state.car.owner.vehicle;
-    let pose = Mat4::from_cols_array(&runtime.pose());
-    let origin = pose.w_axis.truncate();
+    let effects = crate::replay::effects(runtime);
     let v = runtime.velocity();
-    let w = runtime.angular_velocity();
-    let velocity = Vec3::new(v[0], v[1], v[2]);
-    let spin = Vec3::new(w[0], w[1], w[2]);
     let poses = runtime.wheels();
+    compose(
+        &Source {
+            pose: Mat4::from_cols_array(&runtime.pose()),
+            velocity: Vec3::new(v[0], v[1], v[2]),
+            angular_velocity: effects.angular_velocity,
+            anchor: poses.map(|w| w.anchor),
+            axis: poses.map(|w| w.axis),
+            displacement: poses.map(|w| w.displacement),
+            steering: poses.map(|w| w.steering),
+            effects: &effects,
+        },
+        |token| runtime.surfaces().code(token),
+    )
+}
+
+/// The wheel ground state of a replayed car (crate::replay_effects).
+pub(crate) fn replayed(
+    car: &crate::replay::frame::Car,
+    code: impl Fn(u32) -> Option<[u8; 4]>,
+) -> [Wheel; 4] {
+    compose(
+        &Source {
+            pose: car.pose.to_mat4(),
+            velocity: car.velocity,
+            angular_velocity: car.effects.angular_velocity,
+            anchor: car.geometry.map(|g| g.anchor),
+            axis: car.geometry.map(|g| g.axis),
+            displacement: car.wheels.map(|w| w.displacement),
+            steering: car.wheels.map(|w| w.steering),
+            effects: &car.effects,
+        },
+        code,
+    )
+}
+
+pub(crate) fn compose(source: &Source, code: impl Fn(u32) -> Option<[u8; 4]>) -> [Wheel; 4] {
+    let pose = source.pose;
+    let origin = pose.w_axis.truncate();
+    let velocity = source.velocity;
+    let spin = source.angular_velocity;
+    let mass = source.effects.mass;
     std::array::from_fn(|i| {
-        let o = 0x1990 + i * 0x150;
-        let token = b[(o + 0xc0) / 4];
-        let radius = f(b, o + 0xe0);
-        let omega = f(b, o + 0x104);
-        let wheel = poses[i];
-        let local = Vec3::from_array(wheel.anchor) + Vec3::from_array(wheel.axis) * wheel.displacement;
+        let e = &source.effects.wheels[i];
+        let token = e.token;
+        let radius = e.radius;
+        let omega = e.omega;
+        let local = Vec3::from_array(source.anchor[i])
+            + Vec3::from_array(source.axis[i]) * source.displacement[i];
         // Mark/emitter point: the wheel centre lowered by its radius in the
         // car frame, then to world, like 73F860 (no track probe) [D].
         let point = pose.transform_point3(local - Vec3::Y * radius);
         let normal = pose.transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
-        let yaw = wheel.steering[1].atan2(wheel.steering[0]);
+        let yaw = source.steering[i][1].atan2(source.steering[i][0]);
         let heading = pose.transform_vector3(Quat::from_rotation_y(yaw) * Vec3::Z);
         let forward = (heading - normal * heading.dot(normal)).normalize_or(heading);
         let side = normal.cross(forward);
         let contact_velocity = velocity + spin.cross(point - origin);
-        let code = runtime.surfaces().code(token).unwrap_or(*b"\0\0\0\0");
-        let mass = f(b, 0x15a0);
+        let code = code(token).unwrap_or(*b"\0\0\0\0");
         let planar = contact_velocity - normal * contact_velocity.dot(normal);
         let side_factor = if planar.length() > 1e-3 {
             1. - planar.normalize().dot(forward).abs().min(1.)
@@ -107,12 +152,12 @@ pub(crate) fn sample(runtime: &Runtime) -> [Wheel; 4] {
             longitudinal: omega * radius - contact_velocity.dot(forward),
             lateral: contact_velocity.dot(side).abs(),
             radius,
-            width: f(b, o + 0xf8),
-            excess: if mass > 0. { f(b, o + 0xac) / mass } else { 0. },
+            width: e.width,
+            excess: if mass > 0. { e.excess / mass } else { 0. },
             side_factor,
             rear: i < 2,
-            left: wheel.anchor[0] < 0.,
-            load: f(b, o + 0x138),
+            left: source.anchor[i][0] < 0.,
+            load: e.load,
             car_speed: velocity.length(),
         }
     })
@@ -128,7 +173,17 @@ pub(crate) fn install(app: &mut App) {
         );
 }
 
-pub(crate) fn update(mut ground: ResMut<WheelGround>, driving: Res<super::Driving>) {
+pub(crate) fn update(
+    mut ground: ResMut<WheelGround>,
+    driving: Res<super::Driving>,
+    replay: Option<Res<crate::replay::Replay>>,
+) {
+    // A replay (and a jump-in's re-run under its frozen session) steps the
+    // ground effects itself (crate::replay_effects): no marks bridge the
+    // rewound tick.
+    if replay.is_some_and(|r| r.session.is_some()) {
+        return;
+    }
     let key = (driving.segment, driving.runtime.ticks);
     if ground.key == Some(key) {
         return;

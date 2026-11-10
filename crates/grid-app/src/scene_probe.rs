@@ -784,6 +784,7 @@ mod tests {
                 }; 4],
                 deformation: None,
                 lost: [None; 4],
+                effects: Default::default(),
             }],
             props: None,
         };
