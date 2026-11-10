@@ -116,9 +116,9 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   one [I]; the instance colour taken as `DiffuseColour` [I]), no back-face culling [I], no tone
   map. The camera follows the two `Translation` channels by the screen's own clock (held before
   1.0 s and after 18.333 s), vertical FOV 55.4 [I]. The same `fe_world::Spec` takes any other
-  root, camera and lighting group. Open: the floor reflection (`loading_reflection`), the
-  particle emitter, the `fe_loading_world` post effect and the stat panel. The noise rotation,
-  the stick spring and the cube reflection are ported (next items).
+  root, camera and lighting group. Open: the floor reflection (`loading_reflection`) and the
+  `fe_loading_world` post effect. The noise rotation, the stick spring, the cube reflection and
+  the stat panel are ported (next items); the particle emitter draws nothing (below).
 - **Cube reflection (F813, static analysis).** `fe3d_tracksurface.cg.fp` in full [D, shaderpack
   disassembly]: V = normalize(eye − pos), N = normalize(normal), f = sat((1 − N·V)^FresnelPower);
   R = N(−2 N·V) + V; ray = normalize(−R / (r_max − r_min)); d = 2·ray (1e-5 on an axis at zero);
@@ -146,7 +146,7 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   corner's dark lower half. A debug render measured this: texture alpha 1 everywhere, a smooth
   Fresnel term, and the cube's green jumping from 34 to 213 at the edge. The barrier shows a
   smaller rectangle of the same kind. This follows from the [D] formula once pos is world space.
-  The space was traced in F817 [D unless marked], and no world-to-box transform was found:
+  The space was traced in F819 [D unless marked], and no world-to-box transform was found:
   - The constant builder 0x4DFC00 (0x4E031F–0x4E0393) only inserts w into `_refMinGamma` and
     `_refMaxScale` (r_gamma, r_scale, with andps/orps masks). The box xyz go to the shader as
     the vector reader stored them. Nothing else in the uniform table 0xDAB000 (14 names,
@@ -188,7 +188,7 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   - 0x47C7F0 orbits the camera position about its target by these two angles in radians: the
     first about the camera's side axis (row 0 of the frame from 0x47C2E0, side = up × (eye −
     target), rolled by the camera's roll), the second about its up axis (row 1). Another path
-    (0x47D100, flag byte +0x190) is off by default. Order and signs [E, F818: 0x47C7F0 run in
+    (0x47D100, flag byte +0x190) is off by default. Order and signs [E, F820: 0x47C7F0 run in
     Unicorn 2.1.4 on a camera object with up +Y and roll 0, three mixed angle pairs]: the
     result is the second angle about the camera's up axis, then the first about its original
     side axis; a positive first angle lowers an eye in front of a level target, a positive second
@@ -201,7 +201,7 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
     the dampen share kept at 0 (no setter found on this path [I]), and the orbit with world up,
     yaw then pitch (as emulated, above). With the `loading` values (0.1, 0.1, rate 0.066) the
     camera turns up to about 0.1 rad about its target.
-- **Stick spring (F818, static analysis; orbit emulated).** The `<spring_tweaks>` of the same
+- **Stick spring (F820, static analysis; orbit emulated).** The `<spring_tweaks>` of the same
   `<camera_tweaks>` block tune a spring component (constructor 0x47E770, vtable 0xCB9B9C) that
   holds a four-lane spring object (constructor 0x47B250, reader 0x47B570) [D]:
   - Defaults: centering tension 11, damping 12; user tension 15, damping 11; thresholds and
@@ -259,9 +259,39 @@ animated helpers `anim_top`, `anim_mid` and `anim_bot`:
   hint family. `loading` ("Loading, please wait") and `Loading_short` ("Loading...") also exist.
 - [V] FUN_004EA770 (one caller, FUN_004FF470) fills a table of 38 fact slots of 0xC4 bytes, three
   0x40-byte string ids each (header, body, details), with 114 calls to the same string setter.
-  The executable also names `fact_top_friend_*`, which the English table lacks. [I] the 38 slots
-  are the 35 English headers plus online facts; the rule that picks one per screen was not found.
-- Animations [D pssg]: `loading_stat_in/out`, `loading_text_in/out`, `loading_1_in` … `loading_5_in`.
+  The executable also names `fact_top_friend_*`, which the English table lacks.
+- **Which fact is shown** [D static, F821]. Each slot carries a mode mask (first dword of the
+  slot, set by 0x4EA770): 1 for slots 0–2, 5, 9, 10, 21, 22, 32 (biggest rep, top speed, total
+  distance, career results, instant replays, favourite discipline, driver offers, win streak,
+  biggest drift); 2 for the career slots 3, 4, 6–8, 11–15, 24, 25, 28, 29, 33; 4 for the drift
+  slots 16–20; 8 touge speed (23); 0x10 Le Mans (30, 31); 0x20 online (26, 27); 0x40 the awards
+  34–37. The collector 0x4EF1A0 builds the current mask with 0x4D6D40: 1 always, 2 in career
+  mode, 4 when the profile's drift statistic is above 0, 8 for touge, 0x10 from profile stat
+  0x6A1B10, 0x80/0x100/0x200 online; it never sets 0x20 or 0x40, so the online and award slots
+  never show. For each slot whose mask meets it, the builder 0x4E4ED0 (a 38-case switch) fills
+  the three texts and says whether the slot is valid: some cases always are (5 career results),
+  others need a statistic above zero or a database row (3 dirtiest car: `vehicle_livery`).
+  `[VALUE]` is replaced by FUN_0049D0F0. The valid slots are shuffled with MSVC
+  `random_shuffle` (0x4F4510, `rand() & 0x7FFF` steps) and the cursor starts at the count, so
+  the first "next" (0x4DFAD0) wraps to the first shuffled fact.
+- The values come from a profile statistics object (getters 0x6A1850 … 0x6A1B10, e.g. 0x6A1920
+  returns career wins at +0x44 and podiums at +0x48 of the object at +0xC; 0x6A1A50 events
+  entered/finished at +0x3C/+0x40) [D]. The port has no such object.
+- Animations [D pssg, F821]: the glyph's `Anim!1` (14.67 s; translation and rotation of the three
+  helpers, `load_top#DiffuseColour`) is a strip of segments. Each `loading_N_in` FEEVENT is a
+  goto to a frame, a `parameters` trigger with style `loading_stat_in`, a play-to 1.333 s further
+  (duration override 1.3 s) and the sound `loading_text_in`; each `loading_N_out` a goto, a
+  play-to 1.333 s further over 0.8 s, style `loading_stat_out` and `loading_text_out`:
+
+  | N | in (from → to) | out (from → to) |
+  |---|---|---|
+  | 1 | 6 → 7.333 | 4.333 → 5.667 |
+  | 2 | 3 → 4.333 | 7.333 → 8.667 |
+  | 3 | 6 → 7.333 | 10.333 → 11.667 |
+  | 4 | 9 → 10.333 | 7.333 → 8.667 |
+  | 5 | 12 → 13.333 | 13.333 → 14.667 |
+
+  The keys move each line in from ±250 units and out to ±250 (or up to 200) on its own axis.
 
 **Timing of the stat panel**
 - [D persistentdatacommon.xml] `loading_stats definedanimations=5`; `on_time minimum=0.8 desired=1.5`;
@@ -277,12 +307,37 @@ animated helpers `anim_top`, `anim_mid` and `anim_bot`:
   +0x200/+0x204/+0x208) and the durations `loading_stat_play_in/out`. Its per-frame update
   0x52B970 (takes the frame time) calls FUN_005048D0. That function calls `range` (0xA683E0)
   with (1, definedanimations+1) and stores the result at +0x22C.
-  [I] that picks one of `loading_1_in` … `loading_5_in` at random (format string `loading_%d_in`).
+- **The cycle** [D static, F821]: flags at +0x20C, tested in this order by 0x52B970: bit 4 busy
+  (an animation plays; nothing else happens), bit 1 refresh (0x5048D0: next fact, set the three
+  texts, pick N = `range(1, definedanimations+1)`), bit 2 shown. Shown: 0x515180 adds the frame
+  time to the on timer (+0x220) and plays out at `on_time desired`; hidden: 0x5152A0 adds it to
+  the off timer (+0x224) and plays in at `off_time desired`. Play-in 0x504A30 starts
+  `loading_%d_in`, sets bits 2 and 4 and clears the on timer; play-out 0x504AC0 starts
+  `loading_%d_out` with the same N, sets bits 1 and 4, clears bit 2 and the off timer. With a load
+  estimate (manager +0xC, 0x4C9950/0x4C9960) the timers are fitted into the time left (+0x218)
+  between the minimum and maximum times instead [D]; the port has no estimate and takes the
+  desired times. [I] bit 4 clears when the animation ends; the cycle starts with bit 1 set.
 - [I] `on_time` is how long a stat stays up (at least 0.8 s, 1.5 s wanted) and `off_time` the gap
   between stats (none wanted, at most 0.95 s): stats cycle while the load runs. The `minimum` is
   the nearest thing to a minimum display time found. No minimum time for the whole loading
   screen was found. `minscreentime` 4.0 belongs to save/profile screens, not loading [D].
 - [I] Braces in the time values (`{1.5}`, `0.5}`, `{0.8`) look like ease-in/ease-out markers.
+
+**Particle emitter** [F821, static analysis]. `pfx=testEmitter` in `loading_root` (and
+`pfx=particles` in two pre-race screens) is a plain `NODE` with a transform and nothing else [D
+pssg]. The `pfx` prefix makes the node a `GlyphParticleSystem` [D: the node-type table 0x4B09B0
+registers `pfx` with factory 0x4BFB10, which allocates 0xE0 bytes on the base glyph constructor
+0x4A1DC0 and sets vtable 0xCBCB28, followed by its class name]. Against the base glyph vtable
+0xCBC630 it overrides only the clone (0x4C1C60), the message handler (0x490370: the base
+handler, then a check for message type 0xDAAC6C, the channel connect request built by 0x4AB6C0)
+and the dirty marking (0x4903D0) [D]; it has no emission or effect lookup of its own. No data
+names an effect for it: `testEmitter` occurs only in the database, and the three front-end
+systems that `effects/pfx_fe_data_set.xml` loads (`FE_Dry_Ice`, `FE_Beam_Sparks`,
+`FE_Spark_Transition`) are named by no other file of the install and by no string in the
+executable; `pfx_frontend_data_set.xml` lists ten `F_*.xml` files that do not exist [D]. [I] An
+effect reaches a `pfx` glyph only when game code connects one to it, and nothing does for the
+loading world, so it shows no particles; the port draws none. Not verified at run time (no
+grid.exe runs).
 
 **Spinner** [D pssg]: the `load_overlay` root holds `load_circle_anim` (ramp shader with animated
 RampMin/RampMax, i.e. a rotating sweep) and `load_circle_anim_disk` (flat colour). It is started

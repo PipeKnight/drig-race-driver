@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F821](log/F0821.md) | 2026-11-11 | Loading stat panel and particle emitter evidence |
 | [F820](log/F0820.md) | 2026-11-10 | Front-end camera stick spring |
 | [F819](log/F0819.md) | 2026-11-10 | Loading reflection box space (static evidence) |
 | [F818](log/F0818.md) | 2026-11-11 | Car dust, scratch and damage gates and GhostCarValues |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F764](log/F0764.md) | 2026-11-09 | Flashback rewinds the marshal flags; career/free-race set-up labels |
 | [F763](log/F0763.md) | 2026-11-09 | Race HUD: split pills, needle blur, PB pill, OSD and results time formats from static RE |
 | [F762](log/F0762.md) | 2026-11-09 | Player reset job ported 1:1 (row 43) |
-| [F761](log/F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

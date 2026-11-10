@@ -91,6 +91,8 @@ mod front_end_host;
 #[cfg(not(target_os = "android"))]
 mod loading_screen;
 #[cfg(not(target_os = "android"))]
+mod loading_stats;
+#[cfg(not(target_os = "android"))]
 mod camera_noise;
 #[cfg(not(target_os = "android"))]
 mod camera_spring;

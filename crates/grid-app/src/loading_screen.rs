@@ -6,8 +6,7 @@
 //!   fePersistentDatabase.pssg, seen from `load_cam` as it drifts) with a
 //!   stat panel of the player's profile facts (`fact_*`), a load circle and
 //!   fades [D, FRONT_END_FLOW.md section 2]. The world is drawn by
-//!   [`crate::fe_world`]; the port has no profile statistics yet, so the
-//!   facts panel is open.
+//!   [`crate::fe_world`], the stat panel by [`crate::loading_stats`] (F821).
 //! - Fades up from black over 0.5 s (`load_world_fade_up`) [D]; the load
 //!   circle and the `loading` text are the transition overlay's
 //!   (transition.rs, F779), in the same place, so a hand-off from the
@@ -63,6 +62,14 @@ pub fn app(args: &[String]) -> Result<App, Box<dyn std::error::Error>> {
             None
         }
     };
+    // The stat panel of the player's profile facts (loading_stats.rs), in the
+    // world; `GRID_LOADING_STATS=off` leaves it out for A/B shots.
+    if let Some(camera) = camera
+        && !std::env::var_os("GRID_LOADING_STATS").is_some_and(|v| v == "off")
+        && let Err(e) = crate::loading_stats::install(&mut app, &root, camera)
+    {
+        eprintln!("loading screen: no stat panel ({e})");
+    }
     // The player's controls, as in the menus: the pad's right stick (Fe View
     // Tweak) turns the world's camera on its spring (camera_spring.rs).
     if camera.is_some() {

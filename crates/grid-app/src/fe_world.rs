@@ -519,7 +519,7 @@ mod tests {
 
     /// The interactive path: a key bound to Fe View Tweak Right, sampled by
     /// the input systems each frame, turns the camera through `follow`, and
-    /// the spring brings it back after release (F818).
+    /// the spring brings it back after release (F820).
     #[test]
     fn the_view_tweak_stick_turns_the_camera_and_lets_it_return() {
         use crate::input::{Action, ActionMap, Actions, Calibration, Pads, Source};
@@ -623,7 +623,7 @@ mod tests {
             assert!((moved.translation.distance(aim) - eye.distance(aim)).abs() < 0.01);
             assert!((moved.translation - aim).angle_between(eye - aim) < 0.2);
         }
-        // The loading spring (F818): a held stick settles at 5/6 of the
+        // The loading spring (F820): a held stick settles at 5/6 of the
         // halved, clamped input times final_scale 0.25.
         let spring = crate::camera_spring::Tweaks::read(&render, LOADING.tweaks).unwrap();
         assert_eq!((spring.user_tension, spring.limit, spring.final_scale, spring.dampen), (5., [0.35; 2], [0.25; 2], 0.5));

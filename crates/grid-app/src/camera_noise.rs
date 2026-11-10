@@ -164,7 +164,7 @@ impl CameraNoise {
 
 /// `eye` orbited about `target` by `pitch` about the camera's side axis and
 /// `yaw` about its up axis, with `up` the world up [D 0x47C7F0]. The order
-/// and the signs match the original emulated in Unicorn (F818: a camera
+/// and the signs match the original emulated in Unicorn (F820: a camera
 /// with up +Y and no roll, three mixed angle pairs, within 4e-7): yaw about
 /// the camera's up axis, then pitch about its first side axis; a positive
 /// pitch lowers an eye in front of a level target, a positive yaw turns
