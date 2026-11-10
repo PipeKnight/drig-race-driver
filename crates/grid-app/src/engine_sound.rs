@@ -45,6 +45,9 @@ pub(crate) struct EngineSound {
     /// The replay level in dB (0x4430C0's +0x38C), added to the car groups
     /// while a replay is shown.
     replay_db: f32,
+    /// Each car's gear whine while a replay is shown, run once per crossed
+    /// replay tick on its replayed words (`replay::ReplayedWords`).
+    replay_whines: Vec<CarWhine>,
 }
 impl EngineSound {
     pub(crate) fn new(bank: Arc<EngineBank>) -> Self {
@@ -64,7 +67,13 @@ impl EngineSound {
             banks,
             muted: false,
             replay_db: 0.,
+            replay_whines: Vec::new(),
         }
+    }
+    /// The replay level in dB (0 without a replay); the tyre and collision
+    /// sounds add it to their groups too (0x4430C0 sets groups 0..7).
+    pub(crate) fn replay_db(&self) -> f32 {
+        self.replay_db
     }
     pub(crate) fn control(&self, driving: &super::Driving) -> Control {
         Control::vehicle(
@@ -397,7 +406,7 @@ pub(crate) fn install_systems(app: &mut App, banks: Vec<Option<Arc<EngineBank>>>
         .init_resource::<ListenerMotion>()
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, publish.after(super::drive_tick))
-        .add_systems(Update, (listener_motion, mix_mode, update).chain().after(super::drive_present));
+        .add_systems(Update, (listener_motion, mix_mode, update).chain().after(super::drive_present).after(super::replay::control));
 }
 /// The camera listener's motion (0x43F570): the camera's displacement over the frame divided
 /// by the frame time, kept only below `audio_mix::LISTENER_JUMP` (8 m).
@@ -623,6 +632,10 @@ impl Listening<'_, '_> {
         }
         set
     }
+    /// The replay session shown, if any.
+    pub(crate) fn replay_session(&self) -> Option<&super::replay::Session> {
+        self.replay.as_ref()?.session.as_ref()
+    }
     /// The replay shown this frame: its cars' recorded state and its level
     /// target (`replay_level_target`).
     pub(crate) fn replayed(&self) -> Option<(&[super::replay::frame::Car], f32)> {
@@ -741,9 +754,14 @@ fn update(
     // (pause, mute, finish, failure) is published here.
     let finished = listening.stopped(&driving);
     if let Some(cars) = replayed {
+        let (words, advanced) = listening.replay_session().map_or((&[][..], 0), |s| (&s.words[..], s.advanced));
+        tick_replayed_whines(&mut sound, &driving, words, advanced, &opponent_engines);
         push_replayed(&mut sound, &driving, cars, &opponent_engines);
-    } else if Some(player_control(&sound, &driving, finished).pack()) != sound.pushed {
-        push_controls(&mut sound, &driving, finished, &opponent_engines);
+    } else {
+        sound.replay_whines.clear();
+        if Some(player_control(&sound, &driving, finished).pack()) != sound.pushed {
+            push_controls(&mut sound, &driving, finished, &opponent_engines);
+        }
     }
     if let Some(opponents) = &driving.opponents {
         for engine in &opponent_engines {
@@ -882,10 +900,39 @@ fn push_replayed(
     let silent = Control { normalized_rpm: 0., throttle: 0., audible: false, generation, gear: 0 };
     let control = |car: usize| cars.get(car).map_or(silent, |c| replayed_control(&c.effects, audible, generation));
     let handbrake = cars.first().is_some_and(|c| c.effects.handbrake);
-    send(&sound.mailbox, control(0), if handbrake { HANDBRAKE_BIT } else { 0 });
+    let whine = |car: usize| sound.replay_whines.get(car).map_or(0, |w| w.word);
+    send(&sound.mailbox, control(0), whine(0) | if handbrake { HANDBRAKE_BIT } else { 0 });
     sound.pushed = None;
     for engine in opponent_engines {
-        send(&engine.mailbox, control(engine.car), 0);
+        send(&engine.mailbox, control(engine.car), whine(engine.car));
+    }
+}
+/// 4518E0 for each replayed car, once per replay tick crossed this frame, on
+/// its replayed words; a paused or slowed replay keeps the last voice (at
+/// the replay level's floor).
+fn tick_replayed_whines(
+    sound: &mut EngineSound,
+    driving: &super::Driving,
+    words: &[super::replay::ReplayedWords],
+    advanced: u32,
+    opponent_engines: &Query<&OpponentEngine>,
+) {
+    let EngineSound { banks, replay_whines, .. } = sound;
+    replay_whines.resize_with(words.len(), CarWhine::default);
+    let settings = |model: usize| banks.get(model).and_then(|b| b.as_ref()).and_then(|b| b.whine.as_ref());
+    let model = |car: usize| {
+        if car == 0 {
+            Some(0)
+        } else {
+            opponent_engines.iter().find(|e| e.car == car).map(|e| e.model)
+        }
+    };
+    for (car, (whine, w)) in replay_whines.iter_mut().zip(words).enumerate() {
+        let settings = model(car).and_then(settings);
+        let seed = if car == 0 { 0x5eed } else { 0x5eed ^ car as u32 };
+        for _ in 0..advanced {
+            whine.tick(settings, driving.segment, seed, &w.vehicle);
+        }
     }
 }
 /// Once per vehicle tick (FixedUpdate after the tick): queue its controls.

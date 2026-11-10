@@ -130,6 +130,10 @@ pub struct Effects {
     pub rpm: f32,
     pub throttle: f32,
     pub gear: u8,
+    /// The gear whine's other inputs (`grid_tools::engine_audio_whine::Input`):
+    /// the gear change timer (`+1974`) and the drivetrain throttle (`+185C`).
+    pub shift_time: f32,
+    pub drive_throttle: f32,
 }
 
 impl Effects {
@@ -142,6 +146,8 @@ impl Effects {
             speed: l(self.speed, other.speed),
             rpm: l(self.rpm, other.rpm),
             throttle: l(self.throttle, other.throttle),
+            shift_time: l(self.shift_time, other.shift_time),
+            drive_throttle: l(self.drive_throttle, other.drive_throttle),
             wheels: std::array::from_fn(|k| {
                 let (a, b) = (&self.wheels[k], &other.wheels[k]);
                 WheelEffects {
@@ -205,12 +211,32 @@ pub struct Props {
     pub pieces: Vec<Piece>,
 }
 
+/// A collision one-shot played during the recorded ticks, as the original's
+/// replay channel records the "BroadcastMessage_AudioCollsion" messages
+/// (0x68A250, 42D580: the car, variety, volume dB, pitch, position, group
+/// and the Crashed flag; docs/REPLAY.md 2.7). `car` indexes
+/// [`Snapshot::cars`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shot {
+    pub car: u8,
+    pub variety: String,
+    pub volume_db: f32,
+    pub pitch: f32,
+    pub position: [f32; 3],
+    /// The sound group (below 128).
+    pub group: u8,
+    /// The play asked for the Crashed mix (message +0x24, 436300).
+    pub crashed: bool,
+}
+
 /// The complete recorded state at one tick.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
     pub tick: u64,
     pub cars: Vec<Car>,
     pub props: Option<Props>,
+    /// The collision one-shots since the previous frame.
+    pub shots: Vec<Shot>,
 }
 
 /// Where a shared item of a decoded frame lives.
@@ -230,6 +256,7 @@ pub struct Frame {
     pub key: bool,
     pub cars: Vec<FrameCar>,
     pub props: Option<FrameProps>,
+    pub shots: Vec<Shot>,
     words: Vec<u8>,
 }
 
@@ -254,8 +281,9 @@ pub struct FrameProps {
 /// (20), the effect inputs' angular velocity (3), speed, mass, rear
 /// coefficient, flag bits, and per wheel surface token, radius, width, load,
 /// excess, rear term, omega and steer pair (36), then the engine speed and
-/// throttle (2). The flag bits carry the gear in bits 6..10.
-const WORDS: usize = 80;
+/// throttle (2), the whine's gear change timer and drivetrain throttle (2).
+/// The flag bits carry the gear in bits 6..10.
+const WORDS: usize = 82;
 type Words = [u32; WORDS];
 const MASK: usize = WORDS.div_ceil(8);
 /// The mask a key frame leaves: no delta mask can equal it.
@@ -312,7 +340,7 @@ fn words(car: &Car) -> Words {
         ]
     });
     let mut n = 0;
-    let engine = [e.rpm, e.throttle].map(f32::to_bits);
+    let engine = [e.rpm, e.throttle, e.shift_time, e.drive_throttle].map(f32::to_bits);
     for v in floats.chain([bits]).chain(wheels).chain(engine) {
         out[n] = v;
         n += 1;
@@ -334,6 +362,8 @@ fn from_words(w: &Words) -> (Pose, Vec3, [Wheel; 4], Effects) {
         open_wheel: bits & 2 != 0,
         rpm: f(78),
         throttle: f(79),
+        shift_time: f(80),
+        drive_throttle: f(81),
         gear: ((bits >> 6) & 15) as u8,
         wheels: std::array::from_fn(|k| {
             let b = 42 + 9 * k;
@@ -672,6 +702,18 @@ impl Encoder {
                 }
             }
         }
+        w.u16(u16::try_from(snapshot.shots.len()).unwrap_or(u16::MAX));
+        for shot in snapshot.shots.iter().take(usize::from(u16::MAX)) {
+            let name = shot.variety.as_bytes();
+            let name = &name[..name.len().min(255)];
+            w.u8(shot.car);
+            w.u8(name.len() as u8);
+            w.0.extend_from_slice(name);
+            w.f32(shot.volume_db);
+            w.f32(shot.pitch);
+            w.f32s(&shot.position);
+            w.u8((shot.group & 0x7f) | (u8::from(shot.crashed) << 7));
+        }
         w.0.extend_from_slice(&tail);
         w.0
     }
@@ -789,6 +831,29 @@ pub fn decode(bytes: &[u8]) -> Option<Frame> {
             Some(FrameProps { broken, pieces })
         }
     };
+    let n = r.u16()?;
+    let mut shots = Vec::with_capacity(n.into());
+    for _ in 0..n {
+        let car = r.u8()?;
+        let len = r.u8()?;
+        let mut name = Vec::with_capacity(len.into());
+        for _ in 0..len {
+            name.push(r.u8()?);
+        }
+        shots.push(Shot {
+            car,
+            variety: String::from_utf8(name).ok()?,
+            volume_db: r.f32()?,
+            pitch: r.f32()?,
+            position: r.f32s()?,
+            group: 0,
+            crashed: false,
+        });
+        let flags = r.u8()?;
+        let shot = shots.last_mut()?;
+        shot.group = flags & 0x7f;
+        shot.crashed = flags & 0x80 != 0;
+    }
     if key && r.0.len() != cars.len() * WORDS * 4 {
         return None;
     }
@@ -797,6 +862,7 @@ pub fn decode(bytes: &[u8]) -> Option<Frame> {
         key,
         cars,
         props,
+        shots,
         words: r.0.to_vec(),
     })
 }
@@ -947,6 +1013,7 @@ fn resolve(
         tick: frame.tick,
         cars,
         props,
+        shots: frame.shots,
     })
 }
 
@@ -972,7 +1039,7 @@ fn wheel_lerp(a: &Wheel, b: &Wheel, t: f32, seconds: f32) -> Wheel {
 /// interpolate, everything that is stepwise comes from `a`.
 pub fn interpolate(a: &Snapshot, b: &Snapshot, t: f32, seconds: f32) -> Snapshot {
     if t <= 0. || a.cars.len() != b.cars.len() {
-        return a.clone();
+        return Snapshot { shots: Vec::new(), ..a.clone() };
     }
     let cars = a
         .cars
@@ -1034,6 +1101,9 @@ pub fn interpolate(a: &Snapshot, b: &Snapshot, t: f32, seconds: f32) -> Snapshot
         tick: a.tick,
         cars,
         props,
+        // One-shots belong to their frame, not to the time between
+        // frames (`Replay::shots_between`).
+        shots: Vec::new(),
     }
 }
 
@@ -1155,6 +1225,8 @@ pub(crate) mod tests {
                 rpm: 0.3 + 0.01 * x,
                 throttle: 0.75,
                 gear: 3,
+                shift_time: 0.5 + x,
+                drive_throttle: 0.6,
                 wheels: std::array::from_fn(|k| WheelEffects {
                     token: 0x7461_6d00 + k as u32,
                     radius: 0.31,
@@ -1183,6 +1255,19 @@ pub(crate) mod tests {
                     pose: Pose::from_mat4(Mat4::from_translation(Vec3::splat(x))),
                 }],
             }),
+            shots: if tick.is_multiple_of(3) {
+                vec![Shot {
+                    car: 1,
+                    variety: "Car_Hard".into(),
+                    volume_db: -6.5,
+                    pitch: 1.1,
+                    position: [x, 1., -x],
+                    group: 4,
+                    crashed: tick.is_multiple_of(2),
+                }]
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -1334,7 +1419,7 @@ pub(crate) mod tests {
     fn interpolation_hits_the_samples_and_slerps_between() {
         let a = snapshot(0);
         let b = snapshot(2);
-        assert_eq!(interpolate(&a, &b, 0., 0.), a);
+        assert_eq!(interpolate(&a, &b, 0., 0.), Snapshot { shots: Vec::new(), ..a.clone() });
         let end = interpolate(&a, &b, 1., 0.032);
         assert_eq!(end.cars[0].pose, b.cars[0].pose);
         let mid = interpolate(&a, &b, 0.5, 0.016);

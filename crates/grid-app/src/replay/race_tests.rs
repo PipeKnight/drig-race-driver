@@ -475,3 +475,67 @@ fn a_real_wreck_plays_the_crash_replay_by_itself() {
         eprintln!("crash replay: hits={hits} wreck_tick={wreck} frames_to_replay={frames}");
     });
 }
+
+/// The collision one-shots of the frames crossed forward, oldest first;
+/// frames at or before `after` and after `upto` play none.
+#[test]
+fn collision_shots_play_back_from_the_frames_crossed() {
+    let mut r = Replay::new(stream::Stream::new(stream::Limits::default(), None), None);
+    let mut encoder = Encoder::default();
+    let shot = |n: u8| frame::Shot {
+        car: n,
+        variety: format!("hit{n}"),
+        volume_db: -3.,
+        pitch: 1.,
+        position: [1., 2., 3.],
+        group: 1,
+        crashed: n == 2,
+    };
+    for (k, tick) in [0u64, 2, 4, 6].into_iter().enumerate() {
+        let snapshot = Snapshot {
+            tick,
+            cars: vec![frame::tests::car(1., 0.)],
+            props: None,
+            shots: vec![shot(k as u8)],
+        };
+        let bytes = encoder.encode(&snapshot, r.stream.next());
+        r.stream.push(tick, &bytes);
+    }
+    let cars = |v: Vec<frame::Shot>| v.into_iter().map(|s| s.car).collect::<Vec<_>>();
+    assert_eq!(cars(r.shots_between(0, 4)), [1, 2]);
+    assert_eq!(cars(r.shots_between(1, 5)), [1, 2]);
+    assert_eq!(cars(r.shots_between(5, 100)), [3]);
+    assert!(r.shots_between(6, 9).is_empty());
+    let all = r.shots_between(0, 6);
+    assert_eq!(all.iter().map(|s| s.crashed).collect::<Vec<_>>(), [false, true, false]);
+    assert_eq!(all[0], shot(1));
+}
+
+/// The replayed words give the tyre driver and the gear whine what the live
+/// car's words gave them: wheel positions from the pose and the anchors,
+/// the gear, shift time, throttle and the driven wheels' speed.
+#[test]
+fn replayed_words_feed_the_tyre_and_whine_models() {
+    let mut vehicle = vec![0u32; 0x2000 / 4];
+    vehicle[0x18f0 / 4] = 2; // two driven wheels (their offsets): 2 and 3
+    vehicle[0x18d8 / 4] = 0x1990 + 2 * 0x150;
+    vehicle[0x18dc / 4] = 0x1990 + 3 * 0x150;
+    let mut words = ReplayedWords { vehicle, physical: vec![0; 0x300 / 4] };
+    let car = frame::tests::car(4., 0.5);
+    words.show(&car);
+    let m = car.pose.to_mat4();
+    let positions = grid_tools::tyre_audio::wheel_positions(&words.vehicle, &words.physical);
+    for (i, p) in positions.into_iter().enumerate() {
+        let want = m.transform_point3(Vec3::from_array(car.geometry[i].anchor));
+        assert!(Vec3::from_array(p).distance(want) < 1e-4, "wheel {i}: {p:?} vs {want}");
+    }
+    let f = |o: usize| f32::from_bits(words.physical[o / 4]);
+    assert_eq!([f(0x220), f(0x224), f(0x228)], car.velocity.to_array());
+    let input = grid_tools::engine_audio_whine::Input::vehicle(&words.vehicle);
+    assert_eq!(input.gear, 3);
+    assert_eq!(input.shift_time, car.effects.shift_time);
+    assert_eq!(input.throttle, car.effects.drive_throttle);
+    let speed = |k: usize| car.effects.wheels[k].radius * car.effects.wheels[k].omega;
+    assert!((input.wheel_speed - (speed(2) + speed(3)) / 2.).abs() < 1e-4);
+    assert_eq!(input.airborne, 0);
+}

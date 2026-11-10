@@ -156,7 +156,7 @@ pub(crate) fn install_systems(
     .init_resource::<GlassBreaks>()
     .add_systems(Startup, start)
     .add_systems(FixedUpdate, tick.after(super::drive_tick))
-    .add_systems(Update, audibility);
+    .add_systems(Update, (audibility, replayed.after(super::replay::control)));
 }
 
 /// Backlog row 95: the scrape and damage loops follow the vehicle
@@ -203,12 +203,16 @@ fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets:
     }
 }
 
-/// Once per successful vehicle tick: every car's contacts.
-fn tick(
+/// Once per successful vehicle tick: every car's contacts. The listener's
+/// one-shots are also kept for the replay (`replay::PendingShots`), as the
+/// original's collision messages are recorded into its replay channel
+/// (42D580 → 0x68A580).
+pub(crate) fn tick(
     mut sound: ResMut<CollisionSound>,
     mut glass: ResMut<GlassBreaks>,
     driving: Res<super::Driving>,
     listening: super::engine_sound::Listening,
+    mut pending: Option<ResMut<super::replay::PendingShots>>,
 ) {
     let now = (driving.segment, driving.runtime.ticks);
     if sound.last.is_some_and(|(segment, _)| segment != now.0) {
@@ -250,18 +254,39 @@ fn tick(
         // AI group the camera (433AA0) [I: car pose as the Car listener].
         let listener = if k == 0 { position } else { ear };
         let mut plays = Vec::new();
+        // The first one-shot of a call that set the Crashed mix carries the
+        // message's Crashed flag (+0x24) into the replay [I: one per call;
+        // the mix is set once per tick either way].
+        let mut crashed_at = None;
         if !impacts.is_empty() {
             let contacts = contacts_of(runtime, &car, &impacts);
             let table = sound.table.clone();
-            let mut crash = || table.as_deref().is_some_and(|t| listening.crash(t));
+            let mut crashed = false;
+            let mut crash = || {
+                let set = table.as_deref().is_some_and(|t| listening.crash(t));
+                crashed |= set;
+                set
+            };
             sound.listener.contacts_crashing(k, &car, &contacts, &mut crash, &mut plays);
+            if crashed && !plays.is_empty() {
+                crashed_at = Some(0);
+            }
         }
         // 455FA0: the landing after airtime.
         {
             let table = sound.table.clone();
-            let mut crash = || table.as_deref().is_some_and(|t| listening.crash(t));
+            let first = plays.len();
+            let mut crashed = false;
+            let mut crash = || {
+                let set = table.as_deref().is_some_and(|t| listening.crash(t));
+                crashed |= set;
+                set
+            };
             let airborne = grid_tools::collision_audio::airborne(runtime);
             sound.listener.landing(k, &car, airborne, DELTA, &mut crash, &mut plays);
+            if crashed && plays.len() > first {
+                crashed_at.get_or_insert(first);
+            }
         }
         // 4486E0: the player's yaw/pitch displacement.
         if k == 0 {
@@ -331,7 +356,18 @@ fn tick(
                 }
             }
         }
-        for play in plays {
+        for (i, play) in plays.into_iter().enumerate() {
+            if let Some(pending) = pending.as_mut() {
+                pending.push(super::replay::frame::Shot {
+                    car: u8::try_from(k).unwrap_or(u8::MAX),
+                    variety: play.variety.clone(),
+                    volume_db: play.volume_db,
+                    pitch: play.pitch,
+                    position: play.position,
+                    group: u8::try_from(play.group).unwrap_or(0).min(127),
+                    crashed: crashed_at == Some(i),
+                });
+            }
             let Some(variety) = sound.bank.varieties.get(&play.variety) else { continue };
             let distance = Vec3::from_array(play.position).distance(listener);
             let gain = audio_mix::backend_gain(
@@ -348,4 +384,48 @@ fn tick(
         }
     }
     glass.0.clear();
+}
+
+/// A replay's collision one-shots: those of the frames crossed forward this
+/// frame (`replay::Session::heard`), heard as the live ones are (the player's
+/// from the replayed car, the AI group's from the camera) at the replay level
+/// (0x4430C0). The original re-dispatches its recorded collision channel
+/// (0x694190 → 0x693080) to the live handler 436300 [D static]; whether its
+/// role check lets them sound on playback is capture-only (docs/REPLAY.md 2.7).
+fn replayed(
+    sound: Res<CollisionSound>,
+    engine: Option<Res<super::engine_sound::EngineSound>>,
+    listening: super::engine_sound::Listening,
+) {
+    let Some(session) = listening.replay_session() else { return };
+    let Some(player) = session.shown.as_ref().and_then(|s| s.cars.first()) else { return };
+    if session.heard.is_empty() {
+        return;
+    }
+    let pose = player.pose.to_mat4().to_cols_array();
+    let ear = listening.ear(&pose);
+    let position = Vec3::new(pose[12], pose[13], pose[14]);
+    let replay_db = engine.as_ref().map_or(0., |e| e.replay_db());
+    let (trim, camera, modes) = (listening.trim() + replay_db, listening.camera(), listening.modes());
+    for shot in &session.heard {
+        let Some(variety) = sound.bank.varieties.get(&shot.variety) else { continue };
+        let listener = if shot.car == 0 { position } else { ear };
+        let at = Vec3::from_array(shot.position);
+        let group = sound.table.as_ref().map_or(-9., |t| modes.group_db(t, camera, usize::from(shot.group), trim));
+        let gain = audio_mix::backend_gain(
+            shot.volume_db,
+            group,
+            audio_mix::distance_db(at.distance(listener), variety.min_distance, variety.max_distance),
+        );
+        if gain > 0. {
+            let pan = listening.heard(listener, at);
+            let _ = sound.starts.send(Start::Shot(shot.variety.clone(), shot.pitch, gain, pan));
+        }
+        // 436300: a Crashed message sets the Crashed mix for 0.2 s.
+        if shot.crashed
+            && let Some(table) = &sound.table
+        {
+            listening.crash(table);
+        }
+    }
 }

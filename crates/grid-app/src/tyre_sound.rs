@@ -47,6 +47,9 @@ pub(crate) struct TyreSound {
     pans: Vec<Pan>,
     audible: Arc<AtomicBool>,
     last: Option<(u64, u64)>,
+    /// Each car's driver while a replay is shown, run once per crossed replay
+    /// tick on its replayed words (`replay::ReplayedWords`).
+    replay_drivers: Vec<Driver>,
 }
 impl TyreSound {
     fn new(bank: Arc<Bank>, table: Option<Arc<Table>>) -> Self {
@@ -58,6 +61,7 @@ impl TyreSound {
             pans: Vec::new(),
             audible: Arc::new(AtomicBool::new(false)),
             last: None,
+            replay_drivers: Vec::new(),
         }
     }
     fn driver(&self, car: usize) -> Driver {
@@ -145,7 +149,7 @@ pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, table: Option<Arc<
     app.insert_resource(TyreSound::new(bank, table))
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, tick.after(super::drive_tick))
-        .add_systems(Update, audibility);
+        .add_systems(Update, (replayed.after(super::replay::control), audibility).chain());
 }
 fn start(
     mut commands: Commands,
@@ -192,9 +196,15 @@ fn runtime(driving: &super::Driving, car: usize) -> Option<&Runtime> {
 }
 
 /// Advance the drivers exactly once per successful vehicle tick; reset with the car.
-fn tick(mut sound: ResMut<TyreSound>, driving: Res<super::Driving>) {
+fn tick(mut sound: ResMut<TyreSound>, driving: Res<super::Driving>, replay: Option<Res<super::replay::Replay>>) {
     let now = (driving.segment, driving.runtime.ticks);
     let sound = &mut *sound;
+    // A replay's voices come from its frames (`replayed`); the live drivers
+    // start again after it.
+    if replay.is_some_and(|r| r.session.is_some()) {
+        sound.last = None;
+        return;
+    }
     match sound.last {
         Some(last) if last == now => return,
         Some((segment, ticks)) if segment == now.0 && ticks + 1 == now.1 => {}
@@ -224,6 +234,58 @@ fn tick(mut sound: ResMut<TyreSound>, driving: Res<super::Driving>) {
     }
 }
 
+/// While a replay is shown: each car's driver runs once per replay tick
+/// crossed this frame on the replayed words. The original records no tyre
+/// sound; the port regenerates it from the replayed cars [I] (docs/REPLAY.md
+/// 3.2).
+fn replayed(mut sound: ResMut<TyreSound>, driving: Res<super::Driving>, listening: super::engine_sound::Listening) {
+    let sound = &mut *sound;
+    let Some(session) = listening.replay_session().filter(|s| !s.words.is_empty()) else {
+        sound.replay_drivers.clear();
+        return;
+    };
+    if sound.replay_drivers.is_empty() {
+        let drivers: Vec<Driver> = (0..sound.shared.len()).map(|car| sound.driver(car)).collect();
+        sound.replay_drivers = drivers;
+    }
+    for _ in 0..session.advanced {
+        for (car, ((driver, shared), words)) in
+            sound.replay_drivers.iter_mut().zip(&sound.shared).zip(&session.words).enumerate()
+        {
+            let Some(runtime) = runtime(&driving, car) else {
+                continue;
+            };
+            driver.tick(&Inputs {
+                vehicle: &words.vehicle,
+                physical: &words.physical,
+                surfaces: runtime.surfaces(),
+                delta: DELTA,
+            });
+            if let Ok(mut frame) = shared.lock() {
+                frame.voices.push(driver.voices());
+            }
+        }
+    }
+}
+
+/// Car `car`'s pose, vehicle and physical words: the replayed ones while a
+/// replay is shown, else the live runtime's.
+fn car_words<'a>(
+    replay: Option<&'a super::replay::Session>,
+    car: usize,
+    runtime: &'a Runtime,
+) -> ([f32; 16], &'a [u32], &'a [u32]) {
+    match replay.and_then(|s| s.words.get(car)) {
+        Some(w) => (pose_of(&w.physical), &w.vehicle, &w.physical),
+        None => (runtime.pose(), &runtime.state.car.owner.vehicle, &runtime.state.car.owner.physical),
+    }
+}
+
+/// The pose words (physical `+1D0`).
+fn pose_of(physical: &[u32]) -> [f32; 16] {
+    std::array::from_fn(|i| physical.get(0x1d0 / 4 + i).map_or(0., |w| f32::from_bits(*w)))
+}
+
 fn audibility(
     sound: Res<TyreSound>,
     driving: Res<super::Driving>,
@@ -231,16 +293,20 @@ fn audibility(
     listening: super::engine_sound::Listening,
 ) {
     let (trim, camera, modes) = (listening.trim(), listening.camera(), listening.modes());
-    let ear = listening.ear(&driving.runtime.pose());
+    // A replay is heard from its replayed cars, at the replay level.
+    let replay = listening.replay_session().filter(|s| !s.words.is_empty());
+    let trim = match replay {
+        Some(_) => trim + engine.as_ref().map_or(0., |e| e.replay_db()),
+        None => trim,
+    };
+    let words = |car: usize, runtime| car_words(replay, car, runtime);
+    let ear = listening.ear(&words(0, &driving.runtime).0);
     for (car, shared) in sound.shared.iter().enumerate() {
         let Some(runtime) = runtime(&driving, car) else {
             continue;
         };
-        let distances = tyre_audio::wheel_positions(
-            &runtime.state.car.owner.vehicle,
-            &runtime.state.car.owner.physical,
-        )
-        .map(|p| Vec3::from_array(p).distance(ear));
+        let (pose, vehicle, physical) = words(car, runtime);
+        let distances = tyre_audio::wheel_positions(vehicle, physical).map(|p| Vec3::from_array(p).distance(ear));
         let levels =
             tyre_audio::bus_levels(sound.table.as_deref(), &modes, camera, car == 0, trim, distances);
         // Opponents' tyres (AI group) are heard from the camera; the
@@ -249,7 +315,6 @@ fn audibility(
         if car > 0
             && let Some(pan) = sound.pans.get(car)
         {
-            let pose = runtime.pose();
             pan.set(listening.heard(ear, Vec3::new(pose[12], pose[13], pose[14])));
         }
         if let Ok(mut frame) = shared.lock() {
@@ -257,9 +322,8 @@ fn audibility(
         }
     }
     let audible = !engine.is_some_and(|e| e.muted)
-        && !driving.paused
         && driving.failure.is_none()
-        && !listening.stopped(&driving);
+        && (replay.is_some() || !driving.paused && !listening.stopped(&driving));
     sound.audible.store(audible, Ordering::Relaxed);
 }
 

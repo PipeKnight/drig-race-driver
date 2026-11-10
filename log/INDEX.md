@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F803](F0803.md) | 2026-11-10 | Tyre, whine and collision sound replayed |
 | [F802](F0802.md) | 2026-11-10 | Car reflections: the original's material tuning and SpecularValues floors |
 | [F801](F0801.md) | 2026-11-10 | Car reflections: the track's static map by default |
 | [F800](F0800.md) | 2026-11-10 | cargo td for every package through the build lock |

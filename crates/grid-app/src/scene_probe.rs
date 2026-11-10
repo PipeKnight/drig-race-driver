@@ -788,6 +788,7 @@ mod tests {
                 effects: Default::default(),
             }],
             props: None,
+            shots: Vec::new(),
         };
         let mut encoder = frame::Encoder::default();
         let mut stream = stream::Stream::new(stream::Limits::default(), None);

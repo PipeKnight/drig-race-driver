@@ -203,6 +203,27 @@ manager's update 0x44E860 (docs/AUDIO_RESEARCH.md §7.4):
 - The mix mode around a replay is the flow's (AUDIO_RESEARCH §33): a replay from the pause menu
   is inside Paused (all groups −48 except Global Ambience and HUD), a replay from the results is
   Normal, the terminal-damage replay changes nothing [D].
+- **The collision channel (F803).** The replay setup 0x64ECD0 makes it at +0x2234 through
+  0x68A250: a subscriber of the "game broadcaster" for `BroadcastMessage_AudioCollsion`
+  (0xCB0D38) with 50 slots of 0x30 bytes, vtable 0xCE9A88. Its write 0x68A580 copies each
+  message into the frame; its read 0x694190, while playing with +0x9A9 set, re-dispatches the
+  stored messages through 0x693080 to the same subscribers; 0x68A460 resets it. The messages
+  are built by 0x42D580, called from the contact handlers 0x435B20 (at 0x435E59, 0x435E8F),
+  0x43C320 (0x43C646, 0x43C672), 0x43CB70 (0x43CCC9, 0x43CCF3) and 0x43CD00 (0x43CE59,
+  0x43CE83). 0x42D580 posts only when the audio manager's role is 0, the sound group is not 16
+  and its counter +0x5B4C is below 15; the counter is never decremented, so at most 15 messages
+  per race are recorded, none while Paused. The message holds the car (+4), the level in dB
+  (+8, at least −42), the pitch (+0xC), the position (+0x10), the bank (+0x20), a Crashed flag
+  (+0x24: the Crashed mix for 0.2 s) and the group (+0x28). The live handler 0x436300 plays a
+  message only when the role is 1 and manager+0x5B80 is not 2.
+- The role word is manager+0x24, stored by the manager's constructor 0x45D870 from its second
+  argument; its only caller speech_new 0x466BA0 (at 0x466CCC) is called at 0x67A281 and
+  0x67A297 with `[esi+0x21DC]+0x1C`, so the role is `[[x+0x21DC]+0x1C]+0x24`. Its writer was not
+  traced, so whether recorded collisions are heard on playback in the original (role 1 then)
+  is capture-only.
+- Tyre sound and the gear whine have no recorded channel [D: none among the registered
+  recordables]; with the car groups at full level in a playing replay they can only come from
+  the replayed vehicles [I].
 
 ## 3. The port
 
@@ -319,9 +340,33 @@ manager's update 0x44E860 (docs/AUDIO_RESEARCH.md §7.4):
   the replayed poses and velocities (levels, pan, Doppler); the live controls return when the
   replay ends. The car groups get 0x4430C0's level (§2.7): full while playing at shuttle
   ≥ 0.97 without slow motion, otherwise 4 dB per frame down to −48 dB. The mix mode stays the
-  flow's (a pause-menu replay is inside Paused). Tyre sound, the gear whine, backfires from the
-  tick model and collision sounds stay silent in a replay; replay music and the shuttle cues
-  (bank 0x33) are not played (§6).
+  flow's (a pause-menu replay is inside Paused). Backfires from the tick model stay silent in a
+  replay; replay music and the shuttle cues (bank 0x33) are not played (§6).
+- Collision sound (F803): `collision_sound::tick` keeps every one-shot it plays (contacts,
+  landings, the player's wheel displacement, glass) in `replay::PendingShots`, with the
+  message's fields (car, variety, level, pitch, position, group) and a Crashed flag on the first
+  one-shot of a call that set the Crashed mix; the next recorded frame takes them
+  (`frame::Shot`). While a replay plays forward, `replay::control` collects the one-shots of the
+  frames it crossed this frame (`Replay::shots_between`; none for a step over 60 ticks, a seek
+  or a loop) and `collision_sound::replayed` plays them through the live gain path
+  (`audio_mix::backend_gain`, the mode's group level, the distance curve, the pan), heard from
+  the replayed player car for its own and from the camera for the others, with the replay level
+  added; a Crashed one sets the Crashed mix. [I] deviations: the original records at most 15
+  per race and only for role 0 (§2.7); the port records them all and plays them. The damage
+  audio's shots and the scrape loops have no recorded channel and stay silent in a replay [I].
+- Tyre sound and gear whine (F803): the replay keeps a copy of each car's live vehicle and
+  physical words taken when it starts (`ReplayedWords`) and writes the replayed state over it
+  every frame: pose, velocity, mass, gear, time since the shift, drivetrain throttle, and per
+  wheel the anchor, displacement, phase, surface token, radius, angular speed and load
+  (`frame::Effects` records the shift time and the drivetrain throttle since F803). The rest
+  the two models read (wheel radius `+F4`, the gear tables, the driven wheels, the fuel flag,
+  the front mass fraction) does not change in a race. Once per replay tick crossed this frame
+  (at most 8; a seek or a loop crosses none), replay-only tyre drivers (`tyre_sound::replayed`)
+  and gear whines (`engine_sound::tick_replayed_whines`) run the live models on those words;
+  their voices go to the live mixers, placed at the replayed wheels and car, with the replay
+  level added. Paused or slowed, the last voices hold under the replay level's −48 dB. The live
+  drivers start again when the replay ends [I: the original's tyre and whine state across a
+  replay is not traced].
 
 ### 3.3 Cameras (`replay/director.rs`)
 
@@ -358,6 +403,10 @@ manager's update 0x44E860 (docs/AUDIO_RESEARCH.md §7.4):
     interpolation at and between samples, teleports;
   - `replay::stream`: the memory-only ring, spool round trip with out-of-order reads, a full
     spool;
+  - `replay::race_tests::collision_shots_play_back_from_the_frames_crossed` (the shots of the
+    frames after one tick up to another, oldest first, with their Crashed flag) and
+    `replayed_words_feed_the_tyre_and_whine_models` (the replayed words give the tyre wheel
+    positions and the whine's gear, shift time, throttle and driven wheel speed) (F803);
   - `replay::player`: the shuttle formula, pause/scrub, clamping, loop, laps, slow motion and
     slow reverse, frame step and its pause;
   - `replay::director`: zone crossing, the ordinary camera choice, zoom framing, path projection.
@@ -400,10 +449,13 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 - The vehicle component's own replay fields were not traced; the highlight monitors'
   structure is traced (REPLAY_DIRECTOR_RESEARCH.md §2.7) but not their parameter data; the
   terminal-damage replay's start position needs a capture (below).
-- Replay sound (§2.7): engine sound is replayed (F797); tyre, whine and collision sound in a
-  replay, the shuttle cues and replay music are not; bank 0x33 is not identified. Whether the
-  original regenerates engine sound from replayed cars (rather than a recorded channel) is [I]:
-  only collisions have a recorded channel.
+- Replay sound (§2.7): engine sound (F797), tyre sound, the gear whine and collision sound
+  (F803) are replayed; the shuttle cues, replay music, backfires and the scrape and damage loops
+  are not; bank 0x33 is not identified. Whether the original regenerates engine, tyre and whine
+  sound from replayed cars (rather than a recorded channel) is [I]: only collisions have a
+  recorded channel. Capture-only: whether the role is 1 on playback (recorded collisions
+  audible), how the cap of 15 recorded messages shows in a long race, and whether a replayed
+  Crashed message sets the Crashed mix.
 - Not replayed: the port has no collision sparks; tyre smoke, skid marks and wheel debris are
   replayed (`replay_effects.rs`), and since F796 damage parts, glass, lights and shards too.
 - Replay Save has no consumer in the PC executable (§3.2).

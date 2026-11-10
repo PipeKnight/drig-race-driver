@@ -550,6 +550,7 @@ mod tests {
                 tick,
                 cars: vec![],
                 props: None,
+                shots: Vec::new(),
             };
             assert!(stream.push(tick, &encoder.encode(&snapshot, number as u32)));
         }

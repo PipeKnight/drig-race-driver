@@ -945,6 +945,15 @@ Static: 435B20 (435C5F..435E97), 42D580, 436300, 45DA40..45DB9F. GRID was not la
 - Consequence for the port: the cap of 15 and the 436300 Crashed path do not limit or change
   what an offline player hears. Nothing to port. The FIDELITY_BACKLOG note about the cap is
   closed.
+- [O] F803 (static): the replay's collision channel (0x68A250, replay +0x2234) subscribes to
+  the same message, `BroadcastMessage_AudioCollsion`, records it per frame (0x68A580) and on
+  playback re-dispatches it to the subscribers (0x694190 → 0x693080), so 436300 receives the
+  recorded messages again (docs/REPLAY.md §2.7). The role is `[[x+0x21DC]+0x1C]+0x24` (stored
+  by the manager's constructor 0x45D870 from speech_new 0x466BA0); its writer was not traced.
+- [I] So the posts also feed the replay, and role 1 may be the replay's playback side rather
+  than (or as well as) a network receiver; whether the original sounds them on playback is
+  capture-only. The live race is unchanged: the one-shot plays locally through 421B70. The
+  port records every one-shot (no cap) and plays them back in a replay (REPLAY.md §3.2).
 
 ### 17.2 Window glass (F511)
 

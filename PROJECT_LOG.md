@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F803](log/F0803.md) | 2026-11-10 | Tyre, whine and collision sound replayed |
 | [F802](log/F0802.md) | 2026-11-10 | Car reflections: the original's material tuning and SpecularValues floors |
 | [F801](log/F0801.md) | 2026-11-10 | Car reflections: the track's static map by default |
 | [F800](log/F0800.md) | 2026-11-10 | cargo td for every package through the build lock |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F746](log/F0746.md) | 2026-11-05 | Playable b6eaecaefa82 for the PC and both APKs (shadow kept through the whole LOD fade) |
 | [F745](log/F0745.md) | 2026-11-05 | Row 115: remaining shadow dropouts attributed; shadow level stops one fade step short |
 | [F744](log/F0744.md) | 2026-11-05 | Playable 0a0e7db3c349 for the PC and both APKs (smoke ghost after resize, house shadow blink) |
-| [F743](log/F0743.md) | 2026-11-05 | Row 115: building shadows lost for a frame at the end of a level fade |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

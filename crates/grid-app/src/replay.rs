@@ -105,6 +105,98 @@ pub struct Session {
     hidden: Vec<(Entity, Visibility)>,
     idle: f32,
     laps: Vec<f64>,
+    /// Collision one-shots of the frames the replay crossed forward this
+    /// frame (`Replay::shots_between`), played by `collision_sound::replayed`.
+    pub heard: Vec<frame::Shot>,
+    /// Replay ticks crossed forward this frame, at most [`MAX_ADVANCED`]:
+    /// the tyre and whine models run once per crossed tick.
+    pub advanced: u32,
+    /// Each shown car's words with its replayed state written in, for the
+    /// tyre and whine models (`ReplayedWords`); car 0 is the player.
+    pub words: Vec<ReplayedWords>,
+}
+
+/// The most replay ticks the tyre and whine models run in one frame (fast
+/// forward); more are skipped, as a seek is.
+pub const MAX_ADVANCED: u32 = 8;
+/// A forward step longer than this (ticks) is a seek: its one-shots are not
+/// played.
+const SEEK_TICKS: u64 = 60;
+
+/// The collision one-shots played since the last recorded frame
+/// (`collision_sound::tick`); the next replay frame takes them
+/// (`Replay::record`). The original records the same messages
+/// (`BroadcastMessage_AudioCollsion`, 42D580) into the replay's collision
+/// channel (0x68A250, +0x2234); docs/REPLAY.md 2.7.
+#[derive(Resource, Default)]
+pub struct PendingShots(pub Vec<frame::Shot>);
+impl PendingShots {
+    /// Bound while nothing records (a replay or a Flashback re-run holds it).
+    pub const LIMIT: usize = 256;
+    pub fn push(&mut self, shot: frame::Shot) {
+        if self.0.len() < Self::LIMIT {
+            self.0.push(shot);
+        }
+    }
+}
+
+/// One car's vehicle and physical words with the replayed state written over
+/// a copy of the live words taken when the replay started: what the tyre
+/// driver (`tyre_audio::Driver::tick`) and the gear whine
+/// (`engine_audio_whine::Input::vehicle`) read. The original has no recorded
+/// tyre or whine channel; the port regenerates both from the replayed cars
+/// (docs/REPLAY.md 3.2) [I].
+pub struct ReplayedWords {
+    pub vehicle: Vec<u32>,
+    pub physical: Vec<u32>,
+}
+impl ReplayedWords {
+    pub fn of(runtime: &Runtime) -> Self {
+        Self {
+            vehicle: runtime.state.car.owner.vehicle.clone(),
+            physical: runtime.state.car.owner.physical.to_vec(),
+        }
+    }
+    /// Writes `car`'s recorded state into the words. The rest (wheel radius
+    /// `+F4`, the gear tables, the driven wheels, the fuel flag, the front
+    /// mass fraction) does not change in a race.
+    pub fn show(&mut self, car: &Car) {
+        fn put(words: &mut [u32], offset: usize, x: f32) {
+            if let Some(w) = words.get_mut(offset / 4) {
+                *w = x.to_bits();
+            }
+        }
+        for (i, x) in car.pose.to_mat4().to_cols_array().into_iter().enumerate() {
+            put(&mut self.physical, 0x1d0 + i * 4, x);
+        }
+        for (i, x) in car.velocity.to_array().into_iter().enumerate() {
+            put(&mut self.physical, 0x220 + i * 4, x);
+        }
+        let e = &car.effects;
+        let v = &mut self.vehicle;
+        put(v, 0x15a0, e.mass);
+        if let Some(w) = v.get_mut(0x196c / 4) {
+            *w = u32::from(e.gear);
+        }
+        put(v, 0x1974, e.shift_time);
+        put(v, 0x185c, e.drive_throttle);
+        for i in 0..4 {
+            let o = 0x1990 + i * 0x150;
+            for (j, x) in car.geometry[i].anchor.into_iter().enumerate() {
+                put(v, o + j * 4, x);
+            }
+            // The recorded displacement is the lower of +40 and +4C [I].
+            put(v, o + 0x40, car.wheels[i].displacement);
+            put(v, o + 0x110, car.wheels[i].phase);
+            let w = &e.wheels[i];
+            if let Some(t) = v.get_mut((o + 0xc0) / 4) {
+                *t = w.token;
+            }
+            put(v, o + 0xe0, w.radius);
+            put(v, o + 0x104, w.omega);
+            put(v, o + 0x138, w.load);
+        }
+    }
 }
 
 /// A director shot's camera at the replay samples since its activation: the
@@ -291,6 +383,9 @@ impl Replay {
     }
 
     /// Records the cars and props if `tick` is due (see [`sample_due`]).
+    /// `shots` holds the collision one-shots played since the last frame
+    /// ([`PendingShots`]); the frame takes them.
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &mut self,
         segment: u64,
@@ -298,8 +393,10 @@ impl Replay {
         props: Option<Props>,
         lost: impl Fn(usize, usize) -> Option<Mat4>,
         parts: impl Fn(usize) -> Vec<frame::Part>,
+        shots: &mut Vec<frame::Shot>,
     ) {
         let Some(player) = runtimes.first() else {
+            shots.clear();
             return;
         };
         // The race holds while a replay plays. A Flashback re-runs its ticks
@@ -307,6 +404,7 @@ impl Replay {
         // several frames); recording those as a rewound race would clear the
         // stream, so recording resumes when the session ends.
         if self.session.is_some() {
+            shots.clear();
             return;
         }
         let tick = player.ticks;
@@ -315,6 +413,7 @@ impl Replay {
             .is_some_and(|(s, t)| s != segment || tick < t)
         {
             self.clear();
+            shots.clear();
         }
         // Lap starts of the player (Started, then every Finished).
         if self.seen != Some((segment, tick)) {
@@ -337,6 +436,7 @@ impl Replay {
                 .map(|(i, r)| car(r, |w| lost(i, w), parts(i)))
                 .collect(),
             props,
+            shots: std::mem::take(shots),
         };
         let target = snapshot.cars[0].pose.translation();
         if let (Some(d), Some(from)) = (&self.director, self.last_target) {
@@ -356,6 +456,26 @@ impl Replay {
         self.stream.push(tick, &bytes);
         self.encoder.forget_before(self.stream.frames().start as u32);
         self.recorded = Some((segment, tick));
+    }
+
+    /// The collision one-shots of the frames after tick `after` up to tick
+    /// `upto`, oldest first.
+    pub fn shots_between(&mut self, after: u64, upto: u64) -> Vec<frame::Shot> {
+        let Some(mut i) = self.stream.at_or_before(upto) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        while let Some(frame) = self.stream.read(i).and_then(|b| frame::decode(&b)) {
+            if frame.tick <= after {
+                break;
+            }
+            found.push(frame.shots);
+            if i <= self.stream.frames().start {
+                break;
+            }
+            i -= 1;
+        }
+        found.into_iter().rev().flatten().collect()
     }
 
     /// Frame `frame` with its shared items resolved.
@@ -570,6 +690,9 @@ impl Replay {
             hidden: Vec::new(),
             idle: 0.,
             laps: self.laps.iter().map(|&t| seconds(t)).collect(),
+            heard: Vec::new(),
+            advanced: 0,
+            words: Vec::new(),
         });
         true
     }
@@ -640,6 +763,8 @@ pub fn effects(runtime: &Runtime) -> frame::Effects {
         rpm: engine.normalized_rpm,
         throttle: engine.throttle,
         gear: u8::try_from(engine.gear.min(15)).unwrap_or(0),
+        shift_time: f(0x1974),
+        drive_throttle: f(0x185c),
         wheels: std::array::from_fn(|i| {
             let o = 0x1990 + i * 0x150;
             frame::WheelEffects {
@@ -704,11 +829,13 @@ pub fn install(app: &mut App, root: &std::path::Path, route: &grid_tools::route:
         director.as_ref().map_or(0, |d| d.zones.len()),
     );
     app.insert_resource(Replay::new(stream, director))
+        .init_resource::<PendingShots>()
         .add_systems(
             FixedUpdate,
             record
                 .after(crate::drive_tick)
-                .after(crate::damage_parts::tick),
+                .after(crate::damage_parts::tick)
+                .after(crate::collision_sound::tick),
         )
         .add_systems(
             Update,
@@ -728,7 +855,13 @@ pub fn record(
     mut replay: ResMut<Replay>,
     driving: Res<crate::Driving>,
     damage: Option<Res<crate::damage_parts::DamageParts>>,
+    pending: Option<ResMut<PendingShots>>,
 ) {
+    let mut none = Vec::new();
+    let shots = match pending {
+        Some(p) => &mut p.into_inner().0,
+        None => &mut none,
+    };
     let runtimes: Vec<&Runtime> = std::iter::once(&driving.runtime)
         .chain(
             driving
@@ -750,6 +883,7 @@ pub fn record(
         props,
         |car, wheel| damage.as_ref().and_then(|d| d.lost_wheel(car, wheel)),
         |car| damage.as_ref().map_or_else(Vec::new, |d| d.shown_parts(car)),
+        shots,
     );
 }
 
@@ -837,6 +971,8 @@ pub fn control(
     let Some(session) = replay.session.as_mut() else {
         return;
     };
+    session.heard.clear();
+    session.advanced = 0;
     *shifts = crate::input::ShiftQueue::default();
     if replay.frozen {
         return;
@@ -866,12 +1002,24 @@ pub fn control(
         || actions.pressed(Action::ReplayPrevCamera);
     session.idle = if busy { 0. } else { session.idle + dt };
     let laps = std::mem::take(&mut session.laps);
+    let before = session.player.time;
     let event = session.player.step(step, f64::from(dt), &laps);
     session.laps = laps;
     if event == Some(player::Event::Loop) {
         log_line!("drive_race_replay version=1 event=loop time={:.3}", session.player.time);
     }
     let time = session.player.time;
+    // Played forward: the crossed ticks run the tyre and whine models and
+    // the crossed frames' collision one-shots play (a seek or a loop plays
+    // none).
+    let (from, to) = (tick_at(before), tick_at(time));
+    let forward = event != Some(player::Event::Loop) && to > from;
+    let advanced = if forward { (to - from).min(u64::from(MAX_ADVANCED)) as u32 } else { 0 };
+    let heard = if forward && to - from <= SEEK_TICKS {
+        replay.shots_between(from, to)
+    } else {
+        Vec::new()
+    };
     let shown = replay.state_at(time);
     let frame = replay
         .stream
@@ -884,6 +1032,22 @@ pub fn control(
     if !deformation.is_empty() {
         session.deformation = deformation;
     }
+    session.advanced = advanced;
+    session.heard = heard;
+    if let Some(shown) = &session.shown {
+        if session.words.is_empty() {
+            let opponents = driving.opponents.iter().flat_map(|o| o.multi.cars.iter().skip(1));
+            session.words = std::iter::once(&driving.runtime).chain(opponents).map(ReplayedWords::of).collect();
+        }
+        for (words, car) in session.words.iter_mut().zip(&shown.cars) {
+            words.show(car);
+        }
+    }
+}
+
+/// The replay tick at `time` (simulation seconds).
+fn tick_at(time: f64) -> u64 {
+    (time / f64::from(DELTA)).max(0.).floor() as u64
 }
 
 /// The replay camera, after the live camera was framed.
