@@ -134,6 +134,34 @@ The pssg paint (power 1, 0.3 / 0.6) has a flat weight of 0.45 at every angle. Tu
 
 [I] The cars are loaded when the flag is consumed: the update does not tick during the race load.
 
+### 1.7 Sun terms (lighting)
+
+The tuning record's specular and metallic fields light the paint and window glass programs [O, static: `car_basic.cg.fp_paintDustSpecmapOcclusionReflectiveNormalScratches` and `car_basic.cg.fp_glass_windows` in `shaderpack/shaderpack.pssg`, disassembled with `tools/disassemble_packed_grid_shader.py`, private `local/shaders/`]. The registers are c22 `sunDirection` (toward the sun), c23 `SpecularValues` and c26 `MetallicSpecularValues`. With s = max(`GhostCarValues.w`, the shadow mask's red), r the reflected view vector and m1 the packed map:
+
+- **Paint**, after the reflection mix C1 of 4.2:
+  - a metal mask m = sat((m1.a − 0.3)·8) darkens the diffuse colour toward grazing angles: albedo ×= 1 + m·(sat(n·v + metallic falloff) − 1);
+  - the metallic tint M = m·sun·(diffuse texture·metallic scale + 0.5) replaces the colour by k = pow(sat(sun·r), metallic power)·s·m1.a·dust gate: C2 = C1 + k·(M − C1);
+  - the highlight is added: C2 + sun·s·highlight strength·m1.a·dust gate·pow(sat(sun·r), highlight power);
+  - then fog.
+- **Window glass**:
+  - the reflection has the shadow gate env ×= sat(s + `SpecularValues.w`), with s = 1 on back faces (a `vFace` compare);
+  - its occlusion term is sat(1 + `SpecularValues.z`) with no occlusion map, so it is 1 at every floor ≥ 0;
+  - the highlight is sun·s·highlight strength·0.5·dust gate·pow(sat(sun·r), highlight power);
+  - the output alpha also rises with `GhostCarValues.z`, which is not traced.
+
+**Values** [O, the installed file] (highlight power / strength; metallic power / scale / falloff):
+
+| Material | Highlight | Metallic |
+|---|---|---|
+| Car Body Paint | 35.65 / 1.16 | 14.16 / 1.20 / 0.25 |
+| Window Glass | 509.16 / 1.20 | 1.00 / 0.00 / 0.00 |
+| Chrome | 2.70 / 63.58 | 10.16 / 1.48 / 0.09 |
+| Shiny Metal | 613.10 / 196.53 | 12.45 / 1.48 / 0.08 |
+| Bare Metal | 688.17 / 167.63 | 12.45 / 1.66 / 0.09 |
+| Wheel | 610.78 / 38.96 | 7.43 / 1.66 / 0.06 |
+
+An untuned material keeps its saved `SpecularValues` (Lacetti paint 300 / 64, 1.5). [I] The original draws into an 8-bit target, so a sum above 1 clips to white.
+
 ## 2. The port before this work
 
 - **Default playable:** reflects the source sky only (image-based lighting).
@@ -234,7 +262,7 @@ Survey of all 44 `*_highLOD.pssg` files (private `local/reflections/constants.js
 
 **The overlay.** The port draws that mix as a child entity of each reflecting part or batch:
 - **Geometry:** the same mesh, in the transparent pass, with depth compare GreaterEqual and no depth write.
-- **Blend:** colour = environment, alpha = weight, i.e. `lit·(1 − w) + env·w`.
+- **Blend:** premultiplied, `lit·(1 − w) + env·w` without sun terms (see "Sun terms" below for the full composition).
 - **Order:** an opaque or masked part's overlay sorts before every transparent draw (bias −10⁶); a blended pane's overlay just after its pane (+0.01). The original mixes the reflection inside each part's own program, so a reflector, cabin or cage behind glass has its reflection before the glass is blended over it. Until 2 November 2026 every overlay sorted 0.01 in front of its part's bounds centre: glass writes no depth, so an overlay behind a pane passed the depth test and, whenever its centre sorted after the pane's, was laid over the glass. The tail lamps showed the reflector's chrome over the red lamp glass (black while the cube was black), and the order between a window and the cabin parts behind it changed with small camera moves (private `local/reflections/out/ch-lamps.png`, `orbit.png`).
 - **Fog and tonemapping:** applied as for the part.
 - **What it leaves alone:** the part's own material, and the systems that swap it (batching, damage, lamps).
@@ -250,9 +278,17 @@ Survey of all 44 `*_highLOD.pssg` files (private `local/reflections/constants.js
 
 The port (F-entry of this change) applies the first three to `carpaint_metallic` parts: each car's own `main_m1` (an opponent its livery's), uploaded linear; the main sun's Bevy shadow at the fragment; `OcclusionMapScale` as saved (1 when absent, the loader's fallback). Dust, scratches and the damage vertex masks are left out (the port has no dirt yet).
 
-**Material tuning** (1.6, from this change on): a material whose name starts with a tuned name takes the record's Fresnel power, min and max and, on paint, its occlusion scale, together with the floors `SpecularValues.z` = 0.25 and `.w` = 0.5 (`car_reflection_overlay::Tuning`, read once from the installation's `raceload.jpk`). Other materials keep their saved pssg controls with floors of 0. A tuned material whose min and max are 0 (cabin, grills, suspension, tyre wall) does not reflect. Not ported:
-- the record's specular and metallic fields (`SpecularValues.xy`, `MetallicSpecularValues`), which feed the lighting, not the reflection;
-- the floors on glass: the port's glass has no occlusion or shadow gate.
+**Material tuning** (1.6, from this change on): a material whose name starts with a tuned name takes the record's Fresnel power, min and max and, on paint, its occlusion scale, together with the floors `SpecularValues.z` = 0.25 and `.w` = 0.5 (`car_reflection_overlay::Tuning`, read once from the installation's `raceload.jpk`). Other materials keep their saved pssg controls with floors of 0. A tuned material whose min and max are 0 (cabin, grills, suspension, tyre wall) does not reflect.
+
+**Glass floors** (1.7): tuned window glass gates its reflection by the sun's shadow with the 0.5 floor, `env ×= sat(shadow + SpecularValues.w)`, and a back face counts as lit. The 0.25 occlusion floor has no gate on glass: the program's occlusion term has no map and is 1.
+
+**Sun terms** (1.7): the overlay of a tuned `carpaint_metallic` or `carglass` part also draws the record's sun terms (`car_reflection_overlay::Lighting`) with the main sun (the shadow-casting directional light), its shadow at the fragment and the packed map's alpha:
+- paint: the metallic darkening, the metallic tint by `pow(sat(sun·r), metallic power)` and the highlight;
+- glass: half the highlight.
+
+Composition: the overlay blends premultiplied (source One, destination OneMinusSrcAlpha). It returns the weighted environment, the tint and the highlight as colour, and 1 − the share of the part that stays as alpha, so that `out = lit·keep + colour` with `keep = (1 − w)·darkening·(1 − k)`. Fog is applied to the gain as `fog(colour) − fog(0)·keep`, which equals the earlier `w·fog(env)` where there are no sun terms. Units: the original's sun colour lights the diffuse colour directly, so sun = the light's colour · exposure / π, the scale of Bevy's diffuse term. AUTHORED: the highlight's factor `strength·pow(…)` is clipped at 1 (one lit white). The original clips the whole sum in its 8-bit target; the port's HDR view would otherwise pass the metal and wheel strengths (39–197) to the bloom as light.
+
+The part's own material then has no specular (reflectance 0, metallic 0, no clear coat, no specular texture): its highlight and environment specular would count twice. This is set once per material when its overlay is made, so it applies only while reflections are on; without the overlay (the phone, reflections off) the part keeps Codex's authored lighting (`car_materials.rs`). Untuned materials and the lamp glass and pod programs keep their own lighting.
 
 **Strength against the original** (2 November 2026): the owner's recording of the original, `local/recordings/donington-race-20261009/overview/frame-0050.000.jpg` (clean Lacetti at the start, chase view), against the port at the same view with the cube working (private `local/reflections/out/orig-0050-zoom.png`, `fx-rear-zoom.png`). Both show a highlight along the top edges, the sky on the dark trunk area and a readable livery; the masked port is of about the original's strength, the gates off read chrome-like. By eye only; the original frame is a compressed recording with dirt-free paint at another exposure.
 

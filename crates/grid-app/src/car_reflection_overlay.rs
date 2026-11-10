@@ -29,6 +29,12 @@
 //! and alpha: the original's glass program (`car_basic` `fp_glass_windows`)
 //! keeps the interpolated normal and the Fresnel weight.
 //!
+//! The same overlay draws the tuned sun terms of the paint and window glass
+//! programs ([`Lighting`], docs/CAR_REFLECTIONS.md 1.7): the highlight
+//! `SpecularValues.y · pow(sat(sun · r), SpecularValues.x)` and, on paint,
+//! the metallic tint and darkening of `MetallicSpecularValues`. They replace
+//! the part's own specular, which is turned off when its overlay is made.
+//!
 //! AUTHORED: glass weighs its reflection by the pane's alpha. The paint
 //! program's dust, scratch and vertex-colour gates are not applied (a clean,
 //! unscratched car).
@@ -61,6 +67,20 @@ pub struct Controls {
     /// The paint program's `SpecularValues` z (occlusion) and w (shadow)
     /// floors: [`FLOORS`] for a tuned material, 0 otherwise.
     pub floors: Vec2,
+    /// The tuned sun terms of a paint or window glass program part.
+    pub lighting: Option<Lighting>,
+}
+
+/// A tuned material's sun terms (0x9E7360 submits them from its record):
+/// the paint program (`carpaint_metallic`) and the window glass program
+/// (`carglass`) light with them; docs/CAR_REFLECTIONS.md 1.7.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lighting {
+    /// `SpecularValues` x and y: the highlight's power and strength.
+    pub specular: Vec2,
+    /// `MetallicSpecularValues` x, y and z: the metallic tint's power, its
+    /// scale of the diffuse colour and the falloff of the metallic darkening.
+    pub metallic: Vec3,
 }
 
 /// The `SpecularValues` z and w that 0x9E7360 submits with a tuned
@@ -235,6 +255,7 @@ impl Controls {
             _ => return None,
         };
         let paint = group == b"carpaint_metallic.fx";
+        let lit = paint || group == b"carglass.fx";
         let controls = match tuned {
             Some(r) => Self {
                 colour,
@@ -243,6 +264,10 @@ impl Controls {
                 max: r[8],
                 paint: paint.then_some(r[5]),
                 floors: FLOORS,
+                lighting: lit.then(|| Lighting {
+                    specular: Vec2::new(r[0], r[1]),
+                    metallic: Vec3::new(r[2], r[3], r[4]),
+                }),
             },
             None => Self {
                 colour,
@@ -252,6 +277,7 @@ impl Controls {
                 // The loader's fallback scale is 1 (0x99C300).
                 paint: paint.then(|| scalar(b"OcclusionMapScale").unwrap_or(1.)),
                 floors: Vec2::ZERO,
+                lighting: None,
             },
         };
         (controls.colour.max_element() > 0. && controls.min.max(controls.max) > 0.)
@@ -353,6 +379,12 @@ pub struct Overlay {
     mask: Option<Handle<Image>>,
     #[uniform(8)]
     paint: Vec4,
+    /// `SpecularValues` x, y and `MetallicSpecularValues` x, y.
+    #[uniform(9)]
+    sun_terms: Vec4,
+    /// The metallic falloff, and the program: 0 none, 1 paint, 2 glass.
+    #[uniform(10)]
+    sun_program: Vec4,
     /// The transparent phase's sort bias (`Material::depth_bias`).
     bias: f32,
 }
@@ -387,7 +419,10 @@ impl Material for Overlay {
         {
             target.blend = Some(BlendState {
                 color: BlendComponent {
-                    src_factor: BlendFactor::SrcAlpha,
+                    // Premultiplied: the shader returns the weighted
+                    // environment, the metallic tint and the highlight, and
+                    // the share of the part that stays in alpha.
+                    src_factor: BlendFactor::One,
                     dst_factor: BlendFactor::OneMinusSrcAlpha,
                     operation: BlendOperation::Add,
                 },
@@ -415,6 +450,18 @@ pub struct OverlayOf;
 /// The part's overlay entity.
 #[derive(Component)]
 struct HasOverlay(Entity);
+
+/// A part whose overlay draws its program's sun terms keeps only its diffuse
+/// lighting: no specular F0 (direct or environment) and no clear coat.
+fn unlit_specular(part: &mut StandardMaterial) {
+    part.reflectance = 0.;
+    part.metallic = 0.;
+    part.clearcoat = 0.;
+    #[cfg(feature = "paint-specular")]
+    {
+        part.specular_texture = None;
+    }
+}
 
 pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
@@ -463,7 +510,7 @@ fn follow(
             )>,
         ),
     >,
-    standard: Res<Assets<StandardMaterial>>,
+    mut standard: ResMut<Assets<StandardMaterial>>,
     mut overlays: ResMut<Assets<Overlay>>,
     mut cache: Local<HashMap<AssetId<StandardMaterial>, Handle<Overlay>>>,
 ) {
@@ -483,10 +530,15 @@ fn follow(
         };
         let (controls, glass) = (response.controls, response.glass);
         let cracked = original.is_some();
-        let part = standard.get(material.id());
         let handle = cache
             .entry(material.id())
             .or_insert_with(|| {
+                if controls.lighting.is_some()
+                    && let Some(mut part) = standard.get_mut(material.id())
+                {
+                    unlit_specular(&mut part);
+                }
+                let part = standard.get(material.id());
                 overlays.add(Overlay {
                     environment: controls.colour.extend(controls.power),
                     fresnel: Vec4::new(
@@ -498,9 +550,28 @@ fn follow(
                     cube: cube.0.clone(),
                     base: part.and_then(|m| m.base_color_texture.clone()),
                     mask: response.mask.clone(),
-                    paint: controls.paint.map_or(Vec4::ZERO, |scale| {
-                        paint_override().unwrap_or(Vec4::new(1., scale, controls.floors.x, controls.floors.y))
+                    // Glass takes only the floors (its occlusion term has no
+                    // map, so only the shadow floor acts).
+                    paint: controls.paint.map_or(
+                        Vec4::new(0., 0., controls.floors.x, controls.floors.y),
+                        |scale| {
+                            paint_override()
+                                .unwrap_or(Vec4::new(1., scale, controls.floors.x, controls.floors.y))
+                        },
+                    ),
+                    sun_terms: controls.lighting.map_or(Vec4::ZERO, |l| {
+                        l.specular.extend(l.metallic.x).extend(l.metallic.y)
                     }),
+                    sun_program: Vec4::new(
+                        controls.lighting.map_or(0., |l| l.metallic.z),
+                        match (controls.lighting, controls.paint) {
+                            (None, _) => 0.,
+                            (Some(_), Some(_)) => 1.,
+                            (Some(_), None) => 2.,
+                        },
+                        0.,
+                        0.,
+                    ),
                     bias: sort_bias(part.map(|m| m.alpha_mode)),
                 })
             })
@@ -572,6 +643,18 @@ mod tests {
         let tuned = tuned.unwrap();
         assert_eq!((tuned.power, tuned.min, tuned.max), (2.13, 0.27, 0.86));
         assert_eq!((tuned.paint, tuned.floors), (Some(1.05), FLOORS));
+        // Its sun terms: SpecularValues x, y and MetallicSpecularValues x, y, z.
+        let lighting = Lighting {
+            specular: Vec2::new(35.65, 1.16),
+            metallic: Vec3::new(14.16, 1.2, 0.25),
+        };
+        assert_eq!(tuned.lighting, Some(lighting));
+        let glass = Controls::from_constants(b"carglass.fx", &values, Some(record)).unwrap();
+        assert_eq!((glass.paint, glass.lighting), (None, Some(lighting)));
+        // Untuned materials and other programs keep their own lighting.
+        assert_eq!(paint.lighting, None);
+        let lamp = Controls::from_constants(b"car_light_glass.fx", &values, Some(record));
+        assert_eq!(lamp.unwrap().lighting, None);
         // A record of no weight turns the reflection off.
         let off = [1., 0., 1., 0., 0.19, 1.04, 3.95, 0., 0.];
         assert_eq!(Controls::from_constants(b"carglass.fx", &values, Some(off)), None);
@@ -643,6 +726,96 @@ mod tests {
         assert!(tuned > 0 && paints > 0);
     }
     #[test]
+    fn a_lit_overlay_takes_the_parts_specular() {
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<Overlay>>()
+            .init_resource::<Reflective>()
+            .add_systems(Update, follow);
+        let cube = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        app.insert_resource(Environment(cube));
+        let mesh = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Mesh::from(Cuboid::new(1., 1., 1.)));
+        let lighting = Lighting {
+            specular: Vec2::new(35.65, 1.16),
+            metallic: Vec3::new(14.16, 1.2, 0.25),
+        };
+        // Paint, window glass, and an untuned part.
+        let cases = [
+            (Some(1.05), Some(lighting)),
+            (None, Some(lighting)),
+            (Some(1.), None),
+        ];
+        let parts: Vec<_> = cases
+            .iter()
+            .map(|&(paint, lighting)| {
+                let material = app
+                    .world_mut()
+                    .resource_mut::<Assets<StandardMaterial>>()
+                    .add(StandardMaterial {
+                        reflectance: 0.5,
+                        metallic: 0.4,
+                        clearcoat: 1.,
+                        ..Default::default()
+                    });
+                let controls = Controls {
+                    colour: Vec3::splat(0.5),
+                    power: 2.13,
+                    min: 0.27,
+                    max: 0.86,
+                    paint,
+                    floors: if lighting.is_some() { FLOORS } else { Vec2::ZERO },
+                    lighting,
+                };
+                let response = Response {
+                    controls,
+                    glass: paint.is_none(),
+                    mask: None,
+                };
+                app.world_mut()
+                    .resource_mut::<Reflective>()
+                    .0
+                    .insert(material.id(), response);
+                let entity = app
+                    .world_mut()
+                    .spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())))
+                    .id();
+                (entity, material)
+            })
+            .collect();
+        app.update();
+        let overlay = |entity| {
+            let child = app.world().get::<HasOverlay>(entity).unwrap().0;
+            let handle = &app.world().get::<MeshMaterial3d<Overlay>>(child).unwrap().0;
+            app.world().resource::<Assets<Overlay>>().get(handle).unwrap().clone()
+        };
+        let base = |material: &Handle<StandardMaterial>| {
+            let m = app.world().resource::<Assets<StandardMaterial>>().get(material).unwrap();
+            (m.reflectance, m.metallic, m.clearcoat)
+        };
+        let paint = overlay(parts[0].0);
+        assert_eq!(paint.sun_terms, Vec4::new(35.65, 1.16, 14.16, 1.2));
+        assert_eq!(paint.sun_program, Vec4::new(0.25, 1., 0., 0.));
+        assert_eq!(base(&parts[0].1), (0., 0., 0.));
+        // Glass: program 2 and only the floors in the paint vector.
+        let glass = overlay(parts[1].0);
+        assert_eq!(glass.sun_program.y, 2.);
+        assert_eq!(glass.paint, Vec4::new(0., 0., FLOORS.x, FLOORS.y));
+        assert_eq!(base(&parts[1].1), (0., 0., 0.));
+        // Untuned: no sun terms, the part keeps its own specular.
+        let untuned = overlay(parts[2].0);
+        assert_eq!((untuned.sun_terms, untuned.sun_program), (Vec4::ZERO, Vec4::ZERO));
+        assert_eq!(base(&parts[2].1), (0.5, 0.4, 1.));
+    }
+
+    #[test]
     fn actual_follow_retains_lamp_owned_optics_across_damage_and_bank_readiness() {
         use crate::lamp_association::{BankKey, Receipt};
         use crate::lamp_signals::{Atlas, Mode, runtime};
@@ -695,6 +868,7 @@ mod tests {
                 max: 0.9,
                 paint: None,
                 floors: Vec2::ZERO,
+                lighting: None,
             },
             glass: true,
             mask: Some(mask),
