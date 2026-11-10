@@ -178,6 +178,21 @@ pub const TEST_DRIVE_WRECK_PILLS: [(Pill, &str); 3] = [
 
 /// `terminal_flash` + `terminal_fade` time delays (1.0 s each) [D].
 pub const WRECK_TRANSITIONS: f32 = 2.;
+/// `terminal_flash` slowMo: the time scale 0.1 (0xCAFCD4) [D].
+pub const WRECK_SLOW: f32 = 0.1;
+
+/// The game-time scale `elapsed` real seconds into the wreck transitions:
+/// `terminal_flash` holds [`WRECK_SLOW`] for its 1 s, then `terminal_fade`
+/// rampSlowMo (0x57A140) gives min(0.1 + (2 × its elapsed)², 1) [D]. The
+/// states' clocks are taken as real time [I].
+pub fn wreck_time_scale(elapsed: f32) -> f32 {
+    let fade = elapsed - 1.;
+    if fade < 0. {
+        WRECK_SLOW
+    } else {
+        (WRECK_SLOW + (2. * fade).powi(2)).min(1.)
+    }
+}
 /// `StateTerminalDamageDelay` then waits for the player's car to come to
 /// rest, giving up this long after entering the state (0x57F1A0) [D] ...
 pub const WRECK_REST_LIMIT: f32 = 2.;
@@ -240,6 +255,9 @@ pub struct PostRace {
     cursor: usize,
     answer: usize,
     wreck_timer: f32,
+    /// The simulation tick of the terminal damage (the original stores the
+    /// crash time in P+0xA18 from 0x59D870), the terminal replay's anchor.
+    pub wreck_tick: Option<u64>,
     /// Seconds since the wrecked car came to rest (or the rest wait gave up).
     wreck_rest: Option<f32>,
     segment: u64,
@@ -255,6 +273,7 @@ impl PostRace {
             cursor: 0,
             answer: 1,
             wreck_timer: 0.,
+            wreck_tick: None,
             wreck_rest: None,
             segment: 0,
             repeat: Repeat::default(),
@@ -327,6 +346,15 @@ impl PostRace {
             self.stage = Stage::Wreck;
             self.cursor = 0;
         }
+    }
+
+    /// Real seconds into the wreck's `terminal_flash` and `terminal_fade`
+    /// (the first [`WRECK_TRANSITIONS`] seconds of the terminal damage).
+    pub fn wreck_transition(&self) -> Option<f32> {
+        (self.stage == Stage::Hidden
+            && self.wreck_timer > 0.
+            && self.wreck_timer < WRECK_TRANSITIONS)
+            .then_some(self.wreck_timer)
     }
 
     /// A Flashback from the wreck screen's replay: the race goes on.
@@ -439,7 +467,30 @@ pub fn install(app: &mut App, variant: Variant) {
                 .before(crate::pause_menu::update)
                 .before(crate::drive_actions),
         )
-        .add_systems(Update, (spawn, present).chain().after(update));
+        .add_systems(Update, (spawn, present).chain().after(update))
+        .add_systems(Update, wreck_slow_motion.after(update));
+}
+
+/// The wreck transitions' slow motion on the game clock; back to 1 after.
+fn wreck_slow_motion(
+    post: Res<PostRace>,
+    time: Option<ResMut<Time<Virtual>>>,
+    mut scaled: Local<bool>,
+) {
+    let Some(mut time) = time else {
+        return;
+    };
+    match post.wreck_transition().map(wreck_time_scale) {
+        Some(scale) => {
+            time.set_relative_speed(scale);
+            *scaled = true;
+        }
+        None if *scaled => {
+            time.set_relative_speed(1.);
+            *scaled = false;
+        }
+        None => {}
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -485,6 +536,11 @@ pub fn update(
         post.on_retire();
     }
     let wrecked = driving.runtime.terminal_wheel().is_some() && !finished;
+    if !wrecked {
+        post.wreck_tick = None;
+    } else if post.wreck_tick.is_none() {
+        post.wreck_tick = Some(driving.runtime.ticks);
+    }
     let before = post.stage;
     let rest = at_rest(driving.runtime.velocity(), driving.runtime.angular_velocity());
     post.on_wreck(wrecked, rest, if driving.paused { 0. } else { dt });
@@ -567,7 +623,7 @@ pub fn update(
         }
         Command::TerminalReplay => {
             if let Some(replay) = replay.as_mut() {
-                replay.request_terminal();
+                replay.request_terminal(post.wreck_tick.map(crate::replay::seconds));
             }
         }
 
@@ -1186,6 +1242,19 @@ mod tests {
             view.body,
             "post_race_stats_drift_score_multiple\npost_race_stats_drift_amount_multiple"
         );
+    }
+
+    #[test]
+    fn wreck_transitions_slow_the_game_then_ramp_back() {
+        let mut post = PostRace::new(Variant::FreeRace);
+        assert_eq!(post.wreck_transition(), None);
+        post.on_wreck(true, false, 0.5);
+        assert_eq!(post.wreck_transition(), Some(0.5));
+        assert_eq!(wreck_time_scale(0.5), WRECK_SLOW);
+        assert!((wreck_time_scale(1.25) - 0.35).abs() < 1e-6);
+        assert_eq!(wreck_time_scale(1.5), 1.);
+        post.on_wreck(true, false, 1.5);
+        assert_eq!(post.wreck_transition(), None);
     }
 
     #[test]

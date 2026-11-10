@@ -36,16 +36,20 @@ fn terminal_replay_uses_the_zones_terminal_cameras() {
     assert_eq!(at(&r, 15, false), Some(Activation::Track(2)));
     assert_eq!(at(&r, 15, true), Some(Activation::Track(1)));
     assert_eq!(at(&r, 25, true), Some(Activation::Track(3)));
-    r.request_terminal();
+    r.request_terminal(Some(30.));
     assert_eq!(r.request, Some((Kind::Instant, Origin::Results)));
-    assert!(r.terminal_request);
+    assert_eq!(r.terminal_request, Some(Some(30.)));
     // Nothing recorded: no session, and the flag does not outlive the request.
     let (kind, origin) = r.request.take().unwrap();
     assert!(!r.start(kind, origin, false, &crate::camera::Views::fallback()));
-    assert!(!r.terminal_request);
-    r.request_terminal();
+    assert!(r.terminal_request.is_none());
+    r.request_terminal(None);
     r.request(Kind::Full, Origin::Results);
-    assert!(!r.terminal_request);
+    assert!(r.terminal_request.is_none());
+    // The window starts 10 s before the crash, within the recording.
+    assert_eq!(super::terminal_start(5., 60., 30.), 20.);
+    assert_eq!(super::terminal_start(25., 60., 30.), 25.);
+    assert_eq!(super::terminal_start(5., 60., 75.), 60.);
 }
 
 /// The race harness plus the recorder after each tick and the replay

@@ -89,7 +89,7 @@ pub struct Diagnostics {
     /// docs/REPLAY.md): replay checks of the slow path without key presses.
     pub replay_slow: bool,
     /// The `replay_capture` replay is the terminal-damage replay (the wreck
-    /// screen's Replay): TERMINAL cameras and TerminalFX_02 without a wreck.
+    /// screen's Replay): TERMINAL cameras without a wreck.
     pub replay_terminal: bool,
     /// Seconds: in a scripted run, the stats and results screens select
     /// Continue by themselves after this long (unattended career checks,

@@ -9,11 +9,12 @@ When the scripted drive ends, diagnostics `replay_capture` starts an Instant Rep
 `flashback_capture` jumps in FLASHBACK seconds into it; the race goes on from the jump-in frame and
 reaches the script's end again (a second Instant Replay). `--slow` (GRID_REPLAY_SLOW=1) plays every
 replay in slow motion. `--terminal` (GRID_REPLAY_TERMINAL=1) makes the first replay the
-terminal-damage replay (TERMINAL cameras, TerminalFX_02). No key presses, no focus change.
+terminal-damage replay (TERMINAL cameras, ordinary image: the shipped flow plays it under a
+ScreenReplayInterface, docs/REPLAY.md section 6). No key presses, no focus change.
 
 Verdict from the game's log lines:
 - `drive_race_replay version=1 event=start` (and `slow=true` with --slow; with --terminal
-  `terminal=true` and `graphics_balance_pass active=true` before the jump-in: TerminalFX_02 drawn);
+  `terminal=true` and no `graphics_balance_pass active=true` before the jump-in: no grade drawn);
 - `replay_effects version=1 event=start`: the race's skid strips, debris and smoke when the replay began;
 - `drive_flashback version=1 event=jump_in`, `event=restored` and `event=resume`;
 - `replay_effects version=1 event=adopt` at the resume tick, after it stepped the effects from the
@@ -115,8 +116,8 @@ def main():
             problems.append('first replay not terminal')
         first_jump = next((i for i, l in enumerate(lines) if l.startswith('drive_flashback version=1 event=jump_in')),
                           len(lines))
-        if not any(l.startswith('graphics_balance_pass active=true') for l in lines[:first_jump]):
-            problems.append('no balance pass (TerminalFX_02) before the jump-in')
+        if any(l.startswith('graphics_balance_pass active=true') for l in lines[:first_jump]):
+            problems.append('balance pass drawn before the jump-in (the terminal replay is ungraded)')
     if not fx_start:
         problems.append('no replay_effects start')
     if not (jump and restored and resume):

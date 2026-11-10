@@ -82,9 +82,10 @@ pub struct Session {
     pub kind: Kind,
     pub origin: Origin,
     /// The terminal-damage replay (flow `c_in_terminal_damage_loop`, state
-    /// `instant_race_replay_silent` terminal="true"): the director shows the
-    /// zones' `TERMINAL` cameras and the image takes TerminalFX_02
-    /// (`terminal_replay_interface` enter 0x57F530).
+    /// `instant_race_replay_silent` terminal="true", interface
+    /// `terminal_replay_interface`): the director shows the zones'
+    /// `TERMINAL` cameras; the image is the ordinary one (the preceding
+    /// `terminal_fade` ends on Effect_0000).
     pub terminal: bool,
     pub player: player::Player,
     resume_paused: bool,
@@ -144,8 +145,9 @@ pub struct Replay {
     frozen: bool,
     /// The Flashback transition's camera (`crate::flashback`).
     pub flash_camera: Option<FlashCamera>,
-    /// The requested session is the terminal-damage replay.
-    terminal_request: bool,
+    /// The requested session is the terminal-damage replay, anchored at the
+    /// crash time (simulation seconds) when known.
+    terminal_request: Option<Option<f64>>,
 }
 
 /// The camera a Flashback transition state selects [D 0x579D70]; flash 1's
@@ -186,7 +188,7 @@ impl Replay {
             flashback: None,
             frozen: false,
             flash_camera: None,
-            terminal_request: false,
+            terminal_request: None,
         }
     }
 
@@ -261,17 +263,20 @@ impl Replay {
 
     pub fn request(&mut self, kind: Kind, origin: Origin) {
         self.request = Some((kind, origin));
-        self.terminal_request = false;
+        self.terminal_request = None;
     }
 
-    /// The wreck screen's Replay: the terminal-damage replay of the last
-    /// [`INSTANT_REWIND`] seconds (the original's start time is untraced:
-    /// the silent StateInstantReplay enter 0x596A40 zeroes the rewind and
-    /// messages the terminal flag). Flashback stays possible, as the
-    /// original's `terminal_replay_interface` has a `jump_in` link.
-    pub fn request_terminal(&mut self) {
+    /// The wreck screen's Replay: the terminal-damage replay of the
+    /// [`INSTANT_REWIND`] seconds before the crash at `wreck` (simulation
+    /// seconds) up to now; without a crash time, the last
+    /// [`INSTANT_REWIND`] seconds. The original's replay-state handler
+    /// 0x63EBC0 sets the window END to the replay's start and START to
+    /// max(crash − 10 s [0xDB4FE4], oldest frame) (0x91CC00); rewind stops
+    /// at START. Flashback stays possible, as the original's
+    /// `terminal_replay_interface` has a `jump_in` link.
+    pub fn request_terminal(&mut self, wreck: Option<f64>) {
         self.request = Some((Kind::Instant, Origin::Results));
-        self.terminal_request = true;
+        self.terminal_request = Some(wreck);
     }
 
     fn clear(&mut self) {
@@ -511,13 +516,19 @@ impl Replay {
 
     /// A new session, or `None` with nothing recorded.
     pub fn start(&mut self, kind: Kind, origin: Origin, paused: bool, views: &crate::camera::Views) -> bool {
-        let terminal = std::mem::take(&mut self.terminal_request);
-        let Some((start, end)) = self.window(kind) else {
+        let terminal_request = self.terminal_request.take();
+        let terminal = terminal_request.is_some();
+        let Some((mut start, end)) = self.window(kind) else {
             return false;
         };
-        let from = match kind {
-            Kind::Instant => end - INSTANT_REWIND,
-            Kind::Full => start,
+        let from = match (kind, terminal_request) {
+            (Kind::Instant, Some(Some(wreck))) => {
+                // The terminal window: rewind stops at its START.
+                start = terminal_start(start, end, wreck);
+                start
+            }
+            (Kind::Instant, _) => end - INSTANT_REWIND,
+            (Kind::Full, _) => start,
         };
         let mut cameras = Vec::new();
         if self.director.is_some() {
@@ -561,6 +572,12 @@ impl Replay {
         });
         true
     }
+}
+
+/// The terminal window's START: [`INSTANT_REWIND`] seconds before the crash
+/// at `wreck`, not before the `oldest` frame (0x91CC00) nor after `end`.
+fn terminal_start(oldest: f64, end: f64, wreck: f64) -> f64 {
+    (wreck - INSTANT_REWIND).max(oldest).min(end)
 }
 
 fn car(runtime: &Runtime, lost: impl Fn(usize) -> Option<Mat4>) -> Car {
@@ -757,7 +774,7 @@ pub fn control(
         && !driving.paused
     {
         if crate::settings::diagnostics().replay_terminal {
-            replay.request_terminal();
+            replay.request_terminal(None);
         } else {
             replay.request(Kind::Instant, Origin::Race);
         }

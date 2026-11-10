@@ -163,8 +163,8 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
   (AUTHORED).
   - Restart, after its confirmation.
   - Retire / Finish Test Drive, after its confirmation: the player retires and the app closes.
-  - Replay plays the terminal-damage replay (TERMINAL cameras, TerminalFX_02) of the last 10 s
-    (the start time is AUTHORED, docs/REPLAY.md §6).
+  - Replay plays the terminal-damage replay (TERMINAL cameras, the ordinary image) from 10 s
+    before the crash to the replay's start (docs/REPLAY.md §6).
 - While a post-race screen is up, the pause menu is off and gear presses are dropped. Once the race
   is over the simulation is frozen.
 - Best laps:
@@ -507,7 +507,8 @@ when `FinalBoundary` 0x5EBC90 disqualified the car). Its clock is the replay con
 rewind (0x596C90) adds. Afterwards `flow.bin` plays the crash replay
 (`instant_race_replay_silent`) and the wreck menu comes on a button press. Port:
 `post_race::on_wreck` waits the two transitions, the rest (at most 2 s) and 1 s; it shows the menu
-without the automatic replay (AUTHORED).
+without the automatic replay (AUTHORED). During the two transitions the image blends IG_whiteout →
+TerminalFX_01 → the ordinary image and the game runs in slow motion (docs/FLASHBACK.md §2.5).
 
 Two fields of the OSD owner select the layouts below: F = owner+0x1FC, the competition-format
 enum of DISCIPLINES.md 1.1 [V: the drift handbrake hint shows only for F 2..4, and the stacker

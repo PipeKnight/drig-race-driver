@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F780](log/F0780.md) | 2026-11-10 | Replay/Flashback round 4: terminal window from the crash, TerminalFX_01 wreck grade, linear PPS blend, packed solver rows |
 | [F779](log/F0779.md) | 2026-11-10 | Front-end hand-off in the one-window host, loading bars, circle and sounds, pause art findings |
 | [F778](log/F0778.md) | 2026-11-10 | Replay and Flashback round 3: TERMINAL cameras, camera defaults, packed checkpoints |
 | [F777](log/F0777.md) | 2026-11-10 | HUD: track_mask minimap, world-record pill, drift OSD groups |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F723](log/F0723.md) | 2026-11-03 | Playable 170678e6ce36 for the PC and both APKs; release test-order and F-range fixes |
 | [F722](log/F0722.md) | 2026-11-03 | Tree cards blend two atlas views as the original does |
 | [F721](log/F0721.md) | 2026-11-03 | Tree cards lit like the original's impostor program |
-| [F720](log/F0720.md) | 2026-11-03 | Ten idle worktrees retired; real versus Explorer disk sizes |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

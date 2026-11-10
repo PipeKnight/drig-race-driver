@@ -149,9 +149,32 @@ brightness)` with luma weights (0.2125, 0.7154, 0.0721), `pretint = 1 + tintAmou
 saturate(saturate(q·q) / transition + 1 − 1/transition)`, where vignette.vsh gives `q = 0.89 *
 scale * (shape * rotate(X, Y) + (−offsetX, offsetY))` from `X = 2u − 1`, `Y = 1 − 2v`
 (disassembled with `tools/disassemble_grid_shader.py`; private outputs in
-`local/flashback-fx/`). How the PPS transition blends two effects was not traced; the port
-blends each parameter linearly [I]. The per-corner vignette colours and `vignetteBlendMode`
-(both unused by FlashbackFX_01, used by TerminalFX_01) are not decoded.
+`local/flashback-fx/`).
+
+PPS blend (round 4) [D]: the engine transition controller (update 0x86A910, curve 0x86A8A0)
+takes t = 1 − remaining/duration and w = curve(t, mode): mode 1 is smoothstep (3t² − 2t³, mixed
+with t by a factor), any other mode is t. Only 0x86A880 (never called) and the message handler
+0x86AA20 set the mode; the PPS path does not, so PPS transitions are linear. The backend mix
+(vtable 0xCF4938 slot 4, 0x8962A0) needs both effects on the same chain ("Effect chains not
+identical, cannot mix parameters.") and 0x86AF10 mixes each chain parameter by id with weight w;
+that each parameter class mixes as a lerp is [I]. Effect_0000, IG_whiteout, FlashbackFX_01 and
+TerminalFX_01 share chain Type2 [O]. A duration ≤ 0 sets the effect at once (0x5E8AB0). The
+descriptor reader 0x60A520 reads `pre_wait` and `post_wait` both into +0x80, so the post wait
+(+0x84) is always 0 [D]. The port's per-parameter linear blend (`Balance::lerp`) matches.
+
+TerminalFX_01 (effects.xml id 20, template Effect_0000) [O]: contrast 1.7403, brightness −0.039,
+colour 0, gamma 1.013, tintAmount 1 with tintColour (204, 0, 0), vignetteAmount 0.3247 with a
+black vignetteColour. Its per-corner vignette colours and `vignetteBlendMode` are uploaded by name
+(binder 0x748450) but no shipped shader declares them; the merge shaders read only
+`vignetteColourTL`, which `vignetteColour` maps to [O]. So the effect is a red tint under a flat
+black vignette, which the balance pass draws. `terminal_flash` (slowMo, IG_whiteout → TerminalFX_01
+over 1 s) and `terminal_fade` (rampSlowMo, TerminalFX_01 → Effect_0000 over 1 s) run at the
+terminal damage, before `terminal_damage_delay` (states.txt 191-195) [O]. slowMo sets the time
+scale 0.1 (0xCAFCD4); rampSlowMo (0x57A140) sets min(0.1 + (2 × elapsed)², 1) [D]. The port
+(`flashback::wreck_grade`, `post_race::wreck_time_scale`) draws the two blends on the viewer
+camera and scales the game clock (`Time<Virtual>`) for the first 2 s of the wreck; whether the
+states' clocks run on real or scaled time was not traced, and the port uses real time [I]. The
+gamma term (1.013) is not drawn, as for the other effects.
 
 ### 2.6 UI, HUD and results
 
@@ -206,10 +229,17 @@ The same end state is reached exactly another way (AUTHORED):
     tick-1 checkpoint holds them as the shared copies (1.89 MB once) and the tick-250 checkpoint
     stores 20220 bytes of packed words: 1.22 MB a checkpoint. In the 3-car per-circuit tests a
     later checkpoint's packed words are 6.7–77 kB of 811 kB.
+  - Packed solver rows (round 4): the contact solver's row pool (`manager.rows`, 192-byte rows
+    that keep the pool's capacity between ticks) is packed the same way, as a third slot. Measured
+    [V] (same run conditions, `local/replay-check-r4/grid-app.log`): the solver part of a
+    checkpoint fell from 640952 to 1976 bytes, so a checkpoint is 576392 bytes (0.58 MB, was
+    1.22 MB) after the tick-1 shared copies. The rest is the frames (182520), the bodies and
+    contacts (132996), the other cloned state (238680) and the packed words (20220).
 - **Force feedback** [D]: StateInstantReplay's enter 0x596A40 saves the FFB enabled flag (+0xA0)
   and calls `ffb_enable(0)` 0x7EB110, which empties the snapshot queue and the playing effects
-  (0x7EADD0) and zeroes every device (0x7E8450); `StateIngameEnableFFB` (enter 0x57B180,
-  `enable_ffb` / `disable_ffb`) calls it with its flag, and the jump-in flow runs `enable_ffb`
+  (0x7EADD0) and zeroes every device (0x7E8450); its exit 0x57B180 (vtable 0xCD8AC4 slot 10, the
+  slot of 0x57F5C0 in StateTerminalDamageReplay's) calls it with the byte at +0x2E (round 4; round
+  3 read 0x57B180 as `StateIngameEnableFFB`'s enter), and the jump-in flow runs `enable_ffb`
   after `osd_play_on`, two frames before the race resumes. The port holds `Driving::paused` for the
   replay and the flashes, which zeroes and stops the feed the same way (`Ffb::set_paused`), and
   feeds again on the first tick after the resume; the previous snapshot used for the gear event is

@@ -88,14 +88,17 @@ struct Checkpoint {
     damage: Option<crate::damage_parts::Saved>,
     drift: Option<(Vec<grid_tools::drift::Entry>, u64, u64)>,
     /// Per car (the player's runtime, then the shared world's cars): the
-    /// vehicle words and the deformation owner, moved out of the copied
-    /// runtimes ([`Checkpoint::pack`]).
-    packed: Vec<[Option<Packed>; 2]>,
+    /// vehicle words, the deformation owner and the solver rows, moved out
+    /// of the copied runtimes ([`Checkpoint::pack`]).
+    packed: Vec<[Option<Packed>; 3]>,
 }
 
 /// The shared copies [`Packed`] words are stored against, per car: vehicle
-/// words, deformation owner.
-type Bases = Vec<[Option<Arc<[u32]>>; 2]>;
+/// words, deformation owner, solver rows.
+type Bases = Vec<[Option<Arc<[u32]>>; 3]>;
+
+/// Words of a solver row.
+const ROW_WORDS: usize = std::mem::size_of::<grid_world::contact_rows::Row>() / 4;
 
 /// A word vector stored as the runs of words that differ from a shared copy
 /// (an earlier checkpoint's full copy of the same car's words). A car's
@@ -217,8 +220,10 @@ impl Checkpoint {
         }
     }
 
-    /// Moves every car's vehicle words and deformation owner out of the
-    /// copied runtimes into [`Packed`] form against `bases`.
+    /// Moves every car's vehicle words, deformation owner and solver rows
+    /// out of the copied runtimes into [`Packed`] form against `bases`. The
+    /// row pool keeps its capacity's rows between ticks, and most of them do
+    /// not change between checkpoints.
     fn pack(mut self, bases: &mut Bases) -> Self {
         let cars = std::iter::once(&mut self.runtime)
             .chain(self.opponents.iter_mut().flat_map(|f| f.multi.cars.iter_mut()));
@@ -227,12 +232,14 @@ impl Checkpoint {
             if bases.len() <= i {
                 bases.resize_with(i + 1, Default::default);
             }
-            let [vehicle, owner] = &mut bases[i];
+            let [vehicle, owner, rows] = &mut bases[i];
+            let solver = std::mem::take(&mut r.state.world.manager.rows).into_flattened();
             packed.push([
                 Some(Packed::pack(std::mem::take(&mut r.state.car.owner.vehicle), vehicle)),
                 r.deformation_registration
                     .as_mut()
                     .map(|d| Packed::pack(std::mem::take(&mut d.owner), owner)),
+                Some(Packed::pack(solver, rows)),
             ]);
         }
         self.packed = packed;
@@ -261,12 +268,18 @@ impl Checkpoint {
         }
         let cars = std::iter::once(&mut driving.runtime)
             .chain(driving.opponents.iter_mut().flat_map(|o| o.multi.cars.iter_mut()));
-        for (r, [vehicle, owner]) in cars.zip(&self.packed) {
+        for (r, [vehicle, owner, rows]) in cars.zip(&self.packed) {
             if let Some(p) = vehicle {
                 r.state.car.owner.vehicle = p.unpack();
             }
             if let (Some(d), Some(p)) = (r.deformation_registration.as_mut(), owner) {
                 d.owner = p.unpack();
+            }
+            if let Some(p) = rows {
+                let words = p.unpack();
+                let (whole, rest) = words.as_chunks::<ROW_WORDS>();
+                debug_assert!(rest.is_empty(), "whole rows");
+                r.state.world.manager.rows = whole.to_vec();
             }
         }
         if let (Some(mut t), Some(saved)) = (world.get_resource_mut::<crate::time_trial::Trial>(), &self.trial) {
@@ -281,14 +294,13 @@ impl Checkpoint {
     }
 
     /// Approximate size (bytes) of the copied state: [vehicle words,
-    /// deformation owners (both their own [`Packed`] bytes), frames, bodies
-    /// and contacts, solver rows, other] (diagnostics).
+    /// deformation owners, frames, bodies and contacts, solver rows, other];
+    /// the packed parts count their own [`Packed`] bytes (diagnostics).
     fn bytes(&self) -> [usize; 6] {
         fn world(w: &grid_world::grouped_physical_frame::Output, out: &mut [usize; 6]) {
             out[3] += std::mem::size_of_val(&w.groups.bodies[..]) + std::mem::size_of_val(&w.groups.contacts[..]);
             let m = &w.manager;
-            out[4] += std::mem::size_of_val(&m.rows[..])
-                + std::mem::size_of_val(&m.materials[..])
+            out[4] += std::mem::size_of_val(&m.materials[..])
                 + std::mem::size_of_val(&m.properties[..])
                 + std::mem::size_of_val(&m.workspace[..]);
         }
@@ -305,9 +317,10 @@ impl Checkpoint {
             }
             out[3] += std::mem::size_of_val(f.multi.bodies());
         }
-        for [vehicle, owner] in &self.packed {
+        for [vehicle, owner, rows] in &self.packed {
             out[0] += vehicle.as_ref().map_or(0, Packed::own_bytes);
             out[1] += owner.as_ref().map_or(0, Packed::own_bytes);
+            out[4] += rows.as_ref().map_or(0, Packed::own_bytes);
         }
         out
     }
@@ -405,9 +418,11 @@ struct Whiteout;
 pub struct Effects {
     pub whiteout: Balance,
     pub flashback: Balance,
-    /// TerminalFX_02, the terminal-damage replay's image
-    /// (`terminal_replay_interface` enter 0x57F530); the shipped values
-    /// equal FlashbackFX_01's.
+    /// TerminalFX_01, the terminal damage's image: `terminal_flash` blends
+    /// IG_whiteout to it over 1 s, `terminal_fade` it to Effect_0000 over
+    /// 1 s (states.txt 191-195). Its per-corner vignette colours and
+    /// vignetteBlendMode reach no shipped shader, so the ColourBalance and
+    /// the flat vignette are the whole effect.
     pub terminal: Balance,
 }
 
@@ -417,11 +432,23 @@ impl Effects {
         Ok(Self {
             whiteout: read_balance(bytes, "IG_whiteout")?,
             flashback: read_balance(bytes, "FlashbackFX_01")?,
-            terminal: read_balance(bytes, "TerminalFX_02")?,
+            terminal: read_balance(bytes, "TerminalFX_01")?,
         })
     }
 
-    /// Flash `index`, `elapsed` seconds in (the blend is linear [I]).
+    /// The wreck's image `elapsed` seconds into `terminal_flash` (then
+    /// `terminal_fade`), linear like every PPS transition.
+    pub fn wreck(&self, elapsed: f32) -> Balance {
+        if elapsed < 1. {
+            self.whiteout.lerp(&self.terminal, elapsed)
+        } else {
+            self.terminal.lerp(&Balance::NEUTRAL, elapsed - 1.)
+        }
+    }
+
+    /// Flash `index`, `elapsed` seconds in. The PPS transition controller
+    /// (0x86A910, curve 0x86A8A0) is linear unless its mode is 1
+    /// (smoothstep), which the PPS path never sets [D].
     pub fn balance(&self, index: usize, elapsed: f32) -> Balance {
         let to = if index + 1 < rules::FLASHES {
             self.flashback
@@ -508,15 +535,15 @@ pub fn install(app: &mut App, ai_difficulty: f32, root: &std::path::Path) {
                 update
                     .after(crate::replay::control)
                     .before(crate::replay::frame_camera),
-                terminal_grade.after(update),
+                wreck_grade.after(update).after(crate::post_race::update),
             ),
         );
 }
 
-/// TerminalFX_02 on the viewer camera while a terminal-damage replay shows
-/// and no Flashback transition grades the image; removed when it ends.
-fn terminal_grade(
-    replay: Option<Res<Replay>>,
+/// The wreck's `terminal_flash`/`terminal_fade` image on the viewer camera
+/// while no Flashback transition grades it; removed when they end.
+fn wreck_grade(
+    post: Option<Res<crate::post_race::PostRace>>,
     flashback: Res<Flashback>,
     effects: Option<Res<Effects>>,
     cameras: Query<(Entity, Option<&crate::balance_pass::BalancePass>), With<crate::ViewerCamera>>,
@@ -528,13 +555,10 @@ fn terminal_grade(
         *graded = false;
         return;
     }
-    let terminal = replay
-        .as_ref()
-        .and_then(|r| r.session.as_ref())
-        .is_some_and(|s| s.terminal);
+    let elapsed = post.as_ref().and_then(|p| p.wreck_transition());
     let want = effects
-        .filter(|_| terminal)
-        .map(|e| crate::balance_pass::BalancePass::from(&e.terminal));
+        .zip(elapsed)
+        .map(|(e, t)| crate::balance_pass::BalancePass::from(&e.wreck(t)));
     for (camera, current) in &cameras {
         match want {
             Some(w) if current != Some(&w) => {
@@ -1064,8 +1088,13 @@ mod transition_tests {
         assert_eq!(e.flashback.tint_amount, 0.2987);
         assert_eq!(e.flashback.vignette_amount, 0.6623);
         assert_eq!(e.flashback.vignette_offset, [0.0779, 0.2338]);
-        // TerminalFX_02 carries FlashbackFX_01's values.
-        assert_eq!(e.terminal, e.flashback);
+        // TerminalFX_01: a strong red tint under a flat black vignette.
+        assert_eq!(e.terminal.contrast, 1.7403);
+        assert_eq!(e.terminal.tint_amount, 1.);
+        assert_eq!(e.terminal.vignette_amount, 0.3247);
+        assert_eq!(e.wreck(0.), e.whiteout);
+        assert_eq!(e.wreck(1.), e.terminal);
+        assert_eq!(e.wreck(2.), Balance::NEUTRAL);
         let mut cars = 0;
         for entry in std::fs::read_dir(root.join("cars")).unwrap() {
             let stem = entry.unwrap().file_name().to_string_lossy().into_owned();

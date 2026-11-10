@@ -147,7 +147,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00418DA0	get_numRaceWins	func	crates/grid-tools/src/speech.rs:1768 grid-tools::speech	docs/SPEECH_CAREER_PARAMETERS.md:194 ; docs/SPEECH_AUDIO_RESEARCH.md:906		[O]		not a function entry in the master analysis; Race history `numRaceWins`, `numEventWins` (0x418DA0, 0x418DB0).
 0x00418DB0	get_numEventWins	func	crates/grid-tools/src/speech.rs:1768 grid-tools::speech	docs/SPEECH_CAREER_PARAMETERS.md:210 ; docs/SPEECH_AUDIO_RESEARCH.md:907		[O]		not a function entry in the master analysis; Race history `numRaceWins`, `numEventWins` (0x418DA0, 0x418DB0).
 0x00418DD0	get_racesCurTrack	func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:220 ; docs/SPEECH_AUDIO_RESEARCH.md:908		[O]		not a function entry in the master analysis; | racesCurTrack | 0x418DD0 | block +0x5C | race history item of the track: races driven there |
-0x00418FE0		func	not ported	docs/FLASHBACK.md:164				not a function entry in the master analysis; docs/CAREER_RESEARCH.md §3.1]. The getter 0x6A2290 is still unread. A script/condition `usedFlashback` (0x418FE0) reads a
+0x00418FE0		func	not ported	docs/FLASHBACK.md:187				not a function entry in the master analysis; docs/CAREER_RESEARCH.md §3.1]. The getter 0x6A2290 is still unread. A script/condition `usedFlashback` (0x418FE0) reads a
 0x00419010	get_anyDamageIndOn	func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:183 ; docs/SPEECH_AUDIO_RESEARCH.md:905		[O]		not a function entry in the master analysis; | anyDamageIndOn | 0x419010 | block +0x81 | only then: any HUD damage icon lit (0x8EF920 → `indicators`) |
 0x00419040		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:235				not a function entry in the master analysis; `teamToBeatNum` (0x419040, +0xA4 = block +0x44): offers of kind 1/2 with objective class 2 (beat
 0x004193E0	speech_get_currentDriftType	func	not ported	docs/AUDIO_RESEARCH.md:1990	F667	[O]		not a function entry in the master analysis; `currentDriftType` (0x4193E0, +0x158) and `lostCombo` (0x419400, +0x184): the player
@@ -536,12 +536,12 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004B4440		func	crates/grid-world/src/joint.rs:576 grid-world::joint (in prepare)	docs/DYNAMIC_PROPS_RESEARCH.md:330 ; docs/JOINTS_RESEARCH.md:89	F473	[D]		0x4B4440 writes the offset back clamped by the limit error.
 0x004C6DB0		func	crates/grid-app/src/transition.rs:10 grid-app::transition	docs/SCREEN_FLOW.md:26	F756	[D]		(FUN_004C6DB0, `states.xml`). Once the screen is black on the way into a
 0x004C7F50		func	not ported	docs/RACE_HUD.md:122		[I]		`.points` = Points, only when 0x4C7F50 holds (career [I]);
-0x004C8200	format_lemans_time	func	crates/grid-app/src/post_race.rs:631 grid-app::post_race (in time_text)	docs/RACE_HUD.md:480	F763	[D]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
-0x004C8280	results_gap	func	crates/grid-app/src/post_race.rs:613 grid-app::post_race::results_gap	docs/RACE_HUD.md:482	F763			The results list's difference text (0x4C8280, written into
+0x004C8200	format_lemans_time	func	crates/grid-app/src/post_race.rs:687 grid-app::post_race (in time_text)	docs/RACE_HUD.md:480	F763	[D]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
+0x004C8280	results_gap	func	crates/grid-app/src/post_race.rs:669 grid-app::post_race::results_gap	docs/RACE_HUD.md:482	F763			The results list's difference text (0x4C8280, written into
 0x004C9910		func	not ported	docs/FRONT_END_FLOW.md:155		[V]		game (FUN_004C9910 on game+0xBA0), sets a counter at +0x40 to 1 and posts a
 0x004C9930		func	not ported	docs/FRONT_END_FLOW.md:148		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
 0x004CA6A0		func	not ported	docs/FRONT_END_FLOW.md:148		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
-0x004CAD80	available	func	crates/grid-tools/src/flashback.rs:72 grid-tools::flashback::available ; crates/grid-app/src/replay.rs:166 grid-app::replay	docs/FLASHBACK.md:57	F366	[D]		0x542A00: 0x937150 and 0x4CAD80).
+0x004CAD80	available	func	crates/grid-tools/src/flashback.rs:72 grid-tools::flashback::available ; crates/grid-app/src/replay.rs:168 grid-app::replay	docs/FLASHBACK.md:57	F366	[D]		0x542A00: 0x937150 and 0x4CAD80).
 0x004CADD0		func	not ported	docs/FLASHBACK.md:59		[D]		Using one: `used += 1` (0x6A2260) through 0x4CADD0, called only from 0x59AFA0 [D], the enter
 0x004CB040		func	not ported	docs/CAREER_RESEARCH.md:235		[V]		+0xB0 (0x4CB040). Routine A (0x665560) and B (0x665890) add the event's credited money after each
 0x004CC590		func	not ported	docs/CAMERA_VIEWS.md:84				0x4CC590 resets the key from a preset: 0/1 chase_close, 2 bumper, 3 head-cam. Its caller was not traced.
@@ -589,7 +589,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00540373		func	not ported	docs/RACE_HUD.md:483				not a function entry in the master analysis; `+%02u:%02u.%02u`, truncated hundredths, a blank for the first row (callers 0x540373, 0x542037,
 0x00542037		func	not ported	docs/RACE_HUD.md:483				not a function entry in the master analysis; `+%02u:%02u.%02u`, truncated hundredths, a blank for the first row (callers 0x540373, 0x542037,
 0x0054225A		func	not ported	docs/RACE_HUD.md:484				not a function entry in the master analysis; 0x54225A; the Touge stats' difference 0x51EB72 uses it too). Port: `post_race::time_text` writes
-0x00542A00		func	crates/grid-app/src/replay.rs:166 grid-app::replay	docs/FLASHBACK.md:78	F366	[D]		not a function entry in the master analysis; 0x542A00: 0x937150 and 0x4CAD80).
+0x00542A00		func	crates/grid-app/src/replay.rs:168 grid-app::replay	docs/FLASHBACK.md:78	F366	[D]		not a function entry in the master analysis; 0x542A00: 0x937150 and 0x4CAD80).
 0x00553D40		func	not ported	docs/COCKPIT.md:17		[D]		`<mirrors enabled>` is never read: only the options menu (0x553D40) refers to the category. So the mirror is built and rendered at every preset, "off" includ...
 0x005554F0		func	not ported	docs/CAREER_RESEARCH.md:229				Bank screen** `ScreenRewardsBankAccount` (factory near 0x571400, constructor 0x5554F0, vtable
 0x00555620		func	crates/grid-app/src/career_screen.rs:1133 grid-app::career_screen (in payout_text)	docs/CAREER_RESEARCH.md:230 ; docs/CAREER_SCREEN.md:140	F494	[V]		The bank screen's rows (0x555620) [V]: prize, sponsorship, team
@@ -597,17 +597,18 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00560750		func	not ported	docs/AI_AVOID_RECOVERY_RESEARCH.md:568				type name "ai"). Device slots +4/+8 (0x560750, shared with the other input devices)
 0x00560E30		func	not ported	docs/DISCIPLINES.md:248				0x560E30) and the entry vector at +0x1D8/+0x1DC; 0x67A8DD stores it in the race object at
 0x00564AFB		label	not ported		F522	[V]		inside 0x00564A80; release grid-app.exe sha256 05ece190…564afb
-0x00570000		label	not ported	docs/REPLAY.md:242				inside 0x0056FFD0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
+0x00570000		label	not ported	docs/REPLAY.md:248				inside 0x0056FFD0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
 0x00571400		label	not ported	docs/CAREER_RESEARCH.md:229				inside 0x005713B0; Bank screen** `ScreenRewardsBankAccount` (factory near 0x571400, constructor 0x5554F0, vtable
 0x005791A0	start_race	func	crates/grid-tools/src/audio_mix.rs:203 grid-tools::audio_mix::ModeMix	docs/AUDIO_RESEARCH.md:708	F493	[O]		`StateAudioSetState`, 5791A0/579210) sets persistent modes: StartLine
 0x00579210		func	not ported	docs/AUDIO_RESEARCH.md:715		[O]		`start_race` (5791A0); its enter method 579210 calls 411C10 through 470E40 and, with
-0x00579D70	StateFlashbackTransition_enter	func	crates/grid-app/src/replay.rs:151 grid-app::replay::FlashCamera	docs/FLASHBACK.md:128	F775	[D]	FlashCamera	not a function entry in the master analysis; The camera a Flashback transition state selects [D 0x579D70]; flash 1's
+0x00579D70	StateFlashbackTransition_enter	func	crates/grid-app/src/replay.rs:153 grid-app::replay::FlashCamera	docs/FLASHBACK.md:128	F775	[D]	FlashCamera	not a function entry in the master analysis; The camera a Flashback transition state selects [D 0x579D70]; flash 1's
 0x00579F70	StateFlashbackTransition_exit	func	not ported	docs/FLASHBACK.md:136	F775	[D]		Exit 0x579F70: 0xE6E004 = 0; `selectOnCarCamera` selects the saved camera again; time scale 1.
-0x00579FE0	StateFlashbackTransition_load	func	crates/grid-app/src/flashback.rs:400 grid-app::flashback::Effects	docs/FLASHBACK.md:120 ; docs/REPLAY_DIRECTOR_RESEARCH.md:177	F775	[D]	Effects	read by StateFlashbackTransition 0x579FE0): each flash starts at
+0x00579FE0	StateFlashbackTransition_load	func	crates/grid-app/src/flashback.rs:414 grid-app::flashback::Effects	docs/FLASHBACK.md:120 ; docs/REPLAY_DIRECTOR_RESEARCH.md:177	F775	[D]	Effects	read by StateFlashbackTransition 0x579FE0): each flash starts at
+0x0057A140	state_flashback_transition_time_update	func	crates/grid-app/src/post_race.rs:186 grid-app::post_race::wreck_time_scale	docs/FLASHBACK.md:173	F780	[D]		not a function entry in the master analysis; rampSlowMo (0x57A140) gives min(0.1 + (2 × its elapsed)², 1) [D]. The
 0x0057AA5C		label	not ported	docs/CAMERA_VIEWS.md:247		[I]		inside 0x0057A9C0; Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
 0x0057AD79		label	not ported	docs/DRIVING_ASSISTS_RESEARCH.md:45		[D]		inside 0x0057AD60; when the options are applied and at race set-up (callers 57AD79, 6566AE, 65B897) [D]:
-0x0057B180	state_ingame_enable_ffb_enter	func	not ported	docs/FLASHBACK.md:211	F778	[D]		not a function entry in the master analysis; (0x7EADD0) and zeroes every device (0x7E8450); `StateIngameEnableFFB` (enter 0x57B180,
-0x0057B220		func	not ported	docs/REPLAY.md:240 ; docs/FLASHBACK.md:69	F778	[I]		The Instant Replay's update (0x57B220 / 0x57F630) follows `jump_in` when the Jump In action
+0x0057B180	state_instant_replay_exit	func	not ported	docs/FLASHBACK.md:240	F780 F778	[D]		not a function entry in the master analysis; (0x7EADD0) and zeroes every device (0x7E8450); its exit 0x57B180 (vtable 0xCD8AC4 slot 10, the
+0x0057B220	state_instant_replay_link	func	not ported	docs/REPLAY.md:246 ; docs/FLASHBACK.md:69	F778	[D]		The Instant Replay's update (0x57B220 / 0x57F630) follows `jump_in` when the Jump In action
 0x0057BA80		func	not ported	docs/FRONT_END_FLOW.md:153		[V]		its parse method 0x57BA80 maps `type` to_garage → 0 and to_race → 1 at +0x3C;
 0x0057BAE0		func	not ported	docs/FRONT_END_FLOW.md:157		[V]		not a function entry in the master analysis; its update method 0x57BAE0 decrements the counter and finishes once it drops below 0, so the
 0x0057BB00		func	not ported	docs/FRONT_END_FLOW.md:159		[V]		its exit method 0x57BB00 sends `exit` and sets a busy flag at +0x38;
@@ -616,16 +617,16 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0057D9B0		func	not ported	docs/PROGRESS_AND_SPAWN.md:18				`locked_timestep` references at `0x0057d9b0` and `0x0057dcf0` belong to sequences with slow motion, camera zoom and result presentation fields. These are not...
 0x0057DCF0		func	not ported	docs/PROGRESS_AND_SPAWN.md:18				`locked_timestep` references at `0x0057d9b0` and `0x0057dcf0` belong to sequences with slow motion, camera zoom and result presentation fields. These are not...
 0x0057E11E		label	not ported	docs/CAMERA_VIEWS.md:269				inside 0x0057E0B0; +0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
-0x0057F140		func	not ported	docs/RACE_HUD.md:502	F770			not a function entry in the master analysis; base-class stub) ends by itself. Enter 0x57F140 zeroes its timers. Update 0x57F1A0 waits for the
-0x0057F170	terminal_damage_delay_exit	func	not ported	docs/RACE_HUD.md:506 ; docs/REPLAY.md:371	F770			not a function entry in the master analysis; (0x944430). Exit 0x57F170 stores the state's total time in 0xE6DFF8, which the terminal replay's
-0x0057F1A0	WRECK_REST_LIMIT	func	crates/grid-app/src/post_race.rs:182 grid-app::post_race::WRECK_REST_LIMIT	docs/RACE_HUD.md:502	F770	[D]		rest, giving up this long after entering the state (0x57F1A0) [D] ...
-0x0057F530	terminal_replay_interface_enter	func	crates/grid-app/src/flashback.rs:409 grid-app::flashback ; crates/grid-app/src/replay.rs:87 grid-app::replay	docs/REPLAY.md:367	F778	[I]		(`terminal_replay_interface` enter 0x57F530); the shipped values
-0x0057F5C0		func	not ported	docs/REPLAY.md:64				not a function entry in the master analysis; at 0xDB4FEC, 10.0, as the rewind; 0x63EBC0 seeks to `now − 10.0` (and 0x57F5C0 / the flashback
-0x0057F630		func	not ported	docs/REPLAY.md:240 ; docs/FLASHBACK.md:69	F778	[I]		The Instant Replay's update (0x57B220 / 0x57F630) follows `jump_in` when the Jump In action
+0x0057F140	terminal_damage_delay_enter	func	not ported	docs/RACE_HUD.md:502	F770			not a function entry in the master analysis; base-class stub) ends by itself. Enter 0x57F140 zeroes its timers. Update 0x57F1A0 waits for the
+0x0057F170	terminal_damage_delay_exit	func	not ported	docs/RACE_HUD.md:506	F770			not a function entry in the master analysis; (0x944430). Exit 0x57F170 stores the state's total time in 0xE6DFF8, which the terminal replay's
+0x0057F1A0	terminal_damage_delay_update	func	crates/grid-app/src/post_race.rs:197 grid-app::post_race::WRECK_REST_LIMIT	docs/RACE_HUD.md:502	F770	[D]		rest, giving up this long after entering the state (0x57F1A0) [D] ...
+0x0057F530	state_terminal_damage_replay_enter	func	not ported	docs/REPLAY.md:152	F780 F778	[D]		factory 0x5AB670, enter 0x57F530), the state that applies TerminalFX_02, backs the ids
+0x0057F5C0		func	not ported	docs/FLASHBACK.md:241 ; docs/REPLAY.md:64		[D]		not a function entry in the master analysis; slot of 0x57F5C0 in StateTerminalDamageReplay's) calls it with the byte at +0x2E (round 4; round
+0x0057F630		func	not ported	docs/REPLAY.md:246 ; docs/FLASHBACK.md:69	F778	[I]		The Instant Replay's update (0x57B220 / 0x57F630) follows `jump_in` when the Jump In action
 0x00582750	restore	func	crates/grid-app/src/camera.rs:491 grid-app::camera::restore	docs/CAMERA_VIEWS.md:82	F349	[D]		view falls back to the first visible one, 0x582750) and saved at the end
 0x00582C90		func	not ported	docs/FRONT_END_FLOW.md:154		[V]		its enter method 0x582C90 registers with the `limbo` component, passes the type to the
 0x00582D20		func	not ported	docs/FRONT_END_FLOW.md:160		[V]		its message handler 0x582D20 clears the flag on a `complete` message.
-0x00583B00		func	crates/grid-app/src/post_race.rs:219 grid-app::post_race	docs/RACE_HUD.md:134 ; docs/RACE_RULES_RESEARCH.md:79		[I]		Stats → results: end the race (finalisation from the front end, 0x583B00).
+0x00583B00		func	crates/grid-app/src/post_race.rs:234 grid-app::post_race	docs/RACE_HUD.md:134 ; docs/RACE_RULES_RESEARCH.md:79		[I]		Stats → results: end the race (finalisation from the front end, 0x583B00).
 0x00584810		func	not ported	docs/CAMERA_VIEWS.md:247	F613 F499	[D]		Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
 0x00584842		label	not ported	docs/CAMERA_VIEWS.md:422				inside 0x00584810; Look capture** (F499, needs a live run): the controller's +0x1C..+0x1F bytes during a race (controller `[[car+0x90]+0x2250]` per 0x584842), and per frame cha...
 0x005849F0		func	not ported	docs/CAMERA_VIEWS.md:247	F499	[D]		Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
@@ -636,13 +637,14 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0058ABC0		func	not ported	docs/FLASHBACK.md:50		[D]		options 0x4D5420 and a career state 0x58ABC0) [D]:
 0x0058AC70		label	not ported	docs/AI_CHOREOGRAPHER_PORT.md:37	F439 G130	[V]		inside 0x0058ABC0; setup (caller 0x58AC70 → 0x6AF7C0) copies it and reads desc+0x84 as `available_flashbacks`
 0x0058BAF0	borders	func	crates/grid-app/src/transition.rs:291 grid-app::transition::borders ; crates/grid-tools/src/crowd_audio.rs:493 grid-tools::crowd_audio (in tick)	docs/AUDIO_RESEARCH.md:2047 ; docs/SCREEN_FLOW.md:36	F779 F673	[O]		hand-over to the in-game cameras, FUN_0058BAF0).
-0x0058E2E0	WRECK_AFTER_REST	func	crates/grid-app/src/post_race.rs:184 grid-app::post_race::WRECK_AFTER_REST	docs/RACE_HUD.md:504	F770	[D]		... and returns "done" this long after the rest (0x58E2E0) [D].
+0x0058E2E0	terminal_damage_delay_link	func	crates/grid-app/src/post_race.rs:199 grid-app::post_race::WRECK_AFTER_REST	docs/RACE_HUD.md:504	F770	[D]		... and returns "done" this long after the rest (0x58E2E0) [D].
 0x00596440	vehicle_lights	func	crates/grid-tools/src/environment.rs:74 grid-tools::environment::vehicle_lights ; crates/grid-app/src/dash.rs:330 grid-app::dash::backlight_on	docs/COCKPIT.md:295 ; docs/TRACK_ENVIRONMENT.md:98	F678	[V]		the car lights on at the start (0x596440 → 0xA08DA0). The lighting
-0x00596A40	state_instant_replay_enter	func	crates/grid-app/src/replay.rs:269 grid-app::replay::request_terminal	docs/FLASHBACK.md:209	F778	[D]	request_terminal	not a function entry in the master analysis; the silent StateInstantReplay enter 0x596A40 zeroes the rewind and
+0x00596A40	state_instant_replay_enter	func	not ported	docs/FLASHBACK.md:238 ; docs/REPLAY.md:375	F780 F778	[D]	request_terminal	not a function entry in the master analysis; Force feedback** [D]: StateInstantReplay's enter 0x596A40 saves the FFB enabled flag (+0xA0)
 0x00596C90	state_instant_replay_rewind_enter	func	not ported	docs/REPLAY.md:63 ; docs/RACE_HUD.md:507	F778	[D]		rewind (0x596C90) adds. Afterwards `flow.bin` plays the crash replay
 0x0059AA22		label	not ported	docs/CAMERA_VIEWS.md:269				inside 0x0059A8F0; +0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
-0x0059AFA0		func	crates/grid-app/src/flashback.rs:815 grid-app::flashback (in jump_in) ; crates/grid-tools/src/flashback.rs:13 grid-tools::flashback	docs/FLASHBACK.md:59	F366	[D]		StateReplayJumpInPrepare uses one [D 0x59AFA0].
-0x005A0000		func	not ported	docs/REPLAY.md:242				and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
+0x0059AFA0		func	crates/grid-app/src/flashback.rs:840 grid-app::flashback (in jump_in) ; crates/grid-tools/src/flashback.rs:13 grid-tools::flashback	docs/FLASHBACK.md:59	F366	[D]		StateReplayJumpInPrepare uses one [D 0x59AFA0].
+0x0059D870		func	crates/grid-app/src/post_race.rs:259 grid-app::post_race	docs/REPLAY.md:378	F780	[D]		crash time in P+0xA18 from 0x59D870), the terminal replay's anchor.
+0x005A0000		func	not ported	docs/REPLAY.md:248				and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
 0x005A0CC0		func	not ported	docs/DISCIPLINES.md:734		[D]		the other drift formats. `drift_gp_info.round/track_type/track_name` (0x5A0CC0) and the rival
 0x005A2840		func	not ported	docs/TOUGE.md:66				not a function entry in the master analysis; Meaning of `+4`.** `+4` in {2, 3} selects the Haruna drift intro and results scenes (`haruna_drift_intro_reveal`, `drift_results_intro_haruna`, 0x5A2840/0x5A...
 0x005A3FD0		func	not ported	docs/FRONT_END_FLOW.md:152		[V]		not a function entry in the master analysis; [V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
@@ -650,6 +652,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005A42B0		func	not ported	docs/DISCIPLINES.md:247				0x65F250, 0x5A42B0) with the Settings object at +8 (vtable 0xCEA030: 0x697D60, the parser 0x62FAE0,
 0x005A5990		func	not ported	docs/RACE_HUD.md:501	F763	[D]		not a function entry in the master analysis; Wreck-screen delay [D]: `StateTerminalDamageDelay` (vtable 0xCDA548; 0x5A5990 is only a shared
 0x005AB610		func	not ported		F763			Wreck delay: `StateTerminalDamageDelay` (registered 0xC760D0, factory 0x5AB610, vtable 0xCDA548) only waits for a message (0x5A5990 sets a done bit); the sen...
+0x005AB670	state_terminal_damage_replay_factory	func	not ported	docs/REPLAY.md:152				factory 0x5AB670, enter 0x57F530), the state that applies TerminalFX_02, backs the ids
 0x005B0000		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:372				The setter's caller was not found in 0x401000–0x40C000 or 0x5B0000–0x5D0000.
 0x005B43E0	csm_set_map_size	func	not ported	docs/SUN_SHADOWS.md:8	F652	[O]		[O] Map size: `<shadows size=...>` from the hardware settings, clamped to 128..8192, 1024 when the key is missing (0x601B30 -> 0x5B43E0). The shipped options...
 0x005B4620	csm_mode1_values	func	not ported	docs/SUN_SHADOWS.md:44	F754	[O]		Defaults for all four entries: 0x5B4990 (called four times from the plugin init, loop at 0x5CC951). Then 0x5B4620 rewrites mode 1, 0x5B4720 mode 2, 0x5B4860 ...
@@ -661,7 +664,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005B51A0		func	not ported	docs/TRACK_LOD.md:295 ; docs/CAR_REFLECTIONS.md:20				cull far +0x48, min object size +0x4C; the generic setter 0x5B51A0 writes (+0x40, +0x44, +0x48).
 0x005B58F0		func	not ported	docs/CAR_REFLECTIONS.md:32				for the face states that read the far cube (2 and 3, in 0x5BD1C0 via 0x5B58F0), the far map is composited behind the near one.
 0x005B5E90		func	not ported	docs/DISCIPLINES.md:538		[V]		not a function entry in the master analysis; type 11 the same way: 0x5B5E90 skips it, 0x4022F0 skips its contacts with a normal Y ≥ 0.1. So a
-0x005B60F0	settings_code	func	crates/grid-app/src/settings.rs:1213 grid-app::settings::code ; crates/grid-app/src/main.rs:3736 grid-app::main (in race_app)	docs/SCREEN_FLOW.md:116 ; docs/RACE_RULES_RESEARCH.md:294 ; docs/SERIES.md:525	F768 F756 F401	[V]	code slot	0x5D7630 -> 0x5B60F0 (docs/SERIES.md "Grid", [V]): 0 front, 1 back,
+0x005B60F0	settings_code	func	crates/grid-app/src/settings.rs:1213 grid-app::settings::code ; crates/grid-app/src/main.rs:3736 grid-app::main (in race_app)	docs/SCREEN_FLOW.md:116 ; docs/RACE_RULES_RESEARCH.md:294 ; docs/SERIES.md:525	F768 F756 F401	[V]	code slot	The Race Options grid choice (0x5B60F0), seeded like the series grid.
 0x005B6340		func	crates/grid-tools/src/career/field.rs:237 grid-tools::career::field::grid	docs/CAREER_RESEARCH.md:567 ; docs/SERIES.md:529				field order (AUTHORED: the ranking 0x5B6340's tie order is not traced).
 0x005B6E00		func	not ported	docs/TRACK_LOD.md:192 ; docs/TYRE_SMOKE_RESEARCH.md:508				Call chain per pass: pass callback (main scene 0x5B6E00, CSM cascades 0x5C02D0, reflection and
 0x005B71A0		func	not ported	docs/TRACK_LOD.md:285				not a function entry in the master analysis; 6. Push: main scene task interface (+0x5A4, slot 1 = 0x5B71A0) gets (world cull, world clip);
@@ -681,7 +684,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005BD1C0	env_map_face_buckets	func	not ported	docs/CAR_REFLECTIONS.md:32	F660	[O]		for the face states that read the far cube (2 and 3, in 0x5BD1C0 via 0x5B58F0), the far map is composited behind the near one.
 0x005BDF10	lemans_grid	func	crates/grid-tools/src/series.rs:611 grid-tools::series::lemans_grid ; crates/grid-app/src/main.rs:3197 grid-app::main (in race_app) ; crates/grid-app/src/career_screen.rs:558 grid-app::career_screen::LeMansRun	docs/SERIES.md:198 ; docs/CAREER_SCREEN.md:172 ; docs/LE_MANS.md:128	F507 F409 F406	[V]		original's encoding (0x5BDF10), front of the class group when
 0x005BE470	grid_slot	func	crates/grid-tools/src/race.rs:127 grid-tools::race::grid_slot	docs/RACE_RULES_RESEARCH.md:293 ; docs/SERIES.md:527	F401 F308	[V]		grid_position_base/range) in a field of `field` cars [V 0x5BE470, 0x5C2AC0]:
-0x005BFF24		label	not ported	docs/REPLAY.md:243	F778	[I]		inside 0x005BFEF0; immediate 0x1F found only unrelated sites (0x5BFF24, 0x942D7E). The interface draws a save (hold)
+0x005BFF24		label	not ported	docs/REPLAY.md:249	F778	[I]		inside 0x005BFEF0; immediate 0x1F found only unrelated sites (0x5BFF24, 0x942D7E). The interface draws a save (hold)
 0x005C02D0	csm_cascade_pass_submit	func	not ported	docs/SUN_SHADOWS.md:17 ; docs/CAR_LOD.md:84 ; docs/TRACK_LOD.md:192	F652 F616	[O]		Creates two render passes named "Shadow Cascade" with cascade numbers 1 and 2 (loop `local_24 = 1..2`), callback 0x5C02D0 per pass.
 0x005C04C0	csm_bind_shader_parameters	func	not ported	docs/SUN_SHADOWS.md:36 ; docs/TRACK_LOD.md:329 ; docs/CAR_LOD.md:86	F652	[O]		2.4 Mask and smoothing 0x5C04C0 [O]
 0x005C1880	env_map_pass_ctor	func	not ported	docs/CAR_REFLECTIONS.md:15	F660	[O]		`env map`**: a pass object constructed by 0x5C1880, with vtable 0xCE0778. The renderer keeps it at +0xF20, and the global 0xE5E83C points to it.
@@ -732,6 +735,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005E3330		func	not ported	docs/RACE_HUD.md:436				above, z − f.z·behind), target = (x, 10, z), up Y (lookAt 0x5E3330). Then it draws the track
 0x005E7F30		func	not ported	docs/FRAME_STEPPING.md:24 ; docs/LAUNCH_AND_GRID_START.md:12 ; docs/CAR_MANAGER.md:21	F543 F280	[O]		Physics task `5E7F30` is one of the per-frame tasks. Task objects have a three-slot vtable, and
 0x005E7F97		label	not ported	docs/CONTACT_GROUPS.md:13				inside 0x005E7F30; The registered car job uses `A0A290`, whose pointer occurs at method-table`D1543C`; no direct branch or literal occurrence of synchronous`A09A80` was found b...
+0x005E8AB0	pps_controller_set_instant	func	not ported	docs/FLASHBACK.md:161		[O]		TerminalFX_01 share chain Type2 [O]. A duration ≤ 0 sets the effect at once (0x5E8AB0). The
 0x005E8BE0	pps_transition_start	func	not ported	docs/FLASHBACK.md:129		[D]		0x5E8BE0): `restoreInGameCamera` calls 0x92D110(0,0) and restores the saved in-game camera
 0x005EA5E0	rear_view_mirror_set_dust	func	not ported	docs/COCKPIT.md:45				not a function entry in the master analysis; Cracks come from window_fl/fr damage at scale 0.7 (`rear_view_mirror_set_crack` (0x5EA610)), and dust from the mud colour (`rear_view_mirror_set_dust` (0x5EA... | note: iface (+0x130) slot +4: slot i dustColourAndScale vec4
 0x005EA610	rear_view_mirror_set_crack	func	not ported	docs/COCKPIT.md:45				Cracks come from window_fl/fr damage at scale 0.7 (`rear_view_mirror_set_crack` (0x5EA610)), and dust from the mud colour (`rear_view_mirror_set_dust` (0x5EA... | note: iface slot +8: slot i crackAndScale = (cracked, scale, 0, 0)
@@ -841,7 +845,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0062A5F0		func	not ported	docs/SERIES.md:503				Call chain.** 0x67B790 → 0x62A5F0 (reads the `free_race_track_pool` row: `max_cars`, pool name) →
 0x0062A8D0	objective_finishing_place	func	crates/grid-app/src/career_screen.rs:1045 grid-app::career_screen (in speech_lines) ; crates/grid-tools/src/speech.rs:1590 grid-tools::speech	docs/SPEECH_CAREER_PARAMETERS.md:151 ; docs/SPEECH_AUDIO_RESEARCH.md:903	F624	[O]	offer_objective_place	A race driver offer's objective (0x62A8D0, 0x451A20 +0x7C).
 0x0062AC70		func	crates/grid-tools/src/career/field.rs:58 grid-tools::career::field	docs/CAREER_RESEARCH.md:596 ; docs/SPEECH_AUDIO_RESEARCH.md:667	F614	[I]		The car's team (0x62AC70): the original driver's team for a legend
-0x0062B170		func	crates/grid-app/src/drift_event.rs:39 grid-app::drift_event ; crates/grid-app/src/main.rs:5052 grid-app::main (in race_app) ; crates/grid-tools/src/virtual_race.rs:17 grid-tools::virtual_race	docs/DISCIPLINES.md:480	F386	[V]		Driver skill per entry for the estimator (0x62B170: 1.0 without a | note: merge retained additional port provenance: crates/grid-app/src/main.rs:2962 grid-app::main (in run)
+0x0062B170		func	crates/grid-app/src/main.rs:5052 grid-app::main (in race_app) ; crates/grid-app/src/drift_event.rs:39 grid-app::drift_event ; crates/grid-tools/src/virtual_race.rs:17 grid-tools::virtual_race	docs/DISCIPLINES.md:480	F386	[V]		The virtual race's driver skill: the player 1.0 (0x62B170 without a | note: merge retained additional port provenance: crates/grid-app/src/main.rs:2962 grid-app::main (in run)
 0x0062BE40		func	crates/grid-tools/src/series.rs:388 grid-tools::series (in build_field)	docs/SERIES.md:512				0x62BE40: AI liveries in table order.
 0x0062BEE0		func	crates/grid-tools/src/career/field.rs:88 grid-tools::career::field (in ai_cars)			[V]		Legend substitution (0x663D40, 0x62BEE0) [V]: the hired team
 0x0062C140	season_state	func	crates/grid-tools/src/career/state.rs:19 grid-tools::career::state::SeasonState	docs/CAREER_RESEARCH.md:138		[V]	SeasonState	The season state (0x62C140) [V].
@@ -910,14 +914,14 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0063B2A0		func	not ported	docs/TRACK_LOD.md:366				| 0x0063B2A0 | route-track plugin constructor (vtable 0xCE8D40) |
 0x0063C370	drift_bank	func	crates/grid-tools/src/drift.rs:871 grid-tools::drift::bank	docs/DISCIPLINES.md:216			bank	0x643BC0, end of a drift 0x630560, combo bank 0x63C370, combo fail
 0x0063C552		label	crates/grid-tools/src/hud_audio.rs:220 grid-tools::hud_audio ; crates/grid-tools/src/drift.rs:875 grid-tools::drift (in bank)	docs/AUDIO_RESEARCH.md:255				inside 0x0063C370; Drift scorer (0x643E3D, 0x63C552, 0x6304BC, 0x644038).
-0x0063C580	drift_combo_timer_fraction	func	not ported	docs/RACE_HUD.md:598				ring (0x6B99D0, 0x6B5EF0): f = combo timer / wait (0x63C580). Full while drifting; below 1 one
+0x0063C580	drift_combo_timer_fraction	func	not ported	docs/RACE_HUD.md:599				ring (0x6B99D0, 0x6B5EF0): f = combo timer / wait (0x63C580). Full while drifting; below 1 one
 0x0063C710	reset_window	func	crates/grid-tools/src/touge.rs:122 grid-tools::touge::reset_window	docs/TOUGE.md:73				New run: no open window (0x63C710 keeps the counts).
 0x0063C830	seconds	func	crates/grid-tools/src/touge.rs:129 grid-tools::touge::seconds	docs/DISCIPLINES.md:497 ; docs/TOUGE.md:231	F412 G130	[V]		majorPenaltyTimePenalty (0x63C830).
 0x0063C940		func	not ported	docs/TOUGE.md:227				Past the alongside geometry gate (0x63C940 on both cars, using `alongsideLengthOffset` and `alongsideThresholdTweakMax`), the contact is major (0x631240) whe...
 0x0063E300		func	not ported	docs/LE_MANS.md:87				light, 0x63E300 → 0x90DE60) and gains dt per manager update; it freezes at
 0x0063E4E0		func	not ported	docs/RACE_RULES_RESEARCH.md:80				vehicle's +0x2E64 = 3; 0x63E4E0 on leaving; 0x7028E0/0x70FC80 in network code);
 0x0063E710		func	crates/grid-tools/src/hud_audio.rs:217 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:244				not a function entry in the master analysis; Start-light message state 0 / 1 (handler 0x63E710).
-0x0063EBC0		func	crates/grid-app/src/replay.rs:10 grid-app::replay	docs/FLASHBACK.md:75 ; docs/REPLAY.md:64		[D]		last 10 s [D: 0xDB4FEC, read by StateInstantReplayRewind and 0x63EBC0],
+0x0063EBC0	replay_state_message_handler	func	crates/grid-app/src/replay.rs:273 grid-app::replay::request_terminal	docs/REPLAY.md:64 ; docs/FLASHBACK.md:75	F780	[D]		last 10 s [D: 0xDB4FEC, read by StateInstantReplayRewind and 0x63EBC0],
 0x0063F320		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:41				0xCEA758: vf 0x80 = 0x63F320 (the current event), vf 0x8C = 0x6372D0 (track model id),
 0x00640020		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:40				M = mode object (0x640020 → `[game+0x23D0]+0x34 + mode*4`). Its vtable for the career is
 0x00640800	event_on_last_race	func	crates/grid-app/src/career_screen.rs:1000 grid-app::career_screen (in speech_lines) ; crates/grid-tools/src/speech.rs:1578 grid-tools::speech	docs/SPEECH_CAREER_PARAMETERS.md:106 ; docs/SPEECH_AUDIO_RESEARCH.md:899	F624	[O]		isFinalRace (0x640800): an own event's last race.
@@ -1071,7 +1075,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0066D1C0		func	crates/grid-app/src/career_screen.rs:3986 grid-app::career_screen (in head_to_heads_race_the_rival_alone) ; crates/grid-tools/src/career/field.rs:121 grid-tools::career::field::field	docs/CAREER_SCREEN.md:204	F478	[V]		The rows plus the player [V 0x66D1C0]: one rival, no team mate.
 0x0066D350		func	crates/grid-tools/src/series.rs:341 grid-tools::series::Field ; crates/grid-tools/src/career/field.rs:115 grid-tools::career::field::field	docs/SERIES.md:506 ; docs/CAREER_RESEARCH.md:592 ; docs/CAREER_SCREEN.md:68	F614 F474 F401	[V]		The free-race field of a pool (0x65FF70, 0x664630, 0x66D350 [V]):
 0x0066D800		func	not ported	docs/CAREER_RESEARCH.md:578		[V]		12.1 Race draw [V 0x67BC80, 0x664E30, 0x66D800]
-0x0066DB80	sponsor_pay	func	crates/grid-tools/src/career/state.rs:554 grid-tools::career::state::sponsor_pay ; crates/grid-tools/src/career/rules.rs:115 grid-tools::career::rules::flashback_bonus	docs/CAREER_RESEARCH.md:217 ; docs/CAREER_SCREEN.md:139 ; docs/FLASHBACK.md:162	F494 F466	[V]	flashback_bonus	Each placed sponsor's objective and pay in one race (0x66DB80 per
+0x0066DB80	sponsor_pay	func	crates/grid-tools/src/career/state.rs:554 grid-tools::career::state::sponsor_pay ; crates/grid-tools/src/career/rules.rs:115 grid-tools::career::rules::flashback_bonus	docs/CAREER_RESEARCH.md:217 ; docs/CAREER_SCREEN.md:139 ; docs/FLASHBACK.md:185	F494 F466	[V]	flashback_bonus	Each placed sponsor's objective and pay in one race (0x66DB80 per
 0x0066E1C0	event_reputation_gain	func	not ported	docs/CAREER_RESEARCH.md:246	F774	[V]		gain = base + bonus to the reputation of the event's tier region (0x66E1C0 -> 0x642850)
 0x0066E2E0		func	not ported	docs/CAREER_RESEARCH.md:236		[V]		event; the season end (0x4DBB20 → 0x66E2E0 → 0x665BA0) zeroes every entry. The row shows only while
 0x0066E3A0		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:161 ; docs/CAREER_RESEARCH.md:360		[O]		Objectives** (0x639820 / 0x66E3A0, evaluators 0x655960, 0x655A10, 0x655AC0, 0x655B60):
@@ -1161,7 +1165,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0069B120		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:161		[O]		`driver_offer.objective_type_id` (0x66E3A0) [O]. Sponsor objectives live elsewhere (0x69B120).
 0x0069B290		func	crates/grid-tools/src/career/state.rs:735 grid-tools::career::state::apply_event_in_classes	docs/CAREER_RESEARCH.md:183 ; docs/SPEECH_CAREER_PARAMETERS.md:42	F495	[V]		not a function entry in the master analysis; virtual 0x69B290 tests the tier's region index 4), so the Le Mans 24 Hours
 0x0069C540		func	crates/grid-app/src/speed_advice.rs:17 grid-app::speed_advice		F770	[I]		`Osd/config.xml` parsed by 0x69C540]: the recommendation is read
-0x0069C860		func	not ported	docs/RACE_HUD.md:530				(0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
+0x0069C860		func	not ported	docs/RACE_HUD.md:531				(0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
 0x0069CFC0	needle_blur	func	crates/grid-app/src/race_osd.rs:51 grid-app::race_osd::needle_blur	docs/RACE_HUD.md:378		[D]		not a function entry in the master analysis; Needle blur (0x69CFC0 [D]): a smoothed needle value follows the needle
 0x0069D100		func	not ported	docs/RACE_HUD.md:378		[D]		not a function entry in the master analysis; Needle blur [D]: 0x69D100 binds `needle_blur_up` and `needle_blur_down`; 0x69CFC0 runs every frame:
 0x0069E050	osd_clock	func	crates/grid-app/src/race_hud.rs:106 grid-app::race_hud::osd_clock	docs/RACE_HUD.md:474	F763	[D]		The OSD's lap and race timers use the split clock's format (0x69E050 for the lap
@@ -1173,33 +1177,34 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0069F460		func	not ported	docs/RACE_HUD.md:361				`object/position_pill=N` (0x69F460), `splittimeN` (0x69F4E0) and the row texts (0x6A7050), and its
 0x0069F4E0		func	crates/grid-app/src/race_osd.rs:304 grid-app::race_osd (in position_group)	docs/RACE_HUD.md:361				Both pills colour themselves through their attach animation's ranges (0x69F4E0,
 0x0069F560		func	crates/grid-app/src/race_osd.rs:305 grid-app::race_osd (in position_group)	docs/RACE_HUD.md:366				0x69F560). The split pill's ranges fade its alpha in from 0 (0.55 normal, 0.9 player,
-0x0069FF10	combodigit_bind_params	func	not ported	docs/RACE_HUD.md:592				not a function entry in the master analysis; create 0x6A7AF0, parameter names `scrollX`, `scrollY` bound by 0x69FF10) sets the node's own
+0x0069FF10	combodigit_bind_params	func	not ported	docs/RACE_HUD.md:593				not a function entry in the master analysis; create 0x6A7AF0, parameter names `scrollX`, `scrollY` bound by 0x69FF10) sets the node's own
 0x0069FF90	osd_timer_box_ctor	func	not ported	docs/AUDIO_RESEARCH.md:1685	F589	[O]		The box [O].** The `object/messagebox=counter` widget (vtable 0xCEC0B8, constructor 0x69FF90,
 0x006A0390	osd_timer_start	func	not ported	docs/AUDIO_RESEARCH.md:1687	F589	[O]		Start 0x6A0390 (from the deferred OSD command 0x6C0070, queued by 0x6C1240): +0x140 = the
-0x006A0820		func	not ported	docs/RACE_HUD.md:530				(0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
+0x006A0820		func	not ported	docs/RACE_HUD.md:531				(0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
+0x006A14D0	replay_controller_set_mode	func	not ported	docs/REPLAY.md:381		[D]		replay controller's mode 3 (0x6A14D0); 0x1C leads to `jump_in`, 0x20 to `terminal_damage_menu`.
 0x006A2240	remaining	func	crates/grid-tools/src/flashback.rs:67 grid-tools::flashback::remaining	docs/FLASHBACK.md:57	F366	[D]		`_max_award` [D 0x6AA200]; remaining = maximum - used [D 0x6A2240].
 0x006A2260	use_one	func	crates/grid-tools/src/flashback.rs:89 grid-tools::flashback::use_one	docs/FLASHBACK.md:59	F366	[D]		Preparing the jump-in uses one [D 0x59AFA0 -> 0x6A2260 `used += 1`].
-0x006A2290		func	not ported	docs/FLASHBACK.md:164				not a function entry in the master analysis; docs/CAREER_RESEARCH.md §3.1]. The getter 0x6A2290 is still unread. A script/condition `usedFlashback` (0x418FE0) reads a
-0x006A22A0	award	func	crates/grid-tools/src/flashback.rs:77 grid-tools::flashback::award ; crates/grid-tools/src/career/rules.rs:116 grid-tools::career::rules::flashback_bonus	docs/CAREER_RESEARCH.md:217 ; docs/CAREER_SCREEN.md:139 ; docs/FLASHBACK.md:162	F494	[V]		stores 0x6A22A0 of the race's manager in the race record (+0x5C) when the
+0x006A2290		func	not ported	docs/FLASHBACK.md:187				not a function entry in the master analysis; docs/CAREER_RESEARCH.md §3.1]. The getter 0x6A2290 is still unread. A script/condition `usedFlashback` (0x418FE0) reads a
+0x006A22A0	award	func	crates/grid-tools/src/flashback.rs:77 grid-tools::flashback::award ; crates/grid-tools/src/career/rules.rs:116 grid-tools::career::rules::flashback_bonus	docs/CAREER_RESEARCH.md:217 ; docs/CAREER_SCREEN.md:139 ; docs/FLASHBACK.md:185	F494	[V]		stores 0x6A22A0 of the race's manager in the race record (+0x5C) when the
 0x006A3490		func	not ported	docs/RACE_HUD.md:434				start/end, final); 0x6A3490 creates the render targets.
 0x006A38E0		func	crates/grid-app/src/race_osd.rs:376 grid-app::race_osd::MapView	docs/RACE_HUD.md:426				0x6A38E0 stores them on the minimap camera).
 0x006A3DF0		func	not ported	docs/RACE_HUD.md:433				`minimap_alphacamera` (−1..1) and the render instances (opponent, player, track 0x6A3DF0,
 0x006A4D10		func	not ported	docs/RACE_HUD.md:437				(0x6B2330 → 0x6B1610), start/end (0x6A4D10, only with the +0x64 flag), opponents (0x6AB520,
 0x006A5ED0		func	not ported	docs/RACE_HUD.md:491				not a function entry in the master analysis; HUD widget at HUD+0x6CC (ctor 0x6A5ED0, vtable 0xCEC820, no per-frame update) and hides it; the HUD
-0x006A63B0	format_grouped_int	func	not ported	docs/RACE_HUD.md:580		[D]		0x6A63B0) into `points_total` and its echo and plays `multiplier_bag` `on` (0x6B4570); a fail
+0x006A63B0	format_grouped_int	func	not ported	docs/RACE_HUD.md:581		[D]		0x6A63B0) into `points_total` and its echo and plays `multiplier_bag` `on` (0x6B4570); a fail
 0x006A6A00		func	crates/grid-app/src/race_hud.rs:136 grid-app::race_hud::SPLIT_MAX	docs/RACE_HUD.md:354		[D]		left to at least the minimum (0x6BBB70, 0x6A6A00 [D structure]).
 0x006A7050		func	not ported	docs/RACE_HUD.md:361				`object/position_pill=N` (0x69F460), `splittimeN` (0x69F4E0) and the row texts (0x6A7050), and its
 0x006A7180		func	crates/grid-app/src/race_osd.rs:287 grid-app::race_osd (in position_group)	docs/RACE_HUD.md:362	F763			the original's rest pose is the range's middle (0x6A7180 selects
-0x006A76E0	digits	func	crates/grid-app/src/drift_osd.rs:368 grid-app::drift_osd::digits	docs/RACE_HUD.md:589		[D]		The multiplier digits of one panel slot [D 0x6A76E0]: below 10 the double
+0x006A76E0	digits	func	crates/grid-app/src/drift_osd.rs:368 grid-app::drift_osd::digits	docs/RACE_HUD.md:590		[D]		The multiplier digits of one panel slot [D 0x6A76E0]: below 10 the double
 0x006A7785	DIGIT_STEP	label	crates/grid-app/src/drift_osd.rs:365 grid-app::drift_osd::DIGIT_STEP			[D]		inside 0x006A76E0; `scrollY` per digit of the glyph strip [D 0.1 × 0.91 at 0x6A7785].
-0x006A77E0	drift_combo_shake	func	not ported	docs/RACE_HUD.md:604	F777			Not ported: the ring shake near the end (0x6A77E0; its amplitude and threshold come from the
-0x006A7AC0	scroll	func	crates/grid-app/src/drift_osd.rs:56 grid-app::drift_osd::scroll ; crates/grid-app/src/osd_scene.rs:173 grid-app::osd_scene::Scroll	docs/RACE_HUD.md:593			Scroll	not a function entry in the master analysis; Sets a node's own `scrollY` (a digit glyph, 0x6A7AC0).
-0x006A7AF0	combodigit_create	func	not ported	docs/RACE_HUD.md:592				create 0x6A7AF0, parameter names `scrollX`, `scrollY` bound by 0x69FF10) sets the node's own
-0x006A80A0		func	not ported	docs/RACE_HUD.md:528	F770	[V]		Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)³ × (base −
-0x006A8620	drift_message_bind	func	not ported	docs/RACE_HUD.md:605	F777		drift_message	attach's construction, not traced), the points roll-up, `drift_message` (attach 0x6A8620, its
+0x006A77E0	drift_combo_shake	func	not ported	docs/RACE_HUD.md:605	F777			Not ported: the ring shake near the end (0x6A77E0; its amplitude and threshold come from the
+0x006A7AC0	scroll	func	crates/grid-app/src/drift_osd.rs:56 grid-app::drift_osd::scroll ; crates/grid-app/src/osd_scene.rs:173 grid-app::osd_scene::Scroll	docs/RACE_HUD.md:594			Scroll	not a function entry in the master analysis; Sets a node's own `scrollY` (a digit glyph, 0x6A7AC0).
+0x006A7AF0	combodigit_create	func	not ported	docs/RACE_HUD.md:593				create 0x6A7AF0, parameter names `scrollX`, `scrollY` bound by 0x69FF10) sets the node's own
+0x006A80A0		func	not ported	docs/RACE_HUD.md:529	F770	[V]		Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)³ × (base −
+0x006A8620	drift_message_bind	func	not ported	docs/RACE_HUD.md:606	F777		drift_message	attach's construction, not traced), the points roll-up, `drift_message` (attach 0x6A8620, its
 0x006AA200		func	crates/grid-tools/src/flashback.rs:10 grid-tools::flashback	docs/FLASHBACK.md:56	F366	[D]		`_max_award` [D 0x6AA200]; remaining = maximum - used [D 0x6A2240].
 0x006AA260		func	not ported	docs/FLASHBACK.md:56				(0x6AA200), read back by 0x6AA260.
-0x006AAB90		func	not ported	docs/RACE_HUD.md:521				cars); `driver_id_team` shows the team-mate (0x6AAB90). A rival who is the team-mate is dropped;
+0x006AAB90		func	not ported	docs/RACE_HUD.md:522				cars); `driver_id_team` shows the team-mate (0x6AAB90). A rival who is the team-mate is dropped;
 0x006AB1A0		func	not ported	docs/RACE_HUD.md:438				billboards on the camera axes, size·zoom) and the player (0x6AB1A0).
 0x006AB520		func	crates/grid-app/src/race_osd.rs:601 grid-app::race_osd::minimap	docs/RACE_HUD.md:437				(0x6AB520), and leave the map outside the ring.
 0x006AB8D0	MAP_NEAR	func	crates/grid-app/src/race_osd.rs:403 grid-app::race_osd::MAP_NEAR	docs/RACE_HUD.md:431		[D]		Near and far planes of `minimap_root` (0x6AB8D0 [D]).
@@ -1208,9 +1213,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x006AD0A0	drift_combo_bonus_show	func	crates/grid-app/src/drift_osd.rs:314 grid-app::drift_osd::close_bonus			[D]		The close-drift bonus [D 0x6B5D10, 0x6AD0A0, 0x6AD000]: "%d" or the
 0x006AD220	osd_timer_update	func	not ported	docs/AUDIO_RESEARCH.md:260	F589	[O]	countdown_timer	not a function entry in the master analysis; the OSD "timer" box (0x6AD220): `countdown_timer` on each whole second and
 0x006AF7C0	flashback_new	func	crates/grid-tools/src/flashback.rs:57 grid-tools::flashback::new ; crates/grid-tools/src/career/rules.rs:119 grid-tools::career::rules::flashback_bonus	docs/AI_CHOREOGRAPHER_PORT.md:37 ; docs/CAREER_RESEARCH.md:223 ; docs/FLASHBACK.md:49	F439 F366 G130	[V]	available_flashbacks new	rank and the star level (0x6AF7C0).
-0x006B0540		func	not ported	docs/AUDIO_RESEARCH.md:1698 ; docs/RACE_HUD.md:517	F770 F763	[V]		not a function entry in the master analysis; Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
+0x006B0540		func	not ported	docs/AUDIO_RESEARCH.md:1698 ; docs/RACE_HUD.md:518	F770 F763	[V]		not a function entry in the master analysis; Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
 0x006B0790	osd_queue_timer	func	not ported	docs/AUDIO_RESEARCH.md:1695	F589	[O]		Who starts it [O].** 0x6B0790 queues the start. Its two callers, 0x6B6CE0 (OSD start; sets +0x2A8)
-0x006B0820		func	not ported	docs/RACE_HUD.md:530	F770	[V]		(0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
+0x006B0820		func	not ported	docs/RACE_HUD.md:531	F770	[V]		(0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
 0x006B1260		func	not ported	docs/RACE_HUD.md:428				Setup: 0x6B1260 calls 0x6C0680, which fills the defaults: FOV 60 (+0x24), zoom 500, target height
 0x006B14D0		func	not ported		F763			Minimap: the original draws `rd4minimap` instances with `minimap_alphacamera` and the `osd_minimap_track` shader (0x6B14D0, 0x6B26A0) from the track's `minim...
 0x006B1610	map_ribbon	func	crates/grid-app/src/race_osd.rs:400 grid-app::race_osd::MAP_TRACK_WIDTH	docs/RACE_HUD.md:437		[D]	MAP_TRACK_WIDTH	Ribbon half-width per zoom unit (field +0x30 [D]): 0x6B1610 places each
@@ -1228,72 +1233,72 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x006B3C90		func	not ported	docs/RACE_HUD.md:455				lap just completed (0x6B3C90) and a 5 s timer starts; when the count drops (a restart) the timer
 0x006B3D30		func	crates/grid-app/src/race_hud.rs:107 grid-app::race_hud::osd_clock	docs/RACE_HUD.md:475	F763			time, 0x6B3D30 for the race time), capped at 1:39:59.999, that is
 0x006B4410	drift_points_in	func	crates/grid-app/src/drift_osd.rs:204 grid-app::drift_osd::open_combo			[D]		A combo starts [D 0x6BB130 -> 0x6B9730, 0x6B4410]: the panel resets
-0x006B4570	drift_points_bank	func	crates/grid-app/src/drift_osd.rs:283 grid-app::drift_osd::end	docs/RACE_HUD.md:580		[D]		The combo ends [D 0x6BBF20]: banked (0x6B9850, 0x6B4700, 0x6B4570) or
-0x006B4680	drift_points_fail	func	crates/grid-app/src/drift_osd.rs:284 grid-app::drift_osd::end	docs/RACE_HUD.md:581		[D]		failed (0x6B9910, 0x6B4680); the panel leaves and hides after 2 s.
-0x006B4700	drift_points_set_total	func	crates/grid-app/src/drift_osd.rs:283 grid-app::drift_osd::end	docs/RACE_HUD.md:579		[D]		The combo ends [D 0x6BBF20]: banked (0x6B9850, 0x6B4700, 0x6B4570) or
-0x006B4860	multiplier	func	crates/grid-app/src/drift_osd.rs:224 grid-app::drift_osd::multiplier	docs/RACE_HUD.md:579		[D]		The combo multiplier [D 0x6B4860, 0x6B6040]: "X%d" in the points box;
-0x006B48D0	drift_meter_bind	func	not ported	docs/RACE_HUD.md:570		[D]		Meter (`object/drift_main=drift`, bind 0x6B48D0, update 0x6B8D60) [D]: the signed slip value
-0x006B4AA0	drift_meter_reset_max	func	crates/grid-app/src/drift_osd.rs:174 grid-app::drift_osd (in meter)	docs/RACE_HUD.md:573		[D]		angle [D 0x6B4AA0]; otherwise they follow the largest bar [I].
-0x006B4C80		func	not ported	docs/RACE_HUD.md:575		[D]		raise of the max markers (0x6B4C80/0x6B4B90) is not decompiled; the port keeps the highest bar.
-0x006B4E00		func	not ported	docs/RACE_HUD.md:556				The position stacker (0x6B4E00, 0x6B4F90) appends `position_group` (T 2/3 with more than one car,
-0x006B4F90		func	not ported	docs/RACE_HUD.md:556				The position stacker (0x6B4E00, 0x6B4F90) appends `position_group` (T 2/3 with more than one car,
+0x006B4570	drift_points_bank	func	crates/grid-app/src/drift_osd.rs:283 grid-app::drift_osd::end	docs/RACE_HUD.md:581		[D]		The combo ends [D 0x6BBF20]: banked (0x6B9850, 0x6B4700, 0x6B4570) or
+0x006B4680	drift_points_fail	func	crates/grid-app/src/drift_osd.rs:284 grid-app::drift_osd::end	docs/RACE_HUD.md:582		[D]		failed (0x6B9910, 0x6B4680); the panel leaves and hides after 2 s.
+0x006B4700	drift_points_set_total	func	crates/grid-app/src/drift_osd.rs:283 grid-app::drift_osd::end	docs/RACE_HUD.md:580		[D]		The combo ends [D 0x6BBF20]: banked (0x6B9850, 0x6B4700, 0x6B4570) or
+0x006B4860	multiplier	func	crates/grid-app/src/drift_osd.rs:224 grid-app::drift_osd::multiplier	docs/RACE_HUD.md:580		[D]		The combo multiplier [D 0x6B4860, 0x6B6040]: "X%d" in the points box;
+0x006B48D0	drift_meter_bind	func	not ported	docs/RACE_HUD.md:571		[D]		Meter (`object/drift_main=drift`, bind 0x6B48D0, update 0x6B8D60) [D]: the signed slip value
+0x006B4AA0	drift_meter_reset_max	func	crates/grid-app/src/drift_osd.rs:174 grid-app::drift_osd (in meter)	docs/RACE_HUD.md:574		[D]		angle [D 0x6B4AA0]; otherwise they follow the largest bar [I].
+0x006B4C80		func	not ported	docs/RACE_HUD.md:576		[D]		raise of the max markers (0x6B4C80/0x6B4B90) is not decompiled; the port keeps the highest bar.
+0x006B4E00		func	not ported	docs/RACE_HUD.md:557				The position stacker (0x6B4E00, 0x6B4F90) appends `position_group` (T 2/3 with more than one car,
+0x006B4F90		func	not ported	docs/RACE_HUD.md:557				The position stacker (0x6B4E00, 0x6B4F90) appends `position_group` (T 2/3 with more than one car,
 0x006B5240		func	not ported	docs/AUDIO_RESEARCH.md:1699 ; docs/RACE_HUD.md:356		[O]		Durations: the constructor 0x6B5240 defaults to 5 / 2 s, the config overrides them with
-0x006B5650	SEGMENTS	func	crates/grid-app/src/drift_osd.rs:18 grid-app::drift_osd::SEGMENTS	docs/RACE_HUD.md:584		[D]		not a function entry in the master analysis; (`object/driftcombo_main`, the `drifteffect` attach 0x6B5650/0x6B9640).
-0x006B5C60	drift_type	func	crates/grid-app/src/drift_osd.rs:237 grid-app::drift_osd::drift_type	docs/RACE_HUD.md:595		[D]		A new drift rating [D 0x6B5C60]: the two type slots alternate.
-0x006B5D10	close_bonus	func	crates/grid-app/src/drift_osd.rs:314 grid-app::drift_osd::close_bonus	docs/RACE_HUD.md:602		[D]		The close-drift bonus [D 0x6B5D10, 0x6AD0A0, 0x6AD000]: "%d" or the
-0x006B5EF0	drift_combo_ring_tick	func	crates/grid-app/src/drift_osd.rs:247 grid-app::drift_osd::timer_ring	docs/RACE_HUD.md:598		[D]		The ring of eight timer segments [D 0x6B8BB0, 0x6B99D0, 0x6B5EF0]:
-0x006B6040	drift_combo_multiplier_slot	func	crates/grid-app/src/drift_osd.rs:224 grid-app::drift_osd::multiplier	docs/RACE_HUD.md:587		[D]		The combo multiplier [D 0x6B4860, 0x6B6040]: "X%d" in the points box;
+0x006B5650	SEGMENTS	func	crates/grid-app/src/drift_osd.rs:18 grid-app::drift_osd::SEGMENTS	docs/RACE_HUD.md:585		[D]		not a function entry in the master analysis; (`object/driftcombo_main`, the `drifteffect` attach 0x6B5650/0x6B9640).
+0x006B5C60	drift_type	func	crates/grid-app/src/drift_osd.rs:237 grid-app::drift_osd::drift_type	docs/RACE_HUD.md:596		[D]		A new drift rating [D 0x6B5C60]: the two type slots alternate.
+0x006B5D10	close_bonus	func	crates/grid-app/src/drift_osd.rs:314 grid-app::drift_osd::close_bonus	docs/RACE_HUD.md:603		[D]		The close-drift bonus [D 0x6B5D10, 0x6AD0A0, 0x6AD000]: "%d" or the
+0x006B5EF0	drift_combo_ring_tick	func	crates/grid-app/src/drift_osd.rs:247 grid-app::drift_osd::timer_ring	docs/RACE_HUD.md:599		[D]		The ring of eight timer segments [D 0x6B8BB0, 0x6B99D0, 0x6B5EF0]:
+0x006B6040	drift_combo_multiplier_slot	func	crates/grid-app/src/drift_osd.rs:224 grid-app::drift_osd::multiplier	docs/RACE_HUD.md:588		[D]		The combo multiplier [D 0x6B4860, 0x6B6040]: "X%d" in the points box;
 0x006B6B20		func	not ported	docs/AUDIO_RESEARCH.md:1698		[O]		[[race +0xC0] +4] (0x6B0540, 0x6B6B20, 0x6B8FB0) or passed to the `playerspositioninterface`
 0x006B6CE0		func	not ported	docs/AUDIO_RESEARCH.md:1695		[O]		Who starts it [O].** 0x6B0790 queues the start. Its two callers, 0x6B6CE0 (OSD start; sets +0x2A8)
-0x006B7800		func	not ported	docs/RACE_HUD.md:549				not a function entry in the master analysis; (+0xB0C, bound by 0x6B7800) is laid out once (0x6BC3E0 → 0x6BB0C0) by F:
+0x006B7800		func	not ported	docs/RACE_HUD.md:550				not a function entry in the master analysis; (+0xB0C, bound by 0x6B7800) is laid out once (0x6BC3E0 → 0x6BB0C0) by F:
 0x006B7A90		func	crates/grid-app/src/race_hud.rs:287 grid-app::race_hud::LAP_HOLD ; crates/grid-app/src/race_osd.rs:250 grid-app::race_osd (in lap_group)	docs/RACE_HUD.md:459				clears it when the count drops; 0x6B7A90 shows the pill, 0x6B2D00 hides
-0x006B7BF0		func	not ported	docs/RACE_HUD.md:553	F770	[V]		F 2-4 drift (0x6B7BF0): T 2/3 only; race for F 4 with slot 0x24, else main;
-0x006B7D10		func	not ported	docs/RACE_HUD.md:550	F770	[V]		F 0/1 (0x6B7D10): T 1 race, lap; T 2/3 race (+ lap) when provider slot 0x24 is true, else main,
-0x006B80F0		func	not ported	docs/RACE_HUD.md:555	F770	[V]		F 7/8 offers (0x6B80F0): main, a group whose name the decompile hides, best and offers.
-0x006B8400		func	not ported	docs/RACE_HUD.md:554	F770	[V]		F 5/6 touge (0x6B8400): T 1 race, lap; T 2 main (not for F 6), race;
+0x006B7BF0		func	not ported	docs/RACE_HUD.md:554	F770	[V]		F 2-4 drift (0x6B7BF0): T 2/3 only; race for F 4 with slot 0x24, else main;
+0x006B7D10		func	not ported	docs/RACE_HUD.md:551	F770	[V]		F 0/1 (0x6B7D10): T 1 race, lap; T 2/3 race (+ lap) when provider slot 0x24 is true, else main,
+0x006B80F0		func	not ported	docs/RACE_HUD.md:556	F770	[V]		F 7/8 offers (0x6B80F0): main, a group whose name the decompile hides, best and offers.
+0x006B8400		func	not ported	docs/RACE_HUD.md:555	F770	[V]		F 5/6 touge (0x6B8400): T 1 race, lap; T 2 main (not for F 6), race;
 0x006B85C0	LAP_HOLD	func	crates/grid-app/src/race_hud.rs:286 grid-app::race_hud::LAP_HOLD	docs/RACE_HUD.md:454				stays up until then (0x6B85C0 sets 5 s when the lap count grows and
 0x006B8BB0	timer_ring	func	crates/grid-app/src/drift_osd.rs:247 grid-app::drift_osd::timer_ring			[D]		The ring of eight timer segments [D 0x6B8BB0, 0x6B99D0, 0x6B5EF0]:
-0x006B8D60	meter	func	crates/grid-app/src/drift_osd.rs:168 grid-app::drift_osd::meter	docs/RACE_HUD.md:570	F777	[D]		the meter (`object/drift_main`, 0x6B8D60), the points box
+0x006B8D60	meter	func	crates/grid-app/src/drift_osd.rs:168 grid-app::drift_osd::meter	docs/RACE_HUD.md:571	F777	[D]		the meter (`object/drift_main`, 0x6B8D60), the points box
 0x006B8FB0		func	not ported	docs/AUDIO_RESEARCH.md:1698		[O]		not a function entry in the master analysis; [[race +0xC0] +4] (0x6B0540, 0x6B6B20, 0x6B8FB0) or passed to the `playerspositioninterface`
 0x006B94C0		func	not ported	docs/RACE_HUD.md:357				`maxduration` 10 and `minduration` 5; 0x6AC650 copies them into the controller. 0x6B94C0 hides the
-0x006B9640	drift_combo_update	func	not ported	docs/RACE_HUD.md:584	F777	[D]		not a function entry in the master analysis; bind 0x6B5650, update 0x6B9640) [D]:
-0x006B9730	drift_combo_reset	func	crates/grid-app/src/drift_osd.rs:204 grid-app::drift_osd::open_combo	docs/RACE_HUD.md:585		[D]		A combo starts [D 0x6BB130 -> 0x6B9730, 0x6B4410]: the panel resets
-0x006B9850	EXIT_TIME	func	crates/grid-app/src/drift_osd.rs:39 grid-app::drift_osd::EXIT_TIME	docs/RACE_HUD.md:600		[D]		Seconds the combo panel stays after a bank or a fail [D 2.0 at 0x6B9850/0x6B9910].
-0x006B9910	drift_combo_failed	func	crates/grid-app/src/drift_osd.rs:284 grid-app::drift_osd::end	docs/RACE_HUD.md:601				failed (0x6B9910, 0x6B4680); the panel leaves and hides after 2 s.
-0x006B99D0	drift_combo_ring_begin	func	crates/grid-app/src/drift_osd.rs:247 grid-app::drift_osd::timer_ring	docs/RACE_HUD.md:598		[D]		The ring of eight timer segments [D 0x6B8BB0, 0x6B99D0, 0x6B5EF0]:
+0x006B9640	drift_combo_update	func	not ported	docs/RACE_HUD.md:585	F777	[D]		not a function entry in the master analysis; bind 0x6B5650, update 0x6B9640) [D]:
+0x006B9730	drift_combo_reset	func	crates/grid-app/src/drift_osd.rs:204 grid-app::drift_osd::open_combo	docs/RACE_HUD.md:586		[D]		A combo starts [D 0x6BB130 -> 0x6B9730, 0x6B4410]: the panel resets
+0x006B9850	EXIT_TIME	func	crates/grid-app/src/drift_osd.rs:39 grid-app::drift_osd::EXIT_TIME	docs/RACE_HUD.md:601		[D]		Seconds the combo panel stays after a bank or a fail [D 2.0 at 0x6B9850/0x6B9910].
+0x006B9910	drift_combo_failed	func	crates/grid-app/src/drift_osd.rs:284 grid-app::drift_osd::end	docs/RACE_HUD.md:602				failed (0x6B9910, 0x6B4680); the panel leaves and hides after 2 s.
+0x006B99D0	drift_combo_ring_begin	func	crates/grid-app/src/drift_osd.rs:247 grid-app::drift_osd::timer_ring	docs/RACE_HUD.md:599		[D]		The ring of eight timer segments [D 0x6B8BB0, 0x6B99D0, 0x6B5EF0]:
 0x006BA460	Hud_updateMinimapFlag	func	crates/grid-app/src/race_osd.rs:183 grid-app::race_osd::brake_light ; crates/grid-app/src/speed_advice.rs:157 grid-app::speed_advice::severity ; crates/grid-tools/src/race_flags.rs:499 grid-tools::race_flags::raised	docs/RACE_HUD.md:285 ; docs/FIDELITY_BACKLOG.md:93 ; docs/RACE_RULES_RESEARCH.md:259	F770 F759	[V]	MapView brake_light flash raised severity	flag, 0x6BA460).
-0x006BB0C0		func	not ported	docs/RACE_HUD.md:514	F770	[V]		dispatch 0x6BB0C0 jumps on F 0..8 in the same groups], and T = owner+0x1AC (values 1..4, meaning
-0x006BB130	open_combo	func	crates/grid-app/src/drift_osd.rs:204 grid-app::drift_osd::open_combo	docs/RACE_HUD.md:565	F777	[D]		original's per-frame bridge 0x6BB130 (docs/RACE_HUD.md "Drift OSD"):
-0x006BB650	drift_osd_start	func	crates/grid-app/src/drift_osd.rs:153 grid-app::drift_osd::start	docs/RACE_HUD.md:576	F777	[D]	start	(`object/points_main`, 0x6BB650) and the combo panel
+0x006BB0C0		func	not ported	docs/RACE_HUD.md:515	F770	[V]		dispatch 0x6BB0C0 jumps on F 0..8 in the same groups], and T = owner+0x1AC (values 1..4, meaning
+0x006BB130	open_combo	func	crates/grid-app/src/drift_osd.rs:204 grid-app::drift_osd::open_combo	docs/RACE_HUD.md:566	F777	[D]		original's per-frame bridge 0x6BB130 (docs/RACE_HUD.md "Drift OSD"):
+0x006BB650	drift_osd_start	func	crates/grid-app/src/drift_osd.rs:153 grid-app::drift_osd::start	docs/RACE_HUD.md:577	F777	[D]	start	(`object/points_main`, 0x6BB650) and the combo panel
 0x006BB9E0	split_rows	func	crates/grid-app/src/race_hud.rs:122 grid-app::race_hud::split_rows	docs/RACE_HUD.md:348		[D]		of `n` cars (0x6BB9E0 [D]): the first four for a leading or second
 0x006BBB70	SPLIT_MAX	func	crates/grid-app/src/race_hud.rs:136 grid-app::race_hud::SPLIT_MAX	docs/RACE_HUD.md:346		[D]		left to at least the minimum (0x6BBB70, 0x6A6A00 [D structure]).
 0x006BBF20	drift_osd_end	func	crates/grid-app/src/drift_osd.rs:283 grid-app::drift_osd::end			[D]	end	The combo ends [D 0x6BBF20]: banked (0x6B9850, 0x6B4700, 0x6B4570) or
-0x006BC3E0		func	not ported	docs/RACE_HUD.md:549				(+0xB0C, bound by 0x6B7800) is laid out once (0x6BC3E0 → 0x6BB0C0) by F:
-0x006BCE60		func	not ported	docs/RACE_HUD.md:519	F777			T 2, normal path (0x6BD0B0): tag 0 shows the rival (the career lookup 0x6BCE60, or in the
-0x006BD0B0		func	not ported	docs/RACE_HUD.md:519				T 2, normal path (0x6BD0B0): tag 0 shows the rival (the career lookup 0x6BCE60, or in the
-0x006BD480		func	not ported	docs/RACE_HUD.md:523				T 2 with a driver offer of objective type 2 (0x6BD480, 0x6BD6B0): up to seven cars of the named
-0x006BD6B0		func	not ported	docs/RACE_HUD.md:523				T 2 with a driver offer of objective type 2 (0x6BD480, 0x6BD6B0): up to seven cars of the named
-0x006BD900		func	not ported	docs/RACE_HUD.md:525		[I]		T 3 (0x6BD900; probably online, it also drives the chat box [I]): the two nearest cars on one
-0x006BF070		func	not ported	docs/AUDIO_RESEARCH.md:1696 ; docs/RACE_HUD.md:517	F770	[V]		Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
+0x006BC3E0		func	not ported	docs/RACE_HUD.md:550				(+0xB0C, bound by 0x6B7800) is laid out once (0x6BC3E0 → 0x6BB0C0) by F:
+0x006BCE60		func	not ported	docs/RACE_HUD.md:520	F777			T 2, normal path (0x6BD0B0): tag 0 shows the rival (the career lookup 0x6BCE60, or in the
+0x006BD0B0		func	not ported	docs/RACE_HUD.md:520				T 2, normal path (0x6BD0B0): tag 0 shows the rival (the career lookup 0x6BCE60, or in the
+0x006BD480		func	not ported	docs/RACE_HUD.md:524				T 2 with a driver offer of objective type 2 (0x6BD480, 0x6BD6B0): up to seven cars of the named
+0x006BD6B0		func	not ported	docs/RACE_HUD.md:524				T 2 with a driver offer of objective type 2 (0x6BD480, 0x6BD6B0): up to seven cars of the named
+0x006BD900		func	not ported	docs/RACE_HUD.md:526		[I]		T 3 (0x6BD900; probably online, it also drives the chat box [I]): the two nearest cars on one
+0x006BF070		func	not ported	docs/AUDIO_RESEARCH.md:1696 ; docs/RACE_HUD.md:518	F770	[V]		Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
 0x006BF990		func	not ported	docs/FLASHBACK.md:72		[D]		not a function entry in the master analysis; recordable returns true, 0x6BF990) must agree, and the replay time (+0x1B0) must not be
-0x006C0050		func	not ported	docs/RACE_HUD.md:536				not a function entry in the master analysis; block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
+0x006C0050		func	not ported	docs/RACE_HUD.md:537				not a function entry in the master analysis; block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
 0x006C0070		func	not ported	docs/AUDIO_RESEARCH.md:1687				not a function entry in the master analysis; Start 0x6A0390 (from the deferred OSD command 0x6C0070, queued by 0x6C1240): +0x140 = the
 0x006C01A0		func	not ported	docs/RACE_HUD.md:411		[D]		not a function entry in the master analysis; animation's slot 0x2C (command vtable 0xCEC6AC, execute 0x6C01A0); the node (+0x260) is shown
 0x006C0680	race_osd_default	func	crates/grid-app/src/race_osd.rs:388 grid-app::race_osd::default	docs/RACE_HUD.md:428		[D]	MAP_FOV default	The minimap's built-in values (0x6C0680 [D]), for a route the
 0x006C0F80		func	crates/grid-app/src/race_osd.rs:375 grid-app::race_osd::MapView	docs/RACE_HUD.md:425				the HUD's 0x6BA460 reads and hands to the minimap (0x6C0F80 queues them,
 0x006C0FD0		func	not ported	docs/RACE_HUD.md:414		[D]		0.3 s (show/hide command 0x6C0FD0). Haruna's routes ship only `dummy.rm`, so touge and drift
-0x006C1030		func	not ported	docs/RACE_HUD.md:536				block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
+0x006C1030		func	not ported	docs/RACE_HUD.md:537				block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
 0x006C1240		func	not ported	docs/AUDIO_RESEARCH.md:1687				Start 0x6A0390 (from the deferred OSD command 0x6C0070, queued by 0x6C1240): +0x140 = the
-0x006C1510		func	not ported	docs/RACE_HUD.md:546	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
-0x006C1570		func	not ported	docs/RACE_HUD.md:546	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
+0x006C1510		func	not ported	docs/RACE_HUD.md:547	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
+0x006C1570		func	not ported	docs/RACE_HUD.md:547	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
 0x006C1910	fraction	func	crates/grid-app/src/drift_osd.rs:52 grid-app::drift_osd::fraction					Seeks an animation to a 0..1 fraction of its length (0x6C1910).
 0x006C1AB0		func	not ported	docs/RACE_HUD.md:426				not a function entry in the master analysis; 0x6C1AB0 calls 0x6A38E0, which stores zoom +0x28, behind +0x5c, above +0x60 and a not-drift flag
-0x006C1B70	points_text	func	not ported	docs/RACE_HUD.md:597				drift points (+0x10) show as "%d" in `points_text` (0x6C1B70);
+0x006C1B70	points_text	func	not ported	docs/RACE_HUD.md:598				drift points (+0x10) show as "%d" in `points_text` (0x6C1B70);
 0x006CE260		func	crates/grid-tools/src/hud_audio.rs:294 grid-tools::hud_audio::light_cue					Start-light sounds of the original sequence (0x6CE350 start, 0x6CE260
 0x006CE350	light_cue	func	crates/grid-tools/src/hud_audio.rs:294 grid-tools::hud_audio::light_cue	docs/AUDIO_RESEARCH.md:246				Start-light sounds of the original sequence (0x6CE350 start, 0x6CE260
 0x006CE383		label	crates/grid-tools/src/hud_audio.rs:295 grid-tools::hud_audio::light_cue	docs/AUDIO_RESEARCH.md:246	F452 G130	[O]		inside 0x006CE350; update): the stage advances every 1.0 s (0x6CE383) from stage 1 at the
-0x006D0000		label	not ported	docs/REPLAY.md:242				inside 0x006CFB50; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
-0x006DE370	replay_poll_jump_in	func	not ported	docs/REPLAY.md:240	F778	[I]		input queries `push ID; call [vtable+0x2C]` exist for Jump In 0x1C (0x57B220, 0x57F630, 0x6DE370)
+0x006D0000		label	not ported	docs/REPLAY.md:248				inside 0x006CFB50; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
+0x006DE370	replay_poll_jump_in	func	not ported	docs/REPLAY.md:246	F778	[I]		input queries `push ID; call [vtable+0x2C]` exist for Jump In 0x1C (0x57B220, 0x57F630, 0x6DE370)
 0x006E2760		func	not ported	docs/TRACK_LOD.md:34	F713	[I]		not a function entry in the master analysis; 225 m output is consumed is not traced [?]: its only reader is the getter 0x6E2760 (slot 0x120
 0x006E2A90		func	not ported	docs/DRIVING_ASSISTS_RESEARCH.md:96				AI and scripted controllers set +E6C = 1 (`6E2A90`, `91DF40`).
 0x006E4230		func	not ported	docs/AUDIO_RESEARCH.md:1705				(+0x95), with total 30 and remaining = min(server ms (0x6E4230) / 1000, 30), only in session modes
@@ -1301,7 +1306,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x006EBDF0		func	not ported	docs/RACE_RULES_RESEARCH.md:332		[V]		`TerminalDamageMessage` (0x44C670, 0x6006E0, 0x6EBDF0, 0x70B030).
 0x006EC3D0		func	not ported	docs/AUDIO_RESEARCH.md:1703				The only override found, 0x6F9D70 (vtable 0xCEFE10, constructors 0x6E78A0 and 0x6EC3D0, beside the
 0x006EC5A0		func	not ported	docs/RACE_RULES_RESEARCH.md:155				not a function entry in the master analysis; The network state names 0x6EC5A0 are stateFinished, stateTimedOut, stateTerminalDamage, stateRacing,
-0x006F0000		label	not ported	docs/REPLAY.md:242				inside 0x006EFFB0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
+0x006F0000		label	not ported	docs/REPLAY.md:248				inside 0x006EFFB0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
 0x006F9D70	online_session_get_timer	func	not ported	docs/AUDIO_RESEARCH.md:1703	F589	[O]		The only override found, 0x6F9D70 (vtable 0xCEFE10, constructors 0x6E78A0 and 0x6EC3D0, beside the
 0x006FC700		func	not ported	docs/TRACK_LOD.md:393	F713	[I]		| 0x00CF089C | vtable whose slot 0x120 reads +0xCC8 (constructors 0x6FC700, 0x6FC7D0, 0x7068F0); [I] the object 0x5FAD10 writes |
 0x006FC7D0		func	not ported	docs/TRACK_LOD.md:393	F713	[I]		| 0x00CF089C | vtable whose slot 0x120 reads +0xCC8 (constructors 0x6FC700, 0x6FC7D0, 0x7068F0); [I] the object 0x5FAD10 writes |
@@ -1397,7 +1402,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00747C50	colour_balance_prepared_object_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:64		[D]		The selected object's constructor at `0x00747C50` creates a parameter subobject
 0x00747D60	colour_balance_prepare_uniforms	func	not ported	docs/ORIGINAL_POSTPROCESS.md:66		[D]		parameter+0x24 and packed tintColour at parameter+0x28. Update `0x00747D60`
 0x00748358		label	not ported	docs/ORIGINAL_POSTPROCESS.md:68				inside 0x00747D60; `0x00748358..0x0074839D` prepare:
-0x00748450	colour_balance_bind_named_uniforms	func	not ported	docs/ORIGINAL_POSTPROCESS.md:74		[D]		Binding method `0x00748450` maps preMultipliedTint to that prepared field; the
+0x00748450	colour_balance_bind_named_uniforms	func	not ported	docs/ORIGINAL_POSTPROCESS.md:74 ; docs/FLASHBACK.md:168		[D]		(binder 0x748450) but no shipped shader declares them; the merge shaders read only
 0x0074F530	crowd_select_pair_reset_timer	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:406		[D]		| `0x0074F530` | `crowd_select_pair_reset_timer`: installs the selected pair, sets extent and mapped span from the same argument, sets offset, repeat count0,...
 0x0074F620	crowd_install_three_payloads_zero_timer	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:774		[D]		payload addresses and passes them to `0x0074F620`. That setter retains the
 0x0074F720	crowd_advance_and_evaluate	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:160	G346	[D]		A targeted shared-master decompile of `0x0074F720` connects the selected controller timer to an evaluation entry. Both modes advance the same timer with the ...
@@ -1850,7 +1855,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x007E7E90	ffb_sample_play	func	crates/grid-app/src/force_feedback.rs:1076 grid-app::force_feedback::play	docs/FORCE_FEEDBACK.md:194	F602 F598	[D]	force_feedback_play play	`7E7E90`: one sample's value at clock `now` into the channels; false once it has finished.
 0x007E80F0	ffb_lateral_update	func	not ported	docs/FORCE_FEEDBACK.md:159	F602 F598	[D]		4.2 Lateral (`7E80F0`) [D]
 0x007E8340	ffb_gear_event	func	crates/grid-app/src/force_feedback.rs:820 grid-app::force_feedback (in queue)	docs/FORCE_FEEDBACK.md:118	F602 F598	[D]		7E8340: the gear event against the previous snapshot.
-0x007E8450	ffb_zero_devices	func	not ported	docs/FLASHBACK.md:211	F778	[D]		(0x7EADD0) and zeroes every device (0x7E8450); `StateIngameEnableFFB` (enter 0x57B180,
+0x007E8450	ffb_zero_devices	func	not ported	docs/FLASHBACK.md:240	F778	[D]		(0x7EADD0) and zeroes every device (0x7E8450); its exit 0x57B180 (vtable 0xCD8AC4 slot 10, the
 0x007E8580	ffb_caster_update	func	crates/grid-app/src/force_feedback.rs:996 grid-app::force_feedback::caster	docs/FORCE_FEEDBACK.md:138 ; docs/PLATFORMS_AND_INPUT_RESEARCH.md:339	F602 F598	[D]	caster	`7E8580`.
 0x007E9550	ffb_surface_update	func	not ported	docs/FORCE_FEEDBACK.md:164	F602 F598	[D]		4.3 Surface (`7E9550`) [D]
 0x007E9810	ffb_gear_change_update	func	not ported	docs/FORCE_FEEDBACK.md:175	F602 F598	[D]		not a function entry in the master analysis; | Gear change (`7E9810`) | gear event and (gear = −1 or gear = event gear); per car | {scale, freq, length} |
@@ -1861,9 +1866,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x007EA1F1		label	not ported	docs/WHEEL_DETACHMENT.md:68				inside 0x007E9D60; | 7EA1F1 | 7E9D60 (called from 98D7E5, A00B39) | copies the flag into a per-wheel record +6C | not identified, not ported |
 0x007EA6F0	ffb_device_apply	func	crates/grid-app/src/force_feedback.rs:890 grid-app::force_feedback::effects	docs/FORCE_FEEDBACK.md:136	F602 F598	[D]	effects	Every effect, then `7EA6F0`, for one snapshot.
 0x007EAA40	ffb_device_setup_find	func	crates/grid-app/src/force_feedback.rs:477 grid-app::force_feedback::device	docs/FORCE_FEEDBACK.md:79			device	`7EAA40`: the device's setup by exact name, else `default`.
-0x007EADD0	ffb_clear_effects	func	not ported	docs/FLASHBACK.md:211	F778	[D]		(0x7EADD0) and zeroes every device (0x7E8450); `StateIngameEnableFFB` (enter 0x57B180,
+0x007EADD0	ffb_clear_effects	func	not ported	docs/FLASHBACK.md:240	F778	[D]		(0x7EADD0) and zeroes every device (0x7E8450); its exit 0x57B180 (vtable 0xCD8AC4 slot 10, the
 0x007EB030	ffb_sample_pick	func	crates/grid-app/src/force_feedback.rs:257 grid-app::force_feedback::Rand	docs/FORCE_FEEDBACK.md:62		[D]	Rand force_feedback_pick pick	MSVC `rand()`, which picks a member of a sample set (`7EB030`). [A] seed: the CRT's 1.
-0x007EB110	ffb_enable	func	crates/grid-app/src/force_feedback.rs:779 grid-app::force_feedback::set_enabled	docs/FLASHBACK.md:210 ; docs/FORCE_FEEDBACK.md:244	F778 F598	[D]	set_enabled	`7EB110`: disabling zeroes the outputs. The port reads `force_feedback` when the race
+0x007EB110	ffb_enable	func	crates/grid-app/src/force_feedback.rs:779 grid-app::force_feedback::set_enabled	docs/FLASHBACK.md:239 ; docs/FORCE_FEEDBACK.md:244	F778 F598	[D]	set_enabled	`7EB110`: disabling zeroes the outputs. The port reads `force_feedback` when the race
 0x007EB190	ffb_collision_update	func	not ported	docs/FORCE_FEEDBACK.md:178	F602 F598	[D]		not a function entry in the master analysis; | Collision (`7EB190`) | collision event, thLow < Δv < thHigh; per car; sample drawn now | {scale, freq, length} |
 0x007EB2A0	ffb_parse_samples	func	not ported	docs/FORCE_FEEDBACK.md:51				| | FFBSample | wave, envelope, channel (0), wheelScale (1), rubmlerScale (1) | `7EB2A0`, `7E7DA0` |
 0x007EB540	ffb_parse_devices	func	crates/grid-app/src/force_feedback.rs:107 grid-app::force_feedback::DeviceSetup	docs/FORCE_FEEDBACK.md:41			DeviceSetup	FFBDevice (`7EB540`). Constructor values 1, 1, 0, 10, 1, 0.1, off.
@@ -1902,9 +1907,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x007F7380		func	crates/grid-app/src/camera.rs:540 grid-app::camera	docs/CAMERA_VIEWS.md:92				Car +0xD234 is not 7, the controls are disabled (+0x28, 0x7F7380).
 0x007F73B0	box_hit	func	crates/grid-app/src/camera.rs:1699 grid-app::camera::box_hit	docs/CAMERA_VIEWS.md:277				The car box segment test of 0x7F73B0 → 0xA6A530 for the segment `top`
 0x007F7590		func	crates/grid-app/src/replay/director.rs:15 grid-app::replay::director	docs/REPLAY_DIRECTOR_RESEARCH.md:30	F441 F360 G130	[D]		0xD001A8: parameter binder 0x7F7590, activation 0x843700, update 0x824160
-0x007F7810	Shots	func	crates/grid-app/src/replay.rs:110 grid-app::replay::Shots	docs/REPLAY_DIRECTOR_RESEARCH.md:131				original records its camera state at 30 Hz and interpolates it (0x7F7810,
+0x007F7810	Shots	func	crates/grid-app/src/replay.rs:111 grid-app::replay::Shots	docs/REPLAY_DIRECTOR_RESEARCH.md:131				original records its camera state at 30 Hz and interpolates it (0x7F7810,
 0x007F7CE0		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:107		[O]		0x640800 [O]: true when E is on its last race (0x7F7CE0: count > 0 and index +0x34 == count − 1)
-0x007F9CA0	inside	func	crates/grid-app/src/camera.rs:1682 grid-app::camera::inside ; crates/grid-app/src/main.rs:7470 grid-app::main (in drive_present)	docs/CAMERA_VIEWS.md:265			transition_lift	(0x7F9CA0).
+0x007F9CA0	inside	func	crates/grid-app/src/camera.rs:1682 grid-app::camera::inside ; crates/grid-app/src/main.rs:7470 grid-app::main (in drive_present)	docs/CAMERA_VIEWS.md:265			transition_lift	The blend's lift clears the car's collision box (0x7F9CA0).
 0x007FBA50		func	not ported	docs/DRIVING_ASSISTS_RESEARCH.md:58				The human controller (`FUN_007FBA50`, vtable `CFF25C`, name `"human"`) is built with gearbox mode 4.
 0x007FC030		func	not ported	docs/AI_AVOID_RECOVERY_RESEARCH.md:564 ; docs/AI_DRIVER_RESEARCH.md:117 ; docs/AI_DRIVER_PORT.md:177		[V]		packet +0x10, the steer word clamped by 0x7FC030. The same loop also consumes packet
 0x007FC2B0		func	not ported	docs/AUDIO_RESEARCH.md:1700				The race-session base 0x7F0500 (vtable 0xCFF378, constructor 0x7FC2B0, built by 0x67A9F9; its
@@ -1943,7 +1948,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00819820	zoom_step	func	crates/grid-app/src/replay/director.rs:455 grid-app::replay::director::zoom_step	docs/REPLAY_DIRECTOR_RESEARCH.md:74	F441 G130	[D]		with eye 0x819D20, target 0x8199B0, zoom 0x819820/0x808C30, turn 0x808E20)
 0x008199B0		func	crates/grid-app/src/replay/director.rs:16 grid-app::replay::director	docs/REPLAY_DIRECTOR_RESEARCH.md:68	F441 G130	[D]		with eye 0x819D20, target 0x8199B0, zoom 0x819820/0x808C30, turn 0x808E20)
 0x00819D20	projection_weight	func	crates/grid-app/src/replay/director.rs:260 grid-app::replay::director::projection_weight	docs/REPLAY_DIRECTOR_RESEARCH.md:71	F441 G130	[D]		with eye 0x819D20, target 0x8199B0, zoom 0x819820/0x808C30, turn 0x808E20)
-0x0081A110	director_lerp	func	crates/grid-app/src/replay/director.rs:234 grid-app::replay::director::lerp ; crates/grid-app/src/replay.rs:111 grid-app::replay::Shots	docs/REPLAY_DIRECTOR_RESEARCH.md:138			lerp	The original interpolates the recorded camera state (0x81A110).
+0x0081A110	director_lerp	func	crates/grid-app/src/replay/director.rs:234 grid-app::replay::director::lerp ; crates/grid-app/src/replay.rs:112 grid-app::replay::Shots	docs/REPLAY_DIRECTOR_RESEARCH.md:138			lerp	The original interpolates the recorded camera state (0x81A110).
 0x0081A500		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:84		[O]		not a function entry in the master analysis; (0x683E50 → E vf 0x38 = 0x81A500, the current leaf race; its +0x64/+0x68 vector), and not
 0x0081AAD0		func	not ported	docs/CAREER_RESEARCH.md:32				Database fields are fetched by name at run time (0x832900 table, 0x81AAD0/0x8329C0 field getters), so
 0x0081BCA0		func	not ported	docs/REPLAY_DIRECTOR_RESEARCH.md:138				not a function entry in the master analysis; 0x81BCA0 and 0x81A110 interpolate the record between frames. So the original does not re-run the
@@ -1990,7 +1995,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008326D0		func	not ported	docs/CAMERA_VIEWS.md:261		[I]		That the manager's entries are in file order is [I] (the parser loop was not traced; the restore fallback 0x832570 takes the first visible entry). 0x833DD0 c...
 0x00832900		func	not ported	docs/CAREER_RESEARCH.md:32				Database fields are fetched by name at run time (0x832900 table, 0x81AAD0/0x8329C0 field getters), so
 0x00833DD0	change_view	func	crates/grid-app/src/camera.rs:1961 grid-app::camera::change_view	docs/CAMERA_VIEWS.md:257	F461	[D]		Change View (0x833DD0): starts the blend from the current view to the
-0x008348F0	LOOK_BLEND	func	crates/grid-app/src/camera.rs:90 grid-app::camera::LOOK_BLEND ; crates/grid-app/src/main.rs:7487 grid-app::main (in drive_present)	docs/CAMERA_VIEWS.md:247	F499 F461	[D]	Look	Look input (0x8348F0 → slot 7 messages): the bumper/bonnet turn and the
+0x008348F0	LOOK_BLEND	func	crates/grid-app/src/camera.rs:90 grid-app::camera::LOOK_BLEND ; crates/grid-app/src/main.rs:7487 grid-app::main (in drive_present)	docs/CAMERA_VIEWS.md:247	F499 F461	[D]	Look	view as in the original (0x8348F0, docs/CAMERA_VIEWS.md "Look input").
 0x00834E60		func	not ported	docs/CAMERA_VIEWS.md:247		[I]		not a function entry in the master analysis; Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
 0x0083A130	recognised	func	crates/grid-app/src/input.rs:436 grid-app::input::generic_wheel	docs/PLATFORMS_AND_INPUT_RESEARCH.md:277			generic_wheel	fallback, 83A130). Laid out like the G25 preset: X steering biLower/biUpper dz 0 sat 1,
 0x0083E6D0	spring_step	func	crates/grid-app/src/camera.rs:82 grid-app::camera::SPRING_MIN_STEP ; crates/grid-app/src/lean.rs:3 grid-app::lean	docs/CAMERA_VIEWS.md:105 ; docs/COCKPIT.md:229 ; docs/FIDELITY_BACKLOG.md:113	F665 F472	[D]	SPRING_MIN_STEP	turned by a head spring, both driven by the seat's acceleration (0x83E6D0). | note: [D] also the driver lean springs (0x857F20 via 0x840710)
@@ -2126,8 +2131,13 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00868D50		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1174				not a function entry in the master analysis; `0x875AE0`, which stores it in `mgr+0x3880` (the other writers are `0x868D50`, no direct
 0x00868D60		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:335 ; docs/TYRE_SMOKE_RESEARCH.md:304	F319	[V]		InverseView uses the camera rows (`0x886FF9`, from `setCamera 0x868D60`); | note: merge retained theirs comment: InverseView uses the camera rows (`0x886FF9`, from `setCamera 0x868D60`);
 0x00869360	Random	func	crates/grid-tools/src/tyre_smoke.rs:964 grid-tools::tyre_smoke::Random	docs/TYRE_SMOKE_RESEARCH.md:219				Original particle LCG (0x869360).
+0x0086A880	post_fx_transition_set_mode	func	not ported	docs/FLASHBACK.md:156				not a function entry in the master analysis; with t by a factor), any other mode is t. Only 0x86A880 (never called) and the message handler
+0x0086A8A0	post_fx_transition_curve	func	crates/grid-app/src/flashback.rs:451 grid-app::flashback::balance	docs/FLASHBACK.md:154	F780	[D]		(0x86A910, curve 0x86A8A0) is linear unless its mode is 1
+0x0086A910	post_fx_transition_update	func	crates/grid-app/src/flashback.rs:451 grid-app::flashback::balance	docs/FLASHBACK.md:154	F780	[D]		(0x86A910, curve 0x86A8A0) is linear unless its mode is 1
+0x0086AA20	post_fx_transition_on_message	func	not ported	docs/FLASHBACK.md:157				not a function entry in the master analysis; 0x86AA20 set the mode; the PPS path does not, so PPS transitions are linear. The backend mix
 0x0086AB10	PostprocessFloatParamRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		_atof and binary32 store through node+0C
 0x0086AD10	PostprocessNamedParamsRead	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		Param payload dispatch to matching registered nodes
+0x0086AF10	post_fx_chain_mix_params	func	not ported	docs/FLASHBACK.md:159	F780	[D]		identical, cannot mix parameters.") and 0x86AF10 mixes each chain parameter by id with weight w;
 0x00871D40		func	crates/grid-app/src/replay/stream.rs:10 grid-app::replay::stream	docs/REPLAY.md:60		[D]		with overlapped unbuffered I/O at 0x871D40) created with the limit
 0x00872DF0		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:215				constructor `0x892480`, emitter update `0x89F1B0`, spawn `0x890A10` (position `0x872DF0`,
 0x00873880		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:216				velocity `0x873880`), particle update `0x8A9CC0`, render `0x886BD0`; create one-shot /
@@ -2178,6 +2188,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00892E90	postprocess_resolve_external_texture	func	not ported	docs/ORIGINAL_POSTPROCESS.md:224		[D]		inserts that wrapper into the builder's named map. Resolver `0x00892E90`
 0x00893F40		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:1175				inside 0x00893CC0; callers, and the manager constructor's clear at `0x893F40`).
 0x00895FB0	PostprocessGroupsCallbackByEffectId	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G375	[D]		select effect+98 id then group virtual+8 argument
+0x008962A0	post_fx_effect_system_mix	func	not ported	docs/FLASHBACK.md:158	F780	[D]		not a function entry in the master analysis; (vtable 0xCF4938 slot 4, 0x8962A0) needs both effects on the same chain ("Effect chains not
 0x008981B0		func	not ported	docs/RUNTIME_LIMITS_AUDIT.md:12 ; docs/TYRE_SMOKE_RESEARCH.md:214		[V]		Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D... | note: merge retained theirs comment: Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D...
 0x00898AD0		func	crates/grid-tools/src/tyre_smoke.rs:860 grid-tools::tyre_smoke (in smoke_only)	docs/TYRE_SMOKE_RESEARCH.md:214		[V]		Particle runtime (0x898DC0 system update, 0x898AD0 births, 0x89F1B0
 0x00898B7D		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:228				inside 0x00898AD0; by the system orientation, 0x898B7D–0x898C9A). Emitters emit along local +Z.
@@ -2217,17 +2228,17 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008C0950	postprocess_map_runtime_port_declarations	func	not ported	docs/ORIGINAL_POSTPROCESS.md:166		[D]		Input mapping `0x008C0950` retains separate runtime strings for graph alias
 0x008CA010	postprocess_compile_runtime_from_description	func	not ported	docs/ORIGINAL_POSTPROCESS.md:158		[D]		The runtime compiler at `0x008CA010` consumes a normalized description and creates
 0x008CAFC0		func	not ported	docs/ORIGINAL_POSTPROCESS.md:214				`local/handoff/drafts/`. One shared-master decompile of `0x008CAFC0` completed;
-0x008CE5F0		func	not ported	docs/RACE_HUD.md:548				appended keep their rest position; visibility is separate (0x8CE5F0). The lap-time stacker
-0x008CEBC0	shader_param_table_set	func	not ported	docs/RACE_HUD.md:593				`scrollY` to digit·0.1·0.91 (0x6A7AC0 → 0x8CEBC0). The port adds `Osd::scroll_y`, a per-node
-0x008CFE00		func	not ported	docs/RACE_HUD.md:536				block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
-0x008D0620		func	not ported	docs/RACE_HUD.md:544				translations, sorts them by rest y (top first, 0x8D0620), gives each the authored y gap to the
-0x008D0670		func	not ported	docs/RACE_HUD.md:545				next child (the last reuses the previous gap, 0x8D0670) and starts the cursor at the top child.
+0x008CE5F0		func	not ported	docs/RACE_HUD.md:549				appended keep their rest position; visibility is separate (0x8CE5F0). The lap-time stacker
+0x008CEBC0	shader_param_table_set	func	not ported	docs/RACE_HUD.md:594				`scrollY` to digit·0.1·0.91 (0x6A7AC0 → 0x8CEBC0). The port adds `Osd::scroll_y`, a per-node
+0x008CFE00		func	not ported	docs/RACE_HUD.md:537				block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
+0x008D0620		func	not ported	docs/RACE_HUD.md:545				translations, sorts them by rest y (top first, 0x8D0620), gives each the authored y gap to the
+0x008D0670		func	not ported	docs/RACE_HUD.md:546				next child (the last reuses the previous gap, 0x8D0670) and starts the cursor at the top child.
 0x008D2AA0		func	not ported	docs/RACE_HUD.md:362				reset 0x6A7180 selects `in` and seeks to fraction 0.5 (0x8D2AA0, 0x8D5820), so the pill rests face
-0x008D35D0		func	not ported	docs/RACE_HUD.md:546	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
-0x008D3670		func	not ported	docs/RACE_HUD.md:546	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
-0x008D3730		func	not ported	docs/RACE_HUD.md:543	F770	[V]		factory probably 0x8D5370 [I]). Build 0x8D3730 collects up to 32 children with their rest
-0x008D52D0		func	not ported	docs/RACE_HUD.md:542	F770	[V]		Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
-0x008D5370		func	not ported	docs/RACE_HUD.md:543		[I]		not a function entry in the master analysis; factory probably 0x8D5370 [I]). Build 0x8D3730 collects up to 32 children with their rest
+0x008D35D0		func	not ported	docs/RACE_HUD.md:547	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
+0x008D3670		func	not ported	docs/RACE_HUD.md:547	F770	[V]		Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
+0x008D3730		func	not ported	docs/RACE_HUD.md:544	F770	[V]		factory probably 0x8D5370 [I]). Build 0x8D3730 collects up to 32 children with their rest
+0x008D52D0		func	not ported	docs/RACE_HUD.md:543	F770	[V]		Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
+0x008D5370		func	not ported	docs/RACE_HUD.md:544		[I]		not a function entry in the master analysis; factory probably 0x8D5370 [I]). Build 0x8D3730 collects up to 32 children with their rest
 0x008D5820	play_part_once	func	crates/grid-app/src/osd_scene.rs:551 grid-app::osd_scene::play_part_once	docs/RACE_HUD.md:362				(0x8D5820).
 0x008D5900		func	not ported	docs/RACE_HUD.md:239	F383	[D]		`1.6` 16:10, `1.3` 4:3, `1.2` 5:4); a name without a range (0x8D5900) changes nothing, so a 20:9
 0x008D5CB0		func	crates/grid-app/src/race_osd.rs:9 grid-app::race_osd	docs/RACE_HUD.md:237	F383	[D]		grid.exe 0x8D5CB0; no range for other aspects keeps the default layout).
@@ -2237,8 +2248,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008EEF60	indicators	func	crates/grid-world/src/mechanical_damage.rs:63 grid-world::mechanical_damage::ICONS ; crates/grid-app/src/damage_hud.rs:3 grid-app::damage_hud	docs/MECHANICAL_DAMAGE.md:23 ; docs/SPEECH_CAREER_PARAMETERS.md:186	F333	[O]	ICONS	per-wheel states), driven by FUN_008EEF60 as ported in
 0x008EF250		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:185		[O]		looks up the `dialinterface` HUD object (0x8EF250, name at 0xE4EB78) and stores it at
 0x008EF920	hud_any_damage_indicator	func	crates/grid-tools/src/speech.rs:1537 grid-tools::speech ; crates/grid-app/src/speech_sound.rs:323 grid-app::speech_sound (in view)	docs/SPEECH_CAREER_PARAMETERS.md:186 ; docs/SPEECH_AUDIO_RESEARCH.md:905		[O]		Any HUD damage icon is lit (0x8EF920 → `indicators`), read only with a no-damage objective.
-0x008EFA60		func	not ported	docs/RACE_HUD.md:535	F770 F763	[V]		Boost [D: bind 0x8EFA60, dial start 0x8EFD50]: the only reader copies the player vehicle's +0xDE4
-0x008EFD50		func	not ported	docs/RACE_HUD.md:535	F770	[V]		Boost [D: bind 0x8EFA60, dial start 0x8EFD50]: the only reader copies the player vehicle's +0xDE4
+0x008EFA60		func	not ported	docs/RACE_HUD.md:536	F770 F763	[V]		Boost [D: bind 0x8EFA60, dial start 0x8EFD50]: the only reader copies the player vehicle's +0xDE4
+0x008EFD50		func	not ported	docs/RACE_HUD.md:536	F770	[V]		Boost [D: bind 0x8EFA60, dial start 0x8EFD50]: the only reader copies the player vehicle's +0xDE4
 0x008F1050	incar_plugin_select_lod	func	not ported		F672			Symbols: 7 new rows, 3 updated (0x85D310, 0x862300, 0x862850, 0x848E50, 0x848E40, 0x84A930, 0x84A810, 0x8494C0, 0x8F1050, 0x85E720). | note: gate of the driver LOD pass (plugin +0x70 == 3, 0xDB0201) [D]
 0x008F1A20		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1186				then `0x8F1A20` stores it). Which shipped file holds it was not traced [open].
 0x008F1A70		func	not ported	docs/TYRE_SMOKE_RESEARCH.md:1185				not a function entry in the master analysis; The grid comes from a loaded resource node (`0x8F1A70` checks the node type at `0xD032F8`,
@@ -2271,7 +2282,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00908450	micros	func	crates/grid-tools/src/virtual_race.rs:208 grid-tools::virtual_race::micros	docs/DISCIPLINES.md:477				results are 64-bit microseconds (0x908450 from seconds × 1e6 truncated,
 0x00908470	scale	func	crates/grid-tools/src/virtual_race.rs:315 grid-tools::virtual_race::scale	docs/RACE_RULES_RESEARCH.md:117				0x908470: a microsecond count times a factor (as double), truncated.
 0x00908820	seconds	func	crates/grid-tools/src/virtual_race.rs:213 grid-tools::virtual_race::seconds	docs/DISCIPLINES.md:481				0x908820 back × 1e-6).
-0x00908860	format_lemans_time	func	crates/grid-tools/src/race.rs:107 grid-tools::race::format_lemans_time ; crates/grid-app/src/post_race.rs:631 grid-app::post_race (in time_text) ; crates/grid-app/src/pause_menu/race_tests.rs:917 grid-app::pause_menu::race_tests (in a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress)	docs/RACE_HUD.md:481	F763	[V]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
+0x00908860	format_lemans_time	func	crates/grid-tools/src/race.rs:107 grid-tools::race::format_lemans_time ; crates/grid-app/src/post_race.rs:687 grid-app::post_race (in time_text) ; crates/grid-app/src/pause_menu/race_tests.rs:917 grid-app::pause_menu::race_tests (in a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress)	docs/RACE_HUD.md:481	F763	[V]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
 0x00908C60	split	func	crates/grid-tools/src/virtual_race.rs:309 grid-tools::virtual_race::split			[I]		Split `i`, 0 for a split not recorded [I 0x908C60].
 0x00908CF0	order	func	crates/grid-tools/src/race.rs:529 grid-tools::race::order	docs/LE_MANS.md:102 ; docs/RACE_RULES_RESEARCH.md:72	F308	[V]		unfinished cars rank by race progress [V 0x908cf0];
 0x00908F20		func	not ported	docs/RACE_RULES_RESEARCH.md:191		[V]		(0x908F20(0) = the car whose position is 0) is within 20 m of the line.
@@ -2288,7 +2299,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0090A790	catch_up	func	crates/grid-formats/src/ai.rs:592 grid-formats::ai::catch_up	docs/AI_MISTAKES_PACING_RESEARCH.md:434				The first `catch_up` config whose `user name` is `user` (loader 0x90A790);
 0x0090AB50		func	not ported	docs/PROGRESS_AND_SPAWN.md:23				Follow-up establishes that `0x0090ab50` accepts slot IDs and constructs three world points from the marker's bounding box and transform. Its output is a rect...
 0x0090B5B0	class_positions	func	crates/grid-tools/src/race.rs:581 grid-tools::race::class_positions	docs/RACE_RULES_RESEARCH.md:72		[V]		order [V 0x90B5B0]: the class is `vehicle_class.lemans_sort_order`
-0x0090BDB0		func	not ported	docs/RACE_HUD.md:527		[I]		for F 3 and 9; the distance is Euclidean for F 4, else signed along the track (0x90BDB0).
+0x0090BDB0		func	not ported	docs/RACE_HUD.md:528		[I]		for F 3 and 9; the distance is Euclidean for F 4, else signed along the track (0x90BDB0).
 0x0090BDE0	trackpos_is_ahead	func	not ported	docs/RESET_AND_RESPAWN_RESEARCH.md:130	F762	[I]		the finish) is clamped to it (0x90BDE0: "is this trackpos ahead of that one").
 0x0090BEA0		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:325				(0x90BEA0, same route only).
 0x0090BEC0	trackpos_step_back	func	crates/grid-world/src/reset_lines.rs:159 grid-world::reset_lines::OVERLAP_STEP	docs/RESET_AND_RESPAWN_RESEARCH.md:118	F762			Metres stepped back along the line per retry (0x90C0C0(1.0) -> 0x90BEC0).
@@ -2315,7 +2326,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0090EF10		func	not ported	docs/RACE_RULES_RESEARCH.md:48		[V]		not a function entry in the master analysis; | vf 5 (0x90EF10) | +0x18 | laps completed [V] |
 0x0090F750		func	not ported	docs/RACE_RULES_RESEARCH.md:51		[V]		not a function entry in the master analysis; | vf 20 (0x90F750) | +0x74 | status: 0 racing, 1 finished [V]; 3 is excluded from gate processing by 0x913BE0 [V], meaning not traced |
 0x0090F880		func	crates/grid-tools/src/race.rs:19 grid-tools::race	docs/LE_MANS.md:97	F429 G130	[V]		0x912170, 0x90E1B0, 0x90F880, 0x908CF0; docs/LE_MANS.md §2].
-0x0090FCD0	estimate_laps	func	crates/grid-tools/src/race.rs:141 grid-tools::race::estimate_laps ; crates/grid-app/src/post_race.rs:55 grid-app::post_race ; crates/grid-app/src/main.rs:7028 grid-app::main (in drive_actions)	docs/RACE_RULES_RESEARCH.md:82 ; docs/DISCIPLINES.md:497 ; docs/RESET_AND_RESPAWN_RESEARCH.md:465	F759	[V]	finalize lap_times	Finish time was estimated when the race was ended [V 0x90FCD0]. | note: merge retained additional port provenance: crates/grid-app/src/main.rs:4273 grid-app::main (in drive_actions)
+0x0090FCD0	estimate_laps	func	crates/grid-tools/src/race.rs:141 grid-tools::race::estimate_laps ; crates/grid-app/src/main.rs:7028 grid-app::main (in drive_actions) ; crates/grid-app/src/post_race.rs:55 grid-app::post_race	docs/RACE_RULES_RESEARCH.md:82 ; docs/DISCIPLINES.md:497 ; docs/RESET_AND_RESPAWN_RESEARCH.md:465	F759	[V]	finalize lap_times	still racing are estimated or, below 5 mph, retired [V 0x90FCD0]. | note: merge retained additional port provenance: crates/grid-app/src/main.rs:4273 grid-app::main (in drive_actions)
 0x00911530		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:719				`m2`: 0x911530, 0x90DA20, 0x5C5B50;
 0x00911590	catch_up_max_distance	func	crates/grid-tools/src/ai_pacing.rs:285 grid-tools::ai_pacing::catch_up_max_distance	docs/AI_MISTAKES_PACING_RESEARCH.md:443				Catch-up maximum distance with useLeadForMaxDistance (0x911590).
 0x00911630		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:455				Then `f = catch-up power` if the car's entry is active (0x911630).
@@ -2353,7 +2364,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0091BA70		func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:785	F622	[O]		`track_order_sort` (0x91B240, through 0x91BA70) is an insertion sort, ascending by the key (the
 0x0091BCB0	track_order_add	func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:787		[O]		`track_order_add` (0x91BCB0) adds an entry; `track_order_find` (0x46E8D0) finds an entry's node.
 0x0091C000		func	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:730				not a function entry in the master analysis; (0x908000–0x91C000), `race5b.dis` (0x5B0000–0x5D0000).
-0x0091CC00		func	crates/grid-app/src/replay/stream.rs:7 grid-app::replay::stream ; crates/grid-app/src/replay/player.rs:16 grid-app::replay::player	docs/REPLAY.md:56	F360	[D]		`system/updateMemoryMap.xml`; seeks clamp to its oldest time (0x91CC00),
+0x0091CA80	replay_engine_begin_window	func	not ported	docs/REPLAY.md:377		[D]		start Te (0x91CA80, amount 0) and START to max(W − 10 s [0xDB4FE4], oldest frame) (0x91CC00),
+0x0091CC00	replay_engine_set_start	func	crates/grid-app/src/replay.rs:578 grid-app::replay::terminal_start ; crates/grid-app/src/replay/stream.rs:7 grid-app::replay::stream ; crates/grid-app/src/replay/player.rs:16 grid-app::replay::player	docs/REPLAY.md:56	F780 F360	[D]		max(crash − 10 s [0xDB4FE4], oldest frame) (0x91CC00); rewind stops
 0x0091CEE0	set_time_scale	func	not ported	docs/FLASHBACK.md:135		[D]		time scale 0x91CEE0 to the constant at 0xCAFCD4, else 1.0.
 0x0091D4B0		func	not ported	docs/MECHANICAL_DAMAGE.md:122				glow (453A70), a total-damage percentage (424650) and the network sync packer (91D4B0).
 0x0091DF40		func	not ported	docs/DRIVING_ASSISTS_RESEARCH.md:96				AI and scripted controllers set +E6C = 1 (`6E2A90`, `91DF40`).
@@ -2365,22 +2377,23 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0092E0E0		func	crates/grid-app/src/replay/stream.rs:11 grid-app::replay::stream	docs/REPLAY.md:61		[D]		0x7D000000 bytes (0x92E0E0), which keeps the whole race for the full
 0x0092E440		func	not ported		F339	[I]		A 40-entry request queue (9AB790 → 9DCFA0) carries network (9D77B0, 92E440), repair (5EC370) and hinge requests.
 0x0092F9E0		func	crates/grid-app/src/replay/frame.rs:7 grid-app::replay::frame	docs/REPLAY.md:40	F360	[D]		(0x92F9E0: both matrices to quaternions, slerp, `[interpolation=%f]`). The
-0x00930000		label	not ported	docs/REPLAY.md:242				inside 0x0092F9E0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
+0x00930000		label	not ported	docs/REPLAY.md:248				inside 0x0092F9E0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
 0x009335F0		func	not ported	docs/ROBUSTNESS_RESEARCH.md:49				(activate pooled objects inside a box) and from the replay code 0x9335F0. It is not a prop
 0x00936670		func	not ported	docs/REPLAY.md:55		[D]		an in-memory buffer constructed with 0x380000 bytes (3.5 MiB) at 0x64EDDF → 0x936670 [D]. Seeks
 0x009366F0		func	not ported	docs/REPLAY.md:54				Two replay buffers** (0x9366F0 registers two handles):
 0x00936B50		func	not ported	docs/TOUGE.md:56				selects `subroute_0` (string 0xCEA054) through 0x936B50;
-0x00937150	time_allowed	func	crates/grid-tools/src/flashback.rs:99 grid-tools::flashback::time_allowed ; crates/grid-app/src/replay.rs:166 grid-app::replay	docs/FLASHBACK.md:70	F366	[D]		0x542A00: 0x937150 and 0x4CAD80).
-0x0093C9D0	replay_director_set_cameras	func	crates/grid-app/src/replay/director.rs:209 grid-app::replay::director	docs/REPLAY.md:365	F778	[I]		(0x93C9D0), which shows this one while the director's terminal flag
+0x00937150	time_allowed	func	crates/grid-tools/src/flashback.rs:99 grid-tools::flashback::time_allowed ; crates/grid-app/src/replay.rs:168 grid-app::replay	docs/FLASHBACK.md:70	F366	[D]		0x542A00: 0x937150 and 0x4CAD80).
+0x0093C9D0	replay_director_set_cameras	func	crates/grid-app/src/replay/director.rs:209 grid-app::replay::director	docs/REPLAY.md:370	F778	[I]		(0x93C9D0), which shows this one while the director's terminal flag
 0x0093D000		func	not ported	docs/REPLAY.md:35	F360	[D]		(0x93D000) begins a frame at the replay time and calls every recordable's write (vtable +4),
-0x0093DDA0	replay_cut	func	crates/grid-app/src/replay.rs:206 grid-app::replay::cut ; crates/grid-app/src/replay/stream.rs:144 grid-app::replay::stream::truncate ; crates/grid-app/src/flashback/race_tests.rs:200 grid-app::flashback::race_tests (in check)	docs/FLASHBACK.md:83 ; docs/REPLAY.md:347	F366	[D]	cut truncate	The frame at or before the replay time [D 0x93DDA0]; the stream is cut
+0x0093DDA0	replay_cut	func	crates/grid-app/src/replay.rs:208 grid-app::replay::cut ; crates/grid-app/src/replay/stream.rs:144 grid-app::replay::stream::truncate ; crates/grid-app/src/flashback/race_tests.rs:200 grid-app::flashback::race_tests (in check)	docs/FLASHBACK.md:83 ; docs/REPLAY.md:353	F366	[D]	cut truncate	The frame at or before the replay time [D 0x93DDA0]; the stream is cut
 0x0093DFE0		func	not ported	docs/REPLAY.md:50		[D]		@ 30Hz)" [D]. A frame is written per game update [D: 0x93DFE0 → 0x93D000]; the game update rate
 0x0093F770	replay_director_find_terminal_camera	func	crates/grid-app/src/replay/director.rs:214 grid-app::replay::director::TERMINAL	docs/REPLAY.md:150	F778	[D]	TERMINAL	ident starts with `TERMINAL` (0x93F770 compares 8 characters). The
-0x0093F840	replay_director_set_terminal	func	crates/grid-app/src/replay/director.rs:208 grid-app::replay::director	docs/REPLAY.md:365	F778	[I]		zone handler 0x93F840 hands both cameras to the replay controller
+0x0093F840	replay_director_set_terminal	func	crates/grid-app/src/replay/director.rs:208 grid-app::replay::director	docs/REPLAY.md:370	F778	[I]		zone handler 0x93F840 hands both cameras to the replay controller
 0x00942460	replay_register_recordable	func	crates/grid-app/src/replay_effects.rs:13 grid-app::replay_effects	docs/REPLAY.md:75	F769	[V]		(names through 0x942460). The port re-runs the deterministic presentation
-0x00942D7E		label	not ported	docs/REPLAY.md:243	F778	[I]		inside 0x00942C60; immediate 0x1F found only unrelated sites (0x5BFF24, 0x942D7E). The interface draws a save (hold)
+0x00942D7E		label	not ported	docs/REPLAY.md:249	F778	[I]		inside 0x00942C60; immediate 0x1F found only unrelated sites (0x5BFF24, 0x942D7E). The interface draws a save (hold)
 0x00943FF0		func	crates/grid-app/src/replay/player.rs:6 grid-app::replay::player	docs/REPLAY.md:102				paused 0, scrub `+0xA84 x shuttle x dt` (+0xA84 starts at 1.0, 0x943FF0);
-0x00944430	player_SLOW	func	crates/grid-app/src/replay/player.rs:26 grid-app::replay::player::SLOW	docs/RACE_HUD.md:506 ; docs/REPLAY.md:93	F360	[D]	SLOW	0x944430 advances replay time per frame by mode: play `shuttle x dt`,
+0x009440F0	replay_player_set_mode	func	not ported	docs/REPLAY.md:379		[D]		0xE6E008/0xE6E010/0xE6E018. It plays (0x9440F0(1)) then pauses (0x9440F0(2)) the player, which
+0x00944430	replay_player_step	func	crates/grid-app/src/replay/player.rs:26 grid-app::replay::player::SLOW	docs/RACE_HUD.md:506 ; docs/REPLAY.md:93	F360	[D]	SLOW	0x944430 advances replay time per frame by mode: play `shuttle x dt`,
 0x00944710		func	crates/grid-app/src/replay/player.rs:7 grid-app::replay::player	docs/REPLAY.md:104		[D]		0x944710 reads the rewind and fast-forward actions: when either is above
 0x00944E00		func	not ported	docs/DEFORMATION_GRID.md:136				Successful Ghidra helper survey `local/behavior/20261008T2042548580424Z/` covers9D4210,989BF0,A69340,944E00,9A14D0,9A15D0,A06050. Aligned `impact-producer-he...
 0x00949790		func	not ported	docs/RACE_RULES_RESEARCH.md:199		[V]		not a function entry in the master analysis; corner_cutting** [V]: every method is a stub (load 0x949790 and update 0x9497C0 return 0; the
@@ -2415,7 +2428,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0094BA10	FlagInstance_inZone	func	crates/grid-tools/src/race_flags.rs:475 grid-tools::race_flags::in_zone	docs/RACE_RULES_RESEARCH.md:245		[V]	in_zone	not a function entry in the master analysis; `track_distance_after` past it [V 0x94B440, 0x94B2A0, 0x949960, 0x94BA10].
 0x0094FAF0		func	crates/grid-app/src/ground_detail.rs:3 grid-app::ground_detail	docs/GROUND_EFFECTS_RESEARCH.md:374		[D]		vertices 94FAF0, update 97EDE0). `grass.grs`, `ground_cover.xml` and
 0x0094FEA0		func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:362		[V]		Loader `97EAB0`/`94FEA0`.
-0x00950000		label	not ported	docs/REPLAY.md:242				inside 0x0094FFF0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
+0x00950000		label	not ported	docs/REPLAY.md:248				inside 0x0094FFF0; and of the replay code (0x570000–0x5A0000, 0x930000–0x950000, 0x6D0000–0x6F0000) for an
 0x009514F0		func	not ported	docs/TRACK_LOD.md:409				00619AD0, 00951E40, 0095D2A0, 00951C40, 0095D880, 0095D5D0, 0095D200, 00951CB0, 009514F0,
 0x00951740		func	not ported	docs/TRACK_LOD.md:410				00951740, 00951940, 0096EC80, 0096FBC0, 00965790, 00979430, 00979590, 005C8080, 005C88D0,
 0x00951940		func	not ported	docs/TRACK_LOD.md:410				00951740, 00951940, 0096EC80, 0096FBC0, 00965790, 00979430, 00979590, 005C8080, 005C88D0,
@@ -3618,7 +3631,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CAF460		global	not ported	docs/AI_AVOID_RECOVERY_LIVE.md:148 ; docs/AI_PATH_OBSTACLE_SCAN.md:102 ; docs/SOURCE_SKY_LIGHTING.md:43				A static executable-section scan identifies the direct dispatcher caller at 0x735675. Aligned instruction decoding around it shows the temporary render conte... | note: merge retained theirs comment: with 0xCAF410 builds the """"""""""""""""clear y"""""""""""""""" mask"""""""""""""""
 0x00CAF470		global	not ported	docs/AI_AVOID_RECOVERY_LIVE.md:83 ; docs/AI_DRIVER_PORT.md:146 ; docs/AI_PATH_OBSTACLE_SCAN.md:104		[V]		the original 0x77AC50 uses −ω·up (sign mask 0xCAF470 = 0x80000000 in all lanes), the port | note: merge retained theirs comment: sign bits ×4 | note: merge retained theirs comment: negate (xorps) | note: merge retained theirs comment: negate (xorps) |
 0x00CAF888	mechanical_damage_gain	vtable	crates/grid-world/src/mechanical_damage.rs:38 grid-world::mechanical_damage::gain ; crates/grid-tools/src/damage_audio.rs:320 grid-tools::damage_audio (in steer)	docs/AI_PATH_OBSTACLE_SCAN.md:22 ; docs/AUDIO_RESEARCH.md:1632 ; docs/AI_AVOID_RECOVERY_LIVE.md:154	F306	[V]	gain	BF4E44 is sin; the counter grows by [CAF888] = 1 a tick. | note: merge retained additional doc provenance: docs/BRAKING_REFERENCE.md:360 ; docs/CONTACT_DIRECTIONS.md:23 | note: merge retained theirs comment: BF4E44 is sin; the counter grows by [CAF888] = 1 a tick.
-0x00CAF88C		vtable	crates/grid-app/src/camera.rs:1294 grid-app::camera::shake_table ; crates/grid-app/src/post_race.rs:187 grid-app::post_race::REST_ANGULAR ; crates/grid-tools/src/hud_audio.rs:158 grid-tools::hud_audio (in parse)	docs/AI_PATH_OBSTACLE_SCAN.md:22 ; docs/AI_AVOID_RECOVERY_LIVE.md:154 ; docs/AUDIO_RESEARCH.md:233	F306	[V]		0xCB01AC, 0xCAF88C); f64 with the constants widened reproduces all 6000 | note: merge retained additional doc provenance: docs/CAMERA_VIEWS.md:144
+0x00CAF88C		vtable	crates/grid-tools/src/hud_audio.rs:158 grid-tools::hud_audio (in parse) ; crates/grid-app/src/camera.rs:1294 grid-app::camera::shake_table ; crates/grid-app/src/post_race.rs:202 grid-app::post_race::REST_ANGULAR	docs/AI_PATH_OBSTACLE_SCAN.md:22 ; docs/AI_AVOID_RECOVERY_LIVE.md:154 ; docs/AUDIO_RESEARCH.md:233	F306	[V]		Constants 0xCB0BC0 (-48), 0xCAF88C (0.5), 0xCB8DA4 (2). | note: merge retained additional doc provenance: docs/CAMERA_VIEWS.md:144
 0x00CAF89C		global	not ported	docs/AI_PATH_OBSTACLE_SCAN.md:106				| 0xCAF89C | 3.4028235e38 (FLT_MAX) | initial best time; initial hit distance |
 0x00CAFA58	REPLAY_BEYOND	global	crates/grid-tools/src/ambience_audio.rs:27 grid-tools::ambience_audio::REPLAY_BEYOND ; crates/grid-tools/src/ai_driver.rs:2328 grid-tools::ai_driver::MISTAKE_SPIN_TIME	docs/AI_MISTAKES_PACING_RESEARCH.md:255 ; docs/AUDIO_RESEARCH.md:1849 ; docs/DEMOLITION_DERBY.md:38		[V]		random arm timeout (0xCAFEC4 60 s), the cancel speed (0xCAFA58 10 m/s), the
 0x00CAFB70		global	not ported	docs/RACE_RULES_RESEARCH.md:166		[D]		(parser 0x401AA0, strings 0xCAFB70/0xCAFB54);
@@ -3631,7 +3644,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CAFC54		vtable	not ported	docs/AI_MISTAKES_PACING_RESEARCH.md:65 ; docs/AI_DRIVER_PORT.md:103	F444 G130			vtable 0xCAFC54 and the stack layout of 0x402D20). Found by the live first-corner comparison
 0x00CAFC90		vtable	not ported	docs/AI_DRIVER_PORT.md:150				The AI car state (class vtable 0xCAFC90, constructor 0x775EC0) is filled each tick by
 0x00CAFCD0		global	not ported	docs/AI_AVOID_RECOVERY_LIVE.md:341 ; docs/AI_AVOID_RECOVERY_RESEARCH.md:756				0xA6A1F0, the 700 constant 0xCAFCD0), and whether other cars below 2 m/s count as
-0x00CAFCD4	DEAD_ZONE	global	crates/grid-app/src/post_race.rs:187 grid-app::post_race::REST_ANGULAR ; crates/grid-app/src/replay/player.rs:21 grid-app::replay::player::DEAD_ZONE ; crates/grid-app/src/camera.rs:72 grid-app::camera::DRIFT_SPEED	docs/AI_AVOID_RECOVERY_LIVE.md:343 ; docs/AI_MISTAKES_PACING_RESEARCH.md:309 ; docs/AI_OVERTAKING_RESEARCH.md:420	F753	[V]	REST_ANGULAR	Drift blend (0x8114B0): speed (0xCB093C) and rate (0xCAFCD4) of the slip | note: merge retained additional port provenance: crates/grid-app/src/camera.rs:62 grid-app::camera::DRIFT_SPEED | note: merge retained additional doc provenance: docs/CAMERA_VIEWS.md:79 | note: merge retained confidence provenance: base=[D] ; ours=[D] ; theirs=[O]
+0x00CAFCD4	DEAD_ZONE	global	crates/grid-app/src/post_race.rs:181 grid-app::post_race::WRECK_SLOW ; crates/grid-app/src/replay/player.rs:21 grid-app::replay::player::DEAD_ZONE ; crates/grid-app/src/camera.rs:72 grid-app::camera::DRIFT_SPEED	docs/FLASHBACK.md:135 ; docs/AI_AVOID_RECOVERY_LIVE.md:343 ; docs/AI_MISTAKES_PACING_RESEARCH.md:309	F780 F753	[V]	REST_ANGULAR WRECK_SLOW	Drift blend (0x8114B0): speed (0xCB093C) and rate (0xCAFCD4) of the slip | note: merge retained additional port provenance: crates/grid-app/src/camera.rs:62 grid-app::camera::DRIFT_SPEED | note: merge retained additional doc provenance: docs/CAMERA_VIEWS.md:79 | note: merge retained confidence provenance: base=[D] ; ours=[D] ; theirs=[O]
 0x00CAFDB8	MOUNTED_ACCELERATION	global	crates/grid-app/src/camera.rs:76 grid-app::camera::MOUNTED_ACCELERATION ; crates/grid-formats/src/ai.rs:901 grid-formats::ai (in choreographer)	docs/CAMERA_VIEWS.md:178 ; docs/DISCIPLINES.md:410				Mounted acceleration divisor (0xCAFDB8): Δv / (dt · 30).
 0x00CAFE10	Message	vtable	crates/grid-tools/src/ai_pacing.rs:400 grid-tools::ai_pacing::Message	docs/SPEECH_AUDIO_RESEARCH.md:443				An `AIChoreographerEvent` (vtable 0xCAFE10) that the runner 0x408E50
 0x00CAFE40		global	not ported	docs/AI_PATH_OBSTACLE_SCAN.md:105				| 0xCAFE40 | 0x7FFFFFFF in lane 0 | fabsf |
@@ -3749,12 +3762,14 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CD77E0		vtable	not ported	docs/AUDIO_RESEARCH.md:714	F493	[O]		the state class with vtable CD77E0 reads `mode` (name lookup 4709D0 → 411AE0) and
 0x00CD82D0	vtable_StateFlashbackTransition	vtable	not ported	docs/FLASHBACK.md:120		[D]		StateFlashbackTransition [D, static].** 0x579FE0 (vtable 0xCD82D0) loads the state; it was
 0x00CD8304	str_replay_driver2	global	not ported	docs/FLASHBACK.md:132		[D]		the car's `replay_driver2` view (string 0xCD8304); `selectReplayCamera` calls 0x92D110(1,0)
+0x00CD8AC4	state_instant_replay_vtable	vtable	not ported	docs/FLASHBACK.md:240	F780	[D]		(0x7EADD0) and zeroes every device (0x7E8450); its exit 0x57B180 (vtable 0xCD8AC4 slot 10, the
 0x00CD8D60		vtable	not ported	docs/FRONT_END_FLOW.md:152		[V]		[V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
 0x00CD8DE0		vtable	not ported	docs/FRONT_END_FLOW.md:146		[V]		[V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
 0x00CD8E14		global	not ported	docs/FRONT_END_FLOW.md:149		[V]		Otherwise it is `stats` (0xCD8E14). The link getter is 0x57BD20.
 0x00CD8E1C		global	not ported	docs/FRONT_END_FLOW.md:147		[V]		chooses the link. `standings` (string 0xCD8E1C) is chosen only when the game mode at
 0x00CD9F24		vtable	not ported	docs/CAMERA_VIEWS.md:269				+0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
 0x00CDA548		vtable	not ported	docs/RACE_HUD.md:501	F763	[D]		Wreck-screen delay [D]: `StateTerminalDamageDelay` (vtable 0xCDA548; 0x5A5990 is only a shared
+0x00CDA57C	state_terminal_damage_replay_vtable	vtable	not ported	docs/REPLAY.md:151	F780	[O]		6.0, `full_replay` false; states.txt:9430) [O]; `StateTerminalDamageReplay` (vtable 0xCDA57C,
 0x00CDB624		vtable	not ported	docs/CAMERA_VIEWS.md:247		[D]		Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
 0x00CDDD10		global	not ported	docs/FRONT_END_FLOW.md:175				| `StateRaceLoadCoordinator` | 0xCDDD10 |
 0x00CDDD4C		global	not ported	docs/FRONT_END_FLOW.md:172				| `StateLoading` | 0xCDDD4C |
@@ -3810,8 +3825,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CEB9D8		vtable	not ported	docs/RACE_HUD.md:423				`rd4minimap` attach (vtable 0xCEB9D8, not decompiled). Its strings name render instances for the
 0x00CEBEA0		vtable	not ported	docs/RACE_HUD.md:360				degrees. The `playersposition` attach (factory vtable 0xCEBF24, object vtable 0xCEBEA0) binds
 0x00CEBF24		vtable	not ported	docs/RACE_HUD.md:360				degrees. The `playersposition` attach (factory vtable 0xCEBF24, object vtable 0xCEBEA0) binds
-0x00CEBF3C		vtable	not ported	docs/RACE_HUD.md:583				Combo panel (`object/driftcombo_main=drift_combo`, the `drifteffect` attach, vtable 0xCEBF3C,
-0x00CEC06C		vtable	not ported	docs/RACE_HUD.md:591				text: each `text_single`/`text_echo` glyph is a strip of ten, and the attach (vtable 0xCEC06C,
+0x00CEBF3C		vtable	not ported	docs/RACE_HUD.md:584				Combo panel (`object/driftcombo_main=drift_combo`, the `drifteffect` attach, vtable 0xCEBF3C,
+0x00CEC06C		vtable	not ported	docs/RACE_HUD.md:592				text: each `text_single`/`text_echo` glyph is a strip of ten, and the attach (vtable 0xCEC06C,
 0x00CEC0B8		vtable	not ported	docs/AUDIO_RESEARCH.md:1685	F589	[O]		The box [O].** The `object/messagebox=counter` widget (vtable 0xCEC0B8, constructor 0x69FF90,
 0x00CEC6AC		vtable	not ported	docs/RACE_HUD.md:411		[D]		animation's slot 0x2C (command vtable 0xCEC6AC, execute 0x6C01A0); the node (+0x260) is shown
 0x00CEC820		vtable	not ported	docs/RACE_HUD.md:491				HUD widget at HUD+0x6CC (ctor 0x6A5ED0, vtable 0xCEC820, no per-frame update) and hides it; the HUD
@@ -3832,6 +3847,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CF3108		global	not ported	docs/SOURCE_SKY_LIGHTING.md:43				A static executable-section scan identifies the direct dispatcher caller at 0x735675. Aligned instruction decoding around it shows the temporary render conte...
 0x00CF3354		global	not ported		F365	[V]		Test build [V] (deleted again, see Controls): `grid-069ae995f66c-bundled-PRIVATE-debug.apk`, 233,384,090 bytes, sha256 `71094790…f07512`, libgrid_android.so ...
 0x00CF354C	lighting_key_back_colour	global	not ported	docs/SOURCE_SKY_LIGHTING.md	G330	[D]		Literal backlight_backcolour in hash-pinned unpacked PE.
+0x00CF4938	post_fx_effect_system_vtable	vtable	not ported	docs/FLASHBACK.md:158				(vtable 0xCF4938 slot 4, 0x8962A0) needs both effects on the same chain ("Effect chains not
 0x00CF5004	neanim_scene_binding_field_name	global	not ported	docs/CROWD_ANIMATION_RESEARCH.md:336		[D]		`sceneBinding`. Metadata `E52084` pairs that name at `CF5004` with key
 0x00CF5A28		global	not ported	docs/CROWD_ANIMATION_RESEARCH.md:893				0xCF5A28 with name map0xE4CA4C. The actual wrapper and XML Factor-name lookup
 0x00CF5A98		vtable	not ported	docs/CROWD_ANIMATION_RESEARCH.md:480				allocates the concrete job, installs vtable `0x00CF5A98` and inserts it into the
@@ -3931,13 +3947,13 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CFFDBC		global	crates/grid-app/src/camera.rs:93 grid-app::camera::LOOK_BLEND	docs/CAMERA_VIEWS.md:251				0xE4DDA4); the head's look pitch is maxHeadLook · 0.00523599 (0xCFFDBC)
 0x00D00008		vtable	not ported	docs/AUDIO_RESEARCH.md:104 ; docs/CAMERA_VIEWS.md:50 ; docs/REPLAY_DIRECTOR_RESEARCH.md:33	F349	[D]		Mounted: vtable 0xD00008, binder 0x7F4BE0; | note: merge retained theirs comment: 0xD00278, name """"""""""""""""Chase"""""""""""""""") passes 0, Mounted (vtable 0xD00008) 1, Head (vtable"""""""""""""""
 0x00D00070		global	not ported	docs/REPLAY_DIRECTOR_RESEARCH.md:33				The other camera classes have vtables 0xD00008, 0xD00070, 0xD00140, 0xD00210 and 0xD00278. They
-0x00D000D8		vtable	crates/grid-app/src/replay/director.rs:17 grid-app::replay::director	docs/REPLAY.md:175 ; docs/REPLAY_DIRECTOR_RESEARCH.md:31	F441 G130	[D]		and the static camera class (vtable 0xD000D8, binder 0x7F57C0, update
+0x00D000D8		vtable	crates/grid-app/src/replay/director.rs:17 grid-app::replay::director	docs/REPLAY.md:180 ; docs/REPLAY_DIRECTOR_RESEARCH.md:31	F441 G130	[D]		and the static camera class (vtable 0xD000D8, binder 0x7F57C0, update
 0x00D00140		vtable	not ported	docs/CAMERA_VIEWS.md:51 ; docs/AUDIO_RESEARCH.md:105 ; docs/REPLAY_DIRECTOR_RESEARCH.md:33	F472 F349	[D]		Head: vtable 0xD00140, binder 0x7F3A70. | note: merge retained theirs comment: 0xD00140) 3; other classes pass 2. So bumper and bonnet use the **Bonnet**
-0x00D001A8		vtable	crates/grid-app/src/replay/director.rs:15 grid-app::replay::director	docs/REPLAY.md:175 ; docs/REPLAY_DIRECTOR_RESEARCH.md:30	F441 G130	[D]		0xD001A8: parameter binder 0x7F7590, activation 0x843700, update 0x824160
+0x00D001A8		vtable	crates/grid-app/src/replay/director.rs:15 grid-app::replay::director	docs/REPLAY.md:180 ; docs/REPLAY_DIRECTOR_RESEARCH.md:30	F441 G130	[D]		0xD001A8: parameter binder 0x7F7590, activation 0x843700, update 0x824160
 0x00D00210		global	not ported	docs/REPLAY_DIRECTOR_RESEARCH.md:33				The other camera classes have vtables 0xD00008, 0xD00070, 0xD00140, 0xD00210 and 0xD00278. They
 0x00D00278		vtable	not ported	docs/CAMERA_VIEWS.md:49 ; docs/AUDIO_RESEARCH.md:104 ; docs/REPLAY_DIRECTOR_RESEARCH.md:33	F349	[D]		Chase: vtable 0xD00278, binder 0x7F31B0; | note: merge retained theirs comment: 0xD00278, name """"""""""""""""Chase"""""""""""""""") passes 0, Mounted (vtable 0xD00008) 1, Head (vtable"""""""""""""""
 0x00D01290		vtable	not ported	docs/AI_AVOID_RECOVERY_RESEARCH.md:570				The per-frame input stage **0x828670** (vtable 0xD01290) walks the cars' input devices.
-0x00D01C40	str_replay_save	global	not ported	docs/REPLAY.md:239	F778	[I]		0x1F in the action table 0xE4DFA0, string 0xD01C40) is bound to S, but no code queries it: the
+0x00D01C40	str_replay_save	global	not ported	docs/REPLAY.md:245	F778	[I]		0x1F in the action table 0xE4DFA0, string 0xD01C40) is bound to S, but no code queries it: the
 0x00D023F0	vt_shader_param_visitor	vtable	not ported		F684			Symbols: 7 new rows (0x84E610, 0x84E150, 0xD023F0, 0x862E30, 0x862E50, 0x84D260, 0x5F5240), notes on 0x60E310, 0x861C50, 0x862300. | note: visitor of 0x84E610 [D]
 0x00D02444	vt_incar_driver	vtable	not ported					note: [D] dtor 0x863250, init 0x8600C0, update 0x85DA80, 0x860100, 0x84AA60
 0x00D02A08	vt_incar_codriver	vtable	not ported					note: [D] co-driver, update 0x85DE90
@@ -3948,8 +3964,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D08490		global	not ported		G346			Offline46 closes immediate plugin scalar dispatcher: D08490+04=8841A0 reads incomingdoublepointer, convertsf64tof32 and dispatches ready/nooverride pluginvir...
 0x00D08870		global	not ported	docs/AUDIO_RESEARCH.md:1909				(table 0xD08870–0xD088A0, strict less-than, not stable).
 0x00D088A0		global	crates/grid-tools/src/crowd_audio.rs:67 grid-tools::crowd_audio::shell_sort	docs/AUDIO_RESEARCH.md:1909				(0xD088A0..0xD08870). Not stable: cells at the same distance keep the original's order.
-0x00D0A974		vtable	not ported	docs/RACE_HUD.md:542		[D]		Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
-0x00D0AB20		vtable	not ported	docs/RACE_HUD.md:542		[D]		Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
+0x00D0A974		vtable	not ported	docs/RACE_HUD.md:543		[D]		Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
+0x00D0AB20		vtable	not ported	docs/RACE_HUD.md:543		[D]		Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
 0x00D0BD54		vtable	not ported	docs/CAREER_RESEARCH.md:716		[V]		is five `{rank vtable 0xD0BD54, value}` pairs at L+0x34 (value at L+0x38 + region*8); L+0x30 is
 0x00D0DBE0		global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:85				Actual PE literal candidates and Ghidra references now link car_light_glass(D0DBF0) and car_light_pod(D0DBE0) to dedicated8FC9F0/9024C0 handling;903260 also ...
 0x00D0DBF0		global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:85				Actual PE literal candidates and Ghidra references now link car_light_glass(D0DBF0) and car_light_pod(D0DBE0) to dedicated8FC9F0/9024C0 handling;903260 also ...
@@ -4056,9 +4072,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00DB4C60		global	not ported	docs/SPEECH_CAREER_PARAMETERS.md:123		[O]		0x62C280: its index in {rookie, pro, expert, international} (0xDB4C60) [O]. 3 = international.
 0x00DB4C7C		global	not ported	docs/TRACK_LOD.md:367				| 0x0064C070 | route-track distance defaults/reset (0xDB4C7C..0xDB4C9C) |
 0x00DB4C88		global	not ported	docs/TRACK_LOD.md:33		[O]		and always outputs 225 m (constant 0xDB4C88) [O]; `shadow_obj_size` is applied [O]. Where the
-0x00DB4F60		global	not ported	docs/RACE_HUD.md:528				Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)³ × (base −
-0x00DB4FE4	replay_rewind_window	global	not ported	docs/REPLAY.md:65	F778	[O]		path to `t − 10.0` with 0xDB4FE4, also 10.0) [D]. PAUSE_MENU.md earlier said 15 s; that was not
-0x00DB4FE8	terminal_rewind_short_pad	global	not ported	docs/REPLAY.md:371	F778	[O]		by exit 0x57F170) + 0.6 s (0xDB4FE8) or 10 s (0xDB4FE4) + 2.0 s, or by the whole elapsed time,
+0x00DB4F60		global	not ported	docs/RACE_HUD.md:529				Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)³ × (base −
+0x00DB4FE4	replay_rewind_window	global	crates/grid-app/src/replay.rs:274 grid-app::replay::request_terminal	docs/REPLAY.md:65	F780 F778	[O]		max(crash − 10 s [0xDB4FE4], oldest frame) (0x91CC00); rewind stops
+0x00DB4FE8	terminal_rewind_short_pad	global	not ported	docs/REPLAY.md:387	F778	[O]		`_visual`, `_special`; enter 0x596C90 rewinds by 0xE6DFF8 + 0.6 s (0xDB4FE8) or 10 s + 2.0 s, or
 0x00DB4FEC	INSTANT_REWIND	global	crates/grid-app/src/replay.rs:42 grid-app::replay::INSTANT_REWIND	docs/FLASHBACK.md:84 ; docs/PAUSE_MENU.md:57 ; docs/REPLAY.md:64	F360	[D]		last 10 s [D: 0xDB4FEC, read by StateInstantReplayRewind and 0x63EBC0],
 0x00DB52C8	SMOOTHING	global	crates/grid-app/src/drift_osd.rs:43 grid-app::drift_osd::SMOOTHING			[D]		Meter smoothing per original frame [D 0.3 at 0xDB52C8]; the port applies
 0x00DB79D4	nightlights_other_car_range	global	crates/grid-app/src/night_lights.rs:51 grid-app::night_lights::FOCUS_RANGE	docs/NIGHT_LIGHTS.md:33		[V]		Headlight range of the focus car and of every other car (0xDB79D8, 0xDB79D4).
@@ -4111,7 +4127,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00E4DDA0		global	crates/grid-app/src/camera.rs:92 grid-app::camera::LOOK_BLEND	docs/CAMERA_VIEWS.md:250				the bonnet eye rises and moves forward by 0.05 · |turn| (0xE4DDA0,
 0x00E4DDA4		global	crates/grid-app/src/camera.rs:93 grid-app::camera::LOOK_BLEND					0xE4DDA4); the head's look pitch is maxHeadLook · 0.00523599 (0xCFFDBC)
 0x00E4DEE8	Action	global	crates/grid-app/src/input.rs:23 grid-app::input::Action	docs/PLATFORMS_AND_INPUT_RESEARCH.md:245				The 23 in-game actions of table 0xE4DEE8, in id order, then the
-0x00E4DFA0	input_action_table	global	not ported	docs/REPLAY.md:239	F778	[I]		0x1F in the action table 0xE4DFA0, string 0xD01C40) is bound to S, but no code queries it: the
+0x00E4DFA0	input_action_table	global	not ported	docs/REPLAY.md:245	F778	[I]		0x1F in the action table 0xE4DFA0, string 0xD01C40) is bound to S, but no code queries it: the
 0x00E4DFE0		global	not ported		F778	[I]		A whole-`.text` scan for `push 0x1F` before a call, and a scan of the replay code ranges for an immediate 0x1F, found only unrelated sites (0x5BFF24, 0x942D7...
 0x00E4E0FC	LAG_SPEED	global	crates/grid-app/src/camera.rs:27 grid-app::camera::LAG_SPEED	docs/CAMERA_VIEWS.md:144				Speed at which the chase lag rate reaches lagMaximum (0xE4E0FC, 200 km/h).
 0x00E4E15C		global	crates/grid-app/src/camera.rs:1663 grid-app::camera::TRANSITION_TIME					glass (0xE4E160), and the samples of its lift (0xE4E15C).
@@ -4177,10 +4193,11 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00E5EBE8		global	not ported	docs/LE_MANS.md:245	F430 G130			Open on the graphics side: `renderScale`, the exposure target 0xE5EBE8,
 0x00E5FE0F		global	not ported		F494	[V]		release grid-app.exe sha256 c38bf23b…e5fe0f
 0x00E6B887		global	not ported		G281			Root authors small direct run-derby-first01.py with explicit --run-root, strict source/HEAD/exe/currentinput guards, native0/firstReady/terminal/restoration,...
-0x00E6DFF4		global	not ported	docs/RACE_HUD.md:529				[0xE6DFF4]). Text: the position ("%d"), the name (32 characters) and the nationality flag
-0x00E6DFF8	terminal_damage_delay_total	global	not ported	docs/REPLAY.md:150 ; docs/RACE_HUD.md:506	F778	[O]		(0x944430). Exit 0x57F170 stores the state's total time in 0xE6DFF8, which the terminal replay's
+0x00E6DFF4		global	not ported	docs/RACE_HUD.md:530				[0xE6DFF4]). Text: the position ("%d"), the name (32 characters) and the nationality flag
+0x00E6DFF8	terminal_damage_delay_total	global	not ported	docs/REPLAY.md:155 ; docs/RACE_HUD.md:506	F778	[O]		(0x944430). Exit 0x57F170 stores the state's total time in 0xE6DFF8, which the terminal replay's
 0x00E6E000	g_saved_ingame_camera	global	not ported	docs/FLASHBACK.md:130		[D]		(global 0xE6E000, 0x823360 → 0x82CFB0 on the car) and the car views (0x629490);
 0x00E6E004	g_flashback_effect_names	global	not ported	docs/FLASHBACK.md:133		[D]		and 0x92D400(0). It sets global 0xE6E004 to the effect names (read by the camera visibility
+0x00E6E008	terminal_replay_start	global	not ported	docs/REPLAY.md:379	F780	[D]		0xE6E008/0xE6E010/0xE6E018. It plays (0x9440F0(1)) then pauses (0x9440F0(2)) the player, which
 0x00E6E834		global	not ported	docs/VEHICLE_STATE.md:11				The plugin's first virtual method at `0x00742c40` returns `0x00e6e834`, used by the original type-validation path. That global is not established as a vehicl...
 0x00E7A230		global	crates/grid-tools/src/ai_driver.rs:273 grid-tools::ai_driver::curve	docs/AI_DRIVER_RESEARCH.md:179		[V]		Catmull-Rom segment (0x7786B0, basis 0xE7A230 set by 0xC79D60) through
 0x00E7A260		global	not ported	docs/AI_DRIVER_RESEARCH.md:179		[V]		M = [[−1 3 −3 1] [2 −5 4 −1] [−1 0 1 0] [0 2 0 0]] (rows at 0xE7A260…0xE7A230, set
