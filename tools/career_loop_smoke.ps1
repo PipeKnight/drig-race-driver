@@ -12,7 +12,9 @@
 # -Season runs only the career screen on a seeded season (GRID_CAREER_SEED=
 # season, GRID_CAREER_AUTO=season): team name, Team Branding, the Le Mans
 # choice, Skip Le Mans, End Of Season, Start Of Season, quit (exit 0).
-# Prints a verdict and the log path. This script does not build.
+# The career screen's front-end sound source must start (the F772 sink);
+# settings.ini keeps it silent. Prints a verdict and the log path. This
+# script does not build.
 param(
     [string]$Exe = 'target\release\grid-app.exe',
     [string]$OutDir = '',
@@ -55,6 +57,7 @@ $seconds = [int]((Get-Date) - $started).TotalSeconds
 # The flow, in order; each step must follow the previous one.
 $pages = @(
     @('career opens', 'drive_career version=1 event=open '),
+    @('sounds start', 'hud_audio version=1 event=queued .*cues=menu,screen'),
     @('screen fades in', 'reason=screen_open'),
     @('driver offers page', 'drive_career version=1 event=page page=driveroffers'),
     @('offer details page', 'drive_career version=1 event=page page=offerdetails'),
@@ -79,6 +82,7 @@ $loop = @(
 )
 $seasonSteps = @(
     @('career opens', 'drive_career version=1 event=open '),
+    @('sounds start', 'hud_audio version=1 event=queued .*cues=menu,screen'),
     @('team named', 'drive_career version=1 event=team_named name="My Team"'),
     @('my team page', 'drive_career version=1 event=page page=team'),
     @('team branding page', 'drive_career version=1 event=page page=livery'),

@@ -1587,6 +1587,15 @@ struct Screen {
     team_fee: Option<usize>,
     /// The eBay used cars on show (`Ebay::offers` of the shown models).
     used: Vec<grid_tools::career::ebay::UsedCar>,
+    /// Widget and popup sounds not yet played (`hud_sound::drain`).
+    sounds: Vec<grid_tools::hud_audio::Cue>,
+}
+
+impl Page {
+    /// A `ScreenYesNo` popup over its page (overlay_on / overlay_off).
+    fn popup(&self) -> bool {
+        matches!(self, Page::ConfirmSkipLeMans)
+    }
 }
 
 /// The regions of the Race Events page, in the original's header order
@@ -2926,6 +2935,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         team_region: None,
         team_fee: None,
         used: Vec::new(),
+        sounds: Vec::new(),
     };
     screen.collect()?;
     screen.page = screen.landing(screen.page.clone());
@@ -2966,6 +2976,12 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     // The original's overlay fade (docs/SCREEN_FLOW.md): GRID World fades
     // in from black, and out to "Loading" when a race starts.
     crate::transition::install(&mut app, labels.get("loading"), crate::transition::Start::Screen);
+    // The overlay's letterbox bars, as on the event menu (SCREEN_FLOW §1.4).
+    crate::transition::borders(&mut app);
+    // The screen whooshes and the loading sounds (unprefixed front-end set);
+    // `update` plays the widget and popup sounds through the same sink.
+    let effects = profile.sound_effects.unwrap_or(crate::pause_menu::Options::default().effects);
+    crate::hud_sound::install_front_end(&mut app, &root, effects);
     crate::frame_pacing::install_window_shots(&mut app);
     crate::input::install(&mut app, actions);
     let exit = app
@@ -3114,6 +3130,7 @@ fn update(
     mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut done: Local<bool>,
     mut auto_wait: Local<f32>,
+    sink: Option<Res<crate::hud_sound::HudSink>>,
 ) {
     if *done || fade.leaving() {
         keys.clear();
@@ -3134,6 +3151,8 @@ fn update(
     let rows = screen.actions();
     let n = rows.len().max(1);
     let mut chosen = None;
+    let cursor_before = screen.cursor;
+    let popup_before = screen.page.popup();
     if nav.up {
         screen.cursor = (screen.cursor + n - 1) % n;
     }
@@ -3172,8 +3191,64 @@ fn update(
         }
     }
     let Some(action) = chosen else {
+        let moved = screen.cursor != cursor_before;
+        sounds(&mut screen.sounds, &nav, None, moved, popup_before, popup_before, sink.as_deref());
         return;
     };
+    // The press's widget sound follows its action, the popup's after the
+    // page it lands on is known (below).
+    let pressed = action.clone();
+    act(&mut screen, action, &mut fade, &mut done, &lookup, &labels);
+    let popup_after = screen.page.popup();
+    sounds(&mut screen.sounds, &nav, Some(&pressed), false, popup_before, popup_after, sink.as_deref());
+}
+
+/// The widget and popup sounds of one input frame (`hud_sound::menu_cue`,
+/// `overlay_cue`; the list widget 0x490F40, the itemflow 0x49DA70, the
+/// screen back 0x479930, `ScreenOverlay` 0x49CFA0 / 0x4936A0), played now.
+/// A row that cycles a value (region, fee, sponsor slot, livery part) is an
+/// itemflow step; every other action is an activate, or a back when Back
+/// was pressed. Mouse clicks play the key cues (F772 [I]).
+fn sounds(
+    queue: &mut Vec<grid_tools::hud_audio::Cue>,
+    nav: &Nav,
+    action: Option<&Action>,
+    moved: bool,
+    popup_before: bool,
+    popup_after: bool,
+    sink: Option<&crate::hud_sound::HudSink>,
+) {
+    queue.extend(step_cues(nav, action, moved, popup_before, popup_after));
+    crate::hud_sound::drain(queue, sink);
+}
+
+/// The cues of [`sounds`], in order.
+fn step_cues(
+    nav: &Nav,
+    action: Option<&Action>,
+    moved: bool,
+    popup_before: bool,
+    popup_after: bool,
+) -> Vec<grid_tools::hud_audio::Cue> {
+    let value = matches!(
+        action,
+        Some(Action::CycleRegion | Action::CycleFee | Action::CycleSponsor(_) | Action::CycleLivery(_))
+    );
+    let place = action.is_some() && !value;
+    let mut cues: Vec<_> = crate::hud_sound::menu_cue(nav, place, moved, value, false).into_iter().collect();
+    cues.extend(crate::hud_sound::overlay_cue(popup_before, popup_after));
+    cues
+}
+
+/// Carries out a chosen action; a race start or Quit fades the screen out.
+fn act(
+    screen: &mut Screen,
+    action: Action,
+    fade: &mut crate::transition::Fade,
+    done: &mut bool,
+    lookup: &Lookup,
+    labels: &Labels,
+) {
     screen.message.clear();
     let result = match action {
         Action::Go(page) => {
@@ -3417,7 +3492,7 @@ fn update(
             );
         }
         Ok(false) => {
-            screen.refresh_offers(&lookup.routes, &labels, &lookup.root);
+            screen.refresh_offers(&lookup.routes, labels, &lookup.root);
         }
         Err(e) => {
             warn!("career: {e}");
@@ -4269,6 +4344,38 @@ speech_event_wins = 0
         assert_eq!(l.pattern, 4, "after the last, the first");
     }
 
+    /// The career pages' widget and popup sounds: a cursor move, an
+    /// activate, a value row's step, Back, and the Skip Le Mans popup's
+    /// overlay_on / overlay_off after the press that opened or closed it.
+    #[test]
+    fn steps_queue_the_widget_and_popup_sounds() {
+        use grid_tools::hud_audio::Cue;
+        let press = |f: fn(&mut Nav)| {
+            let mut nav = Nav::default();
+            f(&mut nav);
+            nav
+        };
+        let (down, select, back) = (press(|n| n.down = true), press(|n| n.select = true), press(|n| n.back = true));
+        let idle = Nav::default();
+        assert_eq!(step_cues(&down, None, true, false, false), [Cue::UdlrMove]);
+        assert_eq!(step_cues(&down, None, false, false, false), [], "a one-row list does not move");
+        assert_eq!(step_cues(&idle, None, false, false, false), []);
+        let go = Action::Go(Page::Team);
+        assert_eq!(step_cues(&select, Some(&go), false, false, false), [Cue::Select]);
+        // A click or GRID_CAREER_AUTO acts without a key: the activate cue.
+        assert_eq!(step_cues(&idle, Some(&go), false, false, false), [Cue::Select]);
+        let cycle = Action::CycleLivery(LiveryPart::Pattern);
+        assert_eq!(step_cues(&select, Some(&cycle), false, false, false), [Cue::ItemDiscrete]);
+        assert_eq!(step_cues(&back, Some(&Action::Go(Page::Home)), false, false, false), [Cue::Back]);
+        // Skip Le Mans 24hr opens the popup; No (Back) and Yes close it.
+        let skip = Action::Go(Page::ConfirmSkipLeMans);
+        assert_eq!(step_cues(&select, Some(&skip), false, false, true), [Cue::Select, Cue::OverlayOn]);
+        assert_eq!(step_cues(&down, None, true, true, true), [Cue::UdlrMove]);
+        assert_eq!(step_cues(&back, Some(&Action::Go(Page::LeMans)), false, true, false), [Cue::Back, Cue::OverlayOff]);
+        assert_eq!(step_cues(&select, Some(&Action::RefuseLeMans), false, true, false), [Cue::Select, Cue::OverlayOff]);
+        assert!(Page::ConfirmSkipLeMans.popup() && !Page::LeMans.popup() && !Page::TeamName(String::new()).popup());
+    }
+
     /// The season pages on the purchased data: a seeded season lands on
     /// the team name keyboard, GRID World routes to the Le Mans choice
     /// while Le Mans is pending, its driver offers are the Le Mans ones,
@@ -4298,6 +4405,7 @@ speech_event_wins = 0
             team_region: None,
             team_fee: None,
             used: Vec::new(),
+            sounds: Vec::new(),
         };
         assert_eq!(s.landing(Page::Home), Page::TeamName(String::new()));
         s.page = Page::TeamName(String::new());

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F790](F0790.md) | 2026-11-10 | Career screen sounds and bars; window shots recheck |
 | [F789](F0789.md) | 2026-11-10 | Several shape behaviours of one prop break; Shibuya route_2 diagnosis |
 | [F788](F0788.md) | 2026-11-10 | Popup overlay sounds; the race pause sound has no caller |
 | [F787](F0787.md) | 2026-11-10 | Front-end glyph grafting for the post-race screens (row 69) |
