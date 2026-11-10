@@ -18,11 +18,12 @@
 //! replay; not from View Replay). Then `flashback_flash1..3` (1 s each) and
 //! `replay_jump_in` (2 frames) before the race resumes.
 use crate::input::{Action, Actions};
-use crate::replay::{FlashbackStatus, Kind, Replay};
+use crate::replay::{FlashCamera, FlashbackStatus, Kind, Replay};
 use bevy::prelude::*;
 use grid_tools::flashback::{self as rules, Manager};
 use grid_tools::source_vehicle::player_reset::PlayerReset;
 use grid_tools::source_vehicle::{Controls, DELTA, Runtime, assists::Shift};
+use grid_formats::graphics_grade::Balance;
 use std::collections::VecDeque;
 
 /// AUTHORED checkpoint interval: 4 s of simulation; a jump-in runs at most
@@ -259,11 +260,93 @@ impl Flashback {
     }
 }
 
-/// Overlay of the flashback transition.
+/// Overlay of the flashback transition where its post effects could not be
+/// read.
 #[derive(Component)]
 struct Whiteout;
 
-pub fn install(app: &mut App, ai_difficulty: f32) {
+/// The transition's post effects (system/states.xml flashback_flash1..3,
+/// read by StateFlashbackTransition 0x579FE0): each flash starts at
+/// src_effect IG_whiteout (src_duration 0) and blends to dst_effect over
+/// dst_duration 1 s, FlashbackFX_01 for the first two and Effect_0000 for
+/// the third. The port's ordinary image stands for Effect_0000.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct Effects {
+    pub whiteout: Balance,
+    pub flashback: Balance,
+}
+
+impl Effects {
+    pub fn read(bytes: &[u8]) -> grid_formats::Result<Self> {
+        use grid_formats::graphics_grade::read_balance;
+        Ok(Self {
+            whiteout: read_balance(bytes, "IG_whiteout")?,
+            flashback: read_balance(bytes, "FlashbackFX_01")?,
+        })
+    }
+
+    /// Flash `index`, `elapsed` seconds in (the blend is linear [I]).
+    pub fn balance(&self, index: usize, elapsed: f32) -> Balance {
+        let to = if index + 1 < rules::FLASHES {
+            self.flashback
+        } else {
+            Balance::NEUTRAL
+        };
+        self.whiteout.lerp(&to, elapsed / rules::FLASH_SECONDS)
+    }
+}
+
+/// The camera each flash selects: flashback_flash1 selectReplayCamera,
+/// flash2 selectOnCarCamera ("replay_driver2"), flash3 restoreInGameCamera.
+pub fn flash_camera(index: usize) -> Option<FlashCamera> {
+    match index {
+        0 => None,
+        1 => Some(FlashCamera::OnCar),
+        _ => Some(FlashCamera::InGame),
+    }
+}
+
+/// The transition's post effect on the viewer camera; `None` removes it.
+fn grade(world: &mut World, balance: Option<Balance>) {
+    let cameras: Vec<Entity> = world
+        .query_filtered::<Entity, With<crate::ViewerCamera>>()
+        .iter(world)
+        .collect();
+    for camera in cameras {
+        let mut camera = world.entity_mut(camera);
+        match &balance {
+            Some(b) => {
+                camera.insert(crate::balance_pass::BalancePass::from(b));
+            }
+            None => {
+                camera.remove::<crate::balance_pass::BalancePass>();
+            }
+        }
+    }
+}
+
+pub fn install(app: &mut App, ai_difficulty: f32, root: &std::path::Path) {
+    let path = root.join("postprocess/effects.xml");
+    match std::fs::read(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|b| Effects::read(&b).map_err(|e| format!("{e:?}")))
+    {
+        Ok(effects) => {
+            log_line!(
+                "drive_flashback version=1 event=effects source=postprocess/effects.xml whiteout={:?} flashback={:?}",
+                effects.whiteout,
+                effects.flashback
+            );
+            app.insert_resource(effects);
+            crate::balance_pass::install(app);
+        }
+        Err(e) => {
+            log_line!(
+                "drive_flashback version=1 event=effects_unavailable path={} error={e:?} fallback=overlay",
+                path.display()
+            );
+        }
+    }
     let manager = Manager::new(rules::star_level(ai_difficulty), 2, false);
     log_line!(
         "drive_flashback version=1 event=install maximum={} max_award={} checkpoint_ticks={CHECKPOINT_TICKS}",
@@ -506,7 +589,20 @@ pub fn update(world: &mut World) {
                 Stage::Flash { index, elapsed }
             };
             world.resource_mut::<Flashback>().stage = stage;
-            // IG_whiteout then FlashbackFX_01 over 1 s (AUTHORED: white fading out).
+            let camera = match stage {
+                Stage::Flash { index, .. } => flash_camera(index),
+                _ => Some(FlashCamera::InGame),
+            };
+            world.resource_mut::<Replay>().flash_camera = camera;
+            if let Some(effects) = world.get_resource::<Effects>().copied() {
+                let balance = match stage {
+                    Stage::Flash { index, elapsed } => Some(effects.balance(index, elapsed)),
+                    _ => None,
+                };
+                grade(world, balance);
+                return;
+            }
+            // Without the effects: a white overlay fading out.
             let alpha = match stage {
                 Stage::Flash { elapsed, .. } => (1. - elapsed / rules::FLASH_SECONDS).clamp(0., 1.) * 0.85,
                 _ => 0.,
@@ -580,7 +676,10 @@ fn jump_in(world: &mut World, tick: u64) {
         .query_filtered::<Entity, With<crate::ViewerCamera>>()
         .iter(world)
         .next();
-    if let Some(camera) = camera {
+    world.resource_mut::<Replay>().flash_camera = flash_camera(0);
+    if let Some(effects) = world.get_resource::<Effects>().copied() {
+        grade(world, Some(effects.balance(0, 0.)));
+    } else if let Some(camera) = camera {
         world.spawn((
             Whiteout,
             Node {
@@ -676,6 +775,7 @@ fn resume(world: &mut World) {
     // abandoned future's marks and smoke go.
     crate::replay_effects::adopt(world);
     let origin = world.resource_mut::<Replay>().finish();
+    grade(world, None);
     world.resource_mut::<crate::Driving>().paused = false;
     if let Some(mut menu) = world.get_resource_mut::<crate::pause_menu::PauseMenu>()
         && menu.open
@@ -702,3 +802,70 @@ fn resume(world: &mut World) {
 
 #[cfg(test)]
 mod race_tests;
+
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+
+    fn effects() -> Effects {
+        Effects {
+            whiteout: Balance {
+                contrast: 0.5,
+                brightness: 0.75,
+                maximum: 0.75,
+                ..Balance::NEUTRAL
+            },
+            flashback: Balance {
+                colour: 0.4,
+                vignette_amount: 0.6,
+                ..Balance::NEUTRAL
+            },
+        }
+    }
+
+    #[test]
+    fn each_flash_starts_white_and_blends_to_its_destination() {
+        let e = effects();
+        for index in 0..rules::FLASHES {
+            assert_eq!(e.balance(index, 0.), e.whiteout);
+        }
+        assert_eq!(e.balance(0, rules::FLASH_SECONDS), e.flashback);
+        assert_eq!(e.balance(1, rules::FLASH_SECONDS), e.flashback);
+        // flash3 ends at Effect_0000: the ordinary image.
+        assert_eq!(e.balance(2, rules::FLASH_SECONDS), Balance::NEUTRAL);
+        assert_eq!(e.balance(0, 0.5 * rules::FLASH_SECONDS).contrast, 0.75);
+    }
+
+    #[test]
+    fn the_flashes_select_replay_on_car_and_in_game_cameras() {
+        assert_eq!(flash_camera(0), None);
+        assert_eq!(flash_camera(1), Some(FlashCamera::OnCar));
+        assert_eq!(flash_camera(2), Some(FlashCamera::InGame));
+    }
+
+    /// The shipped effects and the on-car camera of every car (GRID_GAME_ROOT).
+    #[test]
+    #[ignore]
+    fn shipped_effects_and_every_car_on_car_camera() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT"));
+        let e = Effects::read(&std::fs::read(root.join("postprocess/effects.xml")).unwrap()).unwrap();
+        assert_eq!((e.whiteout.contrast, e.whiteout.brightness, e.whiteout.maximum), (0.5, 0.75, 0.75));
+        assert_eq!(e.flashback.colour, 0.4156);
+        assert_eq!(e.flashback.tint_amount, 0.2987);
+        assert_eq!(e.flashback.vignette_amount, 0.6623);
+        assert_eq!(e.flashback.vignette_offset, [0.0779, 0.2338]);
+        let mut cars = 0;
+        for entry in std::fs::read_dir(root.join("cars")).unwrap() {
+            let stem = entry.unwrap().file_name().to_string_lossy().into_owned();
+            if !root.join(format!("cars/{stem}/cameras.xml")).exists() {
+                continue;
+            }
+            // The raw list: a few cars lack a parameter of another view.
+            let bytes = std::fs::read(root.join(format!("cars/{stem}/cameras.xml"))).unwrap();
+            let views = grid_formats::vehicle_views::read(&bytes).unwrap();
+            assert!(views.views.iter().any(|v| v.ident == "replay_driver2"), "{stem}");
+            cars += 1;
+        }
+        assert!(cars >= 40, "{cars}");
+    }
+}

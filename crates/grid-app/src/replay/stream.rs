@@ -206,6 +206,17 @@ impl Stream {
         self.spool.as_ref().map_or(0, |s| s.written)
     }
 
+    /// A frame of `len` bytes would start a new chunk. A memory-only stream
+    /// drops whole chunks, so the frame written there must not depend on
+    /// earlier ones.
+    pub fn opens_chunk(&self, len: usize) -> bool {
+        !self.chunks.back().is_some_and(|c| {
+            c.data
+                .as_ref()
+                .is_some_and(|d| d.len() + len <= self.limits.chunk)
+        })
+    }
+
     /// Appends a frame; false once recording has stopped. Frames before
     /// [`Self::frames`]`.start` are no longer readable afterwards, so the
     /// encoder must not reference them.
@@ -214,11 +225,7 @@ impl Stream {
             self.full = true;
             return false;
         }
-        let open = self
-            .chunks
-            .back()
-            .is_some_and(|c| c.data.as_ref().is_some_and(|d| d.len() + bytes.len() <= self.limits.chunk));
-        if !open {
+        if self.opens_chunk(bytes.len()) {
             let number = self.chunks.back().map_or(0, |c| c.number + 1);
             self.chunks.push_back(Chunk {
                 number,

@@ -34,7 +34,7 @@ use bevy::{
     camera::primitives::{Aabb, MeshAabb},
     prelude::*,
 };
-use frame::{Car, Deformation, Encoder, Pose, Props, Shared, Snapshot, Wheel, WheelGeometry};
+use frame::{Car, Decoder, Deformation, Encoder, Pose, Props, Shared, Snapshot, Wheel, WheelGeometry};
 use grid_tools::source_vehicle::{DELTA, Runtime};
 
 /// [D] sample rate of the original's replay stream.
@@ -117,6 +117,7 @@ struct Shots {
 pub struct Replay {
     pub stream: stream::Stream,
     encoder: Encoder,
+    decoder: Decoder,
     recorded: Option<(u64, u64)>,
     /// The last (segment, tick) whose lap events were read.
     seen: Option<(u64, u64)>,
@@ -136,6 +137,18 @@ pub struct Replay {
     pub flashback: Option<FlashbackStatus>,
     /// A jump-in holds the session: no replay input.
     frozen: bool,
+    /// The Flashback transition's camera (`crate::flashback`).
+    pub flash_camera: Option<FlashCamera>,
+}
+
+/// The camera a Flashback transition state selects [D 0x579D70]; flash 1's
+/// selectReplayCamera keeps the replay's own camera.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlashCamera {
+    /// selectOnCarCamera: the player car's `replay_driver2` view.
+    OnCar,
+    /// restoreInGameCamera: the camera the player drove with.
+    InGame,
 }
 
 /// What the replay panel shows of Flashback.
@@ -152,6 +165,7 @@ impl Replay {
         Self {
             stream,
             encoder: Encoder::default(),
+            decoder: Decoder::default(),
             recorded: None,
             seen: None,
             laps: Vec::new(),
@@ -164,6 +178,7 @@ impl Replay {
             ending: None,
             flashback: None,
             frozen: false,
+            flash_camera: None,
         }
     }
 
@@ -189,8 +204,10 @@ impl Replay {
         if self.stream.tick(frame) != tick || !self.stream.truncate(frame) {
             return false;
         }
-        // Shared items are written inline again.
+        // Shared items and the per-frame words are written whole again; the
+        // frame numbers after the cut are recorded anew.
         self.encoder = Encoder::default();
+        self.decoder = Decoder::default();
         // The session's camera shots may reach past the cut (they run one
         // frame ahead of the replay time); they are made again from the cut
         // stream (the frame camera would index a frame no longer recorded).
@@ -222,6 +239,7 @@ impl Replay {
     /// and HUD come back in `present`.
     pub fn finish(&mut self) -> Option<Origin> {
         self.frozen = false;
+        self.flash_camera = None;
         let session = self.session.take()?;
         self.ending = Some(session.hidden);
         self.exited = true;
@@ -240,6 +258,7 @@ impl Replay {
     fn clear(&mut self) {
         self.stream.clear();
         self.encoder = Encoder::default();
+        self.decoder = Decoder::default();
         self.recorded = None;
         self.seen = None;
         self.laps.clear();
@@ -302,7 +321,13 @@ impl Replay {
         }
         self.last_target = Some(target);
         let number = self.stream.next();
-        let bytes = self.encoder.encode(&snapshot, number);
+        let mut bytes = self.encoder.encode(&snapshot, number);
+        if self.stream.opens_chunk(bytes.len()) {
+            // A chunk starts with a frame that refers to no earlier one, so a
+            // memory-only stream stays readable when it drops older chunks.
+            self.encoder = Encoder::default();
+            bytes = self.encoder.encode(&snapshot, number);
+        }
         self.stream.push(tick, &bytes);
         self.encoder.forget_before(self.stream.frames().start as u32);
         self.recorded = Some((segment, tick));
@@ -310,66 +335,10 @@ impl Replay {
 
     /// Frame `frame` with its shared items resolved.
     pub fn snapshot(&mut self, frame: usize) -> Option<Snapshot> {
-        let decoded = frame::decode(&self.stream.read(frame)?)?;
-        let mut cars = Vec::with_capacity(decoded.cars.len());
-        for (i, c) in decoded.cars.into_iter().enumerate() {
-            let geometry = match c.geometry {
-                Shared::Inline(g) => g,
-                Shared::At(at) => match frame::decode(&self.stream.read(at as usize)?)?
-                    .cars
-                    .get(i)?
-                    .geometry
-                {
-                    Shared::Inline(g) => g,
-                    Shared::At(_) => return None,
-                },
-            };
-            let deformation = match c.deformation {
-                None => None,
-                Some(Shared::Inline(d)) => Some(d),
-                Some(Shared::At(at)) => {
-                    match frame::decode(&self.stream.read(at as usize)?)?
-                        .cars
-                        .get(i)?
-                        .deformation
-                        .clone()
-                    {
-                        Some(Shared::Inline(d)) => Some(d),
-                        _ => return None,
-                    }
-                }
-            };
-            cars.push(Car {
-                pose: c.pose,
-                velocity: c.velocity,
-                wheels: c.wheels,
-                geometry,
-                deformation,
-                lost: c.lost,
-                effects: c.effects,
-            });
-        }
-        let props = match decoded.props {
-            None => None,
-            Some(p) => Some(Props {
-                broken: match p.broken {
-                    Shared::Inline(b) => b,
-                    Shared::At(at) => match frame::decode(&self.stream.read(at as usize)?)?
-                        .props?
-                        .broken
-                    {
-                        Shared::Inline(b) => b,
-                        Shared::At(_) => return None,
-                    },
-                },
-                pieces: p.pieces,
-            }),
-        };
-        Some(Snapshot {
-            tick: decoded.tick,
-            cars,
-            props,
-        })
+        let Replay {
+            decoder, stream, ..
+        } = self;
+        decoder.snapshot(frame, |n| stream.read(n))
     }
 
     /// Where each car's deformation shown at `frame` was written.
@@ -425,8 +394,12 @@ impl Replay {
     }
 
     /// The player's car in frame `frame`: tick, pose and velocity.
-    fn player_in(stream: &mut stream::Stream, frame: usize) -> Option<(u64, Pose, Vec3)> {
-        let f = frame::decode(&stream.read(frame)?)?;
+    fn player_in(
+        decoder: &mut Decoder,
+        stream: &mut stream::Stream,
+        frame: usize,
+    ) -> Option<(u64, Pose, Vec3)> {
+        let f = decoder.snapshot(frame, |n| stream.read(n))?;
         let car = f.cars.first()?;
         Some((f.tick, car.pose, car.velocity))
     }
@@ -437,6 +410,7 @@ impl Replay {
         let Replay {
             director,
             stream,
+            decoder,
             session,
             ..
         } = self;
@@ -452,7 +426,7 @@ impl Replay {
             .filter(|s| s.camera == camera.0 && s.first == first && i >= first);
         let fresh = shots.is_none();
         if fresh {
-            let (_, pose, velocity) = Self::player_in(stream, first)?;
+            let (_, pose, velocity) = Self::player_in(decoder, stream, first)?;
             let (state, shot) = camera.1.start(&pose, velocity);
             shots = Some(Shots {
                 camera: camera.0,
@@ -465,7 +439,7 @@ impl Replay {
         let last = (i + 1).min(frames.end - 1).max(first);
         let mut previous = stream.tick(first + s.shots.len() - 1);
         while first + s.shots.len() <= last {
-            let Some((tick, pose, velocity)) = Self::player_in(stream, first + s.shots.len()) else {
+            let Some((tick, pose, velocity)) = Self::player_in(decoder, stream, first + s.shots.len()) else {
                 break;
             };
             let dt = (tick.saturating_sub(previous)) as f32 * DELTA;
@@ -853,7 +827,11 @@ pub fn frame_camera(
             _ => None,
         }
     });
-    let shot = track.and_then(|(c, from, time)| replay.director_shot(c, from, time).map(|s| (c, s)));
+    // A Flashback transition's camera replaces the director's.
+    let forced = replay.flash_camera;
+    let shot = track
+        .filter(|_| forced.is_none())
+        .and_then(|(c, from, time)| replay.director_shot(c, from, time).map(|s| (c, s)));
     let director = replay.director.as_ref();
     let Some(session) = replay.session.as_mut() else {
         return;
@@ -889,12 +867,18 @@ pub fn frame_camera(
             (shot.eye, shot.rotation, shot.fov, None)
         }
         _ => {
-            let index = match (choice, activation) {
+            let current = cameras.as_ref().map(|c| c.current);
+            let index = match forced {
+                Some(FlashCamera::OnCar) => view("replay_driver2"),
+                Some(FlashCamera::InGame) => current,
+                None => None,
+            }
+            .or_else(|| match (choice, activation) {
                 (Some(Choice::View(i)), _) => Some(i),
                 (_, Some(director::Activation::Car(name))) => view(name),
                 _ => None,
-            }
-            .or_else(|| cameras.as_ref().map(|c| c.current));
+            })
+            .or(current);
             let Some((index, views)) = index.zip(views) else {
                 return;
             };

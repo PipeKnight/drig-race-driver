@@ -5,10 +5,14 @@
 //! The original serialises each `Recordable`'s state into a frame of its
 //! replay stream and, for rigid bodies, interpolates between two stored poses
 //! (0x92F9E0: both matrices to quaternions, slerp, `[interpolation=%f]`). The
-//! byte layout here is AUTHORED: little-endian records with full 3x4 pose
-//! matrices, so a sample decodes to exactly the recorded pose. State that
-//! rarely changes (wheel geometry, body deformation, broken props) is written
-//! when it changes and otherwise referenced by the frame that holds it.
+//! byte layout here is AUTHORED and lossless, so a sample decodes to exactly
+//! the recorded state. State that rarely changes (wheel geometry, body
+//! deformation, broken props) is written when it changes and otherwise
+//! referenced by the frame that holds it. The words a car changes every frame
+//! (pose, velocity, wheels, effect inputs) are predicted from the car's last
+//! three frames and only the nonzero residuals are written; a key frame
+//! writes them raw at least every [`KEY_INTERVAL`] frames and at the start of
+//! every stream chunk (docs/REPLAY.md, "Frame encoding").
 use bevy::math::{Mat3, Mat4, Quat, Vec3, Vec4};
 
 /// A pose as recorded: the 3x4 part of a rigid transform, column-major.
@@ -123,64 +127,6 @@ pub struct Effects {
 }
 
 impl Effects {
-    fn write(&self, w: &mut Writer) {
-        w.vec3(self.angular_velocity);
-        w.f32(self.speed);
-        w.f32(self.mass);
-        w.f32(self.rear_coefficient);
-        let mut bits = u8::from(self.handbrake) | u8::from(self.open_wheel) << 1;
-        for (k, wheel) in self.wheels.iter().enumerate() {
-            bits |= u8::from(wheel.handbraked) << (2 + k);
-        }
-        w.u8(bits);
-        for wheel in &self.wheels {
-            w.u32(wheel.token);
-            w.f32s(&[
-                wheel.radius,
-                wheel.width,
-                wheel.load,
-                wheel.excess,
-                wheel.rear_term,
-                wheel.omega,
-                wheel.steer[0],
-                wheel.steer[1],
-            ]);
-        }
-    }
-
-    fn read(r: &mut Reader) -> Option<Self> {
-        let angular_velocity = r.vec3()?;
-        let speed = r.f32()?;
-        let mass = r.f32()?;
-        let rear_coefficient = r.f32()?;
-        let bits = r.u8()?;
-        let mut wheels = [WheelEffects::default(); 4];
-        for (k, wheel) in wheels.iter_mut().enumerate() {
-            let token = r.u32()?;
-            let [radius, width, load, excess, rear_term, omega, s0, s1] = r.f32s()?;
-            *wheel = WheelEffects {
-                token,
-                radius,
-                width,
-                load,
-                excess,
-                rear_term,
-                omega,
-                steer: [s0, s1],
-                handbraked: bits & (4 << k) != 0,
-            };
-        }
-        Some(Self {
-            angular_velocity,
-            speed,
-            mass,
-            rear_coefficient,
-            handbrake: bits & 1 != 0,
-            open_wheel: bits & 2 != 0,
-            wheels,
-        })
-    }
-
     /// Continuous values interpolate; tokens, constants and flags come from
     /// `self` (the earlier sample).
     pub fn lerp(&self, other: &Self, t: f32) -> Self {
@@ -246,23 +192,25 @@ pub enum Shared<T> {
     At(u32),
 }
 
-/// One decoded frame before its shared items are resolved.
+/// One frame parsed without the prediction history: its shared items, and
+/// the bytes of the per-frame words that [`Decoder`] resolves.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     pub tick: u64,
+    /// Every word is written raw (no prediction from earlier frames).
+    pub key: bool,
     pub cars: Vec<FrameCar>,
     pub props: Option<FrameProps>,
+    words: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameCar {
-    pub pose: Pose,
-    pub velocity: Vec3,
-    pub wheels: [Wheel; 4],
+    /// The residual mask is the car's mask of the previous frame.
+    same_mask: bool,
     pub geometry: Shared<[WheelGeometry; 4]>,
     pub deformation: Option<Shared<Deformation>>,
     pub lost: [Option<Pose>; 4],
-    pub effects: Effects,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -271,12 +219,243 @@ pub struct FrameProps {
     pub pieces: Vec<Piece>,
 }
 
-/// What the encoder last wrote for each shared item, and where.
+/// The words of a car that are written every frame, in this order: pose
+/// (12), velocity (3), per wheel displacement, steering pair, phase and spin
+/// (20), the effect inputs' angular velocity (3), speed, mass, rear
+/// coefficient, flag bits, and per wheel surface token, radius, width, load,
+/// excess, rear term, omega and steer pair (36).
+const WORDS: usize = 78;
+type Words = [u32; WORDS];
+const MASK: usize = WORDS.div_ceil(8);
+/// The mask a key frame leaves: no delta mask can equal it.
+const KEY_MASK: [u8; MASK] = [0xFF; MASK];
+/// A key frame (every word raw) is written at least every this many frames
+/// (AUTHORED): reading a frame decodes at most this many.
+pub const KEY_INTERVAL: usize = 64;
+const KEY_FRAME: u8 = 0;
+const DELTA_FRAME: u8 = 1;
+
+const fn spin_word(wheel: usize) -> usize {
+    15 + 5 * wheel + 4
+}
+
+/// The wheel whose omega word is `word`.
+const fn omega_wheel(word: usize) -> Option<usize> {
+    if word >= 42 && (word - 42) % 9 == 6 {
+        Some((word - 42) / 9)
+    } else {
+        None
+    }
+}
+
+fn words(car: &Car) -> Words {
+    let mut out = [0; WORDS];
+    let e = &car.effects;
+    let mut bits = u32::from(e.handbrake) | u32::from(e.open_wheel) << 1;
+    for (k, w) in e.wheels.iter().enumerate() {
+        bits |= u32::from(w.handbraked) << (2 + k);
+    }
+    let floats = car
+        .pose
+        .0
+        .into_iter()
+        .chain(car.velocity.to_array())
+        .chain(car.wheels.iter().flat_map(|w| {
+            [w.displacement, w.steering[0], w.steering[1], w.phase, w.spin]
+        }))
+        .chain(e.angular_velocity.to_array())
+        .chain([e.speed, e.mass, e.rear_coefficient])
+        .map(f32::to_bits);
+    let wheels = e.wheels.iter().flat_map(|w| {
+        [
+            w.token,
+            w.radius.to_bits(),
+            w.width.to_bits(),
+            w.load.to_bits(),
+            w.excess.to_bits(),
+            w.rear_term.to_bits(),
+            w.omega.to_bits(),
+            w.steer[0].to_bits(),
+            w.steer[1].to_bits(),
+        ]
+    });
+    let mut n = 0;
+    for v in floats.chain([bits]).chain(wheels) {
+        out[n] = v;
+        n += 1;
+    }
+    debug_assert_eq!(n, WORDS);
+    out
+}
+
+/// Pose, velocity, wheels and effect inputs from a car's words.
+fn from_words(w: &Words) -> (Pose, Vec3, [Wheel; 4], Effects) {
+    let f = |i: usize| f32::from_bits(w[i]);
+    let bits = w[41];
+    let effects = Effects {
+        angular_velocity: Vec3::new(f(35), f(36), f(37)),
+        speed: f(38),
+        mass: f(39),
+        rear_coefficient: f(40),
+        handbrake: bits & 1 != 0,
+        open_wheel: bits & 2 != 0,
+        wheels: std::array::from_fn(|k| {
+            let b = 42 + 9 * k;
+            WheelEffects {
+                token: w[b],
+                radius: f(b + 1),
+                width: f(b + 2),
+                load: f(b + 3),
+                excess: f(b + 4),
+                rear_term: f(b + 5),
+                omega: f(b + 6),
+                steer: [f(b + 7), f(b + 8)],
+                handbraked: bits & (4 << k) != 0,
+            }
+        }),
+    };
+    let wheels = std::array::from_fn(|k| {
+        let b = 15 + 5 * k;
+        Wheel {
+            displacement: f(b),
+            steering: [f(b + 1), f(b + 2)],
+            phase: f(b + 3),
+            spin: f(b + 4),
+        }
+    });
+    (
+        Pose(std::array::from_fn(f)),
+        Vec3::new(f(12), f(13), f(14)),
+        wheels,
+        effects,
+    )
+}
+
+/// Float bits to an unsigned integer of the same order, so close floats are
+/// close integers; any word maps one to one.
+fn order(u: u32) -> u32 {
+    if u & 0x8000_0000 != 0 { !u } else { u | 0x8000_0000 }
+}
+
+fn unorder(m: u32) -> u32 {
+    if m & 0x8000_0000 != 0 { m & 0x7FFF_FFFF } else { !m }
+}
+
+fn zigzag(r: u32) -> u32 {
+    let s = r as i32;
+    ((s << 1) ^ (s >> 31)) as u32
+}
+
+fn unzigzag(z: u32) -> u32 {
+    ((z >> 1) as i32 ^ -((z & 1) as i32)) as u32
+}
+
+/// The ordered words of each car's last three frames (newest first) and
+/// last residual mask, which the encoder and the decoder keep alike.
+#[derive(Clone, Debug, Default)]
+struct History {
+    cars: Vec<[Words; 3]>,
+    masks: Vec<[u8; MASK]>,
+    /// Frames held, at most 3; 0 before the first key frame.
+    depth: u8,
+}
+
+impl History {
+    /// The prediction of word `j` of car `car`; `current` holds this frame's
+    /// words before `j`.
+    fn predict(&self, car: usize, j: usize, current: &Words) -> u32 {
+        // Omega is the unsanitised spin: equal to the spin word but where
+        // the spin was not finite.
+        if let Some(k) = omega_wheel(j) {
+            return current[spin_word(k)];
+        }
+        let h = &self.cars[car];
+        let (a, b, c) = (h[0][j], h[1][j], h[2][j]);
+        if self.depth >= 3 {
+            // Linear extrapolation where it predicted the last word better
+            // than repeating the one before.
+            let linear = (a.wrapping_sub(b.wrapping_mul(2).wrapping_sub(c)) as i32).unsigned_abs();
+            let repeat = (a.wrapping_sub(b) as i32).unsigned_abs();
+            if linear < repeat {
+                return a.wrapping_mul(2).wrapping_sub(b);
+            }
+        }
+        a
+    }
+
+    fn push(&mut self, key: bool, words: Vec<Words>, masks: Vec<[u8; MASK]>) {
+        if key || self.cars.len() != words.len() {
+            self.cars = words.into_iter().map(|w| [w; 3]).collect();
+            self.depth = 1;
+        } else {
+            for (h, w) in self.cars.iter_mut().zip(words) {
+                h[2] = h[1];
+                h[1] = h[0];
+                h[0] = w;
+            }
+            self.depth = (self.depth + 1).min(3);
+        }
+        self.masks = masks;
+    }
+
+    /// The raw words of each car of `frame`, which follows the frame this
+    /// history holds (any frame for a key frame).
+    fn apply(&mut self, frame: &Frame) -> Option<Vec<Words>> {
+        let n = frame.cars.len();
+        let mut r = Reader(&frame.words);
+        let mut ordered = Vec::with_capacity(n);
+        let mut masks = Vec::with_capacity(n);
+        if frame.key {
+            for _ in 0..n {
+                let mut w = [0; WORDS];
+                for x in &mut w {
+                    *x = order(r.u32()?);
+                }
+                ordered.push(w);
+                masks.push(KEY_MASK);
+            }
+        } else {
+            if self.depth == 0 || self.cars.len() != n {
+                return None;
+            }
+            for (i, car) in frame.cars.iter().enumerate() {
+                let mask = if car.same_mask {
+                    self.masks[i]
+                } else {
+                    r.take::<MASK>()?
+                };
+                let mut w = [0; WORDS];
+                for j in 0..WORDS {
+                    let residual = if mask[j / 8] & (1 << (j % 8)) != 0 {
+                        unzigzag(r.varint()?)
+                    } else {
+                        0
+                    };
+                    w[j] = self.predict(i, j, &w).wrapping_add(residual);
+                }
+                ordered.push(w);
+                masks.push(mask);
+            }
+        }
+        if !r.0.is_empty() {
+            return None;
+        }
+        let raw = ordered.iter().map(|w| w.map(unorder)).collect();
+        self.push(frame.key, ordered, masks);
+        Some(raw)
+    }
+}
+
+/// What the encoder last wrote for each shared item, and where, and the
+/// prediction history of the per-frame words.
 #[derive(Clone, Debug, Default)]
 pub struct Encoder {
     geometry: Vec<Option<([WheelGeometry; 4], u32)>>,
     deformation: Vec<Option<(Deformation, u32)>>,
     broken: Option<(Vec<bool>, u32)>,
+    history: History,
+    /// Frames written since the last key frame.
+    since_key: usize,
 }
 
 impl Encoder {
@@ -299,10 +478,59 @@ impl Encoder {
         }
     }
 
+    /// The per-frame words of every car: raw for a key frame, otherwise each
+    /// word's residual from its prediction ([`History::predict`]), zigzag
+    /// LEB128, after a mask of the nonzero ones (left out when it is the
+    /// car's previous mask). Returns the bytes and which cars reuse a mask.
+    fn words(&mut self, cars: &[Car]) -> (bool, Vec<u8>, Vec<bool>) {
+        let n = cars.len();
+        let ordered: Vec<Words> = cars.iter().map(|c| words(c).map(order)).collect();
+        let key = self.history.depth == 0
+            || self.history.cars.len() != n
+            || self.since_key + 1 >= KEY_INTERVAL;
+        let mut out = Writer::default();
+        let mut same = vec![false; n];
+        let mut masks = Vec::with_capacity(n);
+        if key {
+            for w in &ordered {
+                for &x in w {
+                    out.u32(unorder(x));
+                }
+                masks.push(KEY_MASK);
+            }
+            self.since_key = 0;
+        } else {
+            for (i, w) in ordered.iter().enumerate() {
+                let mut mask = [0u8; MASK];
+                let mut residuals = [0u32; WORDS];
+                for j in 0..WORDS {
+                    let r = w[j].wrapping_sub(self.history.predict(i, j, w));
+                    residuals[j] = r;
+                    if r != 0 {
+                        mask[j / 8] |= 1 << (j % 8);
+                    }
+                }
+                same[i] = mask == self.history.masks[i];
+                if !same[i] {
+                    out.0.extend_from_slice(&mask);
+                }
+                for r in residuals.into_iter().filter(|&r| r != 0) {
+                    out.varint(zigzag(r));
+                }
+                masks.push(mask);
+            }
+            self.since_key += 1;
+        }
+        self.history.push(key, ordered, masks);
+        (key, out.0, same)
+    }
+
     /// Encodes `snapshot` as frame number `number`.
     pub fn encode(&mut self, snapshot: &Snapshot, number: u32) -> Vec<u8> {
+        let (key, tail, same) = self.words(&snapshot.cars);
         let mut w = Writer::default();
         w.u64(snapshot.tick);
+        w.u8(if key { KEY_FRAME } else { DELTA_FRAME });
         w.u8(u8::try_from(snapshot.cars.len()).expect("at most 255 cars"));
         self.geometry.resize(snapshot.cars.len(), None);
         self.deformation.resize(snapshot.cars.len(), None);
@@ -325,21 +553,15 @@ impl Encoder {
                     flags |= 4;
                 }
             }
+            if same[i] {
+                flags |= 8;
+            }
             for (k, lost) in car.lost.iter().enumerate() {
                 if lost.is_some() {
                     flags |= 16 << k;
                 }
             }
             w.u8(flags);
-            w.pose(car.pose);
-            w.vec3(car.velocity);
-            for wheel in &car.wheels {
-                w.f32(wheel.displacement);
-                w.f32(wheel.steering[0]);
-                w.f32(wheel.steering[1]);
-                w.f32(wheel.phase);
-                w.f32(wheel.spin);
-            }
             match geometry_at {
                 Some(at) => w.u32(at),
                 None => {
@@ -370,7 +592,6 @@ impl Encoder {
             for lost in car.lost.iter().flatten() {
                 w.pose(*lost);
             }
-            car.effects.write(&mut w);
         }
         match &snapshot.props {
             None => w.u8(0),
@@ -401,29 +622,30 @@ impl Encoder {
                 }
             }
         }
+        w.0.extend_from_slice(&tail);
         w.0
     }
 }
 
-/// Decodes one frame; `None` for malformed bytes.
+/// The frame's bytes are a key frame.
+fn is_key(bytes: &[u8]) -> bool {
+    bytes.get(8) == Some(&KEY_FRAME)
+}
+
+/// Parses one frame's shared items; `None` for malformed bytes. The
+/// per-frame words are checked when [`Decoder`] resolves them.
 pub fn decode(bytes: &[u8]) -> Option<Frame> {
     let mut r = Reader(bytes);
     let tick = r.u64()?;
+    let key = match r.u8()? {
+        KEY_FRAME => true,
+        DELTA_FRAME => false,
+        _ => return None,
+    };
     let count = r.u8()?;
     let mut cars = Vec::with_capacity(count.into());
     for _ in 0..count {
         let flags = r.u8()?;
-        let pose = r.pose()?;
-        let velocity = r.vec3()?;
-        let mut wheels = [Wheel::default(); 4];
-        for wheel in &mut wheels {
-            *wheel = Wheel {
-                displacement: r.f32()?,
-                steering: [r.f32()?, r.f32()?],
-                phase: r.f32()?,
-                spin: r.f32()?,
-            };
-        }
         let geometry = if flags & 1 == 0 {
             Shared::At(r.u32()?)
         } else {
@@ -462,15 +684,11 @@ pub fn decode(bytes: &[u8]) -> Option<Frame> {
                 *l = Some(r.pose()?);
             }
         }
-        let effects = Effects::read(&mut r)?;
         cars.push(FrameCar {
-            pose,
-            velocity,
-            wheels,
+            same_mask: flags & 8 != 0,
             geometry,
             deformation,
             lost,
-            effects,
         });
     }
     let props = match r.u8()? {
@@ -509,7 +727,164 @@ pub fn decode(bytes: &[u8]) -> Option<Frame> {
             Some(FrameProps { broken, pieces })
         }
     };
-    r.0.is_empty().then_some(Frame { tick, cars, props })
+    if key && r.0.len() != cars.len() * WORDS * 4 {
+        return None;
+    }
+    Some(Frame {
+        tick,
+        key,
+        cars,
+        props,
+        words: r.0.to_vec(),
+    })
+}
+
+/// Resolved snapshots kept by [`Decoder`] (playback reads a frame and the
+/// next one, the director's camera one ahead).
+const RECENT: usize = 4;
+
+/// Reads the frames of one stream in any order: keeps the prediction history
+/// after the last frame it decoded, so playing forwards decodes each frame
+/// once, and decodes any other frame from the key frame at or before it.
+/// Reset it whenever frames already read are recorded again (a cleared or
+/// cut stream).
+#[derive(Default)]
+pub struct Decoder {
+    history: History,
+    /// The frame `history` follows.
+    at: Option<usize>,
+    recent: std::collections::VecDeque<(usize, Snapshot)>,
+}
+
+impl Decoder {
+    /// Frame `n` with its shared items resolved; `read` gives a frame's
+    /// bytes.
+    pub fn snapshot(
+        &mut self,
+        n: usize,
+        mut read: impl FnMut(usize) -> Option<Vec<u8>>,
+    ) -> Option<Snapshot> {
+        if let Some((_, s)) = self.recent.iter().find(|(k, _)| *k == n) {
+            return Some(s.clone());
+        }
+        let (frame, words) = self.words(n, &mut read)?;
+        let snapshot = resolve(frame, &words, &mut read)?;
+        if self.recent.len() == RECENT {
+            self.recent.pop_front();
+        }
+        self.recent.push_back((n, snapshot.clone()));
+        Some(snapshot)
+    }
+
+    /// Frame `n` and its cars' words.
+    fn words(
+        &mut self,
+        n: usize,
+        read: &mut impl FnMut(usize) -> Option<Vec<u8>>,
+    ) -> Option<(Frame, Vec<Words>)> {
+        let mut pending = Vec::new();
+        match self.at.filter(|&a| a < n && n - a <= KEY_INTERVAL) {
+            Some(a) => {
+                for k in a + 1..=n {
+                    pending.push((k, read(k)?));
+                }
+            }
+            None => {
+                let mut k = n;
+                loop {
+                    let bytes = read(k)?;
+                    let key = is_key(&bytes);
+                    pending.push((k, bytes));
+                    if key {
+                        break;
+                    }
+                    k = k.checked_sub(1)?;
+                }
+                pending.reverse();
+            }
+        }
+        let mut last = None;
+        for (k, bytes) in pending {
+            self.at = None;
+            let frame = decode(&bytes)?;
+            let words = self.history.apply(&frame)?;
+            self.at = Some(k);
+            last = Some((frame, words));
+        }
+        last
+    }
+}
+
+/// Frame `n` parsed, kept for the shared items of one snapshot.
+fn held<'h>(
+    held: &'h mut Vec<(u32, Frame)>,
+    n: u32,
+    read: &mut impl FnMut(usize) -> Option<Vec<u8>>,
+) -> Option<&'h Frame> {
+    let i = match held.iter().position(|(k, _)| *k == n) {
+        Some(i) => i,
+        None => {
+            held.push((n, decode(&read(n as usize)?)?));
+            held.len() - 1
+        }
+    };
+    Some(&held[i].1)
+}
+
+/// The snapshot of a decoded frame: the shared items it refers to are read
+/// from the frames that hold them.
+fn resolve(
+    frame: Frame,
+    words: &[Words],
+    read: &mut impl FnMut(usize) -> Option<Vec<u8>>,
+) -> Option<Snapshot> {
+    let mut frames = Vec::new();
+    let mut cars = Vec::with_capacity(frame.cars.len());
+    for (i, (c, w)) in frame.cars.into_iter().zip(words).enumerate() {
+        let geometry = match c.geometry {
+            Shared::Inline(g) => g,
+            Shared::At(at) => match held(&mut frames, at, read)?.cars.get(i)?.geometry {
+                Shared::Inline(g) => g,
+                Shared::At(_) => return None,
+            },
+        };
+        let deformation = match c.deformation {
+            None => None,
+            Some(Shared::Inline(d)) => Some(d),
+            Some(Shared::At(at)) => match &held(&mut frames, at, read)?.cars.get(i)?.deformation {
+                Some(Shared::Inline(d)) => Some(d.clone()),
+                _ => return None,
+            },
+        };
+        let (pose, velocity, wheels, effects) = from_words(w);
+        cars.push(Car {
+            pose,
+            velocity,
+            wheels,
+            geometry,
+            deformation,
+            lost: c.lost,
+            effects,
+        });
+    }
+    let props = match frame.props {
+        None => None,
+        Some(p) => Some(Props {
+            broken: match p.broken {
+                Shared::Inline(b) => b,
+                Shared::At(at) => match &held(&mut frames, at, read)?.props.as_ref()?.broken {
+                    Shared::Inline(b) => b.clone(),
+                    Shared::At(_) => return None,
+                },
+            },
+            pieces: p.pieces,
+        }),
+    };
+    Some(Snapshot {
+        tick: frame.tick,
+        cars,
+        props,
+    })
 }
 
 /// Snapshots further apart than this (m) are a teleport (car reset): no
@@ -606,11 +981,16 @@ impl Writer {
             self.f32(x);
         }
     }
-    fn vec3(&mut self, v: Vec3) {
-        self.f32s(&v.to_array());
-    }
     fn pose(&mut self, p: Pose) {
         self.f32s(&p.0);
+    }
+    /// LEB128.
+    fn varint(&mut self, mut v: u32) {
+        while v >= 0x80 {
+            self.0.push(v as u8 | 0x80);
+            v >>= 7;
+        }
+        self.0.push(v as u8);
     }
 }
 
@@ -634,6 +1014,17 @@ impl Reader<'_> {
     fn u64(&mut self) -> Option<u64> {
         Some(u64::from_le_bytes(self.take()?))
     }
+    fn varint(&mut self) -> Option<u32> {
+        let mut v = 0u32;
+        for shift in [0, 7, 14, 21, 28] {
+            let b = self.u8()?;
+            v |= u32::from(b & 0x7F) << shift;
+            if b & 0x80 == 0 {
+                return Some(v);
+            }
+        }
+        None
+    }
     fn f32(&mut self) -> Option<f32> {
         Some(f32::from_bits(self.u32()?))
     }
@@ -643,9 +1034,6 @@ impl Reader<'_> {
             *v = self.f32()?;
         }
         Some(out)
-    }
-    fn vec3(&mut self) -> Option<Vec3> {
-        Some(Vec3::from_array(self.f32s()?))
     }
     fn pose(&mut self) -> Option<Pose> {
         Some(Pose(self.f32s()?))
@@ -714,88 +1102,128 @@ pub(crate) mod tests {
         }
     }
 
-    fn resolve(frame: Frame, frames: &[Frame]) -> Snapshot {
-        Snapshot {
-            tick: frame.tick,
-            cars: frame
-                .cars
-                .into_iter()
-                .enumerate()
-                .map(|(i, c)| Car {
-                    pose: c.pose,
-                    velocity: c.velocity,
-                    wheels: c.wheels,
-                    geometry: match c.geometry {
-                        Shared::Inline(g) => g,
-                        Shared::At(at) => match &frames[at as usize].cars[i].geometry {
-                            Shared::Inline(g) => *g,
-                            Shared::At(_) => panic!("reference to a reference"),
-                        },
-                    },
-                    deformation: c.deformation.map(|d| match d {
-                        Shared::Inline(d) => d,
-                        Shared::At(at) => match &frames[at as usize].cars[i].deformation {
-                            Some(Shared::Inline(d)) => d.clone(),
-                            _ => panic!("bad deformation reference"),
-                        },
-                    }),
-                    lost: c.lost,
-                    effects: c.effects,
-                })
-                .collect(),
-            props: frame.props.map(|p| Props {
-                broken: match p.broken {
-                    Shared::Inline(b) => b,
-                    Shared::At(at) => match &frames[at as usize].props.as_ref().unwrap().broken {
-                        Shared::Inline(b) => b.clone(),
-                        Shared::At(_) => panic!("reference to a reference"),
-                    },
-                },
-                pieces: p.pieces,
-            }),
+    /// Frame `n` of an uneven drive: smooth motion with noise, a sanitised
+    /// spin, a negative zero, a deformation and a lost wheel from frame 3,
+    /// a broken prop from frame 4.
+    fn uneven(n: u64) -> Snapshot {
+        let mut s = snapshot(n * 2);
+        let wobble = (n as f32 * 1.7).sin() * 0.37;
+        for (i, car) in s.cars.iter_mut().enumerate() {
+            car.pose.0[10] += wobble * (i + 1) as f32;
+            car.velocity.y = -wobble;
+            car.wheels[2].displacement = wobble * 0.01;
+            car.effects.wheels[3].load += wobble * 900.;
+            car.effects.wheels[0].token = if n.is_multiple_of(5) { 0 } else { 0x7461_6d00 };
         }
+        if n % 3 == 1 {
+            // vehicle_force stored a non-finite spin; the presented one is 0.
+            s.cars[0].wheels[1].spin = 0.;
+            s.cars[0].effects.wheels[1].omega = f32::NAN;
+            s.cars[1].velocity.x = -0.;
+        }
+        if n >= 3 {
+            s.cars[1].deformation = Some(Deformation {
+                active: true,
+                nodes: vec![[1., 2., 3., f32::from_bits(0x7f7f_ffff)]; 8],
+            });
+            s.cars[0].lost[2] = Some(s.cars[0].pose);
+        }
+        if n >= 4 {
+            s.props.as_mut().unwrap().broken[0] = true;
+        }
+        s
+    }
+
+    fn read(frames: &[Vec<u8>]) -> impl FnMut(usize) -> Option<Vec<u8>> + '_ {
+        |n| frames.get(n).cloned()
+    }
+
+    /// Snapshot bits, so NaN words compare equal.
+    fn bits(s: &Snapshot) -> String {
+        format!("{s:?}")
     }
 
     #[test]
     fn frames_decode_to_the_recorded_state_bit_for_bit() {
         let mut encoder = Encoder::default();
-        let mut frames = Vec::new();
-        let mut sizes = Vec::new();
-        let mut recorded = Vec::new();
-        for n in 0..6u64 {
-            let mut s = snapshot(n * 2);
-            if n >= 3 {
-                s.cars[1].deformation = Some(Deformation {
-                    active: true,
-                    nodes: vec![[1., 2., 3., f32::from_bits(0x7f7f_ffff)]; 8],
-                });
-                s.cars[0].lost[2] = Some(s.cars[0].pose);
+        let recorded: Vec<Snapshot> = (0..150).map(uneven).collect();
+        let frames: Vec<Vec<u8>> = recorded
+            .iter()
+            .enumerate()
+            .map(|(n, s)| encoder.encode(s, n as u32))
+            .collect();
+        // Forwards, backwards and jumping about, each from a fresh decoder.
+        let forwards: Vec<usize> = (0..frames.len()).collect();
+        let backwards: Vec<usize> = forwards.iter().rev().copied().collect();
+        let jumps = vec![149, 3, 64, 63, 127, 128, 0, 140, 2, 2, 70];
+        for order in [forwards, backwards, jumps] {
+            let mut decoder = Decoder::default();
+            for &n in &order {
+                let s = decoder.snapshot(n, read(&frames)).unwrap();
+                assert_eq!(bits(&s), bits(&recorded[n]), "frame {n}");
             }
-            if n >= 4 {
-                s.props.as_mut().unwrap().broken[0] = true;
-            }
-            let bytes = encoder.encode(&s, n as u32);
-            sizes.push(bytes.len());
-            frames.push(decode(&bytes).unwrap());
-            recorded.push(s);
         }
-        for (n, s) in recorded.iter().enumerate() {
-            assert_eq!(&resolve(frames[n].clone(), &frames), s, "frame {n}");
-        }
+        // Key frames: the first and then every KEY_INTERVAL frames.
+        let keys: Vec<usize> = (0..frames.len()).filter(|&n| is_key(&frames[n])).collect();
+        assert_eq!(keys, [0, KEY_INTERVAL, 2 * KEY_INTERVAL]);
         // Unchanged geometry, deformation and broken flags are references.
-        assert!(matches!(frames[1].cars[0].geometry, Shared::At(0)));
-        assert!(matches!(frames[4].cars[1].deformation, Some(Shared::At(3))));
+        let parsed: Vec<Frame> = frames.iter().map(|b| decode(b).unwrap()).collect();
+        assert!(matches!(parsed[1].cars[0].geometry, Shared::At(0)));
+        assert!(matches!(parsed[4].cars[1].deformation, Some(Shared::At(3))));
         assert!(matches!(
-            frames[5].props.as_ref().unwrap().broken,
+            parsed[5].props.as_ref().unwrap().broken,
             Shared::At(4)
         ));
-        assert!(sizes[1] < sizes[0], "{sizes:?}");
+        // Predicted frames are smaller; a parked car reuses its mask (moving
+        // floats are not linear in their bits, so their masks vary).
+        assert!(frames[1].len() < frames[0].len());
+        assert!(frames[10].len() * 2 < frames[0].len(), "{} {}", frames[10].len(), frames[0].len());
+        let mut steady = Encoder::default();
+        let masks: Vec<bool> = (0..8)
+            .map(|n| decode(&steady.encode(&snapshot(10), n as u32)).unwrap().cars[1].same_mask)
+            .collect();
+        assert_eq!(masks, [false, false, true, true, true, true, true, true]);
         // Truncated or extended bytes are refused.
-        let bytes = encoder.encode(&recorded[5], 6);
-        assert!(decode(&bytes[..bytes.len() - 1]).is_none());
-        let mut longer = bytes.clone();
-        longer.push(0);
-        assert!(decode(&longer).is_none());
+        for n in [0, 5] {
+            let mut cut = frames.clone();
+            cut[n].pop();
+            assert!(Decoder::default().snapshot(n, read(&cut)).is_none(), "frame {n}");
+            let mut longer = frames.clone();
+            longer[n].push(0);
+            assert!(Decoder::default().snapshot(n, read(&longer)).is_none(), "frame {n}");
+        }
+        // A delta frame without the frames before it is not readable; one
+        // after the next key frame is (its references are kept, frames 0..4).
+        let mut dropped = frames.clone();
+        for f in &mut dropped[5..KEY_INTERVAL] {
+            f.clear();
+        }
+        assert!(Decoder::default().snapshot(KEY_INTERVAL - 1, read(&dropped)).is_none());
+        assert!(Decoder::default().snapshot(KEY_INTERVAL + 6, read(&dropped)).is_some());
+        dropped[0].clear();
+        assert!(Decoder::default().snapshot(4, read(&dropped)).is_none());
+    }
+
+    #[test]
+    fn words_round_trip_and_order_floats() {
+        let car = &uneven(4).cars[0];
+        let (pose, velocity, wheels, effects) = from_words(&words(car));
+        let rebuilt = Car { pose, velocity, wheels, effects, ..car.clone() };
+        assert_eq!(words(&rebuilt), words(car));
+        assert!(rebuilt.effects.wheels[1].omega.is_nan());
+        for k in 0..4 {
+            assert_eq!(f32::from_bits(words(car)[spin_word(k)]), car.wheels[k].spin);
+            assert_eq!(omega_wheel(42 + 9 * k + 6), Some(k));
+        }
+        let floats = [f32::NEG_INFINITY, -2., -0.5, -0., 0., 1e-30, 0.5, 2., f32::INFINITY];
+        let ordered: Vec<u32> = floats.iter().map(|f| order(f.to_bits())).collect();
+        assert!(ordered.windows(2).all(|w| w[0] < w[1]), "{ordered:x?}");
+        for u in [0, 1, 0x7FFF_FFFF, 0x8000_0000, 0xFFFF_FFFF, 0x7FC0_0000] {
+            assert_eq!(unorder(order(u)), u);
+            assert_eq!(unzigzag(zigzag(u)), u);
+        }
+        assert_eq!(zigzag(1), 2);
+        assert_eq!(zigzag(u32::MAX), 1);
     }
 
     #[test]

@@ -174,11 +174,12 @@ These come from F360 and F366 and are confirmed by this audit's strings [D]:
   ±1/60 s (docs/REPLAY.md §2.4). The slow-motion toggle has **no keyboard or pad binding** in the
   shipped action maps, so the original's player cannot reach it through the interface.
 - `slowMo` / `rampSlowMo` / `selectReplayCamera` / `selectOnCarCamera` / `restoreInGameCamera`
-  (0x579FE0) are commands of the scripted race-intro and cutscene system, not the replay player.
+  (0x579FE0) are fields of StateFlashbackTransition, the Flashback transition state, not the replay
+  player (corrected later; docs/FLASHBACK.md section 2.5).
 - `postrace_slowmo_tick` / `postrace_slowmo_bullet` (0x508A36) belong to the post-race front-end
   animation.
 - The Flashback transition (`flashback_flash1..3`, `replay_jump_in`) and the replay interface
-  buttons are as in docs/FLASHBACK.md. The transition's screen effects are still not ported.
+  buttons are as in docs/FLASHBACK.md, which also covers the transition's screen effects and cameras.
 - Post-race flow: View Replay → `post_race_replay_stop/begin/play`, looping (REPLAY.md §2.5). The
   results screen's "funky" camera is `replay_roof2` (`StatePostRaceSetReplayCamera`).
 

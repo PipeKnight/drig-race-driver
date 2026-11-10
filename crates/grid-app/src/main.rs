@@ -89,6 +89,7 @@ mod ffb;
 mod event_menu;
 mod front_end_host;
 mod loading_screen;
+mod balance_pass;
 mod flashback;
 mod free_look;
 mod hud_sound;
@@ -5167,7 +5168,7 @@ pub(crate) fn race_app(
         reset_fade::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);
-            flashback::install(&mut app, ai_settings.difficulty);
+            flashback::install(&mut app, ai_settings.difficulty, &root);
             replay_effects::install(&mut app);
         }
     }

@@ -189,8 +189,16 @@ The replay camera set is separate from the race cameras (F349):
   For the dynamic props it holds the broken flags and every live piece's body pose.
 - Encoding (AUTHORED layout, in the spirit of the original's tagged records): little-endian, one
   frame per sample. Wheel geometry, deformation and broken flags are written when they change,
-  otherwise referenced by the number of the frame holding them. A 12-car frame without changes is
-  about 1.3 KB.
+  otherwise referenced by the number of the frame holding them. Each car's 78 per-frame words
+  (pose, velocities, wheel state, effect inputs) are predicted from the car's last three frames:
+  linear (`2a − b`) when that predicted the previous frame's word better than repeating it, else
+  a repeat; floats are compared in an order-preserving integer map. Only the residuals are
+  written (zigzag, then varint), behind a 10-byte mask of the nonzero words; a car whose mask
+  equals its last one writes a flag instead. A key frame (every word written as a residual from
+  zero) starts every chunk and comes every `KEY_INTERVAL` = 64 frames, so a reader can start at
+  any key frame; the decoder keeps the history and is reset on a cut. Measured on race.ini (12
+  cars, tick 900): about 1.7 kB a frame (735466 bytes for 433 frames), 1.9 kB after a jump-in cut,
+  against 4.09 kB raw.
 - Buffers [D sizes]:
   - the newest frames stay in memory up to 0x380000 bytes;
   - older 1 MiB chunks (AUTHORED size) go to a private spool, `<data dir>/replay-cache/replay.spool`,
@@ -239,10 +247,12 @@ The replay camera set is separate from the race cameras (F349):
   backwards, slowed and after a seek. The frame records each car's effect inputs (`Effects`:
   angular velocity, speed, mass, handbrake, rear coefficient, open-wheel flag, and per wheel the
   surface token, radius, width, load, excess force, rear term, spin, steer pair and handbrake bit;
-  169 bytes a car, lerped between samples). Cost: a 12-car frame grows from about 2.06 to 4.09 kB
-  (measured on race.ini), so the 0x380000-byte memory window, and with it the Instant Replay
-  rewind and the Flashback reach, holds about 30 s instead of 59 s of a 12-car race; the
-  original's window also holds its effect channels, its reach in seconds is not known [I]. The replay re-runs the race's own effect systems
+  169 bytes a car, lerped between samples). Written raw they doubled a 12-car frame to 4.09 kB
+  (a 30 s memory window); with the predicted residuals of 3.1 a frame is 1.7–1.9 kB, so the
+  0x380000-byte memory window, and with it the Instant Replay rewind and the Flashback reach,
+  holds about 65–72 s of a 12-car race, more than the 59 s estimated for the original's frame
+  without effect channels; the original's window also holds its effect channels, its reach in
+  seconds is not known [I]. The replay re-runs the race's own effect systems
   tick by tick from those inputs, starting at a checkpoint of their state: the race keeps one
   every 2 s (all of the last 20 s, older ones every 30 s), the replay adds one every 0.4 s it
   steps (48 at most), and the first recorded frame starts empty. Re-running is bounded to 6 ms a
@@ -286,8 +296,10 @@ The replay camera set is separate from the race cameras (F349):
 ## 4. Tests
 
 - Unit:
-  - `replay::frame`: encode/decode bit for bit with references, refusal of truncated frames,
-    re-writing forgotten references, interpolation at and between samples, teleports;
+  - `replay::frame`: encode/decode bit for bit with references and predicted residuals across
+    key frames, the same-mask flag of a parked car, a reader starting only at a key frame (frames
+    dropped before it), refusal of truncated frames, re-writing forgotten references,
+    interpolation at and between samples, teleports;
   - `replay::stream`: the memory-only ring, spool round trip with out-of-order reads, a full
     spool;
   - `replay::player`: the shuttle formula, pause/scrub, clamping, loop, laps, slow motion and
@@ -334,8 +346,5 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 - Not replayed (shown as they are when the replay starts): glass and light damage, shards,
   damage-part swing angles, collision sparks and other particles than tyre smoke and wheel
   debris, sound.
-- The effect inputs are recorded raw (169 bytes a car a frame, half of a 12-car frame); writing
-  the constant words (mass, radius, width) once like the wheel geometry, or only changed words,
-  would give back memory-window reach.
 - Replay Save is not ported. The director's traced timeline, the terminal-damage replay and its
   TERMINAL cameras are open.

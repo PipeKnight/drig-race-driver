@@ -117,6 +117,42 @@ menu through `set_audio_normal`).
 `affectPPS="true"`, `controller_id="ingame"` on all three. `StateReplayJumpInOSDCountdown` and
 `StateReplayJumpInRestore` are registered state classes not used by `states.bin`.
 
+**StateFlashbackTransition [D, static].** 0x579FE0 (vtable 0xCD82D0) loads the state; it was
+called a cutscene command in REPLAY_DIRECTOR_RESEARCH.md, which is wrong. Fields:
+`restoreInGameCamera` +0x50, `selectOnCarCamera` +0x51, `slowMo` +0x58, `playSample` +0x59,
+`src_effect` +0x79 (default `Effect_0000`), `dst_effect` +0x99, `rampSlowMo` +0xB9,
+`selectReplayCamera` +0xBA. The base loader 0x479EC0 reads `backLink`, `frameDelay`,
+`timeDelay` and `affectPPS`; with PPS on it builds the PPS transition (0x60A520: the two effect
+names and durations, controller `ingame`), with PPS off `timeDelay` becomes `dst_duration`.
+
+- Enter 0x579D70 (after the base enter 0x479F60, which starts the PPS transition via
+  0x5E8BE0): `restoreInGameCamera` calls 0x92D110(0,0) and restores the saved in-game camera
+  (global 0xE6E000, 0x823360 → 0x82CFB0 on the car) and the car views (0x629490);
+  `selectOnCarCamera` calls 0x92D110(0,0), saves the current camera index in +0x54 and selects
+  the car's `replay_driver2` view (string 0xCD8304); `selectReplayCamera` calls 0x92D110(1,0)
+  and 0x92D400(0). It sets global 0xE6E004 to the effect names (read by the camera visibility
+  policy 0x607BC0 at 0x608447) and plays the sample (0x470A60). `slowMo`/`rampSlowMo` set the
+  time scale 0x91CEE0 to the constant at 0xCAFCD4, else 1.0.
+- Exit 0x579F70: 0xE6E004 = 0; `selectOnCarCamera` selects the saved camera again; time scale 1.
+- Update 0x479FF0: with PPS on it waits for the PPS transition (state +0x48 = 4 or 6), then
+  `frameDelay`, then `timeDelay`. Whether the 1 s runs during that wait is not known; the port
+  takes 1 s per flash [I].
+
+**The effects (`postprocess/effects.xml`, global) [D].** `IG_whiteout` (template Effect_0000):
+contrast 0.5, brightness 0.75, maximum 0.75, a flat 0.75 grey. `FlashbackFX_01` (template
+Effect_0000): contrast 1.2208, brightness −0.0649, colour 0.4156, tint 0.2987 of (255,127,1),
+vignette 0.6623 black, shape 0.8571, scale (0.961, 1.0649), offset (0.0779, 0.2338), rotation 0,
+transition 1. CheapFinalMerge applies ColourBalance as
+`min(maxbrightness, lerp(mix(luma, c, colour) * pretint, vignetteColour, w) * contrast +
+brightness)` with luma weights (0.2125, 0.7154, 0.0721), `pretint = 1 + tintAmount *
+(tintColour − 1)` and no gamma; the vignette weight is `w = amount * smoothstep(z)`, `z =
+saturate(saturate(q·q) / transition + 1 − 1/transition)`, where vignette.vsh gives `q = 0.89 *
+scale * (shape * rotate(X, Y) + (−offsetX, offsetY))` from `X = 2u − 1`, `Y = 1 − 2v`
+(disassembled with `tools/disassemble_grid_shader.py`; private outputs in
+`local/flashback-fx/`). How the PPS transition blends two effects was not traced; the port
+blends each parameter linearly [I]. The per-corner vignette colours and `vignetteBlendMode`
+(both unused by FlashbackFX_01, used by TerminalFX_01) are not decoded.
+
 ### 2.6 UI, HUD and results
 
 - The count shows on the replay interface's Flashback icon and on the race options screen
@@ -186,9 +222,19 @@ The same end state is reached exactly another way (AUTHORED):
   race finished, within 0.25 s of the event time, the frame before the memory window, no
   checkpoint.
 - Accepted: one is used (prepare), the state is restored, the replay holds at the jump-in frame
-  (`Replay::freeze`, no replay input) for three 1 s flashes (AUTHORED look: a white overlay fading
-  out each second; no samples or cameras of their own), 2 more frames, then the replay ends, the
-  pause menu closes, the wreck screen is dismissed and the race resumes.
+  (`Replay::freeze`, no replay input) for three 1 s flashes, 2 more frames, then the replay ends,
+  the pause menu closes, the wreck screen is dismissed and the race resumes.
+- Each flash plays its sample (`hud_sound`: `flashback_shot_1`, `flashback_shot_2`,
+  `flashback_zoomup`), selects its camera (`Replay::flash_camera`, applied in
+  `replay::frame_camera`: flash 1 the replay's own camera, flash 2 the player car's
+  `replay_driver2` view, flash 3 and the 2 frames the in-game camera) and draws its post effect:
+  `balance_pass` applies the original ColourBalance and vignette math (2.5) in display space
+  after tonemapping, from IG_whiteout blending linearly to FlashbackFX_01 (flashes 1 and 2) or to
+  the ordinary image (flash 3). The effect values are read from `postprocess/effects.xml` at
+  install (log `drive_flashback … event=effects`); parameters an effect leaves to its template
+  stay neutral, because the port's ordinary image stands for Effect_0000. The pass runs only
+  while the camera carries `BalancePass`, so the ordinary image is unchanged. If the file cannot
+  be read, the old white overlay is the fallback (`event=effects_unavailable`).
 - The replay panel shows `F12 flashback   FLASHBACKS AVAILABLE: n` while a jump-in is possible,
   like the original's icon (AUTHORED plain text).
 - Logs: `drive_flashback version=1 event=install|checkpoint|checkpoint_after_change|jump_in|restored|refused|failed|resume`.
@@ -205,16 +251,23 @@ The same end state is reached exactly another way (AUTHORED):
 - Presentation only, kept from the abandoned future: sounds. Glass and light damage are drawn
   intact again and found anew from the restored deformation; shards are removed. Skid marks, tyre
   smoke and wheel debris are those of the jump-in frame (3.3).
-- The transition's samples (`flashback_shot_1/2`, `flashback_zoomup`), its post effects and
-  camera changes; force feedback; the Pro Mode switch (no race options screen); career money
-  (Flashback Bonus).
+- The transition's time scale (`slowMo` is off for the three flashes, so nothing is lost),
+  the `enable_ffb` state after the flashes (force feedback itself is ported), the Pro Mode switch
+  (no race options screen) and career money (Flashback Bonus).
 - `drive_input` log lines after a jump-in go back in tick; `grid-soak replay-log` does not read
   `drive_flashback` lines yet.
 
 ## 4. Tests
 
 - Unit: `grid_tools::flashback` (counts of the rows, Pro Mode, award, use until none, the
-  event-time rule); `replay::stream` (`a_jump_in_cut_keeps_the_frames_up_to_it_and_records_on`).
+  event-time rule); `replay::stream` (`a_jump_in_cut_keeps_the_frames_up_to_it_and_records_on`);
+  `flashback::transition_tests` (each flash starts white and blends to its destination effect;
+  the replay, on-car and in-game cameras of the three flashes); `balance_pass` (the neutral
+  effect leaves colours, the whiteout is flat grey, the vignette darkens the corners and leaves
+  the centre); `grid_formats` `transition_balance_reads_vignette_and_leaves_template_parameters_neutral`.
+- Asset (`--include-ignored`): `flashback::transition_tests::shipped_effects_and_every_car_on_car_camera`
+  (the shipped IG_whiteout and FlashbackFX_01 values; every car's `cameras.xml` has
+  `replay_driver2`).
 - Asset (`--include-ignored`), the pause-menu race harness with the recorder and Flashback,
   3 AI cars, the player driven by keys as a function of the tick (throttle, weaving, braking):
   - `flashback::race_tests::a_flashback_resumes_the_race_on_*`:
@@ -237,6 +290,10 @@ The same end state is reached exactly another way (AUTHORED):
   250, the race resumes and drives to 900 again; every `drive_sample` line (pose, velocity,
   damage RNG, contacts) from the jump-in tick on is identical in both passes. The replay panel
   shows `F12 flashback   FLASHBACKS AVAILABLE: 3`.
+- Interactive window: `tools/replay_window_check.py` with `--shots` across the flashes
+  (`settings/race.ini`, 1280×800): the whiteout, FlashbackFX_01 on the replay camera, flash 2 on
+  `replay_driver2`, flash 3 fading to the in-game camera, the race resuming 3 s after the jump-in
+  (log `graphics_balance_pass active=true`).
 - Results: see the F entry in PROJECT_LOG.md.
 
 ## 5. Open items
@@ -250,3 +307,7 @@ The same end state is reached exactly another way (AUTHORED):
 - Whether Restart Race keeps used flashbacks (port: it gives them back) needs a live check.
 - A flashback from the wreck screen is wired but not covered by a test (a terminal-damage
   wreck needs a scripted crash).
+- The PPS transition's blend curve and whether the 1 s of a flash counts while the PPS waits
+  were not traced (linear and 1 s [I]). The flashes were not compared with the original (it is
+  not run); `replay_driver2` frames the stands beside the car on the grid, not checked against the
+  original's framing, and the replay OSD stays drawn during the flashes [I].
