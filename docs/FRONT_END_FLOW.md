@@ -116,9 +116,9 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   one [I]; the instance colour taken as `DiffuseColour` [I]), no back-face culling [I], no tone
   map. The camera follows the two `Translation` channels by the screen's own clock (held before
   1.0 s and after 18.333 s), vertical FOV 55.4 [I]. The same `fe_world::Spec` takes any other
-  root, camera and lighting group. Open: the floor reflection (`loading_reflection`), the stick
-  spring, the particle emitter, the `fe_loading_world` post effect and the stat panel. The noise
-  rotation and the cube reflection are ported (next items).
+  root, camera and lighting group. Open: the floor reflection (`loading_reflection`), the
+  particle emitter, the `fe_loading_world` post effect and the stat panel. The noise rotation,
+  the stick spring and the cube reflection are ported (next items).
 - **Cube reflection (F813, static analysis).** `fe3d_tracksurface.cg.fp` in full [D, shaderpack
   disassembly]: V = normalize(eye − pos), N = normalize(normal), f = sat((1 − N·V)^FresnelPower);
   R = N(−2 N·V) + V; ray = normalize(−R / (r_max − r_min)); d = 2·ray (1e-5 on an axis at zero);
@@ -188,15 +188,46 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   - 0x47C7F0 orbits the camera position about its target by these two angles in radians: the
     first about the camera's side axis (row 0 of the frame from 0x47C2E0, side = up × (eye −
     target), rolled by the camera's roll), the second about its up axis (row 1). Another path
-    (0x47D100, flag byte +0x190) is off by default.
+    (0x47D100, flag byte +0x190) is off by default. Order and signs [E, F818: 0x47C7F0 run in
+    Unicorn 2.1.4 on a camera object with up +Y and roll 0, three mixed angle pairs]: the
+    result is the second angle about the camera's up axis, then the first about its original
+    side axis; a positive first angle lowers an eye in front of a level target, a positive second
+    angle turns +Z towards +X. `camera_noise::orbit` matches within 4e-7 (pitch-then-yaw is off
+    by 0.36–0.76).
   - The wiring to the loading camera goes through component tables (0x490410 from 0x4CD3B0,
     0x48FBA0); that the loading world uses the `loading` block is [I] by the name.
   - Port (`camera_noise.rs`, any block by name; `fe_world::Spec::tweaks`): the same octaves, the
     MSVC `rand` from its default seed 1 for the start indices (the original seed is unknown [I]),
     the dampen share kept at 0 (no setter found on this path [I]), and the orbit with world up,
-    yaw then pitch (the order and signs are not resolved; with symmetric random angles they do
-    not show [I]). With the `loading` values (0.1, 0.1, rate 0.066) the camera turns up to about
-    0.1 rad about its target.
+    yaw then pitch (as emulated, above). With the `loading` values (0.1, 0.1, rate 0.066) the
+    camera turns up to about 0.1 rad about its target.
+- **Stick spring (F818, static analysis; orbit emulated).** The `<spring_tweaks>` of the same
+  `<camera_tweaks>` block tune a spring component (constructor 0x47E770, vtable 0xCB9B9C) that
+  holds a four-lane spring object (constructor 0x47B250, reader 0x47B570) [D]:
+  - Defaults: centering tension 11, damping 12; user tension 15, damping 11; thresholds and
+    limits 10.1; final scale 1; `dampen_to_zero` 1 s. The `loading` block: 1, 2, 5, 1;
+    thresholds 0.1; limits 0.35; final scale 0.25; dampen 0.5 s.
+  - Input: the controller update 0x4A9FF0 calls 0x47F660 unless its target name is `none`. It
+    reads the actions 0x2B..0x2E (`Fe View Tweak Left/Right/Up/Down`; pad preset 4: the right
+    stick; keyboard preset: unmapped) and sends x = Right − Left, y = Up − Down in a message
+    (vtable 0xCB96C0, type 0xDAACC4) to the camera, then once more with a second name (0xCB9C4C,
+    purpose [I]).
+  - The component's handler (0x47EB80 → 0x47EAE0) clamps each to ±limit and scales it by −0.5;
+    0x47B7E0 makes that the user target and sets an axis' weight to 1 while |target| >
+    threshold, else 0. The z and w lanes get 0.
+  - Step 0x47B970: sub-steps h ≤ 0.1 s; per lane v += ((ku(target − x) − cu v) w + kc(0 − x) −
+    cc v) h, x += h v.
+  - Update 0x47E890: a dampen share like the noise's (the direction is 0 and no setter is known,
+    so the weight stays 1 [I]); the angles are (`final_scale_y` x₁, `final_scale_x` x₀) through
+    0x47C7F0 (so the first is the pitch); it also sends weight × v as message 0xCB849C (purpose
+    [I], not ported).
+  - With the loading values the full stick gives a target of ∓0.175 and settles at 5/6 of it,
+    about 0.036 rad; stick right turns the eye towards −X of a +Z view (negative yaw).
+  - Port (`camera_spring.rs`, `input::Actions::fe_view_tweak`, `fe_world::WorldCamera`): the two
+    live lanes, the spring orbit after the noise orbit about the same target (their order within
+    a frame is [I]), and the loading-screen app now installs the player's input
+    (`loading_screen::app`). Which controller drives the loading camera is [I] by the block name,
+    as for the noise.
 - **Screens placed in the world (F791).** `loading_root`'s 16 `screen/<glyph>=…` nodes are
   instances (F787, `grid_formats::osd_glyph`): grafted, they add 2434 meshes, nearly all of
   the `fe3d_generic` family (generic, G, GD, GMPD, GPD, I), `fe3d_particle` and `fe3d_ramp`, from

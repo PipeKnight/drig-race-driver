@@ -93,6 +93,8 @@ mod loading_screen;
 #[cfg(not(target_os = "android"))]
 mod camera_noise;
 #[cfg(not(target_os = "android"))]
+mod camera_spring;
+#[cfg(not(target_os = "android"))]
 mod fe_world;
 mod fe3d;
 mod balance_pass;

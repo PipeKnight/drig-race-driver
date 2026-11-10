@@ -522,16 +522,24 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00479EC0	StateTransition_load	func	not ported	docs/FLASHBACK.md:135	F775	[D]		`selectReplayCamera` +0xBA. The base loader 0x479EC0 reads `backLink`, `frameDelay`,
 0x00479F60	StateTransition_enter	func	not ported	docs/FLASHBACK.md:139		[D]		Enter 0x579D70 (after the base enter 0x479F60, which starts the PPS transition via
 0x00479FF0	StateTransition_update	func	not ported	docs/FLASHBACK.md:148		[D]		Update 0x479FF0: with PPS on it waits for the PPS transition (state +0x48 = 4 or 6), then
-0x0047A4F0	FeTextStyle_ParseHAlign	func	crates/grid-formats/src/osd.rs:77 grid-formats::osd::TextLayout	docs/RACE_HUD.md:820			TextLayout	enums as the original's style parsers number them [D 0x47A4F0, 0x47A5B0,
-0x0047A5B0	FeTextStyle_ParseVAlign	func	crates/grid-formats/src/osd.rs:77 grid-formats::osd::TextLayout	docs/RACE_HUD.md:821				enums as the original's style parsers number them [D 0x47A4F0, 0x47A5B0,
-0x0047A660	FeTextStyle_ParseWrapping	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:821				0x47A660, 0x47A800].
-0x0047A800	FeTextStyle_ParseCase	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:821				0x47A660, 0x47A800].
-0x0047B250		func	not ported		F812			the stick spring (tweak readers 0x47B250/0x47B570 known, spring code not traced);
+0x0047A4F0	FeTextStyle_ParseHAlign	func	crates/grid-formats/src/osd.rs:77 grid-formats::osd::TextLayout	docs/RACE_HUD.md:790			TextLayout	enums as the original's style parsers number them [D 0x47A4F0, 0x47A5B0,
+0x0047A5B0	FeTextStyle_ParseVAlign	func	crates/grid-formats/src/osd.rs:77 grid-formats::osd::TextLayout	docs/RACE_HUD.md:791				enums as the original's style parsers number them [D 0x47A4F0, 0x47A5B0,
+0x0047A660	FeTextStyle_ParseWrapping	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:791				0x47A660, 0x47A800].
+0x0047A800	FeTextStyle_ParseCase	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:791				0x47A660, 0x47A800].
+0x0047B250	camera_spring_ctor	func	not ported	docs/FRONT_END_FLOW.md:204		[D]		four-lane spring constructor; defaults kc 11, cc 12, ku 15, cu 11, threshold/limit 10.1, final scale 1
+0x0047B570	camera_spring_read_tweaks	func	not ported	docs/FRONT_END_FLOW.md:204		[D]		reads <spring_tweaks> (scale/normal attributes) into the spring object
+0x0047B7E0	camera_spring_set_input	func	crates/grid-app/src/camera_spring.rs:1 grid-app::camera_spring	docs/FRONT_END_FLOW.md:204		[D]		user target = input; lane weight 1 while |target| > threshold
+0x0047B970	camera_spring_step	func	crates/grid-app/src/camera_spring.rs:1 grid-app::camera_spring	docs/FRONT_END_FLOW.md:204		[D]		semi-implicit Euler, sub-steps <= 0.1 s, user (weighted) + centering springs
 0x0047C2E0	camera_frame_from_target	func	not ported	docs/FRONT_END_FLOW.md:172		[D]		first about the camera's side axis (row 0 of the frame from 0x47C2E0, side = up × (eye −
-0x0047C7F0	camera_orbit_by_angles	func	crates/grid-app/src/camera_noise.rs:154 grid-app::camera_noise::orbit	docs/FRONT_END_FLOW.md:171	F812	[D]	orbit	(0x47C7F0): the first about the camera's side axis (pitch), the second
+0x0047C7F0	camera_orbit_by_angles	func	crates/grid-app/src/camera_noise.rs:154 grid-app::camera_noise::orbit	docs/FRONT_END_FLOW.md:138		[D]		(0x47C7F0): the first about the camera's side axis (pitch), the second
 0x0047D100	camera_noise_apply_alt	func	not ported	docs/FRONT_END_FLOW.md:174		[D]		(0x47D100, flag byte +0x190) is off by default.
+0x0047E770	camera_spring_component_ctor	func	not ported	docs/FRONT_END_FLOW.md:204		[D]		vtable 0xCB9B9C; dampen_to_zero 1 s
+0x0047E890	camera_spring_component_update	func	crates/grid-app/src/camera_spring.rs:1 grid-app::camera_spring	docs/FRONT_END_FLOW.md:204		[D]		dampen weight 2f^2-f^3; orbit 0x47C7F0 by (final_y x1, final_x x0); sends weight*v as 0xCB849C
+0x0047EAE0	camera_spring_on_stick	func	crates/grid-app/src/camera_spring.rs:1 grid-app::camera_spring	docs/FRONT_END_FLOW.md:204		[D]		clamp to +-limit, x -0.5, then 0x47B7E0
+0x0047EB80	camera_spring_component_message	func	not ported	docs/FRONT_END_FLOW.md:204		[D]		dispatches message type 0xDAACC4 to 0x47EAE0
 0x0047EBA0	camera_noise_read_tweaks	func	not ported	docs/FRONT_END_FLOW.md:157	F812	[D]		0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
-0x0047ECB0	camera_noise_update	func	crates/grid-app/src/camera_noise.rs:8 grid-app::camera_noise	docs/FRONT_END_FLOW.md:158	F812	[D]		0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
+0x0047ECB0	camera_noise_update	func	crates/grid-app/src/camera_noise.rs:8 grid-app::camera_noise	docs/FRONT_END_FLOW.md:125		[D]		0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
+0x0047F660	fe_view_tweak_send	func	crates/grid-app/src/input.rs:1 grid-app::input::Actions::fe_view_tweak	docs/FRONT_END_FLOW.md:204		[D]		actions 0x2B..0x2E: x = Right - Left, y = Up - Down, sent to the camera
 0x00480000		label	not ported	docs/SPEECH_CAREER_PARAMETERS.md:58		[O]		inside 0x0047FFC0; of record +0x40 was found (scan of 0x401000–0x480000 for `+0x14C]`/`+0x434]`, and of 0x438C10
 0x004845D0	ColourMessage::ctor	func	not ported	docs/LIVERY_CAROUSEL.md:28	F816	[V]		[V] Colour: 0x52B760 → 0x514950 → 0x5F1D50 take a `livery_colour` row's red, green and blue bytes / 255 and send them as a colour message (vtable 0xCBA004, t...
 0x00484640	noise_octave_ctor	func	crates/grid-app/src/camera_noise.rs:64 grid-app::camera_noise::lattice	docs/FRONT_END_FLOW.md:161	F812	[D]	Octave Rand lattice	of index `n`, in (−1, 1] [D 0x484640].
@@ -563,6 +571,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004A5FD4	overlay_on	func	not ported	docs/AUDIO_RESEARCH.md:2374				not a function entry in the master analysis; `ScreenSDU` has its own enter 0x4A5930 (`overlay_on` at 0x4A5FD4, a3 = 1; `overlay_off` at
 0x004A7B70	fe_open_named_stream	func	not ported	docs/GARAGE_WORLD.md:16	F809	[V]		It formats `garage_%02d` from the message's garage number and passes it with `"garage"` to 0x4A7B70.
 0x004A9E80	race_music_option	func	not ported	docs/AUDIO_RESEARCH.md:1734 ; docs/MUSIC_RESEARCH.md:76				pair (n & 3)·2. A `race_music_option` (0x4A9E80, `DataRaceMusicToggle`) switches it; its default
+0x004A9FF0	fe_camera_controller_update	func	not ported	docs/FRONT_END_FLOW.md:204		[D]		device update, then 0x47F660 unless the target name is "none"
 0x004AC7AF		label	not ported	docs/MUSIC_RESEARCH.md:77				inside 0x004AC580; The default is registered as 1 (`push 1` at 0x4AC7AF), only when the profile has no value.
 0x004B07E0	ScreenOverlay_ctor	func	crates/grid-app/src/hud_sound.rs:72 grid-app::hud_sound::overlay_cue	docs/AUDIO_RESEARCH.md:2370	F788	[O]		shown; the constructor 0x4B07E0 turns the sound on). It follows the
 0x004B1A70		func	crates/grid-tools/src/dynamic_props.rs:439 grid-tools::dynamic_props::split_scale	docs/CONTACT_REORIENTATION_RESEARCH.md:34 ; docs/DYNAMIC_PROPS_RESEARCH.md:335 ; docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:149		[D]		(+0x80). A row shorter than 1e-5 (0x4B1A70) leaves identity rows and a
@@ -577,6 +586,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004B23A0	ShaderParameterExactNameFind	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Exact case-sensitive full parameter-name lookup; caller start index is zero.
 0x004B3960		func	not ported	docs/PHASE0.md:75 ; docs/TOOLCHAIN.md:526				| `0x004b3960` | Pseudocode contains a bounded 32-byte format helper, explicit NUL at byte 31; agrees with the observed call and instructions |
 0x004B4440		func	crates/grid-world/src/joint.rs:576 grid-world::joint (in prepare)	docs/DYNAMIC_PROPS_RESEARCH.md:330 ; docs/JOINTS_RESEARCH.md:89	F473	[D]		0x4B4440 writes the offset back clamped by the limit error.
+0x004B4960	fe_view_tweak_message_type	func	not ported	docs/FRONT_END_FLOW.md:204		[D]		returns type 0xDAACC4
 0x004B7140	StateSFXTrigger_type	func	not ported		F788	[O]		not a function entry in the master analysis; symbols.tsv: added 0x486E20, 0x4A5930, 0x4B07E0, 0x4B7140, 0x4B7290, 0x69C340 and 0x6BFCD0.
 0x004B7290	StateSFXTrigger_ctor	func	not ported		F788	[O]		symbols.tsv: added 0x486E20, 0x4A5930, 0x4B07E0, 0x4B7140, 0x4B7290, 0x69C340 and 0x6BFCD0.
 0x004C6DB0		func	crates/grid-app/src/transition.rs:10 grid-app::transition	docs/SCREEN_FLOW.md:26	F756	[D]		(FUN_004C6DB0, `states.xml`). Once the screen is black on the way into a
@@ -4057,7 +4067,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CB870C		global	crates/grid-tools/src/dynamic_props.rs:1212 grid-tools::dynamic_props (in loose_wheel) ; crates/grid-tools/src/loose_panel.rs:85 grid-tools::loose_panel (in spawn) ; crates/grid-app/src/camera.rs:91 grid-app::camera::LOOK_BLEND	docs/CAMERA_VIEWS.md:189 ; docs/PLATFORMS_AND_INPUT_RESEARCH.md:541 ; docs/SERIES.md:277		[D]		angular_damping: [f32::from_bits(0x3e4c_cccd); 3], // 0.2 (CB870C)
 0x00CB8DA4	RACE_START_SIDE_DISTANCE	global	crates/grid-tools/src/ai_driver.rs:1123 grid-tools::ai_driver::RACE_START_SIDE_DISTANCE ; crates/grid-tools/src/hud_audio.rs:158 grid-tools::hud_audio (in parse) ; crates/grid-world/src/mechanical_damage.rs:38 grid-world::mechanical_damage::gain	docs/AI_AVOID_RECOVERY_LIVE.md:342 ; docs/AI_MISTAKES_PACING_RESEARCH.md:339 ; docs/AUDIO_RESEARCH.md:234		[D]		Constants 0xCB0BC0 (-48), 0xCAF88C (0.5), 0xCB8DA4 (2). | note: merge retained additional port provenance: crates/grid-tools/src/ai_driver.rs:943 grid-tools::ai_driver::RACE_START_SIDE_DISTANCE
 0x00CB95C4		global	not ported	docs/DONINGTON_ATMOSPHERE.md:50				Lighting update730f90, relevant instructions731dfe..731e83: fogParams.z=1/fogDistance and .w=fogDensityCap. SSE masks atcaf420/caf430 select Z/W; numeratorca...
+0x00CB96C0	fe_view_tweak_message_vtable	data	not ported	docs/FRONT_END_FLOW.md:204		[D]		stick message (x +8, y +0xC)
 0x00CB9B78		global	crates/grid-tools/src/virtual_race.rs:457 grid-tools::virtual_race (in estimate) ; crates/grid-world/src/mechanical_damage.rs:155 grid-world::mechanical_damage (in indicators)	docs/MECHANICAL_DAMAGE.md:116				The last sector takes up the rest, at least 2 s (0xCB9B78).
+0x00CB9B9C	camera_spring_component_vtable	data	not ported	docs/FRONT_END_FLOW.md:204		[D]
 0x00CBA004		vtable	not ported	docs/LIVERY_CAROUSEL.md:28		[V]		[V] Colour: 0x52B760 → 0x514950 → 0x5F1D50 take a `livery_colour` row's red, green and blue bytes / 255 and send them as a colour message (vtable 0xCBA004, t...
 0x00CBA1F0		global	crates/grid-tools/src/virtual_race.rs:410 grid-tools::virtual_race (in estimate) ; crates/grid-world/src/mechanical_damage.rs:85 grid-world::mechanical_damage	docs/AI_PATH_OBSTACLE_SCAN.md:108 ; docs/RACE_RULES_RESEARCH.md:121		[V]		0xCBA1F0), else the previous lap, else a fresh lap.
 0x00CBA8D8		vtable	not ported	docs/FRONT_END_FLOW.md:157				0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
@@ -4421,6 +4433,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D8205A		global	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:37				Attempt to reconstruct and reuse the first NTCore result by setting only the flag failed its SHA-256 equality assertion. No candidate executable was saved. N...
 0x00D85A50		global	crates/grid-world/src/impact_frame.rs:332 grid-world::impact_frame (in run)	docs/AUDIO_RESEARCH.md:539 ; docs/AI_AVOID_RECOVERY_RESEARCH.md:357 ; docs/CAR_TO_CAR_DEFORMATION_RESEARCH.md:131		[V]		The file-backed D85A50 threshold is positive zero. Preserve the outer
 0x00DA83B0	choreographer_message_types	global	crates/grid-formats/src/ai.rs:712 grid-formats::ai::MESSAGE_TYPES	docs/SPEECH_AUDIO_RESEARCH.md:515	F611	[O]	MESSAGE_TYPES	The `message_type` names in type order (table 0xDA83B0, read by 0x401860):
+0x00DAACC4	fe_view_tweak_message_type_id	data	not ported	docs/FRONT_END_FLOW.md:204		[D]
 0x00DAB000	fe_material_uniform_names	global	not ported	docs/FRONT_END_FLOW.md:152	F817	[D]		14 uniform names (_debugControl, _refMinGamma, _refMaxScale, _ambient, …, _d3col) registered by 0x4D0960; none carries a box transform.
 0x00DAFC38	csm_shadow_sample_pos	global	crates/grid-app/src/shadow_layout.rs:305 grid-app::shadow_layout (in car_cascade)	docs/SUN_SHADOWS.md:66	F677	[O]		c4-c6), the world cascades' 4 (shadowSamplePos0 and 1, 0xDAFC38).
 0x00DB0201		global	not ported	docs/TRACK_LOD.md:266				Per frame, if the system flag 0xDB0201 is set:

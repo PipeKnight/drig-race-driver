@@ -69,9 +69,15 @@ pub enum Action {
     ReplaySlowMotion,
     ReplayStepBack,
     ReplayStepForward,
+    // The front-end camera's stick spring (camera_spring.rs): ids 0x2B..0x2E
+    // of the shipped presets, read by 0x47F660 [D].
+    FeViewTweakLeft,
+    FeViewTweakRight,
+    FeViewTweakUp,
+    FeViewTweakDown,
 }
 
-pub const ACTIONS: usize = 42;
+pub const ACTIONS: usize = 46;
 
 const ALL: [Action; ACTIONS] = {
     use Action::*;
@@ -118,6 +124,10 @@ const ALL: [Action; ACTIONS] = {
         ReplaySlowMotion,
         ReplayStepBack,
         ReplayStepForward,
+        FeViewTweakLeft,
+        FeViewTweakRight,
+        FeViewTweakUp,
+        FeViewTweakDown,
     ]
 };
 
@@ -165,6 +175,10 @@ const NAMES: [&str; ACTIONS] = [
     "Replay Slow Motion",
     "Replay Step Back",
     "Replay Step Forward",
+    "Fe View Tweak Left",
+    "Fe View Tweak Right",
+    "Fe View Tweak Up",
+    "Fe View Tweak Down",
 ];
 
 impl Action {
@@ -691,6 +705,16 @@ impl Actions {
 
     pub fn pressed(&self, action: Action) -> bool {
         self.state[action as usize].pressed
+    }
+
+    /// The front-end camera stick of 0x47F660 [D]: `[Right − Left, Up −
+    /// Down]` of the Fe View Tweak actions (camera_spring.rs).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn fe_view_tweak(&self) -> [f32; 2] {
+        [
+            self.value(Action::FeViewTweakRight) - self.value(Action::FeViewTweakLeft),
+            self.value(Action::FeViewTweakUp) - self.value(Action::FeViewTweakDown),
+        ]
     }
 
     /// 827D10 human record: accel and brake clamped to [0, 1], handbrake
@@ -1733,6 +1757,36 @@ mod tests {
                 .tune(&mut bad)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn the_pad_right_stick_drives_the_fe_view_tweak() {
+        // The shipped preset 4 entries (calibration defaults, no dead zone given).
+        let preset = action_map::read(
+            r#"<ActionMap deviceType="win_xinput" schemeType="xinputScheme" priority="6">
+<Action actionName="Fe View Tweak Left"><Axis axisName="win_con_xi_analogRightStickX" deviceName="win_xinput" baseCalibration="biDirectionalLower"/></Action>
+<Action actionName="Fe View Tweak Right"><Axis axisName="win_con_xi_analogRightStickX" deviceName="win_xinput" baseCalibration="biDirectionalUpper"/></Action>
+<Action actionName="Fe View Tweak Up"><Axis axisName="win_con_xi_analogRightStickY" deviceName="win_xinput" baseCalibration="biDirectionalLower"/></Action>
+<Action actionName="Fe View Tweak Down"><Axis axisName="win_con_xi_analogRightStickY" deviceName="win_xinput" baseCalibration="biDirectionalUpper"/></Action>
+</ActionMap>"#,
+        )
+        .unwrap();
+        let (map, unknown) = ActionMap::pad(&preset);
+        assert!(unknown.is_empty());
+        let mut actions = Actions::new(map, Pads::Any);
+        actions.update(|_| None);
+        assert_eq!(actions.fe_view_tweak(), [0., 0.]);
+        // Right stick fully right and fully up (pad_raw: x 1.0, y flipped to 0.0).
+        actions.update(|s| match s {
+            Source::PadAxis(GamepadAxis::RightStickX) => Some(1.),
+            Source::PadAxis(GamepadAxis::RightStickY) => Some(0.),
+            _ => Some(0.5),
+        });
+        let [x, y] = actions.fe_view_tweak();
+        assert!(x > 0.99 && y > 0.99, "{x} {y}");
+        // The keyboard preset leaves them unmapped.
+        let keys = ActionMap::keyboard();
+        assert!(keys.bindings(Action::FeViewTweakLeft).is_empty());
     }
 
     #[test]

@@ -63,6 +63,14 @@ pub fn app(args: &[String]) -> Result<App, Box<dyn std::error::Error>> {
             None
         }
     };
+    // The player's controls, as in the menus: the pad's right stick (Fe View
+    // Tweak) turns the world's camera on its spring (camera_spring.rs).
+    if camera.is_some() {
+        let input = profile.input()?;
+        let (actions, pad) = crate::input::load(&root, &input, false)?;
+        println!("loading_input {input} pad_preset={pad}");
+        crate::input::install(&mut app, actions);
+    }
     app.insert_resource(WorldCamera(camera));
     Ok(app)
 }

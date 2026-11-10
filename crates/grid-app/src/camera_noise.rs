@@ -32,23 +32,8 @@ impl Tweaks {
     /// The block `<NAME>` of `<camera_tweaks>`; a missing value keeps the
     /// constructor's default, a missing block gives `None`.
     pub fn read(xml: &str, name: &str) -> Option<Tweaks> {
-        let tweaks = &xml[xml.find("<camera_tweaks>")?..];
-        let tweaks = &tweaks[..tweaks.find("</camera_tweaks>")?];
-        let block = &tweaks[tweaks.find(&format!("<{name}>"))?..];
-        let block = &block[..block.find(&format!("</{name}>"))?];
-        let noise = &block[block.find("<noise_tweaks>")?..];
-        let noise = &noise[..noise.find("</noise_tweaks>")?];
-        let value = |tag: &str, default: f32| -> f32 {
-            let Some(at) = noise.find(&format!("<{tag}")) else { return default };
-            let line = &noise[at..];
-            let line = &line[..line.find("/>").unwrap_or(line.len())];
-            line.find("scale=\"")
-                .and_then(|i| {
-                    let v = &line[i + 7..];
-                    v[..v.find('"')?].trim().parse().ok()
-                })
-                .unwrap_or(default)
-        };
+        let noise = section(xml, name, "noise_tweaks")?;
+        let value = |tag: &str, default: f32| attribute(noise, tag, "scale", default);
         Some(Tweaks {
             rotation: [
                 value("noise_rotation_x", DEFAULT.rotation[0]),
@@ -58,6 +43,33 @@ impl Tweaks {
             rate: value("rotation_rate", DEFAULT.rate),
         })
     }
+}
+
+/// The `<SECTION>…</SECTION>` of the block `<NAME>` of `<camera_tweaks>`
+/// (`noise_tweaks`, `spring_tweaks`).
+pub(crate) fn section<'a>(xml: &'a str, name: &str, section: &str) -> Option<&'a str> {
+    let tweaks = &xml[xml.find("<camera_tweaks>")?..];
+    let tweaks = &tweaks[..tweaks.find("</camera_tweaks>")?];
+    let block = &tweaks[tweaks.find(&format!("<{name}>"))?..];
+    let block = &block[..block.find(&format!("</{name}>"))?];
+    let found = &block[block.find(&format!("<{section}>"))?..];
+    Some(&found[..found.find(&format!("</{section}>"))?])
+}
+
+/// The number in `attr="…"` of the element `<TAG … />` of a section, or
+/// `default` when the element or the attribute is missing (the readers keep
+/// their constructor values).
+pub(crate) fn attribute(section: &str, tag: &str, attr: &str, default: f32) -> f32 {
+    let Some(at) = section.find(&format!("<{tag}")) else { return default };
+    let line = &section[at..];
+    let line = &line[..line.find("/>").unwrap_or(line.len())];
+    let key = format!("{attr}=\"");
+    line.find(&key)
+        .and_then(|i| {
+            let v = &line[i + key.len()..];
+            v[..v.find('"')?].trim().parse().ok()
+        })
+        .unwrap_or(default)
 }
 
 /// The integer lattice noise of an octave: 1 − h/2³⁰ with h the 31-bit hash
@@ -151,9 +163,12 @@ impl CameraNoise {
 }
 
 /// `eye` orbited about `target` by `pitch` about the camera's side axis and
-/// `yaw` about its up axis, with `up` the world up [D 0x47C7F0; the order of
-/// the two turns and their signs are not resolved, which a symmetric random
-/// angle does not show, I].
+/// `yaw` about its up axis, with `up` the world up [D 0x47C7F0]. The order
+/// and the signs match the original emulated in Unicorn (F818: a camera
+/// with up +Y and no roll, three mixed angle pairs, within 4e-7): yaw about
+/// the camera's up axis, then pitch about its first side axis; a positive
+/// pitch lowers an eye in front of a level target, a positive yaw turns
+/// +Z towards +X.
 pub fn orbit(eye: Vec3, target: Vec3, up: Vec3, pitch: f32, yaw: f32) -> Vec3 {
     let offset = eye - target;
     let dir = offset.normalize_or_zero();

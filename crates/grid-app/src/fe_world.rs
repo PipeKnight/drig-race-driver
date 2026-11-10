@@ -20,8 +20,9 @@
 //!   `Translation` channels from the world's start (held before the first
 //!   key and after the last); vertical field of view `FOV` [I, as the OSD
 //!   camera]. On top, the camera noise of the world's `camera_tweaks`
-//!   block orbits it slowly about its target ([`crate::camera_noise`]); the
-//!   stick spring (player-turned view) is open.
+//!   block orbits it slowly about its target ([`crate::camera_noise`]), and
+//!   the pad's right stick turns it a little further on its block's spring
+//!   ([`crate::camera_spring`]; spring after noise [I]).
 //! - Instances: a node `kind/glyph=instance` draws the glyph `<glyph>_root`
 //!   below its transform (`grid_formats::osd_glyph`, F787), except a
 //!   `screen/` instance: that is a front-end screen's panel, which its screen
@@ -154,6 +155,7 @@ pub struct WorldCamera {
     eye: Path3,
     target: Path3,
     noise: Option<crate::camera_noise::CameraNoise>,
+    spring: Option<crate::camera_spring::CameraSpring>,
 }
 
 impl WorldCamera {
@@ -163,16 +165,19 @@ impl WorldCamera {
     }
 
     /// The transform `t` seconds in, `dt` after the last call, with the
-    /// noise orbit on the path's place.
-    pub fn advance(&mut self, t: f32, dt: f32) -> Transform {
-        let (eye, target) = (self.eye.at(t), self.target.at(t));
-        let eye = match &mut self.noise {
-            Some(noise) => {
-                let (pitch, yaw) = noise.angles(dt);
-                crate::camera_noise::orbit(eye, target, Vec3::Y, pitch, yaw)
-            }
-            None => eye,
-        };
+    /// noise orbit on the path's place and then the spring's orbit for the
+    /// stick `[Right − Left, Up − Down]` of this frame.
+    pub fn advance(&mut self, t: f32, dt: f32, stick: [f32; 2]) -> Transform {
+        let (mut eye, target) = (self.eye.at(t), self.target.at(t));
+        if let Some(noise) = &mut self.noise {
+            let (pitch, yaw) = noise.angles(dt);
+            eye = crate::camera_noise::orbit(eye, target, Vec3::Y, pitch, yaw);
+        }
+        if let Some(spring) = &mut self.spring {
+            spring.input(stick);
+            let (pitch, yaw) = spring.angles(dt);
+            eye = crate::camera_noise::orbit(eye, target, Vec3::Y, pitch, yaw);
+        }
         Transform::from_translation(eye).looking_at(target, Vec3::Y)
     }
 }
@@ -309,10 +314,12 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
     let target = scene.node(&format!("target={}", spec.camera)).ok_or(format!("no target={}", spec.camera))?;
     let render = String::from_utf8_lossy(&read("frontend/persistentdatarender.xml")?).into_owned();
     let tweaks = crate::camera_noise::Tweaks::read(&render, spec.tweaks).ok_or(format!("no {} camera tweaks", spec.tweaks))?;
+    let spring = crate::camera_spring::Tweaks::read(&render, spec.tweaks).ok_or(format!("no {} spring tweaks", spec.tweaks))?;
     let world_camera = WorldCamera {
         eye: path(&scene, camera.node),
         target: path(&scene, target),
         noise: Some(crate::camera_noise::CameraNoise::new(tweaks)),
+        spring: Some(crate::camera_spring::CameraSpring::new(spring)),
     };
     let start = world_camera.transform(0.);
     let projection = Projection::Perspective(PerspectiveProjection {
@@ -423,10 +430,16 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
 }
 
 /// Moves the camera along its paths by the app's clock (each loading screen
-/// is a new app, so the world starts at zero).
-fn follow(time: Res<Time>, mut cameras: Query<(&mut WorldCamera, &mut Transform)>) {
+/// is a new app, so the world starts at zero), turned by the Fe View Tweak
+/// stick when the app reads input.
+fn follow(
+    time: Res<Time>,
+    actions: Option<Res<crate::input::Actions>>,
+    mut cameras: Query<(&mut WorldCamera, &mut Transform)>,
+) {
+    let stick = actions.map_or([0.; 2], |a| a.fe_view_tweak());
     for (mut camera, mut transform) in &mut cameras {
-        *transform = camera.advance(time.elapsed_secs(), time.delta_secs());
+        *transform = camera.advance(time.elapsed_secs(), time.delta_secs(), stick);
     }
 }
 
@@ -504,6 +517,61 @@ mod tests {
         assert_eq!(screens, 1);
     }
 
+    /// The interactive path: a key bound to Fe View Tweak Right, sampled by
+    /// the input systems each frame, turns the camera through `follow`, and
+    /// the spring brings it back after release (F818).
+    #[test]
+    fn the_view_tweak_stick_turns_the_camera_and_lets_it_return() {
+        use crate::input::{Action, ActionMap, Actions, Calibration, Pads, Source};
+        let mut map = ActionMap::default();
+        map.bind(Action::FeViewTweakRight, Source::Key(KeyCode::KeyL), Calibration::default());
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<ButtonInput<KeyCode>>();
+        crate::input::install(&mut app, Actions::new(map, Pads::Off));
+        app.add_systems(Update, follow);
+        let fixed = |rest| Path3 { curves: None, rest, parent: Mat4::IDENTITY };
+        let loading = crate::camera_spring::Tweaks {
+            centering_tension: 1.,
+            centering_damping: 2.,
+            user_tension: 5.,
+            user_damping: 1.,
+            threshold: [0.1; 2],
+            limit: [0.35; 2],
+            final_scale: [0.25; 2],
+            dampen: 0.5,
+        };
+        let camera = WorldCamera {
+            eye: fixed(Vec3::new(0., 0., 10.)),
+            target: fixed(Vec3::ZERO),
+            noise: None,
+            spring: Some(crate::camera_spring::CameraSpring::new(loading)),
+        };
+        let entity = app.world_mut().spawn((camera, Transform::default())).id();
+        let run = |app: &mut App, held: bool, frames: usize| {
+            for _ in 0..frames {
+                let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                if held {
+                    keys.press(KeyCode::KeyL);
+                } else {
+                    keys.release(KeyCode::KeyL);
+                }
+                app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_micros(16_667));
+                app.update();
+            }
+            app.world().get::<Transform>(entity).unwrap().translation
+        };
+        assert!(run(&mut app, false, 10).distance(Vec3::new(0., 0., 10.)) < 1e-5, "no input, no turn");
+        // Held: yaw settles at 0.25 × 5/6 × −0.175 rad; a negative yaw turns
+        // +Z towards −X, at the same distance and height.
+        let held = run(&mut app, true, 60 * 20);
+        let yaw = 0.25 * 5. / 6. * -0.175f32;
+        assert!((held.x - 10. * yaw.sin()).abs() < 1e-3 && held.y.abs() < 1e-4, "{held:?}");
+        assert!((held.length() - 10.).abs() < 1e-3);
+        // Released: the centering spring takes it back.
+        let back = run(&mut app, false, 60 * 20);
+        assert!(back.x.abs() < 1e-2, "{back:?}");
+    }
+
     /// The loading world from the install: its six drawn meshes and the
     /// camera's saved start looking at its target.
     #[test]
@@ -520,6 +588,7 @@ mod tests {
             eye: path(&scene, cam.node),
             target: path(&scene, target),
             noise: None,
+            spring: None,
         };
         // Before its first key (1 s) the camera holds its saved place; its
         // forward axis matches the saved matrix's -Z.
@@ -550,10 +619,14 @@ mod tests {
         camera.noise = Some(crate::camera_noise::CameraNoise::new(tweaks));
         let (eye, aim) = (camera.eye.at(30.), camera.target.at(30.));
         for _ in 0..600 {
-            let moved = camera.advance(30., 0.05);
+            let moved = camera.advance(30., 0.05, [0.; 2]);
             assert!((moved.translation.distance(aim) - eye.distance(aim)).abs() < 0.01);
             assert!((moved.translation - aim).angle_between(eye - aim) < 0.2);
         }
+        // The loading spring (F818): a held stick settles at 5/6 of the
+        // halved, clamped input times final_scale 0.25.
+        let spring = crate::camera_spring::Tweaks::read(&render, LOADING.tweaks).unwrap();
+        assert_eq!((spring.user_tension, spring.limit, spring.final_scale, spring.dampen), (5., [0.35; 2], [0.25; 2], 0.5));
         // The reflection: the bundle's one cube, and zone 9's gamma and
         // scale over the group's box.
         let cubes = grid_formats::osd::read_cubemaps(&bundle).unwrap();
