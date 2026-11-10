@@ -1778,7 +1778,7 @@ fn main() {
         // A launcher's race left to the menu (event_menu::MENU_AFTER).
         #[cfg(not(target_os = "android"))]
         if result.is_ok() && event_menu::MENU_AFTER.load(std::sync::atomic::Ordering::Relaxed) {
-            match event_menu::supervise(&menu_flags) {
+            match event_menu::menu_after(&menu_flags) {
                 Ok(code) => std::process::exit(code),
                 Err(error) => {
                     eprintln!("grid-app: {error}");
@@ -5342,6 +5342,11 @@ pub(crate) fn race_app(
     app.insert_resource(body_specular);
     if from_menu || to_menu {
         app.insert_resource(event_menu::FromMenu);
+    }
+    // A launcher's race starts the menu itself and hands off to it.
+    #[cfg(not(target_os = "android"))]
+    if to_menu {
+        app.insert_resource(transition::SelfHandoff::new(event_menu::spawn_menu));
     }
     if let Some(path) = career_result {
         if !drive {

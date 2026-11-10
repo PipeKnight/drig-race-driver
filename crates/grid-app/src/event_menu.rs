@@ -1031,6 +1031,51 @@ pub fn leave(exit: &mut MessageWriter<AppExit>, from_menu: bool) {
 /// then opens the event menu in this process, once the race app is gone.
 pub static MENU_AFTER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The menu supervisor a launcher's race started (`spawn_menu`).
+#[cfg(not(target_os = "android"))]
+static MENU_PROCESS: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+
+/// A launcher's race leaving to the menu (`transition::SelfHandoff`): starts
+/// `grid-app --menu` with the launcher's flags, at the race window's place.
+/// Its menu writes the returned marker once it shows, and the race, black
+/// with "Loading" until then, exits: no desktop shows between them.
+/// The per-process supervisor (`GRID_FRONT_END=processes`) keeps that
+/// contract; the one-window host (front_end_host.rs) does not read the
+/// marker or the place yet, so a launcher's menu stays on the supervisor
+/// as before F767 (F773).
+#[cfg(not(target_os = "android"))]
+pub fn spawn_menu(code: i32, at: Option<String>) -> std::io::Result<PathBuf> {
+    if code != BACK_TO_MENU {
+        return Err(std::io::Error::other(format!("no screen follows exit code {code}")));
+    }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let ready = std::env::temp_dir().join(format!("grid-handoff-{}-menu.ready", std::process::id()));
+    let _ = std::fs::remove_file(&ready);
+    let mut menu = std::process::Command::new(std::env::current_exe()?);
+    menu.arg("--menu")
+        .args(launcher_menu_flags(&args))
+        .env("GRID_FRONT_END", "processes")
+        .env(crate::transition::OUTER_READY_ENV, &ready);
+    match at {
+        Some(at) => menu.env(crate::transition::AT_ENV, at),
+        None => menu.env_remove(crate::transition::AT_ENV),
+    };
+    let child = menu.spawn()?;
+    *MENU_PROCESS.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+    Ok(ready)
+}
+
+/// After a launcher's race left to the menu: waits for the menu `spawn_menu`
+/// started, or, when the race left without the fade, runs it here.
+#[cfg(not(target_os = "android"))]
+pub fn menu_after(flags: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
+    let child = MENU_PROCESS.lock().unwrap_or_else(|e| e.into_inner()).take();
+    match child {
+        Some(mut child) => Ok(child.wait()?.code().unwrap_or(1)),
+        None => supervise(flags),
+    }
+}
+
 /// The menu's flags after a launcher's race: the launcher's, without its
 /// race profile (the menu reads its own saved choice).
 #[cfg(not(target_os = "android"))]
@@ -1085,7 +1130,10 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         menu
     };
     let mut round = 0;
-    let code = crate::transition::run_supervised(menu(0), None, |code| match code {
+    // Started by a launcher's race that is still black (`spawn_menu`).
+    let outer = std::env::var_os(crate::transition::OUTER_READY_ENV).map(PathBuf::from);
+    let at = outer.as_ref().and_then(|_| std::env::var(crate::transition::AT_ENV).ok());
+    let code = crate::transition::run_supervised_from(menu(0), at, outer, |code| match code {
         MENU_GO => {
             // An experimental series runs with the gate (none since F420).
             let mut race = std::process::Command::new(&exe);
@@ -1341,6 +1389,12 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
         },
         ..default()
     }));
+    // GRID_AUDIO=off: no audio device (silent research runs).
+    let plugins = if crate::frame_pacing::audio_off() {
+        plugins.disable::<bevy::audio::AudioPlugin>()
+    } else {
+        plugins
+    };
     app.add_plugins(if hosted { crate::front_end_host::hosted(plugins, crate::front_end_host::Gpu::Ui) } else { plugins });
     crate::ui_font::install(&mut app);
     // The original's overlay fade (docs/SCREEN_FLOW.md): the menu fades in

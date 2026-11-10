@@ -194,8 +194,16 @@ pub fn install(app: &mut App, loading: &str, start: Start) {
     app.insert_resource(Fade::black(Some(start)))
         .insert_resource(LoadingText(loading.to_owned()))
         .add_systems(First, finish)
-        .add_systems(Update, (advance, (spawn, present).chain()).chain())
-        .add_systems(Last, handoff_ready);
+        .add_systems(Update, (advance, (spawn, present).chain()).chain());
+    add_window_show(app);
+}
+
+/// `handoff_ready` before Last: bevy_winit's `changed_windows` (Last) must
+/// see the shown window in the same frame. Applied a frame late, the window
+/// stays hidden for good: a hidden window gets no RedrawRequested, so on
+/// Windows no further update runs (F773, docs/SCREEN_FLOW.md §2.2).
+fn add_window_show(app: &mut App) {
+    app.add_systems(PostUpdate, handoff_ready);
 }
 
 /// Leaving an event (results Continue, Retire, finishing a test drive):
@@ -272,6 +280,7 @@ fn finish(
     time: Res<Time<Real>>,
     mut fade: ResMut<Fade>,
     window: Query<&Window, With<PrimaryWindow>>,
+    mut own: Option<ResMut<SelfHandoff>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(next) = fade.leaving else {
@@ -285,22 +294,35 @@ fn finish(
         log_line!("screen_transition version=1 event=loading_on");
     }
     let go = std::env::var_os(GO_ENV).map(PathBuf::from);
-    let ready = std::env::var_os(READY_ENV).map(PathBuf::from);
-    let (Some(go), Some(ready), Next::Code(code)) = (go, ready, next) else {
-        log_line!("screen_transition version=1 event=exit next={next:?}");
-        exit_with(next, &mut exit);
-        fade.leaving = None;
-        return;
+    let supervised = go.zip(std::env::var_os(READY_ENV).map(PathBuf::from));
+    let code = match next {
+        Next::Code(code) if supervised.is_some() || own.is_some() => code,
+        _ => {
+            log_line!("screen_transition version=1 event=exit next={next:?}");
+            exit_with(next, &mut exit);
+            fade.leaving = None;
+            return;
+        }
     };
     if !fade.handed {
         fade.handed = true;
         let at = window.iter().next().and_then(|w| match w.position {
-            WindowPosition::At(p) => Some(format!(" {} {}", p.x, p.y)),
+            WindowPosition::At(p) => Some(p),
             _ => None,
         });
-        let _ = std::fs::remove_file(&ready);
-        if let Err(error) = std::fs::write(&go, format!("{code}{}\n", at.unwrap_or_default())) {
-            warn!("hand-off marker not written, exiting at once: {error}");
+        let handed = match (&supervised, own.as_mut()) {
+            (Some((go, ready)), _) => {
+                let _ = std::fs::remove_file(ready);
+                let at = at.map(|p| format!(" {} {}", p.x, p.y)).unwrap_or_default();
+                std::fs::write(go, format!("{code}{at}\n")).map_err(|e| e.to_string())
+            }
+            (None, Some(own)) => (own.spawn)(i32::from(code), at.map(|p| format!("{},{}", p.x, p.y)))
+                .map(|ready| own.ready = Some(ready))
+                .map_err(|e| e.to_string()),
+            (None, None) => unreachable!("checked above"),
+        };
+        if let Err(error) = handed {
+            warn!("hand-off failed, exiting at once: {error}");
             exit_with(next, &mut exit);
             fade.leaving = None;
             return;
@@ -309,6 +331,16 @@ fn finish(
         log_line!("screen_transition version=1 event=handoff code={code}");
         return;
     }
+    let ready = match (supervised, own) {
+        (Some((_, ready)), _) => Some(ready),
+        (None, Some(own)) => own.ready.clone(),
+        (None, None) => None,
+    };
+    let Some(ready) = ready else {
+        exit_with(next, &mut exit);
+        fade.leaving = None;
+        return;
+    };
     fade.waited += time.delta_secs();
     // The next process shows its first frame; a stuck one is the
     // supervisor's to stop (it ends this screen when the next one exits).
@@ -324,6 +356,22 @@ fn finish(
 
 /// The longest a screen waits for the next one (its load) before exiting.
 const HANDOFF_LIMIT: f32 = 120.;
+
+/// A screen that starts its next process itself (a launcher's race, which
+/// has no supervisor, opening the event menu): `spawn(code, at)` starts it
+/// with the window position `X,Y` and returns the ready marker it writes.
+/// The screen stays black with "Loading" until then, as under a supervisor.
+#[derive(Resource)]
+pub struct SelfHandoff {
+    spawn: fn(i32, Option<String>) -> std::io::Result<PathBuf>,
+    ready: Option<PathBuf>,
+}
+
+impl SelfHandoff {
+    pub fn new(spawn: fn(i32, Option<String>) -> std::io::Result<PathBuf>) -> Self {
+        Self { spawn, ready: None }
+    }
+}
 
 /// Lets the next process bring its window to the front (the foreground
 /// lock otherwise keeps it behind this one). A per-process permission, no
@@ -458,7 +506,10 @@ pub const READY_ENV: &str = "GRID_HANDOFF_READY";
 /// `X,Y`: where the previous screen's window was.
 pub const AT_ENV: &str = "GRID_WINDOW_AT";
 /// Set on a process started by the hand-off (it starts hidden).
-const HANDED_ENV: &str = "GRID_HANDOFF_SHOW";
+pub const HANDED_ENV: &str = "GRID_HANDOFF_SHOW";
+/// The ready marker of the screen that started this supervisor
+/// ([`SelfHandoff`]): the supervisor's first process writes it.
+pub const OUTER_READY_ENV: &str = "GRID_HANDOFF_OUTER_READY";
 
 /// The frame on which a hidden window shows (after its first black frames).
 const SHOW_FRAME: u32 = 3;
@@ -511,12 +562,35 @@ fn handoff_ready(mut frames: Local<u32>, mut window: Query<&mut Window, With<Pri
 /// next process or `None` to return that code. A handing-off process stays
 /// black until the next one shows its window. Returns the last exit code.
 #[cfg(not(target_os = "android"))]
+#[allow(dead_code, reason = "for the career screen's supervisor (docs/SCREEN_FLOW.md §2.4)")]
 pub fn run_supervised(
     first: std::process::Command,
     at: Option<String>,
+    next: impl FnMut(i32) -> Option<std::process::Command>,
+) -> std::io::Result<i32> {
+    run_supervised_from(first, at, None, next)
+}
+
+/// [`run_supervised`] after a screen that started this supervisor itself
+/// ([`SelfHandoff`]): `outer` is that screen's ready marker; the first
+/// process starts hidden and writes it once it shows.
+#[cfg(not(target_os = "android"))]
+pub fn run_supervised_from(
+    first: std::process::Command,
+    at: Option<String>,
+    outer: Option<PathBuf>,
     mut next: impl FnMut(i32) -> Option<std::process::Command>,
 ) -> std::io::Result<i32> {
     use std::process::{Child, Command};
+    // A screen still black for the first process is let go when that
+    // process ends without showing (a crash) and at the end.
+    let release = || {
+        if let Some(outer) = &outer
+            && !outer.is_file()
+        {
+            let _ = std::fs::write(outer, b"ready\n");
+        }
+    };
     use std::time::Duration;
     let base = std::env::temp_dir().join(format!("grid-handoff-{}", std::process::id()));
     let go = base.with_extension("go");
@@ -525,8 +599,16 @@ pub fn run_supervised(
         let _ = std::fs::remove_file(&go);
         let _ = std::fs::remove_file(&ready);
     };
-    let start = |mut command: Command, at: &Option<String>, handed: bool| -> std::io::Result<Child> {
-        command.env(GO_ENV, &go).env(READY_ENV, &ready).env_remove(HANDED_ENV);
+    let start = |mut command: Command,
+                 at: &Option<String>,
+                 report: &std::path::Path,
+                 handed: bool|
+     -> std::io::Result<Child> {
+        command
+            .env(GO_ENV, &go)
+            .env(READY_ENV, report)
+            .env_remove(HANDED_ENV)
+            .env_remove(OUTER_READY_ENV);
         match at {
             Some(at) => command.env(AT_ENV, at),
             None => command.env_remove(AT_ENV),
@@ -537,7 +619,13 @@ pub fn run_supervised(
         command.spawn()
     };
     clear();
-    let mut current = start(first, &at, false)?;
+    // Where a process reports its first frame: the marker the black screen
+    // before it waits for. The first process after a self hand-off reports
+    // to that screen (`outer`); a hand-off passes the marker on, because the
+    // leaving process waits for its own READY_ENV (F773: the menu's first Go
+    // waited the full limit when the race reported elsewhere).
+    let mut report = outer.clone().unwrap_or_else(|| ready.clone());
+    let mut current = start(first, &at, &report, outer.is_some())?;
     let result = loop {
         // The current process exits, or hands off.
         let marker = loop {
@@ -554,9 +642,11 @@ pub fn run_supervised(
         match marker {
             Err(code) => {
                 // Exited without a hand-off (Quit, a crash, an old build).
+                release();
                 clear();
+                report = ready.clone();
                 match next(code) {
-                    Some(command) => current = start(command, &None, false)?,
+                    Some(command) => current = start(command, &None, &report, false)?,
                     None => break code,
                 }
             }
@@ -567,7 +657,7 @@ pub fn run_supervised(
                     let status = current.wait()?;
                     break status.code().unwrap_or(1);
                 };
-                let mut following = start(command, &at, true)?;
+                let mut following = start(command, &at, &report, true)?;
                 // The leaving screen exits after the ready marker; if the
                 // next process ends first, the screen is stopped.
                 loop {
@@ -581,11 +671,12 @@ pub fn run_supervised(
                     }
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                let _ = std::fs::remove_file(&ready);
+                let _ = std::fs::remove_file(&report);
                 current = following;
             }
         }
     };
+    release();
     clear();
     Ok(result)
 }
@@ -604,6 +695,29 @@ fn parse_go(text: &str) -> Option<(i32, Option<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every `Last` system, bevy_winit's `changed_windows` among them, sees
+    /// the window shown on the frame `handoff_ready` shows it (F773: in Last
+    /// itself the order was ambiguous and a screen could stay hidden).
+    #[test]
+    fn the_shown_window_reaches_last_on_its_frame() {
+        #[derive(Resource, Default)]
+        struct Seen(Vec<bool>);
+        let mut app = App::new();
+        app.init_resource::<Seen>()
+            .add_systems(Last, |window: Query<&Window>, mut seen: ResMut<Seen>| {
+                seen.0.extend(window.iter().map(|w| w.visible));
+            });
+        add_window_show(&mut app);
+        app.world_mut().spawn((Window { visible: false, ..default() }, PrimaryWindow));
+        for _ in 0..SHOW_FRAME {
+            app.update();
+        }
+        let seen = &app.world().resource::<Seen>().0;
+        assert_eq!(seen.len(), SHOW_FRAME as usize);
+        assert!(!seen[SHOW_FRAME as usize - 2]);
+        assert!(seen[SHOW_FRAME as usize - 1]);
+    }
 
     #[test]
     fn curve_is_the_original_smoothstep() {
@@ -666,5 +780,37 @@ mod tests {
         assert_eq!(parse_go("21 -8 120\n"), Some((21, Some("-8,120".into()))));
         assert_eq!(parse_go(""), None);
         assert_eq!(parse_at("-8,120"), Some(IVec2::new(-8, 120)));
+    }
+
+    /// The leaving screen waits for its own READY_ENV, so the process it
+    /// hands off to must report there, also after a self hand-off (`outer`).
+    /// Stand-ins: `cmd` records the READY_ENV it got; the menu hands off 20.
+    #[cfg(windows)]
+    #[test]
+    fn a_hand_off_passes_on_the_marker_the_leaving_screen_waits_for() {
+        use std::os::windows::process::CommandExt;
+        let dir = std::env::temp_dir().join(format!("grid-supervisor-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, tail: &str| {
+            let mut command = std::process::Command::new("cmd");
+            command.raw_arg(format!("/C (echo %{READY_ENV}%)>\"{}\"{tail}", dir.join(name).display()));
+            command
+        };
+        let outer = dir.join("outer.ready");
+        let menu = script(
+            "menu.env",
+            &format!(" & (echo 20)>\"%{GO_ENV}%\" & ping -n 6 127.0.0.1 >nul"),
+        );
+        let mut race = Some(script("race.env", ""));
+        let code = run_supervised_from(menu, None, Some(outer.clone()), |code| match code {
+            20 => race.take(),
+            _ => None,
+        })
+        .unwrap();
+        let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap().trim().to_owned();
+        assert_eq!(code, 0);
+        assert_eq!(read("menu.env"), outer.display().to_string());
+        assert_eq!(read("race.env"), outer.display().to_string());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

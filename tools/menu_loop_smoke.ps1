@@ -4,15 +4,21 @@
 # 1-lap races with 3 opponents, GRID_RESULTS_CONTINUE leaves the results, and
 # GRID_MENU_AUTO presses Continue in the first menu round and Back in the
 # next. Sound is 0 in a scratch data dir under local/. Expects, in order:
-#   race (launcher) -> results -> back_to_menu -> menu -> Go -> hand-off ->
-#   race -> results -> back_to_menu -> hand-off -> menu -> quit, exit 0.
+#   race (launcher) -> results -> back_to_menu -> hand-off -> menu -> Go ->
+#   hand-off -> race -> results -> back_to_menu -> hand-off -> menu -> quit,
+#   exit 0, and the menu's front-end sound source (F772) on the way.
+# -WindowShots (GRID_WINDOW_SHOTS, default 1.5 s) makes every screen save a
+# window shot into the data dir; each of the 4 screens must save one. The
+# extra system in `Last` once kept the window hidden with no frames drawn
+# (the F773 window-show hang, reported by career-ui).
 # Prints a verdict and the log path. Run it under tools\build_lock.ps1 only
 # when it also builds; this script does not build.
 param(
     [string]$Exe = 'target\release\grid-app.exe',
     [string]$OutDir = '',
     [int]$Ticks = 36000,
-    [int]$TimeoutSec = 900
+    [int]$TimeoutSec = 900,
+    [string]$WindowShots = '1.5'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -32,6 +38,7 @@ $env:GRID_AUTOPILOT = '1'
 $env:GRID_RESULTS_CONTINUE = '3'
 $env:GRID_MENU_AUTO = "$Ticks"
 $env:GRID_MENU_AUTO_RACES = '1'
+$env:GRID_WINDOW_SHOTS = $WindowShots
 $appArgs = @('--settings', $raceIni, '--data-dir', $data, '--drive-ticks', "$Ticks")
 $started = Get-Date
 $p = Start-Process -FilePath $Exe -ArgumentList $appArgs -RedirectStandardOutput $log -RedirectStandardError $err -PassThru -NoNewWindow
@@ -49,9 +56,11 @@ $seconds = [int]((Get-Date) - $started).TotalSeconds
 $steps = @(
     @('launcher race fades in', 'reason=race_start'),
     @('launcher race back to menu', 'drive_event_menu version=1 event=back_to_menu'),
-    @('launcher race exits', 'event=exit next=Code\(21\)'),
+    @('launcher race hands off', 'event=handoff code=21'),
     @('menu opens', 'drive_event_menu version=1 event=open'),
-    @('menu fades in', 'reason=screen_open'),
+    @('menu sound starts', 'hud_audio version=1 event=queued .*cues=menu,screen'),
+    @('menu shows', 'event=handoff_ready'),
+    @('launcher race exits', 'event=exit next=Code\(21\) waited='),
     @('menu Go', 'drive_event_menu version=1 event=go '),
     @('menu hands off', 'event=handoff code=20'),
     @('race shows', 'event=handoff_ready'),
@@ -74,8 +83,13 @@ foreach ($s in $steps) {
     if (-not $found) { $missing = $s[0]; break }
 }
 $waits = @($lines | Select-String 'event=exit next=Code\(\d+\) waited=([\d.]+)' | ForEach-Object { $_.Matches[0].Groups[1].Value })
-$ok = ($code -eq 0) -and (-not $missing)
+# One shot per screen: launcher race, menu, menu race, menu.
+# Bevy logs the saved shot to stderr.
+$errLines = if (Test-Path $err) { Get-Content $err } else { @() }
+$shots = @(@($lines) + @($errLines) | Select-String 'Screenshot saved').Count
+$shotsOk = (-not $WindowShots) -or ($shots -ge 4)
+$ok = ($code -eq 0) -and (-not $missing) -and $shotsOk
 $verdict = if ($ok) { 'PASS' } else { 'FAIL' }
-Write-Output "$verdict menu-loop: exit=$code seconds=$seconds steps=$($steps.Count) missing=$(if ($missing) { $missing } else { 'none' }) handoff_waits=$($waits -join ',')"
+Write-Output "$verdict menu-loop: exit=$code seconds=$seconds steps=$($steps.Count) missing=$(if ($missing) { $missing } else { 'none' }) handoff_waits=$($waits -join ',') window_shots=$shots"
 Write-Output "log: $log"
 if (-not $ok) { exit 1 }

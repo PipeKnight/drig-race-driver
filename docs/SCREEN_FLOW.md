@@ -31,8 +31,9 @@ Its alpha channel is `Anim!169`, a BEZIERFLOAT with keys frame 0 → 0 and frame
 
 ### 1.3 Not ported (yet)
 
-- The 3D loading world (`loading` root, track preview and `loading_stats` tips/facts), and the top and bottom bar shutters of `overlay`.
+- The 3D loading world (`loading` root, track preview and the `loading_stats` panel), and the top and bottom bar shutters of `overlay`. `language_eng.lng` has no tip or hint strings (90 ids with load/tip/hint, all load/save or network messages), so `loading_stats` shows facts of the event, not tips [I]. It needs the PSSG front-end scene renderer; not cheap.
 - `fade_to_half_black_quick` (popups).
+- The loading sounds: `loading_text_in` / `_out` (`audiohud` bank, −6.4 / −9.0 dB, played by the overlay's animation) and `spinner` (−7.4 dB) [D]. The widget sounds and screen whooshes are ported (§2.5, AUDIO_RESEARCH.md §36).
 
 ## 2. DRIG
 
@@ -58,13 +59,15 @@ winit allows one event loop per process, so each screen is its own process (even
 3. The supervisor starts the next child with `GRID_HANDOFF_SHOW` and `GRID_WINDOW_AT=x,y`. Its window opens hidden at the same place (`transition::window`), shows and takes focus at frame 3, and writes the ready marker at frame 4. The first frame shown is black because the overlay starts black.
 4. The old child exits; the new one fades in. The leaving process calls `AllowSetForegroundWindow` so the new window may take focus.
 
+The window is shown in `PostUpdate` (`transition::add_window_show`), never in `Last`. bevy_winit applies `Window` changes in `Last` (`changed_windows`), and on Windows it updates a visible window only on `RedrawRequested`, which a window that winit still keeps hidden never gets. If the `visible = true` lands after `changed_windows` in the same `Last`, the app never runs another update. Bevy believes the window is visible, winit keeps it hidden, and the main thread spins in Poll (`EnumDisplayMonitors` and `RedrawWindow`). Adding any system to `Last` could reorder the two. Two cases: an F773 draft that played front-end sounds from `Last` hung the menu screen in 3 of 3 runs (0 of 3 without it; `tools/stack_sample.ps1` sampled the main thread's stack), and career-ui found that `GRID_WINDOW_SHOTS` (`frame_pacing::window_shots`, also `Last`) stopped `--career-screen` and `--menu-screen` after the window was created. `tools/menu_loop_smoke.ps1` saves a window shot on every screen to keep this covered.
+
 A child that exits without a marker (a crash, a close) returns its code to the supervisor as before. If the new child dies during the hand-off, the old one is killed and the code is passed on.
 
 Android keeps `android::relaunch()` (one activity, its own markers); `exit_with` routes `Next::Code` there.
 
 ### 2.3 Launcher races return to the menu
 
-A launcher race (`Play GRID Prototype.cmd`, the `race-*` launchers) used to close the app on results Continue. A windowed race that was not started from the menu or the career, and whose profile does not set `[front_end] event_menu = off`, now behaves like a menu race. The way out sends it back to the menu: `run` drops the race app, then `main` opens `event_menu::supervise` in the same process with the launcher's flags minus its `--settings`. This first step has no hand-off (the race window closes before the menu opens), so a short gap shows. Scripted runs (`--drive-ticks`) keep closing unless `GRID_MENU_AUTO` is set, so captures and the build gate are unchanged.
+A launcher race (`Play GRID Prototype.cmd`, the `race-*` launchers) used to close the app on results Continue. A windowed race that was not started from the menu or the career, and whose profile does not set `[front_end] event_menu = off`, now behaves like a menu race. The way out sends it back to the menu with the hand-off: the race has `transition::SelfHandoff`, so once black with "Loading" it starts `grid-app --menu` itself (`event_menu::spawn_menu`, the launcher's flags minus its `--settings`, `GRID_WINDOW_AT` and `GRID_HANDOFF_OUTER_READY`). That supervisor starts its first menu hidden with the race's ready marker (`transition::run_supervised_from`); the race exits when the menu shows. A hand-off passes a process's marker on to the next one, because the leaving process waits for its own `GRID_HANDOFF_READY`: in the first F773 smoke the menu's first Go waited the 120 s limit while the race reported to another file (test `a_hand_off_passes_on_the_marker_the_leaving_screen_waits_for`). `main` waits for the supervisor and returns its code, so a launcher that waits for the process still sees the whole session. If the menu dies before showing, the supervisor writes the marker so the race does not wait. A race that leaves without the fade still opens the supervisor in the same process afterwards (`event_menu::menu_after`). Scripted runs (`--drive-ticks`) keep closing unless `GRID_MENU_AUTO` is set, so captures and the build gate are unchanged. Since F767 `grid-app --menu` runs the one-window host (FRONT_END_FLOW.md), which neither starts hidden at `GRID_WINDOW_AT` nor writes the outer marker, so `spawn_menu` asks for the supervisor with `GRID_FRONT_END=processes` (F773); the launcher's menu moves into the host once the host keeps that contract.
 
 ### 2.4 Career
 
@@ -102,7 +105,7 @@ The difficulty's star level sets the AI's ratio `flashback::AI_RATIOS` (0.506 �
 
 ## 4. Checks
 
-- Unit tests in `transition.rs`: the curve, the durations, the frame cap, repeated leaves and marker parsing.
+- Unit tests in `transition.rs`: the curve, the durations, the frame cap, repeated leaves, marker parsing, the marker a hand-off passes on, and the window shown before `Last`.
 - Unit tests in `event_menu.rs` and `settings.rs`: the Race Options defaults, order, Ninja lock, saved keys, the profile's AI ratio and grid value, and the 0x5B60F0 slots.
-- `tools/menu_loop_smoke.ps1` drives the real path in interactive windows: launcher race → results → menu → Go (hand-off) → race → results → menu (hand-off) → quit, exit 0.
+- `tools/menu_loop_smoke.ps1` drives the real path in interactive windows: launcher race → results → (hand-off) menu → Go (hand-off) → race → results → menu (hand-off) → quit, exit 0, with the menu's sound source and a window shot from every screen.
 - The build gate's `menu-default` smoke still covers the menu → race start.
