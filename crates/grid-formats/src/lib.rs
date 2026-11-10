@@ -32,6 +32,7 @@ pub mod material;
 pub mod mesh;
 pub mod neanim;
 pub mod osd;
+pub mod osd_glyph;
 pub mod ornaments;
 pub mod track_environment;
 pub mod tree_placements;

@@ -722,6 +722,28 @@ Glyph trees [V, dumped with the reader: `GRID_OSD_DUMP=1` on the ignored test
 - The instances `screen/post_race_stats` and `screen/pause_leaderboards` sit in `pause_root`
   (`helper=anim!3`), the pause menu's tree.
 
-Next steps: the results screen needs the glyph grafting and an `fe3d_*` material, which the pause
-art needs too (the front-end session ports it; asked to share one mechanism, 2026-11-10), then its
-own `osd_scene`-style driver for the rows, pills and texts.
+Grafting, ported (`grid_formats::osd_glyph`, F787): `expand(scenes, scene, root)` walks the tree
+below `root` and, at every childless instance, walks its glyph's definition under the instance's
+world matrix. The definition is looked up in the instancing package first, then in the other loaded
+packages; the definition root's own transform is not applied (identity in every traced glyph [I]);
+an instance whose glyph is undefined, or that would graft a glyph into itself, stays a leaf; at
+most `MAX_DEPTH` = 16 nested instances. Each placed node carries its package, index, world matrix
+and instance depth. With all three front-end packages loaded [V, ignored test
+`post_race_glyphs_expand_through_the_front_end_packages`], every instance below the post-race
+roots resolves:
+
+| root | placed nodes | own meshes | grafted meshes | deepest |
+|---|---|---|---|---|
+| `leaderboards_root` | 471 | 7 | 319 | 3 |
+| `post_race_stats_root` | 22 | 0 | 9 | 1 |
+| `drift_scoreboard_root` | 77 | 7 | 40 | 2 |
+| `loading_root` (front-end's loading world) | 3779 | not counted | 2434 | not counted |
+
+`loading_root` holds 743 instances, so the loading world, which draws only the nodes stored below
+its root (grid-app `fe_world`), lacks the grafted meshes; switching `fe_world` to `expand` is the
+front-end session's call (told 2026-11-10).
+
+Next steps: the results screen needs the `fe3d_generic`/`GD`/`GPD` materials (`fe_world` has only the
+unlit `fe3d_tracksurface` term), the camera that views `pause_root`'s screens, and its own
+`osd_scene`-style driver for the rows, pills and texts. The front-end session ports the pause art
+but builds neither the grafting nor these materials (their reply, 2026-11-10).
