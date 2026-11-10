@@ -2464,6 +2464,27 @@ struct Recovery {
     timer: f32,
 }
 
+impl Recovery {
+    /// Obstruction toggle of 0x78EE70 [V]: a contact with the timer below
+    /// zero restarts it at rcCollisionTimeOut and flips the reverse toggle.
+    /// The toggle branch falls through to the hold test (LAB_0078f41d), so
+    /// the timer also counts down on the toggle tick. Returns the reverse
+    /// request of this tick, if any.
+    fn obstruction_toggle(&mut self, obstruction: bool, timeout: f32, dt: f32) -> Option<bool> {
+        let mut reverse = None;
+        if obstruction && self.timer < 0. {
+            self.timer = timeout;
+            self.toggle = !self.toggle;
+            reverse = Some(self.toggle);
+        }
+        if self.timer > 0. {
+            reverse = Some(self.toggle);
+            self.timer -= dt;
+        }
+        reverse
+    }
+}
+
 /// race_start object (+0x35 active, +0x38 end speed, +0x3C merge factor,
 /// +0x40 desired offset, +0x44 initial phase, +0x48 timeout, +0x4C side).
 #[derive(Clone, Copy, Debug, Default)]
@@ -3968,13 +3989,10 @@ impl AiDriver {
                     _ => {}
                 }
                 // Obstruction contacts toggle reverse/forward for rcCollisionTimeOut.
-                if obstruction && rc.timer < 0. {
-                    rc.timer = rs.rc_collision_timeout;
-                    rc.toggle = !rc.toggle;
-                    request.reverse = rc.toggle;
-                } else if rc.timer > 0. {
-                    request.reverse = rc.toggle;
-                    rc.timer -= dt;
+                if let Some(reverse) =
+                    rc.obstruction_toggle(obstruction, rs.rc_collision_timeout, dt)
+                {
+                    request.reverse = reverse;
                 }
                 // Reset after rcRecoveryTimeOut is disabled by default (rcResetAllowed).
                 rc.elapsed += dt;
@@ -5407,6 +5425,34 @@ mod tests {
             let [left, right] = data.line.track_limits_at(s);
             assert!(left < 0. && right > 0., "segment {i}: {left} {right}");
         }
+    }
+
+    #[test]
+    fn an_obstruction_toggle_holds_for_the_timeout_from_its_own_tick() {
+        let dt = 1. / 60.;
+        let mut rc = Recovery {
+            timer: -1.,
+            ..Default::default()
+        };
+        assert_eq!(rc.obstruction_toggle(false, 2., dt), None);
+        // The toggle tick already counts down (fall-through to LAB_0078f41d).
+        assert_eq!(rc.obstruction_toggle(true, 2., dt), Some(true));
+        assert!((rc.timer - (2. - dt)).abs() < 1e-6);
+        // Contacts while the timer runs do not toggle again.
+        let mut held = 1;
+        while rc.timer > 0. {
+            assert_eq!(rc.obstruction_toggle(true, 2., dt), Some(true));
+            held += 1;
+        }
+        // 2 s at 60 Hz including the toggle tick (f32 rounding may add one).
+        assert!((120..=121).contains(&held), "{held}");
+        // The timer is now <= 0. At exactly 0 the next contact neither
+        // toggles nor holds; below 0 it toggles back.
+        if rc.timer == 0. {
+            assert_eq!(rc.obstruction_toggle(true, 2., dt), None);
+            rc.timer = -dt;
+        }
+        assert_eq!(rc.obstruction_toggle(true, 2., dt), Some(false));
     }
 
     #[test]

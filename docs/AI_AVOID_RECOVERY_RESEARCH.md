@@ -517,6 +517,12 @@ Fields:
    While +0x3C > 0: req+0xAF = +0x36 and +0x3C −= dt. Net effect: each obstruction contact
    flips between reversing and driving forward for 2 s.
 
+   The toggle branch falls through to this test (LAB_0078f41d) [V, F805]. So the
+   decrement also runs on the toggle tick, and the timer is 2 s − dt after it. The port
+   used `else if` until F805, which held each toggle one tick longer. The loop itself,
+   toggling on every new contact after the timer runs out, is the original rule. Activation
+   sets +0x3C = −1, so the first contact toggles at once.
+
    Nothing gates this by own speed (2026-10-20) [V static]: 0x4022F0 counts walls always,
    and the input stage writes gear 9 directly (§5 item 8). A car that brushes a barrier at
    speed while off track engages reverse at speed. The port does the same; in the grid-app
