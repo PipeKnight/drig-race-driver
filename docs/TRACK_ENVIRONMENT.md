@@ -167,6 +167,32 @@ Read `Res<TrackEnvironment>`:
 - `.0.lighting.sky_rain()` and the `sky_rain_*` values → the sky's scrolling cloud layer.
 - `.0.raining()` → always false. No rain rendering is needed for shipped content.
 
+### 3.2 Night level (F781)
+
+The baseline lights a scene with a white Bevy sun of 18,000 lux (EV100 13). Until F781 every preset's
+`backlight_suncolour` peak was mapped to that sun, and the fill, Phong, emissive and night-light units
+were `18000 / peak`. A night preset with a dim sun therefore got a larger unit: Haruna's forced night
+(sun peak 0.169) was lit about 12 times brighter than its data, Shibuya (0.47) about 4 times. The
+original's selected final merge (`CheapFinalMerge`) has no luminance adaptation
+(docs/ORIGINAL_POSTPROCESS.md), so the original shows the coefficients at their absolute level.
+
+- `graphics::sun_reference` = max(sun peak, `DAYLIGHT_SUN_PEAK` 1.99). 1.99 is the dimmest shipped day
+  preset (Yokohama); every other day preset is between 2.07 and 3.0, so day routes keep their unit and
+  render unchanged. Fill, Phong, emissive and night-light units are `18000 / sun_reference`.
+- The sun's lux is `18000 × sun_level`, `sun_level` = peak / reference (1 by day; Haruna night 0.085,
+  Shibuya 0.24). The log line is `baseline_sun_level level= reference=`.
+- Time-of-day routes (Le Mans `daynight.xml`): `timeline_lighting` follows the timeline's
+  `backlight_*` colours and scales at the event clock, or at `sky::static_start` in a static scene,
+  through the source packing. The unit stays the static preset's (Le Mans 2.998), so the emissive and
+  night-light units set at startup stay valid. Only the sun's lux follows the timeline; its colour
+  and direction stay the baseline's. Before F781 nothing applied the timeline's light values in the
+  default path, in driving or static scenes; only the sky followed the clock. Log lines:
+  `timeline_lighting version=1 unit=` and, on the first application, `timeline_lighting apply ...`.
+  It is skipped (logged) with the enhanced profile, a non-linear `GRID_BASELINE_FILL` or the
+  source-lighting trial, which own these lights.
+- The environment map's intensity (sky.rs) is not scaled; Haruna's forced-night sky stays black as in
+  the data.
+
 ## 4. Open
 
 - The loader's search order for route versus track `lighting.xml` and `sky.pssg` (F515 uses route first for both, docs/SKY.md §2).

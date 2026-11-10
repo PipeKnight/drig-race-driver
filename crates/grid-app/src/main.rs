@@ -177,6 +177,7 @@ mod source_projector;
 mod source_projector_present;
 mod effective_lighting;
 mod source_light_trial;
+mod timeline_lighting;
 mod texture_overrides;
 mod surface_rgb;
 mod texture_upload;
@@ -3801,6 +3802,9 @@ pub(crate) fn race_app(
         println!("baseline_specular phong={:?}", graphics.baseline_specular);
         if mode != "off" {
             graphics.emissive_unit = graphics::light_unit(&environment.lighting, graphics.sun_illuminance(), mode == "gamma");
+            graphics.sun_level = graphics::sun_level(&environment.lighting, mode == "gamma").unwrap_or(1.);
+            println!("baseline_sun_level level={:.4} reference={:.3}", graphics.sun_level,
+                environment.lighting.rgb("backlight_suncolour").map_or(0., |sun| graphics::sun_reference(sun, false)));
         }
     }
     if source_haze {
@@ -5264,6 +5268,13 @@ pub(crate) fn race_app(
             timeline,
         })?;
     }
+    // Time-of-day routes: the baseline lights follow the timeline
+    // (docs/TRACK_ENVIRONMENT.md "Night level").
+    if track && !collision && grid_tools::time_of_day::Mode::for_route(&root, &route).ok() == Some(grid_tools::time_of_day::Mode::Timeline) {
+        let environment = grid_tools::environment::Environment::for_route(&root, &route)?;
+        let timeline = grid_tools::time_of_day::Timeline::load(&root, &route).ok().flatten();
+        timeline_lighting::install(&mut app, &environment.lighting, timeline, &graphics);
+    }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
     }
@@ -5461,7 +5472,11 @@ pub(crate) fn race_app(
         .insert_resource(car)
         .insert_resource(InitialOrbit(orbit.clone()))
         .insert_resource(orbit)
-        .insert_resource(ClearColor(Color::srgb(0.055, 0.07, 0.095)))
+        // The original's world pass (0x5C8080) keeps the base render pass's
+        // clear colour (0.14, 0.11, 0.06) from 0x64BCD0 and clears with it
+        // each frame (0x63AEB0); it shows through gaps in the ground data
+        // (Detroit, docs/GRAPHICS_AUDIT.md). sRGB reading [I], as the cockpit.
+        .insert_resource(ClearColor(Color::srgb(0.14, 0.11, 0.06)))
         // The upload path, then the BC images made while the app was built
         // (the OSD scene) and any added later on it (F603).
         .add_systems(
@@ -5867,7 +5882,7 @@ fn setup(
                 // and cull a tree whose centre leaves the frustum.
                 entity.insert((source.placed(matrix), bevy::camera::visibility::NoAutoAabb));
             }
-            if decal_materials.contains(&part.material)
+            if (decal_materials.contains(&part.material) || !source_trees::casts_sun_shadow(&part.name))
                 && let Some(entity) = &mut entity
             {
                 entity.insert(bevy::light::NotShadowCaster);
@@ -6189,7 +6204,7 @@ fn setup(
     let sun = commands
         .spawn((
             DirectionalLight {
-                illuminance: graphics.sun_illuminance(),
+                illuminance: graphics.sun_illuminance() * graphics.sun_level,
                 color: graphics.sun_colour(),
                 shadow_maps_enabled: !shadow_layout::enabled()
                     || graphics.shadow_quality.map_size().is_some(),

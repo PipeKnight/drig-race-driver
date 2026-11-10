@@ -75,7 +75,8 @@ const NAMED_GROUPS: [&str; 8] = [
 /// Whether the port draws a material's emissive map: the start-light board
 /// (main.rs `StartLights`) and the groups object_materials::emissive_materials
 /// reads (night ones scaled by `EmissiveTime`, dark by day as in the
-/// original); `object_emissive_ripple` is not drawn.
+/// original); `object_emissive_ripple` is not drawn (its `EmissiveTime` is
+/// never set, docs/GRAPHICS_AUDIT.md).
 fn emissive_drawn(name: &str, group: &str) -> bool {
     name.rsplit('/').next() == Some("start_lights")
         || ["object_simple_emissive", "object_lod_emissive", "object_animated_emissive", "object_simple_night_emissive"]

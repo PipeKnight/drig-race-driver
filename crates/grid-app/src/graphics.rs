@@ -159,6 +159,9 @@ pub struct Settings {
     /// (object_materials::configure_emissive): the baseline sun's lux over the
     /// route's `backlight_suncolour` peak, over pi. None: sun lux over pi.
     pub emissive_unit: Option<f32>,
+    /// Baseline track scenes: the sun's share of `sun_illuminance`, the
+    /// route's sun peak over [`sun_reference`] (1 by day, below 1 at night).
+    pub sun_level: f32,
     pub preset: Preset,
     pub width: u32,
     pub height: u32,
@@ -238,6 +241,7 @@ impl Default for Settings {
             surface_ao_scale: 1.,
             baseline_specular: None,
             emissive_unit: None,
+            sun_level: 1.,
             preset: Preset::Baseline,
             width: 1280,
             height: 800,
@@ -258,8 +262,37 @@ pub const SAO_SCALE_DEFAULT: f32 = 0.9;
 /// surface gets the `albedo * (ambient + back / 2)` they mean (row 125).
 pub const BEVY_DIFFUSE_AMBIENT: f32 = 0.4524;
 
+/// The dimmest day preset's `backlight_suncolour` peak (yokohama_docks;
+/// shipped day presets span 1.99..3.0, night ones 0.10..0.47, Le Mans'
+/// timeline night 0.10). Fill, Phong, the light unit and the sun scale
+/// against the larger of a preset's sun peak and this ([`sun_reference`]):
+/// a day preset keeps its own scale (its sun peak = the baseline sun's lux,
+/// the authored day look), a darker preset keeps the daylight unit, so its
+/// sun, fill, emissives and night lights stay at their authored level
+/// instead of being raised to a day sun. The original's selected final
+/// merge (CheapFinalMerge) has no luminance adaptation
+/// (docs/ORIGINAL_POSTPROCESS.md; docs/TRACK_ENVIRONMENT.md "Night level").
+pub const DAYLIGHT_SUN_PEAK: f32 = 1.99;
+
+/// The sun-colour peak a preset's light units scale against: its own peak,
+/// at least [`DAYLIGHT_SUN_PEAK`] (decoded with 2.2 for `gamma`, like the
+/// colours).
+pub fn sun_reference(sun: [f32; 3], gamma: bool) -> f32 {
+    let floor = if gamma { DAYLIGHT_SUN_PEAK.powf(2.2) } else { DAYLIGHT_SUN_PEAK };
+    sun.into_iter().fold(floor, f32::max)
+}
+
+/// The baseline sun's share of its lux in a preset: its sun peak over
+/// [`sun_reference`] (1 on day presets).
+pub fn sun_level(lighting: &grid_formats::track_environment::Lighting, gamma: bool) -> Option<f32> {
+    let sun = lighting.rgb("backlight_suncolour")?;
+    let sun = if gamma { sun.map(|c| c.max(0.).powf(2.2)) } else { sun };
+    let peak = sun.into_iter().fold(0_f32, f32::max);
+    Some(peak / sun_reference(sun, gamma))
+}
+
 /// lighting.xml's `backlight_backcolour` / `backlight_ambientcolour`, scaled
-/// against `backlight_suncolour`'s peak = the baseline sun's 18,000 lux.
+/// against [`sun_reference`] = the baseline sun's 18,000 lux.
 /// AUTHORED: as Bevy lights, `ambient + back / 2` is a uniform ambient and
 /// `back / 2` a shadowless light from opposite the sun (the original's term
 /// also dims the lit side by up to back / 2; not reproduced). `gamma`
@@ -283,7 +316,7 @@ impl Fill {
         let sun = decode(lighting.rgb("backlight_suncolour")?);
         let back = decode(lighting.rgb("backlight_backcolour")?);
         let ambient = decode(lighting.rgb("backlight_ambientcolour")?);
-        let unit = sun_lux / sun.into_iter().fold(1e-3_f32, f32::max);
+        let unit = sun_lux / sun_reference(sun, gamma);
         let fill: [f32; 3] = std::array::from_fn(|i| ambient[i] + back[i] / 2.);
         let peak = |c: [f32; 3]| c.into_iter().fold(1e-6_f32, f32::max);
         // Bevy: a directional light gives albedo/pi * lux * N.L; the ambient
@@ -312,11 +345,11 @@ pub struct Phong {
 }
 
 /// Bevy radiance per original light unit, before exposure: `sun_lux` over
-/// `backlight_suncolour`'s peak, over pi (as Fill and Phong scale).
+/// [`sun_reference`], over pi (as Fill and Phong scale).
 pub fn light_unit(lighting: &grid_formats::track_environment::Lighting, sun_lux: f32, gamma: bool) -> Option<f32> {
     let sun = lighting.rgb("backlight_suncolour")?;
     let sun = if gamma { sun.map(|c| c.max(0.).powf(2.2)) } else { sun };
-    Some(sun_lux / sun.into_iter().fold(1e-3_f32, f32::max) / std::f32::consts::PI)
+    Some(sun_lux / sun_reference(sun, gamma) / std::f32::consts::PI)
 }
 
 impl Phong {
@@ -333,7 +366,7 @@ impl Phong {
         // AFTER source byte reconstruction; calibration's historical rawSun
         // decode/order stays unchanged. No source GPU colour-domain claim.
         let specular=decode(source.rgb(packed_sun));
-        let unit = sun_lux / sun.into_iter().fold(1e-3_f32, f32::max);
+        let unit = sun_lux / sun_reference(sun, gamma);
         let [height_degrees, rotation_degrees] = if source.linked() {
             lighting.sun()?
         } else {
@@ -789,7 +822,8 @@ mod graphics_settings_tests {
         // Shadowed albedo-1 surface: Bevy's ambient response times the brightness
         // is the original's (ambient + back / 2) in the sun's albedo/pi * lux units.
         let shadowed = BEVY_DIFFUSE_AMBIENT * fill.ambient_brightness;
-        let original = (0.1 + 0.2 / 2.) * 18_000. / std::f32::consts::PI;
+        // A sun peak of 1 is below daylight: the unit is DAYLIGHT_SUN_PEAK's.
+        let original = (0.1 + 0.2 / 2.) * 18_000. / DAYLIGHT_SUN_PEAK / std::f32::consts::PI;
         assert!((shadowed / original - 1.).abs() < 1e-5, "{shadowed} {original}");
     }
 

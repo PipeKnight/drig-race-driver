@@ -77,10 +77,9 @@ Open:
 - night routes take the NightLights branch of the shadow-mask selector, which skips the CSM sun shadow
   (docs/SOURCE_SKY_LIGHTING.md); the port still draws sun shadows there;
 - cookie orientation and the brightness unit are checked visually only (see the log entry);
-- the static Le Mans night scene keeps the day sun and ambient (the timeline's lighting values are
-  applied in driving only).
-- the forced-night Haruna scene keeps a day-bright ambient and sun in the port (static and driving), so the
-  beams read weaker against it than in the original; that belongs to the sky/ambient path, not this pass.
+- F781 put the night presets' sun and ambient at their authored level and made Le Mans follow the
+  timeline's lighting in static and driving scenes (docs/TRACK_ENVIRONMENT.md §3.2), so the beams now
+  read against the original's night level.
 
 ## 4. Checks
 

@@ -66,7 +66,7 @@ programs (shaderpack disassembly; the `.asm` listings stay under ignored `local/
 | `object_simple_emissive*`, `object_lod_emissive*` | `E.rgb` (unscaled; `EmissiveMapScale` is not read) |
 | `object_animated_emissive*` | `E.rgb * EmissiveColour * EmissivePower` (UV scroll not reproduced) |
 | `object_simple_night_emissive*` | `E.rgb * k`, `k = EmissiveTime * EmissivePower / 3`; the same program adds `shadowmask.gba * E * k * 15` to the light (street-light mask, unported) |
-| `object_emissive_ripple*` (Shibuya water) | only through the street-light mask (unported, not drawn) |
+| `object_emissive_ripple*` (Shibuya inflatable panda and octopus, lantern wires) | the night-emissive program (identical code except that ambient is not scaled by `ambientOcclusionScales.w`), but nothing sets its `EmissiveTime`: the group saves no defaults (`parameterSavedCount` 0), the instances save only `EmissivePower`, and the string's only users are 0x9790E0 (the four night groups) and the ornament setup 0x96E430. So `k` = 0 and the map adds nothing [I: unset constant assumed zero]; the port does not draw it. Their diffuse is bright (mean 0.31 to 0.36). |
 
 `EmissiveTime` is set by 0x9790E0 (docs/re/symbols.tsv `night_emissive_time_init`) for the four
 night-emissive groups: the daynight `emissive` curve in the timeline mode (Le Mans), 3.0 in forced
@@ -93,21 +93,23 @@ diagnostic; `GRID_EXE=local/ga-exe2/grid-app.exe sh tools/graphics_audit_all.sh 
 `graphics_audit_all routes=92 flagged=7 errors=0`. Materials pass: no route has an `unbound`,
 `missing`, `no_uv` or `undecoded` material; `dark` (1 to 5 per route) and `cut_out` (1 to 5) are
 listed per route in `materials.tsv` and were checked below.
+Rerun after F781 (`local/graphics-audit-4/`): the same 7 routes flagged, with the same flag counts
+within one frame.
 
 | Track | Routes | Flagged | Fixed | Open |
 |---|---|---|---|---|
 | Donington | 4 | 0 | first run's 3 void flags were the sweep's side cameras under the terrain (sweep grounded) | - |
 | Istanbul Park | 4 | 0 | - | - |
 | Jarama | 2 | 0 | - | - |
-| Le Mans | 2 | 0 | 27 night-emissive and 12 emissive objects drawn (night ones follow the 24 h clock) | dark bands in forest-shade canopies (shadow work) |
+| Le Mans | 2 | 0 | 27 night-emissive and 12 emissive objects drawn (night ones follow the 24 h clock); the timeline's sun and fill levels apply in every scene, and the canopy's dark bands (tree sheets casting sun shadow, which the original's sheets do not) are gone (F781) | - |
 | Milan | 6 | 0 | first run's camera-in-building flags (sweep snapped to gates) | r5 arcade floor: authored deep shade (macro AO, F738), not a texture |
 | Nürburgring | 4 | 0 | - | - |
-| Spa-Francorchamps | 4 | 0 | - | forest interiors near black at frame edges (shadow work) |
-| Haruna | 10 | 5 (r1, 3, 6, 8, 9) | night windows and signs drawn at EmissiveTime 3 | black sky on the forced-night routes (sky scale 0 in the data); the night light (street lights, `shadowmask.gba` light term, headlight projection) is not ported |
+| Spa-Francorchamps | 4 | 0 | forest interiors near black were the tree sheets' sun shadow; sheets cast none in the original (F781, docs/SOURCE_VEGETATION.md) | - |
+| Haruna | 10 | 5 (r1, 3, 6, 8, 9) | night windows and signs drawn at EmissiveTime 3 | black sky on the forced-night routes (sky scale 0 in the data); the night light (street lights, `shadowmask.gba` light term, headlight projection) is ported (F776); the night sun and fill are at the data's level (F781) |
 | Okutama | 6 | 0 | first run's void flags (cameras under terrain) | - |
-| Shibuya | 8 | 0 | 100 emissive draws (signs, screens, shop fronts) | `object_emissive_ripple` (4, water, street-light mask only) |
+| Shibuya | 8 | 0 | 100 emissive draws (signs, screens, shop fronts) | `object_emissive_ripple` (4 wind-rippled decorations; emissive inactive in the original, see above) |
 | Yokohama Docks | 10 | 0 | - | - |
-| Detroit | 10 | 2 (r0, r1) | - | a gap in the ground data near (90, 178, 264), see below |
+| Detroit | 10 | 2 (r0, r1) | the gap shows the original's clear colour (F781) | a gap in the ground data near (90, 178, 264), see below |
 | Long Beach | 6 | 0 | - | - |
 | San Francisco | 6 | 0 | first run's void flags (cameras under terrain) | - |
 | Washington | 10 | 0 | rows 107, 108, 110, 119 (F699, F702, F738) hold | - |
@@ -125,6 +127,11 @@ Detroit routes 0 and 1: magenta wedges of 0.22 to 0.29 % of the frame beside the
 by route 1's chase view too. `GRID_GRAPHICS_AUDIT_RAYS` (`local/ga-rays/`): the rays through the
 wedge hit no loaded draw and no collision within 1 km; rays beside it hit `track1/3`, `edgestrip1`
 and the buildings. Both views' rays cross near (90, 178, 264): the original's data has a hole in
-the ground there, and what the player sees through it is the frame's clear colour. The port clears
-to (0.055, 0.07, 0.095); the original's base render task defaults to (0.14, 0.11, 0.06) at +0x60
-(0x64BCD0), but whether the scene pass keeps that is not checked. Open.
+the ground there, and what the player sees through it is the frame's clear colour. The
+original's base render pass (0x64BCD0) sets the clear colour (0.14, 0.11, 0.06) at +0x60; the
+world pass (0x5C8080, through the layer-owner base 0x64BE80) does not change it, nor do its
+vtable hooks (+0x1C 0x5C8570, +0x34 0x5C8A10), and the pass dispatch 0x63AEB0 clears with +0x60
+each frame (flags 0xB) [D; I: no other writer of the world pass's +0x60 was searched for
+exhaustively]. Since F781 the race scene clears to that colour (sRGB reading [I], as the cockpit)
+instead of (0.055, 0.07, 0.095), so the gap shows the original's dark brown. The gap itself is in
+the data and stays.

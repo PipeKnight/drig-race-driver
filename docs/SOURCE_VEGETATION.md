@@ -232,3 +232,23 @@ All routes' distances: `local/r52/tree_attributes.tsv` (d0 10-30 m, d1 90-200 m 
 - Bounds (F724): facing, sheet and card entities carry their Aabb grown by the largest quad
   offset and `NoAutoAabb`; without it Bevy recomputes the box from the collapsed centres on
   every `Mesh3d` change and culls trees whose centres leave the view while leaves are on screen.
+
+### Sheets cast no shadow (F781)
+
+The tree setup 0x970C40 (`tree_shader_select` in docs/re/symbols.tsv) [D] picks the shaderpack
+group from the instance's saved shader name: `foliage` → `tree_foliage`, `facing_foliage` →
+`tree_facing`, `foliage_environment` / `foliage_trunk` → `tree_trunk_shadowed`,
+`treesheet_foliage` / `treesheet_trunk` → `tree_sheet` (each `_x1` for the second tree type,
+`_shadowed` when the caller asks). In `shaderpack.pssg` [O] every tree group has three or four
+passes, among them `vpShadow` with `csm_depth_opaque.psh.mainLowAlphaTested` at passConfigMask 4,
+except `tree_sheet` and `tree_sheet_shadowed`: colour (mask 1) and velocity/depth (mask 2) only.
+The cascade pass draws a list with the pass of its mask, so the distant tree sheets cast no sun
+shadow in the original [I: that a group without a mask-4 pass draws nothing in the shadow pass is
+read from the pass table, not traced in the draw loop]. No track saves `treesheet_trunk`; 13
+`.pssg` files save `treesheet_foliage`.
+
+The port cast them, through the sun-facing twins of row 122: the sheets are tall strips of
+leaves expanded about world up, and their shadows fell as hard vertical bands on the canopies in
+front of them (Le Mans, Spa forests; docs/GRAPHICS_AUDIT.md). `source_trees::casts_sun_shadow`
+now keeps `trees/sheet/` parts out of the shadow (`NotShadowCaster` at spawn, no twin); the ornament
+fade proxies already skip shadowless parts. Test `tree_sheets_cast_no_sun_shadow`.

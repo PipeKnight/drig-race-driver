@@ -674,7 +674,7 @@ mod static_colour_corpus_tests {
                 }
                 let actual = actual.expect("complete actual source must admit static Phong");
                 let decode = |v: f32| if gamma { v.max(0.).powf(2.2) } else { v };
-                let unit = 18_000. / sun.map(decode).into_iter().fold(1e-3_f32, f32::max);
+                let unit = 18_000. / crate::graphics::sun_reference(sun.map(decode), gamma);
                 let colour = expected.map(|v| decode(v).max(0.) * unit / std::f32::consts::PI);
                 assert_eq!(
                     actual.colour.map(f32::to_bits),

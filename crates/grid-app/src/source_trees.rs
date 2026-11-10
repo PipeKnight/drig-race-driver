@@ -706,6 +706,19 @@ mod tests {
     }
 }
 
+/// Whether a tree part casts a sun shadow. The tree setup 0x970C40 binds
+/// `treesheet_foliage(.fx)` and `treesheet_trunk(.fx)` to the shaderpack's
+/// `tree_sheet(_shadowed)`, whose only passes are the colour pass (mask 1)
+/// and velocity/depth (mask 2); every other tree group (`tree_foliage`,
+/// `tree_facing`, `tree_trunk`, their `_x1` forms, `tree_lowlod`) has the
+/// `vpShadow` / `csm_depth_opaque` pass (mask 4). So the distant tree sheets
+/// cast nothing in the original. Cast from here, their tall camera-facing
+/// strips threw hard vertical bands over the canopies in front of them
+/// (Le Mans, Spa; docs/SOURCE_VEGETATION.md "Sheets cast no shadow").
+pub fn casts_sun_shadow(part_name: &str) -> bool {
+    !part_name.starts_with("trees/sheet/")
+}
+
 /// Source-facing foliage stores repeated centres and signed offsets in UV1.
 /// The zero-wind original VS expands those offsets along inverse-view X/Y,
 /// after applying the source instance scale, in every pass: in the sun's
@@ -715,6 +728,8 @@ mod tests {
 #[derive(Clone)]
 pub struct FacingSource {
     cylindrical: bool,
+    /// [`casts_sun_shadow`]: a sheet has no shadow twin.
+    casts: bool,
     /// Impostor cards: each vertex's UV0 in the atlas's first view; the
     /// view shown is chosen per placement each frame.
     atlas: Option<Vec<[f32; 2]>>,
@@ -752,6 +767,7 @@ impl FacingSource {
         assert_eq!(centers.len(), offsets.len(), "validated foliage streams");
         Some(Self {
             cylindrical,
+            casts: casts_sun_shadow(name),
             atlas,
             centers: centers.clone(),
             offsets: offsets.clone(),
@@ -916,6 +932,9 @@ fn shadow_twins(
     let turned = faced.is_none_or(|f| f.dot(forward) < 0.99999);
     *faced = Some(forward);
     for (part, facing, mesh, transform, aabb, standard, card, twin) in &parts {
+        if !facing.source.casts {
+            continue;
+        }
         match twin {
             Some(twin) if turned => {
                 if let Some(source) = meshes.get(&mesh.0) {
@@ -1151,6 +1170,28 @@ mod census_tests {
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0., 5., 0.]; 4]);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]]);
         mesh
+    }
+
+    #[test]
+    fn tree_sheets_cast_no_sun_shadow() {
+        // tree_sheet(_shadowed) has no shadow pass in the shaderpack.
+        assert!(!casts_sun_shadow("trees/sheet/distant_tree02"));
+        assert!(casts_sun_shadow("trees/facing/tree01"));
+        assert!(casts_sun_shadow("trees/card/tree01_x2"));
+        assert!(casts_sun_shadow("trees/trunk01"));
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>().add_systems(Update, shadow_twins);
+        app.world_mut().spawn((
+            DirectionalLight { shadow_maps_enabled: true, ..default() },
+            GlobalTransform::from(Transform::IDENTITY.looking_to(Vec3::new(0.3, -0.6, -0.74), Vec3::Y)),
+        ));
+        let source = quad();
+        let facing = FacingSource::from_mesh("trees/sheet/twin", &source).unwrap().placed(Mat4::IDENTITY);
+        let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(source);
+        let material = MeshMaterial3d::<StandardMaterial>(Handle::default());
+        let part = app.world_mut().spawn((facing, Mesh3d(mesh), Transform::IDENTITY, material)).id();
+        app.update();
+        assert!(app.world().get::<ShadowTwin>(part).is_none());
     }
 
     #[test]

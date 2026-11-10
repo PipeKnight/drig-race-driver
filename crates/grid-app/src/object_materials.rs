@@ -90,8 +90,10 @@ pub(crate) struct Emissive {
 /// EmissivePower / 3` (EmissiveTime: 0x9790E0; the program also adds the map
 /// to the light through the street-light mask, unported). All add before fog.
 /// Without the map these screens and signs draw their near-black diffuse
-/// (Shibuya `big_screen_*`). `object_emissive_ripple*` (Shibuya water) is left
-/// out: its emissive only lights through the street-light mask.
+/// (Shibuya `big_screen_*`). `object_emissive_ripple*` (Shibuya's wind-rippled
+/// inflatables and lantern wires) is left out: it runs the night-emissive
+/// program, but nothing in the original sets its `EmissiveTime` (only
+/// 0x9790E0's four night groups and ornaments name it), so it adds nothing.
 pub(crate) fn emissive_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeMap<String, Emissive>> {
     use grid_formats::material;
     let bindings = material::read_texture_bindings(tree)?;
