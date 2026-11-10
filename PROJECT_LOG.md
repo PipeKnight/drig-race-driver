@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F816](log/F0816.md) | 2026-11-10 | Livery designer 3D pill carousel on fe3d |
 | [F815](log/F0815.md) | 2026-11-10 | Car sun terms and glass shadow floor from materials.xml (row 100) |
 | [F814](log/F0814.md) | 2026-11-10 | Race OSD lap-time stacker re-flow and offline layouts (Le Mans time left, best-lap popup) |
 | [F813](log/F0813.md) | 2026-11-10 | Loading world cube reflection |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F759](log/F0759.md) | 2026-11-09 | Circuit lap estimator 0x67FFB0 and marshal flags (rows 44, 47) |
 | [F758](log/F0758.md) | 2026-11-09 | Haruna's vertical streaks are light-shaft cards |
 | [F757](log/F0757.md) | 2026-11-09 | Car shadows in race views and Haruna's wet layer |
-| [F756](log/F0756.md) | 2026-11-09 | Front-end screen transitions, launcher races back to the menu, Race Options difficulty and grid |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

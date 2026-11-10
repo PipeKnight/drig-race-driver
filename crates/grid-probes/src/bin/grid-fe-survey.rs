@@ -14,9 +14,11 @@ fn main() {
     let trees: Vec<pssg::Tree> = bytes.iter().map(|b| pssg::read_tree(b).unwrap()).collect();
     let scenes: Vec<osd::Scene> = trees.iter().map(|t| osd::read_scene(t).unwrap()).collect();
     let refs: Vec<&osd::Scene> = scenes.iter().collect();
-    let s0 = &scenes[0];
-    let root = s0.node(root_id).unwrap_or_else(|| s0.nodes.iter().position(|n| n.name() == root_id).unwrap());
-    let placed = osd_glyph::expand(&refs, 0, root);
+    // The first package that defines the root (feNonPersistentDatabase holds the livery editor).
+    let find = |s: &osd::Scene| s.node(root_id).or_else(|| s.nodes.iter().position(|n| n.name() == root_id));
+    let (si, root) = scenes.iter().enumerate().find_map(|(i, s)| find(s).map(|r| (i, r))).unwrap();
+    let s0 = &scenes[si];
+    let placed = osd_glyph::expand(&refs, si, root);
     // SURVEY_TEXTURES=a,b,c: where each named texture is, at which size
     // (the packages and the b_persistent bundle; cubes by id).
     if let Some(want) = std::env::var_os("SURVEY_TEXTURES") {
@@ -119,9 +121,9 @@ fn main() {
         );
     }
     let mut ids: Vec<String> = chain.iter().map(|&i| s0.nodes[i].id.clone()).collect();
-    // SURVEY_SUBTREE: also the animations of every grafted node of the first package.
+    // SURVEY_SUBTREE: also the animations of every grafted node of the root's package.
     if std::env::var_os("SURVEY_SUBTREE").is_some() {
-        ids.extend(placed.iter().filter(|p| p.scene == 0).map(|p| s0.nodes[p.node].id.clone()));
+        ids.extend(placed.iter().filter(|p| p.scene == si).map(|p| s0.nodes[p.node].id.clone()));
     }
     // SURVEY_TARGET=substring: also the channels whose target contains it (material parameters).
     let extra = std::env::var("SURVEY_TARGET").ok();
@@ -145,7 +147,7 @@ fn main() {
                 let want = want.to_string_lossy().into_owned();
                 for c in a.channels.iter().filter(|c| c.target.contains(&want)) {
                     for (i, curve) in c.components.iter().enumerate() {
-                        let keys: Vec<String> = curve.0.iter().map(|k| format!("{:.3}:{:.2}", k.time, k.value)).collect();
+                        let keys: Vec<String> = curve.0.iter().map(|k| format!("{:.3}:{:.4}", k.time, k.value)).collect();
                         println!("keys {} {:?}[{i}] {}", c.target, c.semantic, keys.join(" "));
                     }
                 }

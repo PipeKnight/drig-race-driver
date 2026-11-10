@@ -20,8 +20,8 @@ This doc covers what draws behind the GRID World menus and the livery designer, 
   - Off reverses all of this (`garage`, mode 2/0, Near/Far on, FE off).
   - [I] 0x4A7B70 opens a named "_open" stream or sound bank for the garage. It searches a list at +0x84 and is not the mesh load.
 - [V] 0x4CCD80 loads the garage bundle `frontend/b_garage_%02d.pssg` once, when its flags allow it (+4/+5/+6 clear, +7 set), and then clears +7.
-  - [O] The three bundles are the same size (999,645 bytes). Each holds `ref_garage_sharp.dds` and `ref_garage_soft.dds`.
-  - [O] The generic `frontend/b_garage.pssg` is 28.9 MB; its contents are not read yet.
+  - [O] The three bundles are the same size (999,645 bytes). Each holds the CUBEMAPTEXTUREs `ref_garage_sharp.dds` (DXT1 512) and `ref_garage_soft.dds` (DXT1 256).
+  - [O] The generic `frontend/b_garage.pssg` is 28.9 MB with 1100 textures: the 52 livery pattern pictures `liv_pattern_pattern_N` (docs/LIVERY_CAROUSEL.md) and the `car_free_race_*` pictures among them; the rest is not surveyed.
 - [V] 0x4CC8E0 fills the `dynamic_screen_list` with an item for each `targetzone_01..99` found that has `magnets`. The garage named items are matched through 0x477940("garage", name).
   - [I] These are the garage zones that the zone cameras move between (`garage_zone_manager`; StateGarageZone).
 - [V] The reflection cube follows a mode in 0x4DCFA0 (called from 0x4E30C0 and the message handler 0x4ED780):
@@ -59,7 +59,7 @@ This doc covers what draws behind the GRID World menus and the livery designer, 
   - the pills are `colour_pills`, `pattern_pills` and `number_pills`, with t = (0, −14.441, 0);
   - main is `main`.
   - The garage_01/02/03_root nodes in the same database are empty (bounds 0).
-- [O] The pills' materials are fe3d effects (hud's `fe3d` module: GENERIC, GD, GPD, I, GMPD).
+- [O] The pills' materials are fe3d effects (hud's `fe3d` module: GENERIC, GD, GPD, I, GMPD). The pills, their ring and their colours are in docs/LIVERY_CAROUSEL.md; the port draws them since F816, without this garage scene behind them.
 - [I] The car that shows the livery is the garage world's car at `grid_start_standing_0`. It is seen through the garage zone camera of StateEditGarageCarLivery, not through a model in the front-end database.
 
 ## What the port needs

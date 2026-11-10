@@ -3214,13 +3214,16 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     crate::hud_sound::install_front_end(&mut app, &root, effects);
     crate::frame_pacing::install_window_shots(&mut app);
     crate::input::install(&mut app, actions);
+    // The livery designer's pill carousel under the Team Branding panel.
+    let patterns = screen.cat.livery_choices.patterns.iter().map(|p| p.1.clone()).collect();
+    crate::livery_carousel::install(&mut app, &root, patterns);
     let exit = app
         .insert_resource(screen)
         .insert_resource(Lookup { routes, root })
         .insert_resource(labels)
         .insert_resource(ClearColor(Color::srgb(0.055, 0.07, 0.095)))
         .add_systems(Startup, spawn)
-        .add_systems(Update, (update, present).chain())
+        .add_systems(Update, (update, present, livery_carousel).chain())
         .run();
     match exit {
         AppExit::Error(code) => std::process::exit(i32::from(code.get())),
@@ -3234,6 +3237,12 @@ struct Title;
 struct Info;
 #[derive(Component)]
 struct RowText(usize);
+/// The node that places the panel on the screen.
+#[derive(Component)]
+struct PanelPlace;
+/// The panel itself (compact while the livery carousel shows below it).
+#[derive(Component)]
+struct Panel;
 
 const ROWS: usize = 18;
 
@@ -3252,6 +3261,7 @@ fn spawn(mut commands: Commands) {
                 align_items: AlignItems::Center,
                 ..default()
             },
+            PanelPlace,
             UiTargetCamera(camera),
         ))
         .with_children(|screen| {
@@ -3270,6 +3280,7 @@ fn spawn(mut commands: Commands) {
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.025, 0.04, 0.065, 0.92)),
+                    Panel,
                 ))
                 .with_children(|panel| {
                     panel.spawn((Title, Text::new(""), font(30.), TextColor(Color::WHITE)));
@@ -3913,6 +3924,77 @@ pub fn reward_pages(
     page(text("bank_rewards_screen_title", "Bank Account"), t.bank);
     page("Team News".into(), [t.news, ebay].concat());
     pages
+}
+
+/// The carousel of the livery part under the cursor (docs/LIVERY_CAROUSEL.md).
+fn carousel_view(
+    l: &TeamLivery,
+    part: LiveryPart,
+    choices: &grid_tools::career::LiveryChoices,
+) -> crate::livery_carousel::View {
+    use crate::livery_carousel::{Kind, View};
+    match part {
+        LiveryPart::Pattern => View::of(Kind::Pattern, choices, l.pattern),
+        LiveryPart::Colour(c) => View::of(Kind::Colour, choices, l.colours[c]),
+        LiveryPart::Number => View::of(Kind::Number, choices, l.number),
+    }
+}
+
+/// Shows the carousel on the Team Branding page, with the panel moved to the
+/// top (below the letterbox bar) so the pills below it stay visible.
+fn livery_carousel(
+    screen: Res<Screen>,
+    mut shown: ResMut<crate::livery_carousel::Shown>,
+    mut place: Query<&mut Node, (With<PanelPlace>, Without<Panel>)>,
+    mut panel: Query<&mut Node, (With<Panel>, Without<PanelPlace>)>,
+) {
+    let view = match &screen.page {
+        Page::Livery(l) if !crate::settings::diagnostics().livery_carousel_off => Some(
+            screen
+                .actions()
+                .get(screen.cursor)
+                .and_then(|a| match a.1 {
+                    Action::CycleLivery(part) => Some(part),
+                    _ => None,
+                })
+                .map(|part| carousel_view(l, part, &screen.cat.livery_choices)),
+        ),
+        _ => None,
+    };
+    // At the top, just below the overlay's top letterbox bar (on while the
+    // screen shows), so the bar does not cover the title.
+    let (align, top) = if view.is_some() {
+        (
+            AlignItems::FlexStart,
+            Val::Vh(100. * crate::transition::bar_shares(0.).0),
+        )
+    } else {
+        (AlignItems::Center, Val::ZERO)
+    };
+    for mut node in &mut place {
+        if node.align_items != align || node.padding.top != top {
+            node.align_items = align;
+            node.padding.top = top;
+        }
+    }
+    // Compact there, and wider so the footer keeps to one line: the full
+    // panel reaches the pills at 1280x800.
+    let (pad, gap, width) = if view.is_some() {
+        (px(12.), px(2.), px(1140.))
+    } else {
+        (px(24.), px(6.), px(900.))
+    };
+    for mut node in &mut panel {
+        if node.row_gap != gap {
+            node.padding = UiRect::all(pad);
+            node.row_gap = gap;
+            node.width = width;
+        }
+    }
+    let view = view.flatten();
+    if shown.view != view {
+        shown.view = view;
+    }
 }
 
 #[allow(clippy::type_complexity)]

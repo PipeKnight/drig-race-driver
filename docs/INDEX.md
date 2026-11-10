@@ -170,6 +170,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [GROUND_EFFECTS_RESEARCH.md](GROUND_EFFECTS_RESEARCH.md) Ground effects: skid marks, wheel kick-up and ground cover — Recorded 15 October 2026 (F306).
 - [LACETTI_CLEARCOAT_STUDY.md](LACETTI_CLEARCOAT_STUDY.md) Lacetti clearcoat and road-mask follow-through — Owner requests continued graphics work.
 - [LACETTI_GRAPHICS_MATERIALS.md](LACETTI_GRAPHICS_MATERIALS.md) Lacetti material response — 19.1.
+- [LIVERY_CAROUSEL.md](LIVERY_CAROUSEL.md) The livery designer's 3D pill carousel — 10 November 2026, Claude Code (F816).
 - [LOCAL_REFLECTIONS.md](LOCAL_REFLECTIONS.md) Local reflection experiment — Existing source sky IBL remains the verified default.
 - [SCENE_HDR_PROBE.md](SCENE_HDR_PROBE.md) Static HDR scene reflection probe — Static scene capture, HDR readback and recognizable offscreen reflection are verified below.
 - [SOURCE_VEGETATION.md](SOURCE_VEGETATION.md) Donington source vegetation — 17 October2026.

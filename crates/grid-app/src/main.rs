@@ -137,6 +137,7 @@ mod name_tag;
 mod native_dlaa;
 #[cfg(feature = "dlaa")]
 mod opaque_conservative_motion;
+mod livery_carousel;
 mod particles;
 mod pause_menu;
 mod post_race;

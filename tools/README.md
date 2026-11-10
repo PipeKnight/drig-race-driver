@@ -183,7 +183,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [audit_object_lods.py](audit_object_lods.py) | Read-only bounds/indices comparison of one purchased object prototype's LOD draws. | [DONINGTON_ATMOSPHERE](../docs/DONINGTON_ATMOSPHERE.md) |
 | [audit_texture_mip_tails.py](audit_texture_mip_tails.py) | Read-only PSSG mip-tail inventory; game-derived reports remain private. | [PSSG_PAYLOADS](../docs/PSSG_PAYLOADS.md) |
 | [disassemble_grid_shader.py](disassemble_grid_shader.py) | Read-only D3D9 shader disassembly using Windows' installed Microsoft compiler. | [FLASHBACK](../docs/FLASHBACK.md) |
-| [disassemble_packed_grid_shader.py](disassemble_packed_grid_shader.py) | Read-only selected shaderpack program disassembly; all evidence stays private. | [CAR_SHADER_MASKS](../docs/CAR_SHADER_MASKS.md) |
+| [disassemble_packed_grid_shader.py](disassemble_packed_grid_shader.py) | Read-only selected shaderpack program disassembly; all evidence stays private. | [CAR_REFLECTIONS](../docs/CAR_REFLECTIONS.md) |
 | [dump_particle_systems.py](dump_particle_systems.py) | Write readable private copies of GRID particle-system binary XML files. | [TYRE_SMOKE_RESEARCH](../docs/TYRE_SMOKE_RESEARCH.md) |
 | [inventory_graphics_resources.py](inventory_graphics_resources.py) | Read-only texture/shader inventory; purchased-resource metadata stays private. | [GRAPHICS_REMASTER](../docs/GRAPHICS_REMASTER.md) |
 | [preview_mesh.py](preview_mesh.py) | Orthographic diagnostic plot of private OBJ sources, without scene assembly. | [PSSG_PAYLOADS](../docs/PSSG_PAYLOADS.md) |

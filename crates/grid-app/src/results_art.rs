@@ -36,18 +36,18 @@ use std::sync::{Arc, Mutex};
 
 /// The render layer of the results art (free of the OSD's 23).
 pub const LAYER: usize = 24;
-const PACKAGES: [&str; 3] = [
+pub(crate) const PACKAGES: [&str; 3] = [
     "frontend/fePersistentDatabase.pssg",
     "frontend/feNonPersistentDatabase.pssg",
     "frontend/fe_DLC_0.pssg",
 ];
 /// The front end's texture bundle (the packages hold only the names).
-const BUNDLE: &str = "frontend/b_persistent.pssg";
-const PARAMS: &str = "frontend/fe_paramcontrol.xml";
+pub(crate) const BUNDLE: &str = "frontend/b_persistent.pssg";
+pub(crate) const PARAMS: &str = "frontend/fe_paramcontrol.xml";
 /// The reflection cubes: `TR1` names `reflection_soft.dds` /
 /// `reflection_sharp.dds`, which the race OSD package holds as `env_soft.dds`
 /// / `env_sharp.dds` [I: the same images under the OSD's names].
-const CUBES: &str = "Osd/dial2.pssg";
+pub(crate) const CUBES: &str = "Osd/dial2.pssg";
 const SCREEN: &str = "screen/pause_leaderboards=leaderboards";
 const CAMERA: &str = "camera=camera1";
 const TARGET: &str = "target=camera1";
@@ -264,10 +264,10 @@ fn visible(gate: &Gate, slot: Option<usize>, board: &Board) -> bool {
 
 // ------------------------------------------------------------------ pose
 
-const IDENTITY: [f32; 16] = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
+pub(crate) const IDENTITY: [f32; 16] = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
 
 /// `saved` with the translation, rotation and scale the channels give at `t`.
-fn animated(saved: &[f32; 16], channels: &[&osd::Channel], t: f32) -> [f32; 16] {
+pub(crate) fn animated(saved: &[f32; 16], channels: &[&osd::Channel], t: f32) -> [f32; 16] {
     let (mut s, mut r, mut p) = Mat4::from_cols_array(saved).to_scale_rotation_translation();
     for c in channels {
         if c.components.len() != 3 {
@@ -284,7 +284,7 @@ fn animated(saved: &[f32; 16], channels: &[&osd::Channel], t: f32) -> [f32; 16] 
     Mat4::from_scale_rotation_translation(s, r, p).to_cols_array()
 }
 
-fn targets(c: &osd::Channel, n: &osd::Node) -> bool {
+pub(crate) fn targets(c: &osd::Channel, n: &osd::Node) -> bool {
     c.target == n.id || c.target == n.name()
 }
 
@@ -652,7 +652,7 @@ struct Prepared {
 }
 
 /// A cube of the OSD package with raw (gamma-space) texels, as fe3d reads them.
-fn cube(c: &osd::Cubemap<'_>) -> Image {
+pub(crate) fn cube(c: &osd::Cubemap<'_>) -> Image {
     let mut data = Vec::new();
     for face in c.faces {
         data.extend(crate::texture_upload::decode_levels(face, c.size, c.size, 1, false).unwrap_or_default());
@@ -834,7 +834,7 @@ struct Live {
 }
 
 /// A white texel for a texture slot whose image the bundle lacks.
-fn white() -> Image {
+pub(crate) fn white() -> Image {
     Image::new(
         Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         TextureDimension::D2,

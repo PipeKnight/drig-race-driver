@@ -102,6 +102,9 @@ pub struct Diagnostics {
     /// Experimental: the results screen keeps the plain panel instead of the
     /// front-end art (before/after comparisons of row 69 only).
     pub results_art_off: bool,
+    /// Experimental: the Team Branding page keeps its text rows only, without
+    /// the 3D pill carousel (before/after comparisons, docs/LIVERY_CAROUSEL.md).
+    pub livery_carousel_off: bool,
     /// Milliseconds slept in every vehicle tick: a forced slow tick for
     /// frame-rate checks (docs/FRAME_STEPPING.md).
     pub tick_delay_ms: Option<f64>,
@@ -150,6 +153,7 @@ impl Default for Diagnostics {
             results_continue: None,
             results_shot: None,
             results_art_off: false,
+            livery_carousel_off: false,
             tick_delay_ms: None,
             max_ticks_per_frame: None,
             camera_fps: None,
@@ -187,6 +191,7 @@ impl Diagnostics {
             results_continue: text("GRID_RESULTS_CONTINUE").and_then(|v| v.parse().ok()),
             results_shot: text("GRID_RESULTS_SHOT").and_then(|v| v.parse().ok()),
             results_art_off: text("GRID_RESULTS_ART_OFF").is_some_and(|v| v == "1"),
+            livery_carousel_off: text("GRID_LIVERY_CAROUSEL_OFF").is_some_and(|v| v == "1"),
             tick_delay_ms: text("GRID_TICK_DELAY_MS").and_then(|v| v.parse().ok()),
             max_ticks_per_frame: text("GRID_MAX_TICKS_PER_FRAME").and_then(|v| v.parse().ok()),
             camera_fps: text("GRID_CAMERA_FPS").and_then(|v| v.parse().ok()),
@@ -226,6 +231,7 @@ impl Diagnostics {
             }
             "results_shot" => self.results_shot = Some(value.parse().map_err(|_| number(key))?),
             "results_art_off" => self.results_art_off = on(key, value)?,
+            "livery_carousel_off" => self.livery_carousel_off = on(key, value)?,
             "tick_delay_ms" => self.tick_delay_ms = Some(value.parse().map_err(|_| number(key))?),
             "max_ticks_per_frame" => {
                 self.max_ticks_per_frame = Some(value.parse().map_err(|_| number(key))?)

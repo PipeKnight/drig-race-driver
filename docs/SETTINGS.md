@@ -72,6 +72,7 @@ Grammar:
 | | `results_continue` | seconds: a scripted run selects Continue on the stats and results screens by itself (docs/CAREER_SCREEN.md) | `GRID_RESULTS_CONTINUE=S` |
 | | `results_shot` | seconds: once the results screen shows its board (the front-end art loaded), save `window-shot-results.png` in the data directory (docs/RACE_HUD.md §6.7, `tools/results_window_check.py`) | `GRID_RESULTS_SHOT=S` |
 | | `results_art_off` | on/off, experimental: the results screen keeps the plain panel instead of the front-end art (before/after comparisons only) | `GRID_RESULTS_ART_OFF=1` |
+| | `livery_carousel_off` | on/off, experimental: the career Team Branding page keeps its text rows without the 3D pill carousel (before/after comparisons only, docs/LIVERY_CAROUSEL.md) | `GRID_LIVERY_CAROUSEL_OFF=1` |
 | | `tick_delay_ms` | milliseconds slept in every vehicle tick: a forced slow tick for frame-rate checks (docs/FRAME_STEPPING.md) | `GRID_TICK_DELAY_MS=MS` |
 | | `camera_fps` | frames per second of race time: the in-race views step by the original's per-frame rules at this rate (head-cam springs, look smoothing, follow damp, spin hold), for comparisons with the original at 60 or 165 fps; unset, one step per 16 ms tick (docs/CAMERA_VIEWS.md §3 "Camera clock") | `GRID_CAMERA_FPS=F` |
 | | `tick_interpolation` | interactive window only: `on` (default) draws the cars, their parts and the camera between the last two 16 ms ticks; `off` draws the last tick, for comparisons (docs/FRAME_STEPPING.md §6) | `GRID_TICK_INTERPOLATION=0` |

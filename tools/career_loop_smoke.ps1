@@ -11,7 +11,8 @@
 # shots show the pages before the race; it ends with the hand-off code 22.
 # -Season runs only the career screen on a seeded season (GRID_CAREER_SEED=
 # season, GRID_CAREER_AUTO=season): team name, Team Branding, the Le Mans
-# choice, Skip Le Mans, End Of Season, Start Of Season, quit (exit 0).
+# choice, Skip Le Mans, End Of Season, Start Of Season, quit (exit 0); the
+# Team Branding page must show its 3D pattern carousel (docs/LIVERY_CAROUSEL.md).
 # The career screen's front-end sound source must start (the F772 sink);
 # settings.ini keeps it silent. Prints a verdict and the log path. This
 # script does not build.
@@ -86,6 +87,7 @@ $seasonSteps = @(
     @('team named', 'drive_career version=1 event=team_named name="My Team"'),
     @('my team page', 'drive_career version=1 event=page page=team'),
     @('team branding page', 'drive_career version=1 event=page page=livery'),
+    @('carousel shown', 'livery_carousel version=1 event=shown kind=pattern '),
     @('livery kept', 'drive_career version=1 event=team_livery '),
     @('le mans choice', 'drive_career version=1 event=page page=lemans'),
     @('skip confirm', 'drive_career version=1 event=page page=confirm_skip_lemans'),
