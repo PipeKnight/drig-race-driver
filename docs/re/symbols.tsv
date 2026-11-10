@@ -506,6 +506,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00479FF0	StateTransition_update	func	not ported	docs/FLASHBACK.md:137		[D]		Update 0x479FF0: with PPS on it waits for the PPS transition (state +0x48 = 4 or 6), then
 0x00480000		label	not ported	docs/SPEECH_CAREER_PARAMETERS.md:58		[O]		inside 0x0047FFC0; of record +0x40 was found (scan of 0x401000–0x480000 for `+0x14C]`/`+0x434]`, and of 0x438C10
 0x00484714		label	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:35				inside 0x00484640; VRAM-resolution XML only, PID 29472: still `0xc0000005`, but RVA changes to `0x484714`. This change affects execution and does not fix startup. Record: `vram...
+0x00486E20	StateSFXTrigger_enter	func	not ported	docs/AUDIO_RESEARCH.md:2353	F788	[O]		StateSFXTrigger enter (slot 3, vtable 0xCBACF8): plays its sfx attribute (this+0x50) through 0x440E10.
 0x00490F40	list_widget_input	func	crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2292	F772	[V]		not a function entry in the master analysis; 0x490F40, itemflow 0x49DA70, slider 0x4A0CC0, screen back 0x479930):
 0x004910DF		func	crates/grid-tools/src/hud_audio.rs:235 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2292				not a function entry in the master analysis; move (0x4910DF), an itemflow value step (0x474100) or a step at its
 0x00491151		func	crates/grid-tools/src/hud_audio.rs:236 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2293				not a function entry in the master analysis; end (0x474130), activate (0x491151) and the screen's back (0x479930).
@@ -520,8 +521,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004A0CC0	slider_step	func	crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2296	F772	[V]		0x490F40, itemflow 0x49DA70, slider 0x4A0CC0, screen back 0x479930):
 0x004A4560	Borders	func	crates/grid-app/src/transition.rs:251 grid-app::transition::Borders	docs/SCREEN_FLOW.md:29	F779 F756	[D]		(FUN_004A4560). The circle is the procedural shader `feov_ramp.fx`:
 0x004A49E0	Borders	func	crates/grid-app/src/transition.rs:249 grid-app::transition::Borders	docs/SCREEN_FLOW.md:43	F779	[D]		FUN_004A49E0, through FUN_004964C0) and slide off once the screen is
+0x004A5930	ScreenSDU_enter	func	not ported	docs/AUDIO_RESEARCH.md:2353	F788	[O]		ScreenSDU enter: overlay_on at 0x4A5FD4 (a3 = 1), overlay_off at 0x4A5BD9.
 0x004A9E80	race_music_option	func	not ported	docs/AUDIO_RESEARCH.md:1725 ; docs/MUSIC_RESEARCH.md:76				pair (n & 3)·2. A `race_music_option` (0x4A9E80, `DataRaceMusicToggle`) switches it; its default
 0x004AC7AF		label	not ported	docs/MUSIC_RESEARCH.md:77				inside 0x004AC580; The default is registered as 1 (`push 1` at 0x4AC7AF), only when the profile has no value.
+0x004B07E0	ScreenOverlay_ctor	func	crates/grid-app/src/hud_sound.rs:74 grid-app::hud_sound::overlay_cue	docs/AUDIO_RESEARCH.md:2353	F788	[O]		ScreenOverlay constructor: popup sound flag +0x1C4 = 1.
 0x004B1A70		func	crates/grid-tools/src/dynamic_props.rs:426 grid-tools::dynamic_props::split_scale	docs/CONTACT_REORIENTATION_RESEARCH.md:34 ; docs/DYNAMIC_PROPS_RESEARCH.md:335 ; docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:149		[D]		(+0x80). A row shorter than 1e-5 (0x4B1A70) leaves identity rows and a
 0x004B1A90		func	not ported	docs/WHEEL_GEOMETRY.md:9	F506	[D]		The constructor builds mirrored X pairs at body `+0x14e0..0x1510`: **rear positive X, rear negative X, front positive X, front negative X**. Selected-coordin...
 0x004B1B60		func	not ported	docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:309		[I]		The exact mixing via `0x4B1B60` is [I]. Record +80 is the state, +84 a changed flag, +88 the
@@ -534,6 +537,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004B23A0	ShaderParameterExactNameFind	func	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:133	G372	[D]		Exact case-sensitive full parameter-name lookup; caller start index is zero.
 0x004B3960		func	not ported	docs/PHASE0.md:75 ; docs/TOOLCHAIN.md:526				| `0x004b3960` | Pseudocode contains a bounded 32-byte format helper, explicit NUL at byte 31; agrees with the observed call and instructions |
 0x004B4440		func	crates/grid-world/src/joint.rs:576 grid-world::joint (in prepare)	docs/DYNAMIC_PROPS_RESEARCH.md:330 ; docs/JOINTS_RESEARCH.md:89	F473	[D]		0x4B4440 writes the offset back clamped by the limit error.
+0x004B7140	StateSFXTrigger_type	func	not ported	docs/AUDIO_RESEARCH.md:2353	F788	[O]		StateSFXTrigger type getter (descriptor 0xE5B48C).
+0x004B7290	StateSFXTrigger_ctor	func	not ported	docs/AUDIO_RESEARCH.md:2353	F788	[O]		StateSFXTrigger constructor (factory 0x4C4530, registered at 0xC6E280).
 0x004C6DB0		func	crates/grid-app/src/transition.rs:10 grid-app::transition	docs/SCREEN_FLOW.md:26	F756	[D]		(FUN_004C6DB0, `states.xml`). Once the screen is black on the way into a
 0x004C7F50		func	not ported	docs/RACE_HUD.md:122		[I]		`.points` = Points, only when 0x4C7F50 holds (career [I]);
 0x004C8200	format_lemans_time	func	crates/grid-app/src/post_race.rs:687 grid-app::post_race (in time_text)	docs/RACE_HUD.md:480	F763	[D]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
@@ -1167,6 +1172,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00699A20		func	not ported	docs/CAREER_RESEARCH.md:356		[D]		After an event, 0x673B20 → 0x699A20 → 0x67F000 unlocks every pool offer of that event with
 0x0069B120		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:161		[O]		`driver_offer.objective_type_id` (0x66E3A0) [O]. Sponsor objectives live elsewhere (0x69B120).
 0x0069B290		func	crates/grid-tools/src/career/state.rs:735 grid-tools::career::state::apply_event_in_classes	docs/CAREER_RESEARCH.md:183 ; docs/SPEECH_CAREER_PARAMETERS.md:42	F495	[V]		not a function entry in the master analysis; virtual 0x69B290 tests the tier's region index 4), so the Le Mans 24 Hours
+0x0069C340	play_effect_overlapping	func	not ported	docs/AUDIO_RESEARCH.md:2353	F788	[O]		vtable 0xCECAB4 +0x10: plays a name through 0x440E10 with a2 = 0, a3 = 1.
 0x0069C540		func	crates/grid-app/src/speed_advice.rs:17 grid-app::speed_advice		F770	[I]		`Osd/config.xml` parsed by 0x69C540]: the recommendation is read
 0x0069C860	name_tag_flag	func	crates/grid-app/src/name_tag.rs:36 grid-app::name_tag::flag	docs/RACE_HUD.md:544	F782		flag	(0x69C860).
 0x0069CFC0	needle_blur	func	crates/grid-app/src/race_osd.rs:51 grid-app::race_osd::needle_blur	docs/RACE_HUD.md:378		[D]		not a function entry in the master analysis; Needle blur (0x69CFC0 [D]): a smoothed needle value follows the needle
@@ -1294,6 +1300,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x006BD900		func	not ported	docs/RACE_HUD.md:536		[I]		T 3 (0x6BD900; probably online, it also drives the chat box [I]): the two nearest cars on one
 0x006BF070		func	crates/grid-app/src/name_tag.rs:4 grid-app::name_tag	docs/AUDIO_RESEARCH.md:1696 ; docs/RACE_HUD.md:518	F770	[V]		[D: update 0x6BF070, team path 0x6BD0B0, rival lookup 0x6BCE60, limits 0x6A80A0, anchor
 0x006BF990		func	not ported	docs/FLASHBACK.md:72		[D]		not a function entry in the master analysis; recordable returns true, 0x6BF990) must agree, and the replay time (+0x1B0) must not be
+0x006BFCD0	fe_anim_sfx_event	func	not ported	docs/AUDIO_RESEARCH.md:2353	F788	[O]		Front-end animation event handler: an event named sfx plays its sample (event+0x24), a3 = 1.
 0x006C0050		func	not ported	docs/RACE_HUD.md:567				not a function entry in the master analysis; block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
 0x006C0070		func	not ported	docs/AUDIO_RESEARCH.md:1687				not a function entry in the master analysis; Start 0x6A0390 (from the deferred OSD command 0x6C0070, queued by 0x6C1240): +0x140 = the
 0x006C01A0		func	not ported	docs/RACE_HUD.md:411		[D]		not a function entry in the master analysis; animation's slot 0x2C (command vtable 0xCEC6AC, execute 0x6C01A0); the node (+0x260) is shown

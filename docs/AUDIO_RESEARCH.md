@@ -2332,7 +2332,8 @@ same effect may overlap itself.
 - The settings sliders (volumes, tuning) play `item_discrete` in place of the silent
   `item_continous`. Their ends play `dead_end`, as in the original.
 - The event menu's mouse clicks play the same cues as keys.
-- Overlays (popups) are not ported, so `overlay_on`/`_off` have no caller yet.
+- Popups are ported in the pause menu and the post-race screens (F788). The career screen's
+  confirmation and the event menu have none yet.
 
 **Not ported, by the original's own behaviour.**
 - Wind is never started (§26, F583).
@@ -2348,3 +2349,48 @@ same effect may overlap itself.
 - grid-app:
   - `hud_sound::tests`;
   - `steps_queue_the_menu_widget_sounds` in `event_menu`, `pause_menu` and `front_end`.
+
+### 36.1 Popups and the race pause sound (F788)
+
+**Popups [O].** `overlay_on`/`_off` belong to the popup base class `ScreenOverlay` and every
+subclass that keeps its enter and leave: `ScreenYesNo`, `ScreenOK`, `ScreenOverlayTimed`,
+`ScreenOverlayTextEntry`, `ScreenYesNoWithTimeout`, `ScreenDriverNotHireable`,
+`ScreenReportBonusUnlocked`, `EBayBuyVehicleConfirm` and others.
+- The constructor 0x4B07E0 sets the sound flag +0x1C4 = 1.
+- Enter (vtable slot 5) 0x49CFA0 sets "shown" +0x1C3 = 1 and plays `overlay_on` when +0x1C4 is
+  set.
+- Leave (slot 10) 0x4936A0 plays `overlay_off` when +0x1C3 and +0x1C4 are set.
+- `ScreenSDU` has its own enter 0x4A5930 (`overlay_on` at 0x4A5FD4, a3 = 1; `overlay_off` at
+  0x4A5BD9) and hide 0x4942F0.
+- All of them go through the wrapper 0x440E10, so a race plays `low_overlay_on`/`_off` (`ah_overlay_on`/`_off`
+  at −4.4 dB).
+- The pause screens themselves are not overlays. The race confirmations (`restart_race_confirm`,
+  `retire_race_confirm`, `exit_race_confirm`, `restart_test_drive_confirm` and others in
+  states.bin) are `ScreenYesNo`.
+
+**The race pause sound [O for the absence, I for the reading].** FEMappings maps `low_pause` to
+`ah_overlay_off` at −4.4 dB. No caller was found:
+- the 19 code references to the string `pause` (0xCC1144) do not play it, and the string
+  `low_pause` is not in the executable;
+- states.bin has one `StateSFXTrigger` (vtable 0xCBACF8, enter 0x486E20 plays its `sfx`
+  attribute through 0x440E10): `trigger_back_sfx sfx="back"`;
+- the front-end animations' `sfx` events (handler 0x6BFCD0 plays the event's sample, a3 = 1):
+  a byte scan of all 24 shipped .pssg files with `sfx` finds 362 events and 39 distinct samples,
+  none named `pause` or `overlay_*`;
+- across the whole installation `low_pause` appears only in FEMappings.bin.
+
+So the shipped game appears never to play `low_pause`. The port keeps the screen whooshes on pause
+open and close (§36, [I]).
+
+**Port.**
+- `hud_sound::overlay_cue(was, is)` gives `OverlayOn` when a popup opens in a frame and
+  `OverlayOff` when it closes. It follows the frame's widget sound (the activate or back).
+- The pause menu's confirmations (`Screen::Confirm`) play it. Yes then plays activate,
+  `overlay_off`, and the menu's whoosh out.
+- The post-race screens (stats, results, scoreboard, wreck) now also play the widget sounds
+  (pill move, Yes/No move, activate, back) and the confirmation popup. `post_race::update`
+  drains them to the race HUD sink. A confirmation answered with Yes plays `overlay_off` after
+  the activate, before the race restarts or the event is left.
+
+**Tests.** `confirmations_queue_the_popup_sounds` (pause_menu),
+`steps_queue_the_widget_and_popup_sounds` (post_race), `hud_sound::tests`.

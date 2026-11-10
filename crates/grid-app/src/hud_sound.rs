@@ -66,6 +66,19 @@ pub(crate) fn menu_cue(nav: &crate::pause_menu::Nav, place: bool, cursor: bool, 
     }
 }
 
+/// A popup's sound when one opens or closes in a frame (`ScreenOverlay`
+/// and its subclasses such as `ScreenYesNo`, `ScreenOK`: enter 0x49CFA0
+/// plays `overlay_on`, leave 0x4936A0 plays `overlay_off` once it was
+/// shown; the constructor 0x4B07E0 turns the sound on). It follows the
+/// frame's widget sound (the activate or back that opened or closed it).
+pub(crate) fn overlay_cue(was: bool, is: bool) -> Option<Cue> {
+    match (was, is) {
+        (false, true) => Some(Cue::OverlayOn),
+        (true, false) => Some(Cue::OverlayOff),
+        _ => None,
+    }
+}
+
 #[derive(Resource)]
 pub(crate) struct HudSound {
     table: Option<Arc<Table>>,

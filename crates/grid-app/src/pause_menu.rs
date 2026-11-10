@@ -348,7 +348,8 @@ impl PauseMenu {
     /// Continue, `c_pause_initial_decision_maker` -> main menu).
     /// One frame of input; queues its widget sounds in `sounds`: the
     /// screen whoosh on opening and closing [I: the pause screen's base
-    /// enter/leave], a list move, a value step, activate or back.
+    /// enter/leave], a list move, a value step, activate or back, and the
+    /// popup sound when a confirmation opens or closes.
     pub fn step(&mut self, nav: Nav) -> Option<Command> {
         use grid_tools::hud_audio::Cue;
         let (open, screen, values) = (self.open, self.screen, self.values);
@@ -362,6 +363,9 @@ impl PauseMenu {
             let left = screen != self.screen || !self.open;
             let cue = crate::hud_sound::menu_cue(&nav, left, cursor, values != self.values, side);
             self.sounds.extend(cue);
+            // A confirmation is a `ScreenYesNo` popup over the menu.
+            let popup = |open: bool, screen: Screen| open && matches!(screen, Screen::Confirm(_));
+            self.sounds.extend(crate::hud_sound::overlay_cue(popup(open, screen), popup(self.open, self.screen)));
             if !self.open {
                 self.sounds.push(Cue::ScreenWhooshOut);
             }
@@ -1216,6 +1220,40 @@ mod tests {
                 Cue::Back,
                 Cue::Back,
                 Cue::Back,
+                Cue::ScreenWhooshOut,
+            ]
+        );
+    }
+
+    /// A confirmation is a popup: `overlay_on` after the activate that
+    /// opens it, `overlay_off` after the back or the answer that closes it,
+    /// before the menu's whoosh out when Yes closes the menu.
+    #[test]
+    fn confirmations_queue_the_popup_sounds() {
+        use grid_tools::hud_audio::Cue;
+        let mut menu = PauseMenu::new(Variant::FreeRace, false, true, Options::default());
+        menu.step(press(|n| n.pause = true));
+        menu.step(press(|n| n.button3 = true));
+        assert_eq!(menu.screen, Screen::Confirm(Confirm::ResetCar));
+        menu.step(press(|n| n.down = true));
+        menu.step(press(|n| n.back = true));
+        assert_eq!(menu.screen, Screen::Main);
+        menu.step(press(|n| n.button3 = true));
+        assert_eq!(menu.step(press(|n| n.select = true)), Some(Command::ResetCar));
+        assert!(!menu.open);
+        assert_eq!(
+            menu.sounds,
+            [
+                Cue::ScreenWhooshIn,
+                Cue::Select,
+                Cue::OverlayOn,
+                Cue::UdlrMove,
+                Cue::Back,
+                Cue::OverlayOff,
+                Cue::Select,
+                Cue::OverlayOn,
+                Cue::Select,
+                Cue::OverlayOff,
                 Cue::ScreenWhooshOut,
             ]
         );

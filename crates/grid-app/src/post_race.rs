@@ -262,6 +262,9 @@ pub struct PostRace {
     wreck_rest: Option<f32>,
     segment: u64,
     repeat: Repeat,
+    /// Menu widget and popup sounds of the last steps (drained to the
+    /// race's HUD sink by `update`).
+    pub(crate) sounds: Vec<grid_tools::hud_audio::Cue>,
 }
 
 impl PostRace {
@@ -277,6 +280,7 @@ impl PostRace {
             wreck_rest: None,
             segment: 0,
             repeat: Repeat::default(),
+            sounds: Vec::new(),
         }
     }
 
@@ -374,7 +378,25 @@ impl PostRace {
         self.drift = drift;
     }
 
+    /// One input frame, queueing its sounds: a pill move or a Yes/No
+    /// change, activate or back (hud_sound::menu_cue), and the popup sound
+    /// when a confirmation (a `ScreenYesNo` such as `exit_race_confirm`)
+    /// opens or closes.
     pub fn step(&mut self, nav: Nav) -> Option<Command> {
+        let (stage, place) = (self.stage, (self.cursor, self.answer));
+        let command = self.navigate(nav);
+        if stage == Stage::Hidden {
+            return command;
+        }
+        let left = stage != self.stage || command.is_some();
+        let cursor = place != (self.cursor, self.answer);
+        self.sounds.extend(crate::hud_sound::menu_cue(&nav, left, cursor, false, false));
+        let popup = |s: Stage| matches!(s, Stage::Confirm(..));
+        self.sounds.extend(crate::hud_sound::overlay_cue(popup(stage), popup(self.stage) && command.is_none()));
+        command
+    }
+
+    fn navigate(&mut self, nav: Nav) -> Option<Command> {
         let n = self.pills().len();
         match self.stage {
             Stage::Hidden => None,
@@ -501,6 +523,7 @@ pub fn update(
     mut shifts: ResMut<ShiftQueue>,
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
     (time, mut leave): (Option<Res<Time<Real>>>, crate::transition::Leave),
+    sink: Option<Res<crate::hud_sound::HudSink>>,
     mut replay: Option<ResMut<crate::replay::Replay>>,
     touge: Option<Res<crate::touge_event::TougeEvent>>,
     mut waited: Local<f32>,
@@ -582,7 +605,9 @@ pub fn update(
     }
     // The car is held while the screens are up (no gear edges leak).
     *shifts = ShiftQueue::default();
-    let Some(command) = post.step(nav) else {
+    let command = post.step(nav);
+    crate::hud_sound::drain(&mut post.sounds, sink.as_deref());
+    let Some(command) = command else {
         return;
     };
     log_line!(
@@ -1192,6 +1217,44 @@ mod tests {
         assert_eq!(post.stage, Stage::Confirm(Confirm::Restart, Return::Results));
         assert_eq!(post.step(press(|n| n.select = true)), Some(Command::Restart));
         assert!(!post.active());
+    }
+
+    /// Pill moves, activates and the confirmation popup's sounds; a hidden
+    /// screen stays silent.
+    #[test]
+    fn steps_queue_the_widget_and_popup_sounds() {
+        use grid_tools::hud_audio::Cue;
+        let mut post = PostRace::new(Variant::FreeRace);
+        post.step(press(|n| n.select = true));
+        assert!(post.sounds.is_empty());
+        post.on_retire();
+        post.step(press(|n| n.right = true));
+        post.step(press(|n| n.right = true));
+        post.step(press(|n| n.select = true));
+        assert_eq!(post.stage, Stage::Confirm(Confirm::Exit, Return::Results));
+        post.step(press(|n| n.left = true));
+        post.step(press(|n| n.back = true));
+        post.step(press(|n| n.right = true));
+        post.step(press(|n| n.select = true));
+        assert_eq!(post.stage, Stage::Confirm(Confirm::Restart, Return::Results));
+        assert_eq!(post.step(press(|n| n.select = true)), Some(Command::Restart));
+        assert_eq!(
+            post.sounds,
+            [
+                Cue::UdlrMove,
+                Cue::UdlrMove,
+                Cue::Select,
+                Cue::OverlayOn,
+                Cue::UdlrMove,
+                Cue::Back,
+                Cue::OverlayOff,
+                Cue::UdlrMove,
+                Cue::Select,
+                Cue::OverlayOn,
+                Cue::Select,
+                Cue::OverlayOff,
+            ]
+        );
     }
 
     #[test]
