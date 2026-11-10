@@ -2994,6 +2994,23 @@ impl Screen {
         self.cat.points.get(&event.points_id).cloned()
     }
 
+    /// `[game] team_livery` (docs/TEAM_LIVERY.md): an event of the player's
+    /// own team (no driver offer) once the team has a livery; the race puts
+    /// it on the player and the team mate where the model has a
+    /// `livery_user` package. The order of the three colours matches the
+    /// shader's red, green and blue weights [I].
+    fn team_livery_line(&self, e: &InProgress) -> String {
+        let Some(l) = self.career.team_livery.filter(|_| e.offer.is_none() && self.career.team_founded) else {
+            return String::new();
+        };
+        let choices = &self.cat.livery_choices;
+        let (Some(pattern), [Some(a), Some(b), Some(c)]) = (choices.pattern_file(l.pattern), l.colours.map(|c| choices.colour(c))) else {
+            return String::new();
+        };
+        let design = crate::team_livery::Design { pattern: pattern.to_owned(), colours: [a, b, c] };
+        format!("team_livery = {}\n", design.write())
+    }
+
     /// Writes the next race's profile.
     fn go(&self) -> Result<(), String> {
         let e = self.current.as_ref().ok_or("no event")?;
@@ -3011,7 +3028,7 @@ impl Screen {
         }
         profile = profile.replacen("[game]
 ", &format!("[game]
-{}{}", speech_lines(&self.cat, &self.career, e, next, points.as_deref()), rival_line(e, next, points.as_deref())), 1);
+{}{}{}", speech_lines(&self.cat, &self.career, e, next, points.as_deref()), rival_line(e, next, points.as_deref()), self.team_livery_line(e)), 1);
         std::fs::write(self.dir.join(PROFILE), profile).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=go event_id={} race={} route={} laps={} grid={}",
@@ -4486,6 +4503,7 @@ speech_event_wins = 0
     fn livery_parts_cycle_through_their_tables() {
         let choices = grid_tools::career::LiveryChoices {
             patterns: vec![(4, "pattern_0".into()), (7, "pattern_1".into())],
+            pattern_files: vec![(4, "simple_01.pssg".into()), (7, "simple_02.pssg".into())],
             colours: vec![(1, [255, 0, 0]), (2, [0, 255, 0]), (3, [0, 0, 255])],
             numbers: vec![(10, "00".into()), (11, "01".into())],
         };
@@ -4586,6 +4604,17 @@ speech_event_wins = 0
         s.take_offer(0).unwrap();
         let e = s.current.take().unwrap();
         assert!(e.lemans.is_some() && !e.field.is_empty(), "{e:?}");
+        // The team livery goes to own-team events only, as a pattern file
+        // that exists and three table colours.
+        s.career.team_founded = true;
+        s.career.team_livery = TeamLivery::first(&s.cat.livery_choices);
+        assert_eq!(s.team_livery_line(&e), "", "a driver offer races in its team's livery");
+        let own = InProgress { offer: None, ..e.clone() };
+        let line = s.team_livery_line(&own);
+        let mut settings = crate::settings::Settings::new();
+        settings.apply(&format!("[game]\n{line}"), Path::new(".")).unwrap();
+        let design = settings.team_livery.unwrap_or_else(|| panic!("{line:?}"));
+        assert!(root.join("cars/user_liveries/liveries").join(&design.pattern).is_file(), "{line}");
         let _ = std::fs::remove_file(dir.join(EVENT));
         s.career.refuse_lemans();
         assert_eq!(s.landing(Page::Home), Page::SeasonEnd);

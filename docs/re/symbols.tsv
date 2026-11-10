@@ -751,6 +751,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005E7F97		label	not ported	docs/CONTACT_GROUPS.md:13				inside 0x005E7F30; The registered car job uses `A0A290`, whose pointer occurs at method-table`D1543C`; no direct branch or literal occurrence of synchronous`A09A80` was found b...
 0x005E8AB0	pps_controller_set_instant	func	not ported	docs/FLASHBACK.md:172		[O]		TerminalFX_01 share chain Type2 [O]. A duration ≤ 0 sets the effect at once (0x5E8AB0). The
 0x005E8BE0	pps_transition_start	func	not ported	docs/FLASHBACK.md:140		[D]		0x5E8BE0): `restoreInGameCamera` calls 0x92D110(0,0) and restores the saved in-game camera
+0x005E9060	team_livery_set_pattern	func	not ported	docs/TEAM_LIVERY.md		[V]		livery_pattern.livery_image_name into the livery object via 0x4F2440 (+0x14)
+0x005E9160	team_livery_set_number	func	not ported	docs/TEAM_LIVERY.md		[V]		livery_number.number_string via 0x4F23E0
 0x005EA0D0	RaceSetup_ctor	func	not ported	docs/RACE_HUD.md:594	F785	[D]		a field of the race-setup object (constructor 0x5EA0D0): M 0 or 2 → T 2, M 3 → T 3, M 4 → T 4,
 0x005EA5E0	rear_view_mirror_set_dust	func	not ported	docs/COCKPIT.md:45				not a function entry in the master analysis; Cracks come from window_fl/fr damage at scale 0.7 (`rear_view_mirror_set_crack` (0x5EA610)), and dust from the mud colour (`rear_view_mirror_set_dust` (0x5EA... | note: iface (+0x130) slot +4: slot i dustColourAndScale vec4
 0x005EA610	rear_view_mirror_set_crack	func	not ported	docs/COCKPIT.md:45				Cracks come from window_fl/fr damage at scale 0.7 (`rear_view_mirror_set_crack` (0x5EA610)), and dust from the mud colour (`rear_view_mirror_set_dust` (0x5EA... | note: iface slot +8: slot i crackAndScale = (cracked, scale, 0, 0)
@@ -777,6 +779,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005F1100	DEFAULT_VIEW	func	crates/grid-app/src/camera.rs:117 grid-app::camera::DEFAULT_VIEW ; crates/grid-world/src/mechanical_damage.rs:13 grid-world::mechanical_damage::Damage	docs/CAMERA_VIEWS.md:81 ; docs/DRIVING_ASSISTS_RESEARCH.md:24 ; docs/FORCE_FEEDBACK.md:243	F349 F333	[D]	Damage	Default view of the original profile (0x5F1100: `current_camera`).
 0x005F18C0		func	crates/grid-app/src/reset_fade.rs:7 grid-app::reset_fade	docs/RESET_AND_RESPAWN_RESEARCH.md:268		[I]		[I] The original's job sends 0x5F9AE0 / 0x5F18C0 messages at the fade
 0x005F1B10		func	not ported	docs/DISCIPLINES.md:470				The difficulty object (vtable 0xCC0A64, constructor 0x5F1B10) is filled by the `difficulty` row
+0x005F1D50	livery_colour_pack	func	crates/grid-app/src/team_livery.rs grid-app::team_livery	docs/TEAM_LIVERY.md		[V]		livery_colour red/green/blue packed 0xFFBBGGRR into +0x174/+0x178/+0x17C
 0x005F33A0	rear_view_mirror_render	func	not ported	docs/COCKPIT.md:31				Update rate.** Once per rendered frame, with no frame skipping (0x608940 → 0x5FBC10, and `renderer_frame_render` (0x5FAD10) → `rear_view_mirror_render` (0x5F... | note: if +0x6B0: 0x63A300(+0x300,+0x360,camera,list)
 0x005F33F0	rear_view_mirror_set_colour_tint	func	not ported	docs/COCKPIT.md:44				`rear_view_mirror_set_colour_tint` (0x5F33F0) sets the tint from VehicleManager +0x4C..+0x58: black with w 0.5 for all three mirrors (VehicleManager ctor 0xA... | note: colourAndTint: middle from VM+0x4C/+0x50, wings from VM+0x54/+0x58
 0x005F3F09		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:320		[I]		inside 0x005F3EC0; [I] Other camera callers of `63A370` (`5BCDCF`, `5C8023`, `5E09BC`, `5F3F09/5F4558`,
@@ -793,6 +796,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005F5F4B		label	not ported	docs/RUNTIME_LIMITS_AUDIT.md:50	F318	[V]		inside 0x005F5D50; | 16 bodies per world | `contact_groups.rs:75`; also per group in `impact_frame.rs:91`, `impact_step.rs:76`, `contact_rows.rs:164` | **No per-world solver ca...
 0x005F5F53		label	not ported	docs/RUNTIME_LIMITS_AUDIT.md:91				inside 0x005F5D50; `0x5F5F53 mov [esp+24],ebx` (maxConstraintsInIsland; 1000 in the live snapshot);
 0x005F5F57		label	not ported	docs/RUNTIME_LIMITS_AUDIT.md:92				inside 0x005F5D50; `0x5F5F57 mov [esp+28],0xBB8` (maxDOFConstraintsInIsland 3000);
+0x005F6250	team_livery_build	func	crates/grid-app/src/team_livery.rs grid-app::team_livery	docs/TEAM_LIVERY.md		[V]		builds the team livery object (pattern, three colours, number, sponsors) for a *_user car
 0x005F68E0	MAX_CLOSING_GAP	func	crates/grid-app/src/speed_advice.rs:43 grid-app::speed_advice::MAX_CLOSING_GAP	docs/RACE_HUD.md:392	F770	[D]		not a function entry in the master analysis; Table [D: the "rm track" load 0x5F68E0, lookup 0x99B9F0, projection
 0x005F73F0	rear_view_mirror_pass_ctor	func	not ported	docs/COCKPIT.md:14	F625	[D]		The pass "rear view mirror" (`rear_view_mirror_pass_ctor` (0x5F73F0), pass code 0x403, vtable `rear_view_mirror_pass_vtable` (0xCE3788)) renders into its own... | note: """"""""""""""""rear view mirror"""""""""""""""" pass, code 0x403, near 0.5/far 1000/cull 500, camera """"""""""""""""rearviewcamera"""""""""""""""" +0x2F4, 3 slots +0x140 (stride 0x90)"""""""""""""""
 0x005F7880	wrong_way_warning	func	not ported	docs/RESET_AND_RESPAWN_RESEARCH.md:140	F762	[V]		No time penalty is applied anywhere on this path [V], and wrong way (0x5F7880) only shows
@@ -941,6 +945,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0063E710		func	crates/grid-tools/src/hud_audio.rs:217 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:244				not a function entry in the master analysis; Start-light message state 0 / 1 (handler 0x63E710).
 0x0063EBC0	replay_state_message_handler	func	crates/grid-app/src/replay.rs:273 grid-app::replay::request_terminal	docs/REPLAY.md:64 ; docs/FLASHBACK.md:86	F794 F780	[O]	request_terminal	last 10 s [D: 0xDB4FEC, read by StateInstantReplayRewind and 0x63EBC0],
 0x0063F320		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:41 ; docs/FLASHBACK.md:58	F795	[D]		state takes the current event (mode object 0x640020, vfunc +0x80 = 0x63F320) and its current
+0x0063FF70	car_set_livery_user_check	func	crates/grid-app/src/team_livery.rs grid-app::team_livery	docs/TEAM_LIVERY.md		[V]		sets a car livery id; a vehicle_livery file_string ending _user builds the team livery
 0x00640020		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:40 ; docs/FLASHBACK.md:58 ; docs/RACE_HUD.md:527				state takes the current event (mode object 0x640020, vfunc +0x80 = 0x63F320) and its current
 0x00640800	event_on_last_race	func	crates/grid-app/src/career_screen.rs:1000 grid-app::career_screen (in speech_lines) ; crates/grid-tools/src/speech.rs:1578 grid-tools::speech	docs/SPEECH_CAREER_PARAMETERS.md:106 ; docs/SPEECH_AUDIO_RESEARCH.md:899	F624	[O]		isFinalRace (0x640800): an own event's last race.
 0x00640950		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:294				| 0x00640950 | standings_find | line of a driver |
@@ -949,12 +954,14 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00641BE0		func	not ported	docs/FLASHBACK.md:287	F795	[D]		build multi-part races (constructors 0x641BE0, 0x66CD80, 0x670B20 reached through the
 0x00641D70		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:109		[I]		not a function entry in the master analysis; (R vf 0x7C true) R vf 0x84 = 0x641D70, the same test recursively). [I] For a plain race this
 0x00642570		func	crates/grid-tools/src/career/rules.rs:221 grid-tools::career::rules::sponsor_race_pay	docs/CAREER_RESEARCH.md:366		[V]		A sponsor's pay for one race (0x652010, 0x642570) [V]: `money_reward ×
+0x00642630	team_livery_sponsor_slots	func	not ported	docs/TEAM_LIVERY.md		[V]		sponsor.file_string with "%s_%d", main slot and seven more
 0x00642730		func	not ported	docs/SERIES.md:501		[I]		seeded with milliseconds (0x4B1E20) in its constructor 0x642730. [I] Original fields cannot be replayed.
 0x006427A0	count_in_season	func	crates/grid-tools/src/career/state.rs:446 grid-tools::career::state::count_in_season	docs/CAREER_RESEARCH.md:137		[V]		[V 0x6427A0]: own events and driver offers finished while the team is
 0x00642850		func	not ported	docs/CAREER_RESEARCH.md:247				gain = base + bonus to the reputation of the event's tier region (0x66E1C0 -> 0x642850)
 0x00642FA0	leaderboards_find_player	func	crates/grid-tools/src/career/leaderboard.rs	docs/CAREER_RESEARCH.md:417		[I]		finds the player entry
 0x006430A0	pass_render_with_camera	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:456				additional partitioning (`0x62E350`) and enters camera/render wrapper `0x6430A0`. | note: 0x63A370(camera, frame, far +0x44) then 0x63AEB0
 0x006430B7		label	not ported	docs/TYRE_SMOKE_RESEARCH.md:321		[I]		inside 0x006430A0; `63B010`, `6430B7/64311E`) were not traced. A camera with scaled rows would also scale
+0x00643460	apply_user_livery	func	crates/grid-app/src/team_livery.rs grid-app::team_livery	docs/TEAM_LIVERY.md		[V]		third caller of 0x5F6250 under the _user suffix check
 0x00643BC0	drift_update	func	crates/grid-tools/src/drift.rs:677 grid-tools::drift::update	docs/DISCIPLINES.md:216 ; docs/TRACK_LOD.md:411	F776	[V]	update	0x643BC0, end of a drift 0x630560, combo bank 0x63C370, combo fail
 0x00643CB4		label	not ported					note: drift scorer +0x50 = |angle|/pi * side when detector speed > 4 (cockpit drift_angle) [D]
 0x00643E3D		label	crates/grid-tools/src/hud_audio.rs:220 grid-tools::hud_audio ; crates/grid-tools/src/drift.rs:736 grid-tools::drift (in update)	docs/AUDIO_RESEARCH.md:251				inside 0x00643BC0; Drift scorer (0x643E3D, 0x63C552, 0x6304BC, 0x644038).
@@ -969,7 +976,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00646A90		func	crates/grid-tools/src/virtual_race.rs:10 grid-tools::virtual_race	docs/DISCIPLINES.md:466	F764	[V]		not a function entry in the master analysis; its set-up from the event (0x646320 free race, 0x646A90 career): the
 0x006478E0		func	crates/grid-tools/src/career/rules.rs:155 grid-tools::career::rules	docs/CAREER_RESEARCH.md:198		[V]		Dense rank: equal points share a rank (0x6478E0) [V].
 0x00649320		func	crates/grid-tools/src/career/data.rs:320 grid-tools::career::data::Hireable	docs/CAREER_RESEARCH.md:379 ; docs/CAREER_SCREEN.md:225		[V]		candidate pool 0x662850, object 0x649320) [V]. The `team_mate` table is
-0x00649C60		func	not ported	docs/SERIES.md:546				to the slot option; whether car index follows entry order (0x649C60); 0x663860 and 0x649E90; the
+0x00649AB0	team_livery_sponsors	func	not ported	docs/TEAM_LIVERY.md		[V]		sponsor.file_string for the livery sponsors
+0x00649C60	field_apply_user_liveries	func	crates/grid-app/src/team_livery.rs grid-app::team_livery	docs/SERIES.md:546 ; docs/TEAM_LIVERY.md		[V]		for each car of kind 1 or 2 with a _user livery, builds the team livery; to the slot option; whether car index follows entry order (0x649C60); 0x663860 and 0x649E90; the
 0x00649E90	field	func	crates/grid-tools/src/career/field.rs:111 grid-tools::career::field::field	docs/SERIES.md:546		[V]		index 0, as 0x649E90 does) [V]:
 0x0064A3F0	bonus_factor	func	crates/grid-tools/src/career/rules.rs:24 grid-tools::career::rules::RaceSettings	docs/CAREER_RESEARCH.md:258		[V]	RaceSettings	The race settings that earn extra reputation (0x64A3F0) [V].
 0x0064A660	leaderboards_save	func	crates/grid-tools/src/career/leaderboard.rs:16 grid-tools::career::leaderboard ; crates/grid-tools/src/career/save.rs:110 grid-tools::career::save (in write)	docs/CAREER_RESEARCH.md:430		[V]		lists and the counter (0x64A660) [V].
@@ -1355,6 +1363,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x006C1AB0		func	not ported	docs/RACE_HUD.md:426				not a function entry in the master analysis; 0x6C1AB0 calls 0x6A38E0, which stores zoom +0x28, behind +0x5c, above +0x60 and a not-drift flag
 0x006C1B70	points_text	func	not ported	docs/RACE_HUD.md:635				drift points (+0x10) show as "%d" in `points_text` (0x6C1B70);
 0x006C2D30	standing_entry	func	not ported	docs/RACE_HUD.md:532	F785	[D]		standing (0x66FF70) and takes its entry 0 (0x6C2D30, 20-byte entries), the championship leader.
+0x006C4130	livery_scene_visitor_select_body_paint	func	crates/grid-formats/src/livery_map.rs grid_formats::livery_map::read	docs/TEAM_LIVERY.md		[V]		keeps Car Body Paint instances on x0_ body-part joints (strstr 0xA66880)
+0x006C53C0	livery_compositor_bind	func	crates/grid-app/src/team_livery.rs grid-app::team_livery	docs/TEAM_LIVERY.md		[V]		binds TDiffuseAlphaMap and TLiveryDiffuseMap, sets tintForRed/Green/BlueChannel
+0x006C7D40	livery_compositor_run	func	crates/grid-app/src/team_livery.rs grid-app::team_livery	docs/TEAM_LIVERY.md		[V]		map_livery_and_alpha_blend over blocks, sponsor passes, fill_gaps, replace_texture
+0x006CC080	livery_compositor_release	func	not ported	docs/TEAM_LIVERY.md		[V]		releases the compositor targets
 0x006CE260		func	crates/grid-tools/src/hud_audio.rs:294 grid-tools::hud_audio::light_cue					Start-light sounds of the original sequence (0x6CE350 start, 0x6CE260
 0x006CE350	light_cue	func	crates/grid-tools/src/hud_audio.rs:294 grid-tools::hud_audio::light_cue	docs/AUDIO_RESEARCH.md:246				Start-light sounds of the original sequence (0x6CE350 start, 0x6CE260
 0x006CE383		label	crates/grid-tools/src/hud_audio.rs:295 grid-tools::hud_audio::light_cue	docs/AUDIO_RESEARCH.md:246	F452 G130	[O]		inside 0x006CE350; update): the stage advances every 1.0 s (0x6CE383) from stage 1 at the
@@ -3643,6 +3655,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00BA2250	pssg_shader_group_read_attributes	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:528		[D]		| Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs re...
 0x00BA2E00	pssg_shader_group_factory	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:528		[D]		| Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs re...
 0x00BA3980	pssg_render_instance_read_shader_reference	func	not ported	docs/TYRE_SMOKE_RESEARCH.md:526		[D]		| Render-instance shader reference | Attribute schema maps `shader` to ID storage `0xF5F674`; `0xBA3980` links it into instance `+0x3C` through `0xB85520`, w...
+0x00BA5950	node_link_by_name	func		docs/TEAM_LIVERY.md		[I]		printf-style name, resolves via 0xBA4ED0; compositor looks up shader_instance
 0x00BAAFD0		func	not ported	docs/CAMERA_VIEWS.md:303	F461	[D]		The record holds fov · 0.0174533 at +0x30 and the near plane at +0x34. Both projection builders found use it as the **vertical** field of view: 0x8163F0 comp...
 0x00BAEC10	neanim_scene_target_match_visitor	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:303		[D]		Match node+2C exact whole name against target prefix before #; ignore leading #; first traversal hit wins.
 0x00BB0F90	texture_resource_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:238		[D]		constructor `0x00BB0F90` installs table `0x00D473C8`. Its virtual+0x2C entry
@@ -3848,6 +3861,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CC0A20		global	not ported	docs/AI_PATH_OBSTACLE_SCAN.md:110				| 0xCB46B4 / 0xCC0A20 | 1e-5 / −1e-5 | parallel threshold in 0x7792C0 |
 0x00CC0A64		vtable	not ported	docs/DISCIPLINES.md:470				The difficulty object (vtable 0xCC0A64, constructor 0x5F1B10) is filled by the `difficulty` row
 0x00CC1144		global	not ported	docs/AUDIO_RESEARCH.md:2373				the 19 code references to the string `pause` (0xCC1144) do not play it, and the string
+0x00CC321C	str_user	data		docs/TEAM_LIVERY.md		[V]		"user", the livery suffix of a team livery
 0x00CC3224		global	not ported	docs/RACE_RULES_RESEARCH.md:193		[V]		within distance_to_line of the line; default 250, from 0xCC3224.
 0x00CC4DA2		global	not ported	docs/PLATFORMS_AND_INPUT_RESEARCH.md:641				BC path unchanged:** the PNGs of the pre-change exe and the new BC path are byte-identical in all three scenes (sha256 `6a4ff6bd…`, `2d56e040…`, `00cc4da2…`).
 0x00CC6EA0		vtable	not ported	docs/FRONT_END_FLOW.md:219				| `StateTriggerLoadingSpinner` | 0xCD71D0 (vtable 0xCC6EA0) |
@@ -3899,6 +3913,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CE6590		global	crates/grid-app/src/camera.rs:101 grid-app::camera::CHASE_LOOK_BLEND	docs/RESET_AND_RESPAWN_RESEARCH.md:103				3.2 (1 − w) + w (0xCE6590), w = clamp(0.2 · speed) (0xCB870C); the point
 0x00CE6798		global	not ported	docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:262				D17170, wings 0x54..0x57 D17160, the rest (mirrors among them) CE6798; the +8 variants (D171C8 …)
 0x00CE67A0		global	not ported	docs/LOADER_RESEARCH.md:25				| `0x006138d0` | Ref at `0x00614c93` to `cars/car_loader.xml`, string at `0x00ce67a0` | Car-loading/setup candidate; observe car ID and resolved resource pat...
+0x00CE67EC	str_underscore	data		docs/TEAM_LIVERY.md		[V]		"_", separator before the livery suffix
 0x00CE770C		global	crates/grid-formats/src/car_collision.rs:66 grid-formats::car_collision::ground_clearance	docs/SERIES.md:114		[D]		at description +0x1B20 (body +0xED60) after presetting 0.17 (0xCE770C), so
 0x00CE7868		global	not ported	docs/LAUNCH_AND_GRID_START.md:23				frame); `87E250` registers a fixed-period variant, used once with 1/48 s (`CE7868`) for
 0x00CE7994		global	not ported	docs/AI_DRIVER_PORT.md:174		[V]		controller types `"ai"` (0xCF6F30) and `"human"` (0xCE7994). It reads the controller's
@@ -3938,7 +3953,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CECA4C		global	crates/grid-app/src/replay/player.rs:21 grid-app::replay::player::DEAD_ZONE					Rewind/fast-forward dead zone (0xCAFCD4) and scale 1/0.9 (0xCECA4C).
 0x00CECBF0		vtable	not ported	docs/RACE_HUD.md:647				Points roll-up [D: vtable 0xCECBF0 group {0x7157D0, update 0x6B8C50, reset 0x6B8CE0}]: the
 0x00CED0C8		vtable	not ported	docs/RACE_HUD.md:453		[D]		Lap time hold and PB/WR pill (the lap interface, constructor 0x6B3950, vtable 0xCED0C8) [D]:
+0x00CEDDF4	livery_material_indices	data		docs/TEAM_LIVERY.md		[V]		one byte 0 -> Car Body Paint
 0x00CEE0FC	CarInteriorBindingNodeToken	global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:129	G372	[D]		Pinned PE literal int_ used by common binding visitor node-mode admission.
+0x00CEE170	livery_scene_visitor_vtable	vtable		docs/TEAM_LIVERY.md		[V]		node callback 0x6C4130
+0x00CEE17C	str_x0_lod0	data		docs/TEAM_LIVERY.md		[V]		"x0_"
 0x00CEFE10		vtable	not ported	docs/AUDIO_RESEARCH.md:1703				The only override found, 0x6F9D70 (vtable 0xCEFE10, constructors 0x6E78A0 and 0x6EC3D0, beside the
 0x00CF089C		vtable	not ported	docs/TRACK_LOD.md:35	F713	[I]		of vtable 0xCF089C, [I] the object 0x5FAD10 writes), and a linear sweep finds no direct
 0x00CF1208		global	crates/grid-app/src/camera.rs:59 grid-app::camera::SPIN_TURN_COS	docs/CAMERA_VIEWS.md:100		[D]		0xE4E164) and a blended forward shorter than 0xCF1208 keeps the car frame.
@@ -4103,6 +4121,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D11548		global	not ported	docs/CONTACT_REORIENTATION_RESEARCH.md:56 ; docs/BOX_CONTACTS.md:284 ; docs/DYNAMIC_PROPS_RESEARCH.md:404		[D]		against an up-facing triangle (face y > 0.707 at D11548, vertical ray through
 0x00D11698	SUBSETS	global	crates/grid-app/src/ground_detail.rs:29 grid-app::ground_detail::SUBSETS	docs/GROUND_EFFECTS_RESEARCH.md:376 ; docs/RUNTIME_LIMITS_AUDIT.md:324	F313	[V]		LOD subset of a cell, table 0xD11698 indexed [(u & 3) + (v & 3) * 4] [V].
 0x00D13C64		vtable	not ported	docs/TRACK_LOD.md:310		[O]		3.4 SURFACELOD weights 0x952CB0 (OrnamentSystem vtable 0xD13C64 slot 1) [O]
+0x00D14B10	car_material_texture_table	data		docs/TEAM_LIVERY.md		[V]		(suffix, sampler, material) triples; _main for body paint, matt, metals, aerials
 0x00D15028	CURVE_SCALE	global	crates/grid-world/src/reset_lines.rs:84 grid-world::reset_lines::CURVE_SCALE	docs/RESET_AND_RESPAWN_RESEARCH.md:224		[V]		0xD15028 / 0xD1502C: torque-curve index scale and its top speed.
 0x00D1502C		global	crates/grid-world/src/reset_lines.rs:84 grid-world::reset_lines::CURVE_SCALE	docs/RESET_AND_RESPAWN_RESEARCH.md:224		[V]		0xD15028 / 0xD1502C: torque-curve index scale and its top speed.
 0x00D15438		global	not ported	docs/VEHICLE_UPDATE.md:9				The registered car-job method `0x00a0a290` reads body pointer at job `+4` and f32 delta at job `+8`, invokes synchronization, calls `0x00a06a90` with that de...
@@ -4195,6 +4214,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00DB4FE8	terminal_rewind_short_pad	global	not ported	docs/REPLAY.md:446	F778	[O]		`_visual`, `_special`; enter 0x596C90 rewinds by 0xE6DFF8 + 0.6 s (0xDB4FE8) or 10 s + 2.0 s, or
 0x00DB4FEC	INSTANT_REWIND	global	crates/grid-app/src/replay.rs:42 grid-app::replay::INSTANT_REWIND	docs/FLASHBACK.md:95 ; docs/PAUSE_MENU.md:57 ; docs/REPLAY.md:64	F360	[D]		last 10 s [D: 0xDB4FEC, read by StateInstantReplayRewind and 0x63EBC0],
 0x00DB52C8	SMOOTHING	global	crates/grid-app/src/drift_osd.rs:43 grid-app::drift_osd::SMOOTHING			[D]		Meter smoothing per original frame [D 0.3 at 0xDB52C8]; the port applies
+0x00DB5308	livery_body_part_suffixes	data	crates/grid-formats/src/livery_map.rs BODY_PARTS	docs/TEAM_LIVERY.md		[V]		27 joint suffixes _bonnet.._wing_mirror_r
 0x00DB79D4	nightlights_other_car_range	global	crates/grid-app/src/night_lights.rs:51 grid-app::night_lights::FOCUS_RANGE	docs/NIGHT_LIGHTS.md:33		[V]		Headlight range of the focus car and of every other car (0xDB79D8, 0xDB79D4).
 0x00DB79D8	nightlights_focus_car_range	global	crates/grid-app/src/night_lights.rs:51 grid-app::night_lights::FOCUS_RANGE	docs/NIGHT_LIGHTS.md:33		[V]	FOCUS_RANGE	Headlight range of the focus car and of every other car (0xDB79D8, 0xDB79D4).
 0x00DB79DC	headlight_beam_pitch_timeline	global	not ported	docs/NIGHT_LIGHTS.md:34		[V]		`normalize(0, y, 0.9962)` in car space with y = −0.45 in timeline mode (0xDB79DC) and −0.8 in forced
@@ -4275,6 +4295,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00E4FD4C		global	crates/grid-world/src/mechanical_damage.rs:94 grid-world::mechanical_damage::grade	docs/MECHANICAL_DAMAGE.md:114				thresholds are the globals E4FD4C 0.3, E4FD50 0.65, E4FD54 0.8 (their
 0x00E4FD50		global	crates/grid-world/src/mechanical_damage.rs:94 grid-world::mechanical_damage::grade					thresholds are the globals E4FD4C 0.3, E4FD50 0.65, E4FD54 0.8 (their
 0x00E4FD54		global	crates/grid-world/src/mechanical_damage.rs:94 grid-world::mechanical_damage::grade					thresholds are the globals E4FD4C 0.3, E4FD50 0.65, E4FD54 0.8 (their
+0x00E4FD58	livery_material_names	data	crates/grid-formats/src/livery_map.rs BODY_PAINT	docs/TEAM_LIVERY.md		[V]		12 names from Car Body Paint
 0x00E50000		global	not ported	docs/IMPACT_GENERATION.md:37				Six private data pages (`E4F000`, `E50000`, `E51000`, `E58000`, `E5A000`, `E85000`) are writable during the call and restored. Executable-section bytes are c...
 0x00E500B8		global	not ported	docs/DEFORMATION_GRID.md:128				The reader now optionally captures the one-byte E500B8 clip flag after existing identity/code-prefix checks. The attempted capture stopped at the PID/start i...
 0x00E500C0		global	not ported	docs/DEFORMATION_GRID.md:142 ; docs/IMPACT_GENERATION.md:9 ; docs/IMPACT_RESPONSE.md:9				Private evidence: `local/behavior/live-impact-20261009-09/capture.json`, SHA-256 `e8fb9ee3f04839e3c7652eb9cadbe86f87fcd029ac51b1690f20ff0b7ca1ec31`. Contact ...

@@ -430,6 +430,9 @@ impl AssistRewards {
 pub struct LiveryChoices {
     /// (id, `fe_image_name`).
     pub patterns: Vec<(i32, String)>,
+    /// (id, `livery_image_name`), the pattern file under
+    /// `cars/user_liveries/liveries` (docs/TEAM_LIVERY.md), in the same order.
+    pub pattern_files: Vec<(i32, String)>,
     /// (id, [red, green, blue]).
     pub colours: Vec<(i32, [u8; 3])>,
     /// (id, `number_string`).
@@ -437,6 +440,16 @@ pub struct LiveryChoices {
 }
 
 impl LiveryChoices {
+    /// The pattern file of `livery_pattern.id`.
+    pub fn pattern_file(&self, id: i32) -> Option<&str> {
+        self.pattern_files.iter().find(|p| p.0 == id).map(|p| p.1.as_str())
+    }
+
+    /// The RGB of `livery_colour.id`.
+    pub fn colour(&self, id: i32) -> Option<[u8; 3]> {
+        self.colours.iter().find(|c| c.0 == id).map(|c| c.1)
+    }
+
     fn from_database(db: &Database) -> Result<Self> {
         fn ordered<T>(mut rows: Vec<(i32, i32, T)>) -> Vec<(i32, T)> {
             rows.sort_by_key(|r| (r.0, r.1));
@@ -448,6 +461,12 @@ impl LiveryChoices {
                 table(db, "livery_pattern")?
                     .rows()
                     .map(|r| Ok((int(&r, "order")?, int(&r, "id")?, text(&r, "fe_image_name")?)))
+                    .collect::<Result<_>>()?,
+            ),
+            pattern_files: ordered(
+                table(db, "livery_pattern")?
+                    .rows()
+                    .map(|r| Ok((int(&r, "order")?, int(&r, "id")?, text(&r, "livery_image_name")?)))
                     .collect::<Result<_>>()?,
             ),
             colours: ordered(

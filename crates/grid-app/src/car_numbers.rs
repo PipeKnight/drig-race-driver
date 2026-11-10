@@ -124,6 +124,11 @@ fn base(dds: &[u8]) -> Result<(usize, usize, Vec<u8>), Box<dyn Error>> {
     }
     Ok((w as usize, h as usize, rgba))
 }
+/// An opaque RGBA8 body texture as a BGRA DDS with its mip chain, filtered
+/// in linear space (the team livery, `team_livery`).
+pub(crate) fn opaque_dds(rgba: Vec<u8>, width: usize, height: usize) -> Vec<u8> {
+    mip_dds(rgba, width, height, &table())
+}
 fn mip_dds(mut rgba: Vec<u8>, width: usize, height: usize, lut: &[f32; 256]) -> Vec<u8> {
     let base_size = rgba.len();
     let (mut w, mut h, mut offset, mut levels) = (width, height, 0, 1);

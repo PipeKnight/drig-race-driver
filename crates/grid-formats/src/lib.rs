@@ -27,6 +27,7 @@ mod handling_damage_fields;
 pub mod jpk;
 pub mod kickup;
 pub mod language;
+pub mod livery_map;
 pub mod livery_numbers;
 pub mod material;
 pub mod mesh;

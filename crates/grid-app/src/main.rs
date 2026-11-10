@@ -123,6 +123,7 @@ use smoke_boundary::native_diagnostic as native_smoke;
 mod ground_skid_pass;
 mod ground_skid_pass_core;
 mod smoke_pilot;
+mod team_livery;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
 mod temporal_colour;
@@ -4499,6 +4500,14 @@ pub(crate) fn race_app(
                     .collect::<Vec<_>>()
                     .join(",")
             );
+        }
+    }
+    // The career team's livery (docs/TEAM_LIVERY.md) on the player and the team-mate; a model
+    // without a livery_user package, or a failed composite, keeps the shipped livery.
+    if let Some(design) = &profile.team_livery {
+        match team_livery::apply(&root, &field.models, &field.car_model, &mut car, profile.teammate, design) {
+            Ok(painted) => println!("team_livery_applied cars={painted}"),
+            Err(error) => eprintln!("team livery skipped: {error}"),
         }
     }
     let texture_override_keys = if let Some(path) = texture_override_path {

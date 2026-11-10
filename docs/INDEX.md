@@ -173,6 +173,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [LOCAL_REFLECTIONS.md](LOCAL_REFLECTIONS.md) Local reflection experiment — Existing source sky IBL remains the verified default.
 - [SCENE_HDR_PROBE.md](SCENE_HDR_PROBE.md) Static HDR scene reflection probe — Static scene capture, HDR readback and recognizable offscreen reflection are verified below.
 - [SOURCE_VEGETATION.md](SOURCE_VEGETATION.md) Donington source vegetation — 17 October2026.
+- [TEAM_LIVERY.md](TEAM_LIVERY.md) Team livery on the race cars — The livery a player designs for their own team (the career's livery page, CAREER_SCREEN.md "Season end, Le Mans entry, …
 - [TEXTURE_OVERRIDES.md](TEXTURE_OVERRIDES.md) Private texture override pilot — 16 October2026.
 - [TEXTURE_UPSCALING.md](TEXTURE_UPSCALING.md) Texture enhancement workflow — Start with available local tooling and small controlled comparisons; consider a commercial tool only if it demonstrates …
 - [TREAD_NORMAL_DETAIL.md](TREAD_NORMAL_DETAIL.md) Selective source tread normal mapping — `--normal-detail tread\|off`, enabled for enhanced closest-LOD tyres only.

@@ -319,6 +319,10 @@ pub struct Settings {
     /// them (docs/SPEECH_AUDIO_RESEARCH.md); older profiles have neither.
     pub opponent_drivers: Option<Vec<i32>>,
     pub teammate: Option<usize>,
+    /// `[game] team_livery`: the player's team livery, `pattern file,RRGGBB,RRGGBB,RRGGBB`
+    /// (docs/TEAM_LIVERY.md). The player and the `teammate` car wear it when their model has a
+    /// `livery_user` package.
+    pub team_livery: Option<crate::team_livery::Design>,
     /// `[game] rival`: the career rival whose name tag shows (`leader`, an opponent number
     /// from 1, or 0 for none; name_tag.rs `RivalRule`, docs/RACE_HUD.md "Driver name tags").
     pub rival: Option<crate::name_tag::RivalRule>,
@@ -584,6 +588,9 @@ impl Settings {
                 ("game", "rival") => {
                     self.rival = crate::name_tag::RivalRule::parse(value)
                         .ok_or_else(|| at("[game] rival needs leader or an opponent number".into()))?
+                }
+                ("game", "team_livery") => {
+                    self.team_livery = Some(crate::team_livery::Design::parse(value).map_err(|e| at(format!("[game] {e}")))?)
                 }
                 ("game", "teammate") => {
                     self.teammate =
