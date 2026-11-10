@@ -31,7 +31,15 @@ The generic range setter 0x5B51A0 (near, far clip, cull far) is called with:
 - the far map holds the scenery out to 600 m;
 - for the face states that read the far cube (2 and 3, in 0x5BD1C0 via 0x5B58F0), the far map is composited behind the near one.
 
-The exact composition and the face-state values are not traced [?].
+Composition, traced statically in F801 [O structure, I meaning]: `env_map_face_buckets` (0x5BD1C0) reads the state of the current face (`this+0x8c`) at `this+0x200+face*0x3E0+0x3D4`.
+- State 4 skips the face.
+- States 2 and 3, when a far cube is linked at `+0x19E0`, call 0x5B58F0 (far cube, face, matrix at `+0x1960`).
+- States 0 and 1 add the near objects' bucket (`param_2+0xC`).
+- With `+0x162` set, a far cube linked, or face 5, it also adds the buckets at `+0x28`, `+0x30`, `+0x60` and `+0x5C`, and `+0x2C` when `+0x161` is set.
+
+0x5B58F0 multiplies the face's view basis by the matrix at `+0x1960` and passes the result to 0xB9DC30 with `+0x194C`. The basis comes from 0x5B5630, a switch over the six faces: face 0 has right −Z, up +Y and forward +X, the D3D cube face order. It then makes one begin/bind/draw/end sequence through the device object at `+0x1A18` (vtable +0xC, +0x10, +0x20, +0x24, +0x28, +0x2C) on `+0x1950`, `+0x1944`, `+0x1958` and `+0x1954`, with the call (4,4,3) on `+0x1950` in between. [I] It draws the far cube's face as a background into the near face, and the near objects are drawn over it. Not traced: what 0xB9DC30 is (a shader constant set is likely), which states 0–3 the shipped settings reach, and when the far cube is linked.
+
+The port renders one cube with the far map's ranges (or `refmap_dist`). It has no separate near pass and no background composite. The difference this makes on screen is not measured.
 
 ### 1.2 Settings
 
@@ -46,7 +54,9 @@ The exact composition and the face-state values are not traced [?].
 
 `faces` is clamped to 0..6 and stored at +0x140; with 0 the pass is off [O, 0x602400].
 
-`_TEnvironmentMap` (0x602FE0) binds the dynamic cube when faces > 0. Otherwise it binds the track's static environment map (scene +0x3F20) [O]. That map is the "low" fallback.
+`_TEnvironmentMap` (0x602FE0) binds the dynamic cube when faces > 0. Otherwise it binds the track's static environment map (track manager +0x3F20) [O]. That map is the "low" fallback; `preRegisterRaceUpdateables` (0x6030F0) and the static pass 0x5EABE0 make the same choice [O]. Section 4.4 has how the static map is made.
+
+The shipped default, `system/hardware_settings_config.xml`, is `<reflections faces="6" size="256" forceBilinear="true" />` [O]: the dynamic cube at 256, the port's `original` level.
 
 ### 1.3 Update rate
 
@@ -142,7 +152,7 @@ Approved by the coordinator on 31 October 2026; step 4 waits for the owner. One 
 
 ## 4. The port (F670)
 
-Common build. Off unless `--car-reflections original|high|ultra` or `GRID_CAR_REFLECTIONS` names a level; step 4 (the owner's comparison) decides the default.
+Common build. Until F801 the cars reflected nothing by default (`off`). Since F801 the default is the original's low setting, the track's static map (4.4); `--car-reflections original|high|ultra` or `GRID_CAR_REFLECTIONS` picks a dynamic level, `off` none. Step 4 (the owner's comparison) decides whether the default becomes the shipped `original`.
 
 ### 4.1 The cube (`car_reflections.rs`)
 
@@ -272,3 +282,21 @@ The port (F-entry of this change) applies the first three to `carpaint_metallic`
 - The paint reads strongly mirror-like, likely stronger than the original's, because the original's gates (4.2) are missing.
 - The cube faces (dump) have the sky up and the ground down, and match the scene.
 - Not checked yet: cracked and smashed glass in a frame, opponents' cars, the cockpit mirror, replays, the phone.
+
+### 4.4 The static map, the default (F801)
+
+Backlog row 100's complaint (matte paint that reflects nothing) was the port's default `off`: the original always reflects something, the dynamic cube or, at its low setting, the track's static map.
+
+**The original** [O, static analysis]:
+- `track_manager_load_scene_nodes` (0x985550) clears the track manager's +0x3F20, then looks for the scene node `static_env_map` in the track's scenes. It takes the node's translation (node +0x80..+0x8C; the zero vector when no node is found) and calls `static_env_probe_create` (0x9853C0), which makes a 128-texel cube named `envmap`, cleared to grey 0.2 (the same kind as the water's probes, docs/WATER.md).
+- `renderer_render_static_env_maps` (0x5FBA30) draws every such probe once while the race is set up: six faces, far plane 2000 m, the water hidden (0x64C9B0). With the env pass's `faces` at 0 it points the pass's cube (+0x84) at the static map; 0x5EABE0 does the same.
+- `_TEnvironmentMap` (0x602FE0) then binds +0x3F20 when `faces` is 0, so every car samples the static map with the same car programs and constants as the dynamic cube.
+- Data [O]: every race track saves a `static_env_map` node, in both land.pssg and tracksplit.pssg at the same world position (all 15 track folders; the test below prints them). For example Donington (290, 0, 183) and Washington (−330, 46, −635); Spa's is at the world origin (0, 0, 0). The frontend garages save one too.
+
+**The port** (`car_reflections::Level::Static`, `car_reflections::static_origin`):
+- The default level. It reads the node from land.pssg, else tracksplit.pssg, and adds one cube at its translation to the water's probe capture (`water_probe::install` is additive): the same capture, the same 128 texels, grey clear, far 2000 m, water hidden, drawn once under the pipeline warm-up's cover. The car overlays (4.2) sample it through `car_reflection_overlay::Environment`, which the dynamic levels fill with their cube instead.
+- Used where the water's probes are: track scenes with the source land drawn, not collision views. The opt-in local probe (`--reflections probe`) and the paint pilot (`--paint-environment`) replace it; a dynamic level with the probe is still an error.
+- The test `every_track_saves_its_static_env_map` (ignored, needs `GRID_GAME_ROOT`) reads every track's node.
+- Cost: one cube drawn once at load (six more views for the warm-up's frames) and the overlay draws of the reflecting parts each frame.
+
+AUTHORED: the cars on the grid are in the static map (they are in the scene while the probes draw); the frontend garages keep no environment (the menu scenes are not track scenes).

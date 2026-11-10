@@ -1,5 +1,5 @@
-//! Each reflecting car part samples the environment cube
-//! ([`crate::car_reflections`]) with its material's own saved controls
+//! Each reflecting car part samples the environment cube ([`Environment`]:
+//! the dynamic cube or the track's static map, [`crate::car_reflections`]) with its material's own saved controls
 //! (docs/CAR_REFLECTIONS.md): `EnvironmentColour` and `FresnelMin/Max/Power`
 //! of its shader instance, as every car's `*_highLOD.pssg` saves them
 //! (paint, rims and metal of `carpaint_metallic`, glass of `carglass`, lamp
@@ -284,13 +284,18 @@ pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The cube the overlays sample: the dynamic cube of a probe level or the
+/// track's static map ([`crate::car_reflections::Level`]).
+#[derive(Resource, Clone)]
+pub struct Environment(pub Handle<Image>);
+
 /// Create, update or remove each part's overlay when its material, mesh or
 /// layers change.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn follow(
     mut commands: Commands,
     reflective: Res<Reflective>,
-    cube: Option<Res<crate::car_reflections::Cube>>,
+    cube: Option<Res<Environment>>,
     parts: Query<
         (
             Entity,
@@ -341,7 +346,7 @@ fn follow(
                         if glass || cracked { 1. } else { 0. },
                         0.,
                     ),
-                    cube: cube.image.clone(),
+                    cube: cube.0.clone(),
                     base: part.and_then(|m| m.base_color_texture.clone()),
                     mask: response.mask.clone(),
                     paint: controls.paint.map_or(Vec4::ZERO, |scale| {
@@ -439,7 +444,7 @@ mod tests {
             .world_mut()
             .resource_mut::<Assets<Image>>()
             .add(Image::default());
-        app.insert_resource(crate::car_reflections::Cube::for_cpu_test(image.clone()));
+        app.insert_resource(Environment(image.clone()));
         let high = BankKey {
             source: "fixture_high".into(),
             resource: "same_lights_on.tga".into(),

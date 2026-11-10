@@ -8,8 +8,11 @@
 //! faces are copied into one cube texture.
 //!
 //! Levels as a setting ([`Level`]): the original's 256 per face, 512 and 1024.
-//! Common build; off unless `--car-reflections` or `GRID_CAR_REFLECTIONS`
-//! names a level (until the owner has compared them).
+//! Common build; the default is the original's low setting instead, the
+//! track's static map ([`Level::Static`], drawn once at load), unless
+//! `--car-reflections` or `GRID_CAR_REFLECTIONS` names a level (until the
+//! owner has compared them; the shipped hardware_settings_config.xml asks for
+//! six faces of 256).
 //!
 //! AUTHORED: the downward face is drawn with its objects (the original's face
 //! 3 has no visibility list); the focused car is the player's; the probe
@@ -54,8 +57,12 @@ const FAR: f32 = 1000.;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Level {
-    #[default]
+    /// No environment reflection (diagnostic).
     Off,
+    /// The track's static map, 128 per face, drawn once at load: the
+    /// original's low setting (`reflections faces="0"`).
+    #[default]
+    Static,
     /// 256 per face, the original's medium/high.
     Original,
     /// 512, the original's ultra.
@@ -68,6 +75,7 @@ impl Level {
     pub fn parse(text: &str) -> Option<Self> {
         Some(match text {
             "off" => Self::Off,
+            "static" | "low" | "128" => Self::Static,
             "original" | "256" => Self::Original,
             "high" | "512" => Self::High,
             "ultra" | "1024" => Self::Ultra,
@@ -83,6 +91,7 @@ impl Level {
     pub fn size(self) -> u32 {
         match self {
             Self::Off => 0,
+            Self::Static => crate::water_probe::SIZE,
             Self::Original => 256,
             Self::High => 512,
             Self::Ultra => 1024,
@@ -92,6 +101,7 @@ impl Level {
     pub fn name(self) -> &'static str {
         match self {
             Self::Off => "off",
+            Self::Static => "static",
             Self::Original => "original",
             Self::High => "high",
             Self::Ultra => "ultra",
@@ -116,19 +126,6 @@ pub struct Cube {
     faces: Vec<Handle<Image>>,
     /// Copies submitted; the cube holds the scene from the second one on.
     pub copies: Arc<AtomicU64>,
-}
-
-// CPU-only fixture for actual overlay-follow lifecycle tests; no probe/render job.
-#[cfg(test)]
-impl Cube {
-    pub(crate) fn for_cpu_test(image: Handle<Image>) -> Self {
-        Self {
-            image,
-            size: 1,
-            faces: Vec::new(),
-            copies: Arc::default(),
-        }
-    }
 }
 
 /// Which meshes the probe draws: the original's reflection object selection
@@ -185,6 +182,31 @@ fn route_refmap(root: &std::path::Path, route: &grid_tools::route::Route) -> (f3
     (size, dist.min(REFMAP_DIST_MAX))
 }
 
+/// The track's static environment map centre: the world origin of the
+/// scene node `static_env_map` (0x985550 looks it up in the track's scenes
+/// and makes a 128-texel probe there with 0x9853C0; with no node the probe
+/// stands at the world origin). Every shipped track saves it, in land.pssg
+/// or tracksplit.pssg. With the dynamic map off (the original's `faces` 0),
+/// `_TEnvironmentMap` binds this cube (0x602FE0).
+pub fn static_origin(root: &std::path::Path, route: &grid_tools::route::Route) -> Option<Vec3> {
+    ["land.pssg", "tracksplit.pssg"].into_iter().find_map(|file| {
+        let bytes = crate::read(&root.join(route.track_file(file))).ok()?;
+        // Most of tracksplit.pssg is geometry; skip the parse without the name.
+        bytes.windows(14).any(|w| w == b"static_env_map").then_some(())?;
+        static_node(&grid_formats::pssg::read_tree(&bytes).ok()?)
+    })
+}
+
+/// The translation of a tree's scene node named `static_env_map`.
+fn static_node(tree: &grid_formats::pssg::Tree<'_>) -> Option<Vec3> {
+    let node = (0..tree.nodes.len()).find(|&i| {
+        matches!(tree.name(i), b"NODE" | b"RENDERNODE" | b"ROOTNODE")
+            && tree.string(i, b"id").is_ok_and(|v| v == b"static_env_map")
+    })?;
+    let m = grid_formats::scene::node_matrix(tree, node).ok()?;
+    Some(Vec3::new(m[12], m[13], m[14]))
+}
+
 #[derive(Resource)]
 struct Dump {
     after: u64,
@@ -197,8 +219,10 @@ pub fn install(
     root: &std::path::Path,
     route: &grid_tools::route::Route,
 ) {
-    if level == Level::Off {
-        return;
+    match level {
+        Level::Off => return,
+        Level::Static => return install_static(app, root, route),
+        _ => {}
     }
     let size = level.size();
     let per_frame = std::env::var("GRID_CAR_REFLECTIONS_FACES")
@@ -238,7 +262,8 @@ pub fn install(
             images.add(face)
         })
         .collect();
-    app.insert_resource(Cube {
+    app.insert_resource(crate::car_reflection_overlay::Environment(image.clone()))
+    .insert_resource(Cube {
         image,
         size,
         faces,
@@ -284,6 +309,25 @@ pub fn install(
     println!(
         "car_reflections level={} size={size} faces=6 per_frame={per_frame} far={far} min_object_size={min_size} layer={LAYER} centre=focused-car+{CENTRE_HEIGHT}",
         level.name()
+    );
+}
+
+/// The original's low setting: the track manager's static map (+0x3F20),
+/// one cube at the track's `static_env_map` node (the origin when a track
+/// has none, as 0x985550), drawn once by the shared probe capture with the
+/// water's cubes (0x5FBA30, [`crate::water_probe`]). The car programs bind
+/// it as `_TEnvironmentMap` when the env pass draws no faces (0x602FE0;
+/// `preRegisterRaceUpdateables`, 0x6030F0, makes the same choice).
+fn install_static(app: &mut App, root: &std::path::Path, route: &grid_tools::route::Route) {
+    let found = static_origin(root, route);
+    let origin = found.unwrap_or(Vec3::ZERO);
+    let cube = crate::water_probe::install(app, vec![origin]).remove(0);
+    app.insert_resource(crate::car_reflection_overlay::Environment(cube));
+    println!(
+        "car_reflections level=static size={} origin={:?} node={}",
+        crate::water_probe::SIZE,
+        origin.to_array(),
+        if found.is_some() { "static_env_map" } else { "none" }
     );
 }
 
@@ -657,11 +701,58 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn every_track_saves_its_static_env_map() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"),
+        );
+        let mut tracks = 0;
+        for region in ["europe", "japan", "usa"] {
+            let mut dirs: Vec<_> = std::fs::read_dir(root.join("tracks").join(region))
+                .unwrap()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.join("land.pssg").exists())
+                .collect();
+            dirs.sort();
+            for dir in dirs {
+                let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+                let mut routes: Vec<_> = std::fs::read_dir(&dir)
+                    .unwrap()
+                    .flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.starts_with("route_") && dir.join(n).join("track.jpk").exists())
+                    .collect();
+                routes.sort();
+                let Some(first) = routes.first() else { continue };
+                let route = grid_tools::route::Route::new(&format!("tracks/{region}/{name}/{first}")).unwrap();
+                let each: Vec<Option<Vec3>> = ["land.pssg", "tracksplit.pssg"]
+                    .into_iter()
+                    .map(|file| {
+                        let bytes = std::fs::read(root.join(route.track_file(file))).ok()?;
+                        static_node(&grid_formats::pssg::read_tree(&bytes).ok()?)
+                    })
+                    .collect();
+                println!("static_env_map track={name} land={:?} tracksplit={:?}", each[0], each[1]);
+                let origin = static_origin(&root, &route).unwrap_or_else(|| panic!("{name}"));
+                assert_eq!(Some(origin), each[0].or(each[1]), "{name}");
+                if let (Some(a), Some(b)) = (each[0], each[1]) {
+                    assert!(a.distance(b) < 0.01, "{name}: land {a} tracksplit {b}");
+                }
+                tracks += 1;
+            }
+        }
+        assert!(tracks >= 15, "{tracks}");
+    }
+
+    #[test]
     fn levels_follow_the_original_sizes() {
         assert_eq!(Level::parse("original").map(Level::size), Some(256));
         assert_eq!(Level::parse("high").map(Level::size), Some(512));
         assert_eq!(Level::parse("ultra").map(Level::size), Some(1024));
         assert_eq!(Level::parse("off"), Some(Level::Off));
+        assert_eq!(Level::parse("static").map(Level::size), Some(128));
+        assert_eq!(Level::default(), Level::Static);
         assert_eq!(Level::parse("2048"), None);
     }
 

@@ -2936,7 +2936,7 @@ pub(crate) fn race_app(
             }
             "--car-reflections" => {
                 graphics.car_reflections = car_reflections::Level::parse(&args.next().unwrap_or_default())
-                    .ok_or("--car-reflections needs off, original, high or ultra")?;
+                    .ok_or("--car-reflections needs off, static, original, high or ultra")?;
             }
             "--probe-update" => {
                 graphics.moving_probe = match args.next().as_deref() {
@@ -4546,7 +4546,19 @@ pub(crate) fn race_app(
         if !graphics.enhanced() { return Err("body occlusion pilot requires enhanced graphics".into()); }
         body_occlusion::prepare(&car, &field)?
     } else { body_occlusion::Prepared::default() };
-    let reflection_masks = if graphics.car_reflections != car_reflections::Level::Off {
+    // The track's static map is drawn with the track, as the water's cubes;
+    // the opt-in local probe and the paint pilot replace it.
+    let car_reflections_level = match graphics.car_reflections {
+        car_reflections::Level::Static
+            if !(track && !collision && graphics.source_land)
+                || graphics.reflection_mode == 3
+                || graphics.paint_environment > 0. =>
+        {
+            car_reflections::Level::Off
+        }
+        level => level,
+    };
+    let reflection_masks = if car_reflections_level != car_reflections::Level::Off {
         car_reflection_overlay::Masks::prepare(&car, &field)
     } else {
         car_reflection_overlay::Masks::default()
@@ -5318,11 +5330,13 @@ pub(crate) fn race_app(
     if graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off {
         lamp_materials::install(&mut app);
     }
-    if graphics.car_reflections != car_reflections::Level::Off && graphics.reflection_mode == 3 {
+    if !matches!(car_reflections_level, car_reflections::Level::Off | car_reflections::Level::Static)
+        && graphics.reflection_mode == 3
+    {
         return Err("--car-reflections replaces --reflections probe; choose one".into());
     }
-    car_reflections::install(&mut app, graphics.car_reflections, &root, &route);
-    if graphics.car_reflections != car_reflections::Level::Off {
+    car_reflections::install(&mut app, car_reflections_level, &root, &route);
+    if car_reflections_level != car_reflections::Level::Off {
         car_reflection_overlay::install(&mut app)?;
     }
     if graphics.paint_environment > 0. {

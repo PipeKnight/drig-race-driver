@@ -3,7 +3,9 @@
 //! node, centred on that child's world origin (sea level: y 0, Detroit
 //! −8.9), 128 texels a face, cleared to grey 0.2 and drawn once while the
 //! race is set up with the water hidden, far plane 2000 m (0x5FBA30,
-//! 0x64C9B0). The water draws of a child sample its cube.
+//! 0x64C9B0). The water draws of a child sample its cube. The cars' static
+//! map (the track's `static_env_map` node, 0x985550 and 0x9853C0) is one more
+//! cube of the same kind ([`crate::car_reflections::Level::Static`]).
 //!
 //! The port draws the six faces on the default layer while the pipeline
 //! warm-up's cover is still up after the scene is restored
@@ -93,18 +95,55 @@ struct Capture {
 }
 
 /// One cube per origin, filled with the clear colour until drawn; returns
-/// their handles in origin order.
+/// their handles in origin order. Additive: the water's probes and the car's
+/// static map ([`crate::car_reflections::static_origin`]) are drawn by the
+/// same capture, as 0x64C9B0 draws every probe 0x9853C0 made.
 pub fn install(app: &mut App, origins: Vec<Vec3>) -> Vec<Handle<Image>> {
     if origins.is_empty() {
         return Vec::new();
     }
+    let (cubes, faces) = allocate(app, origins.len());
+    println!(
+        "water_probe probes={} size={SIZE} far={FAR} origins={:?}",
+        origins.len(),
+        origins.iter().map(|o| o.to_array()).collect::<Vec<_>>()
+    );
+    if let Some(mut probes) = app.world_mut().get_resource_mut::<Probes>() {
+        probes.origins.extend(origins);
+        probes.cubes.extend(cubes.iter().cloned());
+        probes.faces.extend(faces);
+        return cubes;
+    }
+    app.insert_resource(Probes {
+        origins,
+        cubes: cubes.clone(),
+        faces,
+        active: false,
+        copies: Arc::default(),
+    })
+    .insert_resource(Capture {
+        dump: std::env::var("GRID_WATER_PROBE_DUMP").is_ok_and(|v| v == "1"),
+        ..default()
+    })
+    .init_resource::<SkyCentre>()
+    .add_plugins(ExtractResourcePlugin::<Probes>::default())
+    .add_systems(Update, capture);
+    if let Some(render) = app.get_sub_app_mut(RenderApp) {
+        render.add_systems(Render, copy_faces.in_set(RenderSystems::Cleanup));
+    }
+    cubes
+}
+
+/// `count` grey cubes and their face targets.
+#[allow(clippy::type_complexity)]
+fn allocate(app: &mut App, count: usize) -> (Vec<Handle<Image>>, Vec<Vec<Handle<Image>>>) {
     let mut images = app.world_mut().resource_mut::<Assets<Image>>();
     let grey = half_bits(CLEAR).to_le_bytes();
     let one = half_bits(1.).to_le_bytes();
     let pixel = [grey[0], grey[1], grey[0], grey[1], grey[0], grey[1], one[0], one[1]];
     let mut cubes = Vec::new();
     let mut faces = Vec::new();
-    for _ in &origins {
+    for _ in 0..count {
         let mut cube = Image::new_fill(
             Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 6 },
             TextureDimension::D2,
@@ -129,29 +168,7 @@ pub fn install(app: &mut App, origins: Vec<Vec3>) -> Vec<Handle<Image>> {
                 .collect(),
         );
     }
-    println!(
-        "water_probe probes={} size={SIZE} far={FAR} origins={:?}",
-        origins.len(),
-        origins.iter().map(|o| o.to_array()).collect::<Vec<_>>()
-    );
-    app.insert_resource(Probes {
-        origins,
-        cubes: cubes.clone(),
-        faces,
-        active: false,
-        copies: Arc::default(),
-    })
-    .insert_resource(Capture {
-        dump: std::env::var("GRID_WATER_PROBE_DUMP").is_ok_and(|v| v == "1"),
-        ..default()
-    })
-    .init_resource::<SkyCentre>()
-    .add_plugins(ExtractResourcePlugin::<Probes>::default())
-    .add_systems(Update, capture);
-    if let Some(render) = app.get_sub_app_mut(RenderApp) {
-        render.add_systems(Render, copy_faces.in_set(RenderSystems::Cleanup));
-    }
-    cubes
+    (cubes, faces)
 }
 
 /// A positive normal f32 as half-float bits (truncated mantissa).

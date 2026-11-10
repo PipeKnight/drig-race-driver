@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F801](F0801.md) | 2026-11-10 | Car reflections: the track's static map by default |
 | [F800](F0800.md) | 2026-11-10 | cargo td for every package through the build lock |
 | [F799](F0799.md) | 2026-11-10 | Team livery checked on a race car |
 | [F798](F0798.md) | 2026-11-10 | Career team livery on the race cars |
