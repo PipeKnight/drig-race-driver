@@ -347,9 +347,11 @@ fn four_flashbacks_at_normal_then_none() {
         assert_eq!(flashback(&app).stage, Stage::Idle);
         assert_eq!(ticks(&app), 800);
         tap(&mut app, KeyCode::Escape);
-        // Restart Race gives them back [I].
+        // Restart Race gives them back: the race reset reloads the set-up
+        // manager from the data store [D 0x59B1B0 -> 0x65B2C0 -> 0x6AA260].
         tap(&mut app, KeyCode::KeyR);
         drive_frame(&mut app);
+        assert_eq!(flashback(&app).manager, flashback(&app).published);
         assert_eq!(flashback(&app).manager.remaining(), 4);
     });
 }

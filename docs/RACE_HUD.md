@@ -501,13 +501,17 @@ Penalty pill (touge only) [D unless marked]:
 Wreck-screen delay [D]: `StateTerminalDamageDelay` (vtable 0xCDA548; 0x5A5990 is only a shared
 base-class stub) ends by itself. Enter 0x57F140 zeroes its timers. Update 0x57F1A0 waits for the
 player's car to rest (angular speed ≤ 0.1, linear ≤ 0.5 [I units: rad/s, m/s]), giving up 2 s
-after entering the state, then counts 1 s; its link check 0x58E2E0 returns "done" then (or at once
+after entering the state, then counts 1 s. At the rest moment, before the 1 s, it sets the
+camera director's TERMINAL flag (director ctx+0x2254 → +0x14, field +0xD20 = 1) and calls
+0x92D110(1, 0), 0x92D400(0) and 0x92D450 [D]; the flag stays set through the crash replay (REPLAY.md
+§6). Its link check 0x58E2E0 returns "done" then (or at once
 when `FinalBoundary` 0x5EBC90 disqualified the car). Its clock is the replay controller's step
 (0x944430). Exit 0x57F170 stores the state's total time in 0xE6DFF8, which the terminal replay's
 rewind (0x596C90) adds. Afterwards `flow.bin` plays the crash replay
-(`instant_race_replay_silent`) and the wreck menu comes on a button press. Port:
-`post_race::on_wreck` waits the two transitions, the rest (at most 2 s) and 1 s; it shows the menu
-without the automatic replay (AUTHORED). During the two transitions the image blends IG_whiteout →
+(`instant_race_replay_silent`) and the wreck menu comes on its exit (action 0x20). Port:
+`post_race::on_wreck` waits the two transitions, the rest (at most 2 s) and 1 s; `post_race::update`
+then plays the terminal replay (`Replay::request_terminal`) and the wreck menu shows on its exit
+(round 5; before it the port showed the menu first). During the two transitions the image blends IG_whiteout →
 TerminalFX_01 → the ordinary image and the game runs in slow motion (docs/FLASHBACK.md §2.5).
 
 Two fields of the OSD owner select the layouts below: F = owner+0x1FC, the competition-format

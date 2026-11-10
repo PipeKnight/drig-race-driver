@@ -260,6 +260,8 @@ pub struct PostRace {
     pub wreck_tick: Option<u64>,
     /// Seconds since the wrecked car came to rest (or the rest wait gave up).
     wreck_rest: Option<f32>,
+    /// The wreck screen just opened: [`update`] plays the crash replay first.
+    crash_replay: bool,
     segment: u64,
     repeat: Repeat,
     /// Menu widget and popup sounds of the last steps (drained to the
@@ -278,6 +280,7 @@ impl PostRace {
             wreck_timer: 0.,
             wreck_tick: None,
             wreck_rest: None,
+            crash_replay: false,
             segment: 0,
             repeat: Repeat::default(),
             sounds: Vec::new(),
@@ -328,8 +331,7 @@ impl PostRace {
     /// Terminal damage this frame (`dt` real seconds, `rest` the car's
     /// [`at_rest`]): the two transitions, the rest wait (at most
     /// [`WRECK_REST_LIMIT`]), then [`WRECK_AFTER_REST`] and the wreck screen.
-    /// The original plays the crash replay before its menu; the port shows the
-    /// menu, with the replay one choice of it (AUTHORED).
+    /// [`update`] then plays the crash replay; the menu shows on its exit.
     pub fn on_wreck(&mut self, wrecked: bool, rest: bool, dt: f32) {
         if !wrecked || self.stage != Stage::Hidden {
             self.wreck_timer = 0.;
@@ -349,6 +351,7 @@ impl PostRace {
         if self.wreck_rest.is_some_and(|t| t >= WRECK_AFTER_REST) {
             self.stage = Stage::Wreck;
             self.cursor = 0;
+            self.crash_replay = true;
         }
     }
 
@@ -573,6 +576,18 @@ pub fn update(
             driving.segment,
             driving.runtime.ticks
         );
+    }
+    // The shipped flow plays the crash replay by itself after
+    // `terminal_damage_delay` (`instant_race_replay_silent`, terminal) and
+    // shows the wreck menu on its exit [O: flow.bin]; the menu's Instant
+    // Replay plays the same window again. An unattended scripted run
+    // (diagnostics results_continue) goes straight to the menu.
+    if std::mem::take(&mut post.crash_replay) {
+        let unattended =
+            crate::settings::diagnostics().results_continue.is_some() && driving.scripted_ticks.is_some();
+        if !unattended && let Some(replay) = replay.as_mut() {
+            replay.request_terminal(post.wreck_tick.map(crate::replay::seconds));
+        }
     }
     let mut repeat = post.repeat;
     let mut nav = crate::pause_menu::nav(&actions, &mut repeat, dt);
@@ -1326,6 +1341,11 @@ mod tests {
         post.on_wreck(true, true, 2.0);
         post.on_wreck(true, true, 1.0);
         assert_eq!(post.stage, Stage::Wreck);
+        // The crash replay plays first, once [O: flow.bin
+        // `terminal_damage_delay` -> `instant_race_replay_silent`].
+        assert!(std::mem::take(&mut post.crash_replay));
+        post.on_wreck(true, true, 1.0);
+        assert!(!post.crash_replay);
         post.step(press(|n| n.down = true));
         post.step(press(|n| n.down = true));
         assert_eq!(post.step(press(|n| n.select = true)), Some(Command::TerminalReplay));

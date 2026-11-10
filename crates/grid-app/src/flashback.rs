@@ -346,6 +346,11 @@ pub enum Stage {
 #[derive(Resource)]
 pub struct Flashback {
     pub manager: Manager,
+    /// The manager as the race set it up: the original publishes it to the
+    /// data store (`flashback_manager_maximum` / `_used` / `_max_award`,
+    /// 0x6AA200, from 0x6AF7C0 and `StateNextRace` 0x58ABC0) and the race
+    /// reset 0x65B2C0 reads it back (0x6AA260) [D].
+    published: Manager,
     pub stage: Stage,
     checkpoints: VecDeque<Checkpoint>,
     /// The shared copies the checkpoints' packed words refer to.
@@ -367,6 +372,7 @@ impl Flashback {
     pub fn new(manager: Manager) -> Self {
         Self {
             manager,
+            published: manager,
             stage: Stage::Idle,
             checkpoints: VecDeque::new(),
             bases: Vec::new(),
@@ -597,12 +603,15 @@ pub fn capture(
         return;
     }
     let tick = driving.runtime.ticks;
-    // Restart Race: a new race with its flashbacks [I].
+    // Restart Race: `StateRestartRace` (enter 0x59B1B0) posts the race reset
+    // message (0x5ACDC0, type 0xCD83B8), whose handler 0x65B2C0 reloads the
+    // manager from the data store (0x6AA260): the flashbacks the race was set
+    // up with [D].
     if flashback.segment != Some(driving.segment)
         || flashback.last.is_some_and(|(t, ..)| tick < t)
     {
         if flashback.segment.is_some() {
-            flashback.manager.used = 0;
+            flashback.manager = flashback.published;
         }
         flashback.segment = Some(driving.segment);
         flashback.checkpoints.clear();

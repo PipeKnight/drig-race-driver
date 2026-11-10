@@ -53,7 +53,10 @@ All addresses are of the hash-pinned unpacked image `local/compatibility/grid-un
     special mode);
   - used = 0; max award = `flashback_bonus`;
   - published to the UI data store as `flashback_manager_maximum` / `_used` / `_max_award`
-    (0x6AA200), read back by 0x6AA260.
+    (0x6AA200), read back by 0x6AA260 [D]. The writer is reached from 0x6AF7C0 and from the
+    thunk 0x6AF910, whose only caller is `StateNextRace`'s enter 0x58ABC0 (vtable 0xCD96E0): it
+    calls 0x6AF7C0 when no manager exists and otherwise publishes the current values. The reader
+    is reached through the thunk 0x6AF900 only from the race reset 0x65B2C0 (§3.2).
 - Remaining = maximum − used (0x6A2240) [D]. 0x4CAD80 allows a flashback when remaining ≥ 1
   (and not when `pro_mode` is set in a mode-0 race) [D].
 - Using one: `used += 1` (0x6A2260) through 0x4CADD0, called only from 0x59AFA0 [D], the enter
@@ -184,7 +187,10 @@ gamma term (1.013) is not drawn, as for the other effects.
 - Results: the bank screen has a "Flashback Bonus" line (`bank_rewards_flashback_desc`). The career's
   per-race recorder 0x66DB80 pays 0x6A22A0 of the manager, `(maximum − used) × max_award / maximum`
   (the whole award with no flashbacks), for each race the player finishes [V, F494;
-  docs/CAREER_RESEARCH.md §3.1]. The getter 0x6A2290 is still unread. A script/condition `usedFlashback` (0x418FE0) reads a
+  docs/CAREER_RESEARCH.md §3.1]. Round 5 [D]: 0x6A22A0 returns `maximum > 0 ? (maximum − used) ×
+  max_award / maximum : max_award` in integer arithmetic (`flashback::Manager::award` matches);
+  its callers are 0x66DB80 and 0x51FB90 (vtable 0xCCF460). 0x6A2290 only returns `max_award`
+  (+0x18) and has no caller. A script/condition `usedFlashback` (0x418FE0) reads a
   per-race flag [D], [I] for stats/achievements (`fact_instant_replay_body` "[VALUE]
   Flashbacks"). The career port pays the bonus (F494): each career race reports the
   manager's `used` and `maximum` (`flashbacks` line of `career-race.result`). The race's manager
@@ -259,8 +265,16 @@ The same end state is reached exactly another way (AUTHORED):
   Drift Battle in 296 ms (real app, release).
 - Then, as the original: the replay stream is cut after T (`Replay::cut`, `Stream::truncate`),
   later lap markers and director entries are forgotten, and recording goes on from T.
-- Restart Race restores the race's flashbacks [I: the data store keeps the values published at
-  set-up, which 0x6AA260 reads back].
+- Restart Race restores the race's flashbacks [D, round 5]: `StateRestartRace` (vtable 0xCDA208,
+  enter 0x59B1B0) frees a list (0x655330) and posts the race reset message (0x5ACDC0, message
+  vtable 0xCD83B8, with a byte from the state's +4); its handler, the race reset 0x65B2C0
+  (registered at 0x679BE1 through 0x685990, and called by the race set-up 0x669700 at 0x669FD4),
+  reads the manager back from the data store (0x6AA260 through 0x6AF900): the values published at
+  set-up. The flow goes restart_race → decision_maker → prerace, not through `StateNextRace`
+  (FRONT_END_FLOW.md). The port keeps the set-up manager (`Flashback::published`) and restores it
+  on a restart (`four_flashbacks_at_normal_then_none`). [I] Whether a multi-race career event
+  carries `used` from one race to the next through `StateNextRace`'s publish of the current values
+  was not traced (the meaning of its manager test and vfunc +0x7C).
 
 ### 3.3 Flow and UI
 
@@ -347,14 +361,18 @@ The same end state is reached exactly another way (AUTHORED):
 
 ## 5. Open items
 
-- Memory: with the vehicle words and deformation owners packed (§3.2), a 12-car checkpoint is
-  about 1.2 MB, most of it the solver rows (0.64 MB), frames, bodies and contacts, which are still
-  cloned whole. The earlier 13 MB was an estimate for 12 deforming cars (F366).
-- The award formula of the Flashback Bonus, the mode-4 exception, the focus condition of
+- Memory (measured in round 5 with a counting allocator in a temporary test: live heap bytes held by
+  one checkpoint, 5 cars at Donington, tick 600, deformation on): 1,295,048 bytes cloned whole,
+  293,736 bytes packed (vehicle words, deformation owners and solver rows against the shared copy).
+  Of the packed checkpoint, the cars' frames, bodies and contacts take about 46 kB, the shared
+  world's live state (the multi-car world, shapes and the cars' private world copies) about
+  160 kB; both are the race's live state at that tick, not data shared with the start, so further
+  cuts would be a byte packing of the live world, not sharing. `Checkpoint::bytes` (the
+  diagnostic sizes) is approximate. The earlier 13 MB was an estimate for 12 deforming cars (F366).
+- The mode-4 exception, the focus condition of
   0x937150 and which replay state calls 0x93DDA0 were not traced.
 - The vehicle recordable's own apply was not traced; [I] it restores the full car state like the
   touge one.
-- Whether Restart Race keeps used flashbacks (port: it gives them back) needs a live check.
 - A flashback from the wreck screen is wired but not covered by a test (a terminal-damage
   wreck needs a scripted crash).
 - The PPS transition's blend curve and whether the 1 s of a flash counts while the PPS waits

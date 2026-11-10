@@ -228,9 +228,10 @@ The replay camera set is separate from the race cameras (F349):
   - starts 10 s before the newest frame, clamped to the in-memory window [D];
   - loops back to that point at the end [D `loop`].
 - View Replay (results) plays the whole recorded race from its first frame and loops to the start
-  [D]. The wreck screen's Replay plays the terminal-damage replay: from 10 s before the crash
-  (not before the oldest frame) to the replay's start (§6), with the zones' TERMINAL cameras
-  and the ordinary image.
+  [D]. The terminal-damage replay plays by itself once the wrecked car has rested (round 5) and
+  again from the wreck screen's Replay: from 10 s before the crash (not before the oldest frame)
+  to the replay's start (§6), with the zones' TERMINAL cameras and the ordinary image; the wreck
+  menu shows on its exit.
 - Interpolation between two samples: translation lerp and rotation slerp for car bodies, lost
   wheels and prop pieces [D 0x92F9E0]. Wheel displacement and steering lerp; the wheel angle is the
   sample's angle plus spin × time, as the live presentation does. Deformation, wheel geometry and
@@ -359,7 +360,8 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 ## 6. Open items
 
 - The vehicle component's own replay fields, the director's event timeline
-  and highlight monitors, and the terminal-damage replay's start time were not traced.
+  and highlight monitors were not traced; the terminal-damage replay's start position needs a
+  capture (below).
 - Not replayed (shown as they are when the replay starts): glass and light damage, shards,
   damage-part swing angles, collision sparks and other particles than tyre smoke and wheel
   debris, sound.
@@ -372,6 +374,17 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
   Round 3 also graded it with TerminalFX_02, read as the enter 0x57F530 of
   `terminal_replay_interface`; 0x57F530 belongs to `StateTerminalDamageReplay`, which no flow node
   uses (§2.5), so round 4 removed the grade.
+- TERMINAL flag lifetime (round 5) [D]: +0xD20 (director ctx+0x2254 → +0x14) is set to 1 by
+  `StateTerminalDamageDelay`'s update 0x57F1A0 when the wrecked car rests (before its 1 s count),
+  by the delay's link 0x58E2E0 for a `FinalBoundary` disqualification, by 0x57F530 (unused state)
+  and by the terminal rewind; it is cleared only by `StateInstantReplayRewind`'s enter (non-terminal)
+  and its exit (terminal). The silent replay's enter 0x596A40 (its arguments read by 0x57B1B0:
+  +0x2C terminal, +0x2D silent) and exit 0x57B180 (which sets +0x28 |= 0x100 and restores force
+  feedback through 0x7EB110(+0x2E)) leave it, so the crash
+  replay that follows the delay shows the TERMINAL cameras. 0x607BC0 also reads +0xD20 with the
+  camera's +0x42, for the shadow cascade set-up only. The port turns the TERMINAL choice on with
+  the terminal session; between the rest moment and the replay no replay camera is shown, so the
+  difference is not visible.
 - Terminal window (round 4) [D]: the silent StateInstantReplay enter 0x596A40 zeroes the rewind
   and posts UpdateMessage_ReplayState; its handler 0x63EBC0 sets the window END to the replay's
   start Te (0x91CA80, amount 0) and START to max(W − 10 s [0xDB4FE4], oldest frame) (0x91CC00),
@@ -379,12 +392,21 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
   0xE6E008/0xE6E010/0xE6E018. It plays (0x9440F0(1)) then pauses (0x9440F0(2)) the player, which
   sits at END; forward stops at END and rewind at START. The terminal link 0x57B220 sets the
   replay controller's mode 3 (0x6A14D0); 0x1C leads to `jump_in`, 0x20 to `terminal_damage_menu`.
-  What moves the time from END back to START was not traced (controller mode 3 or the
-  ScreenReplayInterface) [I]. The port anchors the window at the tick the player's car took
-  terminal damage (`PostRace::wreck_tick`) and plays from START (AUTHORED start position); a
-  terminal request without a crash time (the `replay_terminal` diagnostic) keeps the last 10 s.
+  Round 5: nothing automatic moves the time from END back to START [I: static]. The replay
+  controller (ctx+0x225C; constructor 0x6A1430, vtable 0xCEC3E0, update 0x6BA130) in modes 3/4
+  runs 0x6B6250, the terminal-intro tutorial, then the ordinary input 0x6AEF30, which moves time
+  only on the player's rewind/play/shuttle; the player step 0x944430 → 0x944220 and the reverse
+  step 0x9407A0 stop at the window's ends. The menu's Replay re-enters the replay through
+  `loop_entry_special` (0xCCBF40, set by 0x524210), which keeps the saved window and crash time
+  (0xE6E008, 0xE6E010, 0xE6E018). Whether the ScreenReplayInterface itself issues a rewind or play
+  on entry needs a capture; its `timeOut` 6.0 is the key-hint fade (§3.2). The port anchors the
+  window at the tick the player's car took terminal damage (`PostRace::wreck_tick`) and plays
+  from START (AUTHORED start position); a terminal request without a crash time (the `replay_terminal` diagnostic) keeps the last 10 s.
   The terminal rewind variants of `StateInstantReplayRewind` (`terminal_replay_rewind_forslow`,
   `_visual`, `_special`; enter 0x596C90 rewinds by 0xE6DFF8 + 0.6 s (0xDB4FE8) or 10 s + 2.0 s, or
   by the whole elapsed time) are used by no `flow.bin` node [O]; 0xE6DFF8 is read only there.
 - The shipped flow plays the crash replay by itself after `terminal_damage_delay` and shows the
-  wreck menu on its exit; the port shows the menu first, the replay one choice of it (AUTHORED).
+  wreck menu on its exit; the port does the same since round 5 (`PostRace::crash_replay`; an
+  unattended scripted run with diagnostics `results_continue` skips it). Where the original's
+  crash replay starts (paused at END, or played from START) needs a capture; the port plays from
+  START (AUTHORED).
