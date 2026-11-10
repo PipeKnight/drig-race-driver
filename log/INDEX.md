@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F814](F0814.md) | 2026-11-10 | Race OSD lap-time stacker re-flow and offline layouts (Le Mans time left, best-lap popup) |
 | [F813](F0813.md) | 2026-11-10 | Loading world cube reflection |
 | [F812](F0812.md) | 2026-11-10 | Loading camera noise rotation |
 | [F811](F0811.md) | 2026-11-10 | Pause Restart darkening; pause tone map blocked on row 77 |

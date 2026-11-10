@@ -92,6 +92,12 @@ pub struct Driver {
     brake_flash: f32,
     /// The brake light is flashing (severity above `startflashSeverity`).
     brake_flashing: bool,
+    /// The lap-time stacker's children and their saved y (`STACKER`).
+    stack_rest: Option<Vec<(String, f32)>>,
+    /// The layout last applied, for the `osd_stack` report.
+    stack: Vec<&'static str>,
+    /// The best-lap row of a popup layout (`BestRow`).
+    best: BestRow,
 }
 
 pub fn drive(
@@ -152,7 +158,7 @@ pub fn drive(
             osd.show(&format!("object/{kind}=driver_id_{i:02}"), false);
         }
     }
-    lap_group(&view, &mut osd);
+    lap_group(&view, &mut osd, &mut driver, dt);
     penalty_pill(&view, &mut osd, &mut driver);
     position_group(&view, &mut osd, &mut driver);
     dial(&view, &mut osd, &mut driver, dt);
@@ -229,32 +235,224 @@ pub fn penalty_text(seconds: f32) -> String {
     format!("+{}", seconds as i32)
 }
 
-fn lap_group(view: &HudView, osd: &mut Osd) {
+/// The lap-time stacker node (`lap_time_stacker.stacker`, 0xCED5A8) [D].
+const STACKER: &str = "lap_time_stacker";
+
+/// What a group of the lap-time stacker shows: the elements the layouts
+/// bind to a slot's `*_group`, `*_title` and `*_time` nodes (0x6B3760) [D].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Element {
+    /// The lap counter (`big_lap_*`, element +0x218).
+    Laps,
+    /// The race time, titled `osd_time` (element +0x2A0: activate 0x6B3840,
+    /// update 0x6B38C0).
+    RaceTime,
+    /// The time-limited race's remaining time, titled `osd_time` (element
+    /// +0x570: activate 0x6B40A0, update 0x6B4110), in hours:minutes
+    /// rounded up (0x69DF40), or minutes:seconds with `minutes` (its mode
+    /// +0x94 is 4, drift freestyle).
+    Remaining { minutes: bool },
+    /// The current lap time (element +0x340).
+    LapTime,
+    /// The best lap, titled `osd_best` (element +0x400: activate 0x6B3E80,
+    /// update 0x6B89C0); with `popup` (its +0xA0 = 1) the row shows for
+    /// [`BEST_POPUP`] s after each faster lap, else it stays up.
+    Best { popup: bool },
+}
+
+/// The event's competition format as the lap-time layouts tell them apart
+/// (F, `[+0x7C4]+0x5C`, docs/DISCIPLINES.md 1.1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LapFormat {
+    /// F 0 single race, F 1 demolition.
+    #[default]
+    Race,
+    /// F 2 drift battle, F 3 drift grand prix.
+    Drift,
+    /// F 4 drift freestyle.
+    DriftFreestyle,
+    /// F 5 pro touge.
+    Touge,
+}
+
+/// The groups the lap-time stacker shows, top down, and their elements, for
+/// an offline event (T 2, written by 0x611F30 through 0x582BF0 for every
+/// offline race) [D]. The layout (0x6BC3E0 -> 0x6BB0C0, once) hides every
+/// group (0x6B2D80) and appends these:
+/// - F 0/1 (0x6B7D10): with a time limit (provider slot 9, 0x80E5E0: the
+///   time-limited race type 3) the remaining time and the best lap in the
+///   lap slot; else the lap counter, race time, lap time and best lap;
+/// - F 2/3 (0x6B7BF0): the lap counter; F 4 the remaining time
+///   (minutes:seconds) with a time limit, else nothing;
+/// - F 5 (0x6B8400): the lap counter and race time; F 6 the race time
+///   (the port runs midnight touge as a plain race, so it has no variant).
+///
+/// [I] the lap and best rows are dropped when byte `[+0x7C8]+0x655` is
+/// set; its meaning was not traced and the port takes it as 0.
+pub fn lap_layout(format: LapFormat, time_limited: bool) -> &'static [(&'static str, Element)] {
+    use Element::*;
+    match (format, time_limited) {
+        (LapFormat::Race, true) => &[("race_group", Remaining { minutes: false }), ("lap_group", Best { popup: true })],
+        (LapFormat::Race, false) => &[
+            ("main_group", Laps),
+            ("race_group", RaceTime),
+            ("lap_group", LapTime),
+            ("best_group", Best { popup: true }),
+        ],
+        (LapFormat::Drift, _) => &[("main_group", Laps)],
+        (LapFormat::DriftFreestyle, true) => &[("race_group", Remaining { minutes: true })],
+        (LapFormat::DriftFreestyle, false) => &[],
+        (LapFormat::Touge, _) => &[("main_group", Laps), ("race_group", RaceTime)],
+    }
+}
+
+/// The stacker's re-flow (build 0x8D3730, reset 0x8D35D0, append 0x8D3670)
+/// [D]: the children sorted by saved y, top first; each child's gap is the
+/// distance to the next one below, and the last reuses the gap above it. The
+/// cursor starts at the top child's y; each appended child moves to the
+/// cursor, which drops by that child's gap. Only y moves; the others keep
+/// their saved y. Returns the new y of each of `rest`.
+pub fn reflow(rest: &[(String, f32)], appended: &[&str]) -> Vec<f32> {
+    let mut order: Vec<usize> = (0..rest.len()).collect();
+    order.sort_by(|&a, &b| rest[b].1.total_cmp(&rest[a].1));
+    let mut gap = vec![0.; rest.len()];
+    for w in order.windows(2) {
+        gap[w[0]] = rest[w[0]].1 - rest[w[1]].1;
+    }
+    if let [.., before, last] = order[..] {
+        gap[last] = gap[before];
+    }
+    let mut y: Vec<f32> = rest.iter().map(|r| r.1).collect();
+    let mut cursor = order.first().map_or(0., |&i| rest[i].1);
+    for name in appended {
+        if let Some(i) = rest.iter().position(|r| r.0 == *name) {
+            y[i] = cursor;
+            cursor -= gap[i];
+        }
+    }
+    y
+}
+
+/// Whole hours and minutes of a time, minutes rounded up when seconds are
+/// left (carrying into the hours), "%02u:%02u" (0x69DF40 with the getters
+/// 0x9085C0, 0x9085F0, 0x908640) [D].
+pub fn hours_minutes(seconds: f64) -> String {
+    let s = seconds.max(0.) as u64;
+    let (mut h, mut m) = (s / 3600, s / 60 % 60);
+    if !s.is_multiple_of(60) {
+        m += 1;
+        if m == 60 {
+            m = 0;
+            h += 1;
+        }
+    }
+    format!("{h:02}:{m:02}")
+}
+
+/// Minutes and seconds of a time, "%02u:%02u" (0x69DF90) [D].
+pub fn minutes_seconds(seconds: f64) -> String {
+    let s = seconds.max(0.) as u64;
+    format!("{:02}:{:02}", s / 60 % 60, s % 60)
+}
+
+/// How long a popup best row stays up after a faster lap (0xCED5C8) [D].
+pub const BEST_POPUP: f32 = 5.;
+
+/// The popup best-lap row (0x6B89C0) [D]: a best lap faster than the one
+/// last shown (the first counts) shows the row for [`BEST_POPUP`] s; the
+/// row is hidden before the first best lap.
+#[derive(Default)]
+pub struct BestRow {
+    shown: Option<f64>,
+    timer: f32,
+}
+
+impl BestRow {
+    /// Advances by `dt` and returns whether the row is up.
+    pub fn update(&mut self, best: Option<f64>, dt: f32) -> bool {
+        match (best, self.shown) {
+            (None, _) => *self = Self::default(),
+            (Some(b), Some(s)) if b >= s => {}
+            (Some(b), _) => {
+                self.shown = Some(b);
+                self.timer = BEST_POPUP + dt;
+            }
+        }
+        self.timer = (self.timer - dt).max(0.);
+        self.timer > 0.
+    }
+}
+
+fn lap_group(view: &HudView, osd: &mut Osd, driver: &mut Driver, dt: f32) {
     let up = |id: &'static str| view.label(id).to_uppercase();
     let info = &view.lap;
-    osd.set_text("big_lap_title", &up("osd_lap"));
-    osd.set_text("big_lap_number", &info.lap.to_string());
-    osd.set_text("big_lap_slash", if info.total.is_some() { "/" } else { "" });
-    osd.set_text("big_lap_total", &info.total.map_or(String::new(), |t| t.to_string()));
     // The original's OSD timers read mm:ss.hh (race_hud::osd_clock); the
     // empty placeholder is AUTHORED.
     let time = |t: Option<f64>| t.map_or_else(|| "--:--.--".into(), crate::race_hud::osd_clock);
-    osd.set_text("race_title", &up("osd_race"));
-    osd.set_text("race_time", &time(info.race));
-    osd.show("race_group", info.race.is_some());
-    osd.set_text("lap_title", &up("osd_laptime"));
-    osd.set_text("lap_time", &time(info.current));
-    osd.set_text("best_title", &up("osd_best"));
-    osd.set_text("best_time", &time(info.best));
+    let layout = lap_layout(view.stack.format, view.stack.remaining.is_some());
+    // Hide every group, then lay out the appended ones top down.
+    if driver.stack_rest.as_ref().is_none_or(Vec::is_empty) {
+        driver.stack_rest = Some(osd.children(STACKER).into_iter().filter_map(|c| osd.rest(&c).map(|r| (c, r.y))).collect());
+    }
+    let rest = driver.stack_rest.as_deref().unwrap_or_default();
+    let names: Vec<&'static str> = layout.iter().map(|l| l.0).collect();
+    for ((name, at), y) in rest.iter().zip(reflow(rest, &names)) {
+        osd.offset(name, Vec3::new(0., y - at, 0.));
+        osd.show(name, false);
+    }
+    if driver.stack != names {
+        // Reported for the interactive window check (hud_window_check.py).
+        println!("osd_stack groups={}", names.join(","));
+        driver.stack = names;
+    }
+    let mut lap_pill = false;
+    for &(group, element) in layout {
+        let slot = group.trim_end_matches("_group");
+        let (title, value) = (format!("{slot}_title"), format!("{slot}_time"));
+        let on = match element {
+            Element::Laps => {
+                osd.set_text("big_lap_title", &up("osd_lap"));
+                osd.set_text("big_lap_number", &info.lap.to_string());
+                osd.set_text("big_lap_slash", if info.total.is_some() { "/" } else { "" });
+                osd.set_text("big_lap_total", &info.total.map_or(String::new(), |t| t.to_string()));
+                true
+            }
+            Element::RaceTime => {
+                osd.set_text(&title, &up("osd_time"));
+                osd.set_text(&value, &time(info.race));
+                info.race.is_some()
+            }
+            Element::Remaining { minutes } => {
+                let left = view.stack.remaining.unwrap_or(0.);
+                osd.set_text(&title, &up("osd_time"));
+                osd.set_text(&value, &if minutes { minutes_seconds(left) } else { hours_minutes(left) });
+                true
+            }
+            Element::LapTime => {
+                osd.set_text(&title, &up("osd_laptime"));
+                osd.set_text(&value, &time(info.current));
+                lap_pill = slot == "lap";
+                true
+            }
+            Element::Best { popup } => {
+                osd.set_text(&title, &up("osd_best"));
+                osd.set_text(&value, &time(info.best));
+                // The OSD's clock stands while it is hidden (pause) [I].
+                !popup || driver.best.update(info.best, if view.hidden { 0. } else { dt })
+            }
+        };
+        osd.show(group, on);
+    }
     // Record pill: the lap time's pill (0x6B3AF0 binds `lap_record` and
-    // `pb_wr_lap_text`; 0x6B7A90 writes `osd_wr` for a world record, else
-    // `osd_pb`, and plays "on", 0x6B2D00 "off" [D]). The other two record
-    // pills are not bound by the original's code. In dial2.pssg the pill's
-    // text node is `multiplier_text!0`, found under the pill.
+    // `pb_wr_lap_text` for the lap time element; 0x6B7A90 writes `osd_wr` for
+    // a world record, else `osd_pb`, and plays "on", 0x6B2D00 "off" [D]). The
+    // other two record pills are not bound by the original's code. In
+    // dial2.pssg the pill's text node is `multiplier_text!0`, found under the
+    // pill.
     if let Some(id) = osd.find("object/pb_wr=lap_record", "multiplier_text") {
         osd.set_text(&id, &up(if view.world_record { "osd_wr" } else { "osd_pb" }));
     }
-    osd.play_once("object/pb_wr=lap_record", if view.new_best { "on" } else { "off" });
+    osd.play_once("object/pb_wr=lap_record", if view.new_best && lap_pill { "on" } else { "off" });
     for record in ["object/pb_wr=best__record", "object/pb_wr=race_record"] {
         osd.play_once(record, "off");
     }
@@ -844,5 +1042,71 @@ mod tests {
         }
         let d = MapView::from_database(&db, grid_tools::route::DONINGTON).unwrap();
         assert_eq!(d, MapView { zoom: 200., behind: 116., above: 110. });
+    }
+
+    fn stack_rest() -> Vec<(String, f32)> {
+        [("main_group", 0.), ("race_group", -48.18), ("lap_group", -73.18), ("best_group", -98.18), ("offers_group", -129.054)]
+            .iter()
+            .map(|&(n, y)| (n.to_owned(), y))
+            .collect()
+    }
+
+    #[test]
+    fn lap_layouts_follow_the_format() {
+        let names = |f, t| lap_layout(f, t).iter().map(|l| l.0).collect::<Vec<_>>();
+        assert_eq!(names(LapFormat::Race, false), ["main_group", "race_group", "lap_group", "best_group"]);
+        assert_eq!(names(LapFormat::Race, true), ["race_group", "lap_group"]);
+        assert_eq!(lap_layout(LapFormat::Race, true)[1].1, Element::Best { popup: true });
+        assert_eq!(names(LapFormat::Drift, false), ["main_group"]);
+        assert!(names(LapFormat::DriftFreestyle, false).is_empty());
+        assert_eq!(lap_layout(LapFormat::DriftFreestyle, true), [("race_group", Element::Remaining { minutes: true })]);
+        assert_eq!(names(LapFormat::Touge, false), ["main_group", "race_group"]);
+    }
+
+    #[test]
+    fn stacker_reflows_the_appended_groups_from_the_top() {
+        let rest = stack_rest();
+        let near = |a: &[f32], b: [f32; 5]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
+        // Every group: the saved layout.
+        let all = reflow(&rest, &["main_group", "race_group", "lap_group", "best_group", "offers_group"]);
+        assert!(near(&all, [0., -48.18, -73.18, -98.18, -129.054]));
+        // The time-limited race: race at the top, the lap slot one race gap below.
+        let le_mans = reflow(&rest, &["race_group", "lap_group"]);
+        assert!(near(&le_mans, [0., 0., -25., -98.18, -129.054]), "{le_mans:?}");
+        // Touge: main, then race one main gap below.
+        let touge = reflow(&rest, &["main_group", "race_group"]);
+        assert!(near(&touge, [0., -48.18, -73.18, -98.18, -129.054]));
+        // The last child reuses the gap above it.
+        let last = reflow(&rest, &["offers_group", "main_group"]);
+        assert!(near(&last, [-30.874, -48.18, -73.18, -98.18, 0.]), "{last:?}");
+    }
+
+    #[test]
+    fn remaining_time_formats() {
+        assert_eq!(hours_minutes(86400.), "24:00");
+        assert_eq!(hours_minutes(86399.), "24:00");
+        assert_eq!(hours_minutes(3599.), "01:00");
+        assert_eq!(hours_minutes(3600.), "01:00");
+        assert_eq!(hours_minutes(3660.), "01:01");
+        assert_eq!(hours_minutes(3601.), "01:01");
+        assert_eq!(hours_minutes(0.), "00:00");
+        assert_eq!(minutes_seconds(125.), "02:05");
+        assert_eq!(minutes_seconds(0.), "00:00");
+    }
+
+    #[test]
+    fn best_row_pops_up_after_each_faster_lap() {
+        let mut row = BestRow::default();
+        assert!(!row.update(None, 0.1));
+        assert!(row.update(Some(90.), 0.1));
+        assert!(row.update(Some(90.), 4.8));
+        assert!(!row.update(Some(90.), 0.2));
+        // A slower best (a restart's reset aside) does not show it again.
+        assert!(!row.update(Some(91.), 0.1));
+        assert!(row.update(Some(89.), 0.1));
+        assert!(!row.update(Some(89.), 5.));
+        // No best (restart): hidden, and the next best shows again.
+        assert!(!row.update(None, 0.1));
+        assert!(row.update(Some(95.), 0.1));
     }
 }

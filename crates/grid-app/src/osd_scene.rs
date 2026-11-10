@@ -500,6 +500,8 @@ pub struct Osd {
     entities: HashMap<String, Entity>,
     /// Node ids, parents and local bounds, in tree order.
     tree: Vec<(String, Option<usize>, [f32; 6])>,
+    /// Saved local translation of each node of `tree`.
+    rest: Vec<Vec3>,
     /// The environment cubemaps (soft, sharp) for new materials.
     cubes: (Handle<Image>, Handle<Image>),
     anims: Vec<Anim>,
@@ -544,6 +546,17 @@ impl Osd {
     /// The entity of a node.
     pub fn entity(&self, node: &str) -> Option<Entity> {
         self.entities.get(node).copied()
+    }
+    /// The ids of a node's direct children, in tree order.
+    pub fn children(&self, node: &str) -> Vec<String> {
+        let Some(p) = self.tree.iter().position(|(id, ..)| id == node) else {
+            return Vec::new();
+        };
+        self.tree.iter().filter(|t| t.1 == Some(p)).map(|t| t.0.clone()).collect()
+    }
+    /// The saved local translation of a node.
+    pub fn rest(&self, node: &str) -> Option<Vec3> {
+        self.tree.iter().position(|(id, ..)| id == node).and_then(|i| self.rest.get(i).copied())
     }
     /// The saved local bounds of a node (min xyz, max xyz).
     pub fn bounds(&self, node: &str) -> Option<[f32; 6]> {
@@ -1021,6 +1034,7 @@ fn spawn(
     commands.insert_resource(Osd {
         entities: by_id,
         tree: loaded.nodes.iter().map(|n| (n.id.clone(), n.parent, n.bounds)).collect(),
+        rest: loaded.nodes.iter().map(|n| Vec3::new(n.local[12], n.local[13], n.local[14])).collect(),
         cubes: loaded.cubes.clone(),
         anims,
         anim_index,
@@ -1325,6 +1339,7 @@ mod tests {
         let mut osd = Osd {
             entities: HashMap::new(),
             tree: Vec::new(),
+            rest: Vec::new(),
             cubes: (Handle::default(), Handle::default()),
             anims: Vec::new(),
             anim_index: HashMap::new(),
@@ -1380,6 +1395,7 @@ mod tests {
         let mut osd = Osd {
             entities: HashMap::new(),
             tree: Vec::new(),
+            rest: Vec::new(),
             cubes: (Handle::default(), Handle::default()),
             anims: vec![Anim { data: flip, time: 0., stop: 0., targets: vec![Target::None] }],
             anim_index: HashMap::from([("player1".to_owned(), 0)]),

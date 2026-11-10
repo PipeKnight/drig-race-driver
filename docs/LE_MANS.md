@@ -117,8 +117,10 @@ Headers 0x52E2C0 (`le_mans_leaderboard`): Pos, Driver, Class
 the career). Row filler 0x53FE10: class cell `le_mans_%s` (vehicle class
 `file_string`), time `%02u:%02u.%02u` in total minutes (24 h prints
 `1440:00.00`), `--:--:--` for zero, `DNF` when not classified. The HUD
-countdown 0x80E5E0 returns max(24 h − scaled clock, 0); its caller and
-format were not found.
+countdown 0x80E5E0 returns max(24 h − scaled clock, 0); its caller is the
+OSD's remaining-time element (+0x570, update 0x6B4110) in the lap-time
+stacker, titled `osd_time` above the best-lap row, in hours:minutes rounded
+up (0x69DF40) (RACE_HUD.md §6.4, F814).
 
 ### 2.5 24-hour field [V]
 
@@ -152,7 +154,7 @@ LMP1s, four Courage C65 LMP2s, lam); Spyker 17.
 - Launcher `Play GRID Le Mans 24 Hours.cmd` (settings/le-mans-24.ini: DBR9,
   720 s, back of the GT1 group; no GRID_SERIES_EXPERIMENTAL since F420).
 - AUTHORED / not ported: the career trigger (+0x50 setter), the race-wide
-  results factor, the expiry observer (+0xF1E4), the HUD countdown's format,
+  results factor, the expiry observer (+0xF1E4),
   the clock while paused (the port's race time follows the simulation tick,
   so it stops while paused, as inferred for the original), the estimator.
 
@@ -260,6 +262,6 @@ the street-light binding are ported (docs/NIGHT_LIGHTS.md).
 - Route 1 (`le_mans_classic`) wrecks solo; the C6R stops at about 0.99 laps
   near (−775, −1160) in both GT fields (cause not traced); four cars of the
   12-car GT field wreck early at speed.
-- The career 24 h trigger, the HUD countdown's format, the race-wide results
+- The career 24 h trigger, the race-wide results
   factor, the AI lap estimator 0x67FFB0 in a timed race (ported for lap races, F759).
 - Rendering the time of day (section 3.5) and drawn headlights.

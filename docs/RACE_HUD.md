@@ -31,12 +31,13 @@ Private evidence is in the main checkout under `local/pause-menu/` (`states.xml`
 **`osd_left`**
 - `object/messagebox=counter`: the central message box and its segmented timer.
 - `object/minimap_main=minimap`: `track_mask` (`rd4minimap`), `brake_light`, `object/flag=flag`.
-- `object/lap_time=lap_time`, a stacker of:
-  - `main_group`: `big_lap_number / big_lap_total`;
-  - `race_group`: race time;
-  - `lap_group`: lap time, plus the `pb_wr` lap-record animation;
-  - `best_group`: best time;
-  - `offers_group`.
+- `object/lap_time=lap_time`, the stacker `lap_time_stacker` (rest y in dial2 [V]) of:
+  - `main_group` (0): `big_lap_number / big_lap_total`;
+  - `race_group` (-48.18): race time;
+  - `lap_group` (-73.18): lap time, plus the `pb_wr` lap-record animation;
+  - `best_group` (-98.18): best time;
+  - `offers_group` (-129.054).
+  The groups have no animation of their own; each slot has `{slot}_title` and `{slot}_time`.
 - `object/points_main` (drift only).
 
 **`osd_bottom`**
@@ -61,8 +62,8 @@ Above the cars there are seven `driver_id` name tags.
   - `excessivespeedindicator threshold="10.0" lookahead="2.0" …` (the brake light);
   - `wrongway wrongwayinterval="4.0" rightwayinterval="2.0"`.
 
-HUD texts in `language_eng.lng` [D]: `osd_lap` LAP, `osd_race` Race, `osd_laptime` LAP, `osd_best`
-BEST, `osd_pb` PB, `osd_pos` POS, `osd_GO` GO, `osd_wrong_way` WRONG WAY!, `kph`, `mph`.
+HUD texts in `language_eng.lng` [D]: `osd_lap` LAP, `osd_race` Race, `osd_time` TIME (the race
+and remaining time rows), `osd_laptime` LAP, `osd_best` BEST, `osd_pb` PB, `osd_pos` POS, `osd_GO` GO, `osd_wrong_way` WRONG WAY!, `kph`, `mph`.
 
 ## 2. HUD: the port
 
@@ -92,7 +93,6 @@ Not ported:
 - the dial's needle smoothing (the OSD dial has the blur, section 6.4);
 - boost (no stock car has it, section 6.4);
 - driver name tags (traced, section 6.4);
-- the lap-time stacker re-flow (traced, section 6.4);
 - offers;
 - spectator layout.
 
@@ -301,8 +301,7 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   `Osd/` and the five OSD fonts (about 3.6 MB); without them the app falls back to the panels.
 - Drift groups: `drift_osd` drives the meter, the points box and the combo panel in drift events
   (section 6.5); the text panel of `drift_event` then stays hidden.
-- Not ported: boost, chat, driver name tags, offers,
-  the stacker re-flow (hidden groups leave their gap), the cutscene/post-race
+- Not ported: boost, chat, driver name tags, offers, the cutscene/post-race
   and pause-menu art (front-end packages, not this scene).
 
 ### 6.3 Checks
@@ -602,7 +601,38 @@ drive), or 3 when the online session `[[[x+0x1048]+0x1058]+0x1CC]` (0x6D9B20, as
 not set +0x80, and no other function that loads `game+0x234C`, uses the type key or is a setup
 virtual stores there. So T is 2 for every offline race, 3 online and 4 in a test drive; T 1 is not
 reached through this writer. [I] The online flag means an active online session; not traced
-further. Provider slot 0x24 is still not traced, and the re-flow is not ported.
+further.
+
+Lap-time layouts for T 2 (every offline race) [D, F814]. The layout first hides every group
+(0x6B2D80), then appends elements; an element (classes 0x6B3760, vtables 0xCEC82C..0xCEC850)
+binds a slot's `{slot}_group`, `{slot}_title` and `{slot}_time` and shows the group through
+0x8D4670 (hide 0x8D46A0). Provider slot 0x24 (index 9) is the time limit: 0x80E5E0 is true only
+for the time-limited race type 3 (Le Mans) and gives the time left, max(24 h - race time x clock
+scale, 0). Elements:
+- lap counter (+0x218) in `main_group`;
+- race time (+0x2A0, activate 0x6B3840) titled `osd_time` (TIME, not `osd_race`);
+- remaining time (+0x570, activate 0x6B40A0, update 0x6B4110) titled `osd_time`, hours:minutes
+  rounded up (0x69DF40: hours 0x9085C0, minutes mod 60 0x9085F0, +1 minute when seconds 0x908640
+  are left, carrying into the hours), or minutes:seconds (0x69DF90) in mode 4 (drift freestyle);
+- lap time (+0x340), with the `lap_record` pill;
+- best lap (+0x400, activate 0x6B3E80, update 0x6B89C0) titled `osd_best` (`osd_world` with
+  +0xB2). When the record index changes to a time earlier than the cached one (0x9084C0 is the
+  unsigned 64-bit microsecond "less than") it writes the time and shows the row; with flag +0xA0
+  set the row hides again after 5.0 s (0xCED5C8), else it stays. Activate caches index count - 1
+  and the largest time (0xE6E160), so the first best lap counts.
+The layouts, top down: F 0/1 with a time limit: remaining time in `race_group`, best (popup) in
+`lap_group`; F 0/1 without: lap counter, race time, lap time, best (popup); F 2/3: lap counter;
+F 4: remaining time (minutes:seconds) with a time limit, else nothing; F 5: lap counter, race
+time; F 6: race time. Byte [+0x7C8]+0x655 drops the lap and best rows; its meaning was not traced
+and the port takes it as 0 [I].
+
+Ported (F814): `race_osd::lap_layout` (the table above), `race_osd::reflow` (build and append on
+the rest y read from dial2 by `Osd::children`/`Osd::rest`), `hours_minutes`/`minutes_seconds`
+and `BestRow` (the popup). `race_hud::LapStack` gives the format (drift event's format, touge
+event, else race) and the remaining time (the Le Mans clock scale). The port has no midnight
+touge or online and test-drive layouts (T 3/4). Each layout change prints `osd_stack groups=...`.
+[I] the race row shows only once the race clock runs (the original's update shows it from
+activate; not traced whether the value is blank before the start).
 
 Not traced yet: the post-race art.
 

@@ -3,7 +3,7 @@
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
        [--size WxH] [--shots S,S,...] [--expect-stale] [--expect-splits]
        [--expect-penalty [--contact-at S]] [--expect-brake] [--expect-drift]
-       [--expect-tag [--teammate K] [--rival R]]
+       [--expect-tag [--teammate K] [--rival R]] [--expect-stack G,G,...]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1). RESIZE_AT seconds after launch it resizes
@@ -43,6 +43,11 @@ line after it (printed on each show and hide, within 60 m). The check runs a cop
 settings with `[game] teammate = K` added (--teammate, default 1), so use a race with opponents;
 a series event also gives the drivers' flags. --rival R also adds `[game] rival = R` (`leader` or an
 opponent number) and requires the rival's tag (tag 0, `tag=rival` lines) shown in the same way.
+
+--expect-stack G,G,... (F814) also requires the lap-time stacker's layout in the interactive
+window: the last `osd_stack groups=...` line (race_osd.rs, printed when the layout changes) must
+name these groups, top down (`main_group,race_group,lap_group,best_group` for a race without a
+time limit, `race_group,lap_group` for the time-limited Le Mans race).
 """
 import argparse
 import ctypes
@@ -89,6 +94,7 @@ def main():
     ap.add_argument('--expect-tag', action='store_true')
     ap.add_argument('--teammate', type=int, default=1)
     ap.add_argument('--rival')
+    ap.add_argument('--expect-stack')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -176,6 +182,13 @@ def main():
             verdict = 'FAIL: no penalty pill raised'
         else:
             verdict += f'; {len(pills)} penalty pills'
+    stacks = re.findall(r'^osd_stack groups=(.*)$', text, re.M)
+    print(f'osd_stack: {stacks[-3:]}')
+    if args.expect_stack is not None and verdict.startswith('PASS'):
+        if not stacks or stacks[-1].strip() != args.expect_stack:
+            verdict = f'FAIL: lap-time stacker layout {stacks[-1:]} is not {args.expect_stack}'
+        else:
+            verdict += f'; stacker {args.expect_stack}'
     table = re.findall(r'^speed_advice version=1 event=table (.*)$', text, re.M)
     brakes = re.findall(r'^osd_brake (.*)$', text, re.M)
     print(f'speed_advice: {table[:1]}; osd_brake: {len(brakes)} lines {brakes[:4]}')

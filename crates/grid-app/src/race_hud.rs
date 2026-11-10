@@ -717,12 +717,24 @@ pub struct HudView {
     /// the OSD is off then [D: `post_race_entry` turns the OSD off; I: the
     /// pause menu and replays, from the original's pause frame].
     pub hidden: bool,
+    /// What the lap-time stacker lays out (race_osd::lap_layout).
+    pub stack: LapStack,
     labels: std::collections::HashMap<&'static str, String>,
 }
 
+/// The lap-time stacker's inputs: the event's format and, in a
+/// time-limited race, the time left on its 24-hour clock.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LapStack {
+    pub format: crate::race_osd::LapFormat,
+    /// Seconds left on the race clock: max(24 h - race time x clock scale,
+    /// 0) (0x80E5E0, the time-limited race type 3) [D].
+    pub remaining: Option<f64>,
+}
+
 /// The HUD's texts in the user's language table [D ids].
-const LABELS: [&str; 13] = [
-    "osd_lap", "osd_race", "osd_laptime", "osd_best", "osd_pb", "osd_wr", "osd_pos", "osd_GO", "osd_wrong_way", "kph", "mph", "osd_minor", "osd_major",
+const LABELS: [&str; 14] = [
+    "osd_lap", "osd_race", "osd_time", "osd_laptime", "osd_best", "osd_pb", "osd_wr", "osd_pos", "osd_GO", "osd_wrong_way", "kph", "mph", "osd_minor", "osd_major",
 ];
 
 impl HudView {
@@ -754,6 +766,8 @@ fn frame(
     replay: Option<Res<crate::replay::Replay>>,
     front: Option<Res<crate::front_end::FrontEnd>>,
     touge: Option<Res<crate::touge_event::TougeEvent>>,
+    drift: Option<Res<crate::drift_event::DriftEvent>>,
+    le_mans: Option<Res<crate::le_mans_event::LeMansEvent>>,
     world: Option<Res<WorldRecord>>,
     mut state: ResMut<HudState>,
     mut view: ResMut<HudView>,
@@ -809,6 +823,17 @@ fn frame(
         || post.as_ref().is_some_and(|p| p.stage != crate::post_race::Stage::Hidden)
         || replay.as_ref().is_some_and(|r| r.session.is_some())
         || front.as_ref().is_some_and(|f| f.open);
+    use crate::race_osd::LapFormat;
+    use grid_tools::virtual_race::Format;
+    let stack = LapStack {
+        format: match (drift.as_ref().map(|d| d.format), touge.is_some()) {
+            (Some(Format::DriftFreestyle), _) => LapFormat::DriftFreestyle,
+            (Some(_), _) => LapFormat::Drift,
+            (None, true) => LapFormat::Touge,
+            (None, false) => LapFormat::Race,
+        },
+        remaining: le_mans.and_then(|l| l.scale).map(|s| (86400. - info.race.unwrap_or(0.) * s).max(0.)),
+    };
     let labels = std::mem::take(&mut view.labels);
     *view = HudView {
         lap: info,
@@ -836,6 +861,7 @@ fn frame(
         show_dials: options.dials,
         show_minimap: options.minimap && driving.reset_line.is_some(),
         hidden,
+        stack,
         labels,
     };
 }

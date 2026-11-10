@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F814](log/F0814.md) | 2026-11-10 | Race OSD lap-time stacker re-flow and offline layouts (Le Mans time left, best-lap popup) |
 | [F813](log/F0813.md) | 2026-11-10 | Loading world cube reflection |
 | [F812](log/F0812.md) | 2026-11-10 | Loading camera noise rotation |
 | [F811](log/F0811.md) | 2026-11-10 | Pause Restart darkening; pause tone map blocked on row 77 |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F757](log/F0757.md) | 2026-11-09 | Car shadows in race views and Haruna's wet layer |
 | [F756](log/F0756.md) | 2026-11-09 | Front-end screen transitions, launcher races back to the menu, Race Options difficulty and grid |
 | [F755](log/F0755.md) | 2026-11-09 | AI retire 1:1: stuck latch, Racing gate, terminal damage stops then leaves |
-| [F754](log/F0754.md) | 2026-11-09 | Water probes at authored markers; original shadow depth offsets and disc radii |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
