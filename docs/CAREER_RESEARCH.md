@@ -155,7 +155,8 @@ A season is not a calendar.
 - The flow shows `season_end_info`, then `end_season`, then `season_start_info`.
 - Both info pages are one screen class, ScreenSeasonInfo [I]: loader 0x508EB0, vtable 0xCCFAC8, factory 0xC72470;
   the byte +0x200 selects the end-of-season variant. Between `season_end_info` and `end_season` the original shows the
-  end-of-season leaderboards (0x509BA0, 0x50FB40 [I]); the port does not.
+  end-of-season leaderboards `eos_driver_leaderboard` and `eos_team_leaderboard` (ScreenTeamLeaderboard loader 0x509BA0,
+  ScreenDriverLeaderboard loader 0x50FB40 [V]); the port shows them too (§7).
 - Port (docs/CAREER_SCREEN.md, season end): `Career::season_totals` (event wins, money won, reputation earned this season,
   AUTHORED counters: the original's own counters were not traced) and `Career::end_season`, which also keeps the
   ended season's totals for the Start Of Season page.
@@ -413,20 +414,83 @@ choice in the save (`team_livery`, AUTHORED); it does not charge `livery_price`.
   - speed test (0x655C80): top speed ≥ `target_speed_mph[star level]`.
   - The targets are six comma-separated values, one per difficulty star level [D].
 
-## 7. Leaderboards [V arithmetic, I meaning]
+## 7. Leaderboards [V, I where marked] (10 November 2026)
 
-`season_leaderboards_setup.xml` [D] drives the AI teams' season earnings (0x665C50):
+The SeasonLeaderboards object at career +0xB0 (constructor 0x674EE0) holds two lists of 16-byte
+entries {id, value u32, rank, change i16}; the player's id is −2 in both.
+
+| List | Value | Data, count | Capacity |
+|---|---|---|---|
+| teams | season earnings | +0x20, +0x28 | 350 |
+| drivers | reputation | +0x1620, +0x1628 | 600 |
+| Le Mans teams | team ids | +0x3C04, +0x3D84 | 32 |
+
+The Le Mans driver list holds up to 64. A counter at +0x3D98 seeds the global Mersenne Twister
+(`Mt::new(counter)`) at every update and is then incremented; the save holds the lists and the counter
+(0x64A660 writes, 0x64A6B0 appends the player's team).
+
+**Init** (0x66E990):
+- drivers: the player (−2, 0), then every `driver` row with `leaderboard_rank` ≠ 0 (value = that rank),
+  pushed by 0x685030;
+- teams: every `team` row whose type is not `various_team` (value 0), pushed by 0x684EF0;
+- the Le Mans team list: the teams of the Le Mans tiers' events that are not driver-offer tiers, in table
+  order, without `various_team`; the shipped data gives teams 62, 64, 54 and 68;
+- the team list is sorted and ranked (0x67D540);
+- 0x665C50 follows when +0x3D94 is set.
+- The player's team (−2, 0) is appended by 0x64A6B0, called only from the found-team step of 0x674610
+  (at 0x674744, after 0x66F640), when the bank reaches `start_race_team`.
+
+**Targets** (0x665C50), single precision, from `SeasonLeaderboardsSetup` in
+`gameconfig/season_leaderboards_setup.xml` [D]:
 
 ```
+N = the team table's row count
 t = (N − leaderboard_rank) / N
 s = t^bias
-E = t^(bot + (top − bot)·s) · 0.25 · (max − min) + 0.25 · min
-E is multiplied by 0.8 when 0x62CEB0 is true
-R = (botRand + (topRand − botRand)·s) · E
+E = t^(bot + (top − bot)·s) · (0.25·max − 0.25·min) + 0.25·min
+E = E · 0.8 for a Le Mans team (0x62CEB0 scans the Le Mans list)
+R = trunc((botRand + (topRand − botRand)·s) · E); E is stored truncated
 ```
 
-E is the target earnings and R their random spread. N, the 0.25 factor and the condition are not
-resolved. The player's team is ranked by its accumulated earnings [I].
+Shipped values: teamMaxSeasonEarnings 40,000,000, teamMinSeasonEarnings 120,000, topCurveFactor 12,
+botCurveFactor 1, topRand 0.05, botRand 0.2, driverLowerFactor 1.0, driverUpperFactor 1.3, bias 0.5.
+Team 1 (rank 1) gets E, R = 9,532,667, 479,496; team 377 gets 30,505, 5,522.
+
+**Update A** (0x665560), arguments (reputation, money, teammate reputation, teammate, flag):
+1. The player's driver entry gains the reputation; the teammate's entry gains the teammate reputation.
+2. Every other driver draws v = `int(trunc(rank · lower), trunc(rank · upper))` (0xA68410). The entry
+   takes v only if v ≤ the player's new value or the player's old value < the entry's value: a rival
+   never jumps past a player who was ahead.
+3. Without the flag, the player's team gains the money and every AI team gains `int(E − R, E + R)`
+   (0x652400).
+4. Both lists are sorted descending and ranked (0-based rank; change = new rank − old rank).
+
+In `apply_event` the teammate reputation is career +0x70, the pot's reputation share for the
+teammate's place, read before the pot is reduced (the pushes at 0x6780A1–0x6780E4: +0x6C, the money,
++0x70, the teammate, 0). A driver offer calls the update with the flag set while the team is not
+founded. **Routine B** (0x665890, Le Mans) is the same, but pays only the Le Mans teams, in the
+Le Mans list's order.
+
+**Season end** (0x665BA0, from 0x4DBB20 → 0x66E2E0): every team's value, rank and change return to 0
+and the list is resorted; the drivers keep their values.
+
+Interpretations and open points [I]:
+- Init after founding: the port builds the lists when the team is founded; the original's init
+  trigger was not traced.
+- The FUN_007f7d80 filter in the init loop was not resolved.
+- The driver-offer flag: the port passes "drivers only" while the team is not founded; the locals that
+  set it were not traced.
+- Equal values: the original's introsort (0x693BF0) decides their order; the port keeps the list
+  order (stable sort).
+- `teamMaxSeasonEarnings` reads as a per-season figure, but E is added at every update; the 0.25
+  factor may spread it over the four events of a season.
+- The original sorts only the team list at init; the port ranks both so a page opened before the
+  first update shows ordered places.
+- The player's team starts at rank = list length (the end of the list) until the next update.
+
+Port: `grid_tools::career::leaderboard` (docs/CAREER_SCREEN.md, "Rankings"). With the shipped data,
+founding and one update of 2,000 reputation and $30,000 put the player 459th of 500 drivers and the
+team 221st.
 
 ## 8. Career-only race rules
 
@@ -562,7 +626,8 @@ AUTHORED or [I] in the port:
 3. The writer of event record +0x64 (head-to-head unlock); the `head_to_head_rewards` car branch.
 4. The no-damage flag threshold; 0x652200 (record +0x5C) in the event money.
 5. Driver-offer slot rotation after a failed offer; whether offer races also pay the event pot.
-6. Season leaderboard N, the 0.25 factor and 0x62CEB0; the player team's season rank.
+6. Answered in §7: N, 0x62CEB0 and the update. Still open: the meaning of the 0.25 factor, the init trigger and
+   the FUN_007f7d80 filter.
 7. Answered in §12: the race draw and the career field. Still open there: whether the drawn race
    list is saved; the Le Mans 24 Hours flag (+0x98); the tie order of the grid ranking 0x5B6340; the
    player's car and livery in an own-team field.

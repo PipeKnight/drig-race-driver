@@ -91,6 +91,8 @@ $seasonSteps = @(
     @('skip confirm', 'drive_career version=1 event=page page=confirm_skip_lemans'),
     @('le mans refused', 'drive_career version=1 event=lemans_refused '),
     @('end of season', 'drive_career version=1 event=page page=season_end'),
+    @('driver rankings', 'drive_career version=1 event=page page=rankings:drivers:'),
+    @('team rankings', 'drive_career version=1 event=page page=rankings:teams:'),
     @('season ended', 'drive_career version=1 event=season_ended season=2 '),
     @('start of season', 'drive_career version=1 event=page page=season_start'),
     @('grid world', 'drive_career version=1 event=page page=home'),

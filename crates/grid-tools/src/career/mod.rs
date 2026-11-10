@@ -3,6 +3,7 @@
 pub mod data;
 pub mod ebay;
 pub mod field;
+pub mod leaderboard;
 pub mod rules;
 pub mod save;
 pub mod state;
@@ -683,6 +684,10 @@ mod tests {
             money: 51000,
             reputation: 900,
         };
+        c.leaderboards.counter = 3;
+        c.leaderboards.drivers.push(leaderboard::Entry { id: -2, value: 5, rank: 1, change: -1 });
+        c.leaderboards.drivers.push(leaderboard::Entry { id: 64, value: 9, rank: 0, change: 1 });
+        c.leaderboards.teams.push(leaderboard::Entry { id: 54, value: 70, rank: 0, change: 0 });
         let text = save::write(&c).unwrap();
         assert!(text.contains("team_livery 3 1 22 40 17
 "));

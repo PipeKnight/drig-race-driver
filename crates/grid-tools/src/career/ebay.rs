@@ -152,7 +152,7 @@ impl Settings {
 
 /// `int(lo, hi)` (0xA68410): `lo == hi ? hi : lo + genrand % (hi - lo)`,
 /// unsigned, `hi` exclusive.
-fn int(rng: &mut Mt, lo: u32, hi: u32) -> u32 {
+pub(crate) fn int(rng: &mut Mt, lo: u32, hi: u32) -> u32 {
     if lo == hi { hi } else { lo.wrapping_add(rng.next_u32() % hi.wrapping_sub(lo)) }
 }
 

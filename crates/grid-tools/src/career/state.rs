@@ -145,6 +145,8 @@ pub struct Career {
     pub layout_races: BTreeMap<i32, u32>,
     /// The eBay used-car market (`EBAY_MANAGER_SAVE`, docs/CAREER_RESEARCH.md §13).
     pub ebay: super::ebay::Ebay,
+    /// The season leaderboards (career +0xB0, docs/CAREER_RESEARCH.md §7).
+    pub leaderboards: super::leaderboard::Leaderboards,
 }
 
 impl Career {
@@ -180,6 +182,7 @@ impl Career {
             races_lost: 0,
             layout_races: BTreeMap::new(),
             ebay: super::ebay::Ebay::new(),
+            leaderboards: Default::default(),
         }
     }
 
@@ -232,6 +235,7 @@ impl Career {
         if !self.team_founded && self.money >= catalogue.start_money {
             self.money -= catalogue.start_money;
             self.team_founded = true;
+            self.leaderboards = super::leaderboard::Leaderboards::found_team(catalogue);
             if !self.cars.iter().any(|c| c.vehicle_id == catalogue.initial_vehicle_id) {
                 self.cars.push(OwnedCar {
                     vehicle_id: catalogue.initial_vehicle_id,
@@ -245,6 +249,43 @@ impl Career {
             return true;
         }
         false
+    }
+
+    /// Builds the leaderboards of a founded team whose save has none (saves
+    /// written before the port kept them).
+    pub fn ensure_leaderboards(&mut self, catalogue: &Catalogue) {
+        if self.team_founded && self.leaderboards.drivers.is_empty() {
+            self.leaderboards = super::leaderboard::Leaderboards::found_team(catalogue);
+        }
+    }
+
+    /// Adds an event's or offer's reputation and money to the leaderboards
+    /// (0x665560 / 0x665890), before the money reaches the bank [V].
+    fn update_leaderboards(
+        &mut self,
+        catalogue: &Catalogue,
+        payout: &Payout,
+        team_mate_reputation: Option<i64>,
+        drivers_only: bool,
+        le_mans: bool,
+    ) {
+        self.ensure_leaderboards(catalogue);
+        let clamp = |v: i64| v.clamp(0, u32::MAX as i64) as u32;
+        let team_mate = self
+            .team_mate
+            .as_ref()
+            .zip(team_mate_reputation)
+            .map(|(t, rep)| (t.driver_id, clamp(rep)));
+        self.leaderboards.update(
+            catalogue,
+            super::leaderboard::Update {
+                reputation: clamp(payout.reputation()),
+                money: clamp(payout.money()),
+                team_mate,
+                drivers_only,
+                le_mans,
+            },
+        );
     }
 
     /// The licence countdown (+0x1694) [V 0x66B1D0]: 7 at the start, one
@@ -429,6 +470,7 @@ impl Career {
         self.season_event_wins = 0;
         self.season_reputation = 0;
         self.season_number += 1;
+        self.leaderboards.end_season();
         true
     }
 
@@ -797,6 +839,8 @@ pub fn apply_event_in_classes(
         career.count_in_season(SeasonEntry::Event(event.id));
         career.season_earnings += payout.money();
         career.season_event_wins += u32::from(payout.position == Some(0));
+        // 0x6788D0 calls routine A without a teammate [V].
+        career.update_leaderboards(catalogue, &payout, None, false, false);
         payout.team_founded = career.add_money(catalogue, payout.money());
         return Ok(payout);
     }
@@ -819,6 +863,7 @@ pub fn apply_event_in_classes(
             .map(|s| s.rank)
     };
     payout.position = rank_of(Entrant::Player);
+    let mut team_mate_reputation = None;
     if let Some(pos) = payout.position {
         payout.prize = rules::prize(event, pos);
         let pot = if routine_b {
@@ -841,6 +886,10 @@ pub fn apply_event_in_classes(
         if let (Some(tm), Some(tm_pos)) = (&career.team_mate, rank_of(Entrant::TeamMate)) {
             payout.team_mate_prize =
                 rules::teammate_share(rules::prize(event, tm_pos), tm.winnings_percentage);
+            // The teammate's leaderboard reputation (+0x70): the pot's share
+            // for their place, no bonus factor [V].
+            team_mate_reputation =
+                Some(rules::reputation_base(&catalogue.reputation_fractions, pot, tm_pos));
         }
         let teams = if by_class {
             rules::in_class(&table, Entrant::Player, class_of)
@@ -871,6 +920,8 @@ pub fn apply_event_in_classes(
     career.season_earnings += payout.money();
     career.season_reputation += payout.reputation();
     career.season_event_wins += u32::from(payout.position == Some(0));
+    // apply_event 0x6779C0 → routine A, Le Mans 0x6781F0 → routine B [V].
+    career.update_leaderboards(catalogue, &payout, team_mate_reputation, false, routine_b);
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }
@@ -917,6 +968,10 @@ pub fn apply_driver_offer(
     career.count_in_season(SeasonEntry::DriverOffer(offer_id));
     career.season_earnings += payout.money();
     career.season_reputation += payout.reputation();
+    // 0x674940 / 0x678BD0 / 0x678EE0: no teammate; [I] the team list is
+    // left alone unless the team is founded (two flags were not traced).
+    let drivers_only = !career.team_founded;
+    career.update_leaderboards(catalogue, &payout, None, drivers_only, tier.region == Region::LeMans);
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }

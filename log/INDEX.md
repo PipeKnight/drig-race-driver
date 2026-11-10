@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F792](F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |
 | [F791](F0791.md) | 2026-11-10 | Loading world: glyph instances grafted, screen panels left to their screens |
 | [F790](F0790.md) | 2026-11-10 | Career screen sounds and bars; window shots recheck |
 | [F789](F0789.md) | 2026-11-10 | Several shape behaviours of one prop break; Shibuya route_2 diagnosis |

@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F792](log/F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |
 | [F791](log/F0791.md) | 2026-11-10 | Loading world: glyph instances grafted, screen panels left to their screens |
 | [F790](log/F0790.md) | 2026-11-10 | Career screen sounds and bars; window shots recheck |
 | [F789](log/F0789.md) | 2026-11-10 | Several shape behaviours of one prop break; Shibuya route_2 diagnosis |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F735](log/F0735.md) | 2026-11-05 | Trees switch to their card where the original cross-fades, not at d0 |
 | [F734](log/F0734.md) | 2026-11-05 | Row 117: the end-of-race barrier pass was a crash and roll through a gap, not a pass-through |
 | [F733](log/F0733.md) | 2026-11-05 | Token retro: where the tokens go; AGENTS.md token rules; earlier auto-compact |
-| [F732](log/F0732.md) | 2026-11-05 | Owner playtest of ee26c2ebc427: judder gone; HUD regression sent; barrier pass-through recorded (row 117) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

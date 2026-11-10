@@ -19,7 +19,7 @@ Since F771 the screen follows the original's GRID World page tree (`states.xml`/
 | Select Car | `event_vehicle_select`, `buy_vehicle_buttons` | each event car the team owns (starts the event with it), Buy New for each purchasable car it does not own, Buy On eBay | event details |
 | Driver Offers | `driver_offers_select` | the offers the port can run, with their car | GRID World |
 | offer details | `driver_offers_details` | Accept the offer; the info shows team, car, track and objective | Driver Offers |
-| My Team | `team_management` | Team Mate, Sponsors (own team only) | GRID World |
+| My Team | `team_management` | Team Mate, Sponsors, Change Name, Branding, Team Rankings, Driver Rankings (own team only) | GRID World |
 | Team Mate, Sponsors | team mate search, sponsor slots | as before (F466) | My Team |
 | View Cars | `view_vehicles` | the team's cars; Buy On eBay | GRID World |
 | a car | car options (`sell_vehicle_button_header`, `sell_on_ebay_button_header`) | Sell, List on eBay | View Cars |
@@ -30,7 +30,8 @@ Since F771 the screen follows the original's GRID World page tree (`states.xml`/
 | Team Branding | `livery_designer` | Pattern, Primary, Secondary and Tertiary Colour, Number (each cycles its table), Confirm | My Team |
 | Le Mans | `lemans_select` | Driver Offers (n), Team Entry (n open), Skip Le Mans, GRID World | — |
 | Skip Le Mans? | `confirm_reject_lemans` | Yes (refuse), No | Le Mans |
-| End Of Season | `season_end_info` | Continue (ends the season) | — |
+| End Of Season | `season_end_info` | Continue (Driver Rankings) | — |
+| Driver Rankings, Team Rankings | `eos_driver_leaderboard`, `eos_team_leaderboard` (from My Team: its leaderboard buttons) | Continue (after End Of Season: Team Rankings, then the season ends), Find me / Find my team mate / Find my team, Previous, Next | My Team (none after End Of Season) |
 | Start Of Season | `season_start_info` | Continue | — |
 
 Car ownership is enforced as in the original: an event starts only with a car of its `event_vehicle` list that the team owns (`event_vehicle_select` lists the team's cars [D]); before F771 the port started an event with its first raceable car whether owned or not. Founding the team still gives the free car (F466).
@@ -186,9 +187,18 @@ The original's flow ([D] `flow.xml`/`states.xml`, [I] for the code addresses in 
 - **Team name.** Founding the team opens the PC keyboard page (`edit_team_name_pc_title`); the port lands there whenever the team is founded and unnamed. Typing: letters, digits, space and `-.&'`, Backspace deletes, at most 20 characters (AUTHORED limit), no leading space; OK takes the name (the original's default `default_player_team_name` fills an empty entry). My Team gains "Change Name", which reopens the page with the current name.
 - **Team Branding** (`team_management_design_livery_button_*` → `livery_designer`): pattern, the three colours and the number cycle through the shipped livery tables (`Catalogue.livery_choices`: the designer's pattern, colour and number rows); Confirm saves `Career.team_livery`. The original's 3D preview and colour grid are not ported: the page names the choice by id and RGB.
 - **Le Mans entry.** After the fourth counted entry of a season the career is `LeMansPending` (`Career::season_state`). GRID World's Race Events and Driver Offers rows then open the Le Mans page (`lemans_select`): Driver Offers lists the Le Mans offer tiers (`lemans_offers_shown`, from 0x651A10), Team Entry opens the Le Mans region's events, Skip asks `confirm_reject_lemans`, and Yes runs `Career::refuse_lemans` (0x4DBAD0). Back from the Le Mans offers or events returns to the Le Mans page. A taken Le Mans driver offer runs through `lemans_plan` with its seed, like a team entry.
-- **End of season.** When the season has ended (the 24 Hours driven or refused), the screen lands on End Of Season (`season_end_info`): the season number and its totals (event wins, money won, reputation earned; `eos_*` headers). Continue runs `Career::end_season` (archives the season, keeps the totals as last season's, clears the counters, season + 1) and shows Start Of Season (`season_start_info`) with last season's totals, then GRID World. The original's end-of-season leaderboards (0x509BA0, 0x50FB40) are not ported.
+- **End of season.** When the season has ended (the 24 Hours driven or refused), the screen lands on End Of Season (`season_end_info`): the season number and its totals (event wins, money won, reputation earned; `eos_*` headers). Continue runs `Career::end_season` (archives the season, keeps the totals as last season's, clears the counters, season + 1) and shows Start Of Season (`season_start_info`) with last season's totals, then GRID World. Since F792, Continue first shows Driver Rankings and Team Rankings (below).
 - Every step saves the career and logs a `drive_career` line: `team_named name=…`, `team_livery`, `lemans_refused`, `season_ended season=N event_wins= money_won= reputation_earned=`.
 - **Licences** need no save field: the tiers stay on the port's live-rank rule; CAREER_RESEARCH §14.1 traces where the original keeps the licence array.
+
+## Rankings: the season leaderboards
+
+The model is `grid_tools::career::leaderboard` (CAREER_RESEARCH §7): the lists are built when the team is founded (an older save gets them on load, `Career::ensure_leaderboards`), updated by every event, driver offer and head-to-head before the money reaches the bank, and saved as `lb_counter` and `lb_driver` / `lb_team` lines.
+- Driver Rankings: place, driver and team, reputation, and the change of place since the last update in brackets [I: the original's change marker was not traced]; table title `driver_leaderboard_table_title2` (All Time Standings, since driver values are never reset [I]).
+- Team Rankings: place, team, season earnings; table title `team_leaderboard_table_title` with `driver_leaderboard_table_title1` (After N Events, N = the season's counted entries [I]).
+- 12 rows on show (`IBLeaderboardList visible_items=12`); a page opens, and Find puts the found row, 7th from the top (`find_offset=6`) [D]. Previous and Next stand in for the list's scrolling (AUTHORED). The player's row starts with `>`.
+- After End Of Season the two pages come before `Career::end_season`, which returns the team earnings to 0 (the original's flow: `season_end_info`, `eos_driver_leaderboard`, `eos_team_leaderboard`, `season_start_info` [D]).
+- Checks: the ignored test `a_seeded_season_walks_le_mans_and_the_season_screens` walks End Of Season → Driver Rankings → Team Rankings → EndSeason; `tools/career_loop_smoke.ps1 -Season` expects `page=rankings:drivers:` and `page=rankings:teams:`.
 
 ## International head-to-head unlock (F514)
 
@@ -268,6 +278,6 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
 
 ## Not done
 
-- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. The livery designer's 3D preview and colour grid, the sponsor designer and logos, the end-of-season leaderboards, and the original's career look (3D garage backdrop, tiles, car turntable, the bar shutters of the transitions).
+- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. The livery designer's 3D preview and colour grid, the sponsor designer and logos, the Rankings pages' hire button (`driver_leaderboard_purchase_driver`) and leaderboard speech, and the original's career look (3D garage backdrop, tiles, car turntable, the bar shutters of the transitions).
 - The Ravenwest guest cars, Le Mans selection fields (`lemans_restrictions`) and the original's player car and livery choice in an own-team field.
 - Flashback limits per difficulty and pro mode's restart ban (§8).

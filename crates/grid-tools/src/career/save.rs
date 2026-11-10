@@ -107,6 +107,14 @@ pub fn write(c: &Career) -> Result<String, Error> {
     }
     put(format!("races_won {}", c.races_won));
     put(format!("races_lost {}", c.races_lost));
+    // The leaderboards in full, as the original's save (0x64A660) [V].
+    let lb = &c.leaderboards;
+    put(format!("lb_counter {}", lb.counter));
+    for (key, list) in [("lb_driver", &lb.drivers), ("lb_team", &lb.teams)] {
+        for e in list {
+            put(format!("{key} {} {} {} {}", e.id, e.value, e.rank, e.change));
+        }
+    }
     super::ebay::write(&c.ebay, &mut put);
     let mut body = lines.join("\n");
     body.push('\n');
@@ -240,6 +248,20 @@ pub fn read(text: &str) -> Result<Career, Error> {
             }
             "races_won" => c.races_won = num(f.next(), key)?,
             "races_lost" => c.races_lost = num(f.next(), key)?,
+            "lb_counter" => c.leaderboards.counter = num(f.next(), key)?,
+            "lb_driver" | "lb_team" => {
+                let e = super::leaderboard::Entry {
+                    id: num(f.next(), key)?,
+                    value: num(f.next(), key)?,
+                    rank: num(f.next(), key)?,
+                    change: num(f.next(), key)?,
+                };
+                if key == "lb_driver" {
+                    c.leaderboards.drivers.push(e);
+                } else {
+                    c.leaderboards.teams.push(e);
+                }
+            }
             "" => {}
             other => {
                 if !super::ebay::read(&mut c.ebay, other, rest).map_err(Error)? {

@@ -517,6 +517,19 @@ pub struct Catalogue {
     /// `gameconfig/ebay.xml` (the shipped values when absent).
     pub ebay: super::ebay::Settings,
     pub livery_choices: LiveryChoices,
+    /// `driver.leaderboard_rank` of the rows that have one, table order [D]
+    /// (the driver leaderboard's start values, 0x66E990).
+    pub driver_leaderboard: Vec<(i32, u32)>,
+    /// `team.leaderboard_rank` of every `team` row, table order [D].
+    pub team_leaderboard: Vec<(i32, u32)>,
+    /// The Le Mans teams (0x66E990) [V]: the teams of the drivers of the
+    /// Le Mans region's non-offer tiers' events, in tier, event and
+    /// `event_driver` table order, at most 64 drivers and 32 teams, no
+    /// `various_team`.
+    pub le_mans_teams: Vec<i32>,
+    /// `gameconfig/season_leaderboards_setup.xml` (the shipped values when
+    /// absent).
+    pub leaderboard_setup: super::leaderboard::Setup,
 }
 
 impl Catalogue {
@@ -534,6 +547,12 @@ impl Catalogue {
         if ebay.exists() {
             let bytes = std::fs::read(ebay)?;
             catalogue.ebay = super::ebay::Settings::from_document(&grid_formats::binxml::read(&bytes)?)?;
+        }
+        let setup = root.join("gameconfig/season_leaderboards_setup.xml");
+        if setup.exists() {
+            let bytes = std::fs::read(setup)?;
+            catalogue.leaderboard_setup =
+                super::leaderboard::Setup::from_document(&grid_formats::binxml::read(&bytes)?)?;
         }
         Ok(catalogue)
     }
@@ -780,6 +799,54 @@ impl Catalogue {
                 ))
             })
             .collect::<Result<BTreeMap<_, _>>>()?;
+        let leaderboard_rank = |r: &Row<'_>| r.int("leaderboard_rank").unwrap_or(0).max(0) as u32;
+        let driver_leaderboard = table(db, "driver")?
+            .rows()
+            .filter(|r| leaderboard_rank(r) != 0)
+            .map(|r| Ok((int(&r, "id")?, leaderboard_rank(&r))))
+            .collect::<Result<Vec<_>>>()?;
+        let team_leaderboard = table(db, "team")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, leaderboard_rank(&r))))
+            .collect::<Result<Vec<_>>>()?;
+        let le_mans_teams = {
+            use super::leaderboard::{LE_MANS_DRIVER_CAP, LE_MANS_TEAM_CAP};
+            let (mut drivers, mut teams) = (Vec::new(), Vec::new());
+            for t in table(db, "tier")?.rows() {
+                if int(&t, "career_region_id")? != Region::LeMans.id()
+                    || int(&t, "is_driver_offer_tier")? != 0
+                {
+                    continue;
+                }
+                let tier = int(&t, "id")?;
+                for e in table(db, "event")?.rows() {
+                    if int(&e, "tier_id")? != tier {
+                        continue;
+                    }
+                    let event = int(&e, "id")?;
+                    for d in table(db, "event_driver")?.rows() {
+                        let driver = int(&d, "driver_id")?;
+                        if int(&d, "event_id")? != event
+                            || drivers.contains(&driver)
+                            || drivers.len() >= LE_MANS_DRIVER_CAP
+                        {
+                            continue;
+                        }
+                        drivers.push(driver);
+                        let Some(team) = all_drivers.get(&driver).map(|d| d.team_id) else {
+                            continue;
+                        };
+                        if !teams.contains(&team)
+                            && team_types.get(&team) != Some(&4)
+                            && teams.len() < LE_MANS_TEAM_CAP
+                        {
+                            teams.push(team);
+                        }
+                    }
+                }
+            }
+            teams
+        };
         let venues = table(db, "track_model")?
             .rows()
             .map(|r| Ok((int(&r, "id")?, int(&r, "track_id")?)))
@@ -921,6 +988,10 @@ impl Catalogue {
                 .collect::<Result<_>>()?,
             ebay: super::ebay::Settings::default(),
             livery_choices: LiveryChoices::from_database(db)?,
+            driver_leaderboard,
+            team_leaderboard,
+            le_mans_teams,
+            leaderboard_setup: super::leaderboard::Setup::default(),
         })
     }
 

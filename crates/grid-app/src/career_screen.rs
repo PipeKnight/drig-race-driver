@@ -1508,7 +1508,24 @@ enum Page {
     TeamName(String),
     /// Team Branding (`livery_designer`): the livery being designed.
     Livery(TeamLivery),
+    /// Driver Rankings / Team Rankings (`eos_driver_leaderboard`,
+    /// `eos_team_leaderboard`, My Team's leaderboard buttons): the season
+    /// leaderboard from row `top`; after End Of Season (`season_end`)
+    /// Continue leads on instead of Back.
+    Rankings { board: Board, top: usize, season_end: bool },
 }
+
+/// The leaderboard a Rankings page shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Board {
+    Drivers,
+    Teams,
+}
+
+/// Rows on show (`IBLeaderboardList visible_items=12`) and the row a found
+/// entry lands on (`find_offset=6`) [D].
+const RANK_ROWS: usize = 12;
+const RANK_FIND_OFFSET: usize = 6;
 
 /// The part of the livery a Team Branding row changes
 /// (`livery_designer_main_menu_edit_*`).
@@ -1659,7 +1676,9 @@ impl Screen {
             | Page::Rewards(..)
             | Page::SeasonEnd
             | Page::SeasonStart
+            | Page::Rankings { season_end: true, .. }
             | Page::LeMans => return None,
+            Page::Rankings { .. } => Page::Team,
             Page::DriverOffers | Page::Events(Region::LeMans) if self.lemans_pending() => Page::LeMans,
             Page::Regions | Page::DriverOffers | Page::Team | Page::Garage => Page::Home,
             Page::Events(_) => Page::Regions,
@@ -1709,7 +1728,57 @@ impl Screen {
             Page::ConfirmSkipLeMans => self.text("lemans_confirm_exit_title", "Skip Le Mans 24hr"),
             Page::TeamName(_) => self.text(self.name_key(true), "Team Name"),
             Page::Livery(_) => self.text("livery_designer_title", "Team Branding"),
+            Page::Rankings { board: Board::Drivers, .. } => self.text("driver_leaderboard_title", "Driver Rankings"),
+            Page::Rankings { board: Board::Teams, .. } => self.text("team_leaderboard_title", "Team Rankings"),
         }
+    }
+
+    /// A leaderboard's entries in rank order.
+    fn board(&self, board: Board) -> &[grid_tools::career::leaderboard::Entry] {
+        let l = &self.career.leaderboards;
+        match board {
+            Board::Drivers => &l.drivers,
+            Board::Teams => &l.teams,
+        }
+    }
+
+    /// The Rankings page with entry `id` on the find row (the top when it
+    /// is not on the board).
+    fn rank_page(&self, board: Board, id: i32, season_end: bool) -> Page {
+        let entries = self.board(board);
+        let at = entries.iter().position(|e| e.id == id).unwrap_or(0);
+        let top = at.saturating_sub(RANK_FIND_OFFSET).min(entries.len().saturating_sub(RANK_ROWS));
+        Page::Rankings { board, top, season_end }
+    }
+
+    /// A Rankings row: the place, the driver and team or the team, the
+    /// reputation or earnings and the change since the last update [I].
+    fn rank_line(&self, board: Board, e: &grid_tools::career::leaderboard::Entry) -> String {
+        use grid_tools::career::leaderboard::PLAYER;
+        let own_team = || {
+            if self.career.team_name.is_empty() { self.default_team_name() } else { self.career.team_name.clone() }
+        };
+        let name = match (board, e.id) {
+            (Board::Drivers, PLAYER) => {
+                format!("You - {}", if self.career.team_founded { own_team() } else { "-".into() })
+            }
+            (Board::Drivers, id) => match self.cat.drivers.get(&id) {
+                Some(d) => format!("{} {} - {}", d.first_name, d.surname, team_name(&self.cat, d.team_id, &self.labels)),
+                None => format!("driver {id}"),
+            },
+            (Board::Teams, PLAYER) => own_team(),
+            (Board::Teams, id) => team_name(&self.cat, id, &self.labels),
+        };
+        let value = match board {
+            Board::Drivers => format!("{} pts", thousands(i64::from(e.value))),
+            Board::Teams => format!("${}", thousands(i64::from(e.value))),
+        };
+        let change = match e.change {
+            0 => String::new(),
+            c => format!(" ({c:+})"),
+        };
+        let mark = if e.id == PLAYER { ">" } else { " " };
+        format!("{mark}{:>4}. {name} - {value}{change}", e.rank + 1)
     }
 
     fn lemans_pending(&self) -> bool {
@@ -1967,6 +2036,13 @@ impl Screen {
                             Action::Go(Page::Livery(l)),
                         ));
                     }
+                    for (board, key, fallback) in [
+                        (Board::Teams, "team_leaderboard_title", "Team Rankings"),
+                        (Board::Drivers, "driver_leaderboard_title", "Driver Rankings"),
+                    ] {
+                        let p = self.rank_page(board, grid_tools::career::leaderboard::PLAYER, false);
+                        rows.push((self.text(key, fallback), Action::Go(p)));
+                    }
                 }
             }
             Page::TeamMate => {
@@ -2051,7 +2127,49 @@ impl Screen {
                 return rows;
             }
             Page::Rewards(..) => return vec![("Continue".into(), Action::Continue)],
-            Page::SeasonEnd => return vec![("Continue".into(), Action::EndSeason)],
+            Page::SeasonEnd => {
+                let p = self.rank_page(Board::Drivers, grid_tools::career::leaderboard::PLAYER, true);
+                return vec![("Continue".into(), Action::Go(p))];
+            }
+            Page::Rankings { board, top, season_end } => {
+                use grid_tools::career::leaderboard::PLAYER;
+                let (board, top, season_end) = (*board, *top, *season_end);
+                if season_end {
+                    let next = match board {
+                        Board::Drivers => Action::Go(self.rank_page(Board::Teams, PLAYER, true)),
+                        Board::Teams => Action::EndSeason,
+                    };
+                    rows.push(("Continue".into(), next));
+                }
+                let mate = self.career.team_mate.as_ref().map(|t| t.driver_id);
+                let finds = match board {
+                    Board::Drivers => vec![
+                        ("driver_leaderboard_goto_player", "Find me", Some(PLAYER)),
+                        ("driver_leaderboard_goto_team_mate", "Find my team mate", mate),
+                    ],
+                    Board::Teams => vec![("team_leaderboard_goto_player", "Find my team", Some(PLAYER))],
+                };
+                for (key, fallback, id) in finds {
+                    if let Some(id) = id
+                        && self.board(board).iter().any(|e| e.id == id)
+                    {
+                        rows.push((self.text(key, fallback), Action::Go(self.rank_page(board, id, season_end))));
+                    }
+                }
+                // Paging stands in for the list's scrolling (AUTHORED).
+                let len = self.board(board).len();
+                if top > 0 {
+                    let top = top.saturating_sub(RANK_ROWS);
+                    rows.push(("Previous".into(), Action::Go(Page::Rankings { board, top, season_end })));
+                }
+                if top + RANK_ROWS < len {
+                    let top = (top + RANK_ROWS).min(len.saturating_sub(RANK_ROWS));
+                    rows.push(("Next".into(), Action::Go(Page::Rankings { board, top, season_end })));
+                }
+                if season_end {
+                    return rows;
+                }
+            }
             Page::SeasonStart => return vec![("Continue".into(), Action::Go(Page::Home))],
             Page::LeMans => {
                 rows.push((
@@ -2428,9 +2546,37 @@ impl Screen {
                 lines.push(format!("Season {}", self.career.season_number));
                 lines.extend(self.totals_lines(self.career.season_totals()));
                 lines.push(String::new());
-                lines.push(
-                    "The season's driver and team leaderboards that follow in the original are not ported.".into(),
-                );
+                lines.push("Continue: the driver and team rankings, then the new season.".into());
+            }
+            Page::Rankings { board, top, .. } => {
+                let entries = self.board(*board);
+                if entries.is_empty() {
+                    lines.push("The rankings start when your team is founded.".into());
+                }
+                let events = self.career.season.len();
+                let plural = if events == 1 { ("event_non_plural", "Event") } else { ("event_plural", "Events") };
+                let after = self
+                    .text("driver_leaderboard_table_title1", "After [EVENT_COUNT] [EVENT_PLURAL]")
+                    .replace("[EVENT_COUNT]", &events.to_string())
+                    .replace("[EVENT_PLURAL]", &self.text(plural.0, plural.1));
+                lines.push(match board {
+                    Board::Drivers => format!(
+                        "{} - {}",
+                        self.text("driver_leaderboard_table_title2", "All Time Standings"),
+                        self.text("driver_leaderboard_table_reputation", "Reputation")
+                    ),
+                    Board::Teams => format!(
+                        "{} - {after} - {}",
+                        self.text("team_leaderboard_table_title", "Team Rankings"),
+                        self.text("team_leaderboard_table_earnings", "Earnings")
+                    ),
+                });
+                for e in entries.iter().skip(*top).take(RANK_ROWS) {
+                    lines.push(self.rank_line(*board, e));
+                }
+                if !entries.is_empty() {
+                    lines.push(format!("{}-{} of {}", top + 1, (top + RANK_ROWS).min(entries.len()), entries.len()));
+                }
             }
             Page::SeasonStart => {
                 lines.push(format!("Season {}", self.career.season_number));
@@ -2904,7 +3050,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let dir = crate::settings::data_dir().to_path_buf();
     std::fs::create_dir_all(&dir)?;
     let save_path = dir.join(SAVE);
-    let career = if save_path.is_file() {
+    let mut career = if save_path.is_file() {
         save::load(&save_path)?
     } else {
         let mut c = new_career(&cat);
@@ -2915,6 +3061,8 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         log_line!("drive_career version=1 event=new_career team_founded={} money={}", c.team_founded, c.money);
         c
     };
+    // A save from before the leaderboards port, or a seeded founded team.
+    career.ensure_leaderboards(&cat);
     let current = match std::fs::read_to_string(dir.join(EVENT)) {
         Ok(text) => Some(InProgress::read(&text)?),
         Err(_) => None,
@@ -3066,8 +3214,9 @@ fn auto_action(s: &Screen, target: Auto) -> Action {
     };
     let first = || s.actions().into_iter().next().map_or(Action::Quit, |r| r.1);
     match (&s.page, target) {
-        (Page::SeasonEnd, _) => Action::EndSeason,
-        (Page::SeasonStart | Page::TeamName(_), _) => first(),
+        (Page::SeasonStart | Page::SeasonEnd | Page::Rankings { season_end: true, .. } | Page::TeamName(_), _) => {
+            first()
+        }
         (Page::Home, Auto::Season) if s.career.team_founded && s.career.team_livery.is_none() => {
             Action::Go(Page::Team)
         }
@@ -3257,8 +3406,13 @@ fn act(
             }
             let page = screen.landing(page);
             log_line!("drive_career version=1 event=page page={}", page_name(&page));
+            // Finding and paging keep the cursor on its row.
+            let same = matches!((&screen.page, &page),
+                (Page::Rankings { board: a, .. }, Page::Rankings { board: b, .. }) if a == b);
             screen.page = page;
-            screen.cursor = 0;
+            if !same {
+                screen.cursor = 0;
+            }
             Ok(false)
         }
         Action::Start(i, car) => screen.start(i, &car).and_then(|()| screen.go()).map(|()| true),
@@ -3514,6 +3668,7 @@ fn page_name(page: &Page) -> String {
         Page::TeamName(_) => "team_name".into(),
         Page::Livery(_) => "livery".into(),
         Page::SeasonEnd => "season_end".into(),
+        Page::Rankings { board, top, .. } => format!("rankings:{}:{top}", format!("{board:?}").to_lowercase()),
         Page::SeasonStart => "season_start".into(),
         Page::LeMans => "lemans".into(),
         Page::ConfirmSkipLeMans => "confirm_skip_lemans".into(),
@@ -4434,6 +4589,37 @@ speech_event_wins = 0
         let _ = std::fs::remove_file(dir.join(EVENT));
         s.career.refuse_lemans();
         assert_eq!(s.landing(Page::Home), Page::SeasonEnd);
+        // End Of Season leads through Driver Rankings and Team Rankings,
+        // each opened on the player's row, before the season ends.
+        s.career.ensure_leaderboards(&s.cat);
+        s.page = Page::SeasonEnd;
+        let Action::Go(drivers @ Page::Rankings { board: Board::Drivers, season_end: true, .. }) = s.actions()[0].1.clone()
+        else {
+            panic!("{:?}", s.actions())
+        };
+        s.page = drivers;
+        assert_eq!(s.parent(), None);
+        let lines = s.info();
+        eprintln!("{}", lines.join("
+"));
+        assert!(lines.iter().any(|l| l.starts_with('>') && l.contains("You")), "{lines:?}");
+        assert!(lines.iter().filter(|l| l.contains(". ")).count() == RANK_ROWS, "{lines:?}");
+        let Action::Go(teams @ Page::Rankings { board: Board::Teams, season_end: true, .. }) = s.actions()[0].1.clone()
+        else {
+            panic!("{:?}", s.actions())
+        };
+        s.page = teams;
+        assert!(s.info().iter().any(|l| l.starts_with("> ") || l.starts_with('>')));
+        assert_eq!(s.actions()[0].1, Action::EndSeason);
+        assert!(s.actions().iter().all(|(label, _)| label != "Back"));
+        // From My Team the boards have Back.
+        s.page = Page::Team;
+        let rows = s.actions();
+        assert!(rows.iter().any(|(_, a)| matches!(a, Action::Go(Page::Rankings { board: Board::Teams, season_end: false, .. }))));
+        s.page = s.rank_page(Board::Drivers, grid_tools::career::leaderboard::PLAYER, false);
+        assert_eq!(s.parent(), Some(Page::Team));
+        let next = s.actions().into_iter().find(|(l, _)| l == "Next" || l == "Previous");
+        assert!(next.is_some(), "{:?}", s.actions());
         assert!(s.career.end_season());
         assert_eq!(s.career.season_number, 2);
         assert_eq!(s.landing(Page::Home), Page::Home);
