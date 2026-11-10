@@ -302,6 +302,10 @@ pub struct PauseMenu {
     pub save_to: Option<std::path::PathBuf>,
     /// Menu widget sounds of the last steps (hud_sound::menu_cue).
     pub(crate) sounds: Vec<grid_tools::hud_audio::Cue>,
+    /// Seconds into `restart_darken` after Restart's Yes: the menu stays
+    /// open, and the race restarts when the darkening ends
+    /// ([`PauseMenu::darken_step`]).
+    darken: Option<f32>,
 }
 
 impl PauseMenu {
@@ -321,6 +325,7 @@ impl PauseMenu {
             repeat: Repeat::default(),
             save_to: None,
             sounds: Vec::new(),
+            darken: None,
         }
     }
 
@@ -342,6 +347,26 @@ impl PauseMenu {
     pub(crate) fn close(&mut self) {
         self.open = false;
         self.screen = Screen::Main;
+        self.darken = None;
+    }
+
+    /// Advances `restart_darken` by `dt` seconds: `None` when Restart is not
+    /// darkening, `Some(true)` once it ends (the menu closes and the race
+    /// restarts, `restart_overlay_hide` then `closed_shutters_restart`).
+    pub fn darken_step(&mut self, dt: f32) -> Option<bool> {
+        let t = self.darken? + dt;
+        if t < RESTART_DARKEN {
+            self.darken = Some(t);
+            return Some(false);
+        }
+        self.close();
+        Some(true)
+    }
+
+    /// The black veil's alpha over the world during `restart_darken`
+    /// ([`restart_veil`]); 0 otherwise.
+    pub fn veil(&self) -> f32 {
+        self.darken.map_or(0., |t| restart_veil(t / RESTART_DARKEN))
     }
 
     /// One frame of menu input. Closed, only Pause does anything (it opens on
@@ -354,19 +379,23 @@ impl PauseMenu {
         use grid_tools::hud_audio::Cue;
         let (open, screen, values) = (self.open, self.screen, self.values);
         let place = (self.main, self.options, self.row, self.answer);
+        let darkening = self.darken.is_some();
         let command = self.navigate(nav);
+        // Restart's Yes keeps the menu on screen while it darkens; it
+        // sounds as the close it starts.
+        let shut = !self.open || (!darkening && self.darken.is_some());
         if !open && self.open {
             self.sounds.push(Cue::ScreenWhooshIn);
         } else if open {
             let side = matches!(self.screen, Screen::Setup(_));
             let cursor = place != (self.main, self.options, self.row, self.answer);
-            let left = screen != self.screen || !self.open;
+            let left = screen != self.screen || shut;
             let cue = crate::hud_sound::menu_cue(&nav, left, cursor, values != self.values, side);
             self.sounds.extend(cue);
             // A confirmation is a `ScreenYesNo` popup over the menu.
             let popup = |open: bool, screen: Screen| open && matches!(screen, Screen::Confirm(_));
-            self.sounds.extend(crate::hud_sound::overlay_cue(popup(open, screen), popup(self.open, self.screen)));
-            if !self.open {
+            self.sounds.extend(crate::hud_sound::overlay_cue(popup(open, screen), popup(self.open && !shut, self.screen)));
+            if shut {
                 self.sounds.push(Cue::ScreenWhooshOut);
             }
         }
@@ -374,6 +403,9 @@ impl PauseMenu {
     }
 
     fn navigate(&mut self, nav: Nav) -> Option<Command> {
+        if self.darken.is_some() {
+            return None;
+        }
         if !self.open {
             if nav.pause {
                 self.open = true;
@@ -434,6 +466,10 @@ impl PauseMenu {
                 }
                 if !nav.select {
                     return None;
+                }
+                if confirm == Confirm::Restart {
+                    self.darken = Some(0.);
+                    return Some(Command::Restart);
                 }
                 self.close();
                 Some(match confirm {
@@ -760,7 +796,7 @@ pub fn install(app: &mut App, menu: PauseMenu, labels: Labels) {
     app.insert_resource(menu)
         .insert_resource(labels)
         .add_systems(Update, update.before(crate::drive_actions))
-        .add_systems(Update, (spawn, present).chain().after(update))
+        .add_systems(Update, (spawn, present, veil).chain().after(update))
         .add_systems(Update, pause_bloom.after(update));
 }
 
@@ -774,6 +810,27 @@ pub fn install(app: &mut App, menu: PauseMenu, labels: Labels) {
 const PAUSE_BLOOM: f32 = 0.4;
 const PAUSE_IN: f32 = 0.3;
 const PAUSE_OUT: f32 = 0.29;
+
+/// Restart's Yes runs `restart_darken`: a waypoint to `fepause_restart` in
+/// 0.1 s, then `restart_overlay_hide` and `closed_shutters_restart` [D
+/// flow.bin, states.bin]. `restart_post_process` sets that effect's
+/// ColourBalance `contrast` to 0.15 [D frontend/persistentdatarender.xml],
+/// and the final merge multiplies its colour by `contrast` before
+/// `brightness` (CheapFinalMerge `mad r0.xyz, r0, c6.x, c8.x`,
+/// docs/ORIGINAL_POSTPROCESS.md) [D]. The race's own contrast is taken as 1
+/// (DRIG's grade is AUTHORED, backlog row 77) and the waypoint as linear in
+/// real time [I].
+const RESTART_DARKEN: f32 = 0.1;
+const RESTART_CONTRAST: f32 = 0.15;
+
+/// Alpha of a black veil that scales the picture's displayed values by the
+/// contrast `share` of the way from 1 to [`RESTART_CONTRAST`]. The UI blends
+/// in linear light, so the displayed factor k needs alpha 1 − k^2.2 [I: the
+/// original multiplies display values; 2.2 approximates sRGB].
+fn restart_veil(share: f32) -> f32 {
+    let k = 1. + (RESTART_CONTRAST - 1.) * share.clamp(0., 1.);
+    1. - k.powf(2.2)
+}
 
 /// How far the pause effect is in (0 = race, 1 = paused) after `dt` seconds.
 fn pause_share(share: f32, open: bool, dt: f32) -> f32 {
@@ -853,6 +910,7 @@ pub fn update(
     ),
     mut replay: Option<ResMut<crate::replay::Replay>>,
     sink: Option<Res<crate::hud_sound::HudSink>>,
+    mut script: Local<RestartScript>,
 ) {
     // A replay owns the input; after it the menu shows again. The front end
     // owns it before the race. Nothing more after leaving (the fade runs).
@@ -870,10 +928,23 @@ pub fn update(
     if post.as_ref().is_some_and(|p| p.active()) {
         return;
     }
-    let dt = time.map_or(0., |t| t.delta_secs());
+    let (dt, now) = time.map_or((0., 0.), |t| (t.delta_secs(), t.elapsed_secs()));
+    if let Some(due) = menu.darken_step(dt) {
+        if due {
+            log_line!(
+                "drive_menu version=1 segment={} tick={} action=restart",
+                driving.segment,
+                driving.runtime.ticks
+            );
+            crate::restart(&mut driving, trial.as_deref_mut());
+        }
+        *shifts = ShiftQueue::default();
+        return;
+    }
     let mut repeat = menu.repeat;
-    let nav = nav(&actions, &mut repeat, dt);
+    let mut nav = nav(&actions, &mut repeat, dt);
     menu.repeat = repeat;
+    script.drive(&mut menu, &mut nav, now);
     let command = menu.step(nav);
     crate::hud_sound::drain(&mut menu.sounds, sink.as_deref());
     let Some(command) = command else {
@@ -898,10 +969,8 @@ pub fn update(
             driving.paused = false;
             driving.report("resume", driving.last_controls.unwrap_or_default());
         }
-        Command::Restart => {
-            log("restart");
-            crate::restart(&mut driving, trial.as_deref_mut());
-        }
+        // The race restarts when the darkening ends (top of this system).
+        Command::Restart => log("restart_darken"),
         Command::ResetCar => {
             log("reset-car");
             driving.paused = false;
@@ -962,6 +1031,42 @@ pub fn update(
     *shifts = ShiftQueue::default();
 }
 
+/// `GRID_PAUSE_RESTART_AT=S` (research runs, PAUSE_MENU.md §3): at S
+/// seconds of real time the menu opens, moves to Restart and opens its
+/// confirmation; 0.5 s later it presses Yes. Pressed through
+/// [`PauseMenu::step`], so it takes the player's path.
+#[derive(Default)]
+pub struct RestartScript {
+    at: Option<Option<f32>>,
+    stage: u8,
+}
+
+impl RestartScript {
+    fn drive(&mut self, menu: &mut PauseMenu, nav: &mut Nav, now: f32) {
+        let at = *self.at.get_or_insert_with(|| {
+            std::env::var("GRID_PAUSE_RESTART_AT").ok().and_then(|v| v.parse().ok())
+        });
+        let Some(at) = at.filter(|&at| now >= at) else {
+            return;
+        };
+        let restart = menu.buttons().iter().position(|b| b.link == Link::Restart);
+        match (self.stage, restart) {
+            (0, _) if !menu.open => nav.pause = true,
+            (0, Some(row)) if menu.screen == Screen::Main && menu.main != row => nav.down = true,
+            (0, Some(_)) if menu.screen == Screen::Main => nav.select = true,
+            (0, _) if menu.screen == Screen::Confirm(Confirm::Restart) => {
+                self.stage = 1;
+                log_line!("drive_menu version=1 action=script_confirm t={now:.2}");
+            }
+            (1, _) if now >= at + 0.5 => {
+                nav.select = true;
+                self.stage = 2;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Reset Vehicle (pause menu Button3, `c_pause_reset_car`): a request to
 /// the player's reset job, which fades, places the car on the track
 /// tracker's line and keeps it out of car collisions for a while, as the
@@ -1006,6 +1111,22 @@ struct Subtitle;
 struct Row(usize);
 #[derive(Component)]
 struct Help;
+/// The black veil of `restart_darken` ([`PauseMenu::veil`]).
+#[derive(Component)]
+struct Veil;
+
+fn veil(menu: Res<PauseMenu>, mut veils: Query<(&mut BackgroundColor, &mut Visibility), With<Veil>>) {
+    let alpha = menu.veil();
+    for (mut colour, mut visibility) in &mut veils {
+        let want = if alpha > 0. { Visibility::Inherited } else { Visibility::Hidden };
+        if *visibility != want {
+            *visibility = want;
+        }
+        if colour.0.alpha() != alpha {
+            colour.0 = Color::srgba(0., 0., 0., alpha);
+        }
+    }
+}
 
 const ROWS: usize = 8;
 
@@ -1018,6 +1139,20 @@ fn spawn(
         return;
     };
     *done = true;
+    // Under the panel: `restart_darken` darkens the world, not the menu [I].
+    commands.spawn((
+        Veil,
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100.),
+            height: percent(100.),
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+        Visibility::Hidden,
+        GlobalZIndex(9),
+        UiTargetCamera(camera),
+    ));
     let font = |size: f32| TextFont {
         font_size: FontSize::Px(size),
         ..default()
@@ -1172,6 +1307,68 @@ mod tests {
             app.update();
         }
         assert!((bloom(&app) - 0.04).abs() < 1e-6, "{}", bloom(&app));
+    }
+
+    /// Restart's Yes: the menu stays open (no input) for the 0.1 s
+    /// `restart_darken`, with the sounds of the close it starts, and the
+    /// restart comes when the darkening ends.
+    #[test]
+    fn restart_darkens_before_the_race_restarts() {
+        use grid_tools::hud_audio::Cue;
+        let mut menu = PauseMenu::new(Variant::FreeRace, false, true, Options::default());
+        menu.step(press(|n| n.pause = true));
+        for _ in 0..2 {
+            menu.step(press(|n| n.down = true));
+        }
+        menu.step(press(|n| n.select = true));
+        assert_eq!(menu.screen, Screen::Confirm(Confirm::Restart));
+        menu.sounds.clear();
+        assert_eq!(menu.darken_step(0.05), None);
+        assert_eq!(menu.step(press(|n| n.select = true)), Some(Command::Restart));
+        assert!(menu.open);
+        assert_eq!(menu.sounds.last(), Some(&Cue::ScreenWhooshOut));
+        assert_eq!(menu.veil(), 0.);
+        menu.sounds.clear();
+        assert_eq!(menu.step(press(|n| n.pause = true)), None);
+        assert!(menu.sounds.is_empty());
+        assert_eq!(menu.darken_step(0.05), Some(false));
+        assert!((menu.veil() - restart_veil(0.5)).abs() < 1e-6);
+        assert_eq!(menu.darken_step(0.06), Some(true));
+        assert!(!menu.open);
+        assert_eq!((menu.veil(), menu.darken_step(0.1)), (0., None));
+    }
+
+    /// The veil scales displayed values by the contrast: 1 → 0.15.
+    #[test]
+    fn the_restart_veil_reaches_the_restart_contrast() {
+        assert_eq!(restart_veil(0.), 0.);
+        assert!((1. - restart_veil(1.)).powf(1. / 2.2) - 0.15 < 1e-6);
+        assert!(((1. - restart_veil(0.5)).powf(1. / 2.2) - 0.575).abs() < 1e-6);
+    }
+
+    /// The system on the veil node: shown with the menu's alpha while
+    /// Restart darkens, hidden otherwise.
+    #[test]
+    fn the_veil_follows_the_darkening() {
+        let mut app = App::new();
+        let mut menu = PauseMenu::new(Variant::TestDrive, false, true, Options::default());
+        menu.open = true;
+        menu.screen = Screen::Confirm(Confirm::Restart);
+        menu.step(press(|n| n.select = true));
+        menu.darken_step(0.025);
+        app.insert_resource(menu).add_systems(Update, veil);
+        let node = app.world_mut().spawn((Veil, BackgroundColor(Color::NONE), Visibility::Hidden)).id();
+        app.update();
+        let shown = |app: &App| {
+            let world = app.world();
+            (*world.get::<Visibility>(node).unwrap(), world.get::<BackgroundColor>(node).unwrap().0.alpha())
+        };
+        let (visibility, alpha) = shown(&app);
+        assert_eq!(visibility, Visibility::Inherited);
+        assert!((alpha - restart_veil(0.25)).abs() < 1e-6, "{alpha}");
+        app.world_mut().resource_mut::<PauseMenu>().darken_step(1.);
+        app.update();
+        assert_eq!(shown(&app), (Visibility::Hidden, 0.));
     }
 
     fn press(f: impl Fn(&mut Nav)) -> Nav {

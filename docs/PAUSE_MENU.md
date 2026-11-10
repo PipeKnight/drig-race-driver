@@ -87,7 +87,8 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
   - held directions repeat after 0.35 s, then every 0.15 s;
   - lists wrap (`wrapV="true"`); left/right toggle combo boxes, which wrap too.
 - **Continue / Back** resumes. The race continues exactly where it stopped [V].
-- **Restart Race / Restart Test Drive**: after Yes, the whole event restarts, the same as `R`. That
+- **Restart Race / Restart Test Drive**: Yes first darkens the screen for 0.1 s with the menu
+  still up (`restart_darken`, below); then the whole event restarts, the same as `R`. That
   covers:
   - every car (state, damage, deformation, lost wheels);
   - the shared world and its dynamic props;
@@ -182,9 +183,30 @@ not traced; the plain one is taken [I].
 
 Port (F784, `pause_menu::pause_bloom`): the race camera's bloom intensity times
 1 − 0.6 × share, share going 0 → 1 in 0.3 s when the menu opens and back in 0.29 s when it closes
-(by real time, linear [I]). The ToneMapFast override needs the original's tone map (backlog row
-77, docs/ORIGINAL_POSTPROCESS.md) and is open; `restart_darken` is not ported because DRIG
-restarts at once on Yes, so a 0.1 s darkening would never show.
+(by real time, linear [I]).
+
+The ToneMapFast override (2026-11-10) stays open, blocked on backlog row 77. In the original,
+lumMin, lumMax and adaptMax only clamp and pace the FastLumAdapt adapted luminance (`type4.xml`:
+FastLuminanceFromX4, FastLumAdapt). That luminance feeds the softening `inExposure`, the motion
+blur `lum_in` and the no-blur merge's exposure. The ordinary Type2 merge (`CheapFinalMerge`) has
+no exposure term: its disassembly ends in `C·contrast + brightness`, clamped to `maxbrightness`
+[D]. DRIG has a fixed exposure (`graphics.rs` `Exposure`) and no adapted luminance, so there is
+nothing for the override to act on until row 77 ports the original's merge.
+
+Restart darkening (2026-11-10, `pause_menu.rs` `RESTART_DARKEN`, `restart_veil`):
+
+- [D] `restart_darken` is a `StateWayPoint` to `fepause_restart` in 0.1 s. `fepause_restart` exists
+  only in `persistentdatarender.xml` `restart_post_process`: chain Type5, the same id 17 as
+  `fepause_final`, ColourBalance contrast 0.15 (`effects.xml` gives `fepause_final` contrast
+  1.0). The flow then hides the overlay and closes the shutters on `StateRestartRace`.
+- Port: Yes keeps the menu open and the race paused for 0.1 s of real time; the menu takes no
+  input meanwhile. Then it closes and the race restarts in the same frame, so the restarted race is
+  still bit-identical to a fresh one.
+- [I] The race's contrast is taken as 1 and the waypoint as linear in real time. DRIG has no
+  ColourBalance pass, so a black UI veil under the menu panel (`GlobalZIndex` 9, the panel is 10)
+  stands in for it. UI blending is in linear light, so the veil's alpha is 1 − k^2.2 with
+  k = 1 + (0.15 − 1) × share: the sRGB picture is scaled by k, ending at 0.15 of its value.
+- The results screen's Restart Race is a different flow (`overlay_fade_on_hh`) and is unchanged.
 
 **Autosave (F480).** The original saves the profile whenever a settings screen is left: every
 `*_st_*_optionsscreen` has a link to an `*_st_*_autosave` state [D]. The port does the same.
@@ -234,6 +256,7 @@ reproduced).
   - `restart_race_resets_cars_damage_ai_timing_and_props`:
     - drive 1800 ticks into the field and the barriers, then Restart Race from the menu (Yes by
       default);
+    - during the 0.1 s darkening the race stays paused at segment 0 with the menu open;
     - the state after the restart frame equals a fresh race after one frame;
     - the restarted race driven 900 ticks equals a fresh race given the same input [V].
     - The first attempt left real damage behind: player damage words changed and 115 car-contact

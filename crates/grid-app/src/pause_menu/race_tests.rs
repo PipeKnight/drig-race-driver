@@ -385,10 +385,27 @@ fn restart_race_resets_cars_damage_ai_timing_and_props() {
             app.world().resource::<PauseMenu>().screen,
             Screen::Confirm(Confirm::Restart)
         );
-        // Yes is the default answer.
+        // Yes is the default answer. It starts `restart_darken`: 0.1 s of
+        // real time with the menu still up and the race still paused.
+        let t0 = std::time::Instant::now();
+        let mut real = Time::<bevy::time::Real>::new(t0);
+        real.update_with_instant(t0);
+        app.insert_resource(real);
         keys(&mut app).press(KeyCode::Enter);
         app.update();
         keys(&mut app).release(KeyCode::Enter);
+        {
+            let d = app.world().resource::<Driving>();
+            let menu = app.world().resource::<PauseMenu>();
+            assert!(menu.open && menu.veil() == 0.);
+            assert!(d.paused);
+            assert_eq!(d.segment, 0);
+        }
+        app.world_mut()
+            .resource_mut::<Time<bevy::time::Real>>()
+            .update_with_instant(t0 + std::time::Duration::from_millis(120));
+        app.update();
+        app.world_mut().remove_resource::<Time<bevy::time::Real>>();
         {
             let d = app.world().resource::<Driving>();
             assert!(!app.world().resource::<PauseMenu>().open);
