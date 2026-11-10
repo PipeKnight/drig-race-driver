@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F799](log/F0799.md) | 2026-11-10 | Team livery checked on a race car |
 | [F798](log/F0798.md) | 2026-11-10 | Career team livery on the race cars |
 | [F797](log/F0797.md) | 2026-11-10 | Replay sound and highlight monitors traced; engine sound replayed |
 | [F796](log/F0796.md) | 2026-11-10 | Damage parts, glass, lights and shards replayed; crash replay tested with a real wreck |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F742](log/F0742.md) | 2026-11-05 | Ghost of the old frame through smoke after a resize: smoke materials now rebind the resized depth |
 | [F741](log/F0741.md) | 2026-11-05 | Playable 09da41d6d2a4 for the PC and both APKs (HUD resize, needle lines, Washington void, blink on approach) |
 | [F740](log/F0740.md) | 2026-11-05 | Row 115: tree shadows built mid-race; shadow cull keeps unculled casters so the warm-up builds every shadow variant |
-| [F739](log/F0739.md) | 2026-11-05 | OSD sprites clamp as the original's wrapS/wrapT say: no thin lines beside the speedometer needle |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
