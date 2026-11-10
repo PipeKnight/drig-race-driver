@@ -147,7 +147,7 @@ The tuning record's specular and metallic fields light the paint and window glas
   - the reflection has the shadow gate env ×= sat(s + `SpecularValues.w`), with s = 1 on back faces (a `vFace` compare);
   - its occlusion term is sat(1 + `SpecularValues.z`) with no occlusion map, so it is 1 at every floor ≥ 0;
   - the highlight is sun·s·highlight strength·0.5·dust gate·pow(sat(sun·r), highlight power);
-  - the output alpha also rises with `GhostCarValues.z`, which is not traced.
+  - the output alpha rises with the reflection and the highlight by `GhostCarValues.z` (1.8).
 
 **Values** [O, the installed file] (highlight power / strength; metallic power / scale / falloff):
 
@@ -161,6 +161,32 @@ The tuning record's specular and metallic fields light the paint and window glas
 | Wheel | 610.78 / 38.96 | 7.43 / 1.66 / 0.06 |
 
 An untuned material keeps its saved `SpecularValues` (Lacetti paint 300 / 64, 1.5). [I] The original draws into an 8-bit target, so a sum above 1 clips to white.
+
+### 1.8 Dust, scratches, vertex damage and GhostCarValues
+
+[O, static only: the vertex programs that declare `dirtLevel` (three paint variants: basic, part state and wobble), the pixel programs of 1.7, and the decompiled functions named below; no grid.exe runs.]
+
+- **Vertex controls.** Every paint vertex program writes o7 = (1 − vertex red, 1 − vertex green, sat(dirtLevel), 0). x is the normal-map strength and the damage gate, y the scratch amount, z the dust amount. The saved colours are in docs/CAR_SHADER_MASKS.md: on Lacetti LOD0 paint, 10074 vertices are white (x = y = 0) and 179 are red 0 / green 255 (x = 1, y = 0). No paint vertex has green below 255, so the scratch gate is 1 on a clean car.
+- **Paint pixel program.** With d = m1.r·dirtLevel and the dust gate dg = sat(1 − 2d):
+  - the reflection weight is sat(2·m1.a)·Fresnel·dg·(1 − scratch.a·y)·sat(1.1 − x);
+  - the highlight and the metallic factor k use m1.a·dg;
+  - the albedo moves toward `DustColour` by d;
+  - the output alpha is the diffuse alpha·`GhostCarValues.x`, and the shadow s = max(`GhostCarValues.w`, mask red).
+  - So a red-free vertex (panel gaps, grilles, trim on Lacetti) reflects at 0.1 of the weight even on a clean car.
+- **Window glass pixel program.** s = 1 on back faces, else max(`GhostCarValues.w`, mask red). With dust d = dust.r·dirtLevel, dg = sat(1 − 2d) and w = dg·Fresnel:
+  - α_a = lerp(a, 1, w·ghost.z);
+  - α_b = sat(sat(4.5a)·(α_a + s·strength·0.5·dg·pow(sat(sun·r), power)));
+  - α = lerp(α_a, α_b, ghost.z)·ghost.x;
+  - the colour is the lit colour mixed toward the environment by w, plus half the highlight·dg.
+- **GhostCarValues.** 0xA14540 sets (1, 1, 1, 0). The per-vehicle loop 0xA18460 rewrites it only when the car's render-record fade (float +0x60, kept at vehicle+0x3a34) changes: x = clamp(1 − fade, 0, 1), y = z = 1, w = 1 while x < 1, else 0. The writer of the fade is not traced. A normal car therefore draws with (1, 1, 1, 0): full alpha, glass alpha raised by its reflection, no shadow floor.
+- **Dust and mud set-up.**
+  - Each track's `mud.xml` (`MUD` element; all 18 track folders have one) gives `mudcolour` and `dirtcolour` (#3B3834 everywhere), read by 0x9ABE70.
+  - The VehicleMudPlugin set-up 0xA10B30 passes them per vehicle as `MudColour` and `DustColour`.
+  - Visitor 0xA10710 (vtable 0xD161E8, name table 0xE4FC98: `dirtLevel`, `mudLevels`, `backwardsMudLevels`, the side, front and rear planes) and 0xA108D0 collect the parameter indices of every paint instance per LOD.
+- **Dirt level.**
+  - Surfaces carry `dirtbuildup` and `mudbuildup` rates in surface_materials.xml (dry and wet elements; 60 are 0, the others 0.001–0.05).
+  - The career carries `max_maintained_dirt`, `max_maintained_scratches` and `max_maintained_dents` between events (0x63D0B0).
+  - [I] The level starts at 0 for a fresh car. The per-frame writer that accumulates it, and the scratch writer, are not traced.
 
 ## 2. The port before this work
 
@@ -273,10 +299,22 @@ Survey of all 44 `*_highLOD.pssg` files (private `local/reflections/constants.js
 - `weight ×= sat(2·m1.a)`: the map's alpha masks the reflection (trim, gaps and badges reflect less).
 - `env ×= sat(1 + OcclusionMapScale·(m1.g − 1) + SpecularValues.z)`: the green is the ambient occlusion that also darkens the lighting.
 - `env ×= sat(shadow + SpecularValues.w)`: where the sun is shadowed, the paint mixes toward a darker environment.
-- `weight ×= (1 − 2·m1.r·dirt)·(1 − scratch.a·vertex.g)·sat(1.1 − vertex.r)`: dust, scratches and the vertex damage masks. A clean car has 1 for all three.
+- `weight ×= sat(1 − 2·m1.r·dirt)·(1 − scratch.a·(1 − vertex.g))·sat(1.1 − (1 − vertex.r))`: dust, scratches and the vertex damage masks (1.8). A clean car has 1 for the first two; red-free vertices cut the weight to 0.1.
 - No other gate. An earlier note of a fade on downward-facing surfaces was a misreading: the only `sunDirection` terms weigh the lighting and the specular, not the reflection.
 
 The port (F-entry of this change) applies the first three to `carpaint_metallic` parts: each car's own `main_m1` (an opponent its livery's), uploaded linear; the main sun's Bevy shadow at the fragment; `OcclusionMapScale` as saved (1 when absent, the loader's fallback). Dust, scratches and the damage vertex masks are left out (the port has no dirt yet).
+
+**Dust, scratch and damage gates and GhostCarValues** (from F818 on; shared by every car, livery and LOD):
+- The car mesh loader stores (1 − red, 1 − green) of each saved vertex colour as the mesh's second UV set (`car_materials::shader_controls`; LOD0 and the low LODs). Bevy's own material ignores it, and the batching key carries it. The overlay reads it as `uv_b`.
+- Paint: `weight ×= dg·(1 − y)·sat(1.1 − x)`; dg also scales k and the highlight.
+  - dg comes from m1.r·`DIRT_LEVEL`, and `DIRT_LEVEL` is 0: the accumulation is not traced, and a car starts clean.
+  - AUTHORED: the scratch map (`_main_sc`) is not bound and counts as alpha 1, so scratches show wherever a vertex sets y. No saved paint vertex does.
+  - The `DustColour` albedo tint is not ported; it is 0 at level 0.
+- Shadow: s = max(shadow, `GHOST.w`) for paint and the front of window glass.
+- Window glass (tuned `carglass`, program 2, intact or cracked) follows the program's alpha with `GHOST` = (1, 1, 1, 0).
+  - The part below already holds a·lit + (1 − a)·background. The overlay returns α·(w·env + 0.5·highlight·dg) with keep = clamp((1 − α)/(1 − a), 0, 1).
+  - Without a highlight, keep is exactly 1 − w. The background's share then matches, and the lit share differs by (1 − a)·w·(1 − w) ≤ 0.25 (1 − a) (AUTHORED: one premultiplied blend over the drawn pane).
+  - Panes with alpha below 0.22 keep at most their background (clamped).
 
 **Material tuning** (1.6, from this change on): a material whose name starts with a tuned name takes the record's Fresnel power, min and max and, on paint, its occlusion scale, together with the floors `SpecularValues.z` = 0.25 and `.w` = 0.5 (`car_reflection_overlay::Tuning`, read once from the installation's `raceload.jpk`). Other materials keep their saved pssg controls with floors of 0. A tuned material whose min and max are 0 (cabin, grills, suspension, tyre wall) does not reflect.
 
@@ -294,10 +332,10 @@ The part's own material then has no specular (reflectance 0, metallic 0, no clea
 
 **Diagnostic:** `GRID_CAR_REFLECTIONS_PAINT=x,y,z,w` sets the paint gates for comparisons: x the share of the alpha gate, y the occlusion scale, z and w the two floors. `0,0,1,1` turns them all off (the F670 look).
 
-**Cracked glass** [O, `carglass` passConfigMask 1 and 32: `car_basic.cg.fp_glass_windows`, decoded statically, private `local/reflections/shaders/fp_glass_windows.asm`]: the program blends the diffuse colour and alpha toward `TDiffuseCrackMap` by a per-vertex crack amount (the interpolated normal's w), then mixes the lit colour toward the environment by the same Fresnel weight as intact glass (`FresnelValues`, the cube flipped in Z and divided by alpha, `EnvironmentColour`, the `SpecularValues` z/w floors on the occlusion and the shadow). The normal is the interpolated one: nothing perturbs it. A dust gate `sat(1 − 2·dust)` scales the weight. The output alpha rises with the weight where `GhostCarValues.z` applies (its in-race value is not traced). The port follows it: a cracked pane reflects like an intact one through its crack-map copy's colour and alpha. Until 2 November 2026 the port turned authored facets on a 48×48 UV grid and cut the weight by 60% where the crack map is opaque; at every level that showed as a square mosaic on the windscreen (private `local/reflections/out/look4-player-check.png`).
+**Cracked glass** [O, `carglass` passConfigMask 1 and 32: `car_basic.cg.fp_glass_windows`, decoded statically, private `local/reflections/shaders/fp_glass_windows.asm`]: the program blends the diffuse colour and alpha toward `TDiffuseCrackMap` by a per-vertex crack amount (the interpolated normal's w), then mixes the lit colour toward the environment by the same Fresnel weight as intact glass (`FresnelValues`, the cube flipped in Z and divided by alpha, `EnvironmentColour`, the `SpecularValues` z/w floors on the occlusion and the shadow). The normal is the interpolated one: nothing perturbs it. A dust gate `sat(1 − 2·dust)` scales the weight. The output alpha rises with the weight by `GhostCarValues.z` (1 in race, 1.8). The port follows it: a cracked pane reflects like an intact one through its crack-map copy's colour and alpha. Until 2 November 2026 the port turned authored facets on a 48×48 UV grid and cut the weight by 60% where the crack map is opaque; at every level that showed as a square mosaic on the windscreen (private `local/reflections/out/look4-player-check.png`).
 
 **AUTHORED:**
-- Glass weighs the reflection by the pane's alpha (the program's alpha path is approximated, `GhostCarValues` not traced).
+- Lamp glass and untuned glass weigh the reflection by the pane's alpha. Tuned window glass follows its program's alpha path (above).
 
 ### 4.3 Object selection and cost (31 October 2026)
 

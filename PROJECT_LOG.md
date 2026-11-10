@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F818](log/F0818.md) | 2026-11-11 | Car dust, scratch and damage gates and GhostCarValues |
 | [F817](log/F0817.md) | 2026-11-10 | Tyre walls with a static back row break; lift_sunk skips bodies that do not collide with fixed geometry |
 | [F816](log/F0816.md) | 2026-11-10 | Livery designer 3D pill carousel on fe3d |
 | [F815](log/F0815.md) | 2026-11-10 | Car sun terms and glass shadow floor from materials.xml (row 100) |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F761](log/F0761.md) | 2026-11-09 | Ambient fill at the original's weight: compensate Bevy's 0.45 diffuse ambient response (row 125) |
 | [F760](log/F0760.md) | 2026-11-09 | Graphics route audit: every raceable route, autopilot lap, chase and head-cam verdicts |
 | [F759](log/F0759.md) | 2026-11-09 | Circuit lap estimator 0x67FFB0 and marshal flags (rows 44, 47) |
-| [F758](log/F0758.md) | 2026-11-09 | Haruna's vertical streaks are light-shaft cards |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

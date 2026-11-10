@@ -1003,6 +1003,11 @@ fn load_package(
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         }
         if !track
+            && let Some(controls) = car_materials::shader_controls(source, draw.vertices.clone())
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, controls);
+        }
+        if !track
             && lod == "LOD0_"
             && matches!(draw.material, b"Tyre Tread" | b"Head Lights Pod" | b"Rear Lights Pod" | b"Head Lights Glass" | b"Rear Lights Glass")
             && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())
@@ -2099,6 +2104,9 @@ fn low_lod(
                 mesh.compute_smooth_normals();
             } else {
                 mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+            }
+            if let Some(controls) = car_materials::shader_controls(source, draw.vertices.clone()) {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, controls);
             }
             if name == "Tyre Tread"
                 && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())

@@ -35,9 +35,12 @@
 //! the metallic tint and darkening of `MetallicSpecularValues`. They replace
 //! the part's own specular, which is turned off when its overlay is made.
 //!
-//! AUTHORED: glass weighs its reflection by the pane's alpha. The paint
-//! program's dust, scratch and vertex-colour gates are not applied (a clean,
-//! unscratched car).
+//! The paint program's gates (docs/CAR_REFLECTIONS.md 4.2): dust from the
+//! packed map's red times [`DIRT_LEVEL`], the scratch and damage gates from
+//! the saved vertex colour (`car_materials::shader_controls`, carried as the
+//! mesh's second UV set), and [`GHOST`]. The window glass program raises the
+//! pane's alpha by its reflection and highlight. Lamp glass and untuned glass
+//! weigh their reflection by the pane's alpha (AUTHORED).
 use bevy::{
     asset::uuid_handle,
     camera::visibility::RenderLayers,
@@ -285,6 +288,19 @@ impl Controls {
     }
 }
 
+/// `GhostCarValues` (x output alpha, z glass alpha raise, w shadow floor):
+/// 0xA14540 sets (1, 1, 1, 0) and the per-vehicle loop 0xA18460 rewrites it
+/// only while the car's render record fades it out (x = 1 - fade, w = 1 while
+/// x < 1). The port has no faded car (its reset ghost is collision-only), so
+/// every car draws with the initial value.
+pub const GHOST: Vec4 = Vec4::new(1., 1., 1., 0.);
+
+/// The paint programs' `dirtLevel`. The original raises it from each
+/// surface's `dirtbuildup` (surface_materials.xml) and carries it between
+/// career events (`max_maintained_dirt`); the per-frame writer is not traced,
+/// so every car starts and stays clean (0, docs/CAR_REFLECTIONS.md 4.2).
+pub const DIRT_LEVEL: f32 = 0.;
+
 /// How a reflecting car material responds.
 #[derive(Clone, Debug)]
 pub struct Response {
@@ -382,9 +398,13 @@ pub struct Overlay {
     /// `SpecularValues` x, y and `MetallicSpecularValues` x, y.
     #[uniform(9)]
     sun_terms: Vec4,
-    /// The metallic falloff, and the program: 0 none, 1 paint, 2 glass.
+    /// The metallic falloff, the program (0 none, 1 paint, 2 glass) and
+    /// the dirt level.
     #[uniform(10)]
     sun_program: Vec4,
+    /// `GhostCarValues`.
+    #[uniform(11)]
+    ghost: Vec4,
     /// The transparent phase's sort bias (`Material::depth_bias`).
     bias: f32,
 }
@@ -569,9 +589,10 @@ fn follow(
                             (Some(_), Some(_)) => 1.,
                             (Some(_), None) => 2.,
                         },
-                        0.,
+                        DIRT_LEVEL,
                         0.,
                     ),
+                    ghost: GHOST,
                     bias: sort_bias(part.map(|m| m.alpha_mode)),
                 })
             })
@@ -802,7 +823,8 @@ mod tests {
         };
         let paint = overlay(parts[0].0);
         assert_eq!(paint.sun_terms, Vec4::new(35.65, 1.16, 14.16, 1.2));
-        assert_eq!(paint.sun_program, Vec4::new(0.25, 1., 0., 0.));
+        assert_eq!(paint.sun_program, Vec4::new(0.25, 1., DIRT_LEVEL, 0.));
+        assert_eq!(paint.ghost, GHOST);
         assert_eq!(base(&parts[0].1), (0., 0., 0.));
         // Glass: program 2 and only the floors in the paint vector.
         let glass = overlay(parts[1].0);

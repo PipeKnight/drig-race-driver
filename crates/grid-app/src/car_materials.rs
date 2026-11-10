@@ -25,6 +25,24 @@ pub fn tread_tangents(
     Some(output)
 }
 
+/// The car programs' per-vertex controls, from the saved vertex colour
+/// (docs/CAR_SHADER_MASKS.md): the paint vertex programs pass
+/// (1 - red, 1 - green) on, where 1 - red cuts the reflection (damage /
+/// normal-map strength) and 1 - green lets the scratch map in. None when the
+/// range has no colours.
+pub fn shader_controls(
+    source: &grid_formats::mesh::Mesh<'_>,
+    range: std::ops::Range<usize>,
+) -> Option<Vec<[f32; 2]>> {
+    let colours = source.colors_argb.get(range)?;
+    (!colours.is_empty()).then(|| {
+        colours
+            .iter()
+            .map(|&[_, r, g, _]| [1. - f32::from(r) / 255., 1. - f32::from(g) / 255.])
+            .collect()
+    })
+}
+
 pub fn apply(name: &str, material: &mut StandardMaterial) {
     match name {
         "Car Body Paint" => {
@@ -70,6 +88,32 @@ pub fn apply(name: &str, material: &mut StandardMaterial) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shader_controls_invert_red_and_green() {
+        let mesh = grid_formats::mesh::Mesh {
+            id: b"",
+            positions: vec![[0.; 3]; 3],
+            normals: vec![],
+            tangents: vec![],
+            binormals: vec![],
+            colors_argb: vec![[255, 255, 255, 255], [255, 0, 255, 255], [254, 255, 0, 255]],
+            nonfinite_normals: 0,
+            nonfinite_texcoords: 0,
+            texcoords: vec![],
+            additional_texcoords: vec![],
+            skin_indices: None,
+            skin_weights: None,
+            indices: vec![],
+        };
+        assert_eq!(
+            shader_controls(&mesh, 0..3),
+            Some(vec![[0., 0.], [1., 0.], [0., 1.]])
+        );
+        assert_eq!(shader_controls(&mesh, 1..2), Some(vec![[1., 0.]]));
+        let bare = grid_formats::mesh::Mesh { colors_argb: vec![], ..mesh };
+        assert_eq!(shader_controls(&bare, 0..3), None);
+    }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn source_tread_frames_and_masks() {

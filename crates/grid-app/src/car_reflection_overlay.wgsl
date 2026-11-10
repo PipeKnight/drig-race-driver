@@ -32,8 +32,11 @@
 // (strength), MetallicSpecularValues x (tint power) and y (tint scale).
 @group(#{MATERIAL_BIND_GROUP}) @binding(9) var<uniform> sun_terms: vec4<f32>;
 // MetallicSpecularValues z (falloff), the program (0 none, 1 paint, 2 window
-// glass), unused.
+// glass), the car's dirtLevel (0 at the start of a race), unused.
 @group(#{MATERIAL_BIND_GROUP}) @binding(10) var<uniform> sun_program: vec4<f32>;
+// GhostCarValues: x scales the output alpha, z sets how far the glass
+// reflection and highlight raise the pane's alpha, w floors the sun's shadow.
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var<uniform> ghost: vec4<f32>;
 
 const PI: f32 = 3.141592653589793;
 
@@ -80,7 +83,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
 #else
     let texel = vec4(1.0);
 #endif
-    weight *= mix(1.0, texel.a, fresnel.z);
+    let window = sun_program.y > 1.5;
+    if !window {
+        weight *= mix(1.0, texel.a, fresnel.z);
+    }
+    // The paint vertex programs' controls from the saved vertex colour:
+    // x = 1 - red (damage), y = 1 - green (scratches).
+#ifdef VERTEX_UVS_B
+    let controls = in.uv_b;
+#else
+    let controls = vec2(0.0);
+#endif
     // A cracked pane reflects as an intact one: the original's glass program
     // (car_basic fp_glass_windows) blends only the colour and alpha toward the
     // crack map and keeps the interpolated normal and the Fresnel weight.
@@ -98,14 +111,21 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
 #endif
         // The glass program lights a back face as unshadowed.
         if front || program < 1.5 {
-            shadow = sun_shadow(in, n);
+            shadow = max(sun_shadow(in, n), ghost.w);
         }
     }
+    // Dust: the packed map's red times the dirt level (white for glass, whose
+    // dust map is not bound); half a layer removes the reflection.
+    let dust_gate = saturate(1.0 - 2.0 * m1.r * sun_program.z);
     // The paint program: the packed map's alpha gates the weight, its green
     // occludes the environment, and the sun's shadow darkens it.
     if paint.x > 0.0 {
         // paint.x: the share of the alpha gate applied (1 = the program's).
         weight *= mix(1.0, saturate(2.0 * m1.a), saturate(paint.x));
+        // The dust gate, the scratch gate (AUTHORED: the scratch map is not
+        // bound and counts as fully scratched where the vertex says so) and
+        // the vertex damage gate, which cuts red-free vertices to 0.1.
+        weight *= dust_gate * (1.0 - controls.y) * saturate(1.1 - controls.x);
         env *= saturate(1.0 + paint.y * (m1.g - 1.0) + paint.z);
         env *= saturate(shadow + paint.w);
     } else if program > 1.5 {
@@ -113,10 +133,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
         // term is 1 + SpecularValues.z, saturated: no occlusion map).
         env *= saturate(shadow + paint.w);
     }
+    if window {
+        weight *= dust_gate;
+    }
     weight = saturate(weight);
     // Premultiplied: what the part gains, and the share of it that stays.
     var colour = env * weight;
     var keep = 1.0 - weight;
+    // The window glass program's half highlight and its share of alpha.
+    var glint = vec3(0.0);
+    var raise = 0.0;
     if program > 0.0 && lights.n_directional_lights > 0u {
         let sun_light = lights.directional_lights[sun_index()];
         // The original's sun colour lights the diffuse colour directly;
@@ -134,16 +160,28 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
             // highlight; the alpha gates both.
             let metal = saturate((m1.a - 0.3) * 8.0);
             let darken = 1.0 + metal * (saturate(dot(n, v) + sun_program.x) - 1.0);
-            let k = saturate(pow(saturate(lr), sun_terms.z) * shadow * m1.a);
+            let k = saturate(pow(saturate(lr), sun_terms.z) * shadow * m1.a * dust_gate);
             let tint = sun * (texel.rgb * sun_terms.w + 0.5) * metal;
-            colour = colour * (1.0 - k) + tint * k + highlight * m1.a;
+            colour = colour * (1.0 - k) + tint * k + highlight * m1.a * dust_gate;
             keep *= darken * (1.0 - k);
         } else {
-            // The window glass program: half the highlight. AUTHORED: scaled
-            // by the pane's alpha like its reflection (GhostCarValues.z, which
-            // sets how the highlight raises the pane's alpha, is not traced).
-            colour += highlight * 0.5 * texel.a;
+            glint = highlight * 0.5 * dust_gate;
+            raise = shadow * sun_terms.y * pow(saturate(lr), sun_terms.x) * 0.5 * dust_gate;
         }
+    }
+    if window {
+        // The window glass program's alpha: the reflection weight raises the
+        // pane's alpha toward 1 and the highlight adds to it, both by
+        // GhostCarValues.z; thin panes (alpha < 0.22) are faded by 4.5 alpha.
+        // The part below already holds a·lit + (1 - a)·background; keep
+        // restores the background's share 1 - alpha. The lit share differs
+        // by at most 0.25 (1 - a) (AUTHORED: one premultiplied blend).
+        let a = texel.a;
+        let raised = mix(a, 1.0, weight * ghost.z);
+        let lifted = saturate(saturate(4.5 * a) * (raised + raise));
+        let pane = mix(raised, lifted, ghost.z) * ghost.x;
+        colour = pane * (env * weight + glint);
+        keep = clamp((1.0 - pane) / max(1.0 - a, 1e-3), 0.0, 1.0);
     }
     let alpha = 1.0 - keep;
     var pbr = pbr_input_new();
