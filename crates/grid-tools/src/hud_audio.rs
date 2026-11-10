@@ -239,6 +239,9 @@ pub enum Cue {
     DeadEnd,
     Select,
     Back,
+    /// The livery designer's Randomise (0x5043F0, 0x504230: `randomize`,
+    /// third argument 0; front-end set only).
+    Randomize,
     /// Base screen enter (0x4799E0) and leave (0x479A10).
     ScreenWhooshIn,
     ScreenWhooshOut,
@@ -273,6 +276,7 @@ impl Cue {
             Cue::DeadEnd => "dead_end".into(),
             Cue::Select => "select".into(),
             Cue::Back => "back".into(),
+            Cue::Randomize => "randomize".into(),
             Cue::ScreenWhooshIn => "screen_whoosh_in".into(),
             Cue::ScreenWhooshOut => "screen_whoosh_out".into(),
             Cue::OverlayOn => "overlay_on".into(),
@@ -287,7 +291,7 @@ impl Cue {
     /// back, dead end), which may not retrigger an effect still playing or
     /// remembered by a free slot.
     pub fn continuous(self) -> bool {
-        !matches!(self, Cue::Select | Cue::Back | Cue::DeadEnd)
+        !matches!(self, Cue::Select | Cue::Back | Cue::DeadEnd | Cue::Randomize)
     }
 }
 
@@ -569,6 +573,7 @@ mod tests {
             Cue::OverlayOn,
             Cue::OverlayOff,
         ];
+        assert!(front.effect(&Cue::Randomize.name()).is_some());
         for cue in menu {
             assert!(front.effect(&cue.name()).is_some(), "front {cue:?}");
             assert!(race.effect(&cue.name()).is_some(), "race {cue:?}");

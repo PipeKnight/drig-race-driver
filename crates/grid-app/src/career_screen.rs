@@ -1478,8 +1478,16 @@ enum Page {
     Team,
     /// Team Mate: search and hiring.
     TeamMate,
-    /// Sponsors: received offers and their slots.
+    /// Sponsors (`sponsor_designer`): the eight slots, Major and Minor
+    /// 1-7.
     Sponsors,
+    /// One designer slot: its replacements (`s_d_replacement_sponsors`),
+    /// Remove and Swap.
+    SponsorSlot(usize),
+    /// Swap (`s_d_swap_view`): the slot to swap the given one with.
+    SponsorSwap(usize),
+    /// Remove's `ScreenYesNo` (`s_d_clear_confirm`) for the slot.
+    SponsorClear(usize),
     /// View Cars (`view_vehicles`): the team's cars.
     Garage,
     /// One team car (`view_vehicle_buttons`): sell, sell on eBay.
@@ -1560,8 +1568,13 @@ enum Action {
     CycleRegion,
     CycleFee,
     Hire(i32),
-    /// Moves a received sponsor offer to its next slot.
-    CycleSponsor(i32),
+    /// Places the offer in the designer slot (Replace,
+    /// `sponsor_buttontext_replace`).
+    PlaceSponsor(usize, i32),
+    /// Swaps the two designer slots (`sponsor_buttontext_swap_confirm`).
+    SwapSponsors(usize, usize),
+    /// Empties the designer slot (Remove's confirm "yes").
+    ClearSponsorSlot(usize),
     /// Buys `used[i]`.
     BuyUsed(usize),
     /// Lists the team's car `i` on eBay.
@@ -1578,8 +1591,11 @@ enum Action {
     RefuseLeMans,
     /// Names the team.
     NameTeam(String),
-    /// The next choice of a livery part.
+    /// The next choice of a livery part (Select; Left/Right step it as the
+    /// original's carousel does, `step_livery`).
     CycleLivery(LiveryPart),
+    /// Randomise (`livery_buttontext_randomise`): every part at random.
+    RandomiseLivery,
     /// Keeps the designed livery.
     PaintTeam(TeamLivery),
     Quit,
@@ -1611,7 +1627,7 @@ struct Screen {
 impl Page {
     /// A `ScreenYesNo` popup over its page (overlay_on / overlay_off).
     fn popup(&self) -> bool {
-        matches!(self, Page::ConfirmSkipLeMans)
+        matches!(self, Page::ConfirmSkipLeMans | Page::SponsorClear(_))
     }
 }
 
@@ -1691,6 +1707,8 @@ impl Screen {
             Page::Cars(i) => Page::Details(*i),
             Page::OfferDetails(_) => Page::DriverOffers,
             Page::TeamMate | Page::Sponsors => Page::Team,
+            Page::SponsorSlot(_) => Page::Sponsors,
+            Page::SponsorSwap(i) | Page::SponsorClear(i) => Page::SponsorSlot(*i),
             Page::Car(_) => Page::Garage,
             Page::Ebay(Some(i)) => Page::Cars(*i),
             Page::Ebay(None) => Page::Garage,
@@ -1713,7 +1731,10 @@ impl Screen {
             Page::DriverOffers | Page::OfferDetails(_) => self.text("driver_offers_screen_title", "Driver Offers"),
             Page::Team => self.text("team_management_screen_title", "My Team"),
             Page::TeamMate => self.text("team_management_team_mates_button_title", "Team Mate"),
-            Page::Sponsors => self.text("team_management_current_sponsors_button_title", "Sponsors"),
+            Page::Sponsors | Page::SponsorSlot(_) | Page::SponsorSwap(_) => {
+                self.text("team_management_current_sponsors_button_title", "Sponsors")
+            }
+            Page::SponsorClear(_) => self.text("sponsor_empty_slot_confirm_title", "Remove Sponsor"),
             Page::Garage | Page::Car(_) => self.text("career_menu_view_vehicles_button_title", "View Cars"),
             Page::Ebay(_) => self.text("buy_on_ebay_button_header", "Buy On eBay"),
             Page::Event => self
@@ -1885,6 +1906,7 @@ impl Screen {
             (Page::Team, 2) => "team_management_team_name_button_subtitle",
             (Page::Team, 3) => "team_management_design_livery_button_subtitle",
             (Page::LeMans, 2) | (Page::ConfirmSkipLeMans, _) => "lemans_confirm_exit_subtitle",
+            (Page::SponsorClear(_), _) => "sponsor_empty_slot_confirm_subtitle",
             (Page::TeamName(_), _) => self.name_key(false),
             _ => return String::new(),
         };
@@ -2081,9 +2103,30 @@ impl Screen {
                 }
             }
             Page::Sponsors => {
-                for &o in self.career.sponsor_offers.iter().take(ROWS - 1) {
-                    rows.push((self.sponsor_row(o), Action::CycleSponsor(o)));
+                for slot in 0..grid_tools::career::state::SPONSOR_SLOTS {
+                    rows.push((self.slot_row(slot), Action::Go(Page::SponsorSlot(slot))));
                 }
+            }
+            Page::SponsorSlot(slot) => {
+                let replace = self.text("sponsor_buttontext_replace", "Replace");
+                for o in self.career.available_sponsors(&self.cat).into_iter().take(ROWS - 3) {
+                    rows.push((format!("{replace}: {}", self.sponsor_row(o)), Action::PlaceSponsor(*slot, o)));
+                }
+                // Remove and Swap act on a filled slot only (0x5093B0, 0x509420).
+                if self.career.slot_sponsor(*slot).is_some() {
+                    rows.push((self.text("sponsor_buttontext_remove", "Remove"), Action::Go(Page::SponsorClear(*slot))));
+                    rows.push((self.text("sponsor_buttontext_swap", "Swap"), Action::Go(Page::SponsorSwap(*slot))));
+                }
+            }
+            Page::SponsorSwap(from) => {
+                for to in (0..grid_tools::career::state::SPONSOR_SLOTS).filter(|t| t != from) {
+                    rows.push((self.slot_row(to), Action::SwapSponsors(*from, to)));
+                }
+            }
+            Page::SponsorClear(slot) => {
+                rows.push((self.text("yes", "Yes"), Action::ClearSponsorSlot(*slot)));
+                rows.push((self.text("no", "No"), Action::Go(Page::SponsorSlot(*slot))));
+                return rows;
             }
             Page::Garage => {
                 for (i, c) in self.career.cars.iter().enumerate().take(ROWS - 2) {
@@ -2211,6 +2254,7 @@ impl Screen {
                 ] {
                     rows.push((self.livery_row(l, part), Action::CycleLivery(part)));
                 }
+                rows.push((self.text("livery_buttontext_randomise", "Randomise"), Action::RandomiseLivery));
                 rows.push((self.text("livery_designer_main_menu_confirm", "Confirm"), Action::PaintTeam(*l)));
             }
         }
@@ -2350,6 +2394,19 @@ impl Screen {
         let key = format!("db_{}", s.name);
         let text = self.labels.get(&key);
         if text == key { s.name.clone() } else { text.to_owned() }
+    }
+
+    /// A designer slot's name: Major, Minor 1-7.
+    fn slot_name(slot: usize) -> String {
+        if slot == 0 { "Major (pays double)".to_owned() } else { format!("Minor {slot}") }
+    }
+
+    /// "Slot: sponsor, objective, $ per race" or "Slot: empty".
+    fn slot_row(&self, slot: usize) -> String {
+        match self.career.slot_sponsor(slot) {
+            Some(o) => format!("{}: {}", Self::slot_name(slot), self.sponsor_row(o)),
+            None => format!("{}: empty", Self::slot_name(slot)),
+        }
     }
 
     /// "Sponsor: objective, $ per race - slot".
@@ -2608,7 +2665,7 @@ impl Screen {
                 if self.career.team_livery != Some(*l) {
                     lines.push("Changed: Confirm keeps it.".into());
                 }
-                lines.push("Each row shows its next choice when selected. The race cars do not show the livery in the port yet.".into());
+                lines.push("Each row shows its next choice when selected; Left/Right step it.".into());
             }
             Page::TeamMate => {
                 match &self.career.team_mate {
@@ -2632,9 +2689,17 @@ impl Screen {
                 lines.push(if self.career.sponsor_offers.is_empty() {
                     "Finish in the top three and sponsorship offers will start rolling in.".into()
                 } else {
-                    "Select an offer to move it: not on the car, Major (pays double), Minor 1-7.".into()
+                    "Select a slot to replace, remove or swap its sponsor.".into()
                 });
             }
+            Page::SponsorSlot(slot) => {
+                lines.push(self.slot_row(*slot));
+                if self.career.available_sponsors(&self.cat).is_empty() {
+                    lines.push(self.text("sponsor_no_available_offers_title", "No Available Offers"));
+                    lines.push(self.text("sponsor_no_available_offers_subtitle", ""));
+                }
+            }
+            Page::SponsorSwap(from) | Page::SponsorClear(from) => lines.push(self.slot_row(*from)),
             Page::Garage => {
                 if self.career.cars.is_empty() {
                     lines.push("Your team owns no cars yet.".into());
@@ -3326,6 +3391,17 @@ fn update(
         screen.cursor = (screen.cursor + 1) % n;
     }
     screen.cursor = screen.cursor.min(n - 1);
+    // Left/Right on a Team Branding part step it along its carousel.
+    let side = match (rows.get(screen.cursor).map(|r| &r.1), nav.left != nav.right) {
+        (Some(Action::CycleLivery(part)), true) => {
+            let s = &mut *screen;
+            match &mut s.page {
+                Page::Livery(l) => Some(step_livery(l, *part, if nav.left { -1 } else { 1 }, &s.cat.livery_choices)),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
     if nav.select {
         chosen = rows.get(screen.cursor).map(|r| r.1.clone());
     }
@@ -3358,6 +3434,9 @@ fn update(
     }
     let Some(action) = chosen else {
         let moved = screen.cursor != cursor_before;
+        if let Some(changed) = side {
+            screen.sounds.extend(crate::hud_sound::menu_cue(&nav, false, false, changed, true));
+        }
         sounds(&mut screen.sounds, &nav, None, moved, popup_before, popup_before, sink.as_deref());
         return;
     };
@@ -3398,8 +3477,12 @@ fn step_cues(
 ) -> Vec<grid_tools::hud_audio::Cue> {
     let value = matches!(
         action,
-        Some(Action::CycleRegion | Action::CycleFee | Action::CycleSponsor(_) | Action::CycleLivery(_))
+        Some(Action::CycleRegion | Action::CycleFee | Action::CycleLivery(_))
     );
+    if matches!(action, Some(Action::RandomiseLivery)) {
+        // The button plays its own sample, no activate (0x5043F0).
+        return vec![grid_tools::hud_audio::Cue::Randomize];
+    }
     let place = action.is_some() && !value;
     let mut cues: Vec<_> = crate::hud_sound::menu_cue(nav, place, moved, value, false).into_iter().collect();
     cues.extend(crate::hud_sound::overlay_cue(popup_before, popup_after));
@@ -3554,25 +3637,31 @@ fn act(
                     false
                 })
         }
-        Action::CycleSponsor(offer) => {
+        Action::PlaceSponsor(slot, offer) => {
             let s = &mut *screen;
-            let next = if s.career.major_sponsor == Some(offer) {
-                Some(Some(0))
-            } else {
-                match s.career.minor_sponsors.iter().position(|o| *o == Some(offer)) {
-                    Some(i) if i + 1 < s.career.minor_sponsors.len() => Some(Some(i + 1)),
-                    Some(_) => None,
-                    None => Some(None),
-                }
-            };
-            let placed = match next {
-                Some(slot) => s.career.place_sponsor(offer, slot),
-                None => {
-                    s.career.remove_sponsor(offer);
-                    Ok(())
-                }
-            };
-            placed.and_then(|()| s.save()).map(|()| false)
+            s.career.place_in_slot(offer, slot).and_then(|()| s.save()).map(|()| {
+                s.page = Page::Sponsors;
+                s.cursor = slot;
+                false
+            })
+        }
+        Action::SwapSponsors(from, to) => {
+            let s = &mut *screen;
+            s.career.swap_sponsor_slots(from, to);
+            s.save().map(|()| {
+                s.page = Page::Sponsors;
+                s.cursor = to;
+                false
+            })
+        }
+        Action::ClearSponsorSlot(slot) => {
+            let s = &mut *screen;
+            s.career.clear_sponsor_slot(slot);
+            s.save().map(|()| {
+                s.page = Page::Sponsors;
+                s.cursor = slot;
+                false
+            })
         }
         Action::EndSeason => {
             let s = &mut *screen;
@@ -3623,6 +3712,18 @@ fn act(
             let s = &mut *screen;
             if let Page::Livery(l) = &mut s.page {
                 next_livery(l, part, &s.cat.livery_choices);
+            }
+            Ok(false)
+        }
+        Action::RandomiseLivery => {
+            let s = &mut *screen;
+            if let Page::Livery(l) = &mut s.page {
+                // AUTHORED: the seed is the clock's (the original's generator
+                // state was not traced).
+                let seed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32);
+                randomise_livery(l, &s.cat.livery_choices, &mut grid_tools::series::Mt::new(seed));
             }
             Ok(false)
         }
@@ -3725,6 +3826,46 @@ fn next_livery(l: &mut TeamLivery, part: LiveryPart, choices: &grid_tools::caree
         LiveryPart::Pattern => l.pattern = next(choices.patterns.iter().map(|p| p.0), l.pattern),
         LiveryPart::Colour(c) => l.colours[c] = next(choices.colours.iter().map(|x| x.0), l.colours[c]),
         LiveryPart::Number => l.number = next(choices.numbers.iter().map(|n| n.0), l.number),
+    }
+}
+
+/// Steps a livery part `delta` choices along its table (in `order`) as the
+/// designer's carousels do (CarouselBase update 0x500E40, index `order` − 1,
+/// 0x4C97B0): no wrap, an end holds and plays `dead_end`. Returns whether
+/// the choice changed; an id not in the table moves to the first choice.
+fn step_livery(l: &mut TeamLivery, part: LiveryPart, delta: i32, choices: &grid_tools::career::LiveryChoices) -> bool {
+    fn step(ids: Vec<i32>, current: &mut i32, delta: i32) -> bool {
+        let Some(last) = ids.len().checked_sub(1) else {
+            return false;
+        };
+        let to = match ids.iter().position(|&id| id == *current) {
+            Some(at) => (at as i64 + i64::from(delta)).clamp(0, last as i64) as usize,
+            None => 0,
+        };
+        let changed = ids[to] != *current;
+        *current = ids[to];
+        changed
+    }
+    match part {
+        LiveryPart::Pattern => step(choices.patterns.iter().map(|p| p.0).collect(), &mut l.pattern, delta),
+        LiveryPart::Colour(c) => step(choices.colours.iter().map(|x| x.0).collect(), &mut l.colours[c], delta),
+        LiveryPart::Number => step(choices.numbers.iter().map(|n| n.0).collect(), &mut l.number, delta),
+    }
+}
+
+/// The main menu's Randomise (0x5043F0): pattern, number and the three
+/// colours, in that order, each the choice at `range(0, count)` of its table
+/// in `order` (0x4CF9E0, 0x4CFA10, 0x4CFA40).
+fn randomise_livery(l: &mut TeamLivery, choices: &grid_tools::career::LiveryChoices, rng: &mut grid_tools::series::Mt) {
+    let mut pick = |ids: Vec<i32>, current: &mut i32| {
+        if !ids.is_empty() {
+            *current = ids[rng.range(0, ids.len() as u32) as usize];
+        }
+    };
+    pick(choices.patterns.iter().map(|p| p.0).collect(), &mut l.pattern);
+    pick(choices.numbers.iter().map(|n| n.0).collect(), &mut l.number);
+    for c in 0..3 {
+        pick(choices.colours.iter().map(|x| x.0).collect(), &mut l.colours[c]);
     }
 }
 
@@ -4517,6 +4658,42 @@ speech_event_wins = 0
         assert_eq!(l.pattern, 4, "after the last, the first");
     }
 
+    /// Left/Right step a part along its table without wrapping (CarouselBase
+    /// update 0x500E40); Randomise picks every part from its table.
+    #[test]
+    fn livery_carousels_clamp_and_randomise_picks_from_the_tables() {
+        use grid_tools::hud_audio::Cue;
+        let choices = grid_tools::career::LiveryChoices {
+            patterns: vec![(4, "pattern_0".into()), (7, "pattern_1".into())],
+            pattern_files: vec![(4, "simple_01.pssg".into()), (7, "simple_02.pssg".into())],
+            colours: vec![(1, [255, 0, 0]), (2, [0, 255, 0]), (3, [0, 0, 255])],
+            numbers: vec![(10, "00".into()), (11, "01".into())],
+        };
+        let mut l = TeamLivery::first(&choices).unwrap();
+        assert!(!step_livery(&mut l, LiveryPart::Colour(0), -1, &choices), "the first holds");
+        assert!(step_livery(&mut l, LiveryPart::Colour(0), 1, &choices));
+        assert!(step_livery(&mut l, LiveryPart::Colour(0), 1, &choices));
+        assert!(!step_livery(&mut l, LiveryPart::Colour(0), 1, &choices), "the last holds");
+        assert_eq!(l.colours, [3, 2, 3]);
+        l.number = 99;
+        assert!(step_livery(&mut l, LiveryPart::Number, -1, &choices), "an unknown id moves to the first");
+        assert_eq!(l.number, 10);
+        let mut seen = std::collections::HashSet::new();
+        let mut rng = grid_tools::series::Mt::new(5);
+        for _ in 0..64 {
+            randomise_livery(&mut l, &choices, &mut rng);
+            assert!([4, 7].contains(&l.pattern) && [10, 11].contains(&l.number));
+            assert!(l.colours.iter().all(|c| (1..=3).contains(c)));
+            seen.insert(l.colours[1]);
+        }
+        assert_eq!(seen.len(), 3, "every colour can come up");
+        let nav = Nav { right: true, ..Nav::default() };
+        assert_eq!(crate::hud_sound::menu_cue(&nav, false, false, false, true), Some(Cue::DeadEnd));
+        assert_eq!(crate::hud_sound::menu_cue(&nav, false, false, true, true), Some(Cue::ItemDiscrete));
+        let nav = Nav { select: true, ..Nav::default() };
+        assert_eq!(step_cues(&nav, Some(&Action::RandomiseLivery), false, false, false), [Cue::Randomize]);
+    }
+
     /// The career pages' widget and popup sounds: a cursor move, an
     /// activate, a value row's step, Back, and the Skip Le Mans popup's
     /// overlay_on / overlay_off after the press that opened or closed it.
@@ -4547,6 +4724,58 @@ speech_event_wins = 0
         assert_eq!(step_cues(&back, Some(&Action::Go(Page::LeMans)), false, true, false), [Cue::Back, Cue::OverlayOff]);
         assert_eq!(step_cues(&select, Some(&Action::RefuseLeMans), false, true, false), [Cue::Select, Cue::OverlayOff]);
         assert!(Page::ConfirmSkipLeMans.popup() && !Page::LeMans.popup() && !Page::TeamName(String::new()).popup());
+    }
+
+    /// The sponsor designer pages (F808): eight slots; a slot lists the
+    /// available offers best first, with Remove and Swap only when filled;
+    /// Remove opens a Yes/No popup; Swap lists the other seven slots.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn the_sponsor_designer_lists_slots_replacements_remove_and_swap() {
+        use grid_tools::career::state::SPONSOR_SLOTS;
+        let (cat, _, root) = catalogue();
+        let mut career = new_career(&cat);
+        // bmw_si_tour's offers 5 (3,000), 64 (2,150), 65 (1,350) [D].
+        career.sponsor_offers = vec![64, 65, 5];
+        let mut s = Screen {
+            cat,
+            career,
+            offers: Vec::new(),
+            driver_offers: Vec::new(),
+            current: None,
+            page: Page::Sponsors,
+            cursor: 0,
+            repeat: Repeat::default(),
+            dir: std::env::temp_dir(),
+            message: String::new(),
+            labels: Labels::default(),
+            root,
+            team_region: None,
+            team_fee: None,
+            used: Vec::new(),
+            sounds: Vec::new(),
+        };
+        let rows = s.actions();
+        assert_eq!(rows.len(), SPONSOR_SLOTS + 1, "{rows:?}");
+        assert_eq!(rows[0], ("Major (pays double): empty".to_owned(), Action::Go(Page::SponsorSlot(0))));
+        assert_eq!(rows[7].1, Action::Go(Page::SponsorSlot(7)));
+        s.page = Page::SponsorSlot(0);
+        let places: Vec<Action> = s.actions().into_iter().map(|r| r.1).filter(|a| matches!(a, Action::PlaceSponsor(..))).collect();
+        assert_eq!(places, [Action::PlaceSponsor(0, 5), Action::PlaceSponsor(0, 64), Action::PlaceSponsor(0, 65)]);
+        assert!(!s.actions().iter().any(|r| matches!(r.1, Action::Go(Page::SponsorClear(_) | Page::SponsorSwap(_)))));
+        s.career.place_in_slot(5, 0).unwrap();
+        let rows = s.actions();
+        assert!(rows.iter().any(|r| r.1 == Action::Go(Page::SponsorClear(0))), "{rows:?}");
+        assert!(rows.iter().any(|r| r.1 == Action::Go(Page::SponsorSwap(0))));
+        assert!(!rows.iter().any(|r| r.1 == Action::PlaceSponsor(0, 5)), "a placed offer is not available");
+        assert_eq!(s.parent(), Some(Page::Sponsors));
+        s.page = Page::SponsorClear(0);
+        assert!(s.page.popup());
+        assert_eq!(s.actions()[0].1, Action::ClearSponsorSlot(0));
+        assert_eq!(s.parent(), Some(Page::SponsorSlot(0)));
+        s.page = Page::SponsorSwap(0);
+        let to: Vec<Action> = s.actions().into_iter().map(|r| r.1).filter(|a| matches!(a, Action::SwapSponsors(..))).collect();
+        assert_eq!(to, (1..SPONSOR_SLOTS).map(|t| Action::SwapSponsors(0, t)).collect::<Vec<_>>());
     }
 
     /// The season pages on the purchased data: a seeded season lands on

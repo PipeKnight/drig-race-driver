@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F808](F0808.md) | 2026-11-10 | Sponsor designer: slots, replace, remove, swap, best-sponsor fill |
+| [F807](F0807.md) | 2026-11-10 | Livery designer carousels: clamp, dead end, Randomise |
 | [F806](F0806.md) | 2026-11-10 | Reset lines: Haruna final boundaries disqualify; tall fence plates are not raised boxes |
 | [F805](F0805.md) | 2026-11-10 | Recovery obstruction toggle decrements on the toggle tick (0x78EE70) |
 | [F804](F0804.md) | 2026-11-10 | Pieces with several shapes break (compound bodies, B11520) |

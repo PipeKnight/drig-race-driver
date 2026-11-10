@@ -2307,6 +2307,8 @@ same effect may overlap itself.
 | `screen_whoosh_out` | 1 | base screen leave virtual 0x479A10 |
 | `back` | 0 | base screen back virtual 0x479930 |
 | `overlay_on` / `overlay_off` | 1 | popup overlay show 0x49CFA0, hide 0x4936A0 and 0x4942F0 |
+| `randomize` | 0 | livery designer Randomise, main menu 0x5043F0 and colour menu 0x504230 (front-end set only; no `low_randomize`) |
+| `dead_end` | 0 | also the livery designer's carousels (CarouselBase update 0x500E40) at either end |
 
 **FEMappings levels [O].**
 - Front end: `UDLR_move` −13.4 dB, `dead_end` −2.4, `item_discrete` −6.4, `select` −6.4,

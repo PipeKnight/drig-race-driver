@@ -358,6 +358,9 @@ mod tests {
         assert_eq!(c.money, 50000);
         assert_eq!(c.reputation[Region::Europe as usize], 20000);
         assert_eq!(c.reputation_pots[&7], 20000);
+        // The first offers put the best one (most money) in Major.
+        assert_eq!(c.major_sponsor, Some(71));
+        assert_eq!(c.minor_sponsors, [None; state::MINOR_SLOTS]);
 
         // Sponsors: 71 in the major slot (pays double), 72 minor.
         c.place_sponsor(71, None).unwrap();
@@ -373,6 +376,38 @@ mod tests {
             apply_event(&cat, &mut c, 7, &races, &plain()).unwrap();
         }
         assert_eq!(c.reputation_pots[&7], 100);
+    }
+
+    /// The sponsor designer (F808): the available list best first, place,
+    /// swap, clear, and the best-sponsor fill only with nothing placed.
+    #[test]
+    fn sponsor_designer_slots_place_swap_and_clear() {
+        let cat = tiny();
+        let mut c = founded();
+        c.sponsor_offers.extend([72, 73, 71]);
+        let money = |o: i32| cat.sponsor_offer(o).unwrap().money_reward;
+        let avail = c.available_sponsors(&cat);
+        assert_eq!(avail.len(), 3);
+        assert!(avail.windows(2).all(|w| money(w[0]) >= money(w[1])), "best first");
+        assert_eq!(c.apply_best_sponsor(&cat), Some(avail[0]));
+        assert_eq!(c.slot_sponsor(0), Some(avail[0]));
+        assert_eq!(c.apply_best_sponsor(&cat), None, "only with nothing placed");
+        assert!(!c.available_sponsors(&cat).contains(&avail[0]));
+
+        // Replace: the slot's old offer becomes available again.
+        c.place_in_slot(avail[1], 0).unwrap();
+        assert_eq!(c.slot_sponsor(0), Some(avail[1]));
+        assert!(c.available_sponsors(&cat).contains(&avail[0]));
+        // Swap with an empty slot moves it; with a filled one exchanges.
+        c.swap_sponsor_slots(0, 3);
+        assert_eq!((c.slot_sponsor(0), c.slot_sponsor(3)), (None, Some(avail[1])));
+        c.place_in_slot(avail[2], 0).unwrap();
+        c.swap_sponsor_slots(3, 0);
+        assert_eq!((c.slot_sponsor(0), c.slot_sponsor(3)), (Some(avail[1]), Some(avail[2])));
+        assert_eq!(c.minor_sponsors[2], Some(avail[2]));
+        c.clear_sponsor_slot(3);
+        assert_eq!(c.slot_sponsor(3), None);
+        assert!(c.place_in_slot(avail[0], state::SPONSOR_SLOTS).is_err());
     }
 
     #[test]

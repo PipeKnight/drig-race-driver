@@ -8,6 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Sponsor slots on the car: one major (pays double) and seven minor
 /// (career sponsor manager +0x44, +0x48..+0x60) [V].
 pub const MINOR_SLOTS: usize = 7;
+/// The sponsor designer's slots in its carousel order (0x4CB690)
+/// [V static]: 0 = Major, 1..=7 = Minor 1..7.
+pub const SPONSOR_SLOTS: usize = 1 + MINOR_SLOTS;
 
 /// What a season entry counts (result kind +0x44) [V].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -675,6 +678,83 @@ impl Career {
         }
     }
 
+    /// The offer in designer slot `slot` ([`SPONSOR_SLOTS`] order).
+    pub fn slot_sponsor(&self, slot: usize) -> Option<i32> {
+        match slot {
+            0 => self.major_sponsor,
+            n => self.minor_sponsors.get(n - 1).copied().flatten(),
+        }
+    }
+
+    fn slot_mut(&mut self, slot: usize) -> Option<&mut Option<i32>> {
+        match slot {
+            0 => Some(&mut self.major_sponsor),
+            n => self.minor_sponsors.get_mut(n - 1),
+        }
+    }
+
+    /// Places a received offer in designer slot `slot` (0x4E6EE0): the
+    /// slot's previous offer goes back to the available list.
+    pub fn place_in_slot(&mut self, offer_id: i32, slot: usize) -> Result<(), String> {
+        if slot >= SPONSOR_SLOTS {
+            return Err("no such sponsor slot".into());
+        }
+        self.place_sponsor(offer_id, slot.checked_sub(1))
+    }
+
+    /// Empties designer slot `slot` (Remove, then the confirm's "yes":
+    /// 0x522490 sets the flag that 0x509030 acts on with 0x4E4A80) [V static].
+    pub fn clear_sponsor_slot(&mut self, slot: usize) {
+        if let Some(s) = self.slot_mut(slot) {
+            *s = None;
+        }
+    }
+
+    /// Swaps two designer slots' offers, either of which may be empty
+    /// (0x5317E0: two 0x4E6EE0 calls) [V static].
+    pub fn swap_sponsor_slots(&mut self, a: usize, b: usize) {
+        if a == b || a >= SPONSOR_SLOTS || b >= SPONSOR_SLOTS {
+            return;
+        }
+        let (x, y) = (self.slot_sponsor(a), self.slot_sponsor(b));
+        if let Some(s) = self.slot_mut(a) {
+            *s = y;
+        }
+        if let Some(s) = self.slot_mut(b) {
+            *s = x;
+        }
+    }
+
+    /// The offers not on the car, best first (0x4ED0B0) [V static]: the
+    /// received ones sorted by `money_reward` (comparator 0x684110, then
+    /// reversed), less every placed one. [I] The original first ranks
+    /// offers by a flag (+9) not identified, and breaks money ties by a
+    /// string; the port keeps arrival order for ties (AUTHORED).
+    pub fn available_sponsors(&self, catalogue: &Catalogue) -> Vec<i32> {
+        let placed: Vec<i32> = self.sponsor_slots().map(|(o, _)| o).collect();
+        let mut out: Vec<i32> = self
+            .sponsor_offers
+            .iter()
+            .copied()
+            .filter(|o| !placed.contains(o))
+            .collect();
+        let money = |o: &i32| catalogue.sponsor_offer(*o).map_or(-1, |s| s.money_reward);
+        out.sort_by_key(|o| std::cmp::Reverse(money(o)));
+        out
+    }
+
+    /// `StateApplyBestSponsor` (enter 0x509930) [V static]: with nothing
+    /// on the car, the best available offer goes in the Major slot.
+    /// Returns the offer placed.
+    pub fn apply_best_sponsor(&mut self, catalogue: &Catalogue) -> Option<i32> {
+        if self.sponsor_slots().next().is_some() {
+            return None;
+        }
+        let best = *self.available_sponsors(catalogue).first()?;
+        self.place_sponsor(best, None).ok()?;
+        Some(best)
+    }
+
     fn sponsor_slots(&self) -> impl Iterator<Item = (i32, bool)> + '_ {
         self.major_sponsor
             .map(|o| (o, true))
@@ -908,6 +988,12 @@ pub fn apply_event_in_classes(
                 career.sponsor_offers.push(offer.id);
                 payout.new_sponsor_offers.push(offer.id);
             }
+        }
+        // The first sponsor presentation (flow.xml
+        // `*_first_sponsor_speech` → `apply_first_sponsor`) puts the best
+        // offer on the car. [I] That it runs when the first offers arrive.
+        if career.sponsor_offers.len() == payout.new_sponsor_offers.len() && !payout.new_sponsor_offers.is_empty() {
+            career.apply_best_sponsor(catalogue);
         }
         let best = career.event_results.entry(event.id).or_insert(pos);
         *best = (*best).min(pos);
