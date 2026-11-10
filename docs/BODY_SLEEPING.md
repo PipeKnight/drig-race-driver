@@ -241,6 +241,15 @@ nothing to wake. Islands that never come to rest (a rocking tyre) neither park n
 the player. Sleep itself (status 1) cannot catch a body in the air. Measurements and tests: log
 F561.
 
+**Hang check (F817).** `MultiRuntime::unsupported` and the tyre-wall test wake a copy of every
+sleeping piece and count a piece as hanging when it falls more than 0.2 m while the kept copy stays
+put. The drop is read 30 ticks (0.5 s) after the wake (`FALLS_AT_ONCE_TICKS`): a piece without
+support falls 0.2 m in 12 ticks from rest. The sleep test does not exclude a balanced body: a
+Donington tyre on its rim on the pile (wall 167, after the F817 lift_sunk fix changed the pile) sat
+with zero linear velocity and spin 0.02-0.04 rad/s, below the 0.3 thresholds, and slept. Woken, it
+moved 0.0001 m in 20 ticks, then tipped over (spin up to 3.3 rad/s) and landed 0.21 m lower after
+about 100 ticks. That is a supported body tipping, not a piece in the air.
+
 ## Open
 
 - **7D75F0**, called by 5C6B90 with the same point and scale and 1000.0: the entity manager's

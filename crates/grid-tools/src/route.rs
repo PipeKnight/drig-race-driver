@@ -387,13 +387,13 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Tyre stacks (single and double, three colours) break; the tyre walls
-        // need the joint rows the port lacks and stay static, as on Donington.
-        assert_eq!(props.boxes.len(), 2796);
-        assert_eq!(templates.values().sum::<usize>(), 124);
-        assert!(templates.keys().all(|t| t.starts_with("tyrestack_")));
-        assert_eq!(catalog.unported.values().sum::<usize>(), 275);
-        assert!(catalog.unported.keys().all(|t| t.starts_with("tyrewall_")));
+        // Tyre stacks (single and double, three colours) and since F817 the 275
+        // tyre walls with a static back row break; each wall adds its three
+        // back blocks as route boxes, off until the break.
+        assert_eq!(props.boxes.len(), 2796 + 275 * 3);
+        assert_eq!(templates.values().sum::<usize>(), 124 + 275);
+        assert!(templates.keys().all(|t| t.starts_with("tyrestack_") || t.starts_with("tyrewall_")));
+        assert!(catalog.unported.is_empty(), "{:?}", catalog.unported);
     }
 
     #[test]
@@ -571,22 +571,22 @@ mod tests {
             *templates.entry(&b.template).or_default() += 1;
         }
         // 22 brake-marker boards, 55 joined tyre walls (`tyrewall_b_*`,
-        // F484), 296 armco sections (F501), and since F804 the 39 armco ends
-        // and 37 cones (pieces with several shapes) break; the
-        // `tyrewall_a_*` walls (a static or phantom piece) stay static.
-        assert_eq!(props.boxes.len(), 2239);
-        assert_eq!(templates.values().sum::<usize>(), 449);
+        // F484), 296 armco sections (F501), since F804 the 39 armco ends and
+        // 37 cones (pieces with several shapes), and since F817 the 709
+        // `tyrewall_a_*` walls (a static back row, three route boxes each) break.
+        assert_eq!(props.boxes.len(), 2239 + 709 * 3);
+        assert_eq!(templates.values().sum::<usize>(), 449 + 709);
         assert_eq!(templates["tyrewall_b_red.max"] + templates["tyrewall_b_white.max"], 55);
+        assert_eq!(templates["tyrewall_a_red.max"], 360);
         assert!(
             templates
                 .keys()
                 .all(|t| t.starts_with("gg_brake_marker")
-                    || t.starts_with("tyrewall_b_")
+                    || t.starts_with("tyrewall_")
                     || t.starts_with("armco_")
                     || t.starts_with("gg_barrier_cone_"))
         );
-        assert_eq!(catalog.unported.values().sum::<usize>(), 709);
-        assert_eq!(catalog.unported["tyrewall_a_red.max"], 360);
+        assert!(catalog.unported.is_empty(), "{:?}", catalog.unported);
     }
 
     /// Milan, Shibuya and San Francisco route 0: lap timing, grids, AI lines,

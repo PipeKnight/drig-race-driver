@@ -138,13 +138,6 @@ impl PropBox {
     }
 }
 
-/// Whether a template's damage state with static (`infMass`) pieces is
-/// ported: so far only the close-drift flags. Others (the Long Beach and Spa
-/// tyre walls) stay intact until their breaks are checked.
-pub fn static_damage_ported(template: &str) -> bool {
-    template.contains("close_drift_flag")
-}
-
 /// Whether an entity instance takes part in the physics of an event on
 /// `route`: [V] outside the drift formats the race setup frees every
 /// instance whose name (`id`) contains `close_drift_flag` (0x62FEB0, strstr
@@ -248,9 +241,6 @@ impl Props {
             let template = String::from_utf8_lossy(e.template).into_owned();
             // The static pieces of the damage state, once per behaviour type.
             let mut types = Vec::new();
-            if !static_damage_ported(&template) {
-                continue;
-            }
             for s in e.renderables.iter().flat_map(|r| &r.shapes) {
                 let Some(behaviour) = &s.behaviour else { continue };
                 if types.contains(&behaviour.behaviour_type) {

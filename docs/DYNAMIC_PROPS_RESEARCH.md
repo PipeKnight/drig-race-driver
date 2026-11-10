@@ -457,7 +457,10 @@ linear velocity. `PropWorld::road_depths` measures the depth: the cylinder's or 
 point, or the mesh hull's world bounds, against a track cast from 5 cm above the centre. A start
 3 m higher hit wall ledges. The test `pieces_pressed_by_a_car_stay_above_the_road` (Le Mans wall
 969, the car at full throttle for 600 ticks) sank body 22 by 0.099 m at tick 397 before the
-change. After it, the deepest of 22091 piece-ticks is 0.0100 m.
+change. After it, the deepest of 22091 piece-ticks is 0.0100 m. F817: the pass skips bodies
+whose +0x416 is clear (`dontCollideWithFixedObjects`; they have no road contacts and hang into
+the road by design), and clears +0x224, the linear velocity y; until F817 it cleared +0x214, the
+angular velocity y (JOINTS_RESEARCH "Tyre walls with a static back row").
 
 Detroit demolition derby, 12 stk cars, 12000 ticks, `GRID_SINK_CHECK=0.02 GRID_HANG_CHECK=300`
 (grid-opponent-race):
@@ -556,10 +559,10 @@ template-name test. Over the 94 race routes the structural rule adds 1641 entiti
 Yokohama Docks, Washington and Haruna. Probe: `local/drift-soak/shib/p3-*.txt`.
 
 Damage states whose dynamic pieces have several shapes break since F804 (next section).
-Damage states with `infMass`
-pieces still pass only for the close-drift flags (`entity_geometry::static_damage_ported`);
-the general rule would add about 4700 tyre walls on Spa and Long Beach, whose breaks
-are not checked.
+Damage states with `infMass` pieces passed only for the close-drift flags until F817
+(`entity_geometry::static_damage_ported`); since F817 every such entity uses them, which
+adds the Spa and Long Beach tyre walls (JOINTS_RESEARCH, "Tyre walls with a static back
+row").
 
 ## Pieces with several shapes (F804)
 
@@ -631,7 +634,7 @@ Results (F804):
   - a post's mesh may stand on its shapes (Le Mans `post_foam_green`: a 9 cm base under a
     33 cm mesh), as a single box's may.
 - Catalog after F804: no unported template is left on the circuits except the `infMass` tyre walls,
-  Spa's 709 `tyrewall_a_red`/`_white` and Long Beach's 275 `tyrewall_*`. Breakable entities:
+  Spa's 709 `tyrewall_a_red`/`_white` and Long Beach's 275 `tyrewall_*`; they break since F817. Breakable entities:
   Shibuya route_0 363 (was 91), San Francisco 240, Milan 1463, Yokohama Docks route_0 569,
   Jarama route_1 1241, Istanbul 1263, Le Mans 1231, Spa 449, Long Beach 124.
 

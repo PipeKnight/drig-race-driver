@@ -769,12 +769,6 @@ impl Catalog {
                 *catalog.unported.entry(template).or_default() += 1;
                 continue;
             }
-            if behaviour.added.iter().any(|a| a.infinite_mass)
-                && !crate::entity_geometry::static_damage_ported(&template)
-            {
-                *catalog.unported.entry(template).or_default() += 1;
-                continue;
-            }
             let (threshold, explosion) = parameters.behaviour(reference(behaviour.properties)?)?;
             // Per intact box, in the route reader's shape order.
             let mut limits = Vec::new();
@@ -2019,7 +2013,7 @@ impl PropWorld {
     }
 
     /// AUTHORED (see [`SINK_TOLERANCE`]): lift every live piece and wheel
-    /// whose hull ends the step more than the tolerance below the road under
+    /// that collides with fixed geometry and whose hull ends the step more than the tolerance below the road under
     /// its centre back to that tolerance, and stop it moving further down.
     /// Call after each committed step, after [`Self::hold_lost`]. With
     /// `parallel` the depths come from the compute pool (same values).
@@ -2030,15 +2024,22 @@ impl PropWorld {
         parallel: bool,
     ) -> Result<(), Error> {
         for d in self.depths(track, bodies, parallel) {
-            if d.depth <= SINK_TOLERANCE || self.lost.contains_key(&d.body) {
+            // A body that does not collide with fixed geometry (a joint's
+            // `dontCollideWithFixedObjects`, 0xA69560) is meant to pass into
+            // the road; the solver never pushes it out either (F817).
+            if d.depth <= SINK_TOLERANCE
+                || self.lost.contains_key(&d.body)
+                || byte(&bodies[d.body], COLLIDES_WITH_FIXED) == 0
+            {
                 continue;
             }
             let body = &mut bodies[d.body];
             let mut position: [f32; 4] = std::array::from_fn(|k| f(body, 0x1c0 + k * 4));
             position[1] += d.depth - SINK_TOLERANCE;
             grid_world::continuous::apply(body, position)?;
-            if f(body, 0x214) < 0. {
-                set(body, 0x214, 0.);
+            // Linear velocity y (+0x224); +0x210 is the angular velocity.
+            if f(body, 0x224) < 0. {
+                set(body, 0x224, 0.);
             }
         }
         Ok(())

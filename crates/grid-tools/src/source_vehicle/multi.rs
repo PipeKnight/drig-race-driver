@@ -89,6 +89,14 @@ pub enum Contacted {
     Static,
 }
 
+/// Ticks (60 Hz) within which a woken body without support falls the
+/// 0.2 m of [`MultiRuntime::unsupported`]: from rest, free fall covers
+/// 0.2 m in 12 ticks and 1.2 m in 30. A body that slept balanced, for
+/// example a tyre on its rim on a pile (asleep under the original's
+/// stationary thresholds, BODY_SLEEPING.md), tips over only seconds after
+/// it is woken and is not missing support (F817).
+pub const FALLS_AT_ONCE_TICKS: usize = 30;
+
 /// A body [`MultiRuntime::unsupported`] found asleep or parked without
 /// support, or a held car.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -519,8 +527,9 @@ impl MultiRuntime {
     /// air): steps two clones `ticks` times with idle controls, one as it
     /// is and one with every asleep piece or lost wheel woken and parking
     /// off. A body that is asleep or parked here, stays put in the first
-    /// clone and falls more than 0.2 m in the second lacked support. Held
-    /// (retired) cars are listed too, with their height above the track.
+    /// clone and falls more than 0.2 m in the second within
+    /// [`FALLS_AT_ONCE_TICKS`] lacked support. Held (retired) cars are
+    /// listed too, with their height above the track.
     pub fn unsupported(&self, ticks: usize) -> Result<Vec<Unsupported>, Error> {
         let cars = self.cars.len();
         let n = self.bodies().len();
@@ -545,14 +554,18 @@ impl MultiRuntime {
             }
         }
         let idle = vec![Controls::default(); cars];
-        for _ in 0..ticks {
+        let mut fallen = Vec::new();
+        for t in 0..ticks {
             kept.tick(&idle)?;
             woken.tick(&idle)?;
+            if t + 1 == ticks.min(FALLS_AT_ONCE_TICKS) {
+                fallen = (0..n).map(|i| height(&woken, i)).collect();
+            }
         }
         for i in cars..n {
             let (asleep, parked) = state(i);
             let before = height(self, i);
-            let drop = before - height(&woken, i);
+            let drop = before - fallen.get(i).copied().unwrap_or(before);
             if (asleep || parked) && (height(&kept, i) - before).abs() < 1e-3 && drop > 0.2 {
                 out.push(Unsupported { body: i, asleep, parked, held: false, drop, gap: gap(i) });
             }
@@ -1930,6 +1943,90 @@ mod tests {
             .unwrap();
     }
 
+    /// A broken Spa or Long Beach tyre wall: the back row of three blocks is
+    /// static (`infMass`, 0x7CDCD0), so its two back-to-back constraints have
+    /// a static A (0x7CC1E0 hands A as 0) and make no joint; the front blocks
+    /// hang on the back row's fixed objects (0x7B7EE0 swap, 0xA7D3C0) and
+    /// each other (cDeformableTyreWall*, unbreakable, no fixed-object
+    /// contacts), stay near their places and settle with the loose tyres
+    /// (speed and spin; a front block without +0x416 is not lifted out of
+    /// the road, F817).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_broken_tyre_wall_with_a_static_back_row_hangs_on_it_and_settles() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = || {
+                    Some(
+                        crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                            .unwrap(),
+                    )
+                };
+                for (path, template) in [
+                    (crate::route::SPA, "tyrewall_a_red.max"),
+                    (crate::route::SPA, "tyrewall_a_white.max"),
+                    (crate::route::LONG_BEACH, "tyrewall_single_blue.max"),
+                    (crate::route::LONG_BEACH, "tyrewall_white.max"),
+                ] {
+                    let route = Route::new(path).unwrap();
+                    let mut multi =
+                        MultiRuntime::lacetti_on(root, &route, &["slot_00"], &table, events())
+                            .unwrap();
+                    multi.enable_dynamic_props(root).unwrap();
+                    let props = multi.props.as_mut().unwrap();
+                    let wall = (props.catalog.breakables.iter())
+                        .position(|b| b.template == template)
+                        .unwrap_or_else(|| panic!("{path} {template} not breakable"));
+                    let entry = &props.catalog.breakables[wall];
+                    assert_eq!(entry.static_pieces.iter().filter(|s| **s).count(), 3);
+                    assert_eq!(entry.joints.len(), 7);
+                    // The back row's shapes: three route boxes, off until the break.
+                    assert_eq!(entry.damaged.len(), 3);
+                    let dynamic = entry.pieces.len() - 3;
+                    props.queue_break(wall);
+                    let drive = [Controls::default(); 1];
+                    multi.tick(&drive).unwrap();
+                    let props = multi.dynamic_props().unwrap();
+                    assert_eq!(props.pieces.len(), dynamic);
+                    assert_eq!(props.joints.len(), 5, "{template}");
+                    assert_eq!(props.joints.iter().filter(|j| j.b.is_none()).count(), 3);
+                    for _ in 0..900 {
+                        multi.tick(&drive).unwrap();
+                    }
+                    let props = multi.dynamic_props().unwrap();
+                    assert!(props.joints.iter().all(|j| !j.broken));
+                    let mut fastest = 0f32;
+                    let mut furthest = 0f32;
+                    for piece in &props.pieces {
+                        let spawn =
+                            props.catalog.breakables[piece.breakable].pieces[piece.spec].pose[3];
+                        let now = crate::dynamic_props::body_pose(&multi.bodies()[piece.body])[3];
+                        assert!(now.iter().all(|v| v.is_finite()));
+                        assert!((now[1] - spawn[1]).abs() < 1.5, "{template} {piece:?} {spawn:?} {now:?}");
+                        let v = &multi.bodies()[piece.body][0x220 / 4..0x22c / 4];
+                        let speed =
+                            v.iter().map(|&w| f32::from_bits(w).powi(2)).sum::<f32>().sqrt();
+                        fastest = fastest.max(speed);
+                        let moved = ((now[0] - spawn[0]).powi(2) + (now[2] - spawn[2]).powi(2)).sqrt();
+                        furthest = furthest.max(moved);
+                        let w = &multi.bodies()[piece.body][0x210 / 4..0x21c / 4];
+                        let spin = w.iter().map(|&x| f32::from_bits(x).powi(2)).sum::<f32>().sqrt();
+                        fastest = fastest.max(spin);
+                    }
+                    eprintln!("{template}: pieces={dynamic} fastest={fastest:.3} furthest={furthest:.3}");
+                    assert!(fastest < 0.1, "{template} {fastest}");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// An armco section in the middle of a chain breaks its two linked
     /// neighbours too (0x7D5540); the rails hang between the posts and the
     /// world and stay near their places.
@@ -2843,9 +2940,13 @@ mod tests {
                             grouped_physical_frame::wake(&mut woken.world, i);
                         }
                     }
-                    for _ in 0..120 {
+                    let mut fallen = Vec::new();
+                    for t in 0..120 {
                         multi.tick(&drive).unwrap();
                         woken.tick(&drive).unwrap();
+                        if t + 1 == FALLS_AT_ONCE_TICKS {
+                            fallen = (0..n).map(|i| height(&woken, i)).collect();
+                        }
                     }
                     // Awake pieces after the settle: speed, spin and how far they moved.
                     let pos = |m: &MultiRuntime, i: usize| {
@@ -2876,11 +2977,11 @@ mod tests {
                     let hanging: Vec<(usize, bool, bool, f32)> = (cars..n)
                         .filter(|&i| {
                             (height(&multi, i) - before[i]).abs() < 1e-3
-                                && height(&woken, i) < before[i] - 0.2
+                                && fallen[i] < before[i] - 0.2
                         })
                         .map(|i| {
                             let (a, p) = state(&multi, i);
-                            (i, a, p, before[i] - height(&woken, i))
+                            (i, a, p, before[i] - fallen[i])
                         })
                         .collect();
                     eprintln!(

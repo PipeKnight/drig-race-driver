@@ -270,8 +270,9 @@ Verification:
 - [V data] Breakables with joints: Donington 588 `tyre_wall` (7 joints each, all
   `cDeformableRubber*`, `dontCollideWithAny`, unbreakable), Istanbul Park 221
   `tyrewall_black`, Le Mans 208 tyre walls, Spa 55 `tyrewall_b_*`, Milan 113
-  `green_cushion_a`, San Francisco 171 `tyrewall_black`. Still static: armco everywhere
-  and Spa's 709 `tyrewall_a_*` (a piece with a static or phantom shape).
+  `green_cushion_a`, San Francisco 171 `tyrewall_black`. Armco breaks since F501 and its
+  ends since F804; Spa's 709 `tyrewall_a_*` and Long Beach's 275 `tyrewall_*` (a static
+  back row) since F817 ("Tyre walls with a static back row").
 - Not verified: the whole break against a live capture of the original (needs the
   coordinator's go), the narrow phase's pair filter in a live world.
 
@@ -334,8 +335,10 @@ Port (`grid_formats::entities::EntityLink`, `grid_tools::dynamic_props`):
 - `PropWorld::apply`: per queued break, `break_entity` (pieces, static pieces kept in
   `statics`, then the joints in the damage state's order) and `follow_links` (propagate).
   `make_joint` resolves B as above (a static or missing B: fixed, world frames); a static A
-  makes no joint (only a primary's post to the world, [I]: the original's handling of a
-  static A with no B is not read). `make_dynamic` is 0x7D2D90. A removed joint keeps its
+  makes no joint. [D] 0x7CC1E0 (F817): a static A hands no physics body (0), a static B
+  its own fixed object and a missing B the world's (0x958200), both with the fixed flag,
+  so a constraint between two static pieces, or from a static piece to the world, has no
+  dynamic body and does nothing in the solver; only a primary's post goes on. `make_dynamic` is 0x7D2D90. A removed joint keeps its
   record with byte +0x48 set (the solver skips it); a break by propagation records force 0.
 - Link list order follows 0x7BDE30's prepend (newest link first); the original's list
   order is [D], not observed live.
@@ -448,11 +451,10 @@ The port (F506, F509):
    - `specificPostCollision` on a `close_drift_flag` entity with a dynamic A records the
      joint as a post (`Breakable::posts`); the pole's collision is cleared (no points, so
      `collides()` is false) and its limit is FLT_MAX.
-   - Gate: only the close-drift flags use static damage pieces or several behaviours on
-     one body (`entity_geometry::static_damage_ported`). Other templates with them stay
-     intact and unported as before: Long Beach's 275 and Spa's 709 tyre walls (static
-     base pieces) and Yokohama's crates, logs, signs and pipes and 91 Shibuya placements
-     (several behaviours). Each needs its own check before it breaks.
+   - Gate (removed): only the close-drift flags used static damage pieces or several
+     behaviours on one body (`entity_geometry::static_damage_ported`). Several behaviours
+     pass since F789 for every template, static damage pieces since F817 (Long Beach's
+     275 and Spa's 709 tyre walls, "Tyre walls with a static back row").
    - Flags now breakable: the Nürburgring 4, Jarama 16, Yokohama 17 of 21 (4 stay
      unported for another reason), Shibuya 19. Donington has none.
 2. The post geometry, verified bit for bit [V] (`grid_world::phantom_post`):
@@ -506,6 +508,57 @@ The port (F506, F509):
 
 Before the break, the intact pole and base are static boxes with contact limits 50 and
 2000. The original breaks the flag at those impulses; so does the port now.
+
+### Tyre walls with a static back row (F817)
+
+Spa's `tyrewall_a_red`/`_white` (360 and 349 placements on route_0) and Long Beach's
+`tyrewall_single_*` and `tyrewall_*` (blue, white, yellow; 275) differ from the Donington
+wall in one point: the three back blocks of the damage state are `infMass`. Static analysis
+(no game run; probe `local/drift-soak/infmass_probe.txt`):
+
+- [V data] Intact: one `infMass` box, `bDeformableRubber` (impulse 1000, explosion 0.35),
+  no ENS links. Damage state: static back blocks `bl`, `bc`, `br`; dynamic front blocks
+  `fl`, `fc`, `fr`; 8 or 16 loose tyre cylinders; seven constraints, Lateral `bc→bl`,
+  `bc→br`, `fc→fr`, `fc→fl`, Centre `bc→fc`, Ends `fl→bl`, `fr→br`.
+- [V data] physparams: `cDeformableTyreWallCentre`/`Ends` limit z to −1..0 with a spring
+  (K 1e5, S 1e4) on z, plane rotation 0.1 and twist 0.1; `Lateral` is free within ±10 m. All
+  three are unbreakable (`breakLinear`/`breakAngular` +inf) and set
+  `dontCollideWithFixedObjects`; they are the only constraints that set it, and none sets
+  `dontCollideWithAny`.
+- [D] 0x7B7EE0 swaps a static A with a dynamic B, so `bc→fc` becomes `fc` on `bc`'s fixed
+  object. [D] 0x7CC1E0: the static-static `bc→bl` and `bc→br` have no dynamic body (see
+  Phase 3b), and a finite break impulse alone registers the break callback.
+- [D] `dontCollideWithFixedObjects` clears body byte +0x416 on A and on a dynamic B; the port
+  then skips the track contacts and the road sweep of that body (`dynamic_props`), so the
+  front blocks hang from the back row on the z springs.
+- [V port] Found by the test (Long Beach `tyrewall_single_blue`): block `fr` kept 1.3 m/s
+  down and 3.1 rad/s for 60 s with a frozen pose and no contacts. A per-tick trace showed the
+  frame publishing it 5.5 cm lower each tick and the authored `PropWorld::lift_sunk` (F564,
+  `SINK_TOLERANCE`) lifting it back before the next predict. Two defects in that shared
+  pass, fixed for every piece: it lifted bodies with +0x416 clear, which hang into the
+  road by design and get no road contacts or sweep; and its "stop moving down" cleared
+  +0x214 (angular velocity y) instead of +0x224 (linear velocity y).
+- So every step of the break is a mechanism the port already has from the original, and
+  F817 lifts the gate: the back blocks' shapes become route boxes off until the break, the
+  front blocks get five joints (two between front blocks, three on a fixed object).
+- Test: `a_broken_tyre_wall_with_a_static_back_row_hangs_on_it_and_settles` (Spa red and
+  white, Long Beach single blue and white).
+- Measured (`local/drift-soak/step4/measure.sh`, matched before/after `grid-opponent-race`
+  builds, 12 AI cars, 15000 ticks, `GRID_DYNAMIC_PROPS=1`, seeds 0-3, after the `lift_sunk`
+  fix): Spa route_0 is unchanged (0 breaks, 12 laps, no retirement in all four seeds; the
+  AI never hits a tyre wall hard enough, and car 0 steered into an `a_red` or `a_white`
+  wall does not break it either). Long Beach route_0 had 2/1/2/1 breaks (tyre stacks only)
+  before and 7/7/5/13 after (mostly `tyrewall_single_*`), 24 laps and no retirement in every
+  seed before and after; car 0 steered into a `single_blue` or `white` wall breaks 4 pieces.
+  No NaN or panic in any run.
+- Observation: a first measurement with the gate lifted but before the `lift_sunk` fix
+  (`measure.out`) had 6/6/8/8 breaks, 23/22/24/24 laps and a terminal-damage retirement in
+  seeds 0 and 1, where a car slid along the barrier line after a wall broke and met
+  `concrete_fence_orange` behind it (seed 1 car 4, tick 4820, `s1.props.tsv`). With the fix
+  (`measure2.out`) no car retires. Interpretation: the front blocks that kept a constant
+  velocity pushed the cars; whether the original's AI loses cars at these walls cannot be
+  checked without a capture.
+- Not verified: the break against a live capture of the original.
 
 ## Size [D]
 
