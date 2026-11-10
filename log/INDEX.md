@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F793](F0793.md) | 2026-11-10 | Career team sum: an AI car without a team counts for the player (0x660E90) |
 | [F792](F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |
 | [F791](F0791.md) | 2026-11-10 | Loading world: glyph instances grafted, screen panels left to their screens |
 | [F790](F0790.md) | 2026-11-10 | Career screen sounds and bars; window shots recheck |

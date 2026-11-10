@@ -1028,3 +1028,42 @@ impl Catalogue {
             .find(|d| d.rank_id == rank_id && d.star_level == star_level)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 0x660E90 keys each AI car by `team.id` of its driver's `team_id`
+    /// (0x81AAD0 writes only on a hit, so a missing driver or team leaves
+    /// key 0, the player's key) [V]. In the shipped data every AI driver of
+    /// a career field (`event_driver`, `event_legend`, the Le Mans fields of
+    /// `lemans_restrictions`, 0x663860) has a team row with a non-zero id,
+    /// so no AI car merges into the player's team [D].
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn every_career_ai_driver_has_a_team() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let db = crate::read_database(&root).unwrap();
+        let teams: std::collections::BTreeSet<i32> =
+            table(&db, "team").unwrap().rows().filter_map(|r| r.int("id")).collect();
+        assert!(!teams.contains(&0));
+        let team_of: BTreeMap<i32, i32> = table(&db, "driver")
+            .unwrap()
+            .rows()
+            .filter_map(|r| Some((r.int("id")?, r.int("team_id")?)))
+            .collect();
+        let mut checked = 0;
+        for name in ["event_driver", "event_legend", "lemans_restrictions"] {
+            for r in table(&db, name).unwrap().rows() {
+                let driver = r.int("driver_id").unwrap();
+                let team = team_of.get(&driver).copied();
+                assert!(
+                    team.is_some_and(|t| teams.contains(&t)),
+                    "{name}: driver {driver} has team {team:?}"
+                );
+                checked += 1;
+            }
+        }
+        eprintln!("every_career_ai_driver_has_a_team: {checked} rows, {} teams", teams.len());
+    }
+}

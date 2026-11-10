@@ -806,6 +806,17 @@ row 60). Labels as above.
   sum, descending, with the insertion sort 0x68F970 (`team_sum_insertion_sort`), which keeps the
   player's team (inserted first) ahead of an equal sum. The bonus is paid when the player's team is
   at index 0, so a tie pays.
-- [I] An AI car without a team has key 0, the player's key, and so adds to the player's sum.
-  The port keeps each AI car as its own team (§3.1), so this is not ported.
-- Port: `rules::player_team_first` now pays on a tie (test `a_tied_team_standing_goes_to_the_player`).
+- Keys [V, 10 November 2026]: the player and the teammate (car types 1 and 2) have key 0. An AI car
+  takes its team override (car +0x14), else its driver's `team_id`, and its key is that row's
+  `team.id` read by 0x81AAD0, which writes only on a hit; the key starts at 0. So an AI car without a
+  driver or team, or whose team has no row, has key 0, the player's key, and adds to the player's
+  sum. The new entry's "player" flag is `key == 0`. Le Mans fields (0x663860) give each AI car its
+  `lemans_restrictions.driver_id`, so they follow the same rule.
+- [D] In the shipped data no career AI car has key 0: every `event_driver`, `event_legend` and
+  `lemans_restrictions` driver has a team row, and no team row has id 0 (test
+  `data::tests::every_career_ai_driver_has_a_team`). The rule changes no shipped event.
+- [I] The car fields +0x0C (tested before the driver) and +0x14 (team override) are read from this
+  routine only.
+- Port: `rules::player_team_first` pays on a tie (test `a_tied_team_standing_goes_to_the_player`)
+  and adds an AI car of team 0 to the player's sum (test
+  `an_ai_car_without_a_team_counts_for_the_player`).

@@ -276,20 +276,19 @@ pub fn class_position(
 /// Whether the player's team leads the team standings of the event
 /// (0x660E90 `player_team_position` returns 0). Its sort (0x68F970) puts
 /// the player's team first on equal sums [V], so a tie wins. [I] The summed
-/// value is the event points of each team's cars; the player and the
-/// teammate are one team, AI cars count by `team.id` (an AI with team 0 is
-/// its own team; the original probably merges it into the player's key 0).
+/// value is the event points of each team's cars. Keys [V]: the player and
+/// the teammate have key 0; an AI car has `team.id` of its driver's team,
+/// and 0 when it has no driver or team (0x81AAD0 writes only on a hit), so
+/// such a car adds to the player's sum. The shipped career fields have no
+/// such car (`data::tests::every_career_ai_driver_has_a_team`).
 pub fn player_team_first(standings: &[Standing]) -> bool {
     use std::collections::BTreeMap;
     let mut ours = 0;
-    let mut teams: BTreeMap<(i32, i32), i32> = BTreeMap::new();
+    let mut teams: BTreeMap<i32, i32> = BTreeMap::new();
     for s in standings {
         match s.entrant {
-            Entrant::Player | Entrant::TeamMate => ours += s.points,
-            Entrant::Ai { driver, team } => {
-                let key = if team == 0 { (0, driver) } else { (team, 0) };
-                *teams.entry(key).or_default() += s.points;
-            }
+            Entrant::Player | Entrant::TeamMate | Entrant::Ai { team: 0, .. } => ours += s.points,
+            Entrant::Ai { team, .. } => *teams.entry(team).or_default() += s.points,
         }
     }
     teams.values().all(|&p| p <= ours)
@@ -364,5 +363,16 @@ mod team_win_tests {
         assert!(player_team_first(&tied));
         let behind = [standing(Entrant::Player, 10), standing(Entrant::TeamMate, 8), standing(ai(5, 3), 19)];
         assert!(!player_team_first(&behind));
+    }
+
+    #[test]
+    fn an_ai_car_without_a_team_counts_for_the_player() {
+        let ai = |driver, team| Entrant::Ai { driver, team };
+        // 0x660E90: a teamless AI car has key 0, the player's key.
+        let merged = [standing(Entrant::Player, 10), standing(ai(7, 0), 4), standing(ai(5, 3), 12)];
+        assert!(player_team_first(&merged));
+        // Two cars of one team add up.
+        let team = [standing(Entrant::Player, 10), standing(ai(5, 3), 6), standing(ai(6, 3), 6)];
+        assert!(!player_team_first(&team));
     }
 }
