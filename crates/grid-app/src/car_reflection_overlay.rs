@@ -1,7 +1,8 @@
 //! Each reflecting car part samples the environment cube ([`Environment`]:
 //! the dynamic cube or the track's static map, [`crate::car_reflections`]) with its material's own saved controls
 //! (docs/CAR_REFLECTIONS.md): `EnvironmentColour` and `FresnelMin/Max/Power`
-//! of its shader instance, as every car's `*_highLOD.pssg` saves them
+//! of its shader instance, as every car's `*_highLOD.pssg` saves them or the
+//! original's material tuning overrides them
 //! (paint, rims and metal of `carpaint_metallic`, glass of `carglass`, lamp
 //! glass and pods, grills; matt parts and tyres save 0 and do not reflect).
 //!
@@ -16,9 +17,13 @@
 //! Parts of the paint program (`carpaint_metallic`) also take its gates: the
 //! car's packed `main_m1` map's alpha gates the weight, its green occludes
 //! the environment by `OcclusionMapScale`, and the sun's shadow darkens it.
-//! [I] The program adds the `SpecularValues` z and w floors to the occlusion
-//! and the shadow; only the debug material editor (0x9E7360) is seen setting
-//! them, so the port takes 0.
+//!
+//! The original overrides the saved Fresnel and occlusion controls of every
+//! material whose name starts with one of 35 names ([`Tuning`],
+//! `raceload.jpk#materials.xml`, read by 0x99C300 and submitted by 0x9E7360
+//! as `SpecularValues`, `MetallicSpecularValues` and `FresnelValues`). The
+//! same submission sets the `SpecularValues` z and w floors that the paint
+//! program adds to the occlusion and the shadow ([`FLOORS`]).
 //!
 //! A cracked pane reflects like an intact one through its crack-map colour
 //! and alpha: the original's glass program (`car_basic` `fp_glass_windows`)
@@ -53,10 +58,141 @@ pub struct Controls {
     pub max: f32,
     /// `OcclusionMapScale` of a paint-program part, `None` for other programs.
     pub paint: Option<f32>,
+    /// The paint program's `SpecularValues` z (occlusion) and w (shadow)
+    /// floors: [`FLOORS`] for a tuned material, 0 otherwise.
+    pub floors: Vec2,
 }
 
-/// The paint program's `SpecularValues` z (occlusion) and w (shadow) floors.
-const FLOORS: Vec2 = Vec2::ZERO;
+/// The `SpecularValues` z and w that 0x9E7360 submits with a tuned
+/// material: the vehicle manager's +4 and +0, which its constructor 0xA135C0
+/// sets to 0.25 and 0.5 (only the debug material editor changes them).
+pub const FLOORS: Vec2 = Vec2::new(0.25, 0.5);
+
+/// The 35 material names the original tunes (the table at 0xE4FD58), in its
+/// order.
+const TUNED: [&str; 35] = [
+    "Car Body Paint",
+    "Matt",
+    "Head Lights Pod",
+    "Rear Lights Pod",
+    "Lights Pod Matt",
+    "Head Lights Glass",
+    "Rear Lights Glass",
+    "Shiny Metal",
+    "Bare Metal",
+    "Car Body Carbon Fibre",
+    "Discs",
+    "Car Body Plastic",
+    "Suspension",
+    "Aerials",
+    "Window Glass",
+    "Cabin",
+    "Grills",
+    "Grills Glass",
+    "Wheel",
+    "Tyre Wall",
+    "Tyre Tread",
+    "Chrome",
+    "carbon fibre",
+    "Leather",
+    "dials",
+    "Shiny Painted Metal",
+    "shiny plastic",
+    "dials dials dials dials dials matt",
+    "dials shny dials shiny",
+    "dials shny dials shiny low spec",
+    "interior glass windows",
+    "mirror",
+    "bare metal bare",
+    "matt clipping shader",
+    "shiny clipping shader",
+];
+
+/// A tuning record's fields, as 0x99C300 reads them from each `param`.
+const FIELDS: [&str; 9] = [
+    "specularHighlightPower",
+    "specularHighlightStrength",
+    "metallicSpecularPower",
+    "metallicSpecularScale",
+    "metallicFalloff",
+    "occlusionMapScale",
+    "fresnelPower",
+    "fresnelMin",
+    "fresnelMax",
+];
+
+/// 0x99C300's record before it reads a name's element.
+const FALLBACK: [f32; 9] = [300., 64., 10., 4., 0.2, 1., 2., 0.1, 0.9];
+
+/// The original's car material tuning, `raceload.jpk#materials.xml`.
+///
+/// 0x99C300 reads one nine-field record per name of [`TUNED`] from the root
+/// `materials` element's children of that name (spaces as underscores) and
+/// sets the vehicle manager's reload flag (+0x558, also set by its
+/// constructor). 0x9E7360, called every frame by the vehicle manager's update
+/// (0xA10310), sees the flag and, for every material of the 20 cars whose
+/// name starts with a tuned name (case-insensitive, the first in table
+/// order), submits `SpecularValues` (highlight power and strength,
+/// [`FLOORS`]), `MetallicSpecularValues` and `FresnelValues` (power, min,
+/// max) to it, then clears the flag.
+///
+/// [I] The cars are loaded when the flag is consumed: the update does not
+/// tick during the race load.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tuning(pub [[f32; 9]; 35]);
+
+impl Tuning {
+    /// From the installation's `raceload.jpk`.
+    pub fn read(root: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
+        use grid_formats::{binxml, jpk};
+        let bytes = std::fs::read(root.join("raceload.jpk"))?;
+        let archive = jpk::inspect(&bytes)?;
+        let entry = (archive.entries.iter())
+            .find(|e| e.name == b"materials.xml")
+            .ok_or("raceload.jpk lacks materials.xml")?;
+        if entry.uncompressed_size as usize != entry.stored_data.len() {
+            return Err("compressed materials.xml unsupported".into());
+        }
+        Self::parse(&binxml::read(&bytes[entry.stored_data.clone()])?)
+    }
+
+    /// From the decoded document, as 0x99C300 reads it: later elements and
+    /// params override earlier ones.
+    pub fn parse(
+        document: &grid_formats::binxml::Document,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let elements = &document.elements;
+        let root = (elements.iter())
+            .find(|e| e.parent.is_none())
+            .filter(|e| e.name == "materials")
+            .ok_or("materials.xml's root is not `materials`")?;
+        let named = |range: std::ops::Range<usize>, name: String| {
+            range.filter(move |&i| elements[i].name == name)
+        };
+        let mut records = [FALLBACK; 35];
+        for (record, name) in records.iter_mut().zip(TUNED) {
+            for material in named(root.children.clone(), name.replace(' ', "_")) {
+                for param in named(elements[material].children.clone(), "param".into()) {
+                    for &(key, value) in &elements[param].attributes {
+                        if let Some(k) = FIELDS.iter().position(|f| *f == key) {
+                            record[k] = value.trim().parse()?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(Self(records))
+    }
+
+    /// The record 0x9E7360 submits to a material of this name, if any.
+    pub fn record(&self, material: &str) -> Option<[f32; 9]> {
+        let bytes = material.as_bytes();
+        let i = TUNED.iter().position(|t| {
+            bytes.len() >= t.len() && bytes[..t.len()].eq_ignore_ascii_case(t.as_bytes())
+        })?;
+        Some(self.0[i])
+    }
+}
 
 /// Where an overlay sorts among the transparent draws (Bevy sorts by the
 /// mesh's bounds centre plus the material's bias). The original reflects in
@@ -83,10 +219,12 @@ fn paint_override() -> Option<Vec4> {
 }
 
 impl Controls {
-    /// From a shader instance's constants; `None` when it does not reflect.
+    /// From a shader instance's constants and, for a tuned material, its
+    /// [`Tuning`] record; `None` when it does not reflect.
     pub fn from_constants(
         group: &[u8],
         values: &std::collections::BTreeMap<&[u8], Vec<f32>>,
+        tuned: Option<[f32; 9]>,
     ) -> Option<Self> {
         let scalar = |name: &[u8]| match values.get(name).map(Vec::as_slice) {
             Some([v]) => Some(*v),
@@ -96,14 +234,25 @@ impl Controls {
             Some([r, g, b, ..]) => Vec3::new(*r, *g, *b),
             _ => return None,
         };
-        let controls = Self {
-            colour,
-            power: scalar(b"FresnelPower")?,
-            min: scalar(b"FresnelMin")?,
-            max: scalar(b"FresnelMax")?,
-            // The loader's fallback scale is 1 (0x99C300).
-            paint: (group == b"carpaint_metallic.fx")
-                .then(|| scalar(b"OcclusionMapScale").unwrap_or(1.)),
+        let paint = group == b"carpaint_metallic.fx";
+        let controls = match tuned {
+            Some(r) => Self {
+                colour,
+                power: r[6],
+                min: r[7],
+                max: r[8],
+                paint: paint.then_some(r[5]),
+                floors: FLOORS,
+            },
+            None => Self {
+                colour,
+                power: scalar(b"FresnelPower")?,
+                min: scalar(b"FresnelMin")?,
+                max: scalar(b"FresnelMax")?,
+                // The loader's fallback scale is 1 (0x99C300).
+                paint: paint.then(|| scalar(b"OcclusionMapScale").unwrap_or(1.)),
+                floors: Vec2::ZERO,
+            },
         };
         (controls.colour.max_element() > 0. && controls.min.max(controls.max) > 0.)
             .then_some(controls)
@@ -350,7 +499,7 @@ fn follow(
                     base: part.and_then(|m| m.base_color_texture.clone()),
                     mask: response.mask.clone(),
                     paint: controls.paint.map_or(Vec4::ZERO, |scale| {
-                        paint_override().unwrap_or(Vec4::new(1., scale, FLOORS.x, FLOORS.y))
+                        paint_override().unwrap_or(Vec4::new(1., scale, controls.floors.x, controls.floors.y))
                     }),
                     bias: sort_bias(part.map(|m| m.alpha_mode)),
                 })
@@ -412,13 +561,86 @@ mod tests {
         values.insert(b"FresnelPower".as_slice(), vec![1.]);
         values.insert(b"FresnelMin".as_slice(), vec![0.3]);
         values.insert(b"FresnelMax".as_slice(), vec![0.6]);
-        let paint = Controls::from_constants(b"carpaint_metallic.fx", &values).unwrap();
+        let paint = Controls::from_constants(b"carpaint_metallic.fx", &values, None).unwrap();
         assert_eq!((paint.min, paint.max, paint.power), (0.3, 0.6, 1.));
-        assert_eq!(paint.paint, Some(1.));
-        let glass = Controls::from_constants(b"carglass.fx", &values).unwrap();
+        assert_eq!((paint.paint, paint.floors), (Some(1.), Vec2::ZERO));
+        let glass = Controls::from_constants(b"carglass.fx", &values, None).unwrap();
         assert_eq!(glass.paint, None);
+        // A tuned material takes its record's Fresnel, occlusion and floors.
+        let record = [35.65, 1.16, 14.16, 1.2, 0.25, 1.05, 2.13, 0.27, 0.86];
+        let tuned = Controls::from_constants(b"carpaint_metallic.fx", &values, Some(record));
+        let tuned = tuned.unwrap();
+        assert_eq!((tuned.power, tuned.min, tuned.max), (2.13, 0.27, 0.86));
+        assert_eq!((tuned.paint, tuned.floors), (Some(1.05), FLOORS));
+        // A record of no weight turns the reflection off.
+        let off = [1., 0., 1., 0., 0.19, 1.04, 3.95, 0., 0.];
+        assert_eq!(Controls::from_constants(b"carglass.fx", &values, Some(off)), None);
         values.insert(b"EnvironmentColour".as_slice(), vec![0., 0., 0.]);
-        assert_eq!(Controls::from_constants(b"carpaint_metallic.fx", &values), None);
+        let dark = Controls::from_constants(b"carpaint_metallic.fx", &values, Some(record));
+        assert_eq!(dark, None);
+    }
+
+    #[test]
+    fn a_material_takes_the_first_tuned_name_it_starts_with() {
+        let mut records = [FALLBACK; 35];
+        for (i, r) in records.iter_mut().enumerate() {
+            r[0] = i as f32;
+        }
+        let tuning = Tuning(records);
+        let index = |name: &str| tuning.record(name).map(|r| r[0] as usize);
+        assert_eq!(index("Car Body Paint"), Some(0));
+        assert_eq!(index("car body paint_livery"), Some(0));
+        assert_eq!(index("Window Glass"), Some(14));
+        // "dials" comes before the longer dials names in the table.
+        assert_eq!(index("dials shny dials shiny"), Some(24));
+        assert_eq!(index("Body"), None);
+    }
+
+    /// The installed `raceload.jpk#materials.xml`, and every reflecting
+    /// material of every car's high LOD: how many are tuned.
+    #[test]
+    #[ignore = "needs GRID_GAME_ROOT"]
+    fn the_installed_tuning_covers_the_cars_reflecting_materials() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").unwrap());
+        let tuning = Tuning::read(&root).unwrap();
+        let paint = tuning.record("Car Body Paint").unwrap();
+        assert_eq!(paint[5..], [1.05, 2.13, 0.27, 0.86]);
+        // "Grills" comes first and is a prefix of "Grills Glass" (and "Matt"
+        // of "matt clipping shader"): their own records are never used.
+        assert_eq!(tuning.record("Grills Glass"), tuning.record("Grills"));
+        assert_eq!(tuning.record("shiny clipping shader"), Some(FALLBACK));
+        let (mut tuned, mut paints, mut off) = (0, 0, 0);
+        let mut untuned = Vec::new();
+        let mut cars: Vec<_> = std::fs::read_dir(root.join("cars")).unwrap().flatten().collect();
+        cars.sort_by_key(|e| e.file_name());
+        for car in cars {
+            let id = car.file_name().to_string_lossy().into_owned();
+            let Ok(bytes) = std::fs::read(car.path().join(format!("{id}_highLOD.pssg"))) else {
+                continue;
+            };
+            let tree = grid_formats::pssg::read_tree(&bytes).unwrap();
+            for shader in grid_formats::material::read_constants(&tree).unwrap() {
+                let name = String::from_utf8_lossy(shader.shader).into_owned();
+                if Controls::from_constants(shader.group, &shader.values, None).is_none() {
+                    continue;
+                }
+                match tuning.record(&name) {
+                    Some(r) => {
+                        tuned += 1;
+                        paints += usize::from(shader.group == b"carpaint_metallic.fx");
+                        let now = Controls::from_constants(shader.group, &shader.values, Some(r));
+                        off += usize::from(now.is_none());
+                    }
+                    None => untuned.push(format!("{id}:{name}")),
+                }
+            }
+        }
+        println!(
+            "tuning reflecting_tuned={tuned} paint_program={paints} tuned_off={off} untuned={} {:?}",
+            untuned.len(),
+            &untuned[..untuned.len().min(40)]
+        );
+        assert!(tuned > 0 && paints > 0);
     }
     #[test]
     fn actual_follow_retains_lamp_owned_optics_across_damage_and_bank_readiness() {
@@ -472,6 +694,7 @@ mod tests {
                 min: 0.02,
                 max: 0.9,
                 paint: None,
+                floors: Vec2::ZERO,
             },
             glass: true,
             mask: Some(mask),

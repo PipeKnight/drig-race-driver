@@ -90,10 +90,49 @@ Constants are per material instance, saved in each car's PSSG (docs/LACETTI_GRAP
   - specular 300 / 64.
   - The pixel program reads the cube, flips Z, and divides RGB by alpha (an RGBD-style encoding). Scratch alpha and the packed map's alpha mask the reflection.
   - The loader's fallback record (0x99C300) has Fresnel 2 / 0.1 / 0.9.
+  - At run time the material tuning (1.6) replaces these saved controls: tuned paint has Fresnel 2.13 / 0.27 / 0.86.
 - **Glass** (`carglass`) [O, Lacetti window]: environment ≈ 0.486, Fresnel 0.3–0.7.
 - **Cracked glass** uses the `_Cracked` variant with `TDiffuseCrackMap` [O].
 - **Smashed glass**: the pane is removed and shards are spawned [O, port damage_parts.rs].
 - **Dents**: [I] the deformed vertices and normals feed the same shaders. Nothing separate was seen.
+
+### 1.6 Material tuning
+
+The saved controls of 1.5 are not the ones the original draws with [O, static: 0x99C300, 0x9E7360, 0xA135C0, 0xA10310]:
+
+- **Source.** `raceload.jpk#materials.xml`, binary XML, root `materials`. A decoded private copy is `local/binxml/captured-dependencies/decoded-001.xml`. The vehicle manager's XML dispatch (0x9CA3A0) and a reload of `cars/materials.xml` (0x9CBCE0) both call the loader, 0x99C300.
+- **The loader, 0x99C300.** It checks the root's name, then walks the 35 names of the table at 0xE4FD58 (`Car Body Paint`, `Matt`, `Head Lights Pod` … `shiny clipping shader`, with spaces written as `_`). For each name it:
+  - presets the record [300, 64, 10, 4, 0.2, 1, 2, 0.1, 0.9];
+  - reads the `param` children of the root's elements of that name, with the attributes `specularHighlightPower`, `specularHighlightStrength`, `metallicSpecularPower`, `metallicSpecularScale`, `metallicFalloff`, `occlusionMapScale`, `fresnelPower`, `fresnelMin` and `fresnelMax`;
+  - stores the record at vehicle manager + 0x6C + i·0x24.
+
+  At the end it sets the reload flag (+0x558).
+- **The submission, 0x9E7360.** It is called every frame at the end of the vehicle manager's update (0xA10310) and runs when the debug editor byte (+0x2C) or the reload flag is set. Then, for each material of the 20 cars, it searches the table in order for the first name that matches the start of the material's name, case-insensitive (`__strnicmp` with the table name's length, 0xA66780). A tuned material gets these values through 0xB9DD10 (set a named vector):
+  - `SpecularValues` = (highlight power, highlight strength, vehicle manager +4, +0);
+  - `MetallicSpecularValues` = (metallic power, scale, falloff, occlusion scale);
+  - `FresnelValues` = (Fresnel power, min, max, 0).
+
+  Then it clears the flag.
+- **Floors.** The vehicle manager's constructor (0xA135C0) sets +0 to 0.5 and +4 to 0.25, and also sets the reload flag. Only the debug editor changes +0/+4. So a tuned material draws with `SpecularValues.z` = 0.25 (the occlusion floor) and `.w` = 0.5 (the shadow floor).
+
+**Values** [O, the installed file]:
+
+
+| Material | Fresnel power / min / max | Occlusion scale |
+|---|---|---|
+| Car Body Paint | 2.13 / 0.27 / 0.86 | 1.05 |
+| Window Glass | 4.35 / 0.34 / 0.81 | 0.76 |
+| Head / Rear Lights Glass | 4.07 / 0.20 / 0.84, 4.07 / 0.41 / 0.80 | |
+| Head / Rear Lights Pod | 6.20 / 0.24 / 0.65, 4.57 / 0.45 / 0.67 | 0.46 (head) |
+| Shiny Metal, Bare Metal, Chrome | 4.16 / 0.65 / 0.81, 3.95 / 0.12 / 0.18, 4.07 / 0.81 / 0.80 | 1.09 (chrome) |
+| Wheel | 3.24 / 0.29 / 0.40 | |
+| Suspension, Cabin, Grills, Tyre Wall | min = max = 0 (no reflection) | |
+| Grills Glass, matt clipping shader | never used: `Grills` and `Matt` come first and match the start of the name, so these materials take those records | |
+| shiny clipping shader | the loader's fallback, 2 / 0.1 / 0.9 | |
+
+The pssg paint (power 1, 0.3 / 0.6) has a flat weight of 0.45 at every angle. Tuned paint goes from 0.27 facing the camera to 0.86 at grazing angles.
+
+[I] The cars are loaded when the flag is consumed: the update does not tick during the race load.
 
 ## 2. The port before this work
 
@@ -209,7 +248,11 @@ Survey of all 44 `*_highLOD.pssg` files (private `local/reflections/constants.js
 - `weight ×= (1 − 2·m1.r·dirt)·(1 − scratch.a·vertex.g)·sat(1.1 − vertex.r)`: dust, scratches and the vertex damage masks. A clean car has 1 for all three.
 - No other gate. An earlier note of a fade on downward-facing surfaces was a misreading: the only `sunDirection` terms weigh the lighting and the specular, not the reflection.
 
-The port (F-entry of this change) applies the first three to `carpaint_metallic` parts: each car's own `main_m1` (an opponent its livery's), uploaded linear; the main sun's Bevy shadow at the fragment; `OcclusionMapScale` as saved (1 when absent, the loader's fallback). [I] `SpecularValues.z` and `.w` are taken as 0: the only code seen setting them is the debug material editor (0x9E7360), which copies two fields of its own state; their production value is not traced. Dust, scratches and the damage vertex masks are left out (the port has no dirt yet).
+The port (F-entry of this change) applies the first three to `carpaint_metallic` parts: each car's own `main_m1` (an opponent its livery's), uploaded linear; the main sun's Bevy shadow at the fragment; `OcclusionMapScale` as saved (1 when absent, the loader's fallback). Dust, scratches and the damage vertex masks are left out (the port has no dirt yet).
+
+**Material tuning** (1.6, from this change on): a material whose name starts with a tuned name takes the record's Fresnel power, min and max and, on paint, its occlusion scale, together with the floors `SpecularValues.z` = 0.25 and `.w` = 0.5 (`car_reflection_overlay::Tuning`, read once from the installation's `raceload.jpk`). Other materials keep their saved pssg controls with floors of 0. A tuned material whose min and max are 0 (cabin, grills, suspension, tyre wall) does not reflect. Not ported:
+- the record's specular and metallic fields (`SpecularValues.xy`, `MetallicSpecularValues`), which feed the lighting, not the reflection;
+- the floors on glass: the port's glass has no occlusion or shadow gate.
 
 **Strength against the original** (2 November 2026): the owner's recording of the original, `local/recordings/donington-race-20261009/overview/frame-0050.000.jpg` (clean Lacetti at the start, chase view), against the port at the same view with the cube working (private `local/reflections/out/orig-0050-zoom.png`, `fx-rear-zoom.png`). Both show a highlight along the top edges, the sky on the dark trunk area and a readable livery; the masked port is of about the original's strength, the gates off read chrome-like. By eye only; the original frame is a compressed recording with dirt-free paint at another exposure.
 

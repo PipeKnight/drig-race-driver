@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F802](log/F0802.md) | 2026-11-10 | Car reflections: the original's material tuning and SpecularValues floors |
 | [F801](log/F0801.md) | 2026-11-10 | Car reflections: the track's static map by default |
 | [F800](log/F0800.md) | 2026-11-10 | cargo td for every package through the build lock |
 | [F799](log/F0799.md) | 2026-11-10 | Team livery checked on a race car |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F745](log/F0745.md) | 2026-11-05 | Row 115: remaining shadow dropouts attributed; shadow level stops one fade step short |
 | [F744](log/F0744.md) | 2026-11-05 | Playable 0a0e7db3c349 for the PC and both APKs (smoke ghost after resize, house shadow blink) |
 | [F743](log/F0743.md) | 2026-11-05 | Row 115: building shadows lost for a frame at the end of a level fade |
-| [F742](log/F0742.md) | 2026-11-05 | Ghost of the old frame through smoke after a resize: smoke materials now rebind the resized depth |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

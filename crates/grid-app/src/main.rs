@@ -1092,8 +1092,25 @@ fn load_package(
             .with_sections(lamp_sections);
         association.report();
         car.lamp_associations.push(association);
+        // The original's material tuning, read once (car_reflection_overlay::Tuning).
+        static TUNING: std::sync::OnceLock<Option<car_reflection_overlay::Tuning>> =
+            std::sync::OnceLock::new();
+        let tuning = TUNING.get_or_init(|| match car_reflection_overlay::Tuning::read(root) {
+            Ok(tuning) => {
+                println!("car_reflections tuning=raceload.jpk#materials.xml");
+                Some(tuning)
+            }
+            Err(error) => {
+                eprintln!("car_reflections tuning unavailable: {error}");
+                None
+            }
+        });
         for shader in material::read_constants(&tree)? {
-            if let Some(controls) = car_reflection_overlay::Controls::from_constants(shader.group, &shader.values) {
+            let name = String::from_utf8_lossy(shader.shader);
+            let tuned = tuning.as_ref().and_then(|t| t.record(&name));
+            if let Some(controls) =
+                car_reflection_overlay::Controls::from_constants(shader.group, &shader.values, tuned)
+            {
                 car.reflections
                     .insert(String::from_utf8(shader.shader.to_vec())?, controls);
             }
