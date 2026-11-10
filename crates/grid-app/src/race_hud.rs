@@ -295,17 +295,52 @@ pub struct LapHold {
     best: Option<f64>,
     timer: f32,
     record: bool,
+    /// The lap that last beat the world record this session.
+    beaten: Option<f64>,
+    world: bool,
+}
+
+/// The record pill's state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RecordPill {
+    #[default]
+    Off,
+    /// `osd_pb`: a new personal best.
+    Personal,
+    /// `osd_wr`: a new best that also beats the world record.
+    World,
 }
 
 impl LapHold {
-    /// One frame with the lap timer's completed laps, its last lap time and
-    /// best lap. Returns the completed lap time to show instead of the
-    /// running one, and whether the record pill is up.
-    pub fn update(&mut self, laps: Option<u32>, last: Option<f64>, best: Option<f64>, dt: f32) -> (Option<f64>, bool) {
+    /// One frame with the lap timer's completed laps, its last lap time, best
+    /// lap and the world record to beat (seconds). Returns the completed lap
+    /// time to show instead of the running one, and the record pill.
+    pub fn update(
+        &mut self,
+        laps: Option<u32>,
+        last: Option<f64>,
+        best: Option<f64>,
+        world_record: Option<f64>,
+        dt: f32,
+    ) -> (Option<f64>, RecordPill) {
         // A new best is the personal best message [I: the port's session
-        // best; the original's PB source is not traced].
+        // best; the original's PB source is not traced]. It is also a world
+        // record when it beats the track's `world_record` row for the car's
+        // grade (0x5C3890 [D]), or the lap that beat that row earlier this
+        // session ([I]: the original keeps a beaten record as the one to
+        // beat; the port does not save it).
         if best != self.best {
             self.record |= best.is_some();
+            if let Some(b) = best {
+                let target = match (world_record.filter(|w| *w > 0.), self.beaten) {
+                    (Some(w), Some(x)) => Some(w.min(x)),
+                    (w, x) => w.or(x),
+                };
+                if target.is_some_and(|t| b < t) {
+                    self.world = true;
+                    self.beaten = Some(b);
+                }
+            }
             self.best = best;
         }
         match (laps, self.laps) {
@@ -317,8 +352,48 @@ impl LapHold {
         self.laps = laps;
         let held = self.timer > 0.;
         self.record &= held;
+        self.world &= self.record;
         self.timer = (self.timer - dt).max(0.);
-        (last.filter(|_| held), self.record)
+        let pill = match (self.record, self.world) {
+            (true, true) => RecordPill::World,
+            (true, false) => RecordPill::Personal,
+            _ => RecordPill::Off,
+        };
+        (last.filter(|_| held), pill)
+    }
+}
+
+/// The world record of the race's track and the player's car (seconds):
+/// the `world_record` row whose `track_model_id` is the route's track model
+/// and whose `vehicle_grade_id` is the player vehicle's (0x5C3890 [D]).
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct WorldRecord(pub Option<f64>);
+
+impl WorldRecord {
+    /// `route` is `tracks/<folder>/<file>/<route>`, `car` the vehicle's
+    /// folder stem (`vehicle.file_string`).
+    pub fn from_database(db: &grid_formats::database::Database, route: &str, car: &str) -> Option<f64> {
+        let model = crate::race_osd::track_model(db, route)?.int("id")?;
+        let grade = db
+            .table("vehicle")?
+            .rows()
+            .find(|r| r.text("file_string").is_some_and(|f| f.eq_ignore_ascii_case(car)))?
+            .int("vehicle_grade_id")?;
+        db.table("world_record")?
+            .rows()
+            .find(|r| r.int("track_model_id") == Some(model) && r.int("vehicle_grade_id") == Some(grade))
+            .and_then(|r| r.float("world_record"))
+            .map(f64::from)
+            .filter(|w| *w > 0.)
+    }
+
+    /// [`Self::from_database`] from the installation at `root`.
+    pub fn load(root: &std::path::Path, route: &str, car: &str) -> Self {
+        let db = std::fs::read(root.join("database/schema.bin"))
+            .and_then(|s| std::fs::read(root.join("database/database.bin")).map(|d| (s, d)))
+            .ok()
+            .and_then(|(s, d)| grid_formats::database::read(&s, &d).ok());
+        Self(db.and_then(|db| Self::from_database(&db, route, car)))
     }
 }
 
@@ -363,7 +438,7 @@ pub fn install(app: &mut App) {
         .init_resource::<HudState>()
         .init_resource::<HudView>();
     if osd {
-        app.add_systems(Update, ((crate::speed_advice::update, frame, crate::race_osd::drive, crate::race_osd::minimap).chain(), crate::race_osd::place_help));
+        app.add_systems(Update, ((crate::speed_advice::update, frame, crate::race_osd::drive, crate::drift_osd::drive, crate::race_osd::minimap).chain(), crate::race_osd::place_help));
     } else {
         app.add_systems(Update, (spawn, frame, update).chain());
     }
@@ -616,6 +691,8 @@ pub struct HudView {
     pub lap: LapInfo,
     /// A new personal best is marked (PB) for the split time.
     pub new_best: bool,
+    /// The new best is also a world record (WR wins over PB).
+    pub world_record: bool,
     pub position: Option<(usize, usize, Vec<Split>)>,
     pub splits: bool,
     /// Speed in the selected unit.
@@ -643,8 +720,8 @@ pub struct HudView {
 }
 
 /// The HUD's texts in the user's language table [D ids].
-const LABELS: [&str; 12] = [
-    "osd_lap", "osd_race", "osd_laptime", "osd_best", "osd_pb", "osd_pos", "osd_GO", "osd_wrong_way", "kph", "mph", "osd_minor", "osd_major",
+const LABELS: [&str; 13] = [
+    "osd_lap", "osd_race", "osd_laptime", "osd_best", "osd_pb", "osd_wr", "osd_pos", "osd_GO", "osd_wrong_way", "kph", "mph", "osd_minor", "osd_major",
 ];
 
 impl HudView {
@@ -676,6 +753,7 @@ fn frame(
     replay: Option<Res<crate::replay::Replay>>,
     front: Option<Res<crate::front_end::FrontEnd>>,
     touge: Option<Res<crate::touge_event::TougeEvent>>,
+    world: Option<Res<WorldRecord>>,
     mut state: ResMut<HudState>,
     mut view: ResMut<HudView>,
 ) {
@@ -699,10 +777,11 @@ fn frame(
     state.last = Some(now);
     let lap = driving.runtime.lap.as_ref();
     let mut info = lap_info(trial.as_ref().map(|t| &t.state), lap);
-    let (held, new_best) = state.lap_hold.update(
+    let (held, pill) = state.lap_hold.update(
         lap.map(|l| l.attempts),
         lap.and_then(|l| l.last_lap.as_ref()).map(|l| l.seconds),
         info.best,
+        world.and_then(|w| w.0),
         if driving.paused { 0. } else { dt },
     );
     if held.is_some() {
@@ -732,7 +811,8 @@ fn frame(
     let labels = std::mem::take(&mut view.labels);
     *view = HudView {
         lap: info,
-        new_best,
+        new_best: pill != RecordPill::Off,
+        world_record: pill == RecordPill::World,
         position: race.map(|o| position(&o.standings, &o.names, 0, &o.split_times, split)),
         splits: split.is_some(),
         speed: if options.mph { speed * 3.6 / 1.609_344 } else { speed * 3.6 },
@@ -819,7 +899,7 @@ fn update(
                     "\n{}  {}{}",
                     l("osd_best"),
                     info.best.map_or_else(|| "-:--.---".into(), lap_time),
-                    if view.new_best { format!("  {}", l("osd_pb")) } else { String::new() }
+                    if view.new_best { format!("  {}", l(if view.world_record { "osd_wr" } else { "osd_pb" })) } else { String::new() }
                 ));
                 set(text, s);
             }
@@ -1032,18 +1112,59 @@ mod tests {
     #[test]
     fn a_completed_lap_holds_its_time_and_the_record_pill_for_five_seconds() {
         let mut h = LapHold::default();
-        assert_eq!(h.update(Some(0), None, None, 0.5), (None, false));
+        let (pb, off) = (RecordPill::Personal, RecordPill::Off);
+        assert_eq!(h.update(Some(0), None, None, None, 0.5), (None, off));
         // Lap 1 completes in 61.2 s: a new best.
         let mut frames = Vec::new();
         for _ in 0..12 {
-            frames.push(h.update(Some(1), Some(61.2), Some(61.2), 0.5));
+            frames.push(h.update(Some(1), Some(61.2), Some(61.2), None, 0.5));
         }
-        assert_eq!(frames.iter().filter(|f| **f == (Some(61.2), true)).count(), 10);
-        assert_eq!(frames[11], (None, false));
+        assert_eq!(frames.iter().filter(|f| **f == (Some(61.2), pb)).count(), 10);
+        assert_eq!(frames[11], (None, off));
         // A slower lap holds its time without the pill.
-        assert_eq!(h.update(Some(2), Some(63.), Some(61.2), 0.5), (Some(63.), false));
+        assert_eq!(h.update(Some(2), Some(63.), Some(61.2), None, 0.5), (Some(63.), off));
         // A restart (the count drops) ends the hold at once.
-        assert_eq!(h.update(Some(0), None, None, 0.5), (None, false));
+        assert_eq!(h.update(Some(0), None, None, None, 0.5), (None, off));
+    }
+
+    #[test]
+    fn a_best_under_the_world_record_shows_wr() {
+        let mut h = LapHold::default();
+        let wr = Some(60.);
+        h.update(Some(0), None, None, wr, 0.1);
+        // 61 s: a personal best only.
+        assert_eq!(h.update(Some(1), Some(61.), Some(61.), wr, 0.1).1, RecordPill::Personal);
+        // 59.5 s beats the record: WR, for the hold only.
+        assert_eq!(h.update(Some(2), Some(59.5), Some(59.5), wr, 0.1).1, RecordPill::World);
+        for _ in 0..60 {
+            h.update(Some(2), Some(59.5), Some(59.5), wr, 0.1);
+        }
+        assert_eq!(h.update(Some(2), Some(59.5), Some(59.5), wr, 0.1).1, RecordPill::Off);
+        // After a restart 59.8 s is a PB, not a WR: 59.5 is the record now.
+        h.update(Some(0), None, None, wr, 0.1);
+        assert_eq!(h.update(Some(1), Some(59.8), Some(59.8), wr, 0.1).1, RecordPill::Personal);
+        assert_eq!(h.update(Some(2), Some(59.4), Some(59.4), wr, 0.1).1, RecordPill::World);
+        // No record row (or −1): never WR.
+        let mut h = LapHold::default();
+        h.update(Some(0), None, None, Some(-1.), 0.1);
+        assert_eq!(h.update(Some(1), Some(1.), Some(1.), Some(-1.), 0.1).1, RecordPill::Personal);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn world_records_come_from_the_track_model_and_grade() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"));
+        let schema = std::fs::read(root.join("database/schema.bin")).unwrap();
+        let data = std::fs::read(root.join("database/database.bin")).unwrap();
+        let db = grid_formats::database::read(&schema, &data).unwrap();
+        let mut found = 0;
+        for route in grid_tools::route::CIRCUITS {
+            let wr = WorldRecord::from_database(&db, route, "lac");
+            println!("world_record route={route} lac={wr:?}");
+            found += usize::from(wr.is_some());
+        }
+        assert!(found > 0, "no Lacetti world record on any circuit");
+        assert!(WorldRecord::from_database(&db, grid_tools::route::DONINGTON, "no_such_car").is_none());
     }
 
     #[test]

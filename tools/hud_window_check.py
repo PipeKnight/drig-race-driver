@@ -2,7 +2,7 @@
 
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
        [--size WxH] [--shots S,S,...] [--expect-stale] [--expect-splits]
-       [--expect-penalty [--contact-at S]] [--expect-brake]
+       [--expect-penalty [--contact-at S]] [--expect-brake] [--expect-drift]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1). RESIZE_AT seconds after launch it resizes
@@ -32,6 +32,10 @@ counted --contact-at seconds after GO (default 30), through the normal penalty p
 --expect-brake (F770) also requires the excessive-speed brake light's table: a `speed_advice ...
 loaded=true` line. `osd_brake` lines (printed when the light starts flashing) are counted but not
 required, since the autopilot need not overspeed. Use a circuit whose route ships class tables.
+
+--expect-drift also requires the drift OSD groups (drift_osd.rs): an `osd_drift open=true` line (a
+combo opened, printed on each combo change) after the resize, with the multiplier's digit scroll
+(`scroll=` units of the double, units and tens of the treble). Use a drift settings file.
 """
 import argparse
 import ctypes
@@ -74,6 +78,7 @@ def main():
     ap.add_argument('--expect-penalty', action='store_true')
     ap.add_argument('--contact-at', type=float, default=30.)
     ap.add_argument('--expect-brake', action='store_true')
+    ap.add_argument('--expect-drift', action='store_true')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -164,6 +169,14 @@ def main():
             verdict = 'FAIL: no brake-light speed table loaded'
         else:
             verdict += f'; brake table loaded, {len(brakes)} flashing starts'
+    drifts = re.findall(r'^osd_drift (.*)$', text[max(at, 0):], re.M)
+    opened = [d for d in drifts if 'open=true' in d]
+    print(f'osd_drift after the resize: {len(drifts)} lines, {len(opened)} open; {drifts[:4]}')
+    if args.expect_drift and verdict.startswith('PASS'):
+        if at < 0 or not opened:
+            verdict = 'FAIL: no drift combo opened after the resize'
+        else:
+            verdict += f'; {len(opened)} drift combo updates'
     missing = [n for n in names if not (out / n).exists()]
     if missing:
         verdict += f' (shots missing: {", ".join(missing)})'

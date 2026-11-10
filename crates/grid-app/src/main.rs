@@ -139,6 +139,7 @@ mod light_clusters;
 mod shadow_layout;
 mod race_hud;
 mod race_osd;
+mod drift_osd;
 mod render_scale;
 mod replay;
 mod replay_effects;
@@ -5129,6 +5130,25 @@ pub(crate) fn race_app(
             advice.is_some()
         );
         app.insert_resource(speed_advice::SpeedAdvice::new(advice));
+        // The minimap camera's per-track values (race_osd::MapView).
+        let map_view = race_osd::MapView::load(&root, route.path());
+        println!(
+            "osd_minimap version=1 event=view route={} zoom={} behind={} above={}",
+            route.path(),
+            map_view.zoom,
+            map_view.behind,
+            map_view.above
+        );
+        app.insert_resource(map_view);
+        // The world record the record pill compares a new best with.
+        let world_record = race_hud::WorldRecord::load(&root, route.path(), player_car.stem());
+        println!(
+            "osd_record version=1 event=world_record route={} car={} seconds={:?}",
+            route.path(),
+            player_car.stem(),
+            world_record.0
+        );
+        app.insert_resource(world_record);
         if let Some((next, length)) = touge_run.take() {
             app.insert_resource(touge_event::TougeEvent::new(
                 grid_tools::touge::Settings::load(&root)?,

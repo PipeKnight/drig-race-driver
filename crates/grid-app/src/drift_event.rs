@@ -562,11 +562,14 @@ fn present(
     labels: Option<Res<crate::pause_menu::Labels>>,
     post: Option<Res<crate::post_race::PostRace>>,
     replay: Option<Res<crate::replay::Replay>>,
+    osd: Option<Res<crate::osd_scene::Installed>>,
     mut panel: Query<&mut Visibility, With<Panel>>,
     mut text: Query<&mut Text, With<PanelText>>,
 ) {
-    // Hidden behind the post-race screens and while a replay plays.
-    let shown = !post.as_ref().is_some_and(|p| p.active())
+    // Hidden behind the post-race screens, while a replay plays and when
+    // the OSD scene shows the original drift groups (drift_osd).
+    let shown = osd.is_none()
+        && !post.as_ref().is_some_and(|p| p.active())
         && !replay.as_ref().is_some_and(|r| r.owns_input());
     for mut visibility in &mut panel {
         let want = if shown {

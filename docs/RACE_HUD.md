@@ -93,7 +93,6 @@ Not ported:
 - boost (no stock car has it, section 6.4);
 - driver name tags (traced, section 6.4);
 - the lap-time stacker re-flow (traced, section 6.4);
-- world records (`osd_wr`): the port has no record table;
 - offers;
 - spectator layout.
 
@@ -284,10 +283,10 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   icon panel, countdown box, wrong-way pill, minimap frame with the flag, which plays `in` while the
   player is inside an active yellow flag's zone, as 0x6BA460 (F759; before, it played for the
   chequered flag; docs/RACE_RULES_RESEARCH.md "Flag system").
-- Minimap (AUTHORED): the original draws its track shape into `track_mask` (`rd4minimap`, not
-  traced). The port hides the mask quad, draws the route as a light line inside the frame (north
-  up, as the plain HUD) and moves the original player arrow (turned with the heading [I]) and one
-  opponent marker per car.
+- Minimap [D] (F777): a chase-camera view of the flat track inside the
+  `track_mask` ring, the player arrow fixed below the centre pointing up, one opponent disc per car
+  projected from the same camera ("Minimap [D]" below). The port hides the mask quad and draws the
+  ribbon itself (`race_osd::minimap`, `race_osd::MapView`).
 - The OSD is off while the pause menu, a post-race screen, a replay or the front end is up
   (`post_race_entry` turns it off [D]; pause and replay from the original's pause frame [I]).
 - Screen Setup still hides the four groups.
@@ -299,7 +298,9 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   buttons. Without touch the help strip is a small bottom-centre line (it used to cover the lap group).
 - Phone: `tools/push_android_data.ps1` (and so `build_android.ps1 -BundleData`) now also copies
   `Osd/` and the five OSD fonts (about 3.6 MB); without them the app falls back to the panels.
-- Not ported: boost, drift groups, chat, driver name tags, offers,
+- Drift groups: `drift_osd` drives the meter, the points box and the combo panel in drift events
+  (section 6.5); the text panel of `drift_event` then stays hidden.
+- Not ported: boost, chat, driver name tags, offers,
   the stacker re-flow (hidden groups leave their gap), the cutscene/post-race
   and pause-menu art (front-end packages, not this scene).
 
@@ -418,13 +419,32 @@ reading, I meaning]:
   the node. Speed is the velocity's magnitude [I: the original reads car+0x1648]. Unit tests on a
   synthetic pack; an ignored test checks every route with a touring table against its AI line.
 
-Minimap [D]: a camera view of the track (`minimap_zoom` 400, `minimap_dist_behind` 116,
-`minimap_dist_above` 110 per track), up to 20 car markers; `track_mask` is drawn by the
-`rd4minimap` attach (vtable 0xCEB9D8, not decompiled). Its strings name render instances for the
-track, start/end, player and opponents, an `minimap_alphacamera` and the `osd_minimap_track`
-shader (used by 0x6B14D0 and 0x6B26A0); the track shape comes from a data field
-`minimap_file_string` [I: a per-track minimap model, its loader not traced]. Porting it is a render
-feature of its own. The port's route line stays AUTHORED.
+Minimap [D]: a camera view of the track drawn by the `rd4minimap` attach.
+- Values: the HUD (0x6BA460) reads the DB `track` columns `minimap_zoom`, `minimap_dist_behind`,
+  `minimap_dist_above` (Donington 200/116/110) and sends them through 0x6C0F80/0x6C01C0; the execute
+  0x6C1AB0 calls 0x6A38E0, which stores zoom +0x28, behind +0x5c, above +0x60 and a not-drift flag
+  +0x64 in the controller.
+- Setup: 0x6B1260 calls 0x6C0680, which fills the defaults: FOV 60 (+0x24), zoom 500, target height
+  10, track half-width 0.03·zoom, track colour ARGB 0xEFD2D2D2, highlight 0xFF414141 alpha 202 (only
+  with a highlight index), start/end colour 0xFF212121, player size 0.13·zoom, opponent size
+  0.1513·zoom, start/end sizes 0.0742/0.0099·zoom, behind 116, above 110. 0x6AB8D0 copies the block
+  into the controller and builds `minimap_database`/`minimap_root` (near 0.1, far 10000),
+  `minimap_alphacamera` (−1..1) and the render instances (opponent, player, track 0x6A3DF0,
+  start/end, final); 0x6A3490 creates the render targets.
+- Camera 0x6B28A0: the car's height is ignored. With f the flat unit forward, eye = (x − f.x·behind,
+  above, z − f.z·behind), target = (x, 10, z), up Y (lookAt 0x5E3330). Then it draws the track
+  (0x6B2330 → 0x6B1610), start/end (0x6A4D10, only with the +0x64 flag), opponents (0x6AB520,
+  billboards on the camera axes, size·zoom) and the player (0x6AB1A0).
+- Ribbon 0x6B1610: per route node (closed routes add a closing pair) two vertices at
+  node ± side·w with y 0, w = 0.03·zoom (Donington 6 m each side), vertex colour from the ARGB.
+- Port: `race_osd::MapView` reads the three columns through `track_model` (route key, venue
+  fallback; defaults 500/116/110 otherwise) and builds the same view and a 60° projection; the
+  ribbon runs along the AI line [I: the original's node list is the route; the AI line follows it],
+  clipped to the near plane and to a 64-gon of the ring (AUTHORED), in the 0xEFD2D2D2 colour. The
+  arrow keeps its dial2 size and stays upright; opponent discs keep theirs, scaled with the inverse
+  depth (AUTHORED: the original draws them at 0.1513·zoom world size).
+- `minimap_file_string` [I: a per-track model; its loader is not traced, and the camera draw does
+  not use it].
 
 Post-race cutscene (`cutscene/postrace.xml`) [D]: damage off, the AI takes over with a RaceOver
 cruise at 40 then 30, the OSD off. Porting it needs an AI cruise behaviour in the simulation.
@@ -438,8 +458,16 @@ Lap time hold and PB/WR pill (the lap interface, constructor 0x6B3950, vtable 0x
 - 0x6B3AF0 binds `object/pb_wr=lap_record` and `pb_wr_lap_text` (in dial2.pssg the pill's `multiplier_text!0`); 0x6B7A90 writes `osd_pb` (or
   `osd_wr`, which wins) into the text and plays `on`; once the 5 s timer is out it calls 0x6B2D00,
   which plays `off`. The `best__record` and `race_record` pills are not bound by any code.
+- World record [D]: the lap-record object (vtable 0xCE115C, built by the race setup near 0x67A976
+  through 0x5D0BE0) checks each completed lap in 0x5C3890: PB through 0x5C36C0 against its PB lap
+  (+0x3c), WR through 0x5C3790 against its WR lap (+0x38), which posts `NewWorldRecordMessage`
+  (vtable 0xCB154C). It then loads the record to beat: the `world_record` row of the track model
+  whose `vehicle_grade_id` equals the player vehicle's. Not traced: where the PB and WR laps come
+  from (a saved profile or ghost file, `ghostlaps/%s%d.xml` [I]).
 - Port: `race_hud::LapHold`. The PB source is the session best [I: what the original compares
-  against is not traced]; world records are not ported. Before, the port showed `osd_pb` on the
+  against is not traced]. A new best under `race_hud::WorldRecord` (that DB row for the player's
+  car) or under a lap that beat it earlier in the session shows `osd_wr` (F777);
+  a beaten record is not saved [I]. Before, the port showed `osd_pb` on the
   `best__record` pill for 5 s and never held the completed lap time (AUTHORED).
 
 OSD timer format [D]: the LAP and RACE texts are written with `%02u:%02u.%02u` (0x69E050 for
@@ -529,3 +557,49 @@ or T 2) and `split_group`. Not ported: which layout a port event gets depends on
 whose meaning is open.
 
 Not traced yet: the post-race art.
+
+### 6.5 Drift OSD
+
+The original drives three groups from the player's drift scorer (`grid_tools::drift::Scorer`,
+field offsets as in that file). The race OSD's per-frame bridge 0x6BB130 runs while the scorer
+exists and an OSD flag is set [D; who sets the flag is not traced, I: the drift formats F 2..4].
+It posts small commands that the combo attach executes later; the port calls them in the same
+order (`drift_osd::DriftOsd::update`).
+
+- Meter (`object/drift_main=drift`, bind 0x6B48D0, update 0x6B8D60) [D]: the signed slip value
+  (scorer +0x50, −1..1) is smoothed by s += (x − s)·0.3 per frame; `car` seeks to p = clamp((s+1)/2),
+  `meter_left` to clamp(1 − 2p), `meter_right` to clamp(2p − 1). A side swap after a value above
+  0.25 resets `meter_max_left/right` (0x6B4AA0), as does a new combo. The port applies the 0.3 at
+  a 60 Hz reference, 1 − 0.7^(60·dt), so the meter does not depend on the frame rate [I]. The
+  raise of the max markers (0x6B4C80/0x6B4B90) is not decompiled; the port keeps the highest bar.
+- Points box (`object/points_main=points`, bind 0x6BB650) [D]: titles get `osd_points`, the
+  total starts at "0" and `points_anim` plays `out`. A new combo plays `in`, hides
+  `multiplier_bag` and writes "X1"; each multiplier change writes "X%d" into `multiplier_text`
+  (0x6B4860). A bank writes the banked total with the locale's digit grouping (0x6B4700,
+  0x6A63B0) into `points_total` and its echo and plays `multiplier_bag` `on` (0x6B4570); a fail
+  plays `points_anim` `fail` (0x6B4680). The original also counts the shown value up to the combo
+  points (+0x2F8..+0x304); that tick is not traced and the port writes the total at the bank.
+- Combo panel (`object/driftcombo_main=drift_combo`, the `drifteffect` attach, vtable 0xCEBF3C,
+  bind 0x6B5650, update 0x6B9640) [D]:
+  - open (0x6B9730) when the combo multiplier (+0x18) becomes non-zero: the slots reset and
+    `driftcombo_anim` plays `on`;
+  - multiplier 2..99 (0x6B6040): the two slots `multiplier_1/2` alternate, the old one plays
+    `off`, the new one gets the digits and plays `on`;
+  - digits (0x6A76E0, the `combodigit` attach): below 10 the double stash (an "X" glyph and one
+    digit) shows and the treble stash hides, from 10 the reverse (tens and units). A digit is not
+    text: each `text_single`/`text_echo` glyph is a strip of ten, and the attach (vtable 0xCEC06C,
+    create 0x6A7AF0, parameter names `scrollX`, `scrollY` bound by 0x69FF10) sets the node's own
+    `scrollY` to digit·0.1·0.91 (0x6A7AC0 → 0x8CEBC0). The port adds `Osd::scroll_y`, a per-node
+    copy of the scene material that keeps following its animated values;
+  - drift type (0x6B5C60): when the rating (+0x20) changes to r > 0 the name of rating r−1 goes
+    into the other of `drift_type_1/2` (text and echo) with `off`/`on`; while r ≠ 0 the current
+    drift points (+0x10) show as "%d" in `points_text` (0x6C1B70);
+  - ring (0x6B99D0, 0x6B5EF0): f = combo timer / wait (0x63C580). Full while drifting; below 1 one
+    of the eight `timer_a/b` segments goes `off` every wait/8 s, from 8 down to 1, so ceil(8f) stay
+    lit. f reaching 0 banks (0x6B9850): the slots play `off`, the panel exits and hides after
+    2 s. A fail (+0x4C) plays `drop` (0x6B9910), also hidden after 2 s;
+  - close-drift bonus (0x6B5D10): when a close drift ends, `bonus` (under `redflag`) shows the
+    bonus "%d" or `osd_perfect` for a zero distance and plays `bonus`; after 1 s `bonus_off`.
+- Not ported: the ring shake near the end (0x6A77E0; its amplitude and threshold come from the
+  attach's construction, not traced), the points roll-up, `drift_message` (attach 0x6A8620, its
+  feeder not traced) and the battle position multiplier, which the plain text panel showed.

@@ -140,9 +140,6 @@ pub fn drive(
     osd.show("object/minimap_main=minimap", view.show_minimap);
     // Unported groups stay off.
     for node in [
-        "object/drift_main=drift",
-        "object/points_main=points",
-        "object/driftcombo_main=drift_combo",
         "object/pc_chat_whole=pc_chat",
         "object/drift_message=drift_message",
         "offers_group",
@@ -249,14 +246,13 @@ fn lap_group(view: &HudView, osd: &mut Osd) {
     osd.set_text("lap_time", &time(info.current));
     osd.set_text("best_title", &up("osd_best"));
     osd.set_text("best_time", &time(info.best));
-    // PB marker: the lap time's record pill (0x6B3AF0 binds `lap_record`
-    // and `pb_wr_lap_text`; 0x6B7A90 sets `osd_pb` and plays "on", 0x6B2D00
-    // "off" [D]). No world records in the port, so never `osd_wr`. The
-    // other two record pills are not bound by the original's code. In
-    // dial2.pssg the pill's text node is `multiplier_text!0`, found under
-    // the pill.
+    // Record pill: the lap time's pill (0x6B3AF0 binds `lap_record` and
+    // `pb_wr_lap_text`; 0x6B7A90 writes `osd_wr` for a world record, else
+    // `osd_pb`, and plays "on", 0x6B2D00 "off" [D]). The other two record
+    // pills are not bound by the original's code. In dial2.pssg the pill's
+    // text node is `multiplier_text!0`, found under the pill.
     if let Some(id) = osd.find("object/pb_wr=lap_record", "multiplier_text") {
-        osd.set_text(&id, &up("osd_pb"));
+        osd.set_text(&id, &up(if view.world_record { "osd_wr" } else { "osd_pb" }));
     }
     osd.play_once("object/pb_wr=lap_record", if view.new_best { "on" } else { "off" });
     for record in ["object/pb_wr=best__record", "object/pb_wr=race_record"] {
@@ -374,66 +370,241 @@ fn dial(view: &HudView, osd: &mut Osd, driver: &mut Driver, dt: f32) {
     }
 }
 
-/// The minimap's authored parts: the route line and one marker per car.
-#[derive(Default)]
-pub struct Minimap {
-    done: bool,
-    markers: Vec<Entity>,
-    /// (min x, min z, size) of the route and the mask's centre and radius.
-    map: Option<((f32, f32, f32), Vec2, f32)>,
-    /// The markers' saved depth in the mask's space.
-    depth: f32,
+/// Per-track minimap camera values: database.bin `track` columns
+/// `minimap_zoom`, `minimap_dist_behind` and `minimap_dist_above` [D], which
+/// the HUD's 0x6BA460 reads and hands to the minimap (0x6C0F80 queues them,
+/// 0x6A38E0 stores them on the minimap camera).
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct MapView {
+    /// Scales the ribbon width and the icon sizes; the camera ignores it.
+    pub zoom: f32,
+    /// Eye distance behind the car along its flat heading.
+    pub behind: f32,
+    /// Eye height above the map plane.
+    pub above: f32,
 }
 
-/// Fraction of the mask radius the route's square fills (AUTHORED).
-const MAP_FILL: f32 = 0.68;
-/// Depth step between minimap markers, toward the OSD camera (AUTHORED, scene
-/// units): a few float steps at the camera's distance of about 3,300 units,
-/// and 12 cars span 0.024, a tenth of the route ribbon's 0.2 offset.
-const MARKER_STEP: f32 = 0.002;
-
-/// A point of the map plane (world x, z) in the mask's local space: x to
-/// the right, world +Z up [I, as the plain HUD].
-fn map_local(p: [f32; 3], (x0, z0, size): (f32, f32, f32), centre: Vec2, radius: f32) -> Vec2 {
-    let u = (p[0] - x0) / size * 2. - 1.;
-    let v = (p[2] - z0) / size * 2. - 1.;
-    centre + Vec2::new(u, v) * radius * MAP_FILL
+impl Default for MapView {
+    /// The minimap's built-in values (0x6C0680 [D]), for a route the
+    /// database has no track row for.
+    fn default() -> Self {
+        Self { zoom: 500., behind: 116., above: 110. }
+    }
 }
 
-/// A closed ribbon along the route (local x, y; z 0).
-fn ribbon(points: &[Vec2], width: f32) -> grid_formats::osd::Mesh {
+/// Field of view in degrees (0x6C0680 field +0x24 = 60, set on the minimap
+/// camera before 0x6B28A0 draws [D value]; [I] vertical, square target).
+const MAP_FOV: f32 = 60.;
+/// Height of the camera's target above the map plane (field +0x2c [D]).
+const MAP_TARGET_HEIGHT: f32 = 10.;
+/// Ribbon half-width per zoom unit (field +0x30 [D]): 0x6B1610 places each
+/// route node's two vertices at node ± side · 0.03 · zoom, at height 0.
+const MAP_TRACK_WIDTH: f32 = 0.03;
+/// Near and far planes of `minimap_root` (0x6AB8D0 [D]).
+const MAP_NEAR: f32 = 0.1;
+const MAP_FAR: f32 = 10_000.;
+/// Track ribbon colour 0xEFD2D2D2 (ARGB, field +0x34 [D]).
+const MAP_TRACK_RGB: f32 = 210. / 255.;
+const MAP_TRACK_ALPHA: f32 = 239. / 255.;
+/// Sides of the polygon that stands in for the ring when the ribbon is cut
+/// to it (AUTHORED; the original masks a render target with `track_mask`).
+const RING_SIDES: usize = 64;
+
+/// The `track_model` row of `route` (`tracks/<folder>/<file>/<route>`),
+/// else the first row of its venue.
+pub fn track_model<'a>(db: &'a grid_formats::database::Database, route: &str) -> Option<grid_formats::database::Row<'a>> {
+    let models = db.table("track_model")?;
+    let route = route.replace('\\', "/").to_ascii_lowercase();
+    let venue = route.rsplit_once('/').map_or(route.as_str(), |(v, _)| v);
+    let key = |m: &grid_formats::database::Row<'_>| -> Option<(String, String)> {
+        let venue = format!("tracks/{}/{}", m.text("folder_string")?, m.text("file_string")?).to_ascii_lowercase();
+        Some((format!("{venue}/{}", m.text("route_string")?.to_ascii_lowercase()), venue))
+    };
+    models
+        .rows()
+        .find(|m| key(m).is_some_and(|(r, _)| r == route))
+        .or_else(|| models.rows().find(|m| key(m).is_some_and(|(_, v)| v == venue)))
+}
+
+impl MapView {
+    /// The values of `route`'s track (`tracks/<folder>/<file>/<route>`):
+    /// the `track_model` row of that route, else any row of its venue, then
+    /// that row's `track`.
+    pub fn from_database(db: &grid_formats::database::Database, route: &str) -> Option<Self> {
+        let tracks = db.table("track")?;
+        let model = track_model(db, route)?;
+        let track = tracks.rows().find(|t| t.int("id") == model.int("track_id"))?;
+        Some(Self {
+            zoom: track.float("minimap_zoom")?,
+            behind: track.float("minimap_dist_behind")?,
+            above: track.float("minimap_dist_above")?,
+        })
+    }
+
+    /// [`Self::from_database`] from the installation at `root`, else the
+    /// built-in values.
+    pub fn load(root: &std::path::Path, route: &str) -> Self {
+        std::fs::read(root.join("database/schema.bin"))
+            .and_then(|s| std::fs::read(root.join("database/database.bin")).map(|d| (s, d)))
+            .ok()
+            .and_then(|(s, d)| grid_formats::database::read(&s, &d).ok())
+            .and_then(|db| Self::from_database(&db, route))
+            .unwrap_or_default()
+    }
+
+    /// The minimap camera of a car at `pos` heading `forward` (0x6B28A0
+    /// [D]): the eye `behind` back along the flat heading at height `above`,
+    /// looking at the point `MAP_TARGET_HEIGHT` above the car, world up. The
+    /// heights are absolute: the camera, like the ribbon, ignores the car's
+    /// and the route's elevation. Returns (view, projection).
+    pub fn camera(&self, pos: Vec3, forward: Vec3) -> Option<(Mat4, Mat4)> {
+        let f = Vec3::new(forward.x, 0., forward.z).try_normalize()?;
+        let ground = Vec3::new(pos.x, 0., pos.z);
+        let eye = ground - f * self.behind + Vec3::Y * self.above;
+        let view = Mat4::look_at_rh(eye, ground + Vec3::Y * MAP_TARGET_HEIGHT, Vec3::Y);
+        Some((view, Mat4::perspective_rh(MAP_FOV.to_radians(), 1., MAP_NEAR, MAP_FAR)))
+    }
+}
+
+/// A map-plane point (world x, z at height 0) seen by the minimap camera:
+/// view-space position, or `None` behind the near plane.
+fn map_view_point(view: Mat4, p: [f32; 3]) -> Option<Vec3> {
+    let v = view.transform_point3(Vec3::new(p[0], 0., p[2]));
+    (v.z <= -MAP_NEAR).then_some(v)
+}
+
+/// A view-space point on the minimap target, in the mask's local space: the
+/// target's square spans the ring's square (NDC ±1 = ±radius).
+fn map_target(projection: Mat4, v: Vec3, centre: Vec2, radius: f32) -> Vec2 {
+    let clip = projection * v.extend(1.);
+    centre + Vec2::new(clip.x, clip.y) / clip.w * radius
+}
+
+/// Sutherland-Hodgman: the part of `poly` on the side of `inside`, with
+/// `cut` giving the crossing point of an edge.
+fn clip_polygon<T: Copy>(poly: &[T], inside: impl Fn(T) -> bool, cut: impl Fn(T, T) -> T) -> Vec<T> {
+    let mut out = Vec::with_capacity(poly.len() + 2);
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        match (inside(a), inside(b)) {
+            (true, true) => out.push(b),
+            (true, false) => out.push(cut(a, b)),
+            (false, true) => out.extend([cut(a, b), b]),
+            (false, false) => {}
+        }
+    }
+    out
+}
+
+/// The track ribbon the minimap camera sees, in the mask's local space and
+/// cut to the ring: the route at height 0, `half_width` either side of each
+/// point (0x6B1610 [D]; the original's nodes carry their own side vectors,
+/// here the route's flat normal), closed unless `open`.
+fn map_ribbon(
+    points: &[[f32; 3]],
+    open: bool,
+    half_width: f32,
+    (view, projection): (Mat4, Mat4),
+    centre: Vec2,
+    radius: f32,
+) -> grid_formats::osd::Mesh {
     let mut m = grid_formats::osd::Mesh::default();
     let n = points.len();
     if n < 2 {
         return m;
     }
-    for i in 0..n {
-        let (a, b) = (points[(i + n - 1) % n], points[(i + 1) % n]);
-        let d = (b - a).normalize_or_zero();
-        let side = Vec2::new(-d.y, d.x) * width / 2.;
-        let p = points[i];
-        for q in [p + side, p - side] {
-            m.positions.push([q.x, q.y, 0.]);
-            m.normals.push([0., 0., 1.]);
-            m.uvs.push([0., 0.]);
+    let flat = |p: [f32; 3]| Vec2::new(p[0], p[2]);
+    let sides: Vec<[Vec3; 2]> = (0..n)
+        .map(|i| {
+            let prev = if i > 0 { i - 1 } else if open { 0 } else { n - 1 };
+            let next = if i + 1 < n { i + 1 } else if open { n - 1 } else { 0 };
+            let d = (flat(points[next]) - flat(points[prev])).normalize_or_zero();
+            let s = Vec2::new(-d.y, d.x) * half_width;
+            let p = flat(points[i]);
+            [Vec3::new(p.x + s.x, 0., p.y + s.y), Vec3::new(p.x - s.x, 0., p.y - s.y)]
+        })
+        .map(|[l, r]| [view.transform_point3(l), view.transform_point3(r)])
+        .collect();
+    let ring: Vec<Vec2> = (0..RING_SIDES)
+        .map(|k| centre + Vec2::from_angle(k as f32 * std::f32::consts::TAU / RING_SIDES as f32) * radius)
+        .collect();
+    // Inside every side of the ring polygon: no cut needed.
+    let safe = radius * (std::f32::consts::PI / RING_SIDES as f32).cos();
+    let segments = if open { n - 1 } else { n };
+    for i in 0..segments {
+        let j = (i + 1) % n;
+        let [l0, r0] = sides[i];
+        let [l1, r1] = sides[j];
+        for tri in [[l0, r0, r1], [l0, r1, l1]] {
+            if tri.iter().all(|v| v.z > -MAP_NEAR) {
+                continue;
+            }
+            let near = clip_polygon(&tri, |v| v.z <= -MAP_NEAR, |a, b| a.lerp(b, (-MAP_NEAR - a.z) / (b.z - a.z)));
+            let mut poly: Vec<Vec2> = near.iter().map(|v| map_target(projection, *v, centre, radius)).collect();
+            let lo = poly.iter().fold(Vec2::INFINITY, |a, p| a.min(*p));
+            let hi = poly.iter().fold(Vec2::NEG_INFINITY, |a, p| a.max(*p));
+            if hi.x < centre.x - radius || lo.x > centre.x + radius || hi.y < centre.y - radius || lo.y > centre.y + radius {
+                continue;
+            }
+            if poly.iter().any(|p| p.distance(centre) > safe) {
+                for k in 0..RING_SIDES {
+                    let (a, b) = (ring[k], ring[(k + 1) % RING_SIDES]);
+                    let edge = b - a;
+                    let side = |p: Vec2| edge.perp_dot(p - a);
+                    poly = clip_polygon(&poly, |p| side(p) >= 0., |p, q| p.lerp(q, side(p) / (side(p) - side(q))));
+                    if poly.len() < 3 {
+                        break;
+                    }
+                }
+            }
+            // The u16 index range bounds one ribbon (AUTHORED guard).
+            if poly.len() < 3 || m.positions.len() + poly.len() > u16::MAX as usize {
+                continue;
+            }
+            let base = m.positions.len() as u16;
+            for p in &poly {
+                m.positions.push([p.x, p.y, 0.]);
+                m.normals.push([0., 0., 1.]);
+                m.uvs.push([0., 0.]);
+            }
+            for k in 1..poly.len() as u16 - 1 {
+                m.indices.extend([base, base + k, base + k + 1]);
+            }
         }
-    }
-    for i in 0..n as u16 {
-        let j = (i + 1) % n as u16;
-        m.indices.extend([2 * i, 2 * i + 1, 2 * j, 2 * j, 2 * i + 1, 2 * j + 1]);
     }
     m
 }
 
-/// Draws the route inside the original minimap frame (the original's
-/// `rd4minimap` draws its own track shape into `track_mask`, AUTHORED here)
-/// and moves the original player and opponent markers; the player arrow
-/// turns with the car's heading [I: north-up map].
+/// The minimap's parts: the ribbon and one marker per car.
+#[derive(Default)]
+pub struct Minimap {
+    done: bool,
+    markers: Vec<Entity>,
+    /// The mask's centre and ring radius in its local space.
+    ring: Option<(Vec2, f32)>,
+    ribbon: Option<Handle<Mesh>>,
+    /// The markers' saved depth in the mask's space.
+    depth: f32,
+    /// The opponent marker's saved scale.
+    scale: Vec3,
+}
+
+/// Depth step between minimap markers, toward the OSD camera (AUTHORED, scene
+/// units): a few float steps at the camera's distance of about 3,300 units,
+/// and 12 cars span 0.024, a tenth of the route ribbon's 0.2 offset.
+const MARKER_STEP: f32 = 0.002;
+
+/// Draws the original minimap (0x6B28A0 [D]): the route ribbon and the cars
+/// as the minimap camera sees them from behind and above the player, heading
+/// up, inside the `track_mask` ring. The player arrow points up; opponent
+/// discs scale with their distance like the original's world-sized icons
+/// (0x6AB520), and leave the map outside the ring.
 #[allow(clippy::too_many_arguments)]
 pub fn minimap(
     mut commands: Commands,
     driving: Res<crate::Driving>,
     osd: Option<Res<Osd>>,
+    view: Option<Res<MapView>>,
     mut state: Local<Minimap>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<crate::osd_scene::OsdMaterial>>,
@@ -448,20 +619,19 @@ pub fn minimap(
     let (Some(mask), Some(bounds)) = (osd.entity("track_mask"), osd.bounds("track_mask")) else {
         return;
     };
+    let view = view.map(|v| *v).unwrap_or_default();
     let cars = driving.opponents.as_ref().map_or(1, |o| o.multi.cars.len());
     if !state.done {
         state.done = true;
         let centre = Vec2::new(bounds[0] + bounds[3], bounds[1] + bounds[4]) / 2.;
         let radius = (bounds[3] - bounds[0]).min(bounds[4] - bounds[1]) / 2.;
-        let fit = crate::race_hud::map_bounds(line.points());
-        state.map = Some((fit, centre, radius));
-        let step = line.points().len().div_ceil(240).max(1);
-        let points: Vec<Vec2> = line.points().iter().step_by(step).map(|p| map_local(*p, fit, centre, radius)).collect();
-        let mesh = crate::osd_scene::mesh(&ribbon(&points, radius * 0.045));
+        state.ring = Some((centre, radius));
+        let ribbon = meshes.add(crate::osd_scene::mesh(&grid_formats::osd::Mesh::default()));
+        state.ribbon = Some(ribbon.clone());
         commands.entity(mask).remove::<Mesh3d>();
         commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(materials.add(osd.colour_material(Vec3::splat(0.85), 0.85))),
+            Mesh3d(ribbon),
+            MeshMaterial3d(materials.add(osd.colour_material(Vec3::splat(MAP_TRACK_RGB), MAP_TRACK_ALPHA))),
             Transform::from_xyz(0., 0., 0.2),
             bevy::camera::visibility::RenderLayers::layer(crate::osd_scene::LAYER),
             bevy::camera::visibility::NoFrustumCulling,
@@ -472,6 +642,7 @@ pub fn minimap(
         if let Some(Ok(t)) = opponent.or(player).map(|e| transforms.get(e)) {
             state.depth = t.translation.z;
         }
+        state.scale = opponent.and_then(|o| transforms.get(o).ok()).map_or(Vec3::ONE, |t| t.scale);
         state.markers = vec![player.unwrap_or(Entity::PLACEHOLDER)];
         if let Some(o) = opponent {
             state.markers.push(o);
@@ -493,9 +664,16 @@ pub fn minimap(
         }
         return;
     }
-    let Some((fit, centre, radius)) = state.map else {
+    let (Some((centre, radius)), Some(player)) = (state.ring, crate::race_hud::car_pose(&driving, 0)) else {
         return;
     };
+    let Some(cam) = view.camera(Vec3::new(player[12], player[13], player[14]), Vec3::new(player[8], 0., player[10])) else {
+        return;
+    };
+    if let Some(mut mesh) = state.ribbon.as_ref().and_then(|h| meshes.get_mut(h)) {
+        let ribbon = map_ribbon(line.points(), line.is_open(), MAP_TRACK_WIDTH * view.zoom, cam, centre, radius);
+        *mesh = crate::osd_scene::mesh(&ribbon);
+    }
     // The markers blend at one saved depth, so where they overlap their
     // order was a sort tie that unrelated changes flipped. Each car now has
     // its own depth: the player's arrow in front, then the opponents in car
@@ -507,20 +685,27 @@ pub fn minimap(
         }
         _ => 1.,
     };
+    let player_depth = map_view_point(cam.0, [player[12], 0., player[14]]).map_or(1., |v| -v.z);
     let count = state.markers.len();
     for (car, &e) in state.markers.iter().enumerate() {
         let Ok(mut t) = transforms.get_mut(e) else {
             continue;
         };
         t.translation.z = state.depth + toward * MARKER_STEP * (count - car) as f32;
-        match crate::race_hud::car_pose(&driving, car).filter(|_| car < cars) {
-            Some(p) => {
-                let at = map_local([p[12], p[13], p[14]], fit, centre, radius);
+        let seen = crate::race_hud::car_pose(&driving, car)
+            .filter(|_| car < cars)
+            .and_then(|p| map_view_point(cam.0, [p[12], 0., p[14]]))
+            .map(|v| (map_target(cam.1, v, centre, radius), -v.z))
+            .filter(|(at, _)| at.distance(centre) <= radius);
+        match seen {
+            Some((at, depth)) => {
                 t.translation.x = at.x;
                 t.translation.y = at.y;
                 if car == 0 {
-                    // Heading from the car's forward (local +Z) axis.
-                    t.rotation = Quat::from_rotation_z(-p[8].atan2(p[10]));
+                    // The camera follows the heading: the arrow points up.
+                    t.rotation = Quat::IDENTITY;
+                } else {
+                    t.scale = state.scale * (player_depth / depth).clamp(0.25, 4.);
                 }
             }
             None => t.translation.x = 1.0e6,
@@ -602,5 +787,62 @@ mod tests {
         assert!((up - 0.36).abs() < 1e-4 && down == 0., "{up} {down}");
         // A fast drop saturates the down blur.
         assert_eq!(needle_blur(&mut s, 0.3, 1. / 30.), (0., 1.));
+    }
+
+    /// The minimap camera of a car at the origin heading +Z with the
+    /// Donington values, and its mapping onto a unit ring.
+    fn donington_camera() -> (Mat4, Mat4) {
+        MapView { zoom: 200., behind: 116., above: 110. }.camera(Vec3::ZERO, Vec3::Z).unwrap()
+    }
+
+    #[test]
+    fn minimap_camera_shows_the_car_below_centre_heading_up() {
+        let cam = donington_camera();
+        let at = |p: [f32; 3]| map_view_point(cam.0, p).map(|v| map_target(cam.1, v, Vec2::ZERO, 1.));
+        // The target is 10 above the car: the car sits 2.7 degrees below the
+        // view's centre, -tan(2.73)/tan(30) of the half-height.
+        let car = at([0., 0., 0.]).unwrap();
+        assert!(car.x.abs() < 1e-5 && (car.y + 0.083).abs() < 0.005, "{car}");
+        // The route ahead goes up the map, the car's right (Bevy: -X for a
+        // +Z heading) to the right; the eye's elevation is ignored.
+        assert!(at([0., 0., 150.]).unwrap().y > 0.3);
+        assert!(at([-20., 0., 0.]).unwrap().x > 0.1);
+        assert_eq!(at([0., 35., 0.]), Some(car));
+        // Far behind the eye is behind the near plane.
+        assert!(at([0., 0., -400.]).is_none());
+    }
+
+    #[test]
+    fn minimap_ribbon_stays_inside_the_ring() {
+        // A straight route through the car, then a turn behind it.
+        let points: Vec<[f32; 3]> = (-100..300).map(|i| [0., 0., i as f32 * 5.]).chain((0..200).map(|i| [i as f32 * 5., 0., -500.])).collect();
+        let m = map_ribbon(&points, false, MAP_TRACK_WIDTH * 200., donington_camera(), Vec2::new(3., 4.), 2.);
+        assert!(!m.indices.is_empty() && m.indices.len().is_multiple_of(3));
+        assert!(m.positions.iter().all(|p| Vec2::new(p[0], p[1]).distance(Vec2::new(3., 4.)) <= 2. + 1e-4));
+        // The ribbon reaches the ring at the top (ahead) and the bottom.
+        let ys = m.positions.iter().map(|p| p[1]);
+        let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(y), b.max(y)));
+        assert!(lo < 4. - 1.9 && hi > 4. + 1.9, "{lo} {hi}");
+        // At the car it is 12 m wide, 0.065 of the 184 m the view spans at the
+        // car's depth: 0.13 of the NDC range.
+        let near_car: Vec<f32> = m.positions.iter().filter(|p| (p[1] - (4. - 0.166)).abs() < 0.02).map(|p| p[0]).collect();
+        let width = near_car.iter().cloned().fold(f32::MIN, f32::max) - near_car.iter().cloned().fold(f32::MAX, f32::min);
+        assert!((width / 2. - 0.135).abs() < 0.02, "{width}");
+    }
+
+    #[test]
+    #[ignore = "needs GRID_GAME_ROOT"]
+    fn every_route_has_minimap_values() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"));
+        let schema = std::fs::read(root.join("database/schema.bin")).unwrap();
+        let data = std::fs::read(root.join("database/database.bin")).unwrap();
+        let db = grid_formats::database::read(&schema, &data).unwrap();
+        for route in grid_tools::route::CIRCUITS {
+            let v = MapView::from_database(&db, route).unwrap_or_else(|| panic!("{route}"));
+            println!("minimap route={route} {v:?}");
+            assert!(v.zoom > 0. && v.behind > 0. && v.above > 0., "{route} {v:?}");
+        }
+        let d = MapView::from_database(&db, grid_tools::route::DONINGTON).unwrap();
+        assert_eq!(d, MapView { zoom: 200., behind: 116., above: 110. });
     }
 }

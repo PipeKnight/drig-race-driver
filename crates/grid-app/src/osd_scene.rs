@@ -168,6 +168,17 @@ fn mode(effect: &str) -> f32 {
     }
 }
 
+/// A node's own copy of its scene material with `scrollY` set, as the
+/// original's per-instance shader parameter (the combodigit attach,
+/// 0x6A7AC0). The copy follows the scene material's animated values.
+#[derive(Clone, Debug)]
+struct Scroll {
+    source: usize,
+    y: f32,
+    handle: Option<Handle<OsdMaterial>>,
+    dirty: bool,
+}
+
 /// CPU copy of a material's animatable values.
 #[derive(Clone, Debug)]
 struct MaterialState {
@@ -411,6 +422,10 @@ pub struct Osd {
     shown: HashMap<Entity, bool>,
     /// Added to an animated node's translation (authored layout moves).
     offsets: HashMap<Entity, Vec3>,
+    /// The scene material of each render node.
+    node_materials: HashMap<Entity, usize>,
+    /// Per-node `scrollY` values over the node's scene material.
+    scrolls: HashMap<Entity, Scroll>,
     image: Handle<Image>,
     /// The UI material that shows `image` over the 3D view.
     display: Handle<OsdDisplay>,
@@ -483,6 +498,25 @@ impl Osd {
         if let Some(&e) = self.entities.get(node) {
             self.offsets.insert(e, offset);
         }
+    }
+    /// Sets a render node's own `scrollY` material value (a digit strip's
+    /// glyph), leaving other nodes that share its material unchanged.
+    pub fn scroll_y(&mut self, node: &str, y: f32) {
+        let Some(&e) = self.entities.get(node) else {
+            return;
+        };
+        let Some(&source) = self.node_materials.get(&e) else {
+            return;
+        };
+        let s = self.scrolls.entry(e).or_insert(Scroll { source, y: f32::NAN, handle: None, dirty: true });
+        if s.y != y {
+            s.y = y;
+            s.dirty = true;
+        }
+    }
+    /// A node's own `scrollY`, once set.
+    pub fn scroll_of(&self, node: &str) -> Option<f32> {
+        self.scrolls.get(self.entities.get(node)?).map(|s| s.y)
     }
     /// Shows or hides a node and its children.
     pub fn show(&mut self, node: &str, on: bool) {
@@ -795,6 +829,7 @@ fn spawn(
     // Nodes, in tree order (parents first).
     let mut entities: Vec<Entity> = Vec::with_capacity(loaded.nodes.len());
     let mut by_id = HashMap::new();
+    let mut node_materials = HashMap::new();
     let mut texts = HashMap::new();
     for (i, n) in loaded.nodes.iter().enumerate() {
         let mut e = commands.spawn((transform(&n.local), Visibility::Inherited));
@@ -831,6 +866,7 @@ fn spawn(
                 }
                 None => mesh.clone(),
             };
+            node_materials.insert(e.id(), r.material);
             e.insert((
                 Mesh3d(mesh),
                 MeshMaterial3d(loaded.materials[r.material].handle.clone()),
@@ -893,6 +929,8 @@ fn spawn(
         fonts: loaded.fonts.clone(),
         shown: HashMap::new(),
         offsets: HashMap::new(),
+        node_materials,
+        scrolls: HashMap::new(),
         image,
         display,
         camera,
@@ -953,6 +991,7 @@ fn animate(
     time: Option<Res<Time<Real>>>,
     mut transforms: Query<&mut Transform>,
     mut materials: ResMut<Assets<OsdMaterial>>,
+    mut bound: Query<&mut MeshMaterial3d<OsdMaterial>>,
 ) {
     let Some(mut osd) = osd else {
         return;
@@ -994,6 +1033,33 @@ fn animate(
                     }
                 }
                 Target::None => {}
+            }
+        }
+    }
+    for (e, s) in &mut osd.scrolls {
+        let state = &osd.materials[s.source];
+        if !(s.dirty || state.dirty) {
+            continue;
+        }
+        s.dirty = false;
+        let mut params = state.params;
+        params.a.y = s.y;
+        match &s.handle {
+            Some(h) => {
+                if let Some(mut m) = materials.get_mut(h) {
+                    m.params = params;
+                }
+            }
+            None => {
+                let Some(mut m) = materials.get(&state.handle).cloned() else {
+                    continue;
+                };
+                m.params = params;
+                let h = materials.add(m);
+                if let Ok(mut b) = bound.get_mut(*e) {
+                    b.0 = h.clone();
+                }
+                s.handle = Some(h);
             }
         }
     }
@@ -1134,6 +1200,8 @@ mod tests {
             fonts: Vec::new(),
             shown: HashMap::new(),
             offsets: HashMap::new(),
+            node_materials: HashMap::new(),
+            scrolls: HashMap::new(),
             image: image.clone(),
             display: display.clone(),
             camera,
@@ -1186,6 +1254,8 @@ mod tests {
             fonts: Vec::new(),
             shown: HashMap::new(),
             offsets: HashMap::new(),
+            node_materials: HashMap::new(),
+            scrolls: HashMap::new(),
             image: Handle::default(),
             display: Handle::default(),
             camera: Entity::PLACEHOLDER,
