@@ -363,7 +363,7 @@ pub fn install(app: &mut App) {
         .init_resource::<HudState>()
         .init_resource::<HudView>();
     if osd {
-        app.add_systems(Update, ((frame, crate::race_osd::drive, crate::race_osd::minimap).chain(), crate::race_osd::place_help));
+        app.add_systems(Update, ((crate::speed_advice::update, frame, crate::race_osd::drive, crate::race_osd::minimap).chain(), crate::race_osd::place_help));
     } else {
         app.add_systems(Update, (spawn, frame, update).chain());
     }
@@ -629,6 +629,8 @@ pub struct HudView {
     pub countdown: Option<String>,
     pub wrong_way: bool,
     pub yellow_flag: bool,
+    /// The player's latest touge penalty (the penalty pill).
+    pub penalty: Option<crate::touge_event::PenaltyPill>,
     pub show_lap: bool,
     pub show_position: bool,
     pub show_dials: bool,
@@ -641,7 +643,9 @@ pub struct HudView {
 }
 
 /// The HUD's texts in the user's language table [D ids].
-const LABELS: [&str; 10] = ["osd_lap", "osd_race", "osd_laptime", "osd_best", "osd_pb", "osd_pos", "osd_GO", "osd_wrong_way", "kph", "mph"];
+const LABELS: [&str; 12] = [
+    "osd_lap", "osd_race", "osd_laptime", "osd_best", "osd_pb", "osd_pos", "osd_GO", "osd_wrong_way", "kph", "mph", "osd_minor", "osd_major",
+];
 
 impl HudView {
     pub fn label(&self, id: &'static str) -> String {
@@ -671,6 +675,7 @@ fn frame(
     post: Option<Res<crate::post_race::PostRace>>,
     replay: Option<Res<crate::replay::Replay>>,
     front: Option<Res<crate::front_end::FrontEnd>>,
+    touge: Option<Res<crate::touge_event::TougeEvent>>,
     mut state: ResMut<HudState>,
     mut view: ResMut<HudView>,
 ) {
@@ -744,6 +749,7 @@ fn frame(
         countdown: if driving.paused { None } else { countdown },
         wrong_way: wrong_way && !finished,
         yellow_flag: race.is_some_and(|o| o.yellow_flag),
+        penalty: touge.and_then(|t| t.pill),
         show_lap: options.lap_timer,
         show_position: options.position && race.is_some(),
         show_dials: options.dials,

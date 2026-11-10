@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F770](log/F0770.md) | 2026-11-10 | HUD: touge penalty pill, brake light, wreck delay; name tags, boost and stacker traced |
 | [F769](log/F0769.md) | 2026-11-10 | Replayed skid marks, smoke and debris; replay slow motion and frame step; Flashback drops the abandoned future's effects |
 | [F768](log/F0768.md) | 2026-11-09 | Drift Battle: original drift field, unread drift settings, drift soak |
 | [F767](log/F0767.md) | 2026-11-09 | One-window front end: menu, loading screen and race in one process |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F713](log/F0713.md) | 2026-11-03 | Ornament shadows fade across D (shadow proxies) |
 | [F712](log/F0712.md) | 2026-11-03 | Baseline draws no source forest on any track; branch baseline-trees prepared |
 | [F711](log/F0711.md) | 2026-11-03 | Row 99 recheck on main: the Le Mans route 0 R10 branch at 8,689 m and the route sweep hold |
-| [F710](log/F0710.md) | 2026-11-03 | Barrier strips at impact: skinned damage meshes blend over their pieces' joints; the anchor offset is the body frame |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

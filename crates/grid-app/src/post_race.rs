@@ -176,9 +176,23 @@ pub const TEST_DRIVE_WRECK_PILLS: [(Pill, &str); 3] = [
     (Pill::Replay, "terminal_damage_replay_button_header"),
 ];
 
-/// `terminal_flash` + `terminal_fade` time delays (1.0 s each) [D]; the
-/// `terminal_damage_delay` state's own wait was not traced.
-pub const WRECK_DELAY: f32 = 2.;
+/// `terminal_flash` + `terminal_fade` time delays (1.0 s each) [D].
+pub const WRECK_TRANSITIONS: f32 = 2.;
+/// `StateTerminalDamageDelay` then waits for the player's car to come to
+/// rest, giving up this long after entering the state (0x57F1A0) [D] ...
+pub const WRECK_REST_LIMIT: f32 = 2.;
+/// ... and returns "done" this long after the rest (0x58E2E0) [D].
+pub const WRECK_AFTER_REST: f32 = 1.;
+/// At rest: angular speed at most 0.1 and linear speed at most 0.5
+/// (0xCAFCD4, 0xCAF88C) [D values; I: rad/s and m/s, as magnitudes].
+pub const REST_ANGULAR: f32 = 0.1;
+pub const REST_LINEAR: f32 = 0.5;
+
+/// The car rests by the terminal-damage delay's thresholds.
+pub fn at_rest(linear: [f32; 4], angular: [f32; 4]) -> bool {
+    let len = |v: [f32; 4]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    len(angular) <= REST_ANGULAR && len(linear) <= REST_LINEAR
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -224,6 +238,8 @@ pub struct PostRace {
     cursor: usize,
     answer: usize,
     wreck_timer: f32,
+    /// Seconds since the wrecked car came to rest (or the rest wait gave up).
+    wreck_rest: Option<f32>,
     segment: u64,
     repeat: Repeat,
 }
@@ -237,6 +253,7 @@ impl PostRace {
             cursor: 0,
             answer: 1,
             wreck_timer: 0.,
+            wreck_rest: None,
             segment: 0,
             repeat: Repeat::default(),
         }
@@ -283,15 +300,28 @@ impl PostRace {
         }
     }
 
-    /// Terminal damage this frame (`dt` real seconds); the wreck screen after
-    /// [`WRECK_DELAY`].
-    pub fn on_wreck(&mut self, wrecked: bool, dt: f32) {
+    /// Terminal damage this frame (`dt` real seconds, `rest` the car's
+    /// [`at_rest`]): the two transitions, the rest wait (at most
+    /// [`WRECK_REST_LIMIT`]), then [`WRECK_AFTER_REST`] and the wreck screen.
+    /// The original plays the crash replay before its menu; the port shows the
+    /// menu, with the replay one choice of it (AUTHORED).
+    pub fn on_wreck(&mut self, wrecked: bool, rest: bool, dt: f32) {
         if !wrecked || self.stage != Stage::Hidden {
             self.wreck_timer = 0.;
+            self.wreck_rest = None;
             return;
         }
         self.wreck_timer += dt;
-        if self.wreck_timer >= WRECK_DELAY {
+        let in_state = self.wreck_timer - WRECK_TRANSITIONS;
+        if in_state < 0. {
+            return;
+        }
+        match &mut self.wreck_rest {
+            Some(t) => *t += dt,
+            None if rest || in_state > WRECK_REST_LIMIT => self.wreck_rest = Some(0.),
+            None => {}
+        }
+        if self.wreck_rest.is_some_and(|t| t >= WRECK_AFTER_REST) {
             self.stage = Stage::Wreck;
             self.cursor = 0;
         }
@@ -303,6 +333,7 @@ impl PostRace {
             self.stage = Stage::Hidden;
         }
         self.wreck_timer = 0.;
+        self.wreck_rest = None;
     }
 
     pub fn reset(&mut self, segment: u64) {
@@ -453,7 +484,8 @@ pub fn update(
     }
     let wrecked = driving.runtime.terminal_wheel().is_some() && !finished;
     let before = post.stage;
-    post.on_wreck(wrecked, if driving.paused { 0. } else { dt });
+    let rest = at_rest(driving.runtime.velocity(), driving.runtime.angular_velocity());
+    post.on_wreck(wrecked, rest, if driving.paused { 0. } else { dt });
     if before != post.stage {
         log_line!(
             "drive_post_race version=1 segment={} tick={} stage=wreck",
@@ -1150,11 +1182,15 @@ mod tests {
     }
 
     #[test]
-    fn wreck_screen_after_two_seconds_and_retire_leaves() {
+    fn wreck_screen_after_the_rest_wait_and_retire_leaves() {
+        // A car at rest: the 2 s transitions, then 1 s.
         let mut post = PostRace::new(Variant::FreeRace);
-        post.on_wreck(true, 1.5);
+        post.on_wreck(true, true, 1.5);
+        post.on_wreck(true, true, 0.5);
         assert!(!post.active());
-        post.on_wreck(true, 0.5);
+        post.on_wreck(true, true, 0.9);
+        assert!(!post.active());
+        post.on_wreck(true, true, 0.1);
         assert_eq!(post.stage, Stage::Wreck);
         post.step(press(|n| n.down = true));
         post.step(press(|n| n.select = true));
@@ -1164,7 +1200,13 @@ mod tests {
             Some(Command::RetireAndExit)
         );
         let mut td = PostRace::new(Variant::TestDrive);
-        td.on_wreck(true, 2.);
+        // Still sliding: the rest wait gives up after 2 s, then 1 s.
+        for _ in 0..49 {
+            td.on_wreck(true, false, 0.1);
+        }
+        assert!(!td.active());
+        td.on_wreck(true, false, 0.3);
+        assert!(td.active());
         td.step(press(|n| n.down = true));
         td.step(press(|n| n.select = true));
         assert_eq!(td.stage, Stage::Confirm(Confirm::FinishTestDrive, Return::Wreck));

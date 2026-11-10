@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F770](F0770.md) | 2026-11-10 | HUD: touge penalty pill, brake light, wreck delay; name tags, boost and stacker traced |
 | [F769](F0769.md) | 2026-11-10 | Replayed skid marks, smoke and debris; replay slow motion and frame step; Flashback drops the abandoned future's effects |
 | [F768](F0768.md) | 2026-11-09 | Drift Battle: original drift field, unread drift settings, drift soak |
 | [F767](F0767.md) | 2026-11-09 | One-window front end: menu, loading screen and race in one process |

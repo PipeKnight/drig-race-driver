@@ -27,6 +27,17 @@ pub(crate) struct NextRun {
     pub length: f64,
 }
 
+/// The player's latest counted penalty, for the HUD pill (0x64E1E0 calls
+/// 0x6B3500 / 0x6B3630 only for the player's car [D]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PenaltyPill {
+    /// Counts the player's penalties of the event; a new value shows the pill.
+    pub serial: u32,
+    pub major: bool,
+    /// `minorPenaltyTimePenalty` or `majorPenaltyTimePenalty`.
+    pub seconds: f32,
+}
+
 #[derive(Resource)]
 pub(crate) struct TougeEvent {
     settings: Settings,
@@ -36,6 +47,12 @@ pub(crate) struct TougeEvent {
     pub penalties: [Penalties; 2],
     /// Finish time per run and car (s from GO; `None` unfinished).
     pub times: [[Option<f64>; 2]; 2],
+    /// The player's latest penalty (`None` before the first).
+    pub pill: Option<PenaltyPill>,
+    /// Smoke only: `GRID_SMOKE_CONTACT=S` counts one contact for the player
+    /// S seconds after GO in run 1, so an interactive check sees the pill
+    /// whether or not the autopilot touches the other car.
+    smoke_contact: Option<f64>,
     length: f64,
     waiting: f64,
     last_tick: u64,
@@ -50,6 +67,8 @@ impl TougeEvent {
             next: Some(next),
             penalties: Default::default(),
             times: [[None; 2]; 2],
+            pill: None,
+            smoke_contact: std::env::var("GRID_SMOKE_CONTACT").ok().and_then(|v| v.parse().ok()),
             length,
             waiting: 0.,
             last_tick: 0,
@@ -96,6 +115,21 @@ impl TougeEvent {
     }
 }
 
+/// The pill after the player's counts went from `before` to `after` in one
+/// update: a newly counted penalty replaces the shown one (a major wins if
+/// both counted in the same update).
+fn player_pill(pill: Option<PenaltyPill>, before: [u32; 2], after: [u32; 2], settings: &Settings) -> Option<PenaltyPill> {
+    let major = after[1] > before[1];
+    if !major && after[0] <= before[0] {
+        return pill;
+    }
+    Some(PenaltyPill {
+        serial: pill.map_or(1, |p| p.serial + 1),
+        major,
+        seconds: if major { settings.major_penalty } else { settings.minor_penalty },
+    })
+}
+
 fn damaged(runtime: &grid_tools::source_vehicle::Runtime) -> bool {
     (runtime.state.car.owner.vehicle[0xba5 / 4] >> 8) & 255 != 0
 }
@@ -117,7 +151,13 @@ pub(crate) fn tick(
     let Some(o) = &mut driving.opponents else {
         return;
     };
-    if advanced > 0 && trial.race_time(ticks).is_some() {
+    if advanced > 0
+        && let Some(time) = trial.race_time(ticks)
+    {
+        if event.run == 0 && event.smoke_contact.is_some_and(|at| time >= at) {
+            event.smoke_contact = None;
+            event.penalties[0].contact(&event.settings, false);
+        }
         if !o.multi.contact_pairs().is_empty() {
             let hit = damaged(&driving.runtime) || o.multi.cars.iter().skip(1).any(damaged);
             let at = |i| o.standings.laps_covered(i) * event.length;
@@ -128,12 +168,14 @@ pub(crate) fn tick(
                 }
             }
         }
+        let before = event.penalties[0].counts[event.run];
         for (i, p) in event.penalties.iter_mut().enumerate() {
             let racing = o.standings.status(i) == grid_tools::race::Status::Racing;
             for _ in 0..advanced {
                 p.tick(f64::from(grid_tools::source_vehicle::DELTA), event.run, racing);
             }
         }
+        event.pill = player_pill(event.pill, before, event.penalties[0].counts[event.run], &event.settings);
     }
     for car in 0..2 {
         event.times[event.run][car] = o.standings.finished(car);
@@ -195,4 +237,30 @@ pub(crate) fn tick(
     }
     trial.reset();
     log_line!("drive_touge version=1 event=run_start run=2 subroute=1 slots=swapped");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> Settings {
+        Settings {
+            minor_penalty: 2.,
+            major_penalty: 10.,
+            ignore_collision_time: 2.,
+            alongside_length_offset: 0.,
+            alongside_threshold_tweak_max: 0.,
+        }
+    }
+
+    #[test]
+    fn each_counted_player_penalty_raises_a_new_pill() {
+        let s = settings();
+        assert_eq!(player_pill(None, [0, 0], [0, 0], &s), None);
+        let minor = player_pill(None, [0, 0], [1, 0], &s).unwrap();
+        assert_eq!((minor.serial, minor.major, minor.seconds), (1, false, 2.));
+        assert_eq!(player_pill(Some(minor), [1, 0], [1, 0], &s), Some(minor));
+        let major = player_pill(Some(minor), [1, 0], [1, 1], &s).unwrap();
+        assert_eq!((major.serial, major.major, major.seconds), (2, true, 10.));
+    }
 }

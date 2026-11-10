@@ -159,6 +159,7 @@ mod foliage_mips;
 mod fps_counter;
 mod front_end;
 mod texture_cache;
+mod speed_advice;
 mod touge_event;
 mod demolition_event;
 mod le_mans_event;
@@ -5091,6 +5092,19 @@ pub(crate) fn race_app(
                 .add_systems(Update, le_mans_event::show_hud)
                 .add_systems(FixedUpdate, le_mans_event::tick.after(drive_tick));
         }
+        // The minimap brake light's recommended speeds for the player's
+        // AI track class (speed_advice; none on routes without them).
+        let advice_class = player_car.vehicle(&root).map(|v| v.ai_track).unwrap_or_default();
+        let advice = speed_advice::Table::load(&root, route.path(), &advice_class).unwrap_or_else(|e| {
+            println!("speed_advice version=1 event=error {e}");
+            None
+        });
+        println!(
+            "speed_advice version=1 event=table route={} class={advice_class} loaded={}",
+            route.path(),
+            advice.is_some()
+        );
+        app.insert_resource(speed_advice::SpeedAdvice::new(advice));
         if let Some((next, length)) = touge_run.take() {
             app.insert_resource(touge_event::TougeEvent::new(
                 grid_tools::touge::Settings::load(&root)?,

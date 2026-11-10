@@ -2,6 +2,7 @@
 
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
        [--size WxH] [--shots S,S,...] [--expect-stale] [--expect-splits]
+       [--expect-penalty [--contact-at S]] [--expect-brake]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1). RESIZE_AT seconds after launch it resizes
@@ -22,6 +23,15 @@ log, the shots and `result.txt` stay in OUT_DIR. The settings file must start a 
 --expect-splits (F763) also requires the split pills in the interactive window: an `osd_splits`
 line (race_osd.rs, printed when the shown pills change) with a race clock after the resize, and
 one with a signed difference. Choose a race with opponents and a resize before the first split.
+
+--expect-penalty also requires the touge penalty pill: an `osd_penalty` line (race_osd.rs, printed
+when the pill is raised) anywhere in the run. Use a pro touge settings file. The autopilot need not
+touch the other car, so the check sets GRID_SMOKE_CONTACT (touge_event.rs): one player contact
+counted --contact-at seconds after GO (default 30), through the normal penalty path.
+
+--expect-brake (F770) also requires the excessive-speed brake light's table: a `speed_advice ...
+loaded=true` line. `osd_brake` lines (printed when the light starts flashing) are counted but not
+required, since the autopilot need not overspeed. Use a circuit whose route ships class tables.
 """
 import argparse
 import ctypes
@@ -61,6 +71,9 @@ def main():
     ap.add_argument('--shots', default='20,22,40,42')
     ap.add_argument('--expect-stale', action='store_true')
     ap.add_argument('--expect-splits', action='store_true')
+    ap.add_argument('--expect-penalty', action='store_true')
+    ap.add_argument('--contact-at', type=float, default=30.)
+    ap.add_argument('--expect-brake', action='store_true')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -71,6 +84,8 @@ def main():
         old.unlink()
     w, h = (int(v) for v in args.size.split('x'))
     env = dict(os.environ, GRID_AUDIO='off', GRID_AUTOPILOT='1', GRID_TICK_INTERPOLATION='1', GRID_WINDOW_SHOTS=args.shots)
+    if args.expect_penalty:
+        env['GRID_SMOKE_CONTACT'] = str(args.contact_at)
     log_path = out / 'grid-app.log'
     log = open(log_path, 'w')
     proc = subprocess.Popen([str(Path(args.exe).resolve()), '--data-dir', str(data), '--settings', args.settings,
@@ -134,6 +149,21 @@ def main():
             verdict = 'FAIL: no split pills with a race clock and a difference after the resize'
         else:
             verdict += f'; {len(clock)} split pill updates'
+    pills = re.findall(r'^osd_penalty (.*)$', text, re.M)
+    print(f'osd_penalty: {len(pills)} lines {pills[:4]}')
+    if args.expect_penalty and verdict.startswith('PASS'):
+        if not pills:
+            verdict = 'FAIL: no penalty pill raised'
+        else:
+            verdict += f'; {len(pills)} penalty pills'
+    table = re.findall(r'^speed_advice version=1 event=table (.*)$', text, re.M)
+    brakes = re.findall(r'^osd_brake (.*)$', text, re.M)
+    print(f'speed_advice: {table[:1]}; osd_brake: {len(brakes)} lines {brakes[:4]}')
+    if args.expect_brake and verdict.startswith('PASS'):
+        if not any('loaded=true' in t for t in table):
+            verdict = 'FAIL: no brake-light speed table loaded'
+        else:
+            verdict += f'; brake table loaded, {len(brakes)} flashing starts'
     missing = [n for n in names if not (out / n).exists()]
     if missing:
         verdict += f' (shots missing: {", ".join(missing)})'

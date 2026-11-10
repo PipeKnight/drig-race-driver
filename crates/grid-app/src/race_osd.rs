@@ -86,6 +86,12 @@ pub struct Driver {
     blur: f32,
     /// Split pills flipped in (`playerN`), kept up while they flip out.
     pills: [bool; 4],
+    /// The penalty pill last shown (`PenaltyPill::serial`).
+    penalty: Option<u32>,
+    /// The brake light's flash timer (s).
+    brake_flash: f32,
+    /// The brake light is flashing (severity above `startflashSeverity`).
+    brake_flashing: bool,
 }
 
 pub fn drive(
@@ -93,6 +99,7 @@ pub fn drive(
     osd: Option<ResMut<Osd>>,
     mobile: Option<Res<crate::touch_controls::Mobile>>,
     time: Option<Res<Time<Real>>>,
+    advice: Option<Res<crate::speed_advice::SpeedAdvice>>,
     mut driver: Local<Driver>,
 ) {
     let dt = time.map_or(0., |t| t.delta_secs());
@@ -137,7 +144,6 @@ pub fn drive(
         "object/points_main=points",
         "object/driftcombo_main=drift_combo",
         "object/pc_chat_whole=pc_chat",
-        "object/penalty_pill=penalty",
         "object/drift_message=drift_message",
         "offers_group",
         "object/boost=boost",
@@ -150,8 +156,10 @@ pub fn drive(
         }
     }
     lap_group(&view, &mut osd);
+    penalty_pill(&view, &mut osd, &mut driver);
     position_group(&view, &mut osd, &mut driver);
     dial(&view, &mut osd, &mut driver, dt);
+    brake_light(advice.map_or(0., |a| a.severity), &mut osd, &mut driver, dt);
     // Central message box: the countdown number, then GO.
     if driver.countdown != view.countdown {
         if view.countdown.is_some() {
@@ -171,6 +179,57 @@ pub fn drive(
     // The minimap flag: in while the player is inside an active yellow
     // flag's zone, out otherwise (0x6BA460; green and chequered have none).
     osd.play_once("object/flag=flag", if view.yellow_flag { "in" } else { "out" });
+}
+
+const BRAKE_LIGHT: &str = "brake_light";
+
+/// The minimap's excessive-speed brake light (0x6BA460, `speed_advice`):
+/// the severity seeks its animation, and the light flashes above
+/// `startflashSeverity`.
+fn brake_light(severity: f32, osd: &mut Osd, driver: &mut Driver, dt: f32) {
+    let duration = osd.duration(BRAKE_LIGHT);
+    osd.seek(BRAKE_LIGHT, severity * duration);
+    let on = crate::speed_advice::flash(severity, &mut driver.brake_flash, dt);
+    osd.show(BRAKE_LIGHT, on);
+    let flashing = severity > crate::speed_advice::START_FLASH_SEVERITY;
+    if flashing && !driver.brake_flashing {
+        println!("osd_brake flashing=true severity={severity:.2}");
+    }
+    driver.brake_flashing = flashing;
+}
+
+const PENALTY: &str = "object/penalty_pill=penalty";
+
+/// The touge penalty pill (0x6B3380 binds it; 0x64E1E0 shows it for the
+/// player when a penalty is counted [D]). 0x6B3500 / 0x6B3630 set the header
+/// to `osd_minor` / `osd_major` and the text to "+%d" of the seconds, show
+/// the pill and play the `small` / `big` range from its start; the range's
+/// end hides it again (anim flags 3) [D].
+fn penalty_pill(view: &HudView, osd: &mut Osd, driver: &mut Driver) {
+    if let Some(p) = view.penalty
+        && driver.penalty != Some(p.serial)
+    {
+        driver.penalty = Some(p.serial);
+        if let Some(id) = osd.find(PENALTY, "header_text") {
+            osd.set_text(&id, &view.label(if p.major { "osd_major" } else { "osd_minor" }));
+        }
+        if let Some(id) = osd.find(PENALTY, "penalty_text") {
+            osd.set_text(&id, &penalty_text(p.seconds));
+        }
+        osd.play(PENALTY, if p.major { "big" } else { "small" });
+        // Reported for the interactive window check (hud_window_check.py).
+        println!("osd_penalty serial={} major={} text={}", p.serial, p.major, penalty_text(p.seconds));
+    }
+    if view.penalty.is_none() {
+        driver.penalty = None;
+    }
+    let up = driver.penalty.is_some() && !osd.finished(PENALTY);
+    osd.show(PENALTY, up);
+}
+
+/// The pill's text: "+%d" of the seconds, truncated (0x6B3500).
+pub fn penalty_text(seconds: f32) -> String {
+    format!("+{}", seconds as i32)
 }
 
 fn lap_group(view: &HudView, osd: &mut Osd) {
@@ -497,6 +556,12 @@ pub fn place_help(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn penalty_text_truncates_the_seconds() {
+        assert_eq!(penalty_text(2.), "+2");
+        assert_eq!(penalty_text(10.9), "+10");
+    }
 
     #[test]
     fn layout_range_is_the_cut_aspect_string() {

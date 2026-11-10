@@ -90,10 +90,9 @@ are the same for both.
 
 Not ported:
 - the dial's needle smoothing (the OSD dial has the blur, section 6.4);
-- boost;
-- the excessive-speed brake light (traced, section 6.4);
-- penalty pills;
-- driver name tags;
+- boost (no stock car has it, section 6.4);
+- driver name tags (traced, section 6.4);
+- the lap-time stacker re-flow (traced, section 6.4);
 - world records (`osd_wr`): the port has no record table;
 - offers;
 - spectator layout.
@@ -127,8 +126,8 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
   - `.car` = Vehicle;
   - `.team` = Team.
 - **Terminal damage:**
-  - `terminal_flash` (1 s) and `terminal_fade` (1 s), then `terminal_damage_delay`, then the wreck
-    screen.
+  - `terminal_flash` (1 s) and `terminal_fade` (1 s), then `terminal_damage_delay` (the car's rest,
+    at most 2 s, then 1 s; section 6.4), then the crash replay, then the wreck screen.
   - Free race, `fr_terminal_damage`: Restart Race, Retire (link `exit` → `retire_race_confirm` →
     `end_race_exit_event`, leaving the event without the results) and Instant Replay.
   - Test drive, `td_terminal_damage`: Restart Test Drive, Finish Test Drive and Instant Replay.
@@ -159,8 +158,10 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
   - Restart Race (after its confirmation) restarts.
   - View Replay plays the whole recorded race (F360, docs/REPLAY.md); Replay Exit returns to the
     results.
-- Terminal damage: the wreck screen appears 2 s after the damage (the two 1 s transitions [D]; the
-  delay state's own wait was not traced).
+- Terminal damage: the wreck screen appears after the two 1 s transitions [D], then the delay
+  state's wait for the car to rest (at most 2 s) and 1 s more [D, section 6.4], so 3 to 5 s after
+  the damage. The original plays the crash replay before its menu; the port shows the menu at once
+  (AUTHORED).
   - Restart, after its confirmation.
   - Retire / Finish Test Drive, after its confirmation: the player retires and the app closes.
   - Replay plays the last 10 s (F360; an AUTHORED stand-in for the terminal-damage replay).
@@ -298,7 +299,7 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
   buttons. Without touch the help strip is a small bottom-centre line (it used to cover the lap group).
 - Phone: `tools/push_android_data.ps1` (and so `build_android.ps1 -BundleData`) now also copies
   `Osd/` and the five OSD fonts (about 3.6 MB); without them the app falls back to the panels.
-- Not ported: boost, drift groups, chat, penalty pills, driver name tags, offers, the brake light,
+- Not ported: boost, drift groups, chat, driver name tags, offers,
   the stacker re-flow (hidden groups leave their gap), the cutscene/post-race
   and pause-menu art (front-end packages, not this scene).
 
@@ -325,6 +326,11 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
 - Interactive split pills (F763): `hud_window_check.py ... --expect-splits` also requires an
   `osd_splits` line (race_osd.rs, printed when the shown pills change) with a race clock and one
   with a signed difference after the resize.
+- Interactive penalty pill and brake light (F770): `--expect-penalty` (pro touge) sets
+  `GRID_SMOKE_CONTACT` (one player contact counted through the normal penalty path S seconds after
+  GO, `--contact-at`, default 30) and requires an `osd_penalty` line; `--expect-brake` (a circuit
+  with class tables) requires `speed_advice ... loaded=true` and counts `osd_brake` lines (the
+  light starting to flash).
 - Offscreen renders (Donington, 11 AI, autopilot, tick 1500): `r3-16x9.png` 1920 × 1080,
   `r4-20x9-touch.png` 2400 × 1080 with touch zones; inspected: texts, dial, red zone, minimap and
   markers in place; with touch zones nothing overlaps a zone.
@@ -378,10 +384,39 @@ reading, I meaning]:
 - severity = (speed - recommended) / threshold, capped at 1, where the recommended speed is read
   `speed × 1 s + lookahead` metres ahead along the lap;
 - the light flashes on a 0.3 s cycle and stays steady below severity 0.5.
-- The recommended speed comes from 0x99B9F0, a byte-quantised speed table per AI racing line
-  (vehicle manager +0x4B0: entries of 0x50 bytes, the lap length at +0xD30, the cell length at +0xD34,
-  a scale per table), linearly interpolated between cells. The loader of that table was not found;
-  the port would need the AI brake speeds from grid-tools. Not ported.
+- The recommended speed comes from 0x99B9F0, a byte-quantised speed table per vehicle class (vehicle
+  manager +0x4B0), linearly interpolated between 1 m cells. It is not built at run time: each route
+  ships it in `reducedmechanics.jpk` (the "reduced mechanics" simplified car model), loaded by the
+  "rm track" resource callback 0x5F68E0 [D]:
+  - `track.rm`: 17-byte nodes about 1 m apart (centre as three 24-bit big-endian values, minus
+    0x800000, × 0.005 m; signed half-extents in bytes 9-11; byte 12 / 255 a lateral fraction; bytes
+    13-14 / 127 a unit vector) [D 0x9C95D0; V on Donington and Washington]. The lap length is the
+    node count − 1 plus the closing gap.
+  - `<class>.rm`, one per `ai_vehicle_type_track` class (touring, gt1, lmp1 …): a big-endian float
+    scale, two 256-entry acceleration tables (512 floats), then two bytes per node, a full-pace and a
+    slower profile [D 0x99B6D0; V 13 classes]. Speed = byte × scale [I: m/s].
+  - The HUD (0x99B9F0) reads the player's class table, full-pace profile, at the player's distance
+    along the node chain plus the lookahead (0x9C78D0 projects each car onto the chain) [D]. The
+    same table, blended toward the slower profile, drives the Virtual_Performance path and the
+    spawn speed 0x915170 (20 m/s without a table).
+  - Without the player's class file the recommendation is FLT_MAX and the severity stays 0 [D].
+  - Projection [D 0x9C78D0, 0x9C7550]: each segment's closest point (3D, clamped), distance = (node
+    + fraction) × spacing, wrapped into the lap; a local search of the segments within 2|v|dt + 3 m
+    of the last fix; farther than 60 m from the chain a coarse scan of every 30th node (every node
+    for the first fix). The 3600 m² test also needs a field +0x18 > 60 whose meaning is open; the port
+    rescans whenever the local search is farther than 60 m.
+  - Light [D 0x6BA460]: the severity goes to the `brake_light` animation (+0x258) through the
+    animation's slot 0x2C (command vtable 0xCEC6AC, execute 0x6C01A0); the node (+0x260) is shown
+    steadily up to `startflashSeverity` 0.5, above it a timer (+0x2AC) counts down from
+    `flashinterval` 0.3 s and the light is off while the timer is at or above `lightoninterval` 0.7 ×
+    0.3 s (show/hide command 0x6C0FD0). Haruna's routes ship only `dummy.rm`, so touge and drift
+    events show no warning.
+  Port: `speed_advice` (grid-app) reads `track.rm` and the player's `<ai_vehicle_type_track>.rm`
+  at race start (log line `speed_advice ... loaded=`), locates the player each frame and sets the
+  severity; `race_osd::brake_light` seeks that fraction of the `brake_light` animation [I: what slot
+  0x2C does with the value is not traced; the needle blur seeks a fraction the same way] and flashes
+  the node. Speed is the velocity's magnitude [I: the original reads car+0x1648]. Unit tests on a
+  synthetic pack; an ignored test checks every route with a touring table against its AI line.
 
 Minimap [D]: a camera view of the track (`minimap_zoom` 400, `minimap_dist_behind` 116,
 `minimap_dist_above` 110 per track), up to 20 car markers; `track_mask` is drawn by the
@@ -422,9 +457,75 @@ the winner's time and the others' differences in these formats; the original giv
 both a time and a difference, the port's one Time column keeps its AUTHORED layout. Before, it
 wrote `0:05.600` and `+3.072` (AUTHORED).
 
-Not traced yet: boost (0x8EFA60), name tags (0x6B0540), penalty pills (0x6B3380), the stacker
-re-flow and the post-race art. The wreck-screen delay is partly traced: the state
-`StateTerminalDamageDelay` (registered at 0xC760D0, factory 0x5AB610, vtable 0xCDA548) has no
-timer of its own; its only own handler, 0x5A5990, sets a completion bit at +0x28, so it seems to
-wait for a message [I: the sender, probably the terminal-damage monitor or choreographer, is not
-traced]. The port's 2 s `post_race::WRECK_DELAY` stays AUTHORED.
+Penalty pill (touge only) [D unless marked]:
+- 0x6B3380 binds `header_text`, `penalty_text` and the anim `object/penalty_pill=penalty` of the
+  HUD widget at HUD+0x6CC (ctor 0x6A5ED0, vtable 0xCEC820, no per-frame update) and hides it; the HUD
+  setup hands it to the touge state (0x631130, touge+0xEC) for every race.
+- The touge tick 0x64E1E0 counts a pending penalty when the contact window (2 s) ends. For the
+  player's car only it calls 0x6B3500 (minor, 2 s) or 0x6B3630 (major, 10 s): the header gets
+  `osd_minor` / `osd_major`, the text `"+%d"` of the seconds; the pill shows and plays `small`
+  (0-1.5 s) or `big` (1.833-3.333 s) from its start, and the range end hides it (anim flags 3).
+  Penalties of the AI car count but are not shown. Reset 0x6B3410 writes `<penalty>` and hides it.
+- Port: `touge_event::TougeEvent::pill` records the player's newly counted penalty;
+  `race_osd::penalty_pill` sets both texts, plays the range and hides the pill when it ends.
+
+Wreck-screen delay [D]: `StateTerminalDamageDelay` (vtable 0xCDA548; 0x5A5990 is only a shared
+base-class stub) ends by itself. Enter 0x57F140 zeroes its timers. Update 0x57F1A0 waits for the
+player's car to rest (angular speed ≤ 0.1, linear ≤ 0.5 [I units: rad/s, m/s]), giving up 2 s
+after entering the state, then counts 1 s; its link check 0x58E2E0 returns "done" then (or at once
+when `FinalBoundary` 0x5EBC90 disqualified the car). Its clock is the replay controller's step
+(0x944430). Exit 0x57F170 stores the state's total time in 0xE6DFF8, which the terminal replay's
+rewind (0x596C90) adds. Afterwards `flow.bin` plays the crash replay
+(`instant_race_replay_silent`) and the wreck menu comes on a button press. Port:
+`post_race::on_wreck` waits the two transitions, the rest (at most 2 s) and 1 s; it shows the menu
+without the automatic replay (AUTHORED).
+
+Two fields of the OSD owner select the layouts below: F = owner+0x1FC, the competition-format
+enum of DISCIPLINES.md 1.1 [V: the drift handbrake hint shows only for F 2..4, and the stacker
+dispatch 0x6BB0C0 jumps on F 0..8 in the same groups], and T = owner+0x1AC (values 1..4, meaning
+open).
+
+Driver name tags [D: bind 0x6B0540, update 0x6BF070]:
+- The update runs while +0x2A8 is set and the game mode is not 2; its first frame hides every tag.
+- T 2, normal path (0x6BD0B0): tag 0 shows the rival (the career lookup 0x6BCE60, or in the
+  player's own career event the leader, the second car when the player leads, with more than two
+  cars); `driver_id_team` shows the team-mate (0x6AAB90). A rival who is the team-mate is dropped;
+  no rival and no team-mate hide the tag.
+- T 2 with a driver offer of objective type 2 (0x6BD480, 0x6BD6B0): up to seven cars of the named
+  team, nearest first, on tags 0..6.
+- T 3 (0x6BD900; probably online, it also drives the chat box [I]): the two nearest cars on one
+  side and the nearest on the other; the `wrongway` tags when the car's byte +0x1550 is set. Skipped
+  for F 3 and 9; the distance is Euclidean for F 4, else signed along the track (0x90BDB0).
+- Limits (0x6A80A0): hidden beyond 60 m (0xDB4F60); alpha = base − min(|d|/60, 1)³ × (base −
+  [0xE6DFF4]). Text: the position ("%d"), the name (32 characters) and the nationality flag
+  (0x69C860, 0x6A0820). Anchor (0x6B0820): the car position raised by 1.5 + 0.04 |d| m, projected;
+  behind the camera it goes off screen, with no edge clamp. The tag plays the "expand" range.
+- Open: what T and game mode 2 are, the sources of the parameters +0x2B0/+0x2B4 and of the base
+  alphas (+0x210). Not ported: the port has no career rival or team-mate data in a race yet.
+
+Boost [D: bind 0x8EFA60, dial start 0x8EFD50]: the only reader copies the player vehicle's +0xDE4
+block into a flag and shows or hides the `boost` animation (0x6C1030, 0x6C0050, 0x8CFE00); no value
+is displayed. Vehicle+0xDE4 is a per-car feature loaded from properties byte 0x4D7, tuning CSV
+column 153 (`vehicle_properties.rs`), which is 0 in all 45 car CSVs of the install [V], so the
+indicator never shows with stock data. The port keeps it hidden (and vehicle preparation rejects a
+nonzero value).
+
+Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
+factory probably 0x8D5370 [I]). Build 0x8D3730 collects up to 32 children with their rest
+translations, sorts them by rest y (top first, 0x8D0620), gives each the authored y gap to the
+next child (the last reuses the previous gap, 0x8D0670) and starts the cursor at the top child.
+Reset 0x6C1510 (0x8D35D0) puts every child back at rest; Append(name) 0x6C1570 (0x8D3670) sets the
+child's y to the cursor and advances the cursor by its gap. Only y moves, at once. Groups not
+appended keep their rest position; visibility is separate (0x8CE5F0). The lap-time stacker
+(+0xB0C, bound by 0x6B7800) is laid out once (0x6BC3E0 → 0x6BB0C0) by F:
+- F 0/1 (0x6B7D10): T 1 race, lap; T 2/3 race (+ lap) when provider slot 0x24 is true, else main,
+  race (+ lap, best), the bracketed parts dropped when byte [+0x7C8]+0x655 is set; T 4 lap, race,
+  best;
+- F 2-4 drift (0x6B7BF0): T 2/3 only; race for F 4 with slot 0x24, else main;
+- F 5/6 touge (0x6B8400): T 1 race, lap; T 2 main (not for F 6), race;
+- F 7/8 offers (0x6B80F0): main, a group whose name the decompile hides, best and offers.
+The position stacker (0x6B4E00, 0x6B4F90) appends `position_group` (T 2/3 with more than one car,
+or T 2) and `split_group`. Not ported: which layout a port event gets depends on T and slot 0x24,
+whose meaning is open.
+
+Not traced yet: the post-race art.
