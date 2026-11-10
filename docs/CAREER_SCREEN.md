@@ -26,6 +26,12 @@ Since F771 the screen follows the original's GRID World page tree (`states.xml`/
 | Buy On eBay | eBay Motors | used cars of the open events' models the team does not own (from Select Car: that event's models only) | Select Car or View Cars |
 | the event | (in-event state) | each race and its place, the standings so far, Next race / Abandon event | — (Escape: GRID World) |
 | rewards | the post-event screens (below) | Continue | — (Escape: Continue) |
+| Team name | `keyboard_title_enter` / `edit_team_name_pc_*` (PC keyboard entry) | OK with the typed name | My Team (none while the team is unnamed) |
+| Team Branding | `livery_designer` | Pattern, Primary, Secondary and Tertiary Colour, Number (each cycles its table), Confirm | My Team |
+| Le Mans | `lemans_select` | Driver Offers (n), Team Entry (n open), Skip Le Mans, GRID World | — |
+| Skip Le Mans? | `confirm_reject_lemans` | Yes (refuse), No | Le Mans |
+| End Of Season | `season_end_info` | Continue (ends the season) | — |
+| Start Of Season | `season_start_info` | Continue | — |
 
 Car ownership is enforced as in the original: an event starts only with a car of its `event_vehicle` list that the team owns (`event_vehicle_select` lists the team's cars [D]); before F771 the port started an event with its first raceable car whether owned or not. Founding the team still gives the free car (F466).
 
@@ -97,7 +103,7 @@ Driver offers on the home page, after the open events:
   - three region slots (`tier.order_index` 0 US, 1 Europe, 2 Japan);
   - each shows one race offer and one test offer: the first offer by `driver_offer.order_index` not driven yet, in the region's driver-offer tier of the player's rank there (the International offer tiers at overall rank 3);
   - a driven offer moves its slot on, whether its objective was met or not [I];
-  - the Le Mans offer tiers are not shown (no Le Mans entry yet).
+  - while Le Mans is pending, the Le Mans offer tiers are shown instead (`Career::lemans_offers_shown`, below).
 - **Which the port runs** (`offer_runs`, AUTHORED filter):
   - the offer's car (`vehicle_livery` → `vehicle`) is in `series::RACEABLE`;
   - its one `driver_offer_track` race is a lap race on a surveyed layout.
@@ -173,6 +179,16 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
   - With 17 points against 13 for the best other GT2 car, the payout was class position 1: prize 150,000, the class team win 150,000, and a Flashback Bonus of 24,000 (2 finished races × 12,000).
 - Unattended checks: with `GRID_RESULTS_CONTINUE`, a scripted race now retires from the wreck screen and confirms (post_race diagnostics), so a wrecked career race still reports its result.
 
+## Season end, Le Mans entry, team name and livery (F774)
+
+The original's flow ([D] `flow.xml`/`states.xml`, [I] for the code addresses in CAREER_RESEARCH §2.3–§2.4):
+- **Team name.** Founding the team opens the PC keyboard page (`edit_team_name_pc_title`); the port lands there whenever the team is founded and unnamed. Typing: letters, digits, space and `-.&'`, Backspace deletes, at most 20 characters (AUTHORED limit), no leading space; OK takes the name (the original's default `default_player_team_name` fills an empty entry). My Team gains "Change Name", which reopens the page with the current name.
+- **Team Branding** (`team_management_design_livery_button_*` → `livery_designer`): pattern, the three colours and the number cycle through the shipped livery tables (`Catalogue.livery_choices`: the designer's pattern, colour and number rows); Confirm saves `Career.team_livery`. The original's 3D preview and colour grid are not ported: the page names the choice by id and RGB.
+- **Le Mans entry.** After the fourth counted entry of a season the career is `LeMansPending` (`Career::season_state`). GRID World's Race Events and Driver Offers rows then open the Le Mans page (`lemans_select`): Driver Offers lists the Le Mans offer tiers (`lemans_offers_shown`, from 0x651A10), Team Entry opens the Le Mans region's events, Skip asks `confirm_reject_lemans`, and Yes runs `Career::refuse_lemans` (0x4DBAD0). Back from the Le Mans offers or events returns to the Le Mans page. A taken Le Mans driver offer runs through `lemans_plan` with its seed, like a team entry.
+- **End of season.** When the season has ended (the 24 Hours driven or refused), the screen lands on End Of Season (`season_end_info`): the season number and its totals (event wins, money won, reputation earned; `eos_*` headers). Continue runs `Career::end_season` (archives the season, keeps the totals as last season's, clears the counters, season + 1) and shows Start Of Season (`season_start_info`) with last season's totals, then GRID World. The original's end-of-season leaderboards (0x509BA0, 0x50FB40) are not ported.
+- Every step saves the career and logs a `drive_career` line: `team_named name=…`, `team_livery`, `lemans_refused`, `season_ended season=N event_wins= money_won= reputation_earned=`.
+- **Licences** need no save field: the tiers stay on the port's live-rank rule; CAREER_RESEARCH §14.1 traces where the original keeps the licence array.
+
 ## International head-to-head unlock (F514)
 
 - Winning a head-to-head of the International region (event 78, the final) runs `Career::unlock_all_cars` (0x674810 → 0x65AD90). Every purchasable vehicle not yet owned joins the garage with a fresh record. Livery 0 is AUTHORED; the original sets none. The payout page says how many cars joined ("Every car is unlocked: N join your garage.", AUTHORED text; the original shows no popup).
@@ -244,12 +260,11 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
   - ignored, on the purchased data: bmw_si_tour is offered with the BMW; its plan is route_1 × 3 laps and route_2 × 2 laps from slot 12; wins, 2nd places and aids-off wins pay as above.
 - The in-app run of bmw_si_tour is recorded in PROJECT_LOG F424.
 - Unattended runs: diagnostics `results_continue = SECONDS` (or `GRID_RESULTS_CONTINUE`) makes a scripted run (`--drive-ticks` with `autopilot`) select Continue on the stats and results screens after that many seconds. A career race then runs and returns its result with no input.
-- Interactive loop smoke (F771): `tools/career_loop_smoke.ps1` runs `grid-app --career` on a fresh career with `GRID_CAREER_AUTO=offer` and checks, in order: open, fade in, Driver Offers, offer details, offer taken, fade out with code 22, hand-off, race shows and fades in, hand-off back with 21, career shows, race added, offer paid, rewards fade in, quit, Close, exit 0. `-PagesOnly` runs the screen alone (for window shots of the pages before the race), `-Shots` passes `GRID_WINDOW_SHOTS`.
+- Interactive loop smoke (F771): `tools/career_loop_smoke.ps1` runs `grid-app --career` on a fresh career with `GRID_CAREER_AUTO=offer` and checks, in order: open, fade in, Driver Offers, offer details, offer taken, fade out with code 22, hand-off, race shows and fades in, hand-off back with 21, career shows, race added, offer paid, rewards fade in, quit, Close, exit 0. `-PagesOnly` runs the screen alone (for window shots of the pages before the race), `-Shots` passes `GRID_WINDOW_SHOTS`. `-Season` runs the screen alone on a seeded season (`GRID_CAREER_SEED=season`: team founded, four events counted, Le Mans pending) with `GRID_CAREER_AUTO=season`, which names the team, opens Team Branding and changes the pattern, skips Le Mans, ends the season and quits.
 - Fully unattended career: `GRID_CAREER_AUTO=EVENT_ID` (or `o` and a driver offer id, e.g. `o15`, or `offer` for the first driver offer on show) with `GRID_AUTOPILOT=1` and `GRID_RESULTS_CONTINUE=3`, then `grid-app --career`. Each screen page acts by itself after 3 s, walking the page tree as a player would (GRID World → Race Events → the region → event details → Select Car → an owned car, else Buy New of the cheapest affordable one; or GRID World → Driver Offers → offer details → Accept): it enters the event, starts each next race, pages through the rewards and quits. The supervisor runs the races with `--drive-ticks 36000` (50000 for the Le Mans 24 Hours, whose 720 s limit outlasts 576 s; grid-app now allows up to 72000), so the autopilot drives. No keyboard or mouse input reaches the desktop. Driving is unchanged; it acts only on the post-race screens of scripted runs.
 
 ## Not done
 
-- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, the sponsor designer and logos, the head-to-head reward cars, Le Mans entry, season-end screens, and the original's career look (3D garage backdrop, tiles, car turntable, the bar shutters of the transitions).
-- Tier availability uses the port's live-rank rule (`Career::tier_open`), not the original's granted per-region licences (CAREER_RESEARCH.md §11.1): the initial licence value is not settled and the save would need the licence array.
+- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. The livery designer's 3D preview and colour grid, the sponsor designer and logos, the end-of-season leaderboards, and the original's career look (3D garage backdrop, tiles, car turntable, the bar shutters of the transitions).
 - The Ravenwest guest cars, Le Mans selection fields (`lemans_restrictions`) and the original's player car and livery choice in an own-team field.
 - Flashback limits per difficulty and pro mode's restart ban (§8).

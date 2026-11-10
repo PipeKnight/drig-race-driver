@@ -28,7 +28,7 @@ use bevy::prelude::*;
 use grid_tools::career::data::EventRace;
 use grid_tools::career::{
     Career, Catalogue, Classified, Entrant, Flashbacks, Payout, RaceResult, RaceSettings, Region,
-    SeasonState, apply_driver_offer, apply_event_in_classes, save,
+    SeasonEntry, SeasonState, SeasonTotals, TeamLivery, apply_driver_offer, apply_event_in_classes, save,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -408,7 +408,7 @@ fn lap_text(seconds: f64) -> String {
 /// The driver offers on show that the port can run.
 pub fn offer_runs(
     cat: &Catalogue,
-    career: &Career,
+    ids: &[i32],
     routes: &BTreeMap<i32, String>,
     labels: &Labels,
     exists: impl Fn(&str) -> bool,
@@ -420,8 +420,12 @@ pub fn offer_runs(
             .filter(|stem| grid_tools::series::RACEABLE.contains(&stem.as_str()) && exists(&format!("cars/{stem}")))
     };
     let mut out = Vec::new();
-    for id in career.driver_offers_shown(cat) {
-        let offer = &cat.driver_offers[&id];
+    for &id in ids {
+        let Some(offer) = cat.driver_offers.get(&id) else {
+            continue;
+        };
+        // The Le Mans 24 Hours is a time-limited race the port runs.
+        let lemans_24 = cat.event(offer.event_id).and_then(|e| lemans_series(cat, e)) == Some(LE_MANS_24);
         let Some(car) = offer.vehicle_id.as_ref().and_then(raceable) else {
             continue;
         };
@@ -431,7 +435,7 @@ pub fn offer_runs(
         let Some(route) = routes.get(&race.track_model_id) else {
             continue;
         };
-        if race.laps < 1 || race.time_limit_seconds != 0 || !surveyed(route) || !exists(route) {
+        if race.laps < 1 || (race.time_limit_seconds != 0 && !lemans_24) || !surveyed(route) || !exists(route) {
             continue;
         }
         let mut field_cars = vec![car.clone()];
@@ -964,6 +968,18 @@ impl InProgress {
 /// A new career starts in Arc 1 [V 0x674610]: no team and no money; the
 /// player drives driver offers until the bank reaches `start_race_team`
 /// (40,000), which founds the team.
+/// Diagnostics `GRID_CAREER_SEED=season` (a new career only): a founded,
+/// unnamed team with four events of the season done, so Le Mans is pending
+/// (the team name keyboard, Team Branding, the Le Mans choice and the
+/// season screens without racing a season).
+fn seed_season(cat: &Catalogue, c: &mut Career) {
+    c.team_founded = true;
+    c.money = c.money.max(cat.start_money);
+    for &id in cat.events.keys().take(4) {
+        c.count_in_season(SeasonEntry::Event(id));
+    }
+}
+
 pub fn new_career(_cat: &Catalogue) -> Career {
     Career::new()
 }
@@ -1339,6 +1355,9 @@ fn auto() -> Option<Auto> {
     if v == "offer" {
         return Some(Auto::FirstOffer);
     }
+    if v == "season" {
+        return Some(Auto::Season);
+    }
     match v.strip_prefix('o') {
         Some(o) => o.parse().ok().map(Auto::Offer),
         None => v.parse().ok().map(Auto::Event),
@@ -1352,6 +1371,9 @@ enum Auto {
     Event(i32),
     Offer(i32),
     FirstOffer,
+    /// The season walk: name the team, Team Branding, skip Le Mans, the
+    /// season screens, quit (with `GRID_CAREER_SEED=season`).
+    Season,
 }
 
 /// Scripted ticks of an unattended career race: 576 s, and 800 s for the
@@ -1445,7 +1467,37 @@ enum Page {
     /// The screens after an event, in the original's order, and the one
     /// on show.
     Rewards(Vec<RewardPage>, usize),
+    /// End Of Season (`season_end_info`, `end_of_season` on): the season's
+    /// figures; Continue ends the season.
+    SeasonEnd,
+    /// Start Of Season (`season_start_info`): the new season's number and
+    /// the last season's figures [I].
+    SeasonStart,
+    /// The Le Mans choice (`lemans_select`) while Le Mans is pending:
+    /// Driver Offers, Team Entry, Skip Le Mans 24hr.
+    LeMans,
+    /// Skip Le Mans 24hr (`confirm_reject_lemans`): Yes / No.
+    ConfirmSkipLeMans,
+    /// The team name keyboard (`keyboard_title_*_team_name_pc`): the text
+    /// typed so far.
+    TeamName(String),
+    /// Team Branding (`livery_designer`): the livery being designed.
+    Livery(TeamLivery),
 }
+
+/// The part of the livery a Team Branding row changes
+/// (`livery_designer_main_menu_edit_*`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LiveryPart {
+    Pattern,
+    /// Base, primary, secondary colour.
+    Colour(usize),
+    Number,
+}
+
+/// The longest team name (AUTHORED: the original's keyboard limit was not
+/// traced).
+const TEAM_NAME_MAX: usize = 20;
 
 /// One screen after an event: its title and lines.
 #[derive(Clone, Debug, PartialEq)]
@@ -1478,6 +1530,16 @@ enum Action {
     Abandon,
     /// The next reward screen, then GRID World.
     Continue,
+    /// Ends the season (End Of Season's Continue), then Start Of Season.
+    EndSeason,
+    /// Skips Le Mans: the season ends.
+    RefuseLeMans,
+    /// Names the team.
+    NameTeam(String),
+    /// The next choice of a livery part.
+    CycleLivery(LiveryPart),
+    /// Keeps the designed livery.
+    PaintTeam(TeamLivery),
     Quit,
 }
 
@@ -1558,9 +1620,17 @@ impl Screen {
     /// leaves the event in progress).
     fn parent(&self) -> Option<Page> {
         Some(match &self.page {
-            Page::Home | Page::Event | Page::Rewards(..) => return None,
+            Page::Home
+            | Page::Event
+            | Page::Rewards(..)
+            | Page::SeasonEnd
+            | Page::SeasonStart
+            | Page::LeMans => return None,
+            Page::DriverOffers | Page::Events(Region::LeMans) if self.lemans_pending() => Page::LeMans,
             Page::Regions | Page::DriverOffers | Page::Team | Page::Garage => Page::Home,
             Page::Events(_) => Page::Regions,
+            Page::ConfirmSkipLeMans => Page::LeMans,
+            Page::TeamName(_) | Page::Livery(_) => Page::Team,
             Page::Details(i) => match self.offers.get(*i).and_then(|o| self.event_region(o.event_id)) {
                 Some(region) => Page::Events(region),
                 None => Page::Regions,
@@ -1599,7 +1669,105 @@ impl Screen {
                 .and_then(|e| self.cat.event(e.event_id))
                 .map_or("Event".into(), |ev| self.text(&format!("db_{}", ev.name), &ev.name)),
             Page::Rewards(pages, at) => pages.get(*at).map_or_else(String::new, |p| p.title.clone()),
+            Page::SeasonEnd => self.text("season_end_info_title", "End Of Season"),
+            Page::SeasonStart => self.text("season_start_info_title", "Start Of Season"),
+            Page::LeMans => self.text("lemans_driver_offers_trackinfo_title", "Le Mans"),
+            Page::ConfirmSkipLeMans => self.text("lemans_confirm_exit_title", "Skip Le Mans 24hr"),
+            Page::TeamName(_) => self.text(self.name_key(true), "Team Name"),
+            Page::Livery(_) => self.text("livery_designer_title", "Team Branding"),
         }
+    }
+
+    fn lemans_pending(&self) -> bool {
+        self.career.season_state() == SeasonState::LeMansPending
+    }
+
+    /// The team name keyboard's strings: enter (no name yet) or edit.
+    fn name_key(&self, title: bool) -> &'static str {
+        match (self.career.team_name.is_empty(), title) {
+            (true, true) => "keyboard_title_enter_team_name_pc_title",
+            (true, false) => "keyboard_title_enter_team_name_pc_subtitle",
+            (false, true) => "keyboard_title_edit_team_name_pc_title",
+            (false, false) => "keyboard_title_edit_team_name_pc_subtitle",
+        }
+    }
+
+    /// Where a walk to GRID World lands: the team name keyboard once the
+    /// team is founded without a name, End Of Season once the season has
+    /// ended (no event in progress), else GRID World. [I] The original's
+    /// order of these screens was not traced.
+    fn landing(&self, page: Page) -> Page {
+        if page != Page::Home || self.current.is_some() {
+            page
+        } else if self.career.team_founded && self.career.team_name.is_empty() {
+            Page::TeamName(String::new())
+        } else if self.career.season_state() == SeasonState::Ended {
+            Page::SeasonEnd
+        } else {
+            Page::Home
+        }
+    }
+
+    /// The default team name (`default_player_team_name`).
+    fn default_team_name(&self) -> String {
+        self.text("default_player_team_name", "My Team")
+    }
+
+    /// The livery the designer opens with: the team's, else the first
+    /// choice of each table (AUTHORED).
+    fn livery_draft(&self) -> Option<TeamLivery> {
+        self.career.team_livery.or_else(|| TeamLivery::first(&self.cat.livery_choices))
+    }
+
+    /// A Team Branding row: the part's header and its choice.
+    fn livery_row(&self, l: &TeamLivery, part: LiveryPart) -> String {
+        let choices = &self.cat.livery_choices;
+        let of = |at: Option<usize>, n: usize| at.map_or("?".to_owned(), |i| format!("{} of {n}", i + 1));
+        match part {
+            LiveryPart::Pattern => {
+                let at = choices.patterns.iter().position(|p| p.0 == l.pattern);
+                format!(
+                    "{}: {}",
+                    self.text("livery_designer_patterns_subheader", "Pattern"),
+                    of(at, choices.patterns.len())
+                )
+            }
+            LiveryPart::Colour(c) => {
+                let key = [
+                    "livery_designer_primary_colour_subheader",
+                    "livery_designer_secondary_colour_subheader",
+                    "livery_designer_tertiary_colour_subheader",
+                ][c];
+                let fallback = ["Base Colour", "Primary Colour", "Secondary Colour"][c];
+                let at = choices.colours.iter().position(|x| x.0 == l.colours[c]);
+                let rgb = at.map_or(String::new(), |i| {
+                    let [r, g, b] = choices.colours[i].1;
+                    format!(" #{r:02X}{g:02X}{b:02X}")
+                });
+                format!("{}: {}{rgb}", self.text(key, fallback), of(at, choices.colours.len()))
+            }
+            LiveryPart::Number => {
+                let at = choices.numbers.iter().position(|n| n.0 == l.number);
+                format!(
+                    "{}: {}",
+                    self.text("livery_designer_numbers_subheader", "Number"),
+                    at.map_or("?", |i| choices.numbers[i].1.as_str())
+                )
+            }
+        }
+    }
+
+    /// A season's figures (`eos_*_header`).
+    fn totals_lines(&self, t: SeasonTotals) -> Vec<String> {
+        vec![
+            format!("{} {}", self.text("eos_event_wins_header", "Event Wins:"), t.event_wins),
+            format!("{} ${}", self.text("eos_money_won_header", "Money Won:"), thousands(t.money)),
+            format!(
+                "{} {} pts",
+                self.text("eos_rep_earned_header", "Reputation Earned:"),
+                thousands(t.reputation)
+            ),
+        ]
     }
 
     /// The selected row's help line (the buttons' `_subtitle` strings).
@@ -1611,6 +1779,10 @@ impl Screen {
             (Page::Home, 3) => "career_menu_view_vehicles_button_subtitle",
             (Page::Team, 0) => "team_management_team_mates_button_subtitle",
             (Page::Team, 1) => "team_management_current_sponsors_button_subtitle",
+            (Page::Team, 2) => "team_management_team_name_button_subtitle",
+            (Page::Team, 3) => "team_management_design_livery_button_subtitle",
+            (Page::LeMans, 2) | (Page::ConfirmSkipLeMans, _) => "lemans_confirm_exit_subtitle",
+            (Page::TeamName(_), _) => self.name_key(false),
             _ => return String::new(),
         };
         self.text(key, "")
@@ -1618,6 +1790,10 @@ impl Screen {
 
     fn actions(&self) -> Vec<(String, Action)> {
         let mut rows: Vec<(String, Action)> = Vec::new();
+        // While Le Mans is pending, Race Events and Driver Offers open the
+        // Le Mans choice (AUTHORED: the original's route to `lemans_select`
+        // from GRID World was not traced).
+        let pending = self.lemans_pending();
         match &self.page {
             Page::Home => {
                 rows.push((
@@ -1626,7 +1802,7 @@ impl Screen {
                         self.text("career_menu_choose_region_button_title", "Race Events"),
                         self.offers.len()
                     ),
-                    Action::Go(Page::Regions),
+                    Action::Go(if pending { Page::LeMans } else { Page::Regions }),
                 ));
                 rows.push((
                     format!(
@@ -1634,7 +1810,7 @@ impl Screen {
                         self.text("career_menu_driver_offers_button_title", "Driver Offers"),
                         self.driver_offers.len()
                     ),
-                    Action::Go(Page::DriverOffers),
+                    Action::Go(if pending { Page::LeMans } else { Page::DriverOffers }),
                 ));
                 rows.push((self.text("career_menu_team_management_button_title", "My Team"), Action::Go(Page::Team)));
                 rows.push((
@@ -1743,6 +1919,20 @@ impl Screen {
                         ),
                         Action::Go(Page::Sponsors),
                     ));
+                    rows.push((
+                        format!(
+                            "{}: {}",
+                            self.text("team_management_team_name_button_title", "Change Name"),
+                            self.career.team_name
+                        ),
+                        Action::Go(Page::TeamName(self.career.team_name.clone())),
+                    ));
+                    if let Some(l) = self.livery_draft() {
+                        rows.push((
+                            self.text("team_management_design_livery_button_title", "Branding"),
+                            Action::Go(Page::Livery(l)),
+                        ));
+                    }
                 }
             }
             Page::TeamMate => {
@@ -1827,6 +2017,50 @@ impl Screen {
                 return rows;
             }
             Page::Rewards(..) => return vec![("Continue".into(), Action::Continue)],
+            Page::SeasonEnd => return vec![("Continue".into(), Action::EndSeason)],
+            Page::SeasonStart => return vec![("Continue".into(), Action::Go(Page::Home))],
+            Page::LeMans => {
+                rows.push((
+                    format!(
+                        "{} ({})",
+                        self.text("lemans_select_driver_offers", "Driver Offers"),
+                        self.driver_offers.len()
+                    ),
+                    Action::Go(Page::DriverOffers),
+                ));
+                rows.push((
+                    format!("{} ({} open)", self.text("lemans_select_team_entry", "Team Entry"), self.offers.len()),
+                    Action::Go(Page::Events(Region::LeMans)),
+                ));
+                rows.push((self.text("lemans_select_reject", "Skip Le Mans 24hr"), Action::Go(Page::ConfirmSkipLeMans)));
+                rows.push((self.text("career_menu_screen_title", "GRID World"), Action::Go(Page::Home)));
+                return rows;
+            }
+            Page::ConfirmSkipLeMans => {
+                rows.push((self.text("yes", "Yes"), Action::RefuseLeMans));
+                rows.push((self.text("no", "No"), Action::Go(Page::LeMans)));
+                return rows;
+            }
+            Page::TeamName(typed) => {
+                let name = if typed.trim().is_empty() { self.default_team_name() } else { typed.trim().to_owned() };
+                rows.push((format!("{}: {name}", self.text("ok", "OK")), Action::NameTeam(name)));
+                if self.career.team_name.is_empty() {
+                    // A new team must be named: no Back.
+                    return rows;
+                }
+            }
+            Page::Livery(l) => {
+                for part in [
+                    LiveryPart::Pattern,
+                    LiveryPart::Colour(0),
+                    LiveryPart::Colour(1),
+                    LiveryPart::Colour(2),
+                    LiveryPart::Number,
+                ] {
+                    rows.push((self.livery_row(l, part), Action::CycleLivery(part)));
+                }
+                rows.push((self.text("livery_designer_main_menu_confirm", "Confirm"), Action::PaintTeam(*l)));
+            }
         }
         rows.push(self.back_row());
         rows
@@ -2156,6 +2390,46 @@ impl Screen {
                     lines.extend(p.lines.iter().cloned());
                 }
             }
+            Page::SeasonEnd => {
+                lines.push(format!("Season {}", self.career.season_number));
+                lines.extend(self.totals_lines(self.career.season_totals()));
+                lines.push(String::new());
+                lines.push(
+                    "The season's driver and team leaderboards that follow in the original are not ported.".into(),
+                );
+            }
+            Page::SeasonStart => {
+                lines.push(format!("Season {}", self.career.season_number));
+                lines.push(format!("Last season (season {}):", self.career.season_number - 1));
+                lines.extend(self.totals_lines(self.career.previous_totals));
+            }
+            Page::LeMans => {
+                lines.push(
+                    "Four events of the season are done. Race the Le Mans 24hr for another team (Driver Offers) or your own (Team Entry), or skip it: either ends the season."
+                        .into(),
+                );
+                if self.driver_offers.is_empty() {
+                    lines.push("No Le Mans driver offer can run in the port.".into());
+                }
+                if self.offers.is_empty() {
+                    lines.push("No Le Mans event open to your team can run in the port.".into());
+                }
+            }
+            Page::ConfirmSkipLeMans => {}
+            Page::TeamName(typed) => {
+                lines.push(format!("{typed}_"));
+                lines.push(format!(
+                    "Type up to {TEAM_NAME_MAX} letters, digits and spaces; Backspace deletes. Empty: {}.",
+                    self.default_team_name()
+                ));
+            }
+            Page::Livery(l) => {
+                lines.push(self.career.team_name.clone());
+                if self.career.team_livery != Some(*l) {
+                    lines.push("Changed: Confirm keeps it.".into());
+                }
+                lines.push("Each row shows its next choice when selected. The race cars do not show the livery in the port yet.".into());
+            }
             Page::TeamMate => {
                 match &self.career.team_mate {
                     Some(t) => lines.push(format!(
@@ -2360,6 +2634,13 @@ impl Screen {
 
     fn refresh_offers(&mut self, routes: &BTreeMap<i32, String>, labels: &Labels, root: &Path) {
         self.offers = offers(&self.cat, &self.career, routes, labels, |p| root.join(p).exists());
+        // While Le Mans is pending, Team Entry lists the Le Mans events and
+        // Driver Offers the Le Mans offers (0x651A10) [V].
+        let pending = self.lemans_pending();
+        if pending {
+            let cat = &self.cat;
+            self.offers.retain(|o| cat.event(o.event_id).and_then(|e| cat.tier(e.tier_id)).is_some_and(|t| t.region == Region::LeMans));
+        }
         // A Le Mans selection event needs a car of the series whose field
         // builds on every drawn layout (AUTHORED: the first that does; the
         // original lets the player choose an owned eligible car).
@@ -2377,7 +2658,19 @@ impl Screen {
                 None => false,
             }
         });
-        self.driver_offers = offer_runs(&self.cat, &self.career, routes, labels, |p| root.join(p).exists());
+        let ids = if pending {
+            self.career.lemans_offers_shown(&self.cat)
+        } else {
+            self.career.driver_offers_shown(&self.cat)
+        };
+        self.driver_offers = offer_runs(&self.cat, &ids, routes, labels, |p| root.join(p).exists());
+        // A Le Mans offer needs its series' field on the drawn layout.
+        self.driver_offers.retain(|o| {
+            let Some(series) = cat.driver_offers.get(&o.offer_id).and_then(|d| cat.event(d.event_id)).and_then(|e| lemans_series(cat, e)) else {
+                return true;
+            };
+            lemans_plan(root, series, &o.car, std::slice::from_ref(&o.race), 1).is_ok()
+        });
     }
 
     /// Takes a driver offer: one race in the offer's car, solo for a test
@@ -2392,9 +2685,11 @@ impl Screen {
         let (race, route) = &run.race;
         // AUTHORED: an offer of a Le Mans selection event keeps the event's
         // cars as its field (`lemans_restrictions`, 0x663860, not ported).
-        let lemans = self.cat.event(offer.event_id).is_some_and(|e| e.use_lemans_selection);
+        let series = self.cat.event(offer.event_id).and_then(|e| lemans_series(&self.cat, e));
         let test = grid_tools::career::rules::is_test_offer(offer);
-        let (field, races) = if lemans || test {
+        let (field, races) = if let Some(series) = series {
+            lemans_plan(&self.root, series, &run.car, std::slice::from_ref(&run.race), seed)?
+        } else if test {
             let planned = Planned {
                 route: route.clone(),
                 laps: race.laps,
@@ -2432,7 +2727,7 @@ impl Screen {
             settings: None,
             best_lap: None,
             top_mph: None,
-            lemans: None,
+            lemans: series.map(|s| LeMansRun { series: s.into(), seed }),
         };
         std::fs::write(self.dir.join(EVENT), e.write()).map_err(|err| err.to_string())?;
         log_line!(
@@ -2578,7 +2873,10 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let career = if save_path.is_file() {
         save::load(&save_path)?
     } else {
-        let c = new_career(&cat);
+        let mut c = new_career(&cat);
+        if std::env::var("GRID_CAREER_SEED").as_deref() == Ok("season") {
+            seed_season(&cat, &mut c);
+        }
         save::store(&save_path, &c)?;
         log_line!("drive_career version=1 event=new_career team_founded={} money={}", c.team_founded, c.money);
         c
@@ -2605,6 +2903,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         used: Vec::new(),
     };
     screen.collect()?;
+    screen.page = screen.landing(screen.page.clone());
     screen.refresh_offers(&routes, &labels, &root);
     log_line!(
         "drive_career version=1 event=open money={} reputation={:?} licences={} season={} offers={}",
@@ -2724,7 +3023,24 @@ fn auto_action(s: &Screen, target: Auto) -> Action {
         Auto::Offer(id) => s.driver_offers.iter().position(|o| o.offer_id == id),
         _ => (!s.driver_offers.is_empty()).then_some(0),
     };
+    let first = || s.actions().into_iter().next().map_or(Action::Quit, |r| r.1);
     match (&s.page, target) {
+        (Page::SeasonEnd, _) => Action::EndSeason,
+        (Page::SeasonStart | Page::TeamName(_), _) => first(),
+        (Page::Home, Auto::Season) if s.career.team_founded && s.career.team_livery.is_none() => {
+            Action::Go(Page::Team)
+        }
+        (Page::Home, Auto::Season) if s.lemans_pending() => Action::Go(Page::LeMans),
+        (Page::Team, Auto::Season) => match s.livery_draft() {
+            Some(l) if s.career.team_livery.is_none() => Action::Go(Page::Livery(l)),
+            _ => Action::Go(Page::Home),
+        },
+        (Page::Livery(l), Auto::Season) if Some(*l) == s.livery_draft() => Action::CycleLivery(LiveryPart::Pattern),
+        (Page::Livery(l), Auto::Season) => Action::PaintTeam(*l),
+        (Page::LeMans, Auto::Season) => Action::Go(Page::ConfirmSkipLeMans),
+        (Page::ConfirmSkipLeMans, Auto::Season) => Action::RefuseLeMans,
+        (Page::LeMans, Auto::Event(_)) => Action::Go(Page::Events(Region::LeMans)),
+        (Page::LeMans, Auto::Offer(_) | Auto::FirstOffer) => Action::Go(Page::DriverOffers),
         (Page::Home, _) if s.current.is_some() => Action::Go(Page::Event),
         (Page::Home, Auto::Event(id)) if offer(id).is_some() => Action::Go(Page::Regions),
         (Page::Home, Auto::Offer(_) | Auto::FirstOffer) if driver_offer().is_some() => {
@@ -2753,7 +3069,10 @@ fn auto_action(s: &Screen, target: Auto) -> Action {
         (Page::OfferDetails(i), _) => Action::TakeOffer(*i),
         (Page::Event, _) if s.current.as_ref().is_some_and(|e| e.next().is_some()) => Action::NextRace,
         (Page::Rewards(pages, at), _) if at + 1 < pages.len() => Action::Continue,
-        (Page::Home | Page::Event | Page::Rewards(..) | Page::Regions | Page::Events(_), _) => Action::Quit,
+        (
+            Page::Home | Page::Event | Page::Rewards(..) | Page::Regions | Page::Events(_) | Page::ConfirmSkipLeMans,
+            _,
+        ) => Action::Quit,
         _ => Action::Go(Page::Home),
     }
 }
@@ -2767,15 +3086,26 @@ fn update(
     clicks: Query<(&Interaction, &RowText), Changed<Interaction>>,
     time: Res<Time<Real>>,
     mut fade: ResMut<crate::transition::Fade>,
+    mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut done: Local<bool>,
     mut auto_wait: Local<f32>,
 ) {
     if *done || fade.leaving() {
+        keys.clear();
         return;
     }
     let mut repeat = screen.repeat;
-    let nav: Nav = crate::pause_menu::nav(&actions, &mut repeat, time.delta_secs());
+    let mut nav: Nav = crate::pause_menu::nav(&actions, &mut repeat, time.delta_secs());
     screen.repeat = repeat;
+    if let Page::TeamName(typed) = &mut screen.page {
+        type_name(typed, keys.read());
+        // Letters type: P (Pause) and the numpad's menu keys do not act.
+        nav.up = false;
+        nav.down = false;
+        nav.pause = false;
+    } else {
+        keys.clear();
+    }
     let rows = screen.actions();
     let n = rows.len().max(1);
     let mut chosen = None;
@@ -2825,6 +3155,7 @@ fn update(
             if let Page::Ebay(of) = page {
                 screen.refresh_used(of);
             }
+            let page = screen.landing(page);
             log_line!("drive_career version=1 event=page page={}", page_name(&page));
             screen.page = page;
             screen.cursor = 0;
@@ -2837,14 +3168,14 @@ fn update(
             let _ = std::fs::remove_file(screen.dir.join(EVENT));
             log_line!("drive_career version=1 event=abandoned");
             screen.current = None;
-            screen.page = Page::Home;
+            screen.page = screen.landing(Page::Home);
             screen.cursor = 0;
             Ok(false)
         }
         Action::Continue => {
             screen.page = match std::mem::replace(&mut screen.page, Page::Home) {
                 Page::Rewards(pages, at) if at + 1 < pages.len() => Page::Rewards(pages, at + 1),
-                _ => Page::Home,
+                _ => screen.landing(Page::Home),
             };
             log_line!("drive_career version=1 event=page page={}", page_name(&screen.page));
             screen.cursor = 0;
@@ -2972,6 +3303,76 @@ fn update(
             };
             placed.and_then(|()| s.save()).map(|()| false)
         }
+        Action::EndSeason => {
+            let s = &mut *screen;
+            if s.career.end_season() {
+                s.save().map(|()| {
+                    log_line!(
+                        "drive_career version=1 event=season_ended season={} event_wins={} money_won={} reputation_earned={}",
+                        s.career.season_number,
+                        s.career.previous_totals.event_wins,
+                        s.career.previous_totals.money,
+                        s.career.previous_totals.reputation
+                    );
+                    s.page = Page::SeasonStart;
+                    log_line!("drive_career version=1 event=page page={}", page_name(&s.page));
+                    s.cursor = 0;
+                    false
+                })
+            } else {
+                s.page = s.landing(Page::Home);
+                s.cursor = 0;
+                Ok(false)
+            }
+        }
+        Action::RefuseLeMans => {
+            let s = &mut *screen;
+            s.career.refuse_lemans();
+            s.save().map(|()| {
+                log_line!("drive_career version=1 event=lemans_refused season={}", s.career.season_number);
+                s.page = s.landing(Page::Home);
+                log_line!("drive_career version=1 event=page page={}", page_name(&s.page));
+                s.cursor = 0;
+                false
+            })
+        }
+        Action::NameTeam(name) => {
+            let s = &mut *screen;
+            let first = s.career.team_name.is_empty();
+            s.career.team_name = name;
+            s.save().map(|()| {
+                log_line!("drive_career version=1 event=team_named name={:?}", s.career.team_name);
+                s.page = if first { s.landing(Page::Home) } else { Page::Team };
+                log_line!("drive_career version=1 event=page page={}", page_name(&s.page));
+                s.cursor = 0;
+                false
+            })
+        }
+        Action::CycleLivery(part) => {
+            let s = &mut *screen;
+            if let Page::Livery(l) = &mut s.page {
+                next_livery(l, part, &s.cat.livery_choices);
+            }
+            Ok(false)
+        }
+        Action::PaintTeam(l) => {
+            let s = &mut *screen;
+            s.career.team_livery = Some(l);
+            s.save().map(|()| {
+                log_line!(
+                    "drive_career version=1 event=team_livery pattern={} colours={},{},{} number={}",
+                    l.pattern,
+                    l.colours[0],
+                    l.colours[1],
+                    l.colours[2],
+                    l.number
+                );
+                s.page = Page::Team;
+                log_line!("drive_career version=1 event=page page={}", page_name(&s.page));
+                s.cursor = 0;
+                false
+            })
+        }
         Action::Quit => {
             *done = true;
             log_line!("drive_career version=1 event=quit");
@@ -3010,7 +3411,48 @@ fn page_name(page: &Page) -> String {
         }
         Page::Ebay(of) => format!("ebay:{of:?}"),
         Page::Rewards(pages, at) => format!("rewards:{at}/{}", pages.len()),
+        Page::TeamName(_) => "team_name".into(),
+        Page::Livery(_) => "livery".into(),
+        Page::SeasonEnd => "season_end".into(),
+        Page::SeasonStart => "season_start".into(),
+        Page::LeMans => "lemans".into(),
+        Page::ConfirmSkipLeMans => "confirm_skip_lemans".into(),
         _ => format!("{page:?}").to_lowercase(),
+    }
+}
+
+/// Typed text on the team name keyboard: printable ASCII letters, digits,
+/// spaces and `-.&'`, up to `TEAM_NAME_MAX`; Backspace deletes (AUTHORED
+/// character set).
+fn type_name<'a>(typed: &mut String, keys: impl Iterator<Item = &'a bevy::input::keyboard::KeyboardInput>) {
+    use bevy::input::ButtonState;
+    use bevy::input::keyboard::KeyCode;
+    for k in keys.filter(|k| k.state == ButtonState::Pressed) {
+        if k.key_code == KeyCode::Backspace {
+            typed.pop();
+            continue;
+        }
+        for c in k.text.as_deref().unwrap_or_default().chars() {
+            if typed.chars().count() < TEAM_NAME_MAX
+                && (c.is_ascii_alphanumeric() || " -.&'".contains(c))
+                && !(c == ' ' && typed.is_empty())
+            {
+                typed.push(c);
+            }
+        }
+    }
+}
+
+/// The next choice of a livery part, after the last the first.
+fn next_livery(l: &mut TeamLivery, part: LiveryPart, choices: &grid_tools::career::LiveryChoices) {
+    fn next(ids: impl Iterator<Item = i32> + Clone, current: i32) -> i32 {
+        let first = ids.clone().next().unwrap_or(current);
+        ids.skip_while(|&id| id != current).nth(1).unwrap_or(first)
+    }
+    match part {
+        LiveryPart::Pattern => l.pattern = next(choices.patterns.iter().map(|p| p.0), l.pattern),
+        LiveryPart::Colour(c) => l.colours[c] = next(choices.colours.iter().map(|x| x.0), l.colours[c]),
+        LiveryPart::Number => l.number = next(choices.numbers.iter().map(|n| n.0), l.number),
     }
 }
 
@@ -3662,7 +4104,7 @@ speech_event_wins = 0
         let mut career = new_career(&cat);
         let exists = |p: &str| root.join(p).exists();
         assert!(offers(&cat, &career, &routes, &Labels::default(), exists).is_empty());
-        let runs = offer_runs(&cat, &career, &routes, &Labels::default(), exists);
+        let runs = offer_runs(&cat, &career.driver_offers_shown(&cat), &routes, &Labels::default(), exists);
         let ids: Vec<i32> = runs.iter().map(|r| r.offer_id).collect();
         // US 2 (Lacetti, Washington) and 7 (time trial, Washington GP),
         // Europe 15 and 16, Japan 25 (350Z, Yokohama) and, since Okutama
@@ -3690,7 +4132,7 @@ speech_event_wins = 0
         assert_eq!((p.driver_offer_wages, p.driver_offer_bonus, p.reputation()), (3000, 2000, 180));
         assert_eq!(career.reputation[Region::Europe as usize], 180);
         // The slot moves on to offer 17, the next Europe race offer by order_index.
-        let ids: Vec<i32> = offer_runs(&cat, &career, &routes, &Labels::default(), exists)
+        let ids: Vec<i32> = offer_runs(&cat, &career.driver_offers_shown(&cat), &routes, &Labels::default(), exists)
             .iter()
             .map(|r| r.offer_id)
             .collect();
@@ -3739,5 +4181,116 @@ speech_event_wins = 0
         assert_eq!(offer[0].lines[0], "Objective: achieved");
         let h2h = reward_pages(text, Vec::new(), vec!["Sponsor X: you met - $1".into()], None, true, t, Vec::new());
         assert_eq!(titles(&h2h), ["Sponsors", "Bank Account", "Team News"]);
+    }
+
+    fn key(text: &str, code: bevy::input::keyboard::KeyCode) -> bevy::input::keyboard::KeyboardInput {
+        bevy::input::keyboard::KeyboardInput {
+            key_code: code,
+            logical_key: bevy::input::keyboard::Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
+            state: bevy::input::ButtonState::Pressed,
+            text: (!text.is_empty()).then(|| text.into()),
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        }
+    }
+
+    #[test]
+    fn the_team_name_keyboard_types_and_deletes() {
+        use bevy::input::keyboard::KeyCode;
+        let mut typed = String::new();
+        let keys = [
+            key(" ", KeyCode::Space),
+            key("A", KeyCode::KeyA),
+            key("é", KeyCode::KeyE),
+            key(" ", KeyCode::Space),
+            key("1", KeyCode::Digit1),
+            key("", KeyCode::Backspace),
+            key("&", KeyCode::Digit7),
+        ];
+        type_name(&mut typed, keys.iter());
+        assert_eq!(typed, "A &", "no leading space, ASCII only, Backspace deletes");
+        let long: Vec<_> = (0..30).map(|_| key("x", KeyCode::KeyX)).collect();
+        type_name(&mut typed, long.iter());
+        assert_eq!(typed.len(), TEAM_NAME_MAX);
+    }
+
+    #[test]
+    fn livery_parts_cycle_through_their_tables() {
+        let choices = grid_tools::career::LiveryChoices {
+            patterns: vec![(4, "pattern_0".into()), (7, "pattern_1".into())],
+            colours: vec![(1, [255, 0, 0]), (2, [0, 255, 0]), (3, [0, 0, 255])],
+            numbers: vec![(10, "00".into()), (11, "01".into())],
+        };
+        let mut l = TeamLivery::first(&choices).unwrap();
+        assert_eq!(l, TeamLivery { pattern: 4, colours: [1, 2, 3], number: 10 });
+        next_livery(&mut l, LiveryPart::Pattern, &choices);
+        next_livery(&mut l, LiveryPart::Colour(2), &choices);
+        next_livery(&mut l, LiveryPart::Number, &choices);
+        assert_eq!(l, TeamLivery { pattern: 7, colours: [1, 2, 1], number: 11 });
+        next_livery(&mut l, LiveryPart::Pattern, &choices);
+        assert_eq!(l.pattern, 4, "after the last, the first");
+    }
+
+    /// The season pages on the purchased data: a seeded season lands on
+    /// the team name keyboard, GRID World routes to the Le Mans choice
+    /// while Le Mans is pending, its driver offers are the Le Mans ones,
+    /// skipping lands on End Of Season and Continue starts season 2.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn a_seeded_season_walks_le_mans_and_the_season_screens() {
+        let (cat, routes, root) = catalogue();
+        let mut career = new_career(&cat);
+        seed_season(&cat, &mut career);
+        assert_eq!(career.season_state(), SeasonState::LeMansPending);
+        let dir = std::env::temp_dir().join(format!("grid-career-season-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Screen {
+            cat,
+            career,
+            offers: Vec::new(),
+            driver_offers: Vec::new(),
+            current: None,
+            page: Page::Home,
+            cursor: 0,
+            repeat: Repeat::default(),
+            dir: dir.clone(),
+            message: String::new(),
+            labels: Labels::default(),
+            root: root.clone(),
+            team_region: None,
+            team_fee: None,
+            used: Vec::new(),
+        };
+        assert_eq!(s.landing(Page::Home), Page::TeamName(String::new()));
+        s.page = Page::TeamName(String::new());
+        assert_eq!(s.actions(), vec![("OK: My Team".to_owned(), Action::NameTeam("My Team".into()))]);
+        s.career.team_name = "My Team".into();
+        assert_eq!(s.landing(Page::Home), Page::Home);
+        s.refresh_offers(&routes, &Labels::default(), &root);
+        let lemans = s.career.lemans_offers_shown(&s.cat);
+        eprintln!(
+            "le mans offers shown {lemans:?}, runnable {:?}, team entries {:?}",
+            s.driver_offers.iter().map(|o| o.offer_id).collect::<Vec<_>>(),
+            s.offers.iter().map(|o| o.event_id).collect::<Vec<_>>()
+        );
+        assert!(s.driver_offers.iter().all(|o| lemans.contains(&o.offer_id)));
+        assert!(!s.driver_offers.is_empty(), "a Le Mans driver offer runs");
+        assert!(s.offers.iter().all(|o| s.event_region(o.event_id) == Some(Region::LeMans)));
+        s.page = Page::Home;
+        assert_eq!(s.actions()[0].1, Action::Go(Page::LeMans));
+        assert_eq!(s.actions()[1].1, Action::Go(Page::LeMans));
+        s.page = Page::DriverOffers;
+        assert_eq!(s.parent(), Some(Page::LeMans));
+        // Taking the Le Mans offer races the series' field.
+        s.take_offer(0).unwrap();
+        let e = s.current.take().unwrap();
+        assert!(e.lemans.is_some() && !e.field.is_empty(), "{e:?}");
+        let _ = std::fs::remove_file(dir.join(EVENT));
+        s.career.refuse_lemans();
+        assert_eq!(s.landing(Page::Home), Page::SeasonEnd);
+        assert!(s.career.end_season());
+        assert_eq!(s.career.season_number, 2);
+        assert_eq!(s.landing(Page::Home), Page::Home);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

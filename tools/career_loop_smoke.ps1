@@ -9,6 +9,9 @@
 # at those seconds to the data dir, the last one (the rewards screen) wins.
 # -PagesOnly runs only the career screen (no supervisor, no race), so its
 # shots show the pages before the race; it ends with the hand-off code 22.
+# -Season runs only the career screen on a seeded season (GRID_CAREER_SEED=
+# season, GRID_CAREER_AUTO=season): team name, Team Branding, the Le Mans
+# choice, Skip Le Mans, End Of Season, Start Of Season, quit (exit 0).
 # Prints a verdict and the log path. This script does not build.
 param(
     [string]$Exe = 'target\release\grid-app.exe',
@@ -16,6 +19,7 @@ param(
     [string]$Auto = 'offer',
     [string]$Shots = '',
     [switch]$PagesOnly,
+    [switch]$Season,
     [int]$TimeoutSec = 900
 )
 $ErrorActionPreference = 'Stop'
@@ -30,11 +34,12 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $log = Join-Path $OutDir 'career-loop.log'
 $err = Join-Path $OutDir 'career-loop.err.log'
 
+if ($Season) { $Auto = 'season'; $env:GRID_CAREER_SEED = 'season' } else { Remove-Item Env:GRID_CAREER_SEED -ErrorAction SilentlyContinue }
 $env:GRID_CAREER_AUTO = $Auto
 $env:GRID_AUTOPILOT = '1'
 $env:GRID_RESULTS_CONTINUE = '3'
 if ($Shots) { $env:GRID_WINDOW_SHOTS = $Shots } else { Remove-Item Env:GRID_WINDOW_SHOTS -ErrorAction SilentlyContinue }
-$appArgs = if ($PagesOnly) { @('--career-screen', '--data-dir', $data) } else { @('--career', '--data-dir', $data) }
+$appArgs = if ($PagesOnly -or $Season) { @('--career-screen', '--data-dir', $data) } else { @('--career', '--data-dir', $data) }
 $started = Get-Date
 $p = Start-Process -FilePath $Exe -ArgumentList $appArgs -RedirectStandardOutput $log -RedirectStandardError $err -PassThru -NoNewWindow
 $null = $p.Handle  # keeps ExitCode readable after the exit
@@ -72,8 +77,24 @@ $loop = @(
     @('career quits', 'drive_career version=1 event=quit'),
     @('career closes', 'event=exit next=Close')
 )
-$steps = if ($PagesOnly) { $pages + $alone } else { $pages + $loop }
-$expected = if ($PagesOnly) { 22 } else { 0 }
+$seasonSteps = @(
+    @('career opens', 'drive_career version=1 event=open '),
+    @('team named', 'drive_career version=1 event=team_named name="My Team"'),
+    @('my team page', 'drive_career version=1 event=page page=team'),
+    @('team branding page', 'drive_career version=1 event=page page=livery'),
+    @('livery kept', 'drive_career version=1 event=team_livery '),
+    @('le mans choice', 'drive_career version=1 event=page page=lemans'),
+    @('skip confirm', 'drive_career version=1 event=page page=confirm_skip_lemans'),
+    @('le mans refused', 'drive_career version=1 event=lemans_refused '),
+    @('end of season', 'drive_career version=1 event=page page=season_end'),
+    @('season ended', 'drive_career version=1 event=season_ended season=2 '),
+    @('start of season', 'drive_career version=1 event=page page=season_start'),
+    @('grid world', 'drive_career version=1 event=page page=home'),
+    @('career quits', 'drive_career version=1 event=quit'),
+    @('career closes', 'event=exit next=Close')
+)
+$steps = if ($Season) { $seasonSteps } elseif ($PagesOnly) { $pages + $alone } else { $pages + $loop }
+$expected = if ($PagesOnly -and -not $Season) { 22 } else { 0 }
 $lines = if (Test-Path $log) { Get-Content $log } else { @() }
 $at = 0
 $missing = $null
@@ -89,7 +110,7 @@ $rewards = @($lines | Select-String 'event=page page=rewards' ).Count
 $shotFiles = @(Get-ChildItem $data -Filter 'window-shot-*.png' -ErrorAction SilentlyContinue).Count
 $ok = ($code -eq $expected) -and (-not $missing)
 $verdict = if ($ok) { 'PASS' } else { 'FAIL' }
-$mode = if ($PagesOnly) { 'pages' } else { 'loop' }
+$mode = if ($Season) { 'season' } elseif ($PagesOnly) { 'pages' } else { 'loop' }
 Write-Output "$verdict career-$mode`: exit=$code seconds=$seconds steps=$($steps.Count) missing=$(if ($missing) { $missing } else { 'none' }) money_after=$paid reward_pages=$rewards shots=$shotFiles"
 Write-Output "log: $log"
 if (-not $ok) { exit 1 }

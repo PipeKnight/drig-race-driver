@@ -424,6 +424,51 @@ impl AssistRewards {
 }
 
 /// The whole career catalogue.
+/// The livery designer's choices (`livery_pattern`, `livery_colour`,
+/// `livery_number`), each table in its `order` column [D].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiveryChoices {
+    /// (id, `fe_image_name`).
+    pub patterns: Vec<(i32, String)>,
+    /// (id, [red, green, blue]).
+    pub colours: Vec<(i32, [u8; 3])>,
+    /// (id, `number_string`).
+    pub numbers: Vec<(i32, String)>,
+}
+
+impl LiveryChoices {
+    fn from_database(db: &Database) -> Result<Self> {
+        fn ordered<T>(mut rows: Vec<(i32, i32, T)>) -> Vec<(i32, T)> {
+            rows.sort_by_key(|r| (r.0, r.1));
+            rows.into_iter().map(|r| (r.1, r.2)).collect()
+        }
+        let byte = |r: &Row<'_>, c: &str| int(r, c).map(|v| v.clamp(0, 255) as u8);
+        Ok(Self {
+            patterns: ordered(
+                table(db, "livery_pattern")?
+                    .rows()
+                    .map(|r| Ok((int(&r, "order")?, int(&r, "id")?, text(&r, "fe_image_name")?)))
+                    .collect::<Result<_>>()?,
+            ),
+            colours: ordered(
+                table(db, "livery_colour")?
+                    .rows()
+                    .map(|r| {
+                        let rgb = [byte(&r, "red")?, byte(&r, "green")?, byte(&r, "blue")?];
+                        Ok((int(&r, "order")?, int(&r, "id")?, rgb))
+                    })
+                    .collect::<Result<_>>()?,
+            ),
+            numbers: ordered(
+                table(db, "livery_number")?
+                    .rows()
+                    .map(|r| Ok((int(&r, "order")?, int(&r, "id")?, text(&r, "number_string")?)))
+                    .collect::<Result<_>>()?,
+            ),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Catalogue {
     pub ranks: Vec<Rank>,
@@ -471,6 +516,7 @@ pub struct Catalogue {
     pub currency_rates: Vec<f64>,
     /// `gameconfig/ebay.xml` (the shipped values when absent).
     pub ebay: super::ebay::Settings,
+    pub livery_choices: LiveryChoices,
 }
 
 impl Catalogue {
@@ -874,6 +920,7 @@ impl Catalogue {
                 .map(|r| float(&r, "conversion_rate").map(f64::from))
                 .collect::<Result<_>>()?,
             ebay: super::ebay::Settings::default(),
+            livery_choices: LiveryChoices::from_database(db)?,
         })
     }
 

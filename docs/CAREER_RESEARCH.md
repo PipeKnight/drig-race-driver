@@ -153,6 +153,12 @@ A season is not a calendar.
 - While Le Mans is pending or the season has ended, finishing a regular driver offer does not refresh
   its slot (0x676DA4).
 - The flow shows `season_end_info`, then `end_season`, then `season_start_info`.
+- Both info pages are one screen class, ScreenSeasonInfo [I]: loader 0x508EB0, vtable 0xCCFAC8, factory 0xC72470;
+  the byte +0x200 selects the end-of-season variant. Between `season_end_info` and `end_season` the original shows the
+  end-of-season leaderboards (0x509BA0, 0x50FB40 [I]); the port does not.
+- Port (docs/CAREER_SCREEN.md, season end): `Career::season_totals` (event wins, money won, reputation earned this season,
+  AUTHORED counters: the original's own counters were not traced) and `Career::end_season`, which also keeps the
+  ended season's totals for the Start Of Season page.
 
 ### 2.4 Le Mans 24 Hours [V, D]
 
@@ -167,6 +173,8 @@ A season is not a calendar.
 - Their reputation goes to the le_mans region, so it only counts towards the international total.
 - `lemans_restrictions` builds the multi-class field (docs/SERIES.md); its career consumer was not
   traced.
+- `lemans_select` offers Driver Offers, Team Entry and Skip; Skip opens `confirm_reject_lemans`, whose Yes runs 0x4DBAD0
+  [D flow, I]. The port shows this page while Le Mans is pending (docs/CAREER_SCREEN.md).
 
 ## 3. Money and reputation of an event
 
@@ -381,7 +389,8 @@ The livery designer is shown after the team is named:
 - patterns, three colours and a number (`livery_pattern`, `livery_colour`, `livery_number`);
 - per-car `vehicle_livery` rows have a `livery_price`.
 
-No livery rule was traced.
+No livery rule was traced. The port (docs/CAREER_SCREEN.md) cycles each part through its table and keeps the
+choice in the save (`team_livery`, AUTHORED); it does not charge `livery_price`.
 
 ## 6. Driver offers [V]
 
@@ -702,11 +711,28 @@ row 60). Labels as above.
   port function) is `le_mans_flow_branch`: it branches on `season_state == 1`.
 - 0x656D40 (head-to-head, §2.2) is unchanged: a head-to-head opens when every other event of its tier
   has its record set.
-- How the port differs (`Career::tier_open`, AUTHORED until ported): it tests the live regional rank,
-  International at overall rank 3 and Le Mans while an entry is pending; the original tests the
-  granted licences, which only rise, and opens International and Le Mans through licence[3]/[4]
-  from the cascade. Not ported yet: the starting licence value is not settled (-1 or 0 before the
-  team is founded), and the port's save has no licence array (§9.4).
+- Where the licences live [V]: in the career-mode object (`L = *(*(P+0x1684)+0x2c)`, vtable
+  0xCEA508, built by 0x66F4F0 and 0x668F90), not in the main_career unit (0x6501B0, §9.3). The array
+  is five `{rank vtable 0xD0BD54, value}` pairs at L+0x34 (value at L+0x38 + region*8); L+0x30 is
+  the team-active byte that 0x66F640 sets. The constructor 0x66F4F0 and the reset 0x64EC60 (vtable
+  slot 2) set every value to -1 and team-active to 0; the serialiser 0x64EB60 (vtable slot 1) reads
+  the team-active byte, the five values and a count of per-event flag bytes (the map at L+0x5C,
+  0x68ADA0 lookup; [I] the available flags 0x64E9B0 sets). So the original saves the licences.
+- Who raises them [V]: 0x669060 checks only the ranges (0x62C380 rank <= 3, 0x62C270 region <= 4)
+  and raises `licence[region]` only when it is below the new rank (0x67C440). Its callers are
+  0x66B1D0, the rank-promotion check run by the event reputation gain 0x66E1C0 (for each rank between
+  the old and the new one it records the pending promotion at P+0x168C/+0x1690, lowers the countdown
+  +0x1694, and grants that licence), 0x66F640 (founding: rookie in Europe, Japan and USA), and
+  itself (the rank-3 cascade). 0x4DD090 has no direct callers.
+- Consequence for the port [V reasoning, no live check]: reputation never falls and every promotion
+  grants, so after founding `licence[r]` equals the region's rank (0x639150), with rookie as the
+  floor founding grants; the first rank 3 comes from the total reputation, which 0x639150 also turns
+  into rank 3 everywhere, matching the cascade. `Career::tier_open` therefore tests `rank(region)`
+  and needs no saved licence array (§9.4). Before founding the original's licences are -1 and the
+  port requires `team_founded`. Le Mans is not entered through tier tiles but through the Le Mans
+  flow (§2.4, `le_mans_entry_decision` / `lemans_select`, the event picked by the car's class); the
+  port opens the Le Mans tiers only while the entry is pending. If a later rule lets reputation
+  fall, the port must start saving the licences.
 
 ### 14.2 Team win: ties go to the player [V]
 

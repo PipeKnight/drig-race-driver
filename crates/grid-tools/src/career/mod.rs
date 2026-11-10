@@ -7,10 +7,10 @@ pub mod rules;
 pub mod save;
 pub mod state;
 
-pub use data::{Catalogue, Event, Region};
+pub use data::{Catalogue, Event, LiveryChoices, Region};
 pub use rules::{Classified, Entrant, Flashbacks, RaceResult, RaceSettings};
 pub use state::{
-    Career, Payout, SeasonEntry, SeasonState, SponsorPay, apply_driver_offer, apply_event, apply_event_in_classes,
+    Career, Payout, SeasonEntry, SeasonState, SeasonTotals, SponsorPay, TeamLivery, apply_driver_offer, apply_event, apply_event_in_classes,
 };
 
 #[cfg(test)]
@@ -213,6 +213,7 @@ mod tests {
             assist_rewards: AssistRewards::default(),
             currency_rates: vec![1.0, 2.0, 1.5, 230.0],
             ebay: super::ebay::Settings::default(),
+            ..Catalogue::default()
         }
     }
 
@@ -598,9 +599,16 @@ mod tests {
         // Season's Earnings: every payout of the season, cleared at its end.
         assert!(c.money > before);
         assert_eq!(c.season_earnings, c.money - before);
+        // Second places: no event win; reputation counts every payout.
+        let totals = c.season_totals();
+        assert_eq!(totals.event_wins, 0);
+        assert_eq!(totals.reputation, c.total_reputation());
+        assert!(totals.reputation > 0);
         c.refuse_lemans();
         assert_eq!(c.season_state(), SeasonState::Ended);
         assert!(c.end_season());
+        assert_eq!(c.previous_totals, totals);
+        assert_eq!(c.season_totals(), SeasonTotals::default());
         assert_eq!(c.season_earnings, 0);
         assert_eq!(c.season_number, 2);
         assert_eq!(c.previous_season.len(), 4);
@@ -665,7 +673,21 @@ mod tests {
         c.head_to_heads.insert(69);
         c.count_race(24);
         c.count_race(24);
+        c.team_livery = Some(TeamLivery {
+            pattern: 3,
+            colours: [1, 22, 40],
+            number: 17,
+        });
+        c.previous_totals = SeasonTotals {
+            event_wins: 2,
+            money: 51000,
+            reputation: 900,
+        };
         let text = save::write(&c).unwrap();
+        assert!(text.contains("team_livery 3 1 22 40 17
+"));
+        assert!(text.contains("season_event_wins 1
+"), "event 7 won");
         assert!(text.contains("layout_races 24 2\n"));
         assert_eq!(save::read(&text).unwrap(), c);
         let forged = text.replace("money 1", "money 9");
@@ -770,6 +792,37 @@ mod tests {
             let g = field::grid(&cat, &f, Some(39), 14, 2, &mut rng);
             assert!(g.iter().position(|&k| k == i).unwrap() < 3);
         }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn le_mans_offers_follow_the_overall_rank_and_livery_tables_load() {
+        let cat = catalogue();
+        let mut c = founded();
+        assert!(c.lemans_offers_shown(&cat).is_empty(), "only while Le Mans is pending");
+        for id in [1, 2, 3, 4] {
+            c.count_in_season(SeasonEntry::Event(id));
+        }
+        assert_eq!(c.season_state(), SeasonState::LeMansPending);
+        let tiers = |c: &Career| -> Vec<i32> {
+            c.lemans_offers_shown(&cat)
+                .iter()
+                .map(|o| cat.driver_offers[o].tier_id)
+                .collect()
+        };
+        // Rookie: the rank-1 tiers by order_index 0, 1, 2 (tier.tsv: 32, 30, 31).
+        assert_eq!(tiers(&c), [32, 30, 31]);
+        c.reputation[Region::Europe as usize] = cat.ranks[1].reputation_to_unlock;
+        assert_eq!(tiers(&c).len(), 3);
+        assert!(tiers(&c).iter().all(|t| cat.tier(*t).unwrap().rank_id == 2));
+        // Every offer shown is a Le Mans 24 Hours race.
+        for o in c.lemans_offers_shown(&cat) {
+            assert_eq!(cat.tier(cat.driver_offers[&o].tier_id).unwrap().region, Region::LeMans);
+        }
+        let l = &cat.livery_choices;
+        assert_eq!((l.patterns.len(), l.colours.len(), l.numbers.len()), (52, 65, 100));
+        assert_eq!(l.numbers[0].1, "00");
+        assert!(TeamLivery::first(l).is_some());
     }
 
     #[test]

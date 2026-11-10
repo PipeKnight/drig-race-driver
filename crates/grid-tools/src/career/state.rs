@@ -27,6 +27,43 @@ pub enum SeasonState {
     Ended,
 }
 
+/// One season's figures on the season info screens (`season_end_info`,
+/// `season_start_info`: Event Wins, Money Won, Reputation Earned). [I] The
+/// screen's data provider (ScreenSeasonInfo, vtable 0xCCFAC8, flag
+/// `end_of_season` at +0x200) was not traced; the port counts own events
+/// won (reward position 0, head-to-heads included), the season's payouts
+/// and the reputation they brought.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeasonTotals {
+    pub event_wins: u32,
+    pub money: i64,
+    pub reputation: i64,
+}
+
+/// The team's livery from the livery designer (`livery_pattern.id`,
+/// three `livery_colour.id`s: base, primary, secondary, and
+/// `livery_number.id`) [D tables]. [I] Where the original saves it was not
+/// traced; the race cars do not show it in the port.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TeamLivery {
+    pub pattern: i32,
+    pub colours: [i32; 3],
+    pub number: i32,
+}
+
+impl TeamLivery {
+    /// The first choice of each table (AUTHORED: the original's starting
+    /// livery was not traced).
+    pub fn first(choices: &super::data::LiveryChoices) -> Option<Self> {
+        let colour = |i: usize| choices.colours.get(i).or(choices.colours.first()).map(|c| c.0);
+        Some(Self {
+            pattern: choices.patterns.first()?.0,
+            colours: [colour(0)?, colour(1)?, colour(2)?],
+            number: choices.numbers.first()?.0,
+        })
+    }
+}
+
 /// A hired teammate (a `driver` row with `can_be_hired`) [V 0x662850].
 #[derive(Clone, Debug, PartialEq)]
 pub struct HiredTeamMate {
@@ -63,6 +100,8 @@ pub struct Career {
     /// `start_race_team`, 0x674610) [V].
     pub team_founded: bool,
     pub team_name: String,
+    /// Chosen in the livery designer; `None` until then.
+    pub team_livery: Option<TeamLivery>,
     pub cars: Vec<OwnedCar>,
     pub team_mate: Option<HiredTeamMate>,
     /// Signing fees paid in total (+0xA10) [V].
@@ -70,6 +109,12 @@ pub struct Career {
     /// The money paid this season (the bank's "Season's Earnings"). [I]
     /// Every payout adds its total; `end_season` clears it.
     pub season_earnings: i64,
+    /// Own events won this season ([`SeasonTotals`]) [I].
+    pub season_event_wins: u32,
+    /// Reputation earned this season ([`SeasonTotals`]) [I].
+    pub season_reputation: i64,
+    /// The last ended season's figures, for `season_start_info` [I].
+    pub previous_totals: SeasonTotals,
     /// Received sponsor offers (`event_sponsor_offer.id`), in arrival order.
     pub sponsor_offers: Vec<i32>,
     pub major_sponsor: Option<i32>,
@@ -112,10 +157,14 @@ impl Career {
             season_number: 1,
             team_founded: false,
             team_name: String::new(),
+            team_livery: None,
             cars: Vec::new(),
             team_mate: None,
             team_mate_spending: 0,
             season_earnings: 0,
+            season_event_wins: 0,
+            season_reputation: 0,
+            previous_totals: SeasonTotals::default(),
             sponsor_offers: Vec::new(),
             major_sponsor: None,
             minor_sponsors: [None; MINOR_SLOTS],
@@ -310,6 +359,48 @@ impl Career {
         }
     }
 
+    /// The current season's figures.
+    pub fn season_totals(&self) -> SeasonTotals {
+        SeasonTotals {
+            event_wins: self.season_event_wins,
+            money: self.season_earnings,
+            reputation: self.season_reputation,
+        }
+    }
+
+    /// The Le Mans driver offers on show while Le Mans is pending (0x651A10)
+    /// [V]: three slots by `tier.order_index`, each from the `le_mans`
+    /// driver-offer tier of rank `overall rank + 1` (rank 1 when there is
+    /// none), its first offer by `driver_offer.order_index`. [I] A driven
+    /// offer is not skipped: each tier has one offer, offered again every
+    /// season.
+    pub fn lemans_offers_shown(&self, catalogue: &Catalogue) -> Vec<i32> {
+        if self.season_state() != SeasonState::LeMansPending {
+            return Vec::new();
+        }
+        let rank = self.overall_rank(catalogue) as i32 + 1;
+        let mut shown = Vec::new();
+        for slot in 0..3 {
+            let in_slot = |rank_id: i32| {
+                catalogue.tiers.iter().find(|t| {
+                    t.driver_offers && t.region == Region::LeMans && t.order_index == slot && t.rank_id == rank_id
+                })
+            };
+            let Some(tier) = in_slot(rank).or_else(|| in_slot(1)) else {
+                continue;
+            };
+            if let Some(o) = catalogue
+                .driver_offers
+                .values()
+                .filter(|o| o.tier_id == tier.id)
+                .min_by_key(|o| (o.order_index, o.id))
+            {
+                shown.push(o.id);
+            }
+        }
+        shown
+    }
+
     /// Counts a finished event or offer into the season, only while the own
     /// team is active and the season has room (0x6427A0, 0x67BF2D) [V].
     pub fn count_in_season(&mut self, entry: SeasonEntry) {
@@ -332,8 +423,11 @@ impl Career {
             return false;
         }
         self.previous_season = std::mem::take(&mut self.season);
+        self.previous_totals = self.season_totals();
         self.lemans_refused = false;
         self.season_earnings = 0;
+        self.season_event_wins = 0;
+        self.season_reputation = 0;
         self.season_number += 1;
         true
     }
@@ -702,6 +796,7 @@ pub fn apply_event_in_classes(
         }
         career.count_in_season(SeasonEntry::Event(event.id));
         career.season_earnings += payout.money();
+        career.season_event_wins += u32::from(payout.position == Some(0));
         payout.team_founded = career.add_money(catalogue, payout.money());
         return Ok(payout);
     }
@@ -774,6 +869,8 @@ pub fn apply_event_in_classes(
     career.count_in_season(SeasonEntry::Event(event.id));
     career.reputation[tier.region as usize] += payout.reputation();
     career.season_earnings += payout.money();
+    career.season_reputation += payout.reputation();
+    career.season_event_wins += u32::from(payout.position == Some(0));
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }
@@ -819,6 +916,7 @@ pub fn apply_driver_offer(
     career.completed_offers.insert(offer_id);
     career.count_in_season(SeasonEntry::DriverOffer(offer_id));
     career.season_earnings += payout.money();
+    career.season_reputation += payout.reputation();
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }

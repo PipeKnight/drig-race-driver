@@ -5,7 +5,7 @@
 //!
 //! Database rows are referred to by their database ids, as the original
 //! does.
-use super::state::{Career, HiredTeamMate, MINOR_SLOTS, OwnedCar, SeasonEntry};
+use super::state::{Career, HiredTeamMate, MINOR_SLOTS, OwnedCar, SeasonEntry, SeasonTotals, TeamLivery};
 
 pub const MAGIC: &str = "grid-career";
 pub const VERSION: u32 = 1;
@@ -52,6 +52,10 @@ pub fn write(c: &Career) -> Result<String, Error> {
     put(format!("season_number {}", c.season_number));
     put(format!("team_founded {}", c.team_founded as u8));
     put(format!("team_name {}", c.team_name));
+    if let Some(l) = c.team_livery {
+        let [a, b, d] = l.colours;
+        put(format!("team_livery {} {a} {b} {d} {}", l.pattern, l.number));
+    }
     for car in &c.cars {
         put(format!(
             "car {} {} {} {} {} {:?}",
@@ -63,6 +67,10 @@ pub fn write(c: &Career) -> Result<String, Error> {
     }
     put(format!("team_mate_spending {}", c.team_mate_spending));
     put(format!("season_earnings {}", c.season_earnings));
+    put(format!("season_event_wins {}", c.season_event_wins));
+    put(format!("season_reputation {}", c.season_reputation));
+    let p = c.previous_totals;
+    put(format!("previous_totals {} {} {}", p.event_wins, p.money, p.reputation));
     for o in &c.sponsor_offers {
         put(format!("sponsor_offer {o}"));
     }
@@ -181,6 +189,22 @@ pub fn read(text: &str) -> Result<Career, Error> {
             }
             "team_mate_spending" => c.team_mate_spending = num(f.next(), key)?,
             "season_earnings" => c.season_earnings = num(f.next(), key)?,
+            "team_livery" => {
+                c.team_livery = Some(TeamLivery {
+                    pattern: num(f.next(), key)?,
+                    colours: [num(f.next(), key)?, num(f.next(), key)?, num(f.next(), key)?],
+                    number: num(f.next(), key)?,
+                })
+            }
+            "season_event_wins" => c.season_event_wins = num(f.next(), key)?,
+            "season_reputation" => c.season_reputation = num(f.next(), key)?,
+            "previous_totals" => {
+                c.previous_totals = SeasonTotals {
+                    event_wins: num(f.next(), key)?,
+                    money: num(f.next(), key)?,
+                    reputation: num(f.next(), key)?,
+                }
+            }
             "sponsor_offer" => c.sponsor_offers.push(num(f.next(), key)?),
             "major_sponsor" => c.major_sponsor = Some(num(f.next(), key)?),
             "minor_sponsor" => {
