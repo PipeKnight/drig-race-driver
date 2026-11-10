@@ -259,6 +259,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [DONINGTON_BODY_CONTACTS.md](DONINGTON_BODY_CONTACTS.md) Experimental packed-track body contacts — This records the F237/F238 packed-only milestone.
 - [DRY_GROUND_AND_AA.md](DRY_GROUND_AND_AA.md) Dry ground and anti-aliasing follow-up — log.
 - [FRESH_PACKED_CONTACTS.md](FRESH_PACKED_CONTACTS.md) Fresh Rust packed body-contact generation (F234) — `packed_contacts::calculate` now composes source moving-mesh bounds and packed candidate traversal with fresh …
+- [GARAGE_WORLD.md](GARAGE_WORLD.md) GRID World 3D scene (the garage) and the livery 3D preview — 10 November 2026, Claude Code (F809).
 - [GEOMETRIC_CONTACT_HANDOFF.md](GEOMETRIC_CONTACT_HANDOFF.md) Geometric contacts into physical solving (F220) — F221 extends this handoff to actual Lacetti/Donington packed-track contacts: [packed mesh …
 - [GRID_POPULATION.md](GRID_POPULATION.md) Source chunk-name grid population (F092) — `grid-world::grid_population` reconstructs grid cell identities from canonical chunk names and their supplied order.
 - [GROUND_PLACEMENT.md](GROUND_PLACEMENT.md) Ground-placement prototype and remaining fidelity checks — Recorded 7 October 2026.

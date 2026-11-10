@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F809](log/F0809.md) | 2026-11-10 | GRID World garage scene and livery 3D preview: static research |
 | [F808](log/F0808.md) | 2026-11-10 | Sponsor designer: slots, replace, remove, swap, best-sponsor fill |
 | [F807](log/F0807.md) | 2026-11-10 | Livery designer carousels: clamp, dead end, Randomise |
 | [F806](log/F0806.md) | 2026-11-10 | Reset lines: Haruna final boundaries disqualify; tall fence plates are not raised boxes |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F752](log/F0752.md) | 2026-11-05 | Playable 343de39742df for the PC and both APKs (first tyre smoke builds no pipeline mid-race) |
 | [F751](log/F0751.md) | 2026-11-05 | Tyre smoke pipelines warmed behind the start cover |
 | [F750](log/F0750.md) | 2026-11-05 | Playable 989dd8305b37 for the PC and both APKs (tree shadows no longer turn with the camera) |
-| [F749](log/F0749.md) | 2026-11-05 | Release script drafts the APK test order's New-in section; F range from added log files |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

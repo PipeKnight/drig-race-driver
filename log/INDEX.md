@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F809](F0809.md) | 2026-11-10 | GRID World garage scene and livery 3D preview: static research |
 | [F808](F0808.md) | 2026-11-10 | Sponsor designer: slots, replace, remove, swap, best-sponsor fill |
 | [F807](F0807.md) | 2026-11-10 | Livery designer carousels: clamp, dead end, Randomise |
 | [F806](F0806.md) | 2026-11-10 | Reset lines: Haruna final boundaries disqualify; tall fence plates are not raised boxes |
