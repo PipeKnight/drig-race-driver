@@ -34,7 +34,6 @@ use grid_tools::route;
 use std::path::{Path, PathBuf};
 
 /// Exit code of the menu process: the event profile is written, start it.
-#[cfg(not(target_os = "android"))]
 pub const MENU_GO: i32 = 20;
 /// Exit code of a race started from the menu: back to the menu.
 pub const BACK_TO_MENU: i32 = 21;
@@ -1039,10 +1038,9 @@ static MENU_PROCESS: std::sync::Mutex<Option<std::process::Child>> = std::sync::
 /// `grid-app --menu` with the launcher's flags, at the race window's place.
 /// Its menu writes the returned marker once it shows, and the race, black
 /// with "Loading" until then, exits: no desktop shows between them.
-/// The per-process supervisor (`GRID_FRONT_END=processes`) keeps that
-/// contract; the one-window host (front_end_host.rs) does not read the
-/// marker or the place yet, so a launcher's menu stays on the supervisor
-/// as before F767 (F773).
+/// Both front ends keep that contract: the one-window host
+/// (front_end_host.rs, the default) and the per-process supervisor
+/// (`GRID_FRONT_END=processes`, which the menu inherits).
 #[cfg(not(target_os = "android"))]
 pub fn spawn_menu(code: i32, at: Option<String>) -> std::io::Result<PathBuf> {
     if code != BACK_TO_MENU {
@@ -1054,7 +1052,6 @@ pub fn spawn_menu(code: i32, at: Option<String>) -> std::io::Result<PathBuf> {
     let mut menu = std::process::Command::new(std::env::current_exe()?);
     menu.arg("--menu")
         .args(launcher_menu_flags(&args))
-        .env("GRID_FRONT_END", "processes")
         .env(crate::transition::OUTER_READY_ENV, &ready);
     match at {
         Some(at) => menu.env(crate::transition::AT_ENV, at),
@@ -1263,6 +1260,7 @@ struct Saving {
 /// event type offering it, with that type's defaults
 /// (`DIR/<route slug>.ini`; a Touge layout also uphill, `-up.ini`), the
 /// profiles tools/route_graphics_audit.py drives.
+#[cfg(not(target_os = "android"))]
 pub fn list_routes(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let out = args.first().filter(|a| !a.starts_with("--")).map(PathBuf::from);
     let profile_args = if out.is_some() { &args[1..] } else { args };
@@ -1296,6 +1294,7 @@ pub fn list_routes(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 impl Catalog {
     /// Every route the menu offers, in first-offered order, with its venue
     /// and `KEY:CAR` for each event type that runs it.
+    #[cfg(not(target_os = "android"))]
     pub fn routes(&self) -> Vec<(String, String, Vec<String>)> {
         let mut out: Vec<(String, String, Vec<String>)> = Vec::new();
         for t in &self.types {
@@ -1312,6 +1311,7 @@ impl Catalog {
 
     /// The default choice of the first event type offering `route`, and
     /// for a type with directions also the other direction.
+    #[cfg(not(target_os = "android"))]
     pub fn route_choices(&self, route: &str) -> Vec<(Kind, Choice)> {
         let Some(t) = self.types.iter().find(|t| t.layouts.iter().any(|l| l.route == route)) else {
             return Vec::new();
@@ -1400,6 +1400,9 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
     // The original's overlay fade (docs/SCREEN_FLOW.md): the menu fades in
     // from black, and out to "Loading" on Continue.
     crate::transition::install(&mut app, labels.get("loading"), crate::transition::Start::Screen);
+    // The overlay's letterbox bars over the screen; they slide off before
+    // "Loading" (docs/SCREEN_FLOW.md §1.4).
+    crate::transition::borders(&mut app);
     // The menu widget and screen sounds (unprefixed front-end set).
     let effects = profile.sound_effects.unwrap_or(crate::pause_menu::Options::default().effects);
     crate::hud_sound::install_front_end(&mut app, &root, effects);

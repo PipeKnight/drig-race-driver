@@ -88,6 +88,7 @@ mod force_feedback;
 mod ffb;
 mod event_menu;
 mod front_end_host;
+#[cfg(not(target_os = "android"))]
 mod loading_screen;
 mod balance_pass;
 mod flashback;

@@ -7,18 +7,28 @@
 #   race (launcher) -> results -> back_to_menu -> hand-off -> menu -> Go ->
 #   hand-off -> race -> results -> back_to_menu -> hand-off -> menu -> quit,
 #   exit 0, and the menu's front-end sound source (F772) on the way.
+# -FrontEnd host (default) runs the menu in the one-window host
+# (front_end_host.rs), the path the owner plays: the launcher race hands off
+# to it, and Menu -> Race -> Menu are screens of that one window.
+# -FrontEnd processes sets GRID_FRONT_END=processes: one process per screen,
+# each change a hand-off.
 # -WindowShots (GRID_WINDOW_SHOTS, default 1.5 s) makes every screen save a
 # window shot into the data dir; each of the 4 screens must save one. The
 # extra system in `Last` once kept the window hidden with no frames drawn
 # (the F773 window-show hang, reported by career-ui).
 # Prints a verdict and the log path. Run it under tools\build_lock.ps1 only
-# when it also builds; this script does not build.
+# when it also builds; this script does not build. -CheckOnly re-checks the
+# log of an earlier run in -OutDir (exit code taken as 0).
 param(
     [string]$Exe = 'target\release\grid-app.exe',
     [string]$OutDir = '',
     [int]$Ticks = 36000,
     [int]$TimeoutSec = 900,
-    [string]$WindowShots = '1.5'
+    [string]$WindowShots = '1.5',
+    [ValidateSet('host', 'processes')]
+    [string]$FrontEnd = 'host',
+    # Re-checks the log in -OutDir without running the game.
+    [switch]$CheckOnly
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -39,8 +49,10 @@ $env:GRID_RESULTS_CONTINUE = '3'
 $env:GRID_MENU_AUTO = "$Ticks"
 $env:GRID_MENU_AUTO_RACES = '1'
 $env:GRID_WINDOW_SHOTS = $WindowShots
+if ($FrontEnd -eq 'processes') { $env:GRID_FRONT_END = 'processes' } else { Remove-Item Env:GRID_FRONT_END -ErrorAction SilentlyContinue }
 $appArgs = @('--settings', $raceIni, '--data-dir', $data, '--drive-ticks', "$Ticks")
 $started = Get-Date
+if ($CheckOnly) { $code = 0 } else {
 $p = Start-Process -FilePath $Exe -ArgumentList $appArgs -RedirectStandardOutput $log -RedirectStandardError $err -PassThru -NoNewWindow
 $null = $p.Handle  # keeps ExitCode readable after the exit
 if (-not $p.WaitForExit($TimeoutSec * 1000)) {
@@ -50,10 +62,32 @@ if (-not $p.WaitForExit($TimeoutSec * 1000)) {
 } else {
     $code = $p.ExitCode
 }
+}
 $seconds = [int]((Get-Date) - $started).TotalSeconds
 
 # The flow, in order; each step must follow the previous one.
-$steps = @(
+$hostSteps = @(
+    @('launcher race fades in', 'reason=race_start'),
+    @('launcher race back to menu', 'drive_event_menu version=1 event=back_to_menu'),
+    @('launcher race hands off', 'event=handoff code=21'),
+    @('one window opens hidden', 'front_end version=1 event=open window=one'),
+    @('menu opens', 'drive_event_menu version=1 event=open'),
+    @('window shows', 'front_end version=1 event=handoff_ready'),
+    @('launcher race exits', 'event=exit next=Code\(21\) waited='),
+    @('menu attaches first', 'front_end version=1 event=attach screen=Menu'),
+    @('menu sound starts', 'hud_audio version=1 event=queued .*cues=menu,screen'),
+    @('menu Go', 'drive_event_menu version=1 event=go '),
+    @('menu leaves', 'front_end version=1 event=exit screen=Menu code=20'),
+    @('race attaches', 'front_end version=1 event=attach screen=Race'),
+    @('menu race fades in', 'reason=race_start'),
+    @('menu race back to menu', 'drive_event_menu version=1 event=back_to_menu'),
+    @('race leaves', 'front_end version=1 event=exit screen=Race code=21'),
+    @('menu attaches', 'front_end version=1 event=attach screen=Menu'),
+    @('menu fades in again', 'reason=screen_open'),
+    @('menu quits', 'drive_event_menu version=1 event=quit'),
+    @('menu closes', 'front_end version=1 event=exit screen=Menu code=0')
+)
+$processSteps = @(
     @('launcher race fades in', 'reason=race_start'),
     @('launcher race back to menu', 'drive_event_menu version=1 event=back_to_menu'),
     @('launcher race hands off', 'event=handoff code=21'),
@@ -72,6 +106,7 @@ $steps = @(
     @('menu quits', 'drive_event_menu version=1 event=quit'),
     @('menu closes', 'event=exit next=Close')
 )
+$steps = if ($FrontEnd -eq 'processes') { $processSteps } else { $hostSteps }
 $lines = if (Test-Path $log) { Get-Content $log } else { @() }
 $at = 0
 $missing = $null
@@ -90,6 +125,6 @@ $shots = @(@($lines) + @($errLines) | Select-String 'Screenshot saved').Count
 $shotsOk = (-not $WindowShots) -or ($shots -ge 4)
 $ok = ($code -eq 0) -and (-not $missing) -and $shotsOk
 $verdict = if ($ok) { 'PASS' } else { 'FAIL' }
-Write-Output "$verdict menu-loop: exit=$code seconds=$seconds steps=$($steps.Count) missing=$(if ($missing) { $missing } else { 'none' }) handoff_waits=$($waits -join ',') window_shots=$shots"
+Write-Output "$verdict menu-loop: front_end=$FrontEnd exit=$code seconds=$seconds steps=$($steps.Count) missing=$(if ($missing) { $missing } else { 'none' }) handoff_waits=$($waits -join ',') window_shots=$shots"
 Write-Output "log: $log"
 if (-not $ok) { exit 1 }

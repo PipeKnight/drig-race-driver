@@ -145,14 +145,14 @@ pub(crate) fn install(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>)
 }
 /// `install` without the device playback (the race-start mix test).
 pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
-    sink(app, bank, "lights,drift,flashback,menu");
+    sink(app, bank, "lights,drift,flashback,menu,loading");
     app.insert_resource(HudSound {
         table,
         countdown: None,
         green: false,
         flash: None,
     })
-    .add_systems(Update, update);
+    .add_systems(Update, (update, loading_sounds));
 }
 
 /// The front-end screens' HUD voices (the unprefixed `fe_fx` set) at the
@@ -178,9 +178,9 @@ pub(crate) fn install_front_end(app: &mut App, root: &std::path::Path, effects: 
         }
     };
     app.add_audio_source::<HudSource>();
-    sink(app, bank, "menu,screen");
+    sink(app, bank, "menu,screen,loading");
     app.world().resource::<HudSink>().level(level);
-    app.add_systems(Update, screen_sounds);
+    app.add_systems(Update, (screen_sounds, loading_sounds));
 }
 
 /// The HUD group level on a front-end screen (Normal mode, FrontEndCamera).
@@ -213,6 +213,30 @@ fn screen_sounds(
 ) {
     let (opened, left) = &mut *state;
     if let Some(cue) = screen_cue(opened, left, fade.is_some_and(|f| f.leaving())) {
+        sink.play(cue);
+    }
+}
+
+/// The loading overlay's sounds when its "Loading" text and circle come and
+/// go (`transition::Fade::loading`): text in and the spinner when it shows
+/// over the black, text out when the screen starts to clear. The state a
+/// screen opens with plays nothing: a race that opens on "Loading" after a
+/// hand-off continues the overlay the leaving screen showed. A race plays
+/// the `low_` text cues; its set has no spinner, so that cue stays silent.
+pub(crate) fn loading_cues(was: &mut Option<bool>, loading: bool) -> &'static [Cue] {
+    let before = was.replace(loading);
+    match before {
+        Some(false) if loading => &[Cue::LoadingTextIn, Cue::Spinner],
+        Some(true) if !loading => &[Cue::LoadingTextOut],
+        _ => &[],
+    }
+}
+
+fn loading_sounds(sink: Res<HudSink>, fade: Option<Res<crate::transition::Fade>>, mut was: Local<Option<bool>>) {
+    let Some(fade) = fade else {
+        return;
+    };
+    for &cue in loading_cues(&mut was, fade.loading) {
         sink.play(cue);
     }
 }
@@ -309,6 +333,19 @@ fn update(
 mod tests {
     use super::*;
     use crate::pause_menu::Nav;
+
+    #[test]
+    fn the_loading_overlay_sounds_on_its_edges_only() {
+        let mut was = None;
+        // The state a screen opens with is silent, either way.
+        assert!(loading_cues(&mut was, true).is_empty());
+        assert!(loading_cues(&mut was, true).is_empty());
+        assert_eq!(loading_cues(&mut was, false), &[Cue::LoadingTextOut]);
+        assert!(loading_cues(&mut was, false).is_empty());
+        assert_eq!(loading_cues(&mut was, true), &[Cue::LoadingTextIn, Cue::Spinner]);
+        let mut was = None;
+        assert!(loading_cues(&mut was, false).is_empty());
+    }
 
     #[test]
     fn a_menu_frame_plays_one_widget_sound() {

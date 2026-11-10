@@ -245,6 +245,12 @@ pub enum Cue {
     /// An overlay panel shown (0x49CFA0) or hidden (0x4936A0, 0x4942F0).
     OverlayOn,
     OverlayOff,
+    /// The loading overlay's "Loading" text shown and hidden, and its
+    /// circle starting to turn (FEMappings `loading_text_in`/`_out`,
+    /// `spinner`; the race set has the text cues only).
+    LoadingTextIn,
+    LoadingTextOut,
+    Spinner,
 }
 
 impl Cue {
@@ -271,6 +277,9 @@ impl Cue {
             Cue::ScreenWhooshOut => "screen_whoosh_out".into(),
             Cue::OverlayOn => "overlay_on".into(),
             Cue::OverlayOff => "overlay_off".into(),
+            Cue::LoadingTextIn => "loading_text_in".into(),
+            Cue::LoadingTextOut => "loading_text_out".into(),
+            Cue::Spinner => "spinner".into(),
         }
     }
 
@@ -568,6 +577,14 @@ mod tests {
         assert_eq!(front.effect("back").unwrap().volume_db, -1.);
         assert_eq!(race.effect("select").unwrap().volume_db, -4.4);
         assert_eq!(race.effect("back").unwrap().volume_db, -4.4);
+        // The loading overlay: text in/out in both sets, the spinner in the
+        // front end only (FEMappings has no `low_spinner`).
+        assert_eq!(front.effect(&Cue::LoadingTextIn.name()).unwrap().volume_db, -6.4);
+        assert_eq!(front.effect(&Cue::LoadingTextOut.name()).unwrap().volume_db, -9.);
+        assert_eq!(front.effect(&Cue::Spinner.name()).unwrap().volume_db, -7.4);
+        assert_eq!(race.effect(&Cue::LoadingTextIn.name()).unwrap().volume_db, -3.4);
+        assert_eq!(race.effect(&Cue::LoadingTextOut.name()).unwrap().volume_db, -5.8);
+        assert!(race.effect(&Cue::Spinner.name()).is_none());
         println!(
             "front effects={} sounds={}; race effects={} sounds={}",
             front.effects.len(),

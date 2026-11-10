@@ -154,6 +154,29 @@ AUTHORED presentation:
 - slider steps of 10 % (volume) and 5 % (controls);
 - none of the original's animated glyphs, pause blur, paused-world camera or audio ducking.
 
+**The pause art (2026-11-10, static data only, not ported).** What the original shows behind the
+menu is a post-process change, not a picture:
+
+- Entering pause, `flow.bin` runs `pause_copy_game_pps_final` (`StateCopyPostProcessEffect`: copies
+  the race's current `Effect_0000` Bloom, ToneMap, ToneMapFast, BloomFromDsX4, FinalMix,
+  ColourBalance and FEPausePostProcess groups into `fepause_final`), hides the OSD, then
+  `pause_increase_blur` (`StateWayPoint`: to `fepause_final` in 0.3 s). Back to the race runs
+  `pause_decrease_blur` (to `Effect_0000` in 0.29 s); Restart's Yes runs `restart_darken` (to
+  `fepause_restart` in 0.1 s) [D, `states.bin`, `flow.bin`].
+- `fepause_final` in `postprocess/effects.xml` (chain Type2): ToneMapFast lumMin 0.25, lumMax
+  0.28, adaptMax 0.05; MotionBlur blurLength 0; vignetteAmount 0.9, scale (1.06, 1.00), shape 0.7,
+  colour black [D]. `frontend/persistentdatarender.xml` overrides it per case
+  (`pause_post_process`: lumMin 0.2, lumMax 0.6, adaptMax 0.5, bloomAmount 0.4; `_no_tonemap` and
+  `_ultra_dark` variants), and `restart_post_process` sets `fepause_restart` contrast 0.15 [D].
+  Its comment says the pause effect keeps its own MotionBlur and DOF values but takes the game's
+  current Bloom, ToneMap, FinalMix and ColourBalance [D].
+- The menu glyphs (`in_game_N_button`, `pause_root`) live in `fePersistentDatabase.pssg` [D].
+
+Porting this needs the original's post-process chain (tone map, bloom, vignette:
+docs/ORIGINAL_POSTPROCESS.md; backlog row 77, graphics) and the front-end PSSG renderer that the
+3D loading world also needs (docs/SCREEN_FLOW.md §1.3). Neither exists yet, and an AUTHORED
+darkening would only add a look the data does not give, so the panel stays plain.
+
 **Autosave (F480).** The original saves the profile whenever a settings screen is left: every
 `*_st_*_optionsscreen` has a link to an `*_st_*_autosave` state [D]. The port does the same.
 Leaving Sound Setup, Screen Setup or Advanced (Back) returns `Command::Save`, and the app writes

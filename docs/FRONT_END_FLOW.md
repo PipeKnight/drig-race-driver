@@ -263,10 +263,13 @@ menu → black → loading screen → race fading in from black.
 **Kept outside the host:**
 
 - `--settings FILE` (the `Play GRID *.cmd` race launchers) runs the race straight in its own
-  app, as before. When such a race leaves to the menu, F756's supervisor takes over in the same
-  process once the race app is gone (`event_menu::MENU_AFTER`, docs/SCREEN_FLOW.md section 2.3):
-  winit allows one event loop per process, so the host cannot start after the race's own loop.
-  Starting launcher races inside the host is open work.
+  app, as before: winit allows one event loop per process, so the host cannot start after the
+  race's own loop. When such a race leaves to the menu, it starts `grid-app --menu` as a new
+  process (docs/SCREEN_FLOW.md section 2.3), which runs the host. The host keeps the hand-off
+  contract: with `GRID_HANDOFF_OUTER_READY` set, its window opens hidden at `GRID_WINDOW_AT`,
+  shows after the shown screen's third update and then writes the race's ready marker
+  (`front_end version=1 event=handoff_ready`), so the race exits with no desktop between them.
+  Starting launcher races inside the host itself is open work.
 - `GRID_FRONT_END=processes` keeps the older supervisor: one process per screen
   (`event_menu::supervise`, EVENT_MENU.md "Processes").
 - The career screen keeps its supervisor (`career_screen.rs`).

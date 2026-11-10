@@ -130,6 +130,8 @@ pub enum Semantic {
     Rotation,
     Scale,
     Parameter,
+    /// A camera's field of view (front-end cameras).
+    Fov,
 }
 
 /// A channel: its target (node id, or `material#parameter`) and components
@@ -335,6 +337,8 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
                 b"float4" => 16,
                 b"half2" => 4,
                 b"half4" => 8,
+                // Vertex colours (front-end scenes); not decoded.
+                b"uint_color_argb" => 4,
                 _ => return fail(tree.nodes[desc].offset, "unsupported OSD stream format"),
             };
             if count == 0 || stride < offset + width || (count - 1) * stride + offset + width > data.len() {
@@ -363,14 +367,28 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
         let Some(index) = children(tree, source, b"RENDERINDEXSOURCE").next() else {
             return fail(tree.nodes[source].offset, "render source without indices");
         };
-        if tree.string(index, b"primitive")? != b"triangles" || tree.string(index, b"format")? != b"ushort" {
+        let wide = match tree.string(index, b"format")? {
+            b"ushort" => false,
+            // One front-end mesh stores 32-bit indices.
+            b"uint" => true,
+            _ => return fail(tree.nodes[index].offset, "unsupported OSD index source"),
+        };
+        if tree.string(index, b"primitive")? != b"triangles" {
             return fail(tree.nodes[index].offset, "unsupported OSD index source");
         }
         let data = children(tree, index, b"INDEXSOURCEDATA")
             .next()
             .and_then(|d| tree.nodes[d].data)
             .unwrap_or_default();
-        mesh.indices = data.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
+        mesh.indices = if wide {
+            let wide: Vec<u32> = data.as_chunks::<4>().0.iter().map(|c| u32::from_be_bytes(*c)).collect();
+            match wide.iter().map(|&i| u16::try_from(i)).collect::<std::result::Result<Vec<u16>, _>>() {
+                Ok(indices) => indices,
+                Err(_) => return fail(tree.nodes[index].offset, "OSD index beyond 16 bits"),
+            }
+        } else {
+            data.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect()
+        };
         let n = mesh.positions.len();
         if mesh.indices.iter().any(|&i| usize::from(i) >= n)
             || (!mesh.uvs.is_empty() && mesh.uvs.len() != n)
@@ -437,7 +455,9 @@ fn keys(tree: &Tree<'_>, blocks: &BTreeMap<String, usize>, times: &str, values: 
         .collect())
 }
 
-fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
+/// Every `NEANIMATION` of a package with its channels and named ranges (also
+/// the front-end scenes, docs/SCREEN_FLOW.md).
+pub fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
     let mut blocks = BTreeMap::new();
     let mut channels = BTreeMap::new();
     let mut vcrs = BTreeMap::new();
@@ -502,6 +522,7 @@ fn animations(tree: &Tree<'_>) -> Result<Vec<Animation>> {
                 b"rotation_euler" => Semantic::Rotation,
                 b"scale" => Semantic::Scale,
                 b"parameter" => Semantic::Parameter,
+                b"fov" => Semantic::Fov,
                 _ => return fail(tree.nodes[r].offset, "unknown animation semantic"),
             };
             list.push(Channel {
@@ -557,7 +578,8 @@ pub fn read_scene<'a>(tree: &Tree<'a>) -> Result<Scene<'a>> {
             bounds,
             render,
         });
-        if kind == b"CAMERANODE" {
+        // Orthographic cameras (front-end overlays) have no FOV.
+        if kind == b"CAMERANODE" && tree.attribute(i, b"FOV").is_ok() {
             camera = Some((
                 nodes.len() - 1,
                 float(tree, i, b"FOV")?,

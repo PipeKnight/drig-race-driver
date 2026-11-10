@@ -9,8 +9,10 @@
 //! in 1.0 s at normal speed and 0.5 s at quick and quickest speed
 //! (FUN_004C6DB0, `states.xml`). Once the screen is black on the way into a
 //! load, the overlay shows "Loading, please wait" with a turning circle
-//! (FUN_004A4560). The circle is a procedural shader (`feov_ramp.fx`), so
-//! its look here is AUTHORED.
+//! (FUN_004A4560). The circle is the procedural shader `feov_ramp.fx`:
+//! the material's colours and its animated ramp window are the original's
+//! data, the ring's mesh and size are AUTHORED (see [`ramp_share`]). Front-end
+//! screens show the overlay's letterbox bars ([`borders`]).
 //!
 //! Each screen is its own process (winit allows one event loop per
 //! process). Under the supervisor (`event_menu::supervise`) a leaving screen
@@ -19,7 +21,8 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::ui::UiTransform;
+use bevy::asset::RenderAssetUsages;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowPosition};
 use std::path::PathBuf;
 
@@ -187,6 +190,108 @@ struct Overlay;
 struct Loading;
 #[derive(Component)]
 struct Circle;
+/// The loading ring's texture, redrawn each frame while loading.
+#[derive(Component)]
+struct RingImage(Handle<Image>);
+#[derive(Component)]
+struct Bars;
+#[derive(Component)]
+struct Bar {
+    top: bool,
+}
+
+// ---- The overlay's bars ----------------------------------------------------
+
+/// The overlay's letterbox bars, `{2}null=topbar` and `{2}null=bottombar` in
+/// `fePersistentDatabase.pssg`: black quads (`overlay_black`) 200 units deep
+/// that animation `Anim!160` slides in (frame 0) and out (frame 0.6667, the
+/// overlay's default frame). Translation Y keys at frames 0, 0.3333, 0.6667
+/// [D]; linear between them [I].
+const TOP_BAR_Y: [(f32, f32); 3] = [(0., 852.123), (0.3333, 882.123), (0.6667, 1002.015)];
+const BOTTOM_BAR_Y: [(f32, f32); 3] = [(0., -26.122), (0.3333, -59.122), (0.6667, -172.521)];
+const BAR_DEPTH: f32 = 200.;
+/// The ortho camera `camera=overlay`: half-height 475.861 round the point
+/// its view axis meets z = 0, its target `target=overlay` (y 307.908; the
+/// camera at y 341.639 looks 1.34 degrees down onto it) [D].
+const VIEW_CENTRE_Y: f32 = 307.908;
+const VIEW_HALF_HEIGHT: f32 = 475.861;
+/// `border_off` plays to this frame; `border_on` to 0 (0.3 s each).
+const BARS_OFF: f32 = 0.6667;
+const BORDER_SECONDS: f32 = 0.3;
+
+/// A value keyed over time: linear between the keys, held outside them.
+fn keyed(keys: &[(f32, f32)], t: f32) -> f32 {
+    let (first, last) = (keys[0], keys[keys.len() - 1]);
+    if t <= first.0 {
+        return first.1;
+    }
+    for w in keys.windows(2) {
+        let ((t0, v0), (t1, v1)) = (w[0], w[1]);
+        if t <= t1 {
+            return v0 + (v1 - v0) * (t - t0) / (t1 - t0);
+        }
+    }
+    last.1
+}
+
+/// The shares of the window height the top and bottom bar cover at an
+/// animation frame (0: on, 0.6667: off).
+pub fn bar_shares(frame: f32) -> (f32, f32) {
+    let (top, bottom) = (VIEW_CENTRE_Y + VIEW_HALF_HEIGHT, VIEW_CENTRE_Y - VIEW_HALF_HEIGHT);
+    let height = 2. * VIEW_HALF_HEIGHT;
+    let top_bar = (top - (keyed(&TOP_BAR_Y, frame) - BAR_DEPTH)).clamp(0., height);
+    let bottom_bar = (keyed(&BOTTOM_BAR_Y, frame) - bottom).clamp(0., height);
+    (top_bar / height, bottom_bar / height)
+}
+
+/// The bars' state, on a screen that shows them ([`borders`]). They are on
+/// when the screen opens (the overlay's set-up posts `border_on`,
+/// FUN_004A49E0, through FUN_004964C0) and slide off once the screen is
+/// black on the way out (`border_off`, FUN_00496770):
+/// the loading text shows when `border_off` finishes (FUN_004A4560).
+#[derive(Resource, Debug)]
+pub struct Borders {
+    from: f32,
+    to: f32,
+    elapsed: f32,
+}
+
+impl Borders {
+    fn on() -> Self {
+        Self { from: 0., to: 0., elapsed: BORDER_SECONDS }
+    }
+
+    pub fn frame(&self) -> f32 {
+        self.from + (self.to - self.from) * (self.elapsed / BORDER_SECONDS).min(1.)
+    }
+
+    /// `border_off` (once).
+    fn slide_off(&mut self) {
+        if self.to < BARS_OFF {
+            self.from = self.frame();
+            self.to = BARS_OFF;
+            self.elapsed = 0.;
+            log_line!("screen_transition version=1 event=border_off seconds={BORDER_SECONDS:.2}");
+        }
+    }
+
+    pub fn off(&self) -> bool {
+        self.to >= BARS_OFF && self.elapsed >= BORDER_SECONDS
+    }
+
+    fn advance(&mut self, dt: f32) {
+        self.elapsed = (self.elapsed + dt.min(MAX_STEP)).min(BORDER_SECONDS);
+    }
+}
+
+/// Shows the overlay's letterbox bars on a front-end screen (after
+/// [`install`]). The original's screens draw their button help on the
+/// bottom bar (`component/overlay_helptext` is its child); the race has
+/// them only in its intro, which DRIG does not have (`border_off` at the
+/// hand-over to the in-game cameras, FUN_0058BAF0).
+pub fn borders(app: &mut App) {
+    app.insert_resource(Borders::on());
+}
 
 /// Installs the overlay on a windowed app: the screen starts black and
 /// `start` says when it clears. `loading` is the loading overlay's text.
@@ -255,9 +360,17 @@ fn exit_with(next: Next, exit: &mut MessageWriter<AppExit>) {
     }
 }
 
-fn advance(time: Res<Time<Real>>, mut fade: ResMut<Fade>, warmup: Option<Res<crate::pipeline_warmup::Warmup>>) {
+fn advance(
+    time: Res<Time<Real>>,
+    mut fade: ResMut<Fade>,
+    borders: Option<ResMut<Borders>>,
+    warmup: Option<Res<crate::pipeline_warmup::Warmup>>,
+) {
     fade.frames += 1;
     fade.advance(time.delta_secs());
+    if let Some(mut borders) = borders {
+        borders.advance(time.delta_secs());
+    }
     // A supervised screen clears after its window shows (handoff_ready).
     let shown = fade.frames > SHOW_FRAME + 1;
     match fade.start {
@@ -281,6 +394,7 @@ fn finish(
     mut fade: ResMut<Fade>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut own: Option<ResMut<SelfHandoff>>,
+    borders: Option<ResMut<Borders>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(next) = fade.leaving else {
@@ -288,6 +402,13 @@ fn finish(
     };
     if !fade.is_black() {
         return;
+    }
+    // Black: the bars slide off, then the loading text shows.
+    if let Some(mut borders) = borders {
+        borders.slide_off();
+        if !borders.off() {
+            return;
+        }
     }
     if !fade.loading {
         fade.loading = true;
@@ -368,6 +489,7 @@ pub struct SelfHandoff {
 }
 
 impl SelfHandoff {
+    #[cfg(not(target_os = "android"))]
     pub fn new(spawn: fn(i32, Option<String>) -> std::io::Result<PathBuf>) -> Self {
         Self { spawn, ready: None }
     }
@@ -395,12 +517,63 @@ fn spawn(
     mut commands: Commands,
     camera: Query<Entity, With<crate::ViewerCamera>>,
     text: Res<LoadingText>,
+    borders: Option<Res<Borders>>,
+    images: Option<ResMut<Assets<Image>>>,
     mut done: Local<bool>,
 ) {
     let Some(camera) = camera.iter().next().filter(|_| !*done) else {
         return;
     };
     *done = true;
+    let ring = images.map(|mut images| {
+        let side = Extent3d {
+            width: RING_TEXELS,
+            height: RING_TEXELS,
+            depth_or_array_layers: 1,
+        };
+        images.add(Image::new_fill(
+            side,
+            TextureDimension::D2,
+            &[0; 4],
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        ))
+    });
+    if borders.is_some() {
+        // Over the screen, under the fade (both black, so the order between
+        // them does not show).
+        commands
+            .spawn((
+                Bars,
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: percent(100.),
+                    height: percent(100.),
+                    ..default()
+                },
+                GlobalZIndex(i32::MAX - 2),
+                UiTargetCamera(camera),
+                Pickable::IGNORE,
+            ))
+            .with_children(|screen| {
+                for top in [true, false] {
+                    screen.spawn((
+                        Bar { top },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(0.),
+                            right: px(0.),
+                            top: if top { px(0.) } else { Val::Auto },
+                            bottom: if top { Val::Auto } else { px(0.) },
+                            height: percent(0.),
+                            ..default()
+                        },
+                        BackgroundColor(Color::BLACK),
+                        Pickable::IGNORE,
+                    ));
+                }
+            });
+    }
     commands
         .spawn((
             Overlay,
@@ -441,35 +614,132 @@ fn spawn(
                     row.spawn((
                         Circle,
                         Node {
-                            width: px(26.),
-                            height: px(26.),
-                            border: UiRect::all(px(3.)),
-                            border_radius: BorderRadius::MAX,
+                            width: px(RING_SIZE),
+                            height: px(RING_SIZE),
                             ..default()
                         },
-                        BorderColor {
-                            top: Color::NONE,
-                            right: Color::srgb(0.95, 0.55, 0.1),
-                            bottom: Color::srgb(0.95, 0.55, 0.1),
-                            left: Color::srgb(0.95, 0.55, 0.1),
-                        },
-                        UiTransform::default(),
-                    ));
+                    ))
+                    .with_children(|circle| spawn_ring(circle, ring));
                 });
         });
 }
 
-/// One turn of the circle in seconds (AUTHORED).
-const TURN_SECONDS: f32 = 0.9;
+// ---- The loading circle ---------------------------------------------------
 
-#[allow(clippy::type_complexity)]
+/// `load_circle_anim` (`Anim!164`, 3.333 s, which `circle_rotate` plays;
+/// looped [I]): the ring material's `RampMin` and `RampMax` keys [D],
+/// linear between them [I].
+const RAMP_MIN: [(f32, f32); 3] = [(0., 0.), (1.6667, 0.), (3.3333, 1.2)];
+const RAMP_MAX: [(f32, f32); 2] = [(0., -0.2), (1.6667, 1.)];
+const RAMP_SOFTNESS: f32 = 0.2;
+const CIRCLE_SECONDS: f32 = 3.3333;
+/// The ring material `matinst=load_circle_anim` (feov_ramp.fx): grey 0.65
+/// at alpha 0.5 inside the ramp window, `RampAlpha` 0 outside it [D].
+const RING_GREY: f32 = 0.65;
+const RING_ALPHA: f32 = 0.5;
+/// The disk `matinst=load_circle_disk` (feov_colour.fx): yellow at alpha
+/// 0.5 [D].
+const DISK_COLOUR: [f32; 4] = [0.9272, 0.8058, 0.0312, 0.5];
+/// The ring's geometry, AUTHORED: its mesh lives in a component instance
+/// library the scene reader does not reach. Pixels.
+const RING_SIZE: f32 = 28.;
+const RING_WIDTH: f32 = 5.;
+const DISK_SIZE: f32 = 10.;
+/// The ring texture's side: twice the ring's size, for a smooth edge.
+const RING_TEXELS: u32 = 56;
+
+/// The share of the ring's alpha at ramp coordinate `u` (0 at the top to 1,
+/// clockwise [I]) `t` seconds into the animation. [I] for the shader
+/// (feov_ramp.fx is not decoded): a window from `RampMin` to `RampMax`
+/// with soft edges `RampSoftness` wide outside it. The keys fit that
+/// reading: `RampMax` starts one softness below 0 and `RampMin` ends one
+/// above 1, so the ring starts and ends just empty and is just full at
+/// 1.667 s.
+pub fn ramp_share(t: f32, u: f32) -> f32 {
+    let (min, max) = (keyed(&RAMP_MIN, t), keyed(&RAMP_MAX, t));
+    let head = ((max - u) / RAMP_SOFTNESS + 1.).clamp(0., 1.);
+    let tail = ((u - min) / RAMP_SOFTNESS + 1.).clamp(0., 1.);
+    head * tail
+}
+
+/// The ring at `t` seconds into `load_circle_anim`: straight sRGB RGBA
+/// texels, the ring's coverage (anti-aliased) times the ramp's alpha.
+pub fn ring_texels(t: f32, rgba: &mut [u8]) {
+    let n = RING_TEXELS as f32;
+    let scale = n / RING_SIZE;
+    let outer = RING_SIZE / 2. * scale;
+    let inner = (RING_SIZE / 2. - RING_WIDTH) * scale;
+    let grey = (RING_GREY * 255. + 0.5) as u8;
+    for y in 0..RING_TEXELS {
+        for x in 0..RING_TEXELS {
+            let (dx, dy) = (x as f32 + 0.5 - n / 2., y as f32 + 0.5 - n / 2.);
+            let d = dx.hypot(dy);
+            let cover = (outer - d + 0.5).clamp(0., 1.) * (d - inner + 0.5).clamp(0., 1.);
+            let a = if cover > 0. {
+                // Clockwise from the top; y points down.
+                let u = (dx.atan2(-dy) / std::f32::consts::TAU).rem_euclid(1.);
+                RING_ALPHA * cover * ramp_share(t, u)
+            } else {
+                0.
+            };
+            let at = ((y * RING_TEXELS + x) * 4) as usize;
+            if let Some(texel) = rgba.get_mut(at..at + 4) {
+                texel.copy_from_slice(&[grey, grey, grey, (a * 255. + 0.5) as u8]);
+            }
+        }
+    }
+}
+
+fn spawn_ring(ring: &mut ChildSpawnerCommands, image: Option<Handle<Image>>) {
+    let centre = RING_SIZE / 2.;
+    if let Some(image) = image {
+        ring.spawn((
+            RingImage(image.clone()),
+            ImageNode::new(image),
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(RING_SIZE),
+                height: px(RING_SIZE),
+                ..default()
+            },
+        ));
+    }
+    let [r, g, b, a] = DISK_COLOUR;
+    ring.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(centre - DISK_SIZE / 2.),
+            top: px(centre - DISK_SIZE / 2.),
+            width: px(DISK_SIZE),
+            height: px(DISK_SIZE),
+            border_radius: BorderRadius::MAX,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(r, g, b, a)),
+    ));
+}
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn present(
     fade: Res<Fade>,
     time: Res<Time<Real>>,
+    borders: Option<Res<Borders>>,
+    mut since: Local<Option<f32>>,
     mut overlay: Query<(&mut BackgroundColor, &mut Visibility), With<Overlay>>,
     mut loading: Query<&mut Visibility, (With<Loading>, Without<Overlay>)>,
-    mut circle: Query<&mut UiTransform, With<Circle>>,
+    rings: Query<&RingImage>,
+    mut images: Option<ResMut<Assets<Image>>>,
+    mut bars: Query<(&Bar, &mut Node)>,
 ) {
+    if let Some(borders) = borders {
+        let (top, bottom) = bar_shares(borders.frame());
+        for (bar, mut node) in &mut bars {
+            let height = percent(100. * if bar.top { top } else { bottom });
+            if node.height != height {
+                node.height = height;
+            }
+        }
+    }
     let a = fade.alpha();
     for (mut color, mut visibility) in &mut overlay {
         color.0 = Color::BLACK.with_alpha(a);
@@ -488,10 +758,20 @@ fn present(
         });
     }
     if fade.loading {
-        let turn = (time.elapsed_secs() / TURN_SECONDS).fract();
-        for mut transform in &mut circle {
-            transform.rotation = Rot2::turn_fraction(turn);
+        // From empty when the loading text shows (`circle_rotate`).
+        let start = *since.get_or_insert(time.elapsed_secs());
+        let t = (time.elapsed_secs() - start) % CIRCLE_SECONDS;
+        if let Some(images) = images.as_mut() {
+            for ring in &rings {
+                if let Some(mut image) = images.get_mut(&ring.0)
+                    && let Some(data) = image.data.as_mut()
+                {
+                    ring_texels(t, data);
+                }
+            }
         }
+    } else {
+        *since = None;
     }
 }
 
@@ -509,17 +789,18 @@ pub const AT_ENV: &str = "GRID_WINDOW_AT";
 pub const HANDED_ENV: &str = "GRID_HANDOFF_SHOW";
 /// The ready marker of the screen that started this supervisor
 /// ([`SelfHandoff`]): the supervisor's first process writes it.
+#[cfg(not(target_os = "android"))]
 pub const OUTER_READY_ENV: &str = "GRID_HANDOFF_OUTER_READY";
 
 /// The frame on which a hidden window shows (after its first black frames).
-const SHOW_FRAME: u32 = 3;
+pub(crate) const SHOW_FRAME: u32 = 3;
 
 /// The window of a screen that installs the fade (`fades`): where the
 /// previous screen's window was, and hidden until its first (black) frames
 /// are drawn, so the desktop never shows the system's blank window. A
 /// window without the fade opens as before.
 pub fn window(mut window: Window, fades: bool) -> Window {
-    if let Some(at) = std::env::var(AT_ENV).ok().and_then(|v| parse_at(&v)) {
+    if let Some(at) = window_at() {
         window.position = WindowPosition::At(at);
     } else if std::env::var_os(READY_ENV).is_some() {
         window.position = WindowPosition::Centered(MonitorSelection::Primary);
@@ -528,6 +809,49 @@ pub fn window(mut window: Window, fades: bool) -> Window {
         window.visible = false;
     }
     window
+}
+
+/// [`AT_ENV`]: where the previous screen's window was.
+pub fn window_at() -> Option<IVec2> {
+    std::env::var(AT_ENV).ok().and_then(|v| parse_at(&v))
+}
+
+/// The ready marker of the black screen that started this process
+/// ([`OUTER_READY_ENV`]: a launcher race's [`SelfHandoff`]), for a process
+/// that shows its window itself, the one-window front end (F767).
+/// Written once: when the window shows, or, failing that, when it is
+/// dropped (the process ends without showing), so the waiting screen never
+/// waits the full limit.
+#[cfg(not(target_os = "android"))]
+pub struct OuterReady(Option<PathBuf>);
+
+#[cfg(not(target_os = "android"))]
+impl OuterReady {
+    pub fn from_env() -> Self {
+        Self(std::env::var_os(OUTER_READY_ENV).map(PathBuf::from))
+    }
+
+    /// A screen is still black until this process shows its window.
+    pub fn waiting(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Writes the marker, if not written yet.
+    pub fn write(&mut self) {
+        if let Some(marker) = self.0.take()
+            && let Err(error) = std::fs::write(&marker, b"ready
+")
+        {
+            warn!("hand-off ready marker not written: {error}");
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl Drop for OuterReady {
+    fn drop(&mut self) {
+        self.write();
+    }
 }
 
 fn parse_at(value: &str) -> Option<IVec2> {
@@ -682,6 +1006,7 @@ pub fn run_supervised_from(
 }
 
 /// `CODE [X Y]` from a go marker: the code and the window position.
+#[cfg(not(target_os = "android"))]
 fn parse_go(text: &str) -> Option<(i32, Option<String>)> {
     let mut words = text.split_whitespace();
     let code = words.next()?.parse().ok()?;
@@ -751,6 +1076,69 @@ mod tests {
         assert!(fade.alpha() >= 1. && !fade.done());
         fade.advance(0.06);
         assert!(fade.is_black());
+    }
+
+    #[test]
+    fn the_bars_cover_the_original_shares() {
+        let (top, bottom) = bar_shares(0.);
+        assert!((top - 0.13832).abs() < 1e-4 && (bottom - 0.14903).abs() < 1e-4, "{top} {bottom}");
+        let (top, bottom) = bar_shares(0.3333);
+        assert!((top - 0.10680).abs() < 1e-4 && (bottom - 0.11435).abs() < 1e-4, "{top} {bottom}");
+        // Fully off at the default frame, and narrowing all the way.
+        assert_eq!(bar_shares(BARS_OFF), (0., 0.));
+        let mut last = bar_shares(0.);
+        for i in 1..=20 {
+            let now = bar_shares(BARS_OFF * i as f32 / 20.);
+            assert!(now.0 <= last.0 && now.1 <= last.1);
+            last = now;
+        }
+    }
+
+    #[test]
+    fn the_ring_fills_then_empties() {
+        let full = |t: f32| (0..48).map(|i| ramp_share(t, (i as f32 + 0.5) / 48.)).sum::<f32>() / 48.;
+        assert_eq!(full(0.), 0.);
+        assert_eq!(full(1.6667), 1.);
+        assert_eq!(full(CIRCLE_SECONDS), 0.);
+        // Filling: the head runs clockwise from the top.
+        assert!(ramp_share(0.6, 0.05) > ramp_share(0.6, 0.5));
+        assert!(full(0.5) < full(1.0) && full(1.0) < full(1.6));
+        // Emptying: the tail follows the same way.
+        assert!(ramp_share(2.6, 0.1) < ramp_share(2.6, 0.9));
+        assert!(full(2.0) > full(2.5) && full(2.5) > full(3.0));
+    }
+
+    #[test]
+    fn the_ring_texture_follows_the_ramp() {
+        let side = RING_TEXELS as usize;
+        let alpha = |t: f32, x: usize, y: usize| {
+            let mut rgba = vec![0; side * side * 4];
+            ring_texels(t, &mut rgba);
+            rgba[(y * side + x) * 4 + 3]
+        };
+        let top = (side / 2, 2);
+        let right = (side - 3, side / 2);
+        // Empty at the start, half alpha all round when full, never inside.
+        assert_eq!(alpha(0., top.0, top.1), 0);
+        assert_eq!(alpha(1.6667, top.0, top.1), 128);
+        assert_eq!(alpha(1.6667, right.0, right.1), 128);
+        assert_eq!(alpha(1.6667, side / 2, side / 2), 0);
+        // Filling clockwise: the right side before the left.
+        assert!(alpha(0.6, right.0, right.1) > alpha(0.6, 2, side / 2));
+    }
+
+    #[test]
+    fn the_loading_text_waits_for_the_bars() {
+        let mut borders = Borders::on();
+        assert_eq!(bar_shares(borders.frame()), bar_shares(0.));
+        borders.slide_off();
+        borders.advance(0.05);
+        assert!(!borders.off());
+        for _ in 0..6 {
+            borders.advance(0.05);
+        }
+        assert!(borders.off());
+        assert_eq!(bar_shares(borders.frame()), (0., 0.));
     }
 
     #[test]

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F779](F0779.md) | 2026-11-10 | Front-end hand-off in the one-window host, loading bars, circle and sounds, pause art findings |
 | [F778](F0778.md) | 2026-11-10 | Replay and Flashback round 3: TERMINAL cameras, camera defaults, packed checkpoints |
 | [F777](F0777.md) | 2026-11-10 | HUD: track_mask minimap, world-record pill, drift OSD groups |
 | [F776](F0776.md) | 2026-11-10 | Night lights: street lights, night shader term and car headlight beams on every night route |

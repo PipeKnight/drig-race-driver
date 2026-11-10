@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F779](log/F0779.md) | 2026-11-10 | Front-end hand-off in the one-window host, loading bars, circle and sounds, pause art findings |
 | [F778](log/F0778.md) | 2026-11-10 | Replay and Flashback round 3: TERMINAL cameras, camera defaults, packed checkpoints |
 | [F777](log/F0777.md) | 2026-11-10 | HUD: track_mask minimap, world-record pill, drift OSD groups |
 | [F776](log/F0776.md) | 2026-11-10 | Night lights: street lights, night shader term and car headlight beams on every night route |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F722](log/F0722.md) | 2026-11-03 | Tree cards blend two atlas views as the original does |
 | [F721](log/F0721.md) | 2026-11-03 | Tree cards lit like the original's impostor program |
 | [F720](log/F0720.md) | 2026-11-03 | Ten idle worktrees retired; real versus Explorer disk sizes |
-| [F719](log/F0719.md) | 2026-11-03 | Source forest on every preset with the original's tree level switch (owner's decision) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

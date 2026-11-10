@@ -87,6 +87,7 @@ pub(crate) fn hosted(plugins: PluginGroupBuilder, gpu: Gpu) -> PluginGroupBuilde
 /// Waits on every kept device so that wgpu frees what a dropped app left
 /// (buffers, textures, pipelines): a kept device outlives its apps, and wgpu
 /// reclaims dropped resources only when the device is polled.
+#[cfg(not(target_os = "android"))]
 pub(crate) fn reclaim_devices() {
     let devices = DEVICES.lock().unwrap_or_else(|e| e.into_inner());
     for (gpu, resources) in devices.iter() {
@@ -156,6 +157,7 @@ mod host {
     use bevy::prelude::*;
     use bevy::window::{
         ExitCondition, PrimaryWindow, RawHandleWrapper, RawHandleWrapperHolder, WindowEvent,
+        WindowPosition,
     };
     use std::path::PathBuf;
     use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -280,6 +282,11 @@ mod host {
         /// `GRID_SERIES_EXPERIMENTAL` was set by the user, not by the host.
         user_experimental: bool,
         loops: Option<Loops>,
+        /// The launcher race that started this process, black until the
+        /// window shows (`event_menu::spawn_menu`).
+        outer: crate::transition::OuterReady,
+        /// Inner updates drawn while the window is still hidden.
+        hidden_frames: Option<u32>,
     }
 
     /// `GRID_MENU_LOOPS`: races to run and the samples at each menu.
@@ -340,6 +347,15 @@ mod host {
             return Err("GRID_MENU_LOOPS needs GRID_MENU_AUTO=TICKS".into());
         }
         let size = Vec2::new(1280., 800.);
+        // Started by a launcher race (the hand-off, docs/SCREEN_FLOW.md
+        // section 2.3): the window opens hidden where the race's was and
+        // shows once the first screen has drawn ([`Host::reveal`]).
+        let outer = crate::transition::OuterReady::from_env();
+        let hidden = outer.waiting();
+        let position = match crate::transition::window_at() {
+            Some(at) if hidden => WindowPosition::At(at),
+            _ => WindowPosition::default(),
+        };
         let mut app = App::new();
         // The host only owns the window, the event loop and the input
         // (gamepads included); the attached app renders. No renderer, assets
@@ -363,6 +379,8 @@ mod host {
                 primary_window: Some(Window {
                     title: "GRID Reassembly".into(),
                     resolution: (size.x as u32, size.y as u32).into(),
+                    position,
+                    visible: !hidden,
                     ..default()
                 }),
                 exit_condition: ExitCondition::OnAllClosed,
@@ -394,6 +412,8 @@ mod host {
                 done: 0,
                 samples: Vec::new(),
             }),
+            outer,
+            hidden_frames: hidden.then_some(0),
         };
         host.start(Screen::Menu);
         app.world_mut().insert_non_send(host);
@@ -567,6 +587,8 @@ mod host {
             sync_in(world, outer, shown);
             shown.app.update();
             sync_out(world, outer, shown);
+            self.reveal(world, outer);
+            let shown = self.shown.as_mut()?;
             let code = match shown.app.should_exit()? {
                 AppExit::Success => 0,
                 AppExit::Error(code) => i32::from(code.get()),
@@ -596,6 +618,27 @@ mod host {
                 .resource_mut::<NextState<FrontEnd>>()
                 .set(FrontEnd::Loading);
             None
+        }
+
+        /// A window opened hidden shows on the first screen's
+        /// `transition::SHOW_FRAME`th update, set in Update so bevy_winit
+        /// applies it in this frame's Last (the F773 window-show hang); the
+        /// launcher race's marker follows a frame later, once it is shown.
+        fn reveal(&mut self, world: &mut World, outer: Entity) {
+            let Some(frames) = self.hidden_frames.as_mut() else {
+                return;
+            };
+            *frames += 1;
+            if *frames == crate::transition::SHOW_FRAME
+                && let Some(mut window) = world.get_mut::<Window>(outer)
+            {
+                window.visible = true;
+                window.focused = true;
+            } else if *frames > crate::transition::SHOW_FRAME {
+                self.hidden_frames = None;
+                self.outer.write();
+                println!("front_end version=1 event=handoff_ready");
+            }
         }
 
         fn attach(

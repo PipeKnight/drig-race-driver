@@ -27,13 +27,24 @@ Its alpha channel is `Anim!169`, a BEZIERFLOAT with keys frame 0 → 0 and frame
 - Going into the race: the screen goes to black with `fade_to_black_quickest` (0.5 s) on Go; the race starts black and plays `overlay_fade_off` (fade to clear, 1.0 s) when the world is ready.
 - Leaving the race (pause Exit/Retire, results Continue): `overlay_fade_on_hh`, fade to black in 1.0 s, then the front end loads.
 - `FUN_004A4560` handles the overlay's event-finished messages. When `border_off` finishes with the loading flag set, it plays the loading component's `fade_on` and `circle_rotate`: "Loading, please wait" (language id `loading`) with a turning circle, on black, bottom right.
-- The circle is drawn by the procedural shader `feov_ramp.fx`, not a texture. DRIG's ring is therefore AUTHORED in look (orange arc, 0.9 s per turn).
+- The circle is drawn by the procedural shader `feov_ramp.fx`, not a texture. Its colours and ramp keys are data (§1.4); its mesh is not reachable, so DRIG's ring geometry is AUTHORED.
 
 ### 1.3 Not ported (yet)
 
-- The 3D loading world (`loading` root, track preview and the `loading_stats` panel), and the top and bottom bar shutters of `overlay`. `language_eng.lng` has no tip or hint strings (90 ids with load/tip/hint, all load/save or network messages), so `loading_stats` shows facts of the event, not tips [I]. It needs the PSSG front-end scene renderer; not cheap.
+- The 3D loading world (`loading` root, track preview and the `loading_stats` panel). `language_eng.lng` has no tip or hint strings (90 ids with load/tip/hint, all load/save or network messages), so `loading_stats` shows facts of the event, not tips [I]. It needs the PSSG front-end scene renderer; not cheap.
 - `fade_to_half_black_quick` (popups).
-- The loading sounds: `loading_text_in` / `_out` (`audiohud` bank, −6.4 / −9.0 dB, played by the overlay's animation) and `spinner` (−7.4 dB) [D]. The widget sounds and screen whooshes are ported (§2.5, AUDIO_RESEARCH.md §36).
+- The bars in the race: there the original slides them off only at the intro to in-game camera hand-over (`FUN_0058BAF0` posts `border_off`); DRIG has no race intro, so the race shows none.
+
+### 1.4 The bars and the loading circle [D unless marked]
+
+Read from `frontend/fePersistentDatabase.pssg` with `grid-fe-anim` (crates/grid-probes); evidence in the main checkout's `local/front-end-flow/loading/overlay-anim.txt` (private).
+
+- **Bars.** `overlay` has a top and a bottom black quad, 200 units deep. The overlay camera looks at y 307.908 with a half-height of 475.861. The bars' Y keys: top (0, 852.123), (0.3333, 882.123), (0.6667, 1002.015); bottom (0, -26.122), (0.3333, -59.122), (0.6667, -172.521). As shares of the window height (top, bottom): frame 0 → (0.1383, 0.1490), frame 0.3333 → (0.1068, 0.1144), frame 0.6667 → (0, 0). `border_on` and `border_off` play 0.3 s between frame 0 and the off frame; `FUN_004964C0` posts `border_on` and `FUN_00496770` posts `border_off` to the overlay.
+- The overlay's setup (`FUN_004A49E0`) posts `border_on`, so a front-end screen opens with the bars on. The button help (`helptext`) is a child of the bottom bar [I: the front-end screens show the bars].
+- `FUN_004A4560`: when `border_off` finishes with the loading flag set, the loading text and circle come on. So the bars slide off under black, then "Loading" shows.
+- **Circle.** `load_circle_anim` (`Anim!164`, 3.333 s, played by `circle_rotate`, looped [I]) animates the ring material's `RampMin` (0, 0), (1.6667, 0), (3.3333, 1.2) and `RampMax` (0, -0.2), (1.6667, 1.0); `RampSoftness` 0.2. The ring material (`feov_ramp.fx`) is grey 0.65 at alpha 0.5; the centre disk (`load_circle_disk`, `feov_colour.fx`) is yellow (0.9272, 0.8058, 0.0312) at alpha 0.5.
+- [I] The ramp: alpha share = clamp((max - u)/soft + 1) × clamp((u - min)/soft + 1) along the ring coordinate u. The keys fit it exactly: empty at 0 and 3.333 s, full at 1.667 s. The shader itself is not decoded.
+- The ring mesh sits in a component instance library the scene reader does not reach. DRIG's ring size (28 px, 5 px wide, 10 px disk) and its place (bottom right, beside the text) are AUTHORED.
 
 ## 2. DRIG
 
@@ -67,7 +78,11 @@ Android keeps `android::relaunch()` (one activity, its own markers); `exit_with`
 
 ### 2.3 Launcher races return to the menu
 
-A launcher race (`Play GRID Prototype.cmd`, the `race-*` launchers) used to close the app on results Continue. A windowed race that was not started from the menu or the career, and whose profile does not set `[front_end] event_menu = off`, now behaves like a menu race. The way out sends it back to the menu with the hand-off: the race has `transition::SelfHandoff`, so once black with "Loading" it starts `grid-app --menu` itself (`event_menu::spawn_menu`, the launcher's flags minus its `--settings`, `GRID_WINDOW_AT` and `GRID_HANDOFF_OUTER_READY`). That supervisor starts its first menu hidden with the race's ready marker (`transition::run_supervised_from`); the race exits when the menu shows. A hand-off passes a process's marker on to the next one, because the leaving process waits for its own `GRID_HANDOFF_READY`: in the first F773 smoke the menu's first Go waited the 120 s limit while the race reported to another file (test `a_hand_off_passes_on_the_marker_the_leaving_screen_waits_for`). `main` waits for the supervisor and returns its code, so a launcher that waits for the process still sees the whole session. If the menu dies before showing, the supervisor writes the marker so the race does not wait. A race that leaves without the fade still opens the supervisor in the same process afterwards (`event_menu::menu_after`). Scripted runs (`--drive-ticks`) keep closing unless `GRID_MENU_AUTO` is set, so captures and the build gate are unchanged. Since F767 `grid-app --menu` runs the one-window host (FRONT_END_FLOW.md), which neither starts hidden at `GRID_WINDOW_AT` nor writes the outer marker, so `spawn_menu` asks for the supervisor with `GRID_FRONT_END=processes` (F773); the launcher's menu moves into the host once the host keeps that contract.
+A launcher race (`Play GRID Prototype.cmd`, the `race-*` launchers) used to close the app on results Continue. A windowed race that was not started from the menu or the career, and whose profile does not set `[front_end] event_menu = off`, now behaves like a menu race. The way out sends it back to the menu with the hand-off: the race has `transition::SelfHandoff`, so once black with "Loading" it starts `grid-app --menu` itself (`event_menu::spawn_menu`, the launcher's flags minus its `--settings`, `GRID_WINDOW_AT` and `GRID_HANDOFF_OUTER_READY`). The menu opens hidden at the race's window place and shows on its first frames; the race exits when the menu shows. A hand-off passes a process's marker on to the next one, because the leaving process waits for its own `GRID_HANDOFF_READY`: in the first F773 smoke the menu's first Go waited the 120 s limit while the race reported to another file (test `a_hand_off_passes_on_the_marker_the_leaving_screen_waits_for`). `main` waits for the menu process and returns its code, so a launcher that waits for the process still sees the whole session. A race that leaves without the fade still opens the menu in the same process afterwards (`event_menu::menu_after`). Scripted runs (`--drive-ticks`) keep closing unless `GRID_MENU_AUTO` is set, so captures and the build gate are unchanged.
+
+Both front ends keep this contract (`transition::OuterReady`, `transition::window_at`):
+- the one-window host (`front_end_host::run`, FRONT_END_FLOW.md, the default since F767): with `GRID_HANDOFF_OUTER_READY` set, its window opens hidden at `GRID_WINDOW_AT`, shows (and takes the focus) after the shown screen's third update (`transition::SHOW_FRAME`), and writes the marker on the next update (`front_end version=1 event=handoff_ready`). Showing happens in the outer app's `Update`, before bevy_winit applies window changes in `Last` (the F773 window-show hang). If the host ends before it shows, dropping `OuterReady` writes the marker, so the race does not wait the full 120 s. Before this, F773 made `spawn_menu` ask for the supervisor with `GRID_FRONT_END=processes`; that is no longer set, so the owner's launcher races now go back to the same one-window menu as the menu's own races;
+- the supervisor (`GRID_FRONT_END=processes`, inherited from the environment): starts its first menu hidden with the race's ready marker (`transition::run_supervised_from`) and writes the marker itself if that menu dies before showing.
 
 ### 2.4 Career
 
@@ -76,6 +91,14 @@ Joined in F771 (backlog row 60, docs/CAREER_SCREEN.md "Processes"). `career_scre
 ### 2.5 Screen and widget sounds
 
 A front-end screen app calls `hud_sound::install_front_end` after `transition::install`. It plays the original's plain `fe_fx` effects on the HUD group: `screen_whoosh_in` on the first frame, `screen_whoosh_out` once `Fade::leaving()` is true, and the menu's widget sounds (move, value step, dead end, activate, back). The pause menu and the pre-race screens play the race's `low_` set. The sounds hook only reads `Fade`; the transition code is unchanged. Details: AUDIO_RESEARCH.md §36.
+
+The loading overlay's sounds (`hud_sound::loading_cues`) follow `Fade::loading`: when "Loading" comes up over the black, `loading_text_in` and `spinner` (−6.4 and −7.4 dB in `fe_fx`); when the screen starts to clear, `loading_text_out` (−9.0 dB). A race plays the `low_` text cues (−3.4 / −5.8 dB); its set has no spinner [D]. The state a screen opens with plays nothing, because a screen that opens on "Loading" after a hand-off continues the overlay the previous process showed. In the original the overlay's animation posts these sounds; the exact frame inside the fade is not traced [I].
+
+### 2.6 The bars and the loading circle
+
+- `transition::borders(app)` (after `transition::install`) gives a screen the overlay's bars (§1.4): two black nodes over the screen, under the fade, at the frame-0 shares. When the screen leaves, the fade goes black, then the bars slide off in 0.3 s (`screen_transition version=1 event=border_off seconds=0.30`), then "Loading" shows, as `FUN_004A4560` orders it. The event menu calls it; another front-end screen (the career screens) opts in with the same line.
+- The race has no bars (§1.3).
+- The circle: a 56 x 56 ring texture redrawn each loading frame (`transition::ring_texels`, anti-aliased edges), whose alpha follows the ramp of §1.4 (`transition::ramp_share`) clockwise from the top (direction and start AUTHORED: the ramp coordinate lives in the unread ring mesh), from empty when "Loading" shows, looped every 3.333 s, around the yellow disk.
 
 ## 3. Race Options: Difficulty and Grid Position
 
@@ -105,7 +128,8 @@ The difficulty's star level sets the AI's ratio `flashback::AI_RATIOS` (0.506 �
 
 ## 4. Checks
 
-- Unit tests in `transition.rs`: the curve, the durations, the frame cap, repeated leaves, marker parsing, the marker a hand-off passes on, and the window shown before `Last`.
+- Unit tests in `transition.rs`: the curve, the durations, the frame cap, repeated leaves, marker parsing, the marker a hand-off passes on, the window shown before `Last`, the bars' shares, the ring filling and emptying, and "Loading" waiting for the bars.
 - Unit tests in `event_menu.rs` and `settings.rs`: the Race Options defaults, order, Ninja lock, saved keys, the profile's AI ratio and grid value, and the 0x5B60F0 slots.
-- `tools/menu_loop_smoke.ps1` drives the real path in interactive windows: launcher race → results → (hand-off) menu → Go (hand-off) → race → results → menu (hand-off) → quit, exit 0, with the menu's sound source and a window shot from every screen.
+- `tools/menu_loop_smoke.ps1` drives the real path in interactive windows: launcher race → results → (hand-off) menu → Go → race → results → menu → quit, exit 0, with the menu's sound source and a window shot from every screen. `-FrontEnd host` (the default) checks the one-window host the owner plays: the hand-off into it (`event=handoff_ready`) and its `attach`/`exit` screen changes. `-FrontEnd processes` checks the per-screen hand-offs. `-CheckOnly` re-checks an earlier run's log.
+- `hud_sound` unit test: the loading cues sound on the overlay's edges only.
 - The build gate's `menu-default` smoke still covers the menu → race start.
