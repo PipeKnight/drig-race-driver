@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F825](log/F0825.md) | 2026-11-11 | Results and drift screens: the pill strip in the front-end art |
 | [F824](log/F0824.md) | 2026-11-11 | Shared front-end reflection cube helper |
 | [F823](log/F0823.md) | 2026-11-10 | Drift scoreboard in the front-end art |
 | [F822](log/F0822.md) | 2026-11-10 | Results screens slide in and out |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F768](log/F0768.md) | 2026-11-09 | Drift Battle: original drift field, unread drift settings, drift soak |
 | [F767](log/F0767.md) | 2026-11-09 | One-window front end: menu, loading screen and race in one process |
 | [F766](log/F0766.md) | 2026-11-09 | Crowd gasps and the AI engine Treble low-pass (rows 70, 72) |
-| [F765](log/F0765.md) | 2026-11-09 | Graphics audit of all routes; night and container emissive objects drawn |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

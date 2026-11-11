@@ -841,7 +841,7 @@ Rows [D]: the row filler 0x54D270 instances one row glyph per entry (`list.%d`, 
 - Text node names pick the column: `position`, `driver`, `time`/`score`, `car`, then the fourth
   column `team`, `class` or `points` by race kind, and `difference` only for the touge's second run.
 - The player's row shows the row cursor pill; never drawn: the race timer, the row arrows and
-  flags, the pill helper, the frame of a list that does not scroll.
+  flags, the frame of a list that does not scroll.
 - Titles: `title_0`/`title_1` the view's title, `table_title` its body line.
 
 Drawing [I]: the art is rendered on its own layer (24) by a camera into an image, shown under a 50 %
@@ -873,7 +873,7 @@ further screen is one more row [D unless marked]:
   `score` the value;
 - the columns `drift_type` (the view's first table column, the drift type) and `amount`/`drift_amount`
   (the second, the count);
-- hidden: the pills (`object/h_pill_group`; the post-race panel's pills stay).
+- the pills: the strip below (F825), as on the results screen.
 The camera follows the board: each screen keeps its own pose (the first key of `Anim!96` at which
 the screen lies at the target's distance, §6.7 above), field of view and clip planes, and the
 render camera takes them when the board changes. The game-data test `drift_scoreboard_lays_out`
@@ -915,8 +915,41 @@ continues), the art hides at once; `exitback`, `enterback` and `exitzone` (only 
 are not played. `results_art enter screen=X seconds=S done` is printed when the slide-in ends;
 `tools/results_window_check.py` requires it.
 
+Pills (F825) [D unless marked]. Both screens' foot holds `object/h_pill_group` → `stacker_left=pill_stack`,
+a `GlyphStackerLeft` (type registry 0x4B09B0, factory 0x4C5300, vtable 0xCBE810) of two pill
+templates `h_pill=0` (x 0) and `h_pill=1` (x 2.0). Each pill is a stacker `pill_build` of a left cap,
+a `scaler_x=pill_middle` and a right cap; the scaler (`GlyphScalerX`, factory 0x4C17C0, vtable
+0xCBD2A0, x axis only) holds the `scalee` mesh and the label `text=pill_header`.
+- Stacker load 0x4AA580: children sorted by position (pos 0x470FA0 = bound min on the axis, size
+  0x4710B0 = max − min); start = the first child's pos; each child keeps the gap
+  next pos − pos − size, the last none. Game data: `pill_stack` start −0.0006, gap 0.4212;
+  `pill_build` gaps 0, −0.02, 0.
+- Re-flow 0x498DF0 (vtable slot 14; slot 16 0x498DC0 clears the gaps): cursor = start; each visible
+  child is moved (0x4879B0) so its pos is the cursor, then cursor += size + gap.
+- SetSize (message 0xDAAD44, vtable 0xCB97B4; handler 0x4ACEB0 → 0x4AA940): children 0..n−1 shown,
+  the rest hidden; while fewer than n, 0x4AA7F0 clones the last and names it by its index; a clone
+  keeps the template's 0 → 1 gap. Then the stacker re-flows.
+- Scaler update 0x48C090 (load 0x4A7CA0, margins 0x482430, none authored in `frontend/` [O]):
+  B = the span of the scaler's visible children other than the scalee, S = the scalee's own span
+  (0x4822B0); scale = |B| / |S|, and the scalee's local is T(B.min − S.min·scale, saved y, z) · diag(scale, 1, 1).
+  So the middle stretches over its label, and the right cap follows in the re-flow.
+The port (`results_art::Strip`, any `stacker_left` whose children are numbered templates, with nested
+stackers and scalers) lays the pills out for the board's labels: `post_race::View::buttons` (the
+panel's pill texts), each label's width from its font (`osd_scene::text_span`). Template j draws pill j;
+the last template also draws every clone after it (up to `MAX_PILLS` = 4: `post_race_results_generic`'s
+itemflow `pills.0 .. pills.3` [D]; [I] the post-race sender of SetSize was not found, so the count is
+the panel's). An empty label shows no pill. Pill colour: the cursor's pill takes the material state after
+the `activate` event, the others `deactivate` (`results_art::event_values`: each material's values
+when the shortest animation with that event ends; `pill_glow_txtrd_2` lights (1.0, 0.79, 0) with glow
+0.2 against 0.1; the label `text_pill_optiontitles` 0.1 against 0.83). The panel keeps its pills only
+for the Exit/Restart confirmations. The strip's world turns +90° about x (×4), and the pill meshes and
+`pill_header`'s text box (bounds [0, 0, −1.15, 0.6, 0, 0]) lie in its local x–z plane [O]; a text box with
+no y extent but a z extent lays its glyphs in that plane, line advance along −z
+(`osd_scene::text_mesh`) [I], so the labels face the camera like the meshes. Tests: `stackers_keep_their_load_gaps`,
+`pills_reflow_around_their_labels`, `post_race_pills_fit_the_strip`, game data `pill_strips_lay_out`.
+
 Not ported: `fepause_final` behind the screen (the front-end session owns the blur), the stats
-screen, the pill art.
+screen.
 
 Row state colour [I]. The text materials carry DiffuseColour 0.1 (`fe_shadersetup.xml` gives the
 front-end instances a DiffuseColour/Alpha and a GlowAmount stream), which reads dark on the grey

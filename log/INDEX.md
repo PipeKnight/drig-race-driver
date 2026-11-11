@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F825](F0825.md) | 2026-11-11 | Results and drift screens: the pill strip in the front-end art |
 | [F824](F0824.md) | 2026-11-11 | Shared front-end reflection cube helper |
 | [F823](F0823.md) | 2026-11-10 | Drift scoreboard in the front-end art |
 | [F822](F0822.md) | 2026-11-10 | Results screens slide in and out |

@@ -104,12 +104,11 @@ const DEFS: [Def; 2] = [
         content: &[("null=race_results", Variant::Race), ("null=drift_results", Variant::Drift)],
         title: &["title_0", "title_1"],
         body: &["table_title"],
-        // The race timer, the row arrows and flags, the pill helper, the
-        // frame without scroller [I: the frame of a list that scrolls].
+        // The race timer, the row arrows and flags, the frame without
+        // scroller [I: the frame of a list that scrolls].
         hidden: &[
             "text=timer",
             "{30}component/leaderboard_arrow=arrow",
-            "null=pill_helper",
             "library/image_flag=flag",
             "component/leaderboard_noscroll=noscroll",
         ],
@@ -127,8 +126,7 @@ const DEFS: [Def; 2] = [
         // `table_title` are not bound [D].
         title: &["title_01"],
         body: &[],
-        // The pills (`h_pill_group`, the post-race panel's for now).
-        hidden: &["object/h_pill_group=undefined"],
+        hidden: &[],
     },
 ];
 
@@ -264,6 +262,8 @@ enum Field {
     Cell(Column),
     /// A drift statistic (`View::stats` index): its label, or its value.
     Stat(usize, bool),
+    /// The label of a pill of the strip ([`Strip`]).
+    Pill,
 }
 
 /// The drift statistic a node belongs to: its `drift_cursor_half` or
@@ -327,6 +327,7 @@ fn text_of(field: Field, slot: Option<usize>, board: &Board) -> String {
             cell(1 + start + slot.unwrap_or(0), c)
         }
         Field::Stat(i, value) => v.stats.get(i).map(|s| s[usize::from(value)].clone()).unwrap_or_default(),
+        Field::Pill => slot.and_then(|k| v.buttons.get(k)).cloned().unwrap_or_default(),
     }
 }
 
@@ -499,6 +500,9 @@ struct Item {
     gate: Gate,
     /// The [`Layout::motions`] entries of the node and its ancestors.
     motion: Vec<usize>,
+    /// In the pill strip: its [`Strip::nodes`] entry and the pill template
+    /// (the root's child) it belongs to.
+    strip: Option<(usize, usize)>,
 }
 
 /// Which event of a screen's own animations plays: the flow 0x4A6670 sends
@@ -575,6 +579,9 @@ struct MaterialDef {
     /// The DiffuseColour of the row states `player` and `deactivate` when the
     /// packages animate it ([`state_colours`]).
     states: [Option<Vec3>; 2],
+    /// The values after the events `activate` and `deactivate` (the pills,
+    /// [`event_values`]).
+    events: [Option<fe3d::Values>; 2],
 }
 
 #[derive(Debug)]
@@ -588,6 +595,8 @@ struct Layout {
     pitch: Vec3,
     /// The nodes the screen's `enter` and `exit` slide.
     motions: Vec<Motion>,
+    /// The pill strip.
+    strip: Option<Strip>,
     /// What was left out, for the log.
     skipped: HashMap<&'static str, usize>,
 }
@@ -750,6 +759,10 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
         w
     };
     let placed = osd_glyph::expand_with(scenes, 0, screen, &parent_world, &local);
+    let (strip, strip_index) = match Strip::find(scenes, &placed, &parent_world) {
+        Some((s, index)) => (Some(s), index),
+        None => (None, HashMap::new()),
+    };
     let name = |p: &osd_glyph::Placed| scenes[p.scene].nodes[p.node].name();
     let at = |n: &str| placed.iter().find(|p| name(p) == n).map(|p| Vec3::new(p.world[12], p.world[13], p.world[14]));
     let pitch = match (at(&format!("{}0", def.rows)), at(&format!("{}1", def.rows))) {
@@ -834,7 +847,7 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
             continue;
         };
         let shape = match &node.text {
-            Some(t) => match field(&names, &g, def) {
+            Some(t) => match strip_index.contains_key(&pi).then_some(Field::Pill).or_else(|| field(&names, &g, def)) {
                 Some(field) => Shape::Text { layout: t.clone(), field },
                 None => {
                     *skipped.entry("text").or_default() += 1;
@@ -852,6 +865,7 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
                 pattern: name("TPattern"),
                 diffuse: name("TDiffuseMap"),
                 states: states[p.scene].get(m.id.as_str()).copied().unwrap_or_default(),
+                events: event_values(scenes[p.scene], m.id.as_str(), values),
             });
             materials.len() - 1
         });
@@ -863,6 +877,7 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
             shape,
             gate: g,
             motion: motion(pi),
+            strip: strip_index.get(&pi).map(|&f| (f, strip.as_ref().and_then(|s| s.template(f)).unwrap_or(0))),
         });
     }
     Ok(Layout {
@@ -873,8 +888,355 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
         materials,
         pitch,
         motions,
+        strip,
         skipped,
     })
+}
+
+/// The values `id`'s parameters take once the events `activate` and
+/// `deactivate` of an animation of `s` have played: the pills' states
+/// (`matinst=pill_glow_txtrd_2`: orange (1, 0.79, 0) with glow 0.2 after
+/// `activate` PlayTo 1.0, 0.1 without glow after `deactivate` PlayTo 0.667;
+/// the label `text_pill_optiontitles` 0.1 and 0.83) [D keys and events; I:
+/// the strip's items take these states, the lit pill `activate`]. From the
+/// shortest such animation (the first of equal ones); `None` where none
+/// keys the material.
+fn event_values(s: &osd::Scene, id: &str, base: fe3d::Values) -> [Option<fe3d::Values>; 2] {
+    let mut best: Option<(f32, [Option<fe3d::Values>; 2])> = None;
+    for a in &s.animations {
+        let channels: Vec<(&str, &osd::Channel)> = a
+            .channels
+            .iter()
+            .filter(|c| c.semantic == osd::Semantic::Parameter)
+            .filter_map(|c| c.target.split_once('#').filter(|(m, _)| *m == id).map(|(_, p)| (p, c)))
+            .collect();
+        let (Some(on), Some(off)) = (a.event("activate"), a.event("deactivate")) else {
+            continue;
+        };
+        if channels.is_empty() {
+            continue;
+        }
+        let at = |e: &osd::Event| {
+            let frame = e.at(a.default_frame, f32::MAX).0;
+            let mut v = base;
+            for (p, c) in &channels {
+                let x: Vec<f32> = c.components.iter().map(|k| k.sample(frame)).collect();
+                set_parameter(&mut v, p, &x);
+            }
+            v
+        };
+        let length = a.duration();
+        if best.as_ref().is_none_or(|b| length < b.0) {
+            best = Some((length, [Some(at(on)), Some(at(off))]));
+        }
+    }
+    best.map_or([None; 2], |b| b.1)
+}
+
+/// Sets the parameter `name` of `v` (the names [`fe3d::values`] reads).
+fn set_parameter(v: &mut fe3d::Values, name: &str, x: &[f32]) {
+    let Some(&first) = x.first() else {
+        return;
+    };
+    match name {
+        "DiffuseColour" if x.len() >= 3 => v.colour = Vec3::new(x[0], x[1], x[2]).extend(v.colour.w),
+        "Alpha" => v.colour.w = first,
+        "GlowAmount" => v.a.x = first,
+        "Emmisive" => v.a.z = first,
+        "SpecularLevel" => v.a.w = first,
+        "FresnelMin" => v.b.x = first,
+        "FresnelMax" => v.b.y = first,
+        "FresnelPower" => v.b.z = first,
+        "SpecularPow" => v.b.w = first,
+        "DirtScale" => v.c.x = first,
+        "DirtBlend" => v.c.y = first,
+        "DirtGlowBlend" => v.c.z = first,
+        "PatternScale" => v.c.w = first,
+        "PatternBlend" => v.d.x = first,
+        _ => {}
+    }
+}
+
+// ------------------------------------------------------------------ pills
+
+/// Pills a strip shows at most: states.xml's itemflow of the results
+/// screens names `pills.0` to `pills.3` [D].
+const MAX_PILLS: usize = 4;
+
+/// How a node of the pill strip lays out its children.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Flow {
+    Plain,
+    /// `stacker_left` (GlyphStackerLeft, vtable 0xCBE810): the children
+    /// along +x in the order of their load-time positions, each gap as at
+    /// load (load 0x4AA580, re-flow 0x498DF0) [D].
+    Stacker,
+    /// `scaler_x` (GlyphScalerX, vtable 0xCBD2A0): stretches its `scalee`
+    /// child along x over its other children (0x48C090) [D].
+    Scaler,
+    Scalee,
+}
+
+fn flow_kind(name: &str) -> Flow {
+    if name.starts_with("stacker_left=") {
+        Flow::Stacker
+    } else if name.starts_with("scaler_x=") {
+        Flow::Scaler
+    } else if name.starts_with("scalee=") {
+        Flow::Scalee
+    } else {
+        Flow::Plain
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FlowNode {
+    flow: Flow,
+    parent: Option<usize>,
+    /// By load-time position (a stacker's order).
+    children: Vec<usize>,
+    /// In the parent's frame.
+    local: Mat4,
+    /// The mesh's x span in the node's frame (render nodes only).
+    own: Option<[f32; 2]>,
+    /// A text node's layout and bounds: its label's span replaces `own`.
+    text: Option<(osd::TextLayout, [f32; 6])>,
+    /// A stacker's gap after each child (the last 0) and its start.
+    gaps: Vec<f32>,
+    start: f32,
+}
+
+/// A pill label's x span from its text layout, bounds and text.
+type LabelSpan<'a> = dyn Fn(&osd::TextLayout, &[f32; 6], &str) -> Option<[f32; 2]> + 'a;
+
+/// The pill strip of a screen: a `stacker_left` whose children are numbered
+/// pill templates (`stacker_left=pill_stack` with `component/h_pill=0` and
+/// `=1` on both results screens), with its subtree. The stacker message
+/// SetSize (0x4AA940) shows the first `count` children and clones the last
+/// (0x4AA7F0, every gap between pills then the template's) [D]; states.xml's
+/// itemflow sizes it to the screen's pills [I: the post-race sender was not
+/// found]. Each pill is `stacker_left=pill_build` of a left cap, a
+/// `scaler_x` middle and a right cap; the middle's `scalee=center` stretches
+/// over the label `text=pill_header`.
+#[derive(Clone, Debug)]
+struct Strip {
+    /// The root stacker first, then its subtree in placed order.
+    nodes: Vec<FlowNode>,
+    /// The world matrix of the root's parent.
+    base: Mat4,
+}
+
+/// Orders a stacker's children by their load-time positions and keeps the
+/// gap after each and the first one's position (0x4AA580: pos = bound min,
+/// size = max - min, gap = next pos - pos - size, the last 0) [D]. `spans`
+/// are the children's x spans in the stacker's frame.
+fn sort_stacker(n: &mut FlowNode, spans: &[Option<[f32; 2]>]) {
+    let pos = |c: usize| spans[c].map_or(f32::MAX, |s| s[0]);
+    n.children.sort_by(|&a, &b| pos(a).total_cmp(&pos(b)));
+    let shown: Vec<[f32; 2]> = n.children.iter().filter_map(|&c| spans[c]).collect();
+    n.start = shown.first().map_or(0., |s| s[0]);
+    n.gaps = vec![0.; n.children.len()];
+    let mut k = 0;
+    for (i, &c) in n.children.iter().enumerate() {
+        if spans[c].is_some() {
+            n.gaps[i] = shown.get(k + 1).map_or(0., |next| next[0] - shown[k][1]);
+            k += 1;
+        }
+    }
+}
+
+/// The x span `e` of a child in its parent's frame through `local`.
+fn through(local: &Mat4, e: [f32; 2]) -> [f32; 2] {
+    let (a, b) = (local.w_axis.x + local.x_axis.x * e[0], local.w_axis.x + local.x_axis.x * e[1]);
+    [a.min(b), a.max(b)]
+}
+
+fn union(a: Option<[f32; 2]>, b: Option<[f32; 2]>) -> Option<[f32; 2]> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].max(b[1])]),
+        (a, b) => a.or(b),
+    }
+}
+
+/// A pill template's number (`component/h_pill=1` is 1).
+fn numbered(name: &str) -> Option<usize> {
+    name.rsplit_once('=').and_then(|(_, k)| k.parse().ok())
+}
+
+impl Strip {
+    /// The strip among `placed` ([`Strip`]) with the [`Strip::nodes`] entry
+    /// of each placed node in it.
+    fn find(scenes: &[&osd::Scene], placed: &[osd_glyph::Placed], parent_world: &[f32; 16]) -> Option<(Strip, HashMap<usize, usize>)> {
+        let node = |i: usize| &scenes[placed[i].scene].nodes[placed[i].node];
+        let children = |i: usize| placed.iter().enumerate().filter(move |(_, q)| q.parent == Some(i)).map(|(c, _)| c);
+        let root = (0..placed.len()).find(|&i| {
+            flow_kind(node(i).name()) == Flow::Stacker
+                && children(i).next().is_some()
+                && children(i).all(|c| numbered(node(c).name()).is_some())
+        })?;
+        // `expand` places a node before its children.
+        let mut index = HashMap::from([(root, 0)]);
+        let mut order = vec![root];
+        for (i, p) in placed.iter().enumerate().skip(root + 1) {
+            if p.parent.is_some_and(|q| index.contains_key(&q)) {
+                index.insert(i, order.len());
+                order.push(i);
+            }
+        }
+        let world = |i: usize| Mat4::from_cols_array(&placed[i].world);
+        let base = placed[root].parent.map_or(Mat4::from_cols_array(parent_world), world);
+        let mut nodes: Vec<FlowNode> = order
+            .iter()
+            .map(|&i| {
+                let n = node(i);
+                let up = if i == root { base } else { placed[i].parent.map_or(base, world) };
+                FlowNode {
+                    flow: flow_kind(n.name()),
+                    parent: if i == root { None } else { placed[i].parent.and_then(|q| index.get(&q).copied()) },
+                    children: Vec::new(),
+                    local: up.inverse() * world(i),
+                    own: n.render.is_some().then_some([n.bounds[0], n.bounds[3]]),
+                    text: n.text.clone().map(|t| (t, n.bounds)),
+                    gaps: Vec::new(),
+                    start: 0.,
+                }
+            })
+            .collect();
+        for f in 1..nodes.len() {
+            if let Some(p) = nodes[f].parent {
+                nodes[p].children.push(f);
+            }
+        }
+        // The load-time extents (children after parents), then each
+        // stacker's order, gaps and start (0x4AA580; pos = bound min, size =
+        // max - min, gap = next pos - pos - size).
+        let mut extent: Vec<Option<[f32; 2]>> = vec![None; nodes.len()];
+        for f in (0..nodes.len()).rev() {
+            let e = nodes[f].children.iter().fold(nodes[f].own, |e, &c| union(e, extent[c].map(|x| through(&nodes[c].local, x))));
+            extent[f] = e;
+        }
+        let spans: Vec<Option<[f32; 2]>> = (0..nodes.len()).map(|c| extent[c].map(|e| through(&nodes[c].local, e))).collect();
+        for n in nodes.iter_mut().filter(|n| n.flow == Flow::Stacker) {
+            sort_stacker(n, &spans);
+        }
+        let map = order.iter().enumerate().map(|(f, &i)| (i, f)).collect();
+        Some((Strip { nodes, base }, map))
+    }
+
+    /// The pill template (the root's child, in clone order) node `f` is in.
+    fn template(&self, mut f: usize) -> Option<usize> {
+        while let Some(p) = self.nodes[f].parent {
+            if p == 0 {
+                return self.nodes[0].children.iter().position(|&c| c == f);
+            }
+            f = p;
+        }
+        None
+    }
+
+    /// Lays out the subtree of `f` for `label`: the new local of each node
+    /// under it in `locals`, and its x span in its own frame. `span` gives a
+    /// text node's span for the label.
+    fn flow(&self, f: usize, label: &str, span: &LabelSpan, locals: &mut [Option<Mat4>]) -> Option<[f32; 2]> {
+        let n = &self.nodes[f];
+        let own = match &n.text {
+            Some((t, b)) => span(t, b, label).or(n.own),
+            None => n.own,
+        };
+        match n.flow {
+            Flow::Stacker => {
+                // Re-flow 0x498DF0: each shown child's position moves to the
+                // cursor, which advances by its size and gap.
+                let mut cursor = n.start;
+                let mut extent = own;
+                for (i, &c) in n.children.iter().enumerate() {
+                    let mut l = self.nodes[c].local;
+                    if let Some(e) = self.flow(c, label, span, locals) {
+                        l.w_axis.x += cursor - through(&l, e)[0];
+                        let s = through(&l, e);
+                        cursor = s[1] + n.gaps[i];
+                        extent = union(extent, Some(s));
+                    }
+                    locals[c] = Some(l);
+                }
+                extent
+            }
+            Flow::Scaler => {
+                // 0x48C090: B, the other children's span; S, the scalee's own;
+                // scale = |B| / |S|; the scalee's local = T(B.min - S.min *
+                // scale, saved y, saved z) * diag(scale, 1, 1); no margins in
+                // the packages [D].
+                let scalee = n.children.iter().copied().find(|&c| self.nodes[c].flow == Flow::Scalee);
+                let mut b = None;
+                for &c in n.children.iter().filter(|&&c| Some(c) != scalee) {
+                    let l = self.nodes[c].local;
+                    b = union(b, self.flow(c, label, span, locals).map(|e| through(&l, e)));
+                    locals[c] = Some(l);
+                }
+                let mut extent = union(own, b);
+                if let Some(s) = scalee {
+                    let saved = self.nodes[s].local;
+                    let e = self.flow(s, label, span, locals);
+                    locals[s] = Some(match (b, e) {
+                        (Some(b), Some(e)) if e[1] - e[0] > 1e-6 => {
+                            let scale = (b[1] - b[0]) / (e[1] - e[0]);
+                            let t = saved.w_axis.truncate();
+                            Mat4::from_translation(Vec3::new(b[0] - e[0] * scale, t.y, t.z)) * Mat4::from_scale(Vec3::new(scale, 1., 1.))
+                        }
+                        _ => {
+                            extent = union(extent, e.map(|e| through(&saved, e)));
+                            saved
+                        }
+                    });
+                }
+                extent
+            }
+            Flow::Plain | Flow::Scalee => {
+                let mut extent = own;
+                for &c in &n.children {
+                    let l = self.nodes[c].local;
+                    extent = union(extent, self.flow(c, label, span, locals).map(|e| through(&l, e)));
+                    locals[c] = Some(l);
+                }
+                extent
+            }
+        }
+    }
+
+    /// The world matrix of each node of each pill for `labels` (at most
+    /// [`MAX_PILLS`]; `None` outside the pill's template), pill `k` a copy of
+    /// template `min(k, last)`; a pill without label is hidden.
+    fn place(&self, labels: &[String], span: &LabelSpan) -> Vec<Vec<Option<Mat4>>> {
+        let root = &self.nodes[0];
+        let m = root.children.len();
+        let root_world = self.base * root.local;
+        let mut cursor = root.start;
+        let mut out = Vec::new();
+        for (k, label) in labels.iter().enumerate().take(MAX_PILLS) {
+            let mut worlds = vec![None; self.nodes.len()];
+            if m == 0 || label.trim().is_empty() {
+                out.push(worlds);
+                continue;
+            }
+            let t = root.children[k.min(m - 1)];
+            let mut locals = vec![None; self.nodes.len()];
+            let mut l = self.nodes[t].local;
+            if let Some(e) = self.flow(t, label, span, &mut locals) {
+                l.w_axis.x += cursor - through(&l, e)[0];
+                // A clone's gap is the template's between its last two.
+                cursor = through(&l, e)[1] + root.gaps.get(k.min(m.saturating_sub(2))).copied().unwrap_or(0.);
+            }
+            locals[t] = Some(l);
+            for f in 1..self.nodes.len() {
+                if let (Some(l), Some(p)) = (locals[f], self.nodes[f].parent) {
+                    let up = if p == 0 { Some(root_world) } else { worlds[p] };
+                    worlds[f] = up.map(|w| w * l);
+                }
+            }
+            out.push(worlds);
+        }
+        out
+    }
 }
 
 // ------------------------------------------------------------------ loading
@@ -1066,14 +1428,30 @@ struct Art {
 /// A screen's items, materials and camera.
 struct LiveScreen {
     items: Vec<Item>,
-    /// Per material: authored, `deactivate` state (the same when unanimated).
-    materials: Vec<[Handle<Fe3dMaterial>; 2]>,
+    /// Per material: the row states `player` and `deactivate`, then the
+    /// states after the events `activate` and `deactivate` (each the authored
+    /// values when unanimated).
+    materials: Vec<[Handle<Fe3dMaterial>; 4]>,
     camera: Transform,
     fov_degrees: f32,
     near: f32,
     far: f32,
     motions: Vec<Motion>,
     pitch: Vec3,
+    strip: Option<Strip>,
+    /// The strip's node worlds per pill for the drawn board ([`Strip::place`]).
+    pills: Vec<Vec<Option<Mat4>>>,
+}
+
+impl LiveScreen {
+    /// Where the layout puts `item` in row (or pill) `slot`; `None` for a
+    /// pill node the board's pills do not place.
+    fn rest(&self, item: &Item, slot: Option<usize>) -> Option<Mat4> {
+        match item.strip {
+            Some((f, _)) => slot.and_then(|k| self.pills.get(k)).and_then(|p| p[f]),
+            None => Some(Mat4::from_translation(self.pitch * slot.unwrap_or(0) as f32) * item.world),
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -1154,7 +1532,7 @@ fn spawn(
     let constants = p.lights.constants(None, None, 0.);
     // Per material: the authored colour (the player's row) and the
     // `deactivate` state colour (the other rows and the fixed items).
-    let mut handles_of = |l: &Layout| -> Vec<[Handle<Fe3dMaterial>; 2]> {
+    let mut handles_of = |l: &Layout| -> Vec<[Handle<Fe3dMaterial>; 4]> {
         l.materials
         .iter()
         .map(|m| {
@@ -1173,8 +1551,16 @@ fn spawn(
                     materials.add(r)
                 })
             });
+            let [activate, deactivate] = m.events.map(|v| {
+                v.map(|values| {
+                    let mut r = authored.clone();
+                    r.values = values;
+                    materials.add(r)
+                })
+            });
             let authored = materials.add(authored);
-            [player.unwrap_or_else(|| authored.clone()), rest.unwrap_or(authored)]
+            let or = |h: Option<Handle<Fe3dMaterial>>| h.unwrap_or_else(|| authored.clone());
+            [or(player), or(rest), or(activate), or(deactivate)]
         })
         .collect()
     };
@@ -1224,15 +1610,23 @@ fn spawn(
         let handles = handles_of(l);
         for (i, item) in l.items.iter().enumerate() {
             let mesh = mesh_of[i].clone().map(|m| meshes.add(m)).unwrap_or_default();
-            let slots: Vec<Option<usize>> = if item.gate.row { (0..screen.def().visible).map(Some).collect() } else { vec![None] };
+            // A pill node: in its template's pill, the last template's also in
+            // every clone after it (SetSize 0x4AA940) [D].
+            let templates = l.strip.as_ref().map_or(0, |s| s.nodes[0].children.len());
+            let slots: Vec<Option<usize>> = match item.strip {
+                Some((_, j)) if j + 1 < templates => vec![Some(j)],
+                Some((_, j)) => (j..MAX_PILLS).map(Some).collect(),
+                None if item.gate.row => (0..screen.def().visible).map(Some).collect(),
+                None => vec![None],
+            };
             for slot in slots {
-                let world = Mat4::from_translation(l.pitch * slot.unwrap_or(0) as f32) * item.world;
+                let world = if item.strip.is_some() { item.world } else { Mat4::from_translation(l.pitch * slot.unwrap_or(0) as f32) * item.world };
                 commands.spawn((
                     Art { screen, item: i, slot, text: None },
                     Transform::from_matrix(world),
                     Visibility::Hidden,
                     Mesh3d(mesh.clone()),
-                    MeshMaterial3d(handles[item.material][1].clone()),
+                    MeshMaterial3d(handles[item.material][if item.strip.is_some() { 3 } else { 1 }].clone()),
                     RenderLayers::layer(LAYER),
                     bevy::camera::visibility::NoFrustumCulling,
                 ));
@@ -1247,6 +1641,8 @@ fn spawn(
             far: l.far,
             motions: l.motions.clone(),
             pitch: l.pitch,
+            strip: l.strip.clone(),
+            pills: Vec::new(),
         });
     }
     commands.insert_resource(Live {
@@ -1328,6 +1724,11 @@ fn update(
         if live.board.as_ref().is_none_or(|d| d.screen != board.screen) {
             live.play = Some((Play::Enter, 0.));
         }
+        // The pills for the board's labels, each label's span from its font.
+        let fonts = &live.fonts;
+        let screen = &mut live.screens[board.screen as usize];
+        let span = |t: &osd::TextLayout, b: &[f32; 6], label: &str| fonts.get(&t.font).map(|f| osd_scene::text_span(f, label, t, b));
+        screen.pills = screen.strip.as_ref().map(|s| s.place(&board.view.buttons, &span)).unwrap_or_default();
         let current = &live.screens[board.screen as usize];
         // The camera of the board's screen.
         if let Ok((_, mut transform, mut projection)) = cameras.get_mut(live.camera) {
@@ -1340,17 +1741,27 @@ fn update(
         }
         live.camera_world = current.camera.to_matrix();
         let mut drawn = 0;
-        for (mut a, mut visibility, mut mesh, mut material, _) in &mut art {
+        for (mut a, mut visibility, mut mesh, mut material, mut transform) in &mut art {
             if a.screen != board.screen {
                 visibility.set_if_neq(Visibility::Hidden);
                 continue;
             }
             let item = &current.items[a.item];
-            let state = &current.materials[item.material][usize::from(!on_player_row(a.slot, board))];
+            // The lit pill is the cursor's (`activate`), the others
+            // `deactivate` [I: the strip's sender was not found].
+            let state = match item.strip {
+                Some(_) => 2 + usize::from(a.slot != Some(board.view.button)),
+                None => usize::from(!on_player_row(a.slot, board)),
+            };
+            let state = &current.materials[item.material][state];
             if material.0 != *state {
                 material.0 = state.clone();
             }
-            let mut on = visible(&item.gate, a.slot, board);
+            let rest = current.rest(item, a.slot);
+            if let Some(world) = rest {
+                transform.set_if_neq(Transform::from_matrix(world));
+            }
+            let mut on = rest.is_some() && visible(&item.gate, if item.strip.is_some() { None } else { a.slot }, board);
             if let Shape::Text { layout, field } = &item.shape {
                 let text = text_of(*field, a.slot, board);
                 on &= !text.trim().is_empty();
@@ -1385,10 +1796,11 @@ fn update(
                 continue;
             }
             let item = &current.items[a.item];
-            if !item.motion.is_empty() {
+            if !item.motion.is_empty()
+                && let Some(rest) = current.rest(item, a.slot)
+            {
                 let m: Vec3 = item.motion.iter().map(|&m| frames[m]).sum();
-                let world = Mat4::from_translation(current.pitch * a.slot.unwrap_or(0) as f32 + m) * item.world;
-                transform.set_if_neq(Transform::from_matrix(world));
+                transform.set_if_neq(Transform::from_matrix(Mat4::from_translation(m) * rest));
             }
         }
         if t >= seconds && play == Play::Enter {
@@ -1467,7 +1879,7 @@ mod tests {
             table.push(std::array::from_fn(|i| format!("r{r}c{i}")));
         }
         Board {
-            view: View { title: "T".into(), body: "B".into(), table, player_row: Some(player + 1), pills: String::new(), stats: Vec::new() },
+            view: View { title: "T".into(), body: "B".into(), table, player_row: Some(player + 1), ..View::default() },
             drift,
             fourth: Fourth::Team,
             screen: Screen::Results,
@@ -1504,7 +1916,7 @@ mod tests {
         assert_eq!((g.variant, g.row, g.hidden), (Variant::Any, true, false));
         assert_eq!(field(&row, &g, D), Some(Field::Cell(Column::Amount)));
         assert!(gate(&["null=x", "gadget/drift_list_items=3"], D).hidden);
-        assert!(gate(&["null=anim_dummy", "object/h_pill_group=undefined"], D).hidden);
+        assert!(!gate(&["null=anim_dummy", "object/h_pill_group=undefined"], D).hidden);
         assert!(!gate(&["null=track_info_pill", "component/drift_cursor_half=avg_speed"], D).player_only);
         let half = ["text=drift_type", "component/drift_cursor_half=avg_speed", "screen/drift_scoreboard=drift_scoreboard"];
         assert_eq!(field(&half, &gate(&half, D), D), Some(Field::Stat(3, false)));
@@ -1749,5 +2161,156 @@ mod tests {
         }
         println!("items slide in {slides_in} out {slides_out} from off screen {from_off} of {moved}");
         assert!(slides_out * 2 > moved && slides_in * 2 > moved && from_off > 0);
+    }
+
+    /// A strip like the results screens': two pill templates (x 0 and 2.0),
+    /// each a stacker of a left cap, a scaler middle (scalee and label at
+    /// -0.5) and a right cap at 1.08.
+    fn synthetic_strip() -> Strip {
+        let text = osd::TextLayout {
+            font: "swiss_black0".into(),
+            height: 0.5,
+            depth: 0.,
+            h_align: 0,
+            v_align: 0,
+            wrapping: 0,
+            line_spacing: 1.,
+            tracking: 0.,
+            case: 0,
+        };
+        let node = |flow, parent, x: f32, own: Option<[f32; 2]>| FlowNode {
+            flow,
+            parent,
+            children: Vec::new(),
+            local: Mat4::from_translation(Vec3::new(x, 0.25, 1.)),
+            own,
+            text: None,
+            gaps: Vec::new(),
+            start: 0.,
+        };
+        let mut nodes = vec![node(Flow::Stacker, None, 0., None)];
+        for x in [2.0, 0.] {
+            let pill = nodes.len();
+            nodes.push(node(Flow::Plain, Some(0), x, None));
+            nodes.push(node(Flow::Stacker, Some(pill), 0., None));
+            let build = pill + 1;
+            nodes.push(node(Flow::Plain, Some(build), 1.08, Some([0., 0.5])));
+            nodes.push(node(Flow::Plain, Some(build), 0., Some([0., 0.5])));
+            nodes.push(node(Flow::Scaler, Some(build), 1.0, None));
+            let middle = nodes.len() - 1;
+            nodes.push(node(Flow::Scalee, Some(middle), -0.5, Some([0., 0.58])));
+            let mut label = node(Flow::Plain, Some(middle), -0.5, Some([0., 0.6]));
+            label.text = Some((text.clone(), [0., 0., 0., 0.6, 0.5, 0.]));
+            nodes.push(label);
+        }
+        for f in 1..nodes.len() {
+            let p = nodes[f].parent.unwrap();
+            nodes[p].children.push(f);
+        }
+        // The load-time order, gaps and starts as `Strip::find` derives them.
+        let mut extent: Vec<Option<[f32; 2]>> = vec![None; nodes.len()];
+        for f in (0..nodes.len()).rev() {
+            let e = nodes[f].children.iter().fold(nodes[f].own, |e, &c| union(e, extent[c].map(|x| through(&nodes[c].local, x))));
+            extent[f] = e;
+        }
+        let spans: Vec<Option<[f32; 2]>> = (0..nodes.len()).map(|c| extent[c].map(|e| through(&nodes[c].local, e))).collect();
+        for n in nodes.iter_mut().filter(|n| n.flow == Flow::Stacker) {
+            sort_stacker(n, &spans);
+        }
+        Strip { nodes, base: Mat4::IDENTITY }
+    }
+
+    #[test]
+    fn stackers_keep_their_load_gaps() {
+        let s = synthetic_strip();
+        let root = &s.nodes[0];
+        // Template 0 is the one at x 0 (authored second).
+        assert_eq!(root.children, [8, 1]);
+        assert!((root.gaps[0] - 0.42).abs() < 1e-5 && root.gaps[1] == 0. && root.start == 0., "{:?} {}", root.gaps, root.start);
+        let build = &s.nodes[9];
+        assert_eq!(build.children, [11, 12, 10], "left cap, middle, right cap");
+        let want = [0., -0.02, 0.];
+        assert!(build.gaps.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-5), "{:?}", build.gaps);
+        assert_eq!((s.template(14), s.template(7), s.template(0)), (Some(0), Some(1), None));
+    }
+
+    #[test]
+    fn pills_reflow_around_their_labels() {
+        let s = synthetic_strip();
+        let labels: Vec<String> = ["AB", "ABCD", "X", ""].map(String::from).into();
+        // A label 0.1 wide per character.
+        let span = |_: &osd::TextLayout, _: &[f32; 6], l: &str| Some([0., 0.1 * l.len() as f32]);
+        let pills = s.place(&labels, &span);
+        assert_eq!(pills.len(), 4);
+        let x = |k: usize, f: usize| pills[k][f].map(|w| w.w_axis.x);
+        let near = |a: Option<f32>, b: f32| a.is_some_and(|a| (a - b).abs() < 1e-4);
+        // Pill 0 (template 0): right cap after the 0.2 label, gap -0.02.
+        assert!(near(x(0, 8), 0.) && near(x(0, 10), 0.68), "{:?} {:?}", x(0, 8), x(0, 10));
+        // The scalee spans the label: scale 0.2 / 0.58 from x 0.5.
+        let center = pills[0][13].unwrap();
+        assert!((center.x_axis.x - 0.2 / 0.58).abs() < 1e-4 && near(Some(center.w_axis.x), 0.5) && near(Some(center.w_axis.y), 1.25));
+        assert!(pills[0][1].is_none(), "template 1's nodes are not in pill 0");
+        // Pill 1 (template 1) starts after pill 0 and the 0.42 gap; pill 2
+        // clones it after the same gap.
+        assert!(near(x(1, 1), 1.6) && near(x(1, 3), 1.6 + 0.88), "{:?} {:?}", x(1, 1), x(1, 3));
+        assert!(near(x(2, 1), 3.4) && near(x(2, 3), 3.4 + 0.58), "{:?} {:?}", x(2, 1), x(2, 3));
+        assert!(pills[2][8].is_none());
+        // An empty label shows no pill.
+        assert!(pills[3].iter().all(Option::is_none));
+        // The stacker keeps y and z.
+        assert!(near(pills[1][3].map(|w| w.w_axis.y), 1.) && near(pills[1][3].map(|w| w.w_axis.z), 4.));
+    }
+
+    #[test]
+    fn post_race_pills_fit_the_strip() {
+        use crate::post_race::{RESULTS_PILLS, TEST_DRIVE_WRECK_PILLS, WRECK_PILLS};
+        assert!(RESULTS_PILLS.len() <= MAX_PILLS && WRECK_PILLS.len() <= MAX_PILLS && TEST_DRIVE_WRECK_PILLS.len() <= MAX_PILLS);
+    }
+
+    /// The pill strips of the packages (`GRID_GAME_ROOT`).
+    #[test]
+    #[ignore]
+    fn pill_strips_lay_out() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let p = prepare(&root).unwrap();
+        for (screen, l) in SCREENS.iter().zip(&p.layouts) {
+            let s = l.strip.as_ref().unwrap_or_else(|| panic!("{screen:?}: no strip"));
+            let root = &s.nodes[0];
+            println!("{screen:?} templates {} gaps {:?} start {}", root.children.len(), root.gaps, root.start);
+            assert_eq!(root.children.len(), 2);
+            assert!((root.gaps[0] - 0.42).abs() < 0.01);
+            let builds: Vec<&FlowNode> = s.nodes.iter().skip(1).filter(|n| n.flow == Flow::Stacker).collect();
+            assert_eq!(builds.len(), 2);
+            for b in builds {
+                assert!(b.gaps.len() == 3 && b.gaps[0].abs() < 0.01 && (b.gaps[1] + 0.02).abs() < 0.01, "{:?}", b.gaps);
+            }
+            let labels = l.items.iter().filter(|i| matches!(i.shape, Shape::Text { field: Field::Pill, .. })).count();
+            assert_eq!(labels, 2, "{screen:?}: a label per template");
+            // The labels' text boxes lie in their node's x-z plane
+            // (`osd_scene::text_mesh` lays them out there).
+            for i in l.items.iter().filter(|i| matches!(i.shape, Shape::Text { field: Field::Pill, .. })) {
+                let b = i.bounds;
+                assert!(b[4] - b[1] < 1e-4 && b[5] - b[2] > 1., "{b:?}");
+            }
+            // The pill (`pill_glow_txtrd_2`) lights orange with glow on
+            // `activate` and goes dark on `deactivate`; its label
+            // (`text_pill_optiontitles`) dark on the lit pill, light on the
+            // others.
+            let events: Vec<_> = l.items.iter().filter(|i| i.strip.is_some()).map(|i| l.materials[i.material].events).filter(|e| e[0].is_some()).collect();
+            let near = |v: f32, w: f32| (v - w).abs() < 0.02;
+            assert!(
+                events.iter().any(|e| e[0].is_some_and(|v| near(v.colour.x, 1.) && near(v.colour.y, 0.79) && v.a.x > 0.1)
+                    && e[1].is_some_and(|v| near(v.colour.x, 0.1) && v.a.x < 0.01)),
+                "{events:?}"
+            );
+            assert!(events.iter().any(|e| e[0].is_some_and(|v| near(v.colour.x, 0.1)) && e[1].is_some_and(|v| near(v.colour.x, 0.83))), "{events:?}");
+            let labels: Vec<String> = crate::post_race::RESULTS_PILLS.iter().map(|(_, id)| id.to_string()).collect();
+            let fonts = &p.fonts;
+            let span = |t: &osd::TextLayout, b: &[f32; 6], label: &str| fonts.get(&t.font).map(|f| osd_scene::text_span(f, label, t, b));
+            let pills = s.place(&labels, &span);
+            let xs: Vec<f32> = pills.iter().filter_map(|p| p.iter().flatten().next().map(|w| w.w_axis.x)).collect();
+            println!("{screen:?} pill x {xs:?}");
+            assert!(xs.len() == 4 && xs.windows(2).all(|w| w[1] > w[0]));
+        }
     }
 }

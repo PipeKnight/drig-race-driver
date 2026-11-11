@@ -875,6 +875,10 @@ pub struct View {
     pub table: Vec<[String; 6]>,
     pub player_row: Option<usize>,
     pub pills: String,
+    /// The pill labels in itemflow order and the lit one, which the
+    /// front-end art draws (results_art.rs); empty without pills.
+    pub buttons: Vec<String>,
+    pub button: usize,
     /// The drift scoreboard's statistics, label and value, in the order of
     /// [`DRIFT_STATS`].
     pub stats: Vec<[String; 2]>,
@@ -983,6 +987,8 @@ impl PostRace {
                     }
                 }
                 view.pills = pill_line(&RESULTS_PILLS, self.cursor);
+                view.buttons = RESULTS_PILLS.iter().map(|(_, id)| l(id)).collect();
+                view.button = self.cursor;
             }
             Stage::Stats => {
                 // `stat type="position"` and `stat type="fastest_lap"` [D].
@@ -1069,6 +1075,8 @@ impl PostRace {
                     ]);
                 }
                 view.pills = pill_line(&RESULTS_PILLS, self.cursor);
+                view.buttons = RESULTS_PILLS.iter().map(|(_, id)| l(id)).collect();
+                view.button = self.cursor;
             }
             Stage::Wreck | Stage::Confirm(_, Return::Wreck) => {
                 view.title = l(match self.variant {
@@ -1084,6 +1092,8 @@ impl PostRace {
                     })
                 );
                 view.pills = pill_line(self.wreck_pills(), self.cursor);
+                view.buttons = self.wreck_pills().iter().map(|(_, id)| l(id)).collect();
+                view.button = self.cursor;
             }
         }
         if let Stage::Confirm(confirm, _) = self.stage {
@@ -1233,6 +1243,8 @@ fn present(
                 node.display = drawn(true);
                 view.body.clone()
             }
+            // The art draws the pills; a confirmation keeps its text.
+            Part::Pills if art_on && !matches!(post.stage, Stage::Confirm(..)) => String::new(),
             Part::Pills => view.pills.clone(),
             Part::Table(cell) => {
                 let (row, column) = (cell / 8, cell % 8);

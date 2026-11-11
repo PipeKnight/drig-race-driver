@@ -336,6 +336,39 @@ fn layout(font: &Font, text: &str, x0: f32, x1: f32, y0: f32, y1: f32) -> osd::M
 /// line aligned in the node's bounds by `h_align` / `v_align` [D enums;
 /// I: against the bounds].
 pub(crate) fn text_mesh(font: &Font, text: &str, t: &osd::TextLayout, bounds: &[f32; 6]) -> osd::Mesh {
+    let (chars, em, pen, _) = line(font, text, t, bounds);
+    // A text box with no y extent but a z extent lies in the node's x-z
+    // plane, up along -z: the front-end's pill labels (`pill_header`) sit
+    // under a node turned 90 degrees about x, with bounds z -1.15..0 [O]. The
+    // glyphs are laid out in x-y over -z and turned -90 degrees about x
+    // (y -> -z, z -> y), so they face the screen like the pill meshes [I].
+    let [_, y0, z0, _, y1, z1] = *bounds;
+    let flat = y1 - y0 <= 1e-4 && z1 - z0 > 1e-4;
+    let (y0, y1) = if flat { (-z1, -z0) } else { (y0, y1) };
+    let baseline = match t.v_align {
+        0 => y1 - font.ascender * em,
+        1 => y0 - font.descender * em,
+        _ => (y0 + y1) / 2. - (font.ascender + font.descender) * em / 2.,
+    };
+    let mut m = glyphs(font, &chars, em, t.tracking, pen, baseline);
+    if flat {
+        for p in m.positions.iter_mut().chain(m.normals.iter_mut()) {
+            *p = [p[0], p[2], -p[1]];
+        }
+    }
+    m
+}
+
+/// The local x span [`text_mesh`] sets `text` over: the pen's start and end
+/// (advances, kerning and tracking).
+pub(crate) fn text_span(font: &Font, text: &str, t: &osd::TextLayout, bounds: &[f32; 6]) -> [f32; 2] {
+    let (_, _, pen, width) = line(font, text, t, bounds);
+    [pen, pen + width]
+}
+
+/// The characters of `text` in the layout's case, the em size, the pen's
+/// start and the line's width.
+fn line(font: &Font, text: &str, t: &osd::TextLayout, bounds: &[f32; 6]) -> (Vec<char>, f32, f32, f32) {
     let text = match t.case {
         1 => text.to_lowercase(),
         2 => text.to_uppercase(),
@@ -353,18 +386,13 @@ pub(crate) fn text_mesh(font: &Font, text: &str, t: &osd::TextLayout, bounds: &[
         .sum::<f32>()
         * em
         + t.tracking * em * chars.len().saturating_sub(1) as f32;
-    let [x0, y0, _, x1, y1, _] = *bounds;
+    let [x0, _, _, x1, _, _] = *bounds;
     let pen = match t.h_align {
         1 => x1 - width,
         2 => (x0 + x1 - width) / 2.,
         _ => x0,
     };
-    let baseline = match t.v_align {
-        0 => y1 - font.ascender * em,
-        1 => y0 - font.descender * em,
-        _ => (y0 + y1) / 2. - (font.ascender + font.descender) * em / 2.,
-    };
-    glyphs(font, &chars, em, t.tracking, pen, baseline)
+    (chars, em, pen, width)
 }
 
 /// The glyphs of `chars` from `pen` along `baseline`, `em` units per em,
@@ -1349,6 +1377,31 @@ mod tests {
         assert!((c.positions[0][0] - (-2.5 + 0.5)).abs() < 1e-4);
         // An empty text is a degenerate triangle.
         assert_eq!(layout(&f, "", 0., 1., 0., 1.).indices, [0, 1, 2]);
+    }
+
+    #[test]
+    fn a_text_box_in_the_x_z_plane_lays_its_glyphs_there() {
+        let f = sample();
+        let t = osd::TextLayout {
+            font: String::new(),
+            height: 10.,
+            depth: 0.,
+            h_align: 0,
+            v_align: 0,
+            wrapping: 0,
+            line_spacing: 1.,
+            tracking: 0.,
+            case: 0,
+        };
+        let flat = text_mesh(&f, "0", &t, &[0., 0., -10., 100., 0., 0.]);
+        let upright = text_mesh(&f, "0", &t, &[0., 0., 0., 100., 10., 0.]);
+        // The same glyph, its y turned to -z (the box's top at z -10) and its
+        // depth to y; x unchanged.
+        for (p, q) in flat.positions.iter().zip(&upright.positions) {
+            assert!((p[0] - q[0]).abs() < 1e-4 && (p[1] - q[2]).abs() < 1e-4 && (p[2] + q[1]).abs() < 1e-4, "{p:?} {q:?}");
+        }
+        assert!(flat.positions.iter().all(|p| (-10. ..=0.).contains(&p[2])));
+        assert!(flat.normals.iter().all(|n| *n == [0., 1., -0.] || *n == [0., 1., 0.]));
     }
 
     /// A window resized mid-race (F737): the display material must change with
