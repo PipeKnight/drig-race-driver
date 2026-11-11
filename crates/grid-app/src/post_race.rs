@@ -264,6 +264,10 @@ pub struct PostRace {
     crash_replay: bool,
     segment: u64,
     repeat: Repeat,
+    /// The stats screen's page ([`PostRace::stat_kinds`]) and the seconds
+    /// it has shown ([`STAT_PAUSE`]).
+    stat_page: usize,
+    stat_time: f32,
     /// Menu widget and popup sounds of the last steps (drained to the
     /// race's HUD sink by `update`).
     pub(crate) sounds: Vec<grid_tools::hud_audio::Cue>,
@@ -283,6 +287,8 @@ impl PostRace {
             crash_replay: false,
             segment: 0,
             repeat: Repeat::default(),
+            stat_page: 0,
+            stat_time: 0.,
             sounds: Vec::new(),
         }
     }
@@ -310,6 +316,29 @@ impl PostRace {
     pub fn on_finish(&mut self) {
         if self.stage == Stage::Hidden {
             self.stage = Stage::Stats;
+            self.stat_page = 0;
+            self.stat_time = 0.;
+        }
+    }
+
+    /// The stats screen's pages: the stat types of `post_race_stats_free_race`
+    /// and `post_race_stats_drift_scores` [D].
+    pub fn stat_kinds(&self) -> &'static [StatKind] {
+        if self.drift { &[StatKind::DriftTotal] } else { &[StatKind::Position, StatKind::FastestLap] }
+    }
+
+    /// The stats screen shows each page for [`STAT_PAUSE`] seconds, then
+    /// the next one; after the last page `navigate` moves on to the
+    /// results (ScreenPostRaceStats 0x5426F0 sends `per_set_pause` after
+    /// each page and acts on its `pausecomplete` trigger [D]).
+    pub fn on_stats_time(&mut self, dt: f32) {
+        if self.stage != Stage::Stats {
+            return;
+        }
+        self.stat_time += dt;
+        while self.stat_time >= STAT_PAUSE && self.stat_page < self.stat_kinds().len() {
+            self.stat_time -= STAT_PAUSE;
+            self.stat_page += 1;
         }
     }
 
@@ -404,7 +433,7 @@ impl PostRace {
         match self.stage {
             Stage::Hidden => None,
             Stage::Stats => {
-                if nav.select {
+                if nav.select || self.stat_page >= self.stat_kinds().len() {
                     self.stage = self.first_results();
                     self.cursor = 0;
                     return Some(Command::Finalize);
@@ -589,6 +618,7 @@ pub fn update(
             replay.request_terminal(post.wreck_tick.map(crate::replay::seconds));
         }
     }
+    post.on_stats_time(dt);
     let mut repeat = post.repeat;
     let mut nav = crate::pause_menu::nav(&actions, &mut repeat, dt);
     post.repeat = repeat;
@@ -882,6 +912,33 @@ pub struct View {
     /// The drift scoreboard's statistics, label and value, in the order of
     /// [`DRIFT_STATS`].
     pub stats: Vec<[String; 2]>,
+    /// The stats screen's page, drawn by the front-end art.
+    pub stat: Option<StatPage>,
+}
+
+/// The seconds each stats page shows: the nested event of `per_set_pause`
+/// in `post_race_stats`'s FEANIMDATA has durationOverride 2 [D].
+pub const STAT_PAUSE: f32 = 2.;
+
+/// A statistic the stats screen pages through (the presenter 0x53D460
+/// dispatches on the stat id: 1 position 0x537270, 6 fastest lap 0x51E0D0,
+/// 9 drift total 0x51E4A0 [D]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatKind {
+    Position,
+    FastestLap,
+    DriftTotal,
+}
+
+/// One page of the stats screen.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StatPage {
+    /// The big first page (`post_race_stats_chunky`), shown when there are
+    /// two stats or more (ScreenPostRaceStats +0x1CA, 0x542560 [D]); the
+    /// others use `post_race_stats_normal`.
+    pub big: bool,
+    /// Title, value and detail.
+    pub lines: [String; 3],
 }
 
 /// The drift scoreboard's statistic glyphs (`component/drift_cursor_half`
@@ -891,6 +948,49 @@ pub struct View {
 pub const DRIFT_STATS: [&str; 7] = ["drift_speed", "drift_time", "drift_score", "avg_speed", "avg_dist", "avg_angle", "total"];
 
 impl PostRace {
+    /// The stats page on show, filled as the original fillers do: the
+    /// title in the first line, the value (0x4707C0, a number as text) in
+    /// the second, the detail in the third [D].
+    fn stat_page(&self, rows: &[Row], labels: &Labels, board: Option<&crate::drift_event::Board>) -> Option<StatPage> {
+        let kinds = self.stat_kinds();
+        let kind = *kinds.get(self.stat_page)?;
+        let l = |id: &'static str| labels.get(id).to_owned();
+        let player = rows.iter().find(|r| r.car == 0);
+        let lines = match kind {
+            StatKind::Position => [
+                l("post_race_stats_position_title"),
+                player.map_or(0, |r| r.position).max(1).to_string(),
+                String::new(),
+            ],
+            StatKind::FastestLap => {
+                let best = player.and_then(|r| r.best);
+                [
+                    l("post_race_stats_fastest_lap_title"),
+                    best.map_or_else(String::new, |(t, _)| crate::race_hud::lap_time(t)),
+                    best.map_or_else(String::new, |(_, lap)| {
+                        l("post_race_stats_fastest_lap_details").replace("[LAPNO]", &lap.to_string())
+                    }),
+                ]
+            }
+            // The detail is the best combo's score: the language texts read
+            // "Best Combo: [AMOUNT] Points", the single form "1 Point" [D];
+            // grouped as on the scoreboard [I].
+            StatKind::DriftTotal => [
+                l("post_race_stats_drift_total_title"),
+                board.map_or(0, |b| b.total).to_string(),
+                board.map_or_else(String::new, |b| {
+                    let amount = b.best_combo.round() as i64;
+                    if amount == 1 {
+                        l("post_race_stats_best_combo_single")
+                    } else {
+                        l("post_race_stats_best_combo_multiple").replace("[AMOUNT]", &crate::drift_event::grouped(amount))
+                    }
+                }),
+            ],
+        };
+        Some(StatPage { big: kinds.len() >= 2 && self.stat_page == 0, lines })
+    }
+
     #[cfg(test)]
     pub fn view(&self, rows: &[Row], labels: &Labels) -> View {
         self.view_with(rows, labels, None)
@@ -934,7 +1034,7 @@ impl PostRace {
             Stage::Stats if self.drift => {
                 let board = board.cloned();
                 view.title = l("post_race_stats_drift_total_title");
-                view.body = board.map_or_else(String::new, |b| {
+                view.body = board.as_ref().map_or_else(String::new, |b| {
                     let drifts = if b.drifts == 1 {
                         l("post_race_stats_drift_amount_single")
                     } else {
@@ -943,6 +1043,7 @@ impl PostRace {
                     };
                     format!("{}\n{drifts}", points(b.total))
                 });
+                view.stat = self.stat_page(rows, labels, board.as_ref());
                 view.pills = format!("Enter/A: {}", l("post_race_stats_buttontext_continue"));
             }
             Stage::Scoreboard | Stage::Confirm(_, Return::Scoreboard) => {
@@ -1009,6 +1110,7 @@ impl PostRace {
                 }
                 view.body = body;
                 view.pills = format!("Enter/A: {}", l("post_race_stats_buttontext_continue"));
+                view.stat = self.stat_page(rows, labels, None);
             }
             Stage::Results | Stage::Confirm(_, Return::Results) => {
                 view.title = l("post_race_results_screen_title");
@@ -1156,7 +1258,8 @@ fn present(
     }
     let results = matches!(post.stage, Stage::Results | Stage::Confirm(_, Return::Results));
     let scoreboard = matches!(post.stage, Stage::Scoreboard | Stage::Confirm(_, Return::Scoreboard));
-    let art_stage = results || scoreboard;
+    let stats = post.stage == Stage::Stats;
+    let art_stage = results || scoreboard || stats;
     if (!post.active() || !art_stage)
         && let Some(art) = art.as_mut().filter(|a| a.board.is_some())
     {
@@ -1191,7 +1294,8 @@ fn present(
     // The results table in the front-end art once it is loaded
     // (results_art.rs); this panel keeps the other stages and the pills.
     // The drift scoreboard in the art once its statistics are known.
-    let wanted = results || (scoreboard && !view.stats.is_empty());
+    // The stats screen in the art too (`screen/post_race_stats`).
+    let wanted = results || (scoreboard && !view.stats.is_empty()) || (stats && view.stat.is_some());
     let art_on = wanted && ready.is_some_and(|r| r.0);
     if !wanted && let Some(art) = art.as_mut().filter(|a| a.board.is_some()) {
         art.board = None;
@@ -1206,7 +1310,13 @@ fn present(
         } else {
             crate::results_art::Fourth::Team
         };
-        let screen = if scoreboard { crate::results_art::Screen::DriftScoreboard } else { crate::results_art::Screen::Results };
+        let screen = if scoreboard {
+            crate::results_art::Screen::DriftScoreboard
+        } else if stats {
+            crate::results_art::Screen::Stats
+        } else {
+            crate::results_art::Screen::Results
+        };
         let board = Some(crate::results_art::Board { view: view.clone(), drift: post.drift, fourth, screen });
         if art.board != board {
             art.board = board;
@@ -1243,8 +1353,9 @@ fn present(
                 node.display = drawn(true);
                 view.body.clone()
             }
-            // The art draws the pills; a confirmation keeps its text.
-            Part::Pills if art_on && !matches!(post.stage, Stage::Confirm(..)) => String::new(),
+            // The art draws the pills; a confirmation keeps its text, and
+            // the stats screen, which has no pills, its Continue hint.
+            Part::Pills if art_on && !matches!(post.stage, Stage::Confirm(..) | Stage::Stats) => String::new(),
             Part::Pills => view.pills.clone(),
             Part::Table(cell) => {
                 let (row, column) = (cell / 8, cell % 8);
@@ -1291,6 +1402,33 @@ mod tests {
         assert_eq!(post.stage, Stage::Results);
         // Continue leaves the event.
         assert_eq!(post.step(press(|n| n.select = true)), Some(Command::Exit));
+    }
+
+    /// The stats screen pages by itself: a big position page, then the
+    /// fastest lap, [`STAT_PAUSE`] seconds each, then the results.
+    #[test]
+    fn stats_pages_time_out_into_the_results() {
+        let mut post = PostRace::new(Variant::FreeRace);
+        post.on_finish();
+        let page = |post: &PostRace| post.view(&[], &Labels::default()).stat;
+        let first = page(&post).unwrap();
+        assert!(first.big);
+        assert_eq!(first.lines, ["post_race_stats_position_title".to_owned(), "1".into(), String::new()]);
+        post.on_stats_time(STAT_PAUSE - 0.1);
+        assert_eq!(post.step(Nav::default()), None);
+        post.on_stats_time(0.2);
+        let second = page(&post).unwrap();
+        assert!(!second.big);
+        assert_eq!(second.lines[0], "post_race_stats_fastest_lap_title");
+        assert_eq!(post.step(Nav::default()), None);
+        assert_eq!(post.stage, Stage::Stats);
+        post.on_stats_time(STAT_PAUSE);
+        assert_eq!(post.step(Nav::default()), Some(Command::Finalize));
+        assert_eq!(post.stage, Stage::Results);
+        // The timer runs only on the stats screen.
+        post.on_stats_time(10.);
+        assert_eq!(post.stage, Stage::Results);
+        assert_eq!(page(&post), None);
     }
 
     #[test]
@@ -1404,6 +1542,10 @@ mod tests {
             view.body,
             "post_race_stats_drift_score_multiple\npost_race_stats_drift_amount_multiple"
         );
+        // One stat: the normal page only, with the total and the combos.
+        let stat = view.stat.unwrap();
+        assert!(!stat.big);
+        assert_eq!(stat.lines, ["post_race_stats_drift_total_title".to_owned(), "12345".into(), "post_race_stats_best_combo_multiple".into()]);
     }
 
     #[test]

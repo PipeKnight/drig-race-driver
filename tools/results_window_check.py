@@ -6,22 +6,26 @@ Usage: py -I tools/results_window_check.py EXE OUT_DIR [--data-dir local] [--art
 
 Starts EXE silently (GRID_AUDIO=off, sound volumes 0) in a 1280x800 window with the autopilot
 (GRID_AUTOPILOT=1, `--drive-ticks`) on a short race written to OUT_DIR/race.ini. When the car
-finishes, GRID_RESULTS_CONTINUE leaves the stats screen; on the results screen the diagnostics
-`results_shot` (results_art.rs) saves `window-shot-results.png` SHOT_AFTER seconds after the board
-first shows with the art loaded, and prints `results_shot path=... art=on|off rows=N`. The script
-then stops the game and copies the shot to OUT_DIR.
+finishes, the stats screen shows first and pages by itself (2 s each: a free race the big position
+page, then the fastest lap; a drift event the drift total), then the next screen. The diagnostics
+`results_shot` (results_art.rs) saves `window-shot-results.png` SHOT_AFTER seconds after the first
+board shows with the art loaded (the stats screen: SHOT_AFTER 1 shoots the big page, 3 the
+second), and prints `results_shot path=... art=on|off rows=N`; GRID_RESULTS_CONTINUE presses
+Continue at SHOT_AFTER + 6 s. The script then stops the game and copies the shot to OUT_DIR.
 
 Verdict: PASS when the shot exists and, with the art on, a `results_art board rows=N drift=D
 drawn=K` line (printed when the art sets up a board) has K > 0 items drawn. `--art-off` runs the
 experimental `results_art_off` diagnostics (the plain panel) for the "before" side of a matched
 pair; it needs only the shot. `--discipline` (settings `[drive] discipline`, e.g. drift_battle on a
-route such as tracks/europe/nurburgring/route_1) shows the drift scoreboard first; the board line
-then ends in `screen=DriftScoreboard`. With the art on, each screen's slide-in must also finish:
-a `results_art enter screen=X seconds=S done` line with S > 0 (the `enter` event of its own
-animation, 0.4 s); a small SHOT_AFTER such as 0.25 shoots the screen mid-slide. `--follow S` keeps
-the game running S seconds after the shot, so GRID_RESULTS_CONTINUE (SHOT_AFTER + 6 s) leaves the
-screen, and requires a `results_art exit screen=X ... done` line and a second enter: with a drift
-discipline the scoreboard slides out and the results slide in. The log and
+route such as tracks/europe/nurburgring/route_1) shows the drift scoreboard after the stats page;
+its board line ends in `screen=DriftScoreboard`, the stats screen's in `screen=Stats`. With the art on, each screen must log
+`results_art enter screen=X seconds=S done`; the results and drift screens slide in (S > 0, the
+`enter` event of their own animation, 0.4 s), the stats screen has no `enter` or `exit` event
+(S = 0). A small SHOT_AFTER such as 0.25 shoots a sliding screen mid-slide. `--follow S` keeps the
+game running S seconds after the shot, so the stats pages and GRID_RESULTS_CONTINUE (SHOT_AFTER +
+6 s) leave their screens, and requires a second enter that slides, and an exit line for every
+left screen other than the stats screen: with a drift discipline the scoreboard slides out and
+the results slide in. The log and
 `result.txt` stay in OUT_DIR. Windows only.
 """
 import argparse
@@ -109,10 +113,16 @@ def main():
         problems.append('no window-shot-results.png')
     if not args.art_off and not any(b[2] > 0 for b in boards):
         problems.append('no results_art board line with drawn > 0')
-    if not args.art_off and not any(t > 0 for _, t in enters):
-        problems.append('no results_art enter line with seconds > 0 (the slide-in did not run)')
-    if args.follow and not args.art_off and not (exits and len(enters) > 1):
-        problems.append('no results_art exit followed by a second enter (the screen change did not slide)')
+    # The stats screen has no `enter`/`exit` event; the others slide.
+    sliding = [t for sc, t in enters if sc != 'Stats']
+    if not args.art_off and not enters:
+        problems.append('no results_art enter line')
+    if not args.art_off and any(t <= 0 for t in sliding):
+        problems.append('a results_art enter line with seconds 0 on a sliding screen (the slide-in did not run)')
+    left = [sc for sc, _ in enters[:-1] if sc != 'Stats']
+    if args.follow and not args.art_off and not (sliding and len(enters) > 1
+                                                 and all(any(e == sc for e, _ in exits) for sc in left)):
+        problems.append('no second enter that slides, or a left screen without its exit (the screen change did not slide)')
     if args.art_off and boards:
         problems.append('art drawn although results_art_off')
     verdict = 'PASS' if not problems else 'FAIL: ' + '; '.join(problems)

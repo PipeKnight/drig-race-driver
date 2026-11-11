@@ -948,8 +948,54 @@ no y extent but a z extent lays its glyphs in that plane, line advance along −
 (`osd_scene::text_mesh`) [I], so the labels face the camera like the meshes. Tests: `stackers_keep_their_load_gaps`,
 `pills_reflow_around_their_labels`, `post_race_pills_fit_the_strip`, game data `pill_strips_lay_out`.
 
-Not ported: `fepause_final` behind the screen (the front-end session owns the blur), the stats
-screen.
+Stats screen (F826) [D unless marked]. `ScreenPostRaceStats`: factory 0xC71E70, vtable
+0xCD3078; load 0x5552B0, enter 0x542560, exit 0x51D820, message handler 0x5426F0, trigger handler
+0x51D940 (vtable slot 34), camera state 0x537170.
+- Enter 0x542560 sends `update_stats_lighting`, sets +0x1CA = 1 (the big first page) and calls the
+  presenter. With a single stat (the stat vector holds one stat and a null) +0x1CA = 0. When +0x1C9
+  is set the cursor starts on the last stat with no big page [I: what sets +0x1C9 was not traced].
+- Presenter 0x53D460 clears `chunky.6.6`/`5.5`/`4.4` and `norm_01.1.1`/`2.2`/`3.3`, dispatches on
+  the stat id at the cursor (1 position 0x537270, 2 0x51D9F0, 3 0x51DB70, 4 0x51DD30, 5 0x51DEF0,
+  6 fastest lap 0x51E0D0, 7 0x51E2C0, 8 0x51E660, 9 drift total 0x51E4A0, 10 0x51E7E0), then
+  advances the cursor and sets +0x230 (send the pause) and clears +0x1A8 (pause done).
+- Each filler writes title, value and detail to `chunky.6.6`, `.5.5`, `.4.4` on the big page and to
+  `norm_01.1.1`, `.2.2`, `.3.3` otherwise. Position: `post_race_stats_position_title`, the position
+  as a number (0x4707C0), an empty detail; the winner and podium titles of the language file are
+  not referenced by this code. Fastest lap: `post_race_stats_fastest_lap_title`, the lap time,
+  `post_race_stats_fastest_lap_details` with [LAPNO] (or a ghost-car text). Drift total:
+  `post_race_stats_drift_total_title`, the total, `post_race_stats_best_combo_single`/`_multiple`
+  with [AMOUNT]. The language texts read "Best Combo: [AMOUNT] Points" and "Best Combo: 1 Point",
+  so [AMOUNT] is the best combo's score (0x4D17D0 [I: not decompiled]).
+- Handler 0x5426F0: while +0x230 is set it sends `per_set_pause`. That event of the screen's
+  FEANIMDATA is a nested FEEVENT with durationOverride 2 s and no steps, then the trigger
+  `pausecomplete`, which 0x51D940 turns into +0x1A8 = 1. On the cue after the big page it clears
+  +0x1CA and presents the next stat (after a replay camera switch when 0x9EE380(0) holds [I]); on a
+  later cue it leaves (Transition) unless `pause_on_final` (+0x1C8). Select (0x25) leaves at once.
+- So a free race shows the big position page 2 s, the normal fastest-lap page 2 s, then the
+  results; a drift event shows the normal drift-total page 2 s. `norm_02` is never written.
+The port: `post_race::PostRace::on_stats_time` pages every `STAT_PAUSE` (2 s) and the stage leaves
+after the last page or on select; `View::stat` holds the page (`StatPage`: big, three lines); the
+art's third screen (`results_art::Screen::Stats`, `screen/post_race_stats`, `norm_02` hidden)
+draws `Field::Line` k on the glyphs of its page (`Gate::page`). The panel keeps its Continue hint
+over the art (the stats screen has no pills).
+- Camera: `pause_root`'s `Anim!96` event `post_race_stats_cam` is [setcamera, Goto 1.333,
+  complete]; `Def::camera_event` names it and the pose is camera1 at that frame (the screen at
+  x -33, z -55 from the camera, left of the view's centre). The node `post_race_stats_cam` of
+  `in_game_cameras_root` is a world-space track camera (x -44224 to -45205 in `Anim!176`), not the
+  art's camera.
+- The stat glyphs' nulls are saved parked at z -2040 (`chunky`) and -2015 (`normal`); `Anim!109`
+  and `Anim!108` slide them in three keys (parked 0 s, on 3 s at z -40/-15, off upwards 4 s). The
+  art's slide lookup (`slide`, the middle key when the first is the saved translation [I]) now
+  tries every translation channel of a node: the first one found was the two-key `explode` of
+  `Anim!79`, which left the glyphs parked out of view. Both slides' FEANIMDATA (femad1221,
+  femad1204) have defaultFrame 3 (the "on" key) and no events of their own, so the screen has no
+  `enter`/`exit` slide in the port and appears at once; who plays the 0 → 3 → 4 s keys per page
+  was not traced [I], and the port does not play them.
+Tests: `stats_pages_time_out_into_the_results`, `stats_lines_fill_their_page`, game data
+`stats_screen_lays_out`. Not ported: `update_stats_lighting`, the replay cameras behind the screen
+(`replay_roof1`, `stats_funky_camera`), the ghost-car details, the pages of the other stat ids.
+
+Not ported: `fepause_final` behind the screen (the front-end session owns the blur).
 
 Row state colour [I]. The text materials carry DiffuseColour 0.1 (`fe_shadersetup.xml` gives the
 front-end instances a DiffuseColour/Alpha and a GlowAmount stream), which reads dark on the grey

@@ -505,6 +505,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0046DBF0		func	not ported	docs/AUDIO_RESEARCH.md:1715				4 or 0xB (0x46DBF0, an XOR-protected word).
 0x0046E8D0	track_order_find	func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:787		[O]		`track_order_add` (0x91BCB0) adds an entry; `track_order_find` (0x46E8D0) finds an entry's node.
 0x0046EC20		func	not ported	docs/SPEECH_CAREER_PARAMETERS.md:197		[O]		`game+0x22F0` is the race history (`RACEHISTORY`, CAREER_RESEARCH §9.2) [I: 0x46EC20 on it says
+0x004707C0	stat_page	func	crates/grid-app/src/post_race.rs:952 grid-app::post_race::stat_page	docs/RACE_HUD.md:963				title in the first line, the value (0x4707C0, a number as text) in
 0x00470880	audio_name_format	func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:846	F623	[O]		`audio_name_format` (0x470880) writes it as `%c_%02d` (`M_01`, `F_55`, `N_42`; with a prefix
 0x004709D0		func	not ported	docs/AUDIO_RESEARCH.md:714		[O]		the state class with vtable CD77E0 reads `mode` (name lookup 4709D0 → 411AE0) and
 0x00470A60	play_ui_sample	func	not ported	docs/FLASHBACK.md:145		[D]		policy 0x607BC0 at 0x608447) and plays the sample (0x470A60). `slowMo`/`rampSlowMo` set the
@@ -513,11 +514,11 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004710B0	glyph_stack_size	func	not ported	docs/RACE_HUD.md:924	F825	[D]		0x4710B0 = max − min); start = the first child's pos; each child keeps the gap
 0x00474100	itemflow_play_discrete	func	crates/grid-tools/src/hud_audio.rs:235 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2303	F772	[V]		not a function entry in the master analysis; move (0x4910DF), an itemflow value step (0x474100) or a step at its
 0x00474130	itemflow_play_dead_end	func	crates/grid-tools/src/hud_audio.rs:236 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2304	F772	[V]		not a function entry in the master analysis; end (0x474130), activate (0x491151) and the screen's back (0x479930).
-0x00475F70	osd_state_message_new	func	not ported	docs/RACE_HUD.md:960	F810	[I]		FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
+0x00475F70	osd_state_message_new	func	not ported	docs/RACE_HUD.md:1003	F810	[I]		FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
 0x004766F0	noise3_reset	func	not ported	docs/FRONT_END_FLOW.md		[D]		noise generator reset: calls each octave +8
-0x00476720	noise3_evaluate	func	crates/grid-app/src/camera_noise.rs:114 grid-app::camera_noise::Generator	docs/FRONT_END_FLOW.md:176	F812	[D]	Generator	0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
+0x00476720	noise3_evaluate	func	crates/grid-app/src/camera_noise.rs:114 grid-app::camera_noise::Generator	docs/FRONT_END_FLOW.md:182	F812	[D]	Generator	0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
 0x00477940		func	not ported	docs/GARAGE_WORLD.md:25		[V]		[V] 0x4CC8E0 fills the `dynamic_screen_list` with an item for each `targetzone_01..99` found that has `magnets`. The garage named items are matched through 0...
-0x00477B80		func	not ported	docs/FRONT_END_FLOW.md:305		[V]		up `loading_stats` through FUN_00477B80 and reads exactly these keys (`definedanimations` to
+0x00477B80		func	not ported	docs/FRONT_END_FLOW.md:311		[V]		up `loading_stats` through FUN_00477B80 and reads exactly these keys (`definedanimations` to
 0x00478990		func	crates/grid-formats/src/osd.rs:199 grid-formats::osd	docs/RACE_HUD.md:890		[D]		lookup by nickname (0x478990) [D]. Empty for other animations.
 0x00479930	screen_back_sound	func	crates/grid-app/src/career_screen.rs:3464 grid-app::career_screen::sounds ; crates/grid-tools/src/hud_audio.rs:236 grid-tools::hud_audio ; crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2308	F772	[V]		screen back 0x479930, `ScreenOverlay` 0x49CFA0 / 0x4936A0), played now.
 0x004799E0	screen_enter_whoosh	func	crates/grid-tools/src/hud_audio.rs:245 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2306	F772	[V]		not a function entry in the master analysis; Base screen enter (0x4799E0) and leave (0x479A10).
@@ -529,39 +530,39 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0047A5B0	FeTextStyle_ParseVAlign	func	crates/grid-formats/src/osd.rs:77 grid-formats::osd::TextLayout	docs/RACE_HUD.md:821				enums as the original's style parsers number them [D 0x47A4F0, 0x47A5B0,
 0x0047A660	FeTextStyle_ParseWrapping	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:821				0x47A660, 0x47A800].
 0x0047A800	FeTextStyle_ParseCase	func	crates/grid-formats/src/osd.rs:78 grid-formats::osd::TextLayout	docs/RACE_HUD.md:821				0x47A660, 0x47A800].
-0x0047B250	camera_spring_ctor	func	crates/grid-app/src/camera_spring.rs:47 grid-app::camera_spring::DEFAULT	docs/FRONT_END_FLOW.md:206	F820 F812	[D]	DEFAULT	The constructor's defaults (0x47B250, 0x47E770) [D].
-0x0047B570	camera_spring_read_tweaks	func	not ported	docs/FRONT_END_FLOW.md:206	F820	[D]		holds a four-lane spring object (constructor 0x47B250, reader 0x47B570) [D]:
-0x0047B7E0	camera_spring_set_input	func	crates/grid-app/src/camera_spring.rs:14 grid-app::camera_spring	docs/FRONT_END_FLOW.md:216	F820	[D]		while its magnitude is above `spring_threshold` (0x47B7E0).
-0x0047B970	camera_spring_step	func	crates/grid-app/src/camera_spring.rs:15 grid-app::camera_spring	docs/FRONT_END_FLOW.md:218	F820	[I]		Spring (0x47B970), in sub-steps of at most 0.1 s, semi-implicit Euler
-0x0047C2E0	camera_frame_from_target	func	not ported	docs/FRONT_END_FLOW.md:189		[D]		first about the camera's side axis (row 0 of the frame from 0x47C2E0, side = up × (eye −
-0x0047C7F0	camera_orbit_by_angles	func	crates/grid-app/src/camera_noise.rs:166 grid-app::camera_noise::orbit ; crates/grid-app/src/camera_spring.rs:18 grid-app::camera_spring	docs/FRONT_END_FLOW.md:188	F820 F812	[D]	orbit	(0x47C7F0): the first about the camera's side axis (pitch), the second
-0x0047D100	camera_noise_apply_alt	func	not ported	docs/FRONT_END_FLOW.md:191		[D]		(0x47D100, flag byte +0x190) is off by default. Order and signs [E, F820: 0x47C7F0 run in
-0x0047E770	camera_spring_component_ctor	func	crates/grid-app/src/camera_spring.rs:47 grid-app::camera_spring::DEFAULT	docs/FRONT_END_FLOW.md:205	F820	[D]		The constructor's defaults (0x47B250, 0x47E770) [D].
-0x0047E890	camera_spring_component_update	func	crates/grid-app/src/camera_spring.rs:124 grid-app::camera_spring::angles	docs/FRONT_END_FLOW.md:220	F820	[I]	angles	The component's update (0x47E890) turns the camera with 0x47C7F0 by
-0x0047EAE0	camera_spring_on_stick	func	crates/grid-app/src/camera_spring.rs:106 grid-app::camera_spring::input	docs/FRONT_END_FLOW.md:215	F820	[D]	input	clamps each to ±`spring_limit` and scales it by −0.5 (0x47EAE0). The
-0x0047EB80	camera_spring_component_message	func	not ported	docs/FRONT_END_FLOW.md:215	F820	[D]		not a function entry in the master analysis; The component's handler (0x47EB80 → 0x47EAE0) clamps each to ±limit and scales it by −0.5;
-0x0047EBA0	camera_noise_read_tweaks	func	not ported	docs/FRONT_END_FLOW.md:174	F812	[D]		0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
-0x0047ECB0	camera_noise_update	func	crates/grid-app/src/camera_noise.rs:8 grid-app::camera_noise	docs/FRONT_END_FLOW.md:175	F812	[D]		0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
-0x0047F660	fe_view_tweak_send	func	crates/grid-app/src/input.rs:710 grid-app::input::fe_view_tweak ; crates/grid-app/src/camera_spring.rs:9 grid-app::camera_spring	docs/FRONT_END_FLOW.md:210	F820	[D]	fe_view_tweak	Input: 0x47F660 reads the actions `Fe View Tweak Right − Left` (0x2C −
+0x0047B250	camera_spring_ctor	func	crates/grid-app/src/camera_spring.rs:47 grid-app::camera_spring::DEFAULT	docs/FRONT_END_FLOW.md:212	F820 F812	[D]	DEFAULT	The constructor's defaults (0x47B250, 0x47E770) [D].
+0x0047B570	camera_spring_read_tweaks	func	not ported	docs/FRONT_END_FLOW.md:212	F820	[D]		holds a four-lane spring object (constructor 0x47B250, reader 0x47B570) [D]:
+0x0047B7E0	camera_spring_set_input	func	crates/grid-app/src/camera_spring.rs:14 grid-app::camera_spring	docs/FRONT_END_FLOW.md:222	F820	[D]		while its magnitude is above `spring_threshold` (0x47B7E0).
+0x0047B970	camera_spring_step	func	crates/grid-app/src/camera_spring.rs:15 grid-app::camera_spring	docs/FRONT_END_FLOW.md:224	F820	[I]		Spring (0x47B970), in sub-steps of at most 0.1 s, semi-implicit Euler
+0x0047C2E0	camera_frame_from_target	func	not ported	docs/FRONT_END_FLOW.md:195		[D]		first about the camera's side axis (row 0 of the frame from 0x47C2E0, side = up × (eye −
+0x0047C7F0	camera_orbit_by_angles	func	crates/grid-app/src/camera_noise.rs:166 grid-app::camera_noise::orbit ; crates/grid-app/src/camera_spring.rs:18 grid-app::camera_spring	docs/FRONT_END_FLOW.md:194	F820 F812	[D]	orbit	(0x47C7F0): the first about the camera's side axis (pitch), the second
+0x0047D100	camera_noise_apply_alt	func	not ported	docs/FRONT_END_FLOW.md:197		[D]		(0x47D100, flag byte +0x190) is off by default. Order and signs [E, F820: 0x47C7F0 run in
+0x0047E770	camera_spring_component_ctor	func	crates/grid-app/src/camera_spring.rs:47 grid-app::camera_spring::DEFAULT	docs/FRONT_END_FLOW.md:211	F820	[D]		The constructor's defaults (0x47B250, 0x47E770) [D].
+0x0047E890	camera_spring_component_update	func	crates/grid-app/src/camera_spring.rs:124 grid-app::camera_spring::angles	docs/FRONT_END_FLOW.md:226	F820	[I]	angles	The component's update (0x47E890) turns the camera with 0x47C7F0 by
+0x0047EAE0	camera_spring_on_stick	func	crates/grid-app/src/camera_spring.rs:106 grid-app::camera_spring::input	docs/FRONT_END_FLOW.md:221	F820	[D]	input	clamps each to ±`spring_limit` and scales it by −0.5 (0x47EAE0). The
+0x0047EB80	camera_spring_component_message	func	not ported	docs/FRONT_END_FLOW.md:221	F820	[D]		not a function entry in the master analysis; The component's handler (0x47EB80 → 0x47EAE0) clamps each to ±limit and scales it by −0.5;
+0x0047EBA0	camera_noise_read_tweaks	func	not ported	docs/FRONT_END_FLOW.md:180	F812	[D]		0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
+0x0047ECB0	camera_noise_update	func	crates/grid-app/src/camera_noise.rs:8 grid-app::camera_noise	docs/FRONT_END_FLOW.md:181	F812	[D]		0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
+0x0047F660	fe_view_tweak_send	func	crates/grid-app/src/input.rs:710 grid-app::input::fe_view_tweak ; crates/grid-app/src/camera_spring.rs:9 grid-app::camera_spring	docs/FRONT_END_FLOW.md:216	F820	[D]	fe_view_tweak	Input: 0x47F660 reads the actions `Fe View Tweak Right − Left` (0x2C −
 0x00480000		label	not ported	docs/SPEECH_CAREER_PARAMETERS.md:58		[O]		inside 0x0047FFC0; of record +0x40 was found (scan of 0x401000–0x480000 for `+0x14C]`/`+0x434]`, and of 0x438C10
 0x004822B0	glyph_node_span	func	not ported	docs/RACE_HUD.md:934	F825	[O]		(0x4822B0); scale = |B| / |S|, and the scalee's local is T(B.min − S.min·scale, saved y, z) · diag(scale, 1, 1).
 0x00482430	GlyphScaler_read_margins	func	not ported	docs/RACE_HUD.md:932	F825	[O]		Scaler update 0x48C090 (load 0x4A7CA0, margins 0x482430, none authored in `frontend/` [O]):
 0x004845D0	ColourMessage::ctor	func	not ported	docs/LIVERY_CAROUSEL.md:28	F816	[V]		[V] Colour: 0x52B760 → 0x514950 → 0x5F1D50 take a `livery_colour` row's red, green and blue bytes / 255 and send them as a colour message (vtable 0xCBA004, t...
-0x00484640	noise_octave_ctor	func	crates/grid-app/src/camera_noise.rs:76 grid-app::camera_noise::lattice	docs/FRONT_END_FLOW.md:178	F812	[D]	Octave Rand lattice	of index `n`, in (−1, 1] [D 0x484640].
+0x00484640	noise_octave_ctor	func	crates/grid-app/src/camera_noise.rs:76 grid-app::camera_noise::lattice	docs/FRONT_END_FLOW.md:184	F812	[D]	Octave Rand lattice	of index `n`, in (−1, 1] [D 0x484640].
 0x00484714		label	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:35				inside 0x00484640; VRAM-resolution XML only, PID 29472: still `0xc0000005`, but RVA changes to `0x484714`. This change affects execution and does not fix startup. Record: `vram...
-0x00484780	noise_octave_eval	func	crates/grid-app/src/camera_noise.rs:84 grid-app::camera_noise::Octave	docs/FRONT_END_FLOW.md:178		[D]		not a function entry in the master analysis; 0x484780].
+0x00484780	noise_octave_eval	func	crates/grid-app/src/camera_noise.rs:84 grid-app::camera_noise::Octave	docs/FRONT_END_FLOW.md:184		[D]		not a function entry in the master analysis; 0x484780].
 0x004855F0	length	func	crates/grid-formats/src/osd.rs:232 grid-formats::osd::length	docs/RACE_HUD.md:891		[D]		The frames its PLAYTO steps cover from `from` (0x4855F0) [D].
 0x00485790	osd_at	func	crates/grid-formats/src/osd.rs:271 grid-formats::osd::at	docs/RACE_HUD.md:890		[D]	at	(advance 0x485790: the eased budget runs the steps in order) [D/I].
 0x00486E20	StateSFXTrigger_enter	func	not ported	docs/AUDIO_RESEARCH.md:2386	F788	[O]		not a function entry in the master analysis; states.bin has one `StateSFXTrigger` (vtable 0xCBACF8, enter 0x486E20 plays its `sfx`
 0x00487680		func	not ported	docs/GARAGE_WORLD.md:32		[V]		Both reflection slots +0x1DC and +0x1E0 are set by 0x487680.
 0x004879B0	glyph_node_move_to	func	not ported	docs/RACE_HUD.md:928	F825	[D]		child is moved (0x4879B0) so its pos is the cursor, then cursor += size + gap.
-0x00487D00	camera_noise_ctor	func	crates/grid-app/src/camera_noise.rs:28 grid-app::camera_noise::DEFAULT	docs/FRONT_END_FLOW.md:174	F812	[D]	DEFAULT	0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
-0x0048C090	GlyphScaler_update	func	crates/grid-app/src/results_art.rs:975 grid-app::results_art	docs/RACE_HUD.md:932	F825	[O]		child along x over its other children (0x48C090) [D].
-0x0048FBA0	camera_tweaks_read_components	func	not ported	docs/FRONT_END_FLOW.md:198	F812	[I]		0x48FBA0); that the loading world uses the `loading` block is [I] by the name.
+0x00487D00	camera_noise_ctor	func	crates/grid-app/src/camera_noise.rs:28 grid-app::camera_noise::DEFAULT	docs/FRONT_END_FLOW.md:180	F812	[D]	DEFAULT	0x487D00, update 0x47ECB0) holds two three-octave generators (0x476720).
+0x0048C090	GlyphScaler_update	func	crates/grid-app/src/results_art.rs:1042 grid-app::results_art	docs/RACE_HUD.md:932	F825	[O]		child along x over its other children (0x48C090) [D].
+0x0048FBA0	camera_tweaks_read_components	func	not ported	docs/FRONT_END_FLOW.md:204	F812	[I]		0x48FBA0); that the loading world uses the `loading` block is [I] by the name.
 0x004901A0	send_message_along_node_path	func	not ported	docs/LIVERY_CAROUSEL.md:28	F816	[V]		[V] Colour: 0x52B760 → 0x514950 → 0x5F1D50 take a `livery_colour` row's red, green and blue bytes / 255 and send them as a colour message (vtable 0xCBA004, t...
-0x00490370	glyph_particle_system_message	func	not ported	docs/FRONT_END_FLOW.md:331	F821	[D]		not a function entry in the master analysis; 0xCBC630 it overrides only the clone (0x4C1C60), the message handler (0x490370: the base
-0x004903D0	glyph_particle_system_mark_dirty	func	not ported	docs/FRONT_END_FLOW.md:333	F821	[D]		not a function entry in the master analysis; and the dirty marking (0x4903D0) [D]; it has no emission or effect lookup of its own. No data
-0x00490410	camera_tweaks_read_components_member	func	not ported	docs/FRONT_END_FLOW.md:197	F812	[I]		The wiring to the loading camera goes through component tables (0x490410 from 0x4CD3B0,
+0x00490370	glyph_particle_system_message	func	not ported	docs/FRONT_END_FLOW.md:337	F821	[D]		not a function entry in the master analysis; 0xCBC630 it overrides only the clone (0x4C1C60), the message handler (0x490370: the base
+0x004903D0	glyph_particle_system_mark_dirty	func	not ported	docs/FRONT_END_FLOW.md:339	F821	[D]		not a function entry in the master analysis; and the dirty marking (0x4903D0) [D]; it has no emission or effect lookup of its own. No data
+0x00490410	camera_tweaks_read_components_member	func	not ported	docs/FRONT_END_FLOW.md:203	F812	[I]		The wiring to the loading camera goes through component tables (0x490410 from 0x4CD3B0,
 0x00490F40	list_widget_input	func	crates/grid-app/src/career_screen.rs:3463 grid-app::career_screen::sounds ; crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2301	F772	[V]	sounds	not a function entry in the master analysis; `overlay_cue`; the list widget 0x490F40, the itemflow 0x49DA70, the
 0x004910DF		func	crates/grid-tools/src/hud_audio.rs:235 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2301				not a function entry in the master analysis; move (0x4910DF), an itemflow value step (0x474100) or a step at its
 0x00491151		func	crates/grid-tools/src/hud_audio.rs:236 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2302				not a function entry in the master analysis; end (0x474130), activate (0x491151) and the screen's back (0x479930).
@@ -571,32 +572,32 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00496770	Borders	func	crates/grid-app/src/transition.rs:250 grid-app::transition::Borders	docs/SCREEN_FLOW.md:42	F779	[D]		black on the way out (`border_off`, FUN_00496770):
 0x00497E70	TextureNameSlot_FindOrCreate	func	not ported	docs/RACE_HUD.md:816		[I]		slots; 0x497E70 finds or creates a texture-name slot). The port uses `env_soft`/`env_sharp` of
 0x00498DC0	GlyphStacker_clear_gaps	func	not ported	docs/RACE_HUD.md:927	F825	[D]		not a function entry in the master analysis; Re-flow 0x498DF0 (vtable slot 14; slot 16 0x498DC0 clears the gaps): cursor = start; each visible
-0x00498DF0	GlyphStacker_reflow	func	crates/grid-app/src/results_art.rs:972 grid-app::results_art	docs/RACE_HUD.md:927	F825	[D]		not a function entry in the master analysis; load (load 0x4AA580, re-flow 0x498DF0) [D].
+0x00498DF0	GlyphStacker_reflow	func	crates/grid-app/src/results_art.rs:1039 grid-app::results_art	docs/RACE_HUD.md:927	F825	[D]		not a function entry in the master analysis; load (load 0x4AA580, re-flow 0x498DF0) [D].
 0x0049CFA0	overlay_show_sound	func	crates/grid-app/src/hud_sound.rs:70 grid-app::hud_sound::overlay_cue ; crates/grid-app/src/career_screen.rs:3464 grid-app::career_screen::sounds ; crates/grid-tools/src/hud_audio.rs:248 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2309	F788 F772	[V]	overlay_cue	screen back 0x479930, `ScreenOverlay` 0x49CFA0 / 0x4936A0), played now.
-0x0049D0F0		func	not ported	docs/FRONT_END_FLOW.md:274		[D]		`[VALUE]` is replaced by FUN_0049D0F0. The valid slots are shuffled with MSVC
+0x0049D0F0		func	not ported	docs/FRONT_END_FLOW.md:280		[D]		`[VALUE]` is replaced by FUN_0049D0F0. The valid slots are shuffled with MSVC
 0x0049D760		func	not ported	docs/TOOLCHAIN.md:527				| `0x0049d760` | Pseudocode calls that helper and traverses/removes a keyed object; generated types include artifacts and require review |
 0x0049DA70	itemflow_step	func	crates/grid-app/src/career_screen.rs:3463 grid-app::career_screen::sounds ; crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2303	F772	[V]		`overlay_cue`; the list widget 0x490F40, the itemflow 0x49DA70, the
 0x0049FD2D		label	not ported	docs/PHASE0.md:76 ; docs/TOOLCHAIN.md:568				inside 0x0049FC60; 2. **Pre-initialized debugger, PID 34196:** attached earlier at `EIP=0x76fa8ae9`, then set a hardware execution breakpoint at `0x0049fd2d`. The target did no...
 0x004A0CC0	slider_step	func	crates/grid-app/src/hud_sound.rs:50 grid-app::hud_sound::menu_cue	docs/AUDIO_RESEARCH.md:2305	F772	[V]		0x490F40, itemflow 0x49DA70, slider 0x4A0CC0, screen back 0x479930):
-0x004A1DC0	glyph_construct	func	not ported	docs/FRONT_END_FLOW.md:330	F821	[D]		0x4A1DC0 and sets vtable 0xCBCB28, followed by its class name]. Against the base glyph vtable
+0x004A1DC0	glyph_construct	func	not ported	docs/FRONT_END_FLOW.md:336	F821	[D]		0x4A1DC0 and sets vtable 0xCBCB28, followed by its class name]. Against the base glyph vtable
 0x004A4560	Borders	func	crates/grid-app/src/transition.rs:251 grid-app::transition::Borders	docs/SCREEN_FLOW.md:29	F779 F756	[D]		(FUN_004A4560). The circle is the procedural shader `feov_ramp.fx`:
 0x004A49E0	Borders	func	crates/grid-app/src/transition.rs:249 grid-app::transition::Borders	docs/SCREEN_FLOW.md:43	F779	[D]		FUN_004A49E0, through FUN_004964C0) and slide off once the screen is
 0x004A5930	ScreenSDU_enter	func	not ported	docs/AUDIO_RESEARCH.md:2374 ; docs/CAREER_SCREEN.md:253	F790 F788	[O]	overlay_on	not a function entry in the master analysis; Sounds (F772/F788's shared rules, `hud_sound`): `install_front_end` plays the screen whooshes and the loading sounds at the Effects Volume. `update` plays th...
 0x004A5BD9		func	not ported	docs/AUDIO_RESEARCH.md:2375				not a function entry in the master analysis; 0x4A5BD9) and hide 0x4942F0.
 0x004A5FD4	overlay_on	func	not ported	docs/AUDIO_RESEARCH.md:2374				not a function entry in the master analysis; `ScreenSDU` has its own enter 0x4A5930 (`overlay_on` at 0x4A5FD4, a3 = 1; `overlay_off` at
-0x004A6670	results_art_Play	func	crates/grid-app/src/results_art.rs:508 grid-app::results_art::Play	docs/RACE_HUD.md:899	F822	[D]	Play	Which event of a screen's own animations plays: the flow 0x4A6670 sends
+0x004A6670	results_art_Play	func	crates/grid-app/src/results_art.rs:568 grid-app::results_art::Play	docs/RACE_HUD.md:899	F822	[D]	Play	Which event of a screen's own animations plays: the flow 0x4A6670 sends
 0x004A7B70	fe_open_named_stream	func	not ported	docs/GARAGE_WORLD.md:16	F809	[V]		It formats `garage_%02d` from the message's garage number and passes it with `"garage"` to 0x4A7B70.
 0x004A7CA0	GlyphScaler_load	func	not ported	docs/RACE_HUD.md:932	F825	[O]		Scaler update 0x48C090 (load 0x4A7CA0, margins 0x482430, none authored in `frontend/` [O]):
 0x004A9E80	race_music_option	func	not ported	docs/AUDIO_RESEARCH.md:1734 ; docs/MUSIC_RESEARCH.md:76				pair (n & 3)·2. A `race_music_option` (0x4A9E80, `DataRaceMusicToggle`) switches it; its default
-0x004A9FF0	fe_camera_controller_update	func	not ported	docs/FRONT_END_FLOW.md:210	F820	[D]		not a function entry in the master analysis; Input: the controller update 0x4A9FF0 calls 0x47F660 unless its target name is `none`. It
-0x004AA580	sort_stacker	func	crates/grid-app/src/results_art.rs:1027 grid-app::results_art::sort_stacker	docs/RACE_HUD.md:923	F825	[D]		load (load 0x4AA580, re-flow 0x498DF0) [D].
-0x004AA7F0	GlyphStacker_clone_last	func	crates/grid-app/src/results_art.rs:1013 grid-app::results_art::Strip	docs/RACE_HUD.md:930	F825	[D]		(0x4AA7F0, every gap between pills then the template's) [D]; states.xml's
-0x004AA940	Strip	func	crates/grid-app/src/results_art.rs:1012 grid-app::results_art::Strip	docs/RACE_HUD.md:929	F825	[D]		SetSize (0x4AA940) shows the first `count` children and clones the last
-0x004AB6C0	glyph_connect_request_build	func	not ported	docs/FRONT_END_FLOW.md:332	F821	[D]		handler, then a check for message type 0xDAAC6C, the channel connect request built by 0x4AB6C0)
+0x004A9FF0	fe_camera_controller_update	func	not ported	docs/FRONT_END_FLOW.md:216	F820	[D]		not a function entry in the master analysis; Input: the controller update 0x4A9FF0 calls 0x47F660 unless its target name is `none`. It
+0x004AA580	sort_stacker	func	crates/grid-app/src/results_art.rs:1097 grid-app::results_art::sort_stacker	docs/RACE_HUD.md:923	F825	[D]		load (load 0x4AA580, re-flow 0x498DF0) [D].
+0x004AA7F0	GlyphStacker_clone_last	func	crates/grid-app/src/results_art.rs:1083 grid-app::results_art::Strip	docs/RACE_HUD.md:930	F825	[D]		(0x4AA7F0, every gap between pills then the template's) [D]; states.xml's
+0x004AA940	Strip	func	crates/grid-app/src/results_art.rs:1082 grid-app::results_art::Strip	docs/RACE_HUD.md:929	F825	[D]		SetSize (0x4AA940) shows the first `count` children and clones the last
+0x004AB6C0	glyph_connect_request_build	func	not ported	docs/FRONT_END_FLOW.md:338	F821	[D]		handler, then a check for message type 0xDAAC6C, the channel connect request built by 0x4AB6C0)
 0x004AC7AF		label	not ported	docs/MUSIC_RESEARCH.md:77				inside 0x004AC580; The default is registered as 1 (`push 1` at 0x4AC7AF), only when the profile has no value.
 0x004ACEB0	GlyphStacker_on_message	func	not ported	docs/RACE_HUD.md:929	F825	[D]		not a function entry in the master analysis; SetSize (message 0xDAAD44, vtable 0xCB97B4; handler 0x4ACEB0 → 0x4AA940): children 0..n−1 shown,
 0x004B07E0	ScreenOverlay_ctor	func	crates/grid-app/src/hud_sound.rs:72 grid-app::hud_sound::overlay_cue	docs/AUDIO_RESEARCH.md:2370	F788	[O]		shown; the constructor 0x4B07E0 turns the sound on). It follows the
-0x004B09B0	glyph_node_types_register	func	not ported	docs/FRONT_END_FLOW.md:328 ; docs/RACE_HUD.md:919	F825 F821	[D]		a `GlyphStackerLeft` (type registry 0x4B09B0, factory 0x4C5300, vtable 0xCBE810) of two pill
+0x004B09B0	glyph_node_types_register	func	not ported	docs/FRONT_END_FLOW.md:334 ; docs/RACE_HUD.md:919	F825 F821	[D]		a `GlyphStackerLeft` (type registry 0x4B09B0, factory 0x4C5300, vtable 0xCBE810) of two pill
 0x004B1A70		func	crates/grid-tools/src/dynamic_props.rs:439 grid-tools::dynamic_props::split_scale	docs/CONTACT_REORIENTATION_RESEARCH.md:34 ; docs/DYNAMIC_PROPS_RESEARCH.md:335 ; docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:149		[D]		(+0x80). A row shorter than 1e-5 (0x4B1A70) leaves identity rows and a
 0x004B1A90		func	not ported	docs/WHEEL_GEOMETRY.md:9	F506	[D]		The constructor builds mirrored X pairs at body `+0x14e0..0x1510`: **rear positive X, rear negative X, front positive X, front negative X**. Selected-coordin...
 0x004B1B60		func	not ported	docs/VISUAL_DAMAGE_PARTS_RESEARCH.md:309		[I]		The exact mixing via `0x4B1B60` is [I]. Record +80 is the state, +84 a changed flag, +88 the
@@ -616,23 +617,23 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004BA070		func	crates/grid-formats/src/osd.rs:206 grid-formats::osd::Step	docs/RACE_HUD.md:887		[D]		not a function entry in the master analysis; 0x4BA150, FEEVENTTRIGGER 0x4BA070) [D].
 0x004BA0E0	osd_Step	func	crates/grid-formats/src/osd.rs:205 grid-formats::osd::Step	docs/RACE_HUD.md:886			Step	not a function entry in the master analysis; One step of a front-end event (FEEVENTGOTO 0x4BA0E0, FEEVENTPLAYTO
 0x004BA150		func	crates/grid-formats/src/osd.rs:206 grid-formats::osd::Step	docs/RACE_HUD.md:886		[D]		not a function entry in the master analysis; 0x4BA150, FEEVENTTRIGGER 0x4BA070) [D].
-0x004BFB10	glyph_particle_system_create	func	not ported	docs/FRONT_END_FLOW.md:329	F821	[D]		not a function entry in the master analysis; registers `pfx` with factory 0x4BFB10, which allocates 0xE0 bytes on the base glyph constructor
+0x004BFB10	glyph_particle_system_create	func	not ported	docs/FRONT_END_FLOW.md:335	F821	[D]		not a function entry in the master analysis; registers `pfx` with factory 0x4BFB10, which allocates 0xE0 bytes on the base glyph constructor
 0x004C17C0	GlyphScalerX_factory	func	not ported	docs/RACE_HUD.md:921	F825	[D]		not a function entry in the master analysis; a `scaler_x=pill_middle` and a right cap; the scaler (`GlyphScalerX`, factory 0x4C17C0, vtable
-0x004C1C60	glyph_particle_system_clone	func	not ported	docs/FRONT_END_FLOW.md:331	F821	[D]		0xCBC630 it overrides only the clone (0x4C1C60), the message handler (0x490370: the base
+0x004C1C60	glyph_particle_system_clone	func	not ported	docs/FRONT_END_FLOW.md:337	F821	[D]		0xCBC630 it overrides only the clone (0x4C1C60), the message handler (0x490370: the base
 0x004C5300	GlyphStackerLeft_factory	func	not ported	docs/RACE_HUD.md:919	F825	[D]		a `GlyphStackerLeft` (type registry 0x4B09B0, factory 0x4C5300, vtable 0xCBE810) of two pill
 0x004C6DB0		func	crates/grid-app/src/transition.rs:10 grid-app::transition	docs/SCREEN_FLOW.md:26	F756	[D]		(FUN_004C6DB0, `states.xml`). Once the screen is black on the way into a
 0x004C7F50		func	not ported	docs/RACE_HUD.md:122		[I]		`.points` = Points, only when 0x4C7F50 holds (career [I]);
-0x004C8200	format_lemans_time	func	crates/grid-app/src/post_race.rs:731 grid-app::post_race (in time_text)	docs/RACE_HUD.md:479	F763	[D]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
-0x004C8280	results_gap	func	crates/grid-app/src/post_race.rs:713 grid-app::post_race::results_gap	docs/RACE_HUD.md:481	F763			The results list's difference text (0x4C8280, written into
+0x004C8200	format_lemans_time	func	crates/grid-app/src/post_race.rs:761 grid-app::post_race (in time_text)	docs/RACE_HUD.md:479	F763	[D]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
+0x004C8280	results_gap	func	crates/grid-app/src/post_race.rs:743 grid-app::post_race::results_gap	docs/RACE_HUD.md:481	F763			The results list's difference text (0x4C8280, written into
 0x004C9720	livery_colour_index_of	func	not ported	docs/CAREER_SCREEN.md:189	F807	[V]		Livery carousels (F807)** [V static]: the original's "colour grid" is one 3D carousel of pills per part (`PatternCarousel`, `NumberCarousel`, `Primary/Second...
 0x004C97B0	livery_colour_id_at	func	crates/grid-app/src/career_screen.rs:3845 grid-app::career_screen::step_livery	docs/CAREER_SCREEN.md:189	F807	[V]		0x4C97B0): no wrap, an end holds and plays `dead_end`. Returns whether
 0x004C9860	livery_clear_choice	func	not ported		F807	[V]		Task (coordinator, after F799): step 2 of the livery series, the livery page's colour grid. Static analysis only (`tools/re/grid_re.py`, master project); gri...
-0x004C9910		func	not ported	docs/FRONT_END_FLOW.md:365		[V]		game (FUN_004C9910 on game+0xBA0), sets a counter at +0x40 to 1 and posts a
-0x004C9930		func	not ported	docs/FRONT_END_FLOW.md:358		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
-0x004C9950	load_estimate_a	func	not ported	docs/FRONT_END_FLOW.md:317	F821	[D]		estimate (manager +0xC, 0x4C9950/0x4C9960) the timers are fitted into the time left (+0x218)
+0x004C9910		func	not ported	docs/FRONT_END_FLOW.md:371		[V]		game (FUN_004C9910 on game+0xBA0), sets a counter at +0x40 to 1 and posts a
+0x004C9930		func	not ported	docs/FRONT_END_FLOW.md:364		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
+0x004C9950	load_estimate_a	func	not ported	docs/FRONT_END_FLOW.md:323	F821	[D]		estimate (manager +0xC, 0x4C9950/0x4C9960) the timers are fitted into the time left (+0x218)
 0x004C9960	load_estimate_b	func	not ported	docs/FRONT_END_FLOW.md	F821	[D]		load estimate getter used to fit the stat timers (not ported: no estimate)
 0x004C9A70	param_read_vector	func	crates/grid-app/src/fe_world.rs:244 grid-app::fe_world::group_vector	docs/FRONT_END_FLOW.md:131	F819 F813	[D]	group_vector	reader 0x4C9A70 stores them in that order, whatever the file's comment
-0x004CA6A0		func	not ported	docs/FRONT_END_FLOW.md:358		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
+0x004CA6A0		func	not ported	docs/FRONT_END_FLOW.md:364		[V]		game+0xBA0 (read by FUN_004C9930) equals 1 and the predicate FUN_004CA6A0 on game+0xA0 is true.
 0x004CAD80	available	func	crates/grid-tools/src/flashback.rs:72 grid-tools::flashback::available ; crates/grid-app/src/replay.rs:260 grid-app::replay	docs/FLASHBACK.md:68	F366	[D]		0x542A00: 0x937150 and 0x4CAD80).
 0x004CADD0		func	not ported	docs/FLASHBACK.md:70		[D]		Using one: `used += 1` (0x6A2260) through 0x4CADD0, called only from 0x59AFA0 [D], the enter
 0x004CB040		func	not ported	docs/CAREER_RESEARCH.md:236		[V]		+0xB0 (0x4CB040). Routine A (0x665560) and B (0x665890) add the event's credited money after each
@@ -645,7 +646,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004CC8E0	garage_fill_target_zones	func	not ported	docs/GARAGE_WORLD.md:17	F809	[V]		It runs 0x4CC8E0.
 0x004CCD80	garage_load_bundle	func	not ported	docs/GARAGE_WORLD.md:22	F810 F809	[V]		[V] 0x4CCD80 loads the garage bundle `frontend/b_garage_%02d.pssg` once, when its flags allow it (+4/+5/+6 clear, +7 set), and then clears +7.
 0x004CD100	garage_world_set_active	func	not ported	docs/GARAGE_WORLD.md:15 ; docs/SUN_SHADOWS.md:45	F809	[V]		[V] The world for garage N loads in 0x4CD100 (it switches on the "garage on" byte +0x6D):
-0x004CD3B0		func	not ported	docs/FRONT_END_FLOW.md:197				The wiring to the loading camera goes through component tables (0x490410 from 0x4CD3B0,
+0x004CD3B0		func	not ported	docs/FRONT_END_FLOW.md:203				The wiring to the loading camera goes through component tables (0x490410 from 0x4CD3B0,
 0x004CE080		func	not ported	docs/CAR_LOD.md:78		[O]		[O] Set choice (0x607BC0): FE set 8 when `ctx+0x21C4 != 0` and 0x4CE080() (front end [I]). The replay set is used when `ctx+0x2254 -> +0x42` is set (replay p...
 0x004CE086		label	not ported	docs/GARAGE_WORLD.md:44				inside 0x004CE080; | `garage_zone_manager` | 0xCC1350 | 0x4CE086, 0x5105C6, 0x51063A, 0x5106E8, 0x580D39, 0x580E58, 0x58158B, 0x5882F7, 0x58ECCE, 0x58EE83, 0x59FB3F, 0x5AD4D0 |
 0x004CE0A0		func	not ported	docs/RACE_HUD.md:597				setup registers itself there, 0x4CE0A0) and also calls 0x60BEF0 with M. Its one caller 0x582BF0
@@ -660,15 +661,16 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004D0960	FeMaterialLibrary_RegisterConstants	func	crates/grid-app/src/fe3d.rs:300 grid-app::fe3d::Constants	docs/FRONT_END_FLOW.md:153 ; docs/RACE_HUD.md:809	F819	[D]	Constants	FE::MaterialLibrary, 0x4D0960).
 0x004D1600		func	not ported	docs/LE_MANS.md:108	F429 G130	[V]		with no finished-first rule. 0x4D1600 is the adjustment's only reader, so
 0x004D166B		label	not ported	docs/SERIES.md:228				inside 0x004D1600; Not ported: `lemans_progress_adjustment` (read only at 0x4D166B, the time-limited races' progress
+0x004D17D0		func	not ported	docs/RACE_HUD.md:968		[I]		so [AMOUNT] is the best combo's score (0x4D17D0 [I: not decompiled]).
 0x004D1890		func	crates/grid-app/src/drift_event.rs:405 grid-app::drift_event (in board)	docs/DISCIPLINES.md:238	F362			The stats screen's count comes from 0x4D1890 (not traced); the
 0x004D27F0	tier_tile_unlocked	func	not ported	docs/CAREER_RESEARCH.md:763	F771	[V]		0x4D27F0 (`tier_tile_unlocked`): a tier tile is unlocked when the tile is valid and 0x628EF0
 0x004D5420		func	not ported	docs/FLASHBACK.md:50		[D]		options 0x4D5420 and a career state 0x58ABC0) [D]:
-0x004D6D40	fact_mode_mask	func	crates/grid-app/src/loading_stats.rs:107 grid-app::loading_stats::mask	docs/FRONT_END_FLOW.md:268	F821	[D]	loading_stats_mask mask	Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
+0x004D6D40	fact_mode_mask	func	crates/grid-app/src/loading_stats.rs:107 grid-app::loading_stats::mask	docs/FRONT_END_FLOW.md:274	F821	[D]	loading_stats_mask mask	Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
 0x004D6EE0	FeMaterialLibrary_ReadValues	func	crates/grid-app/src/fe3d.rs:8 grid-app::fe3d	docs/RACE_HUD.md:808				not a function entry in the master analysis; read as `FE::MaterialLibrary` does (0x4D04B0 zones, 0x4D6EE0 values,
 0x004D7140	lighting_group_read	func	not ported	docs/FRONT_END_FLOW.md:130	F813	[D]		not a function entry in the master analysis; group reader 0x4D7140 that reads r_gamma +0x1A0, r_scale +0x1A4, r_min +0x10, r_max +0x20);
 0x004D75E0		func	not ported	docs/GARAGE_WORLD.md:47				not a function entry in the master analysis; | `pregarage` | 0xCC1D0C | 0x4D75E0 |
-0x004D99B0		func	not ported	docs/RACE_HUD.md:960				FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
-0x004D9A00		func	not ported	docs/RACE_HUD.md:960				FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
+0x004D99B0		func	not ported	docs/RACE_HUD.md:1003				FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
+0x004D9A00		func	not ported	docs/RACE_HUD.md:1003				FUN_004d99b0 holds), `friends` (FUN_004d9a00) or `deactivate`; FUN_00475f70 builds the state
 0x004DA430		func	not ported	docs/CAREER_RESEARCH.md:238		[V]		0x4DA430 is true; otherwise the balance shown adds `start_race_team` (40,000) [I: the flag is "own
 0x004DA640	garages	func	crates/grid-tools/src/career/state.rs:314 grid-tools::career::state::garages	docs/CAREER_RESEARCH.md:63 ; docs/GARAGE_WORLD.md:33		[V]		Garages: 1, 2 after the first licence, 3 after the fourth (0x4DA640)
 0x004DBAD0	refuse_lemans	func	crates/grid-tools/src/career/state.rs:456 grid-tools::career::state::refuse_lemans	docs/CAREER_RESEARCH.md:171 ; docs/CAREER_SCREEN.md:190	F774	[V]		not a function entry in the master analysis; Refuses Le Mans: the season ends (0x4DBAD0) [V].
@@ -676,7 +678,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004DCDF0	PauseWorld_ApplyRaceCamera	func	not ported	docs/RACE_HUD.md:826				of the pause world; 0x5A5630 builds `MovePauseWorldToCamera`, dispatched by 0x4ED780; 0x4DCDF0
 0x004DCFA0	fe_set_reflection_mode	func	crates/grid-app/src/fe_world.rs:75 grid-app::fe_world::LOADING	docs/FRONT_END_FLOW.md:138 ; docs/GARAGE_WORLD.md:27	F813 F810 F809	[V]		`reflection_load.dds` (loaded by 0x4E2750, chosen by 0x4DCFA0 outside the
 0x004DD090	grant_all_global	func	not ported	docs/CAREER_RESEARCH.md:771		[V]		the rookie licence in Europe, USA and Japan) and 0x4DD090 (`grant_all_global`, grants all; [I] a
-0x004DFAD0	fact_list_next	func	crates/grid-app/src/loading_stats.rs:9 grid-app::loading_stats	docs/FRONT_END_FLOW.md:276	F821	[D]		in that order, wrapping (0x4DFAD0). The port keeps no profile statistics
+0x004DFAD0	fact_list_next	func	crates/grid-app/src/loading_stats.rs:9 grid-app::loading_stats	docs/FRONT_END_FLOW.md:282	F821	[D]		in that order, wrapping (0x4DFAD0). The port keeps no profile statistics
 0x004DFC00	FeMaterialLibrary_BuildConstants	func	crates/grid-app/src/fe3d.rs:218 grid-app::fe3d::constants	docs/FRONT_END_FLOW.md:150 ; docs/RACE_HUD.md:809	F819 F810	[D]	Pulse constants	0x4DFC00 does (light directions 0x4CFE40, the glow pulse). Shader
 0x004E031F		label	not ported	docs/FRONT_END_FLOW.md:150	F819	[D]		inside 0x004DFC00; The constant builder 0x4DFC00 (0x4E031F–0x4E0393) only inserts w into `_refMinGamma` and
 0x004E0393		label	not ported	docs/FRONT_END_FLOW.md:150	F819	[D]		inside 0x004DFC00; The constant builder 0x4DFC00 (0x4E031F–0x4E0393) only inserts w into `_refMinGamma` and
@@ -688,26 +690,26 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x004E4890	fill_required_to_unlock	func	not ported	docs/CAREER_RESEARCH.md:772		[V]		cheat or debug path). 0x4E4890 (`fill_required_to_unlock`) fills the tile's "required to unlock"
 0x004E4A20	career_slot_sponsor	func	not ported		F808	[V]		Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...
 0x004E4A80	career_clear_slot	func	crates/grid-tools/src/career/state.rs:706 grid-tools::career::state::clear_sponsor_slot	docs/CAREER_SCREEN.md:236	F808	[V]		0x522490 sets the flag that 0x509030 acts on with 0x4E4A80) [V static].
-0x004E4ED0	fact_slot_build	func	crates/grid-app/src/loading_stats.rs:121 grid-app::loading_stats::values	docs/FRONT_END_FLOW.md:271	F821	[D]	values	Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
+0x004E4ED0	fact_slot_build	func	crates/grid-app/src/loading_stats.rs:121 grid-app::loading_stats::values	docs/FRONT_END_FLOW.md:277	F821	[D]	values	Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
 0x004E6DF0	career_apply_slot_to_livery_editor	func	not ported	docs/CAREER_SCREEN.md:239	F808	[V]		Not ported: the logo variant per slot (root +0x4A4, clamped to the sponsor's `num_logos` by 0x4CB560), the logos on the car (0x4E6DF0 hands each slot to `Liv...
 0x004E6EE0	career_place_in_slot	func	crates/grid-tools/src/career/state.rs:696 grid-tools::career::state::place_in_slot	docs/CAREER_SCREEN.md:235	F808	[V]	place_in_slot	Places a received offer in designer slot `slot` (0x4E6EE0): the
-0x004EA770	fact_slots_init	func	crates/grid-app/src/loading_stats.rs:39 grid-app::loading_stats::Slot	docs/FRONT_END_FLOW.md:260	F821	[V]	SLOTS Slot loading_stats_Slot	Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
+0x004EA770	fact_slots_init	func	crates/grid-app/src/loading_stats.rs:39 grid-app::loading_stats::Slot	docs/FRONT_END_FLOW.md:266	F821	[V]	SLOTS Slot loading_stats_Slot	Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
 0x004EC820	lemans_results_order	func	crates/grid-tools/src/race.rs:562 grid-tools::race::lemans_results_order ; crates/grid-app/src/le_mans_event.rs:11 grid-app::le_mans_event	docs/LE_MANS.md:106	F429 G130	[V]		Le Mans results order [V 0x4EC820]: every car by progress, times its
 0x004ED0B0	career_build_available_sponsors	func	crates/grid-tools/src/career/state.rs:728 grid-tools::career::state::available_sponsors	docs/CAREER_SCREEN.md:234	F808	[V]	available_sponsors	The offers not on the car, best first (0x4ED0B0) [V static]: the
 0x004ED780		func	not ported	docs/GARAGE_WORLD.md:27 ; docs/RACE_HUD.md:826		[V]		of the pause world; 0x5A5630 builds `MovePauseWorldToCamera`, dispatched by 0x4ED780; 0x4DCDF0
 0x004EECE0	Outcome	func	crates/grid-tools/src/career/ebay.rs:325 grid-tools::career::ebay::Outcome					What a career event did to one listing (the popups of 0x4EECE0).
-0x004EF1A0	fact_list_collect	func	crates/grid-app/src/loading_stats.rs:5 grid-app::loading_stats	docs/FRONT_END_FLOW.md:268	F821	[D]		Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
+0x004EF1A0	fact_list_collect	func	crates/grid-app/src/loading_stats.rs:5 grid-app::loading_stats	docs/FRONT_END_FLOW.md:274	F821	[D]		Which facts [D 0x4EA770, 0x4EF1A0, 0x4E4ED0, 0x4D6D40]: the 38 slots of
 0x004EF9C0	champ_one_two	func	crates/grid-app/src/career_screen.rs:1040 grid-app::career_screen (in speech_lines) ; crates/grid-tools/src/speech.rs:1587 grid-tools::speech	docs/SPEECH_CAREER_PARAMETERS.md:38 ; docs/SPEECH_AUDIO_RESEARCH.md:902	F624	[O]		1_2Finish (0x4EF9C0): the player and the teammate are ranks 0 and 1.
-0x004EFE40		func	not ported	docs/FRONT_END_FLOW.md:372		[V]		[V] The string `FileStreamThreadHighPriorityHack` is registered by FUN_004EFE40, beside
+0x004EFE40		func	not ported	docs/FRONT_END_FLOW.md:378		[V]		[V] The string `FileStreamThreadHighPriorityHack` is registered by FUN_004EFE40, beside
 0x004F0FF0	wrapper_eq	func	not ported	docs/CAREER_RESEARCH.md:682		[V]		comparison wrapper (==) used by the licence checks (§14.1).
 0x004F10B0	is_test_offer	func	crates/grid-tools/src/career/rules.rs:339 grid-tools::career::rules::is_test_offer			[V]		appearance fee (0x4F10B0, 0x674940) [V].
 0x004F23E0		func	not ported	docs/TEAM_LIVERY.md:24	F798	[V]		[V] The number is `livery_number.number_string` (0x5E9160 → 0x4F23E0);
 0x004F2440		func	not ported	docs/TEAM_LIVERY.md:25	F798	[V]		the pattern is `livery_pattern.livery_image_name` (0x5E9060 → 0x4F2440,
-0x004F4510	random_shuffle_facts	func	crates/grid-app/src/loading_stats.rs:160 grid-app::loading_stats::shuffle	docs/FRONT_END_FLOW.md:275	F821	[D]	random_shuffle shuffle	shuffled once with MSVC `random_shuffle` ([`Rand`], 0x4F4510) and shown
+0x004F4510	random_shuffle_facts	func	crates/grid-app/src/loading_stats.rs:160 grid-app::loading_stats::shuffle	docs/FRONT_END_FLOW.md:281	F821	[D]	random_shuffle shuffle	shuffled once with MSVC `random_shuffle` ([`Rand`], 0x4F4510) and shown
 0x004F8B30		func	crates/grid-tools/src/career/state.rs:145 grid-tools::career::state					Races driven per `track_model` (the per-layout record 0x4F8B30 +8,
-0x004FF470		func	not ported	docs/FRONT_END_FLOW.md:260		[V]		[V] FUN_004EA770 (one caller, FUN_004FF470) fills a table of 38 fact slots of 0xC4 bytes, three
+0x004FF470		func	not ported	docs/FRONT_END_FLOW.md:266		[V]		[V] FUN_004EA770 (one caller, FUN_004FF470) fills a table of 38 fact slots of 0xC4 bytes, three
 0x004FF7B0		func	not ported	docs/PHASE0.md:78				The nearby function releases objects and clears pointers; an upstream routine at `0x004ff7b0` has a deleting-destructor pattern. **Interpretation, medium con...
-0x00500E40	CarouselBase::update	func	crates/grid-app/src/career_screen.rs:3844 grid-app::career_screen::step_livery ; crates/grid-app/src/livery_carousel.rs:12 grid-app::livery_carousel	docs/AUDIO_RESEARCH.md:2311 ; docs/CAREER_SCREEN.md:189 ; docs/LIVERY_CAROUSEL.md:26	F816 F807	[V]	step_livery	designer's carousels do (CarouselBase update 0x500E40, index `order` − 1,
+0x00500E40	CarouselBase::update	func	crates/grid-app/src/career_screen.rs:3844 grid-app::career_screen::step_livery ; crates/grid-app/src/livery_carousel.rs:12 grid-app::livery_carousel	docs/AUDIO_RESEARCH.md:2311 ; docs/CAREER_SCREEN.md:189 ; docs/LIVERY_CAROUSEL.md:26	F816 F807	[V]	step_livery	RGB / 255 (0x52B760 → 0x514950); the clamp at the ends (0x500E40); the
 0x005011B0	CarouselBase::set_index	func	not ported	docs/LIVERY_CAROUSEL.md:26	F816	[V]		[V] 0x500E40 (CarouselBase::update) steps the index by the input and does not wrap; at an end it plays `dead_end` and holds, otherwise it fires `carousel_rot...
 0x005035D0	GridOption	func	crates/grid-app/src/settings.rs:1229 grid-app::settings::GridOption	docs/SCREEN_FLOW.md:112	F756	[D]		lists Front, Middle, Back, Random (0x5035D0 [D]) with Random the default
 0x00503CE0	Carousel::play_sample_set_index	func	not ported	docs/LIVERY_CAROUSEL.md:26	F816	[V]		not a function entry in the master analysis; [V] 0x500E40 (CarouselBase::update) steps the index by the input and does not wrap; at an end it plays `dead_end` and holds, otherwise it fires `carousel_rot...
@@ -715,10 +717,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00503DA0	Carousel::separation_angle	func	not ported	docs/LIVERY_CAROUSEL.md:23	F816	[V]		not a function entry in the master analysis; [V] 0x50CE30 parses the ScreenLiveryDesignerRoot settings; `seperation_angle` lands at +0x3B8, read through the getter 0x503DA0 that six carousel vtables share.
 0x00504230	LiveryDesignerColourMenu::randomise	func	crates/grid-tools/src/hud_audio.rs:242 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2310 ; docs/CAREER_SCREEN.md:189	F807	[V]		The livery designer's Randomise (0x5043F0, 0x504230: `randomize`,
 0x005043F0	LiveryDesignerMainMenu::randomise	func	crates/grid-app/src/career_screen.rs:3867 grid-app::career_screen::randomise_livery ; crates/grid-tools/src/hud_audio.rs:242 grid-tools::hud_audio	docs/AUDIO_RESEARCH.md:2310 ; docs/CAREER_SCREEN.md:189	F807	[V]	randomise_livery	The button plays its own sample, no activate (0x5043F0).
-0x00504700		func	not ported	docs/FRONT_END_FLOW.md:304		[V]		not a function entry in the master analysis; [V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
-0x005048D0	loading_stats_refresh	func	crates/grid-app/src/loading_stats.rs:264 grid-app::loading_stats::step	docs/FRONT_END_FLOW.md:308	F821	[V]	loading_stats_step step	When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
-0x00504A30	loading_stats_play_in	func	crates/grid-app/src/loading_stats.rs:13 grid-app::loading_stats	docs/FRONT_END_FLOW.md:314	F821	[D]		When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
-0x00504AC0	loading_stats_play_out	func	crates/grid-app/src/loading_stats.rs:13 grid-app::loading_stats	docs/FRONT_END_FLOW.md:315	F821	[D]		When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
+0x00504700		func	not ported	docs/FRONT_END_FLOW.md:310		[V]		not a function entry in the master analysis; [V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
+0x005048D0	loading_stats_refresh	func	crates/grid-app/src/loading_stats.rs:264 grid-app::loading_stats::step	docs/FRONT_END_FLOW.md:314	F821	[V]	loading_stats_step step	When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
+0x00504A30	loading_stats_play_in	func	crates/grid-app/src/loading_stats.rs:13 grid-app::loading_stats	docs/FRONT_END_FLOW.md:320	F821	[D]		When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
+0x00504AC0	loading_stats_play_out	func	crates/grid-app/src/loading_stats.rs:13 grid-app::loading_stats	docs/FRONT_END_FLOW.md:321	F821	[D]		When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
 0x00507520		func	not ported	docs/RESET_AND_RESPAWN_RESEARCH.md:86				The pause menu's `reset_car` entry (state 0x507520, next to `retire_race`, `restart`
 0x00508A36	postrace_slowmo_bullet	label	not ported	docs/REPLAY_DIRECTOR_RESEARCH.md:207				inside 0x005088D0; `postrace_slowmo_tick` / `postrace_slowmo_bullet` (0x508A36) belong to the post-race front-end
 0x00508EB0	season_info_load	func	not ported	docs/CAREER_RESEARCH.md:156	F774	[I]		not a function entry in the master analysis; Both info pages are one screen class, ScreenSeasonInfo [I]: loader 0x508EB0, vtable 0xCCFAC8, factory 0xC72470;
@@ -737,10 +739,20 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005106E8		label	not ported	docs/GARAGE_WORLD.md:44				inside 0x005106C0; | `garage_zone_manager` | 0xCC1350 | 0x4CE086, 0x5105C6, 0x51063A, 0x5106E8, 0x580D39, 0x580E58, 0x58158B, 0x5882F7, 0x58ECCE, 0x58EE83, 0x59FB3F, 0x5AD4D0 |
 0x00514950	colour_carousel_send_colour	func	crates/grid-app/src/livery_carousel.rs:12 grid-app::livery_carousel	docs/LIVERY_CAROUSEL.md:28	F816	[V]		RGB / 255 (0x52B760 → 0x514950); the clamp at the ends (0x500E40); the
 0x00514D50	LiveryDesignerRoot::enter	func	not ported		F807	[V]		Task (coordinator, after F799): step 2 of the livery series, the livery page's colour grid. Static analysis only (`tools/re/grid_re.py`, master project); gri...
-0x00515180	loading_stats_on_timer	func	not ported	docs/FRONT_END_FLOW.md:312	F821	[D]		texts, pick N = `range(1, definedanimations+1)`), bit 2 shown. Shown: 0x515180 adds the frame
-0x005152A0	loading_stats_off_timer	func	not ported	docs/FRONT_END_FLOW.md:313		[D]		time to the on timer (+0x220) and plays out at `on_time desired`; hidden: 0x5152A0 adds it to
+0x00515180	loading_stats_on_timer	func	not ported	docs/FRONT_END_FLOW.md:318	F821	[D]		texts, pick N = `range(1, definedanimations+1)`), bit 2 shown. Shown: 0x515180 adds the frame
+0x005152A0	loading_stats_off_timer	func	not ported	docs/FRONT_END_FLOW.md:319		[D]		time to the on timer (+0x220) and plays out at `on_time desired`; hidden: 0x5152A0 adds it to
 0x0051C930		func	not ported	docs/RACE_RULES_RESEARCH.md:319		[V]		not a function entry in the master analysis; [V] The column layout is built in 0x52E2C0 and 0x51C930. How each cell is formatted (gap or absolute
-0x0051E2C0		func	not ported	docs/DISCIPLINES.md:238				The drift-count stat of `post_race_stats_drift_scores` is read through 0x4D1890 (0x51E2C0), not
+0x0051D820	post_race_stats_exit	func	not ported	docs/RACE_HUD.md:952				0xCD3078; load 0x5552B0, enter 0x542560, exit 0x51D820, message handler 0x5426F0, trigger handler
+0x0051D940	post_race_stats_on_trigger	func	not ported	docs/RACE_HUD.md:953				not a function entry in the master analysis; 0x51D940 (vtable slot 34), camera state 0x537170.
+0x0051D9F0		func	not ported	docs/RACE_HUD.md:958				the stat id at the cursor (1 position 0x537270, 2 0x51D9F0, 3 0x51DB70, 4 0x51DD30, 5 0x51DEF0,
+0x0051DB70		func	not ported	docs/RACE_HUD.md:958				the stat id at the cursor (1 position 0x537270, 2 0x51D9F0, 3 0x51DB70, 4 0x51DD30, 5 0x51DEF0,
+0x0051DD30		func	not ported	docs/RACE_HUD.md:958				the stat id at the cursor (1 position 0x537270, 2 0x51D9F0, 3 0x51DB70, 4 0x51DD30, 5 0x51DEF0,
+0x0051DEF0		func	not ported	docs/RACE_HUD.md:958				the stat id at the cursor (1 position 0x537270, 2 0x51D9F0, 3 0x51DB70, 4 0x51DD30, 5 0x51DEF0,
+0x0051E0D0	post_race_stats_fill_fastest_lap	func	crates/grid-app/src/post_race.rs:924 grid-app::post_race::StatKind	docs/RACE_HUD.md:959				dispatches on the stat id: 1 position 0x537270, 6 fastest lap 0x51E0D0,
+0x0051E2C0		func	not ported	docs/DISCIPLINES.md:238 ; docs/RACE_HUD.md:959				6 fastest lap 0x51E0D0, 7 0x51E2C0, 8 0x51E660, 9 drift total 0x51E4A0, 10 0x51E7E0), then
+0x0051E4A0	post_race_stats_fill_drift_total	func	crates/grid-app/src/post_race.rs:925 grid-app::post_race::StatKind	docs/RACE_HUD.md:959		[D]		9 drift total 0x51E4A0 [D]).
+0x0051E660		func	not ported	docs/RACE_HUD.md:959				6 fastest lap 0x51E0D0, 7 0x51E2C0, 8 0x51E660, 9 drift total 0x51E4A0, 10 0x51E7E0), then
+0x0051E7E0		func	not ported	docs/RACE_HUD.md:959				6 fastest lap 0x51E0D0, 7 0x51E2C0, 8 0x51E660, 9 drift total 0x51E4A0, 10 0x51E7E0), then
 0x0051EB72		label	not ported	docs/RACE_HUD.md:483				inside 0x0051E7E0; 0x54225A; the Touge stats' difference 0x51EB72 uses it too). Port: `post_race::time_text` writes
 0x0051FB90		func	not ported	docs/FLASHBACK.md:200	F794	[D]		its callers are 0x66DB80 and 0x51FB90 (vtable 0xCCF460). 0x6A2290 only returns `max_award`
 0x005222F0	sponsor_designer_available_menu_update	func	not ported		F808	[V]		not a function entry in the master analysis; Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...
@@ -752,22 +764,28 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00522F50	sponsor_designer_swap_mode_update	func	not ported		F808	[V]		not a function entry in the master analysis; Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...
 0x00524210	replay_menu_select_loop	func	not ported	docs/REPLAY.md:492	F794	[O]		not a function entry in the master analysis; `loop_entry_special` (0xCCBF40, set by 0x524210), which keeps the saved window and crash time
 0x0052B760	colour_carousel_fill_pill	func	crates/grid-app/src/livery_carousel.rs:12 grid-app::livery_carousel	docs/LIVERY_CAROUSEL.md:28	F816 F807	[V]		RGB / 255 (0x52B760 → 0x514950); the clamp at the ends (0x500E40); the
-0x0052B970	loading_stats_update	func	crates/grid-app/src/loading_stats.rs:242 grid-app::loading_stats::Cycle	docs/FRONT_END_FLOW.md:308	F821	[V]	Cycle	not a function entry in the master analysis; When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
+0x0052B970	loading_stats_update	func	crates/grid-app/src/loading_stats.rs:242 grid-app::loading_stats::Cycle	docs/FRONT_END_FLOW.md:314	F821	[V]	Cycle	not a function entry in the master analysis; When [D 0x52B970, 0x5048D0, 0x504A30, 0x504AC0]: the cycle of [`Cycle`],
 0x0052E2C0	le_mans_leaderboard	func	not ported	docs/LE_MANS.md:115 ; docs/RACE_RULES_RESEARCH.md:319	F429 G130	[V]		not a function entry in the master analysis; Headers 0x52E2C0 (`le_mans_leaderboard`): Pos, Driver, Class
 0x0052E4F0		func	crates/grid-app/src/post_race.rs:18 grid-app::post_race	docs/RACE_HUD.md:120	F353	[D]		not a function entry in the master analysis; Results columns [D 0x52E4F0..0x52E6A8, `race_results`]: position, driver,
 0x00531720	sponsor_designer_root_parse	func	not ported		F808	[V]		Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...
 0x005317C0	sponsor_designer_root_update	func	not ported		F808	[V]		not a function entry in the master analysis; Task (coordinator, after F799): step 2 of the livery series, second half: the sponsor designer. Static analysis only (`tools/re/grid_re.py dis`/`decompile`, ...
 0x005317E0	sponsor_designer_swap_slots	func	crates/grid-tools/src/career/state.rs:714 grid-tools::career::state::swap_sponsor_slots	docs/CAREER_SCREEN.md:237	F808	[V]	swap_sponsor_slots	not a function entry in the master analysis; (0x5317E0: two 0x4E6EE0 calls) [V static].
+0x00537170	post_race_stats_set_camera_state	func	not ported	docs/RACE_HUD.md:953				0x51D940 (vtable slot 34), camera state 0x537170.
+0x00537270	post_race_stats_fill_position	func	crates/grid-app/src/post_race.rs:924 grid-app::post_race::StatKind	docs/RACE_HUD.md:958				dispatches on the stat id: 1 position 0x537270, 6 fastest lap 0x51E0D0,
+0x0053D460	results_art_line	func	crates/grid-app/src/post_race.rs:923 grid-app::post_race::StatKind ; crates/grid-app/src/results_art.rs:315 grid-app::results_art::line	docs/RACE_HUD.md:957		[D]	StatKind line	A statistic the stats screen pages through (the presenter 0x53D460
 0x0053FE10		func	crates/grid-tools/src/series.rs:585 grid-tools::series ; crates/grid-tools/src/race.rs:107 grid-tools::race::format_lemans_time	docs/LE_MANS.md:117	F429 G130	[V]		not a function entry in the master analysis; `le_mans_%s` [V 0x53FE10]).
 0x00540373		func	not ported	docs/RACE_HUD.md:482				not a function entry in the master analysis; `+%02u:%02u.%02u`, truncated hundredths, a blank for the first row (callers 0x540373, 0x542037,
 0x00542037		func	not ported	docs/RACE_HUD.md:482				not a function entry in the master analysis; `+%02u:%02u.%02u`, truncated hundredths, a blank for the first row (callers 0x540373, 0x542037,
 0x0054225A		func	not ported	docs/RACE_HUD.md:483				not a function entry in the master analysis; 0x54225A; the Touge stats' difference 0x51EB72 uses it too). Port: `post_race::time_text` writes
+0x00542560	post_race_stats_enter	func	crates/grid-app/src/post_race.rs:937 grid-app::post_race ; crates/grid-app/src/results_art.rs:152 grid-app::results_art (in def)	docs/RACE_HUD.md:952		[D]		two stats or more (ScreenPostRaceStats +0x1CA, 0x542560 [D]); the
+0x005426F0	on_stats_time	func	crates/grid-app/src/post_race.rs:332 grid-app::post_race::on_stats_time	docs/RACE_HUD.md:952				results (ScreenPostRaceStats 0x5426F0 sends `per_set_pause` after
 0x00542A00		func	crates/grid-app/src/replay.rs:260 grid-app::replay	docs/FLASHBACK.md:89	F366	[D]		not a function entry in the master analysis; 0x542A00: 0x937150 and 0x4CAD80).
-0x0054D270	RaceResultsList_FillRows	func	crates/grid-app/src/results_art.rs:612 grid-app::results_art::hold_ends	docs/RACE_HUD.md:837	F810	[D]	held hold_ends results_art_held	row filler 0x54D270 instancing one row glyph per entry (`list.%d`, with a
+0x0054D270	RaceResultsList_FillRows	func	crates/grid-app/src/results_art.rs:672 grid-app::results_art::hold_ends	docs/RACE_HUD.md:837	F810	[D]	held hold_ends results_art_held	row filler 0x54D270 instancing one row glyph per entry (`list.%d`, with a
 0x00553D40		func	not ported	docs/COCKPIT.md:17		[D]		`<mirrors enabled>` is never read: only the options menu (0x553D40) refers to the category. So the mirror is built and rendered at every preset, "off" includ...
+0x005552B0	post_race_stats_load	func	not ported	docs/RACE_HUD.md:952				0xCD3078; load 0x5552B0, enter 0x542560, exit 0x51D820, message handler 0x5426F0, trigger handler
 0x005554F0		func	not ported	docs/CAREER_RESEARCH.md:230				Bank screen** `ScreenRewardsBankAccount` (factory near 0x571400, constructor 0x5554F0, vtable
 0x00555620		func	crates/grid-app/src/career_screen.rs:1158 grid-app::career_screen (in payout_text)	docs/CAREER_RESEARCH.md:231 ; docs/CAREER_SCREEN.md:142	F494	[V]		The bank screen's rows (0x555620) [V]: prize, sponsorship, team
-0x0055FD80		func	not ported	docs/FRONT_END_FLOW.md:304		[V]		not a function entry in the master analysis; [V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
+0x0055FD80		func	not ported	docs/FRONT_END_FLOW.md:310		[V]		not a function entry in the master analysis; [V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
 0x00560750		func	not ported	docs/AI_AVOID_RECOVERY_RESEARCH.md:615				type name "ai"). Device slots +4/+8 (0x560750, shared with the other input devices)
 0x00560E30		func	not ported	docs/DISCIPLINES.md:248				0x560E30) and the entry vector at +0x1D8/+0x1DC; 0x67A8DD stores it in the race object at
 0x00564AFB		label	not ported		F522	[V]		inside 0x00564A80; release grid-app.exe sha256 05ece190…564afb
@@ -785,11 +803,11 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0057B180	state_instant_replay_exit	func	not ported	docs/FLASHBACK.md:254 ; docs/REPLAY.md:474	F794 F780 F778	[D]		not a function entry in the master analysis; +0x2C terminal, +0x2D silent) and exit 0x57B180 (which sets +0x28 |= 0x100 and restores force
 0x0057B1B0	state_instant_replay_load	func	not ported	docs/REPLAY.md:473	F794	[D]		and its exit (terminal). The silent replay's enter 0x596A40 (its arguments read by 0x57B1B0:
 0x0057B220	state_instant_replay_link	func	not ported	docs/REPLAY.md:293 ; docs/FLASHBACK.md:80	F778	[D]		input queries `push ID; call [vtable+0x2C]` exist for Jump In 0x1C (0x57B220, 0x57F630, 0x6DE370)
-0x0057BA80		func	not ported	docs/FRONT_END_FLOW.md:363		[V]		its parse method 0x57BA80 maps `type` to_garage → 0 and to_race → 1 at +0x3C;
-0x0057BAE0		func	not ported	docs/FRONT_END_FLOW.md:367		[V]		not a function entry in the master analysis; its update method 0x57BAE0 decrements the counter and finishes once it drops below 0, so the
-0x0057BB00		func	not ported	docs/FRONT_END_FLOW.md:369		[V]		its exit method 0x57BB00 sends `exit` and sets a busy flag at +0x38;
-0x0057BCC0		func	not ported	docs/FRONT_END_FLOW.md:356		[V]		[V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
-0x0057BD20		func	not ported	docs/FRONT_END_FLOW.md:359		[V]		not a function entry in the master analysis; Otherwise it is `stats` (0xCD8E14). The link getter is 0x57BD20.
+0x0057BA80		func	not ported	docs/FRONT_END_FLOW.md:369		[V]		its parse method 0x57BA80 maps `type` to_garage → 0 and to_race → 1 at +0x3C;
+0x0057BAE0		func	not ported	docs/FRONT_END_FLOW.md:373		[V]		not a function entry in the master analysis; its update method 0x57BAE0 decrements the counter and finishes once it drops below 0, so the
+0x0057BB00		func	not ported	docs/FRONT_END_FLOW.md:375		[V]		its exit method 0x57BB00 sends `exit` and sets a busy flag at +0x38;
+0x0057BCC0		func	not ported	docs/FRONT_END_FLOW.md:362		[V]		[V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
+0x0057BD20		func	not ported	docs/FRONT_END_FLOW.md:365		[V]		not a function entry in the master analysis; Otherwise it is `stats` (0xCD8E14). The link getter is 0x57BD20.
 0x0057D9B0		func	not ported	docs/PROGRESS_AND_SPAWN.md:18				`locked_timestep` references at `0x0057d9b0` and `0x0057dcf0` belong to sequences with slow motion, camera zoom and result presentation fields. These are not...
 0x0057DCF0		func	not ported	docs/PROGRESS_AND_SPAWN.md:18				`locked_timestep` references at `0x0057d9b0` and `0x0057dcf0` belong to sequences with slow motion, camera zoom and result presentation fields. These are not...
 0x0057E11E		label	not ported	docs/CAMERA_VIEWS.md:269				inside 0x0057E0B0; +0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
@@ -804,8 +822,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0058158B		func	not ported	docs/GARAGE_WORLD.md:44				not a function entry in the master analysis; | `garage_zone_manager` | 0xCC1350 | 0x4CE086, 0x5105C6, 0x51063A, 0x5106E8, 0x580D39, 0x580E58, 0x58158B, 0x5882F7, 0x58ECCE, 0x58EE83, 0x59FB3F, 0x5AD4D0 |
 0x00582750	restore	func	crates/grid-app/src/camera.rs:491 grid-app::camera::restore	docs/CAMERA_VIEWS.md:82	F349	[D]		view falls back to the first visible one, 0x582750) and saved at the end
 0x00582BF0	race_setup_pick_osd_kind	func	crates/grid-app/src/race_osd.rs:279 grid-app::race_osd::lap_layout	docs/RACE_HUD.md:597	F825 F814 F810	[D]		an offline event (T 2, written by 0x611F30 through 0x582BF0 for every
-0x00582C90		func	not ported	docs/FRONT_END_FLOW.md:364		[V]		its enter method 0x582C90 registers with the `limbo` component, passes the type to the
-0x00582D20		func	not ported	docs/FRONT_END_FLOW.md:370		[V]		its message handler 0x582D20 clears the flag on a `complete` message.
+0x00582C90		func	not ported	docs/FRONT_END_FLOW.md:370		[V]		its enter method 0x582C90 registers with the `limbo` component, passes the type to the
+0x00582D20		func	not ported	docs/FRONT_END_FLOW.md:376		[V]		its message handler 0x582D20 clears the flag on a `complete` message.
 0x00583B00		func	crates/grid-app/src/post_race.rs:234 grid-app::post_race	docs/RACE_HUD.md:134 ; docs/RACE_RULES_RESEARCH.md:79		[I]		Stats → results: end the race (finalisation from the front end, 0x583B00).
 0x00583E10	PauseWorld_Update	func	not ported	docs/RACE_HUD.md:825				package's `Anim!96` flies both between the pause screens (the loader 0x58B380 and update 0x583E10
 0x00584810		func	not ported	docs/CAMERA_VIEWS.md:247	F613 F499	[D]		Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
@@ -842,8 +860,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x005A2840		func	not ported	docs/TOUGE.md:66				not a function entry in the master analysis; Meaning of `+4`.** `+4` in {2, 3} selects the Haruna drift intro and results scenes (`haruna_drift_intro_reveal`, `drift_results_intro_haruna`, 0x5A2840/0x5A...
 0x005A3020	RenderGarageWorld_ctor	func	not ported	docs/GARAGE_WORLD.md:51	F809	[V]		its constructor 0x5A3020 sets vtable 0xCD7970 and copies four 16-byte rows from its argument (+0x10..+0x4F).
 0x005A30E0	RenderGarageWorld_name	func	not ported	docs/GARAGE_WORLD.md:50	F809	[V]		not a function entry in the master analysis; 0x5A30E0 returns its name;
-0x005A3FD0		func	not ported	docs/FRONT_END_FLOW.md:362		[V]		not a function entry in the master analysis; [V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
-0x005A3FE0		func	not ported	docs/FRONT_END_FLOW.md:356		[V]		not a function entry in the master analysis; [V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
+0x005A3FD0		func	not ported	docs/FRONT_END_FLOW.md:368		[V]		not a function entry in the master analysis; [V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
+0x005A3FE0		func	not ported	docs/FRONT_END_FLOW.md:362		[V]		not a function entry in the master analysis; [V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
 0x005A42B0		func	not ported	docs/DISCIPLINES.md:247 ; docs/RESET_AND_RESPAWN_RESEARCH.md:508				0x5A42B0]; the secondary vtable 0xCFB76C holds the resource callback 0x7DD3C0.
 0x005A5630	MovePauseWorldToCamera_Build	func	not ported	docs/RACE_HUD.md:826				of the pause world; 0x5A5630 builds `MovePauseWorldToCamera`, dispatched by 0x4ED780; 0x4DCDF0
 0x005A5990		func	not ported	docs/RACE_HUD.md:500	F763	[D]		not a function entry in the master analysis; Wreck-screen delay [D]: `StateTerminalDamageDelay` (vtable 0xCDA548; 0x5A5990 is only a shared
@@ -1440,10 +1458,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x006A0820	flag_scroll	func	crates/grid-app/src/name_tag.rs:126 grid-app::name_tag::flag_scroll	docs/RACE_HUD.md:548	F782			The flag atlas cell of `flag_id` as (scrollX, scrollY) (0x6A0820): nine rows of seven
 0x006A1430	replay_controller_ctor	func	not ported	docs/REPLAY.md:488	F794	[D]		controller (ctx+0x225C; constructor 0x6A1430, vtable 0xCEC3E0, update 0x6BA130) in modes 3/4
 0x006A14D0	replay_controller_set_mode	func	not ported	docs/REPLAY.md:486		[D]		replay controller's mode 3 (0x6A14D0); 0x1C leads to `jump_in`, 0x20 to `terminal_damage_menu`.
-0x006A1850		func	not ported	docs/FRONT_END_FLOW.md:277	F821	[D]		The values come from a profile statistics object (getters 0x6A1850 … 0x6A1B10, e.g. 0x6A1920
-0x006A1920	profile_career_wins	func	not ported	docs/FRONT_END_FLOW.md:277	F821	[D]		The values come from a profile statistics object (getters 0x6A1850 … 0x6A1B10, e.g. 0x6A1920
-0x006A1A50	profile_events_entered	func	not ported	docs/FRONT_END_FLOW.md:278		[D]		returns career wins at +0x44 and podiums at +0x48 of the object at +0xC; 0x6A1A50 events
-0x006A1B10	profile_lemans_stat	func	not ported	docs/FRONT_END_FLOW.md:270	F821	[D]		0x6A1B10, 0x80/0x100/0x200 online; it never sets 0x20 or 0x40, so the online and award slots
+0x006A1850		func	not ported	docs/FRONT_END_FLOW.md:283	F821	[D]		The values come from a profile statistics object (getters 0x6A1850 … 0x6A1B10, e.g. 0x6A1920
+0x006A1920	profile_career_wins	func	not ported	docs/FRONT_END_FLOW.md:283	F821	[D]		The values come from a profile statistics object (getters 0x6A1850 … 0x6A1B10, e.g. 0x6A1920
+0x006A1A50	profile_events_entered	func	not ported	docs/FRONT_END_FLOW.md:284		[D]		returns career wins at +0x44 and podiums at +0x48 of the object at +0xC; 0x6A1A50 events
+0x006A1B10	profile_lemans_stat	func	not ported	docs/FRONT_END_FLOW.md:276	F821	[D]		0x6A1B10, 0x80/0x100/0x200 online; it never sets 0x20 or 0x40, so the online and award slots
 0x006A2240	remaining	func	crates/grid-tools/src/flashback.rs:67 grid-tools::flashback::remaining	docs/FLASHBACK.md:68	F366	[D]		`_max_award` [D 0x6AA200]; remaining = maximum - used [D 0x6A2240].
 0x006A2260	use_one	func	crates/grid-tools/src/flashback.rs:89 grid-tools::flashback::use_one	docs/FLASHBACK.md:70	F366	[D]		Preparing the jump-in uses one [D 0x59AFA0 -> 0x6A2260 `used += 1`].
 0x006A2290	flashback_manager_max_award	func	not ported	docs/FLASHBACK.md:200	F794	[D]		not a function entry in the master analysis; its callers are 0x66DB80 and 0x51FB90 (vtable 0xCCF460). 0x6A2290 only returns `max_award`
@@ -2556,7 +2574,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x008D46A0	osd_element_hide	func	not ported	docs/RACE_HUD.md:609	F814	[D]		0x8D4670 (hide 0x8D46A0). Provider slot 0x24 (index 9) is the time limit: 0x80E5E0 is true only
 0x008D52D0		func	not ported	docs/RACE_HUD.md:576	F770	[V]		Stacker re-flow [D]: the attach type "stacker" (0xD0A974; constructor 0x8D52D0, vtable 0xD0AB20;
 0x008D5370		func	not ported	docs/RACE_HUD.md:577		[I]		not a function entry in the master analysis; factory probably 0x8D5370 [I]). Build 0x8D3730 collects up to 32 children with their rest
-0x008D5820	play_part_once	func	crates/grid-app/src/osd_scene.rs:695 grid-app::osd_scene::play_part_once	docs/RACE_HUD.md:361				(0x8D5820).
+0x008D5820	play_part_once	func	crates/grid-app/src/osd_scene.rs:730 grid-app::osd_scene::play_part_once	docs/RACE_HUD.md:361				(0x8D5820).
 0x008D5900		func	not ported	docs/RACE_HUD.md:239	F383	[D]		`1.6` 16:10, `1.3` 4:3, `1.2` 5:4); a name without a range (0x8D5900) changes nothing, so a 20:9
 0x008D5CB0		func	crates/grid-app/src/race_osd.rs:9 grid-app::race_osd	docs/RACE_HUD.md:237	F383	[D]		grid.exe 0x8D5CB0; no range for other aspects keeps the default layout).
 0x008D9480		func	not ported	docs/RACE_HUD.md:600	F810	[D]		0x6F9D70) exists and its flag (session+0x10)+0x30 (0x8D9480) is set. The constructor 0x5EA0D0 does
@@ -2604,7 +2622,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x009085F0	time_minutes	func	crates/grid-app/src/race_osd.rs:338 grid-app::race_osd::hours_minutes	docs/RACE_HUD.md:615		[D]		0x9085C0, 0x9085F0, 0x908640) [D].
 0x00908640	time_seconds	func	crates/grid-app/src/race_osd.rs:338 grid-app::race_osd::hours_minutes	docs/RACE_HUD.md:615		[D]		0x9085C0, 0x9085F0, 0x908640) [D].
 0x00908820	seconds	func	crates/grid-tools/src/virtual_race.rs:213 grid-tools::virtual_race::seconds	docs/DISCIPLINES.md:481				0x908820 back × 1e-6).
-0x00908860	format_lemans_time	func	crates/grid-tools/src/race.rs:107 grid-tools::race::format_lemans_time ; crates/grid-app/src/post_race.rs:731 grid-app::post_race (in time_text) ; crates/grid-app/src/pause_menu/race_tests.rs:934 grid-app::pause_menu::race_tests (in a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress)	docs/RACE_HUD.md:480	F763	[V]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
+0x00908860	format_lemans_time	func	crates/grid-tools/src/race.rs:107 grid-tools::race::format_lemans_time ; crates/grid-app/src/post_race.rs:761 grid-app::post_race (in time_text) ; crates/grid-app/src/pause_menu/race_tests.rs:934 grid-app::pause_menu::race_tests (in a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress)	docs/RACE_HUD.md:480	F763	[V]		(0x4C8200 -> 0x908860 [D], the Le Mans results' format).
 0x00908C60	split	func	crates/grid-tools/src/virtual_race.rs:309 grid-tools::virtual_race::split			[I]		Split `i`, 0 for a split not recorded [I 0x908C60].
 0x00908CF0	order	func	crates/grid-tools/src/race.rs:529 grid-tools::race::order	docs/LE_MANS.md:102 ; docs/RACE_RULES_RESEARCH.md:72	F308	[V]		unfinished cars rank by race progress [V 0x908cf0];
 0x00908F20		func	not ported	docs/RACE_RULES_RESEARCH.md:191		[V]		(0x908F20(0) = the car whose position is 0) is within 20 m of the line.
@@ -3184,7 +3202,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x009ECBF1		label	not ported	docs/WHEEL_DETACHMENT.md:40				inside 0x009EC9B0; While parts +7BF1 is 0, for each wheel `+1C3C × S < zone` sets car byte +22E4 + i once (9ECBF1..9ECC96).
 0x009EE360		func	not ported	docs/BODY_SLEEPING.md:177				+0x710 is set and when +0x640 is nonzero, it takes car 9EE380(0), then walks the cars with 9EE360
 0x009EE370		func	not ported	docs/REPLAY_DIRECTOR_RESEARCH.md:166				frame time to +0xD28 and walks the vehicles (0x9AD030 / 0x9EE370, skipping one with +0x6C
-0x009EE380		func	not ported	docs/VEHICLE_STATE.md:31 ; docs/BODY_SLEEPING.md:177 ; docs/DRIVING_ASSISTS_RESEARCH.md:44				+0x710 is set and when +0x640 is nonzero, it takes car 9EE380(0), then walks the cars with 9EE360
+0x009EE380		func	not ported	docs/VEHICLE_STATE.md:31 ; docs/BODY_SLEEPING.md:177 ; docs/DRIVING_ASSISTS_RESEARCH.md:44		[I]		+0x1CA and presents the next stat (after a replay camera switch when 0x9EE380(0) holds [I]); on a
 0x009EF020		func	crates/grid-tools/src/speech.rs:1726 grid-tools::speech	docs/AI_MISTAKES_PACING_RESEARCH.md:338 ; docs/SPEECH_AUDIO_RESEARCH.md:380				The live vehicle and the damage object copied every second frame (+0x470, 0x9EF020).
 0x009EF040	stop_drivetrain	func	crates/grid-world/src/reset_lines.rs:88 grid-world::reset_lines::stop_drivetrain ; crates/grid-world/src/spawn.rs:182 grid-world::spawn::GRID_LIMIT ; crates/grid-tools/src/source_vehicle.rs:1218 grid-tools::source_vehicle::place_at_rest	docs/RESET_AND_RESPAWN_RESEARCH.md:24 ; docs/PROGRESS_AND_SPAWN.md:29 ; docs/VEHICLE_STATE.md:66	F341 F332	[V]	GRID_LIMIT	tail of the grid-spawn setter 0x9EF040 (wheel spin and gear). The caller
 0x009EF17D		label	not ported	docs/LIVE_SPAWN_CAPTURE.md:11				inside 0x009EF040; Attempt 08 attached after the race was loaded and armed entry `0x009de4e0` while running. Observed menu input selected and confirmed Restart Race. Every capt...
@@ -3407,7 +3425,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00A682A0	engine_audio_shift_new	func	crates/grid-tools/src/ai_pacing.rs:195 grid-tools::ai_pacing::Mt ; crates/grid-tools/src/engine_audio_shift.rs:135 grid-tools::engine_audio_shift::new ; crates/grid-tools/src/series.rs:288 grid-tools::series::Mt	docs/AUDIO_RESEARCH.md:1123 ; docs/SERIES.md:497		[V]	Mt new	standard generation and tempering (0xA682A0, 0xA68380) [V, docs/SERIES.md].
 0x00A68380		label	crates/grid-tools/src/series.rs:288 grid-tools::series::Mt	docs/SERIES.md:497		[V]		inside 0x00A682A0; standard generation and tempering (0xA682A0, 0xA68380) [V, docs/SERIES.md].
 0x00A683B0	float	func	crates/grid-tools/src/career/ebay.rs:159 grid-tools::career::ebay::float ; crates/grid-tools/src/virtual_race.rs:251 grid-tools::virtual_race::uniform ; crates/grid-tools/src/career/field.rs:223 grid-tools::career::field::uniform	docs/DISCIPLINES.md:364 ; docs/AI_AVOID_RECOVERY_LIVE.md:234 ; docs/AI_DRIVER_RESEARCH.md:377		[V]	uniform	`float(lo, hi)` (0xA683B0): `lo + genrand · 2⁻³² · (hi − lo)` (x87;
-0x00A683E0	range	func	crates/grid-tools/src/series.rs:322 grid-tools::series::range ; crates/grid-tools/src/race.rs:130 grid-tools::race::grid_slot	docs/CAREER_SCREEN.md:189 ; docs/FRONT_END_FLOW.md:308 ; docs/RACE_RULES_RESEARCH.md:305		[V]		0xA683E0: `lo + genrand() % (hi - lo)`, upper bound exclusive.
+0x00A683E0	range	func	crates/grid-tools/src/series.rs:322 grid-tools::series::range ; crates/grid-tools/src/race.rs:130 grid-tools::race::grid_slot	docs/CAREER_SCREEN.md:189 ; docs/FRONT_END_FLOW.md:314 ; docs/RACE_RULES_RESEARCH.md:305		[V]		0xA683E0: `lo + genrand() % (hi - lo)`, upper bound exclusive.
 0x00A68410	ebay_int	func	crates/grid-tools/src/career/ebay.rs:153 grid-tools::career::ebay::int ; crates/grid-tools/src/career/leaderboard.rs:143 grid-tools::career::leaderboard::int ; crates/grid-tools/src/speech.rs:1336 grid-tools::speech::int_between	docs/SPEECH_AUDIO_RESEARCH.md:155 ; docs/CAREER_RESEARCH.md:461 ; docs/SERIES.md:498			int int_between leaderboard_int	`int(lo, hi)` (0xA68410): `lo == hi ? hi : lo + genrand % (hi - lo)`,
 0x00A68440	series_Mt	func	crates/grid-tools/src/series.rs:287 grid-tools::series::Mt ; crates/grid-tools/src/virtual_race.rs:231 grid-tools::virtual_race	docs/DISCIPLINES.md:489 ; docs/SERIES.md:496	F401	[V]	Mt	seeding (0xA68440: `mt[0] = seed | 1`, `mt[i] = mt[i-1] * 69069`),
 0x00A68487		func	not ported		F514	[V]		not a function entry in the master analysis; release grid-app.exe sha256 9a67e416…a68487
@@ -3963,6 +3981,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00C45770		func	not ported	docs/LAUNCH_AND_GRID_START.md:25				stopwatch `C45770/C457D0`, message stopwatch `A4C350/A4BEA0`. The frame dispatcher that
 0x00C457D0		func	not ported	docs/FRAME_STEPPING.md:66	F543			stopwatch callers of `A3F3B0`/`C457D0` are networking (`bdSocket`), and the QPC user
 0x00C6E720		func	not ported	docs/GARAGE_WORLD.md:43				not a function entry in the master analysis; | `GarageLocationManager` | 0xCC34F8 | 0xC6E720 |
+0x00C71E70	post_race_stats_factory	func	not ported	docs/RACE_HUD.md:951		[D]		not a function entry in the master analysis; Stats screen (F826) [D unless marked]. `ScreenPostRaceStats`: factory 0xC71E70, vtable
 0x00C72470	ScreenSeasonInfo_factory	func	not ported	docs/CAREER_RESEARCH.md:156	F774	[I]		not a function entry in the master analysis; Both info pages are one screen class, ScreenSeasonInfo [I]: loader 0x508EB0, vtable 0xCCFAC8, factory 0xC72470;
 0x00C734B0		func	not ported	docs/GARAGE_WORLD.md:45				not a function entry in the master analysis; | `StateEditGarageCarLivery` | 0xCDD720 | 0xC734B0, 0xC734D0 (registrars) |
 0x00C734D0		func	not ported	docs/GARAGE_WORLD.md:45				not a function entry in the master analysis; | `StateEditGarageCarLivery` | 0xCDD720 | 0xC734B0, 0xC734D0 (registrars) |
@@ -4109,29 +4128,29 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CB8200	DEGREES	global	crates/grid-app/src/camera.rs:29 grid-app::camera::DEGREES	docs/DISCIPLINES.md:408				Degrees to radians as the original multiplies (0xCB8200).
 0x00CB8204		global	not ported	docs/DISCIPLINES.md:199		[I]		negative on one side [I which side]; degrees = |angle| × 57.2957763671875 (0xCB8204); mph by
 0x00CB82C0		global	not ported	docs/AI_PATH_OBSTACLE_SCAN.md:109				| 0xCB82C0 | 500.0 | sweep length L |
-0x00CB849C		global	not ported	docs/FRONT_END_FLOW.md:222	F820	[I]		0x47C7F0 (so the first is the pitch); it also sends weight × v as message 0xCB849C (purpose
+0x00CB849C		global	not ported	docs/FRONT_END_FLOW.md:228	F820	[I]		0x47C7F0 (so the first is the pitch); it also sends weight × v as message 0xCB849C (purpose
 0x00CB8538		global	not ported	docs/AUDIO_RESEARCH.md:2240				scale (0xE50908), 0.05 is 0xCAFE60 and the base 10 is 0xCB8538. With the sqrt switch on, it
-0x00CB8570		vtable	not ported	docs/FRONT_END_FLOW.md:176				Two generators (vtable 0xCB8570, evaluate 0x476720) each sum three octaves at
+0x00CB8570		vtable	not ported	docs/FRONT_END_FLOW.md:182				Two generators (vtable 0xCB8570, evaluate 0x476720) each sum three octaves at
 0x00CB86FC		global	not ported	docs/RACE_HUD.md:546		[I]		authored material alphas [I]. Text: the position ("%d", 0xCB86FC), the name (32 characters) and
 0x00CB870C		global	crates/grid-tools/src/dynamic_props.rs:1212 grid-tools::dynamic_props (in loose_wheel) ; crates/grid-tools/src/loose_panel.rs:85 grid-tools::loose_panel (in spawn) ; crates/grid-app/src/camera.rs:91 grid-app::camera::LOOK_BLEND	docs/CAMERA_VIEWS.md:189 ; docs/PLATFORMS_AND_INPUT_RESEARCH.md:541 ; docs/SERIES.md:277		[D]		angular_damping: [f32::from_bits(0x3e4c_cccd); 3], // 0.2 (CB870C)
 0x00CB8DA4	RACE_START_SIDE_DISTANCE	global	crates/grid-tools/src/ai_driver.rs:1123 grid-tools::ai_driver::RACE_START_SIDE_DISTANCE ; crates/grid-tools/src/hud_audio.rs:158 grid-tools::hud_audio (in parse) ; crates/grid-world/src/mechanical_damage.rs:38 grid-world::mechanical_damage::gain	docs/AI_AVOID_RECOVERY_LIVE.md:342 ; docs/AI_MISTAKES_PACING_RESEARCH.md:339 ; docs/AUDIO_RESEARCH.md:234		[D]		Constants 0xCB0BC0 (-48), 0xCAF88C (0.5), 0xCB8DA4 (2). | note: merge retained additional port provenance: crates/grid-tools/src/ai_driver.rs:943 grid-tools::ai_driver::RACE_START_SIDE_DISTANCE
 0x00CB95C4		global	not ported	docs/DONINGTON_ATMOSPHERE.md:50				Lighting update730f90, relevant instructions731dfe..731e83: fogParams.z=1/fogDistance and .w=fogDensityCap. SSE masks atcaf420/caf430 select Z/W; numeratorca...
-0x00CB96C0	fe_view_tweak_message_vtable	vtable	not ported	docs/FRONT_END_FLOW.md:213	F820	[D]		(vtable 0xCB96C0, type 0xDAACC4) to the camera, then once more with a second name (0xCB9C4C,
+0x00CB96C0	fe_view_tweak_message_vtable	vtable	not ported	docs/FRONT_END_FLOW.md:219	F820	[D]		(vtable 0xCB96C0, type 0xDAACC4) to the camera, then once more with a second name (0xCB9C4C,
 0x00CB97B4	GlyphStacker_message_vtable	vtable	not ported	docs/RACE_HUD.md:929	F825	[D]		SetSize (message 0xDAAD44, vtable 0xCB97B4; handler 0x4ACEB0 → 0x4AA940): children 0..n−1 shown,
 0x00CB9B78		global	crates/grid-tools/src/virtual_race.rs:457 grid-tools::virtual_race (in estimate) ; crates/grid-world/src/mechanical_damage.rs:155 grid-world::mechanical_damage (in indicators)	docs/MECHANICAL_DAMAGE.md:116				The last sector takes up the rest, at least 2 s (0xCB9B78).
-0x00CB9B9C	camera_spring_component_vtable	vtable	crates/grid-app/src/camera_spring.rs:11 grid-app::camera_spring	docs/FRONT_END_FLOW.md:205	F820	[D]		message (type 0xDAACC4). The camera's spring component (vtable 0xCB9B9C)
-0x00CB9C4C		vtable	not ported	docs/FRONT_END_FLOW.md:213	F820	[I]		(vtable 0xCB96C0, type 0xDAACC4) to the camera, then once more with a second name (0xCB9C4C,
+0x00CB9B9C	camera_spring_component_vtable	vtable	crates/grid-app/src/camera_spring.rs:11 grid-app::camera_spring	docs/FRONT_END_FLOW.md:211	F820	[D]		message (type 0xDAACC4). The camera's spring component (vtable 0xCB9B9C)
+0x00CB9C4C		vtable	not ported	docs/FRONT_END_FLOW.md:219	F820	[I]		(vtable 0xCB96C0, type 0xDAACC4) to the camera, then once more with a second name (0xCB9C4C,
 0x00CBA004		vtable	not ported	docs/LIVERY_CAROUSEL.md:28		[V]		[V] Colour: 0x52B760 → 0x514950 → 0x5F1D50 take a `livery_colour` row's red, green and blue bytes / 255 and send them as a colour message (vtable 0xCBA004, t...
 0x00CBA1F0		global	crates/grid-tools/src/virtual_race.rs:410 grid-tools::virtual_race (in estimate) ; crates/grid-world/src/mechanical_damage.rs:85 grid-world::mechanical_damage	docs/AI_PATH_OBSTACLE_SCAN.md:108 ; docs/RACE_RULES_RESEARCH.md:121		[V]		0xCBA1F0), else the previous lap, else a fresh lap.
-0x00CBA8D8		vtable	not ported	docs/FRONT_END_FLOW.md:174				0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
+0x00CBA8D8		vtable	not ported	docs/FRONT_END_FLOW.md:180				0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,
 0x00CBA8F0	BREAK_TOLERANCE	global	crates/grid-tools/src/dynamic_props.rs:32 grid-tools::dynamic_props::BREAK_TOLERANCE ; crates/grid-world/src/continuous.rs:30 grid-world::continuous::TIME_SCALE	docs/DYNAMIC_PROPS_RESEARCH.md:93		[D]	TIME_SCALE	0x00CBA8F0: a contact at 1/1.01 of the limit already breaks the shape.
 0x00CBACF8		vtable	not ported	docs/AUDIO_RESEARCH.md:2386				states.bin has one `StateSFXTrigger` (vtable 0xCBACF8, enter 0x486E20 plays its `sfx`
 0x00CBC4F8		global	crates/grid-app/src/camera.rs:83 grid-app::camera::SPRING_MIN_STEP	docs/CAMERA_VIEWS.md:226				input velocity; the acceleration filter halves per 1/60 s (0xCBC4F8,
-0x00CBC630		global	not ported	docs/FRONT_END_FLOW.md:331				0xCBC630 it overrides only the clone (0x4C1C60), the message handler (0x490370: the base
-0x00CBCB28		vtable	not ported	docs/FRONT_END_FLOW.md:330	F821	[D]		0x4A1DC0 and sets vtable 0xCBCB28, followed by its class name]. Against the base glyph vtable
-0x00CBD2A0	GlyphScalerX_vtable	vtable	crates/grid-app/src/results_art.rs:974 grid-app::results_art	docs/RACE_HUD.md:922	F825	[D]		`scaler_x` (GlyphScalerX, vtable 0xCBD2A0): stretches its `scalee`
+0x00CBC630		global	not ported	docs/FRONT_END_FLOW.md:337				0xCBC630 it overrides only the clone (0x4C1C60), the message handler (0x490370: the base
+0x00CBCB28		vtable	not ported	docs/FRONT_END_FLOW.md:336	F821	[D]		0x4A1DC0 and sets vtable 0xCBCB28, followed by its class name]. Against the base glyph vtable
+0x00CBD2A0	GlyphScalerX_vtable	vtable	crates/grid-app/src/results_art.rs:1041 grid-app::results_art	docs/RACE_HUD.md:922	F825	[D]		`scaler_x` (GlyphScalerX, vtable 0xCBD2A0): stretches its `scalee`
 0x00CBD664	ALONGSIDE_EMPTY_GAP	global	crates/grid-tools/src/ai_driver.rs:1149 grid-tools::ai_driver::ALONGSIDE_EMPTY_GAP ; crates/grid-tools/src/crowd_audio.rs:333 grid-tools::crowd_audio::RECOIL_IMPACT	docs/AUDIO_RESEARCH.md:2162			RECOIL_IMPACT	Alongside gaps above this are "no car on that side" (0xCBD664 = 2000).
-0x00CBE810	GlyphStackerLeft_vtable	vtable	crates/grid-app/src/results_art.rs:970 grid-app::results_art	docs/RACE_HUD.md:919	F825	[D]		`stacker_left` (GlyphStackerLeft, vtable 0xCBE810): the children
+0x00CBE810	GlyphStackerLeft_vtable	vtable	crates/grid-app/src/results_art.rs:1037 grid-app::results_art	docs/RACE_HUD.md:919	F825	[D]		`stacker_left` (GlyphStackerLeft, vtable 0xCBE810): the children
 0x00CC0A20		global	not ported	docs/AI_PATH_OBSTACLE_SCAN.md:110				| 0xCB46B4 / 0xCC0A20 | 1e-5 / −1e-5 | parallel threshold in 0x7792C0 |
 0x00CC0A64		vtable	not ported	docs/DISCIPLINES.md:470				The difficulty object (vtable 0xCC0A64, constructor 0x5F1B10) is filled by the `difficulty` row
 0x00CC1144		global	not ported	docs/AUDIO_RESEARCH.md:2384				the 19 code references to the string `pause` (0xCC1144) do not play it, and the string
@@ -4142,18 +4161,19 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CC34F8		global	not ported	docs/GARAGE_WORLD.md:43				| `GarageLocationManager` | 0xCC34F8 | 0xC6E720 |
 0x00CC3F08		vtable	not ported	docs/LIVERY_CAROUSEL.md:25		[V]		[V] 0x50D080 lays out the ring: it clones the template item for i in 1..count and sends each clone a rotation message (vtable 0xCC3F08) of (0, i × separation...
 0x00CC4DA2		global	not ported	docs/PLATFORMS_AND_INPUT_RESEARCH.md:641				BC path unchanged:** the PNGs of the pre-change exe and the new BC path are byte-identical in all three scenes (sha256 `6a4ff6bd…`, `2d56e040…`, `00cc4da2…`).
-0x00CC6EA0		vtable	not ported	docs/FRONT_END_FLOW.md:383				| `StateTriggerLoadingSpinner` | 0xCD71D0 (vtable 0xCC6EA0) |
+0x00CC6EA0		vtable	not ported	docs/FRONT_END_FLOW.md:389				| `StateTriggerLoadingSpinner` | 0xCD71D0 (vtable 0xCC6EA0) |
 0x00CC962C		vtable	not ported		F807	[I]		Findings [V static]: the "colour grid" is one 3D pill carousel per part (Pattern, Number, Primary/Secondary/Tertiary ColourCarousel classes). Index = `livery...
 0x00CC96CC		vtable	not ported		F807	[I]		Findings [V static]: the "colour grid" is one 3D pill carousel per part (Pattern, Number, Primary/Secondary/Tertiary ColourCarousel classes). Index = `livery...
 0x00CCBF40	replay_loop_entry_special	global	not ported	docs/REPLAY.md:492	F794	[O]	loop_entry_special	`loop_entry_special` (0xCCBF40, set by 0x524210), which keeps the saved window and crash time
 0x00CCD6C0	PrimaryColourCarousel_vtable	vtable	not ported	docs/CAREER_SCREEN.md:189	F807	[V]		Livery carousels (F807)** [V static]: the original's "colour grid" is one 3D carousel of pills per part (`PatternCarousel`, `NumberCarousel`, `Primary/Second...
-0x00CCDBE0		vtable	not ported	docs/FRONT_END_FLOW.md:304		[V]		[V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
+0x00CCDBE0		vtable	not ported	docs/FRONT_END_FLOW.md:310		[V]		[V] `ScreenLoadingStats` (vtable 0xCCDBE0, GetType 0x55FD80): its parse method 0x504700 looks
 0x00CCF460		vtable	not ported	docs/FLASHBACK.md:200	F794	[D]		its callers are 0x66DB80 and 0x51FB90 (vtable 0xCCF460). 0x6A2290 only returns `max_award`
 0x00CCFAC8	ScreenSeasonInfo	vtable	crates/grid-tools/src/career/state.rs:35 grid-tools::career::state::SeasonTotals	docs/CAREER_RESEARCH.md:156	F774	[I]	SeasonTotals	screen's data provider (ScreenSeasonInfo, vtable 0xCCFAC8, flag
+0x00CD3078	post_race_stats_vtable	global	not ported	docs/RACE_HUD.md:952				0xCD3078; load 0x5552B0, enter 0x542560, exit 0x51D820, message handler 0x5426F0, trigger handler
 0x00CD4AE8		global	not ported	docs/CAREER_RESEARCH.md:231		[V]		0xCD4AE8, filler 0x555620) [V]: rows prize (+0x5C), sponsorship (0x652010), Team Win Bonus (+0x64),
-0x00CD61F4		global	not ported	docs/FRONT_END_FLOW.md:380				| `ScreenLoadingStats` | 0xCD61F4 |
-0x00CD71BC		global	not ported	docs/FRONT_END_FLOW.md:384				| `ScreenUnloadRace` | 0xCD71BC |
-0x00CD71D0		vtable	not ported	docs/FRONT_END_FLOW.md:383				| `StateTriggerLoadingSpinner` | 0xCD71D0 (vtable 0xCC6EA0) |
+0x00CD61F4		global	not ported	docs/FRONT_END_FLOW.md:386				| `ScreenLoadingStats` | 0xCD61F4 |
+0x00CD71BC		global	not ported	docs/FRONT_END_FLOW.md:390				| `ScreenUnloadRace` | 0xCD71BC |
+0x00CD71D0		vtable	not ported	docs/FRONT_END_FLOW.md:389				| `StateTriggerLoadingSpinner` | 0xCD71D0 (vtable 0xCC6EA0) |
 0x00CD77E0		vtable	not ported	docs/AUDIO_RESEARCH.md:714	F493	[O]		the state class with vtable CD77E0 reads `mode` (name lookup 4709D0 → 411AE0) and
 0x00CD7970		vtable	not ported	docs/GARAGE_WORLD.md:51	F809	[V]		its constructor 0x5A3020 sets vtable 0xCD7970 and copies four 16-byte rows from its argument (+0x10..+0x4F).
 0x00CD7A1C	RenderGarageWorld	global	not ported	docs/GARAGE_WORLD.md:49		[V]		[V] `RenderGarageWorld` (0xCD7A1C) is a message class, not a renderer:
@@ -4162,10 +4182,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CD83B8	race_reset_message_vtable	vtable	crates/grid-app/src/flashback.rs:607 grid-app::flashback (in capture)	docs/FLASHBACK.md:278	F794	[D]		message (0x5ACDC0, type 0xCD83B8), whose handler 0x65B2C0 reloads the
 0x00CD8AC4	state_instant_replay_vtable	vtable	not ported	docs/FLASHBACK.md:254	F780	[D]		(0x7EADD0) and zeroes every device (0x7E8450); its exit 0x57B180 (vtable 0xCD8AC4 slot 10, the
 0x00CD8D38		global	not ported	docs/RACE_HUD.md:598				(a virtual, .rdata 0xCD8D38) picks M = 2, or 4 when the game mode `[game+0x23D0]+0x50` is 4 (test
-0x00CD8D60		vtable	not ported	docs/FRONT_END_FLOW.md:362		[V]		[V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
-0x00CD8DE0		vtable	not ported	docs/FRONT_END_FLOW.md:356		[V]		[V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
-0x00CD8E14		global	not ported	docs/FRONT_END_FLOW.md:359		[V]		Otherwise it is `stats` (0xCD8E14). The link getter is 0x57BD20.
-0x00CD8E1C		global	not ported	docs/FRONT_END_FLOW.md:357		[V]		chooses the link. `standings` (string 0xCD8E1C) is chosen only when the game mode at
+0x00CD8D60		vtable	not ported	docs/FRONT_END_FLOW.md:368		[V]		[V] `StateLoading` (vtable 0xCD8D60, GetType 0x5A3FD0):
+0x00CD8DE0		vtable	not ported	docs/FRONT_END_FLOW.md:362		[V]		[V] `StateLoadingScreenSelect` (vtable 0xCD8DE0, GetType 0x5A3FE0). Its enter method 0x57BCC0
+0x00CD8E14		global	not ported	docs/FRONT_END_FLOW.md:365		[V]		Otherwise it is `stats` (0xCD8E14). The link getter is 0x57BD20.
+0x00CD8E1C		global	not ported	docs/FRONT_END_FLOW.md:363		[V]		chooses the link. `standings` (string 0xCD8E1C) is chosen only when the game mode at
 0x00CD96E0	state_next_race_vtable	vtable	not ported	docs/FLASHBACK.md:57	F795	[D]		thunk 0x6AF910, whose only caller is `StateNextRace`'s enter 0x58ABC0 (vtable 0xCD96E0). That
 0x00CD9F24		vtable	not ported	docs/CAMERA_VIEWS.md:269				+0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
 0x00CDA208	state_restart_race_vtable	vtable	not ported	docs/FLASHBACK.md:276	F794	[D]		Restart Race restores the race's flashbacks [D, round 5]: `StateRestartRace` (vtable 0xCDA208,
@@ -4174,9 +4194,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CDB624		vtable	not ported	docs/CAMERA_VIEWS.md:247		[D]		Controller 0x8348F0** (vtable 0xCFF8A8 slot 1 → 0x834E60), once per controller update [I: once per rendered frame, before the views]: if the look byte +0x1C ...
 0x00CDD720		global	not ported	docs/GARAGE_WORLD.md:45				| `StateEditGarageCarLivery` | 0xCDD720 | 0xC734B0, 0xC734D0 (registrars) |
 0x00CDD9D4		global	not ported	docs/GARAGE_WORLD.md:46				| `StateGarageZone` | 0xCDD9D4 | 0xC73BD0, 0xC73BF0 (registrars) |
-0x00CDDD10		global	not ported	docs/FRONT_END_FLOW.md:385				| `StateRaceLoadCoordinator` | 0xCDDD10 |
-0x00CDDD4C		global	not ported	docs/FRONT_END_FLOW.md:382				| `StateLoading` | 0xCDDD4C |
-0x00CDDDEC		global	not ported	docs/FRONT_END_FLOW.md:381				| `StateLoadingScreenSelect` | 0xCDDDEC |
+0x00CDDD10		global	not ported	docs/FRONT_END_FLOW.md:391				| `StateRaceLoadCoordinator` | 0xCDDD10 |
+0x00CDDD4C		global	not ported	docs/FRONT_END_FLOW.md:388				| `StateLoading` | 0xCDDD4C |
+0x00CDDDEC		global	not ported	docs/FRONT_END_FLOW.md:387				| `StateLoadingScreenSelect` | 0xCDDDEC |
 0x00CDFA28		vtable	not ported	docs/BODY_SLEEPING.md:180	F548	[D]		5C6B90 is slot 1 of the EntityManager service (vtable CDFA28; constructor **5B4C10** names it
 0x00CE0624	resource_key_csm_shadow_mask	global	not ported	docs/SOURCE_SKY_LIGHTING.md		[D]		Pinned ASCII csm_shadow_mask; separate intermediate resource created into CSM+0x644.
 0x00CE0778		vtable	not ported	docs/CAR_REFLECTIONS.md:15				`env map`**: a pass object constructed by 0x5C1880, with vtable 0xCE0778. The renderer keeps it at +0xF20, and the global 0xE5E83C points to it.
@@ -4488,8 +4508,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D8205A		global	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:37				Attempt to reconstruct and reuse the first NTCore result by setting only the flag failed its SHA-256 equality assertion. No candidate executable was saved. N...
 0x00D85A50		global	crates/grid-world/src/impact_frame.rs:332 grid-world::impact_frame (in run)	docs/AUDIO_RESEARCH.md:539 ; docs/AI_AVOID_RECOVERY_RESEARCH.md:357 ; docs/CAR_TO_CAR_DEFORMATION_RESEARCH.md:131		[V]		The file-backed D85A50 threshold is positive zero. Preserve the outer
 0x00DA83B0	choreographer_message_types	global	crates/grid-formats/src/ai.rs:712 grid-formats::ai::MESSAGE_TYPES	docs/SPEECH_AUDIO_RESEARCH.md:515	F611	[O]	MESSAGE_TYPES	The `message_type` names in type order (table 0xDA83B0, read by 0x401860):
-0x00DAAC6C		global	not ported	docs/FRONT_END_FLOW.md:332				handler, then a check for message type 0xDAAC6C, the channel connect request built by 0x4AB6C0)
-0x00DAACC4	fe_view_tweak_message_type_id	vtable	crates/grid-app/src/camera_spring.rs:11 grid-app::camera_spring	docs/FRONT_END_FLOW.md:213	F820	[D]		message (type 0xDAACC4). The camera's spring component (vtable 0xCB9B9C)
+0x00DAAC6C		global	not ported	docs/FRONT_END_FLOW.md:338				handler, then a check for message type 0xDAAC6C, the channel connect request built by 0x4AB6C0)
+0x00DAACC4	fe_view_tweak_message_type_id	vtable	crates/grid-app/src/camera_spring.rs:11 grid-app::camera_spring	docs/FRONT_END_FLOW.md:219	F820	[D]		message (type 0xDAACC4). The camera's spring component (vtable 0xCB9B9C)
 0x00DAAD44	msg_stacker_set_size	vtable	not ported	docs/RACE_HUD.md:929	F825	[D]		SetSize (message 0xDAAD44, vtable 0xCB97B4; handler 0x4ACEB0 → 0x4AA940): children 0..n−1 shown,
 0x00DAB000	fe_material_uniform_names	global	not ported	docs/FRONT_END_FLOW.md:152	F819	[D]		the vector reader stored them. Nothing else in the uniform table 0xDAB000 (14 names,
 0x00DAFC38	csm_shadow_sample_pos	global	crates/grid-app/src/shadow_layout.rs:305 grid-app::shadow_layout (in car_cascade)	docs/SUN_SHADOWS.md:66	F677	[O]		c4-c6), the world cascades' 4 (shadowSamplePos0 and 1, 0xDAFC38).

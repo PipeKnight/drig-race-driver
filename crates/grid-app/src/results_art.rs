@@ -22,10 +22,9 @@ use bevy::{
     asset::RenderAssetUsages,
     camera::{RenderTarget, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
-    image::ImageSampler,
     light::{Cascades, SimulationLightSystems},
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension},
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
     transform::TransformSystems,
     ui_render::prelude::MaterialNode,
 };
@@ -62,10 +61,13 @@ pub enum Screen {
     /// `screen/drift_scoreboard`: the drift statistics and the drift types
     /// (states.xml `post_race_drift_scoreboard`, glyph `drift_scoreboard`).
     DriftScoreboard,
+    /// `screen/post_race_stats`: the statistics after the finish, one page
+    /// at a time (`ScreenPostRaceStats`, docs/RACE_HUD.md "Stats screen").
+    Stats,
 }
 
 /// Every screen, in the order of [`DEFS`].
-const SCREENS: [Screen; 2] = [Screen::Results, Screen::DriftScoreboard];
+const SCREENS: [Screen; 3] = [Screen::Results, Screen::DriftScoreboard, Screen::Stats];
 
 impl Screen {
     fn def(self) -> &'static Def {
@@ -78,7 +80,12 @@ impl Screen {
 struct Def {
     /// The screen node.
     screen: &'static str,
-    /// The row glyphs' name up to the row number (`{rows}0` is the first).
+    /// The event of the pose animation that sets the screen's camera: the
+    /// pose is the frame it leaves the animation at; empty for the first
+    /// frame at which the screen has arrived ([`pose`]).
+    camera_event: &'static str,
+    /// The row glyphs' name up to the row number (`{rows}0` is the first);
+    /// empty for a screen without rows.
     rows: &'static str,
     /// The column titles' glyph.
     header: &'static str,
@@ -94,9 +101,10 @@ struct Def {
     hidden: &'static [&'static str],
 }
 
-const DEFS: [Def; 2] = [
+const DEFS: [Def; 3] = [
     Def {
         screen: "screen/pause_leaderboards=leaderboards",
+        camera_event: "",
         rows: "gadget/list_items=",
         header: "gadget/list_titles=titles",
         // [I] The list's frame holds twelve.
@@ -115,6 +123,7 @@ const DEFS: [Def; 2] = [
     },
     Def {
         screen: "screen/drift_scoreboard=drift_scoreboard",
+        camera_event: "",
         rows: "gadget/drift_list_items=",
         header: "gadget/drift_list_titles=drift_titles",
         // [I] Row 7 would cover the total (rows 8 apart from y 36, the
@@ -128,7 +137,29 @@ const DEFS: [Def; 2] = [
         body: &[],
         hidden: &[],
     },
+    Def {
+        screen: "screen/post_race_stats=post_race_stats",
+        // `Anim!96`'s event `post_race_stats_cam` [setcamera, Goto 1.333,
+        // complete] places camera1 and the screen; the screen lies left of
+        // the view's centre at that frame, the car beside it [D].
+        camera_event: "post_race_stats_cam",
+        rows: "",
+        header: "",
+        visible: 0,
+        content: &[],
+        title: &[],
+        body: &[],
+        // The enter function 0x542560 hides the three statistic glyphs and
+        // the presenter 0x53D460 writes only `chunky` and `norm_01` [D].
+        hidden: &[STATS_SPARE],
+    },
 ];
+
+/// The statistic glyphs of the stats screen: the big first page and the
+/// normal one (`post_race_stats_root`) [D].
+const STATS_CHUNKY: &str = "component/post_race_stats_chunky=chunky";
+const STATS_NORMAL: &str = "component/post_race_stats_normal=norm_01";
+const STATS_SPARE: &str = "component/post_race_stats_normal=norm_02";
 
 // ------------------------------------------------------------------ the board
 
@@ -181,27 +212,39 @@ struct Gate {
     header: bool,
     player_only: bool,
     scrollbar: bool,
+    /// A stats page glyph: drawn only on its page (`true`: the big one).
+    page: Option<bool>,
 }
 
 /// The gate of a node of screen `def` from its name and its ancestors'
 /// (`names[0]` the node, then up to the screen).
 fn gate(names: &[&str], def: &Def) -> Gate {
     let any = |n: &str| names.contains(&n);
-    let hidden = names.iter().any(|n| def.hidden.contains(n) || n.strip_prefix(def.rows).is_some_and(|k| k != "0"))
+    fn rows<'a>(n: &'a str, def: &Def) -> Option<&'a str> {
+        if def.rows.is_empty() { None } else { n.strip_prefix(def.rows) }
+    }
+    let hidden = names.iter().any(|n| def.hidden.contains(n) || rows(n, def).is_some_and(|k| k != "0"))
         || names.first() == Some(&"scroller_v_manual=centre_face");
     let variant = names
         .windows(2)
         .find(|w| w[1].ends_with("library_simple=content"))
         .map_or(Variant::Any, |w| def.content.iter().find(|c| c.0 == w[0]).map_or(Variant::Never, |c| c.1));
-    let row = names.iter().any(|n| n.strip_prefix(def.rows) == Some("0"));
+    let row = names.iter().any(|n| rows(n, def) == Some("0"));
     Gate {
         hidden,
         variant,
         row,
-        header: any(def.header),
+        header: !def.header.is_empty() && any(def.header),
         // The row cursor pill; the drift statistics' pills are always lit.
         player_only: row && any("null=track_info_pill"),
         scrollbar: any("null=scrollbar"),
+        page: if any(STATS_CHUNKY) {
+            Some(true)
+        } else if any(STATS_NORMAL) {
+            Some(false)
+        } else {
+            None
+        },
     }
 }
 
@@ -264,6 +307,18 @@ enum Field {
     Stat(usize, bool),
     /// The label of a pill of the strip ([`Strip`]).
     Pill,
+    /// A line of the stats page (`View::stat`): 0 the title, 1 the value,
+    /// 2 the detail.
+    Line(usize),
+}
+
+/// The stats page line a text node shows: the presenter 0x53D460 fills
+/// `chunky.6.6`, `.5.5`, `.4.4` (title, value, detail) on the big page and
+/// `norm_01.1.1`, `.2.2`, `.3.3` on the normal one [D].
+fn line(text: &str, page: bool) -> Option<usize> {
+    let text = text.split('!').next()?;
+    let order: [&str; 3] = if page { ["6", "5", "4"] } else { ["1", "2", "3"] };
+    order.iter().position(|t| *t == text)
 }
 
 /// The drift statistic a node belongs to: its `drift_cursor_half` or
@@ -282,6 +337,9 @@ fn field(names: &[&str], g: &Gate, def: &Def) -> Option<Field> {
     }
     if def.body.contains(&text) {
         return Some(Field::Body);
+    }
+    if let Some(page) = g.page {
+        return line(text, page).map(Field::Line);
     }
     if let Some(i) = stat(names) {
         // states.xml binds `drift_type` (`total` in the total) to the label;
@@ -328,6 +386,7 @@ fn text_of(field: Field, slot: Option<usize>, board: &Board) -> String {
         }
         Field::Stat(i, value) => v.stats.get(i).map(|s| s[usize::from(value)].clone()).unwrap_or_default(),
         Field::Pill => slot.and_then(|k| v.buttons.get(k)).cloned().unwrap_or_default(),
+        Field::Line(k) => v.stat.as_ref().map(|p| p.lines[k].clone()).unwrap_or_default(),
     }
 }
 
@@ -356,6 +415,7 @@ fn visible(gate: &Gate, slot: Option<usize>, board: &Board) -> bool {
         && row.is_none_or(|r| r < rows)
         && (!gate.player_only || (row.is_some() && row == player))
         && (!gate.scrollbar || rows > shown)
+        && gate.page.is_none_or(|big| board.view.stat.as_ref().is_some_and(|p| p.big == big))
 }
 
 // ------------------------------------------------------------------ pose
@@ -686,7 +746,11 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
         })
         .ok_or("no animation moves the camera with the screen")?;
     let a = &s0.animations[anim];
-    let pose = pose(s0, a, screen, camera, target);
+    let pose = match a.event(def.camera_event) {
+        Some(e) => pose_at(s0, a, camera, target, e.at(0., 0.).0),
+        None if def.camera_event.is_empty() => pose(s0, a, screen, camera, target),
+        None => return Err(format!("no event {}", def.camera_event)),
+    };
     let cam = s0.cameras.iter().find(|c| c.node == camera);
     // Scene-0 nodes the pose animation moves: the screen and its ancestors.
     let mut chain = HashSet::new();
@@ -695,7 +759,9 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
         chain.insert(n);
         i = s0.nodes[n].parent;
     }
-    let slides: Vec<HashMap<&str, &osd::Channel>> = scenes
+    // Every translation channel of a node: the stats glyphs' slide
+    // (`Anim!108`, `Anim!109`) comes after a two-key `explode` (`Anim!79`).
+    let slides: Vec<HashMap<&str, Vec<&osd::Channel>>> = scenes
         .iter()
         .enumerate()
         .map(|(si, s)| {
@@ -705,7 +771,7 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
                     continue;
                 }
                 for c in an.channels.iter().filter(|c| c.semantic == osd::Semantic::Translation) {
-                    m.entry(c.target.as_str()).or_insert(c);
+                    m.entry(c.target.as_str()).or_insert_with(Vec::new).push(c);
                 }
             }
             m
@@ -734,9 +800,9 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
             let channels: Vec<&osd::Channel> = a.channels.iter().filter(|c| targets(c, node)).collect();
             return animated(&node.local, &channels, pose.time);
         }
-        let channel = slides[si].get(node.id.as_str()).or_else(|| slides[si].get(node.name()));
         let saved = Vec3::new(node.local[12], node.local[13], node.local[14]);
-        match channel.and_then(|c| slide(c, saved)) {
+        let channels = slides[si].get(node.id.as_str()).or_else(|| slides[si].get(node.name()));
+        match channels.and_then(|cs| cs.iter().find_map(|c| slide(c, saved))) {
             Some(p) => {
                 let mut m = node.local;
                 m[12..15].copy_from_slice(&p.to_array());
@@ -766,6 +832,7 @@ fn layout(scenes: &[&osd::Scene], def: &Def) -> Result<Layout, String> {
     let name = |p: &osd_glyph::Placed| scenes[p.scene].nodes[p.node].name();
     let at = |n: &str| placed.iter().find(|p| name(p) == n).map(|p| Vec3::new(p.world[12], p.world[13], p.world[14]));
     let pitch = match (at(&format!("{}0", def.rows)), at(&format!("{}1", def.rows))) {
+        _ if def.rows.is_empty() => Vec3::ZERO,
         (Some(a), Some(b)) => b - a,
         _ => return Err(format!("{}: no row pitch", def.screen)),
     };
@@ -1253,27 +1320,6 @@ struct Prepared {
     lights: fe3d::Lights,
 }
 
-/// A cube of the OSD package with raw (gamma-space) texels, as fe3d reads them.
-pub(crate) fn cube(c: &osd::Cubemap<'_>) -> Image {
-    let mut data = Vec::new();
-    for face in c.faces {
-        data.extend(crate::texture_upload::decode_levels(face, c.size, c.size, 1, false).unwrap_or_default());
-    }
-    let mut image = Image::new(
-        Extent3d { width: c.size, height: c.size, depth_or_array_layers: 6 },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.texture_view_descriptor = Some(TextureViewDescriptor {
-        dimension: Some(TextureViewDimension::Cube),
-        ..default()
-    });
-    image.sampler = ImageSampler::linear();
-    image
-}
-
 fn prepare(root: &Path) -> Result<Prepared, String> {
     let read = |p: &str| std::fs::read(root.join(p)).map_err(|e| format!("{p}: {e}"));
     let bytes: Vec<Vec<u8>> = PACKAGES.iter().map(|p| read(p)).collect::<Result<_, _>>()?;
@@ -1302,11 +1348,7 @@ fn prepare(root: &Path) -> Result<Prepared, String> {
         images.insert(String::from_utf8_lossy(t.id).into_owned(), image);
     }
     // Reflection cubes.
-    let osd_bytes = read(CUBES)?;
-    let osd_tree = pssg::read_tree(&osd_bytes).map_err(|e| format!("{CUBES}: {e}"))?;
-    let osd_scene = osd::read_scene(&osd_tree).map_err(|e| format!("{CUBES}: {e}"))?;
-    let cube_of = |id: &str| osd_scene.cubemaps.iter().find(|c| c.id == id).map(cube).ok_or(format!("{CUBES}: no {id}"));
-    let cubes = [cube_of("env_soft.dds")?, cube_of("env_sharp.dds")?];
+    let (cubes, _) = osd_scene::cubes(&read, &[(CUBES, ["env_soft.dds", "env_sharp.dds"])])?;
     // Fonts.
     let mut fonts = HashMap::new();
     for item in layouts.iter().flat_map(|l| &l.items) {
@@ -1952,7 +1994,7 @@ mod tests {
 
     #[test]
     fn visibility_by_variant_row_and_player() {
-        let race = Gate { hidden: false, variant: Variant::Race, row: true, header: false, player_only: false, scrollbar: false };
+        let race = Gate { hidden: false, variant: Variant::Race, row: true, header: false, player_only: false, scrollbar: false, page: None };
         let b = board(5, 2, false);
         assert!(visible(&race, Some(4), &b));
         assert!(!visible(&race, Some(5), &b), "past the last car");
@@ -2029,10 +2071,70 @@ mod tests {
         assert_eq!(text_of(Field::Stat(1, false), None, &b), "drift_time label");
         assert_eq!(text_of(Field::Stat(6, true), None, &b), "total value");
         assert_eq!(text_of(Field::Cell(Column::DriftType), Some(2), &b), "r2c0");
-        let row = Gate { hidden: false, variant: Variant::Any, row: true, header: false, player_only: false, scrollbar: false };
+        let row = Gate { hidden: false, variant: Variant::Any, row: true, header: false, player_only: false, scrollbar: false, page: None };
         assert!(visible(&row, Some(2), &b) && !visible(&row, Some(3), &b));
         let cursor = Gate { player_only: true, ..row };
         assert!(!visible(&cursor, Some(0), &b), "no player row on the scoreboard");
+    }
+
+    /// The stats page glyphs: `chunky` text 6/5/4 and `norm_01` text 1/2/3
+    /// are the title, value and detail, drawn only on their page.
+    #[test]
+    fn stats_lines_fill_their_page() {
+        const S: &Def = &DEFS[2];
+        assert_eq!(line("6!0", true), Some(0));
+        assert_eq!((line("5", true), line("4", true), line("1", true)), (Some(1), Some(2), None));
+        assert_eq!((line("1", false), line("3", false), line("6", false)), (Some(0), Some(2), None));
+        let big = gate(&["text=5", "null=5", STATS_CHUNKY, "null=anim"], S);
+        assert_eq!((big.page, big.hidden, big.row, big.header), (Some(true), false, false, false));
+        assert_eq!(gate(&["text=2", STATS_NORMAL], S).page, Some(false));
+        assert!(gate(&["text=2", STATS_SPARE], S).hidden);
+        assert_eq!(field(&["text=5", "null=5", STATS_CHUNKY], &big, S), Some(Field::Line(1)));
+        let mut b = board(0, 0, false);
+        b.screen = Screen::Stats;
+        b.view.stat = Some(crate::post_race::StatPage { big: true, lines: ["t".into(), "v".into(), "d".into()] });
+        assert_eq!(text_of(Field::Line(2), None, &b), "d");
+        let normal = Gate { page: Some(false), ..big };
+        assert!(visible(&big, None, &b) && !visible(&normal, None, &b));
+        b.view.stat = None;
+        assert!(!visible(&big, None, &b) && text_of(Field::Line(0), None, &b).is_empty());
+    }
+
+    /// Needs GRID_GAME_ROOT: the stats screen lays out with both pages'
+    /// three lines inside the view of its camera.
+    #[test]
+    #[ignore]
+    fn stats_screen_lays_out() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let p = prepare(&root).unwrap();
+        let l = &p.layouts[Screen::Stats as usize];
+        println!("pose {:?} items {} skipped {:?}", l.pose, l.items.len(), l.skipped);
+        for k in 0..3 {
+            for big in [true, false] {
+                assert!(
+                    l.items.iter().any(|i| i.gate.page == Some(big) && matches!(&i.shape, Shape::Text { field, .. } if *field == Field::Line(k))),
+                    "line {k} big {big}"
+                );
+            }
+        }
+        let view = Mat4::look_at_rh(l.pose.eye, l.pose.target, Vec3::Y);
+        let proj = Mat4::perspective_rh(l.pose.fov_degrees.to_radians(), 1.6, l.near, l.far);
+        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        for it in l.items.iter().filter(|i| !i.gate.hidden) {
+            let b = it.bounds;
+            for k in 0..8 {
+                let c = Vec3::new(b[if k & 1 == 0 { 0 } else { 3 }], b[if k & 2 == 0 { 1 } else { 4 }], b[if k & 4 == 0 { 2 } else { 5 }]);
+                let q = proj * view * it.world.transform_point3(c).extend(1.);
+                assert!(q.w > 0., "art behind the camera");
+                let n = q.truncate().truncate() / q.w;
+                lo = lo.min(n);
+                hi = hi.max(n);
+            }
+        }
+        println!("ndc lo {lo:.2} hi {hi:.2}");
+        assert!((l.pose.time - 4. / 3.).abs() < 1e-3, "the event's frame");
+        assert!(lo.cmpge(Vec2::splat(-1.)).all() && hi.cmple(Vec2::ONE).all(), "inside the view");
+        assert!(hi.x - lo.x > 0.25 && hi.y - lo.y > 0.1, "drawn at a readable size");
     }
 
     /// Needs GRID_GAME_ROOT: the drift scoreboard lays out with every
@@ -2274,6 +2376,11 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
         let p = prepare(&root).unwrap();
         for (screen, l) in SCREENS.iter().zip(&p.layouts) {
+            // The stats screen has no pills.
+            if matches!(screen, Screen::Stats) {
+                assert!(l.strip.is_none());
+                continue;
+            }
             let s = l.strip.as_ref().unwrap_or_else(|| panic!("{screen:?}: no strip"));
             let root = &s.nodes[0];
             println!("{screen:?} templates {} gaps {:?} start {}", root.children.len(), root.gaps, root.start);
