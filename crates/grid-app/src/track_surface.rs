@@ -81,36 +81,40 @@ pub struct Surface {
     #[texture(106)]
     #[sampler(107)]
     skids: Handle<Image>,
+    // AsBindGroup packs fields at binding 108 in declaration order. Keep
+    // SurfaceUniforms in track_surface.wgsl in sync. Separate buffers here can
+    // exhaust the Metal vertex-stage slots, even though only the fragment
+    // shader reads these values.
     // A scale, B scale, C scale, A offset.
     #[uniform(108)]
     scales: Vec4,
     // B offset, skid enabled, authored macro AO strength, 1/PScale (wsm) or 0.
-    #[uniform(109)]
+    #[uniform(108)]
     controls: Vec4,
-    #[uniform(110)]
+    #[uniform(108)]
     skid_colour: Vec4,
-    #[uniform(111)]
+    #[uniform(108)]
     skid_colour2: Vec4,
     // Per-layer response codes:0road,1standalone terrain,2optional U-band.
     // Z/W are authored roughness/reflectance, not recovered source values.
-    #[uniform(112)]
+    #[uniform(108)]
     dry_ground: Vec4,
     // Camera mip bias opt-in, specular mode, speed low-pass bias, asphalt layer bits.
     // controls.w remains the source world-projected UV scale.
-    #[uniform(113)]
+    #[uniform(108)]
     sampling: Vec4,
     // X: RGB mixture; Y: standalone-road authored grazing F0 gain or0; ZW reserved.
     // Alpha stays on original taps.
-    #[uniform(114)]
+    #[uniform(108)]
     rgb_filter: Vec4,
     // The source Phong lobe: PhongPower, Fresnel min, max, power (all 0: none).
-    #[uniform(115)]
+    #[uniform(108)]
     phong: Vec4,
     // specularColour as radiance per unit lobe; W 1 replaces Bevy's specular.
-    #[uniform(116)]
+    #[uniform(108)]
     phong_light: Vec4,
     // specularDirection, toward the light.
-    #[uniform(117)]
+    #[uniform(108)]
     phong_direction: Vec4,
 }
 
