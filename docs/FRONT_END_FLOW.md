@@ -169,6 +169,12 @@ position), `zone_03`, `zone_04`, `tree_cam`. Anchors for the FE panels that appe
   Port: `fe_world.wgsl` (a `Material` with the formula above, sRGB re-encoded after sampling and
   decoded for the linear target), `fe_world::Surface`; the zone is `Spec::zone`, the cube
   `Spec::reflection`, read through `grid_formats::osd::read_cubemaps`.
+  Cube sources (F824): `osd_scene::cubes` returns fe3d's raw cubes from the first package of a
+  list that holds all the named ids (the livery carousel: `b_garage_01` ref_garage_soft/sharp,
+  then `Osd/dial2` env_soft/env_sharp). [D] `frontend/b_persistent.pssg` holds one cube,
+  `reflection_load.dds`; `reflection_soft/sharp.dds` (named by the results art's `TR1`) appear
+  only as names in the three front-end packages, and no `.pssg` of the install holds their data,
+  so the results art's dial2 cubes are the only source the install offers.
 - **Camera noise (static analysis of the unpacked exe).** The `<noise_tweaks>` of a
   `<camera_tweaks>` block (`default`, `pause`, `loading`, `in_game_cameras`) are read by
   0x47EBA0 into a noise object (constructor 0x487D00, vtable 0xCBA8D8; defaults x/y 1.2, z 1.01,

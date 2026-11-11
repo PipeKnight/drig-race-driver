@@ -446,6 +446,41 @@ pub(crate) fn cube(c: &osd::Cubemap<'_>) -> Image {
     image
 }
 
+/// The reflection cubes for fe3d's env slot (`Fe3dMaterial`), from the first
+/// source that holds all of its cube ids, with that source's path.
+///
+/// - Raw (gamma-space) texels, as fe3d reads them; [`cube`] is the sRGB view.
+/// - Each source is a package path and its cube ids, e.g. the garage's
+///   `ref_garage_soft/sharp.dds`, then the race OSD's `env_soft/sharp.dds`
+///   as the stand-in (results_art). Any PSSG with `CUBEMAPTEXTURE` nodes works.
+/// - The error names every source and why it failed.
+pub(crate) fn cubes<const N: usize>(
+    read: &dyn Fn(&str) -> Result<Vec<u8>, String>,
+    sources: &[(&'static str, [&str; N])],
+) -> Result<([Image; N], &'static str), String> {
+    let mut failed = Vec::new();
+    for &(path, ids) in sources {
+        let from = || -> Result<[Image; N], String> {
+            let bytes = read(path)?;
+            let tree = grid_formats::pssg::read_tree(&bytes).map_err(|e| format!("{path}: {e}"))?;
+            let all = osd::read_cubemaps(&tree).map_err(|e| format!("{path}: {e}"))?;
+            let mut out = Vec::with_capacity(N);
+            for id in ids {
+                let c = all.iter().find(|c| c.id == id).ok_or(format!("{path}: no {id}"))?;
+                let mut image = cube(c);
+                image.texture_descriptor.format = TextureFormat::Rgba8Unorm;
+                out.push(image);
+            }
+            out.try_into().map_err(|_| format!("{path}: cube count"))
+        };
+        match from() {
+            Ok(images) => return Ok((images, path)),
+            Err(e) => failed.push(e),
+        }
+    }
+    Err(if failed.is_empty() { "no reflection cube source".to_owned() } else { failed.join("; ") })
+}
+
 struct TextNode {
     font: usize,
     bounds: [f32; 4],
@@ -1437,6 +1472,33 @@ mod tests {
         // In again restarts from the range start.
         osd.play_part_once("player1", "in", 0., 0.5);
         assert_eq!(osd.anims[0].time, 0.);
+    }
+
+    #[test]
+    fn cubes_name_every_failed_source() {
+        let read = |p: &str| -> Result<Vec<u8>, String> { Err(format!("{p}: missing")) };
+        let e = cubes(&read, &[("a.pssg", ["x.dds"]), ("b.pssg", ["y.dds"])]).unwrap_err();
+        assert_eq!(e, "a.pssg: missing; b.pssg: missing");
+        assert!(cubes::<1>(&read, &[]).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased source"]
+    fn the_original_cubes_fall_back_in_order() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let read = |p: &str| std::fs::read(root.join(p)).map_err(|e| format!("{p}: {e}"));
+        let osd = ("Osd/dial2.pssg", ["env_soft.dds", "env_sharp.dds"]);
+        // b_persistent holds only reflection_load.dds, so the results'
+        // reflection_soft/sharp fall back to the race OSD's cubes.
+        let (images, from) =
+            cubes(&read, &[("frontend/b_persistent.pssg", ["reflection_soft.dds", "reflection_sharp.dds"]), osd]).unwrap();
+        assert_eq!(from, "Osd/dial2.pssg");
+        assert_eq!(images[0].texture_descriptor.format, TextureFormat::Rgba8Unorm);
+        assert_eq!(images[0].texture_descriptor.size.depth_or_array_layers, 6);
+        let (_, from) = cubes(&read, &[("frontend/b_persistent.pssg", ["reflection_load.dds"])]).unwrap();
+        assert_eq!(from, "frontend/b_persistent.pssg");
+        let (_, from) = cubes(&read, &[("frontend/b_garage_01.pssg", ["ref_garage_soft.dds", "ref_garage_sharp.dds"]), osd]).unwrap();
+        assert_eq!(from, "frontend/b_garage_01.pssg");
     }
 
     #[test]

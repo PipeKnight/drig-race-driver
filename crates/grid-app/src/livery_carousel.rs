@@ -17,7 +17,7 @@
 //! t + t² − t³.
 use crate::fe3d::{self, Fe3dMaterial};
 use crate::osd_scene::{self, OsdDisplay};
-use crate::results_art::{IDENTITY, PACKAGES, PARAMS, animated, cube, targets, white};
+use crate::results_art::{IDENTITY, PACKAGES, PARAMS, animated, targets, white};
 use bevy::{
     asset::RenderAssetUsages,
     camera::{RenderTarget, visibility::RenderLayers},
@@ -453,22 +453,7 @@ fn upload(tree: &pssg::Tree, ids: &[&[u8]], path: &str) -> Result<HashMap<String
 fn cubes(
     read: &dyn Fn(&str) -> Result<Vec<u8>, String>,
 ) -> Result<([Image; 2], &'static str), String> {
-    let from = |path: &'static str, ids: [&str; 2]| -> Result<([Image; 2], &'static str), String> {
-        let bytes = read(path)?;
-        let tree = read_tree(&bytes, path)?;
-        let scene = osd::read_scene(&tree).map_err(|e| format!("{path}: {e}"))?;
-        let of = |id: &str| {
-            scene
-                .cubemaps
-                .iter()
-                .find(|c| c.id == id)
-                .map(cube)
-                .ok_or(format!("{path}: no {id}"))
-        };
-        Ok(([of(ids[0])?, of(ids[1])?], path))
-    };
-    from(GARAGE, GARAGE_CUBES)
-        .or_else(|_| from(crate::results_art::CUBES, ["env_soft.dds", "env_sharp.dds"]))
+    osd_scene::cubes(read, &[(GARAGE, GARAGE_CUBES), (crate::results_art::CUBES, ["env_soft.dds", "env_sharp.dds"])])
 }
 
 fn prepare(root: &Path, pattern_names: &[String]) -> Result<Prepared, String> {
