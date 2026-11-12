@@ -3,6 +3,7 @@ name = "grid-world"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [features]
 # Validation only: execute the hardware RCPPS/RSQRTPS on x86 instead of the measured tables

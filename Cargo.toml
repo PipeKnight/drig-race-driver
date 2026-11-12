@@ -9,6 +9,7 @@ resolver = "3"
 edition = "2024"
 rust-version = "1.99"
 version = "0.1.0"
+license = "GPL-3.0-or-later"
 
 # Smaller debug builds (docs/DISK_USAGE.md §7): line tables for our crates, no
 # debug info for dependencies. Generated code and determinism are unchanged.

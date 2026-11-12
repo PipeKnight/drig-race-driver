@@ -139,6 +139,9 @@ def main():
     if icon.is_file():
         shutil.copy2(icon, contents / "Resources/DRIG.icns")
     shutil.copy2(source_root / "LICENSE", contents / "Resources/LICENSE.txt")
+    third_party_licenses = source_root / "LICENSES"
+    if third_party_licenses.is_dir():
+        shutil.copytree(third_party_licenses, contents / "Resources/LICENSES", dirs_exist_ok=True)
     shutil.copy2(source_root / "crates/grid-app/assets/fonts/FiraMono-LICENSE",
                  contents / "Resources/FiraMono-LICENSE.txt")
     with (contents / "Info.plist").open("wb") as out:

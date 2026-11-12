@@ -3,6 +3,7 @@ name = "grid-probes"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 # One-off research probes moved out of grid-tools (docs/TOOLCHAIN.md, "Build
 # and test cost"). Same binary names and outputs; not a default member, so
 # `cargo build` and `cargo test` at the root skip them. Build with

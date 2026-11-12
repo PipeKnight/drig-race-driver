@@ -4,6 +4,7 @@ default-run = "grid-tools"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 
 [features]
 # Validation only: hardware RCPPS/RSQRTPS on x86 instead of the default grid_world::sse_approx.
