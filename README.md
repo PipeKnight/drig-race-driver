@@ -99,7 +99,16 @@ Forks, bug reports and pull requests are welcome. Most of the code is written by
 
 DRIG is an independent project. It is not affiliated with, endorsed by or connected to Codemasters or Electronic Arts. "Race Driver: GRID" and related names are trademarks of their respective owners. You need your own copy of the original game to play.
 
-The source code is licensed under the [Apache License 2.0](LICENSE).
+New versions of DRIG are distributed under the [GNU General Public License, version 3 or any later version](LICENSE)
+(`GPL-3.0-or-later`). Versions already published under Apache 2.0 remain available under those terms.
+
+Third-party code and assets keep their original licenses. Upstream Bevy material is available under
+the [MIT](LICENSES/Bevy-MIT.txt) or [Apache 2.0](LICENSES/Apache-2.0.txt) terms. Fira Mono is distributed
+under the [SIL Open Font License 1.1](crates/grid-app/assets/fonts/FiraMono-LICENSE).
+Original GRID game files are supplied separately by the player.
+
+When publishing binaries under GPLv3, provide the corresponding source for that exact build, including
+the scripts needed to build and install it, and retain the applicable third-party notices.
 
 ## Disclaimer
 
