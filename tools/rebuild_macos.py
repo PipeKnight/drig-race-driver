@@ -1,7 +1,7 @@
 """Rebuild fresh origin/main as a private macOS DMG without changing the current checkout.
 
-See docs/MACOS.md. Default: embed the owner's preserved game files, then clean
-temporary sources, app staging and Cargo artifacts. --code-only omits game data.
+See docs/MACOS.md. Default: use the game files embedded in /Applications/DRIG.app when available.
+Clean temporary sources, app staging and Cargo artifacts. --code-only omits game data.
 """
 
 import argparse
@@ -19,6 +19,7 @@ import sys
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+INSTALLED_GAME_ROOT = Path("/Applications/DRIG.app/Contents/Resources/Grid")
 GIB = 1024 ** 3
 MARKERS = ("grid.exe", "cars/lac/lac.ned", "database/schema.bin", "database/database.bin")
 
@@ -27,8 +28,11 @@ def game_folder(explicit=None):
     if explicit is not None:
         candidates = [Path(explicit).expanduser()]
     else:
-        candidates = [ROOT / "local/macos-portable/source/Grid.reference",
-                      ROOT / "local/macos-portable/source/Grid"]
+        candidates = [
+            INSTALLED_GAME_ROOT,
+            ROOT / "local/macos-portable/source/Grid.reference",
+            ROOT / "local/macos-portable/source/Grid",
+        ]
         saved = Path.home() / "Library/Application Support/GRID Reassembly/game-root.txt"
         if saved.is_file():
             candidates.append(Path(saved.read_text().strip()))

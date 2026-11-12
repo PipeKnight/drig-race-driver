@@ -158,6 +158,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F832](log/F0832.md) | 2026-11-12 | Discover installed DRIG resources for private macOS rebuilds |
 | [F827](log/F0827.md) | 2026-11-11 | Playable 62992f28d9ec with F826 and APKs |
 | [F826](log/F0826.md) | 2026-11-11 | Post-race stats screen in the front-end art |
 | [F825](log/F0825.md) | 2026-11-11 | Results and drift screens: the pill strip in the front-end art |
@@ -217,7 +218,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F771](log/F0771.md) | 2026-11-10 | Career GRID World front end: pages, offers, rewards, supervised loop |
 | [F770](log/F0770.md) | 2026-11-10 | HUD: touge penalty pill, brake light, wreck delay; name tags, boost and stacker traced |
 | [F769](log/F0769.md) | 2026-11-10 | Replayed skid marks, smoke and debris; replay slow motion and frame step; Flashback drops the abandoned future's effects |
-| [F768](log/F0768.md) | 2026-11-09 | Drift Battle: original drift field, unread drift settings, drift soak |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

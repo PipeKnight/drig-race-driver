@@ -13,7 +13,7 @@ the original Windows executable.
 On the owner's Mac, double-click **Rebuild GRID.command** in the checkout root.
 It fetches `origin/main`, freezes its exact revision in a temporary detached
 clone, builds the native release and packages a new private portable DMG with
-the preserved `local/macos-portable/source/Grid.reference` resources and the
+the resources from `/Applications/DRIG.app/Contents/Resources/Grid` and the
 DRIG icon. It does not switch, reset or stash the current branch, install over
 a running game, publish a release, or alter the original game folder.
 
@@ -41,11 +41,11 @@ installed on this Mac, the error prints the required rustup installation command
 Packaging uses the maintained local helper/icon and the frozen main revision's
 engine, project license and font license; `build.json` records the engine source.
 
-If the separate game source folder has been deleted to save disk space, its
-resources can be recovered from a previous private DMG: copy `DRIG.app` out of
-that image and pass `--game-root "/path/to/DRIG.app/Contents/Resources/Grid"`.
-Remove that extra copy after the next build finishes. Public engine-only images
-do not contain these resources.
+The installed app is used when it contains the required GRID files. The script
+then falls back to `local/macos-portable/source/Grid.reference`,
+`local/macos-portable/source/Grid`, and the folder recorded in the app's
+`game-root.txt`. Use `--game-root` to override that search. If your private
+`DRIG.app` is in another location, pass its `Contents/Resources/Grid` folder.
 
 ### Manual build
 

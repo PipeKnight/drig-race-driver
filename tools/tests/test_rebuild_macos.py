@@ -21,6 +21,23 @@ def git(root, *args):
 
 
 class RebuildTests(unittest.TestCase):
+    def test_installed_resources_are_preferred_and_explicit_path_overrides(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / "Applications/DRIG.app/Contents/Resources/Grid"
+            fallback = root / "local/macos-portable/source/Grid.reference"
+            for game in (installed, fallback):
+                for marker in MOD.MARKERS:
+                    path = game / marker
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+
+            with patch.object(MOD, "ROOT", root), patch.object(MOD, "INSTALLED_GAME_ROOT", installed):
+                self.assertEqual(MOD.game_folder(), installed.resolve())
+                self.assertEqual(MOD.game_folder(fallback), fallback.resolve())
+                (installed / "grid.exe").unlink()
+                self.assertEqual(MOD.game_folder(), fallback.resolve())
+
     def scenario(self, fail=False, keep_cache=False):
         with tempfile.TemporaryDirectory(prefix="GRID rebuild test ") as directory:
             root = Path(directory) / "working tree"
