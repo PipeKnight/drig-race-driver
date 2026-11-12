@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F832](F0832.md) | 2026-11-12 | Discover installed DRIG resources for private macOS rebuilds |
 | [F827](F0827.md) | 2026-11-11 | Playable 62992f28d9ec with F826 and APKs |
 | [F826](F0826.md) | 2026-11-11 | Post-race stats screen in the front-end art |
 | [F825](F0825.md) | 2026-11-11 | Results and drift screens: the pill strip in the front-end art |
