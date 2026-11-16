@@ -374,3 +374,20 @@ Actual evidence: local/graphics/dlaa-creation-hint01/{native01,native02,native03
 native04,matched01}/ and local/handoff/drafts/dlaa-creation-hint-negative159/.
 Matched native-pixel frame00/frame29 PNGs and thirty-frame GIF were shown to the
 owner from matched01/review/. Antenna/thin-coverage quality remains open.
+
+## External display-resolution motion preparation (G387)
+
+The private comparison keeps a matched native 1920x1080 scene, raw prepass
+depth and motion, identical pre-Early HDR, camera, jitter and driving inputs.
+The test view points NGX at a separate 1x Rg16Float image and clears
+MVLowRes. That image copies the closest visible reverse-Z sample from a 3x3
+neighborhood. A 128x96 GPU readback at source frame 793, tick 1652 matched
+the same CPU reference across all 12,288 pairs. The retained control uses
+the normal SDK input and MVLowRes flag.
+
+The moving sequences still show antenna copies. Post-reconstruction contrast
+for the old lane rises from 0.01506 to 0.01804. The actual shaft is stronger
+as well. Scope is one joined GPU audit tile plus the 30-frame image comparison.
+The external preparation stays in the private diagnostic. The standard DLAA
+launch path continues with its current input policy. Private receipts are in
+local/graphics/dlaa-display-motion01/ and G387.

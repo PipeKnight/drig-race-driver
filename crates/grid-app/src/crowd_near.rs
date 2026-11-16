@@ -22,6 +22,12 @@ const MAX_VARIANTS: usize = 24;
 struct Clip {
     frames: Vec<VertexBuffers>,
     duration: f32,
+    raw_ordinal: usize,
+}
+
+pub(super) enum Motion {
+    Standing,
+    Walking,
 }
 
 pub(super) struct Baked {
@@ -60,6 +66,16 @@ impl PoseMeshes {
             )
         };
         let frame = (coord / duration * frames.len() as f64) as usize;
+        &frames[frame.min(frames.len() - 1)]
+    }
+
+    pub(super) fn walking_frame(&self, seconds: f64, actor_phase: f64) -> &Handle<Mesh> {
+        let (frames, duration) = if actor_phase >= 0.5 && !self.action.is_empty() {
+            (&self.action, self.action_duration)
+        } else {
+            (&self.idle, self.idle_duration)
+        };
+        let frame = (seconds.rem_euclid(duration) / duration * frames.len() as f64) as usize;
         &frames[frame.min(frames.len() - 1)]
     }
 }
@@ -116,6 +132,7 @@ pub(super) fn bake(
     metadata: &Metadata<'_, '_, '_, '_>,
     library: &Library<'_>,
     bank: &pssg::Tree<'_>,
+    motion: Motion,
 ) -> AnyResult<Option<Baked>> {
     let Some(resource) = &template.mesh else {
         return Ok(None);
@@ -181,15 +198,21 @@ pub(super) fn bake(
         rig: &rig,
         prior: &prior,
     };
-    // The source tree contains separate Base Idle and Action branches.
-    // The port plays its own deterministic transition between these clips.
-    let Some(idle) = pose_source.sample(2, false) else {
+    let sample = |performance, require_motion, exclude| {
+        pose_source.sample(performance, require_motion, exclude)
+    };
+    let Some(idle) = sample(2, matches!(motion, Motion::Walking), None) else {
         return Ok(None);
     };
-    let mut action = pose_source.sample(3, true);
-    if let Some(action) = action.as_mut() {
-        blend_action_with_idle(action, &idle);
-    }
+    let action = match motion {
+        Motion::Standing => sample(3, true, None).map(|mut clip| {
+            blend_action_with_idle(&mut clip, &idle);
+            clip
+        }),
+        // Walkers declare two uniform Base Idle leaves. Keep the choices so
+        // placements can select a stable variant across replay and restart.
+        Motion::Walking => sample(2, true, Some(idle.raw_ordinal)),
+    };
     Ok(Some(Baked {
         idle,
         action,
@@ -211,7 +234,12 @@ struct PoseSource<'r, 'lib, 'tree, 'm, 'p, 'layout, 'd, 'def> {
 }
 
 impl PoseSource<'_, '_, '_, '_, '_, '_, '_, '_> {
-    fn sample(&self, performance: u32, require_motion: bool) -> Option<Clip> {
+    fn sample(
+        &self,
+        performance: u32,
+        require_motion: bool,
+        exclude: Option<usize>,
+    ) -> Option<Clip> {
         let mut random = 1u32;
         let mut draw = || {
             random = random.wrapping_mul(214_013).wrapping_add(2_531_011);
@@ -228,7 +256,10 @@ impl PoseSource<'_, '_, '_, '_, '_, '_, '_, '_> {
             ) else {
                 continue;
             };
-            if !attempted.insert(selected.raw_ordinal) || selected.candidate.mirrored {
+            if exclude == Some(selected.raw_ordinal)
+                || !attempted.insert(selected.raw_ordinal)
+                || selected.candidate.mirrored
+            {
                 continue;
             }
             let bind = ExplicitClipBinding {
@@ -277,7 +308,11 @@ impl PoseSource<'_, '_, '_, '_, '_, '_, '_, '_> {
                     selected.candidate.raw_name,
                     frames.len()
                 );
-                return Some(Clip { frames, duration });
+                return Some(Clip {
+                    frames,
+                    duration,
+                    raw_ordinal: selected.raw_ordinal,
+                });
             }
         }
         None

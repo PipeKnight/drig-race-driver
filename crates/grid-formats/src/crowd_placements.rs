@@ -1,6 +1,5 @@
-//! Bounded observed crowd placement framing. Does not evaluate moving paths,
-//! clocks, orientation conventions, animation, randomization, or LOD selection.
-//! Observed format; unsupported moving payloads remain opaque.
+//! Bounded observed crowd placement framing, including optional moving keys.
+//! Path evaluation, playback clocks, animation and LOD remain consumer concerns.
 use crate::{Result, fail, range};
 #[derive(Debug, Clone)]
 pub struct Cell {
@@ -16,6 +15,41 @@ pub struct Standing {
     pub opaque_scalar: f32,
     pub cell: u32,
 }
+#[derive(Debug)]
+pub struct PositionKey {
+    /// Raw file time in seconds.
+    pub seconds: f32,
+    pub position: [f32; 3],
+}
+
+#[derive(Debug)]
+pub struct YawKey {
+    /// Raw file time in seconds.
+    pub seconds: f32,
+    pub degrees: f32,
+}
+
+#[derive(Debug)]
+pub struct MovingActor {
+    pub cell: u32,
+    /// Full rows in file order. The original live loader caps this list at 100.
+    pub positions: Vec<PositionKey>,
+    /// Full rows in file order. The original live loader caps this list at 100.
+    pub yaws: Vec<YawKey>,
+}
+
+#[derive(Debug)]
+pub struct MovingGroup<'a> {
+    pub instance_set: &'a [u8],
+    pub actors: Vec<MovingActor>,
+}
+
+#[derive(Debug)]
+pub struct CrowdWithPaths<'a> {
+    pub crowd: Crowd<'a>,
+    pub moving: Vec<MovingGroup<'a>>,
+}
+
 #[derive(Debug)]
 pub enum Placements<'a> {
     Standing(Vec<Standing>),
@@ -59,9 +93,94 @@ fn span(b: &[u8], start: usize, n: usize, stride: usize) -> Result<std::ops::Ran
         b.len(),
     )
 }
-/// Observed little-endian format. Moving groups are exposed opaquely and must
-/// be explicitly rejected by a caller requiring complete animated placement.
+/// Observed little-endian framing with opaque moving groups.
 pub fn read(b: &[u8]) -> Result<Crowd<'_>> {
+    read_impl(b, None)
+}
+
+/// Preserves the raw placements and decodes the moving actor paths.
+pub fn read_with_paths(b: &[u8]) -> Result<CrowdWithPaths<'_>> {
+    let mut moving = Vec::new();
+    let crowd = read_impl(b, Some(&mut moving))?;
+    Ok(CrowdWithPaths { crowd, moving })
+}
+
+fn moving_actors(
+    b: &[u8],
+    body: std::ops::Range<usize>,
+    count: usize,
+    cells: &[Cell],
+    seen: &mut [u32],
+) -> Result<Vec<MovingActor>> {
+    // 0x764340 rebases the two absolute file offsets. 0x769D50 copies the
+    // position keys into XYZ/time runtime order and keeps the yaw pairs.
+    let headers = span(b, body.start, count, 28)?;
+    if headers.end > body.end {
+        return fail(body.start, "crowd moving header outside group");
+    }
+    let mut next = headers.end;
+    let mut actors = Vec::with_capacity(count);
+    for p in headers.step_by(28) {
+        let position_count = word(b, p)?;
+        let yaw_count = word(b, p + 4)?;
+        let cell = word(b, p + 8)?;
+        let position_offset = word(b, p + 12)? as usize;
+        let yaw_offset = word(b, p + 20)? as usize;
+        if position_count == 0
+            || yaw_count == 0
+            || position_count != word(b, p + 16)?
+            || yaw_count != word(b, p + 24)?
+        {
+            return fail(p, "crowd moving key counts");
+        }
+        let c = cells.get(cell as usize).ok_or(crate::Error {
+            offset: p + 8,
+            message: "crowd moving cell reference",
+        })?;
+        if seen[cell as usize] >= c.moving_instances {
+            return fail(p + 8, "crowd moving cell capacity");
+        }
+        seen[cell as usize] += 1;
+
+        let positions = span(b, position_offset, position_count as usize, 16)?;
+        let yaws = span(b, yaw_offset, yaw_count as usize, 8)?;
+        if positions.start != next || positions.end != yaws.start || yaws.end > body.end {
+            return fail(p + 12, "crowd moving key offsets");
+        }
+        next = yaws.end;
+        let positions = positions
+            .step_by(16)
+            .map(|offset| {
+                let [seconds, x, y, z] = floats::<4>(b, offset)?;
+                let position = [x, y, z];
+                if position.iter().enumerate().any(|(i, &coordinate)| {
+                    coordinate < c.bounds[i] - 0.01 || coordinate > c.bounds[i + 3] + 0.01
+                }) {
+                    return fail(offset, "crowd moving position bounds");
+                }
+                Ok(PositionKey { seconds, position })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let yaws = yaws
+            .step_by(8)
+            .map(|offset| {
+                let [seconds, degrees] = floats::<2>(b, offset)?;
+                Ok(YawKey { seconds, degrees })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        actors.push(MovingActor {
+            cell,
+            positions,
+            yaws,
+        });
+    }
+    if next != body.end {
+        return fail(next, "crowd moving group tail");
+    }
+    Ok(actors)
+}
+
+fn read_impl<'a>(b: &'a [u8], moving: Option<&mut Vec<MovingGroup<'a>>>) -> Result<Crowd<'a>> {
     if word(b, 0)? != 12 || word(b, 4)? != 36 {
         return fail(0, "unsupported crowd header");
     }
@@ -139,6 +258,7 @@ pub fn read(b: &[u8]) -> Result<Crowd<'_>> {
     }
     let mut names = std::collections::BTreeMap::new();
     let mut seen = vec![0u32; count];
+    let mut moving = moving.map(|groups| (groups, vec![0u32; count]));
     let mut groups = Vec::with_capacity(ng);
     let mut total = 0u64;
     let mut moving_total = 0u64;
@@ -181,6 +301,12 @@ pub fn read(b: &[u8]) -> Result<Crowd<'_>> {
         }
         let placements = if i < nm {
             moving_total += u64::from(n);
+            if let Some((groups, seen)) = &mut moving {
+                groups.push(MovingGroup {
+                    instance_set: name,
+                    actors: moving_actors(b, body.clone(), n as usize, &cells, seen)?,
+                });
+            }
             Placements::Moving(&b[body])
         } else {
             if span(b, dp, n as usize, 28)? != body {
@@ -258,6 +384,11 @@ pub fn read(b: &[u8]) -> Result<Crowd<'_>> {
             .any(|(i, c)| seen[i] != c.instances - c.moving_instances)
     {
         return fail(types, "crowd total/tail accounting");
+    }
+    if moving.is_some_and(|(_, seen)| {
+        cells.iter().zip(seen).any(|(cell, n)| n != cell.moving_instances)
+    }) {
+        return fail(types, "crowd moving cell accounting");
     }
     Ok(Crowd {
         origin_xz,
@@ -377,6 +508,49 @@ mod tests {
         assert_eq!(c.groups[0].count, 1);
     }
     #[test]
+    fn checked_moving_paths_preserve_raw_data_and_reject_inconsistent_headers() {
+        let mut b = fixture();
+        b.resize(209, 0);
+        b[128..].fill(0);
+        for (p, value) in [
+            (60, 1), (100, 1), (104, 128), (108, 0), (112, 204),
+            (128, 2), (132, 2), (136, 0), (140, 156), (144, 2), (148, 188), (152, 2),
+        ] {
+            put(&mut b, p, value);
+        }
+        for (i, value) in [0.0_f32, 4., 1., 5., 2., 5., 1., 6., 0., 350., 2., 10.]
+            .into_iter()
+            .enumerate()
+        {
+            put(&mut b, 156 + i * 4, value.to_bits());
+        }
+        b[204..].copy_from_slice(b"m_gr\0");
+
+        let parsed = read_with_paths(&b).unwrap();
+        let Placements::Moving(raw) = &parsed.crowd.groups[0].placements else {
+            panic!("moving payload missing");
+        };
+        assert_eq!(*raw, &b[128..204]);
+        let actor = &parsed.moving[0].actors[0];
+        assert_eq!(actor.cell, 0);
+        assert_eq!(actor.positions[1].seconds, 2.);
+        assert_eq!(actor.positions[1].position, [5., 1., 6.]);
+        assert_eq!(actor.yaws[0].degrees, 350.);
+        assert_eq!(actor.yaws[1].degrees, 10.);
+
+        for (p, value) in [
+            (136, 1), (140, 128), (140, u32::MAX), (144, 1),
+            (148, 184), (148, 196), (152, 1),
+            (160, 40f32.to_bits()), (192, f32::NAN.to_bits()),
+        ] {
+            let mut malformed = b.clone();
+            put(&mut malformed, p, value);
+            assert!(read(&malformed).is_ok(), "raw framing at {p}");
+            assert!(read_with_paths(&malformed).is_err(), "typed paths at {p}");
+        }
+    }
+
+    #[test]
     fn group_count_exceeding_declared_total_rejects_before_rows() {
         let first = fixture();
         let mut b = vec![0u8; 189];
@@ -415,9 +589,15 @@ mod tests {
         paths.sort();
         assert_eq!(paths.len(), 97);
         let mut standing_records = 0u64;
+        let mut moving_records = 0usize;
+        let mut position_keys = 0usize;
+        let mut yaw_keys = 0usize;
+        let mut longest_position_curve = 0usize;
         for path in paths {
             let bytes = std::fs::read(&path).unwrap();
-            let c = read(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let parsed = read_with_paths(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let c = &parsed.crowd;
+            let mut moving = parsed.moving.iter();
             let types = word(&bytes, 8).unwrap() as usize;
             let descriptors = word(&bytes, types + 8).unwrap() as usize;
             let string_start = (0..c.groups.len())
@@ -457,10 +637,38 @@ mod tests {
                         assert_eq!(end - begin, rows.len() * 28);
                         standing_records += rows.len() as u64;
                     }
-                    Placements::Moving(raw) => assert_eq!(*raw, &bytes[begin..end]),
+                    Placements::Moving(raw) => {
+                        assert_eq!(*raw, &bytes[begin..end]);
+                        let group = moving.next().unwrap();
+                        assert_eq!(group.instance_set, g.instance_set);
+                        assert_eq!(group.actors.len(), g.count as usize);
+                        moving_records += group.actors.len();
+                        for (index, actor) in group.actors.iter().enumerate() {
+                            let header = begin + index * 28;
+                            let pos = word(&bytes, header + 12).unwrap() as usize;
+                            let yaw = word(&bytes, header + 20).unwrap() as usize;
+                            position_keys += actor.positions.len();
+                            yaw_keys += actor.yaws.len();
+                            longest_position_curve = longest_position_curve.max(actor.positions.len());
+                            assert_eq!(actor.cell, word(&bytes, header + 8).unwrap());
+                            for (i, row) in actor.positions.iter().enumerate() {
+                                let [x, y, z] = row.position;
+                                for (k, v) in [row.seconds, x, y, z].into_iter().enumerate() {
+                                    assert_eq!(v.to_bits(), word(&bytes, pos + i * 16 + k * 4).unwrap());
+                                }
+                            }
+                            for (i, row) in actor.yaws.iter().enumerate() {
+                                assert_eq!(row.seconds.to_bits(), word(&bytes, yaw + i * 8).unwrap());
+                                assert_eq!(row.degrees.to_bits(), word(&bytes, yaw + i * 8 + 4).unwrap());
+                            }
+                        }
+                    }
                 }
             }
+            assert!(moving.next().is_none());
         }
+        assert_eq!((moving_records, position_keys, yaw_keys), (201, 4231, 2803));
+        assert_eq!(longest_position_curve, 101);
         // f64 cell membership in read() also covers the four Jarama boundaries.
         assert_eq!(standing_records, 1_291_209);
     }

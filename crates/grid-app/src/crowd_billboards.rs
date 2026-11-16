@@ -15,7 +15,7 @@ use bevy::{
 };
 use grid_formats::{
     binxml,
-    crowd_placements::{self, Placements, Standing},
+    crowd_placements::{self, MovingActor, Placements, Standing},
     material, pssg, texture,
 };
 use grid_tools::route::Route;
@@ -42,6 +42,11 @@ struct Omitted {
     moving: bool,
     reason: String,
 }
+struct ActorModel {
+    body: near::Baked,
+    colours: [Vec4; 3],
+}
+
 #[derive(Resource)]
 pub(crate) struct Prepared {
     rows: Vec<Row>,
@@ -54,7 +59,8 @@ pub(crate) struct Prepared {
     omitted: Vec<Omitted>,
     flash_dds: Option<Vec<u8>>,
     flash_cells: Vec<FlashCell>,
-    actors: Vec<Option<near::Baked>>,
+    actors: Vec<Option<ActorModel>>,
+    walkers: Vec<Walker>,
 }
 fn field<'a>(fields: &'a population::Fields, name: &str) -> AnyResult<&'a str> {
     let mut found = fields.iter().filter(|(k, _)| k == name);
@@ -147,13 +153,22 @@ fn source_spec(template: &population::Template) -> AnyResult<Option<Spec>> {
     if !(0. ..0.25).contains(&h) || !(0. ..0.25).contains(&w) {
         return Err("billboard fixed scale-fixture domain exceeded".into());
     }
+    Ok(Some(Spec {
+        uv,
+        dimensions,
+        colours: source_colours(variant)?,
+        instance_scale: crowd_preview::source_scale_fixture(h, w),
+    }))
+}
+
+fn source_colours(variant: &population::Variant) -> AnyResult<[Vec4; 3]> {
     let colours = &variant
         .colour_sets
         .first()
         .ok_or("source colour sets absent")?
         .colours;
     if colours.len() != 3 {
-        return Err("billboard adapter needs three saved tint colours".into());
+        return Err("crowd material needs three saved tint colours".into());
     }
     let mut rgb = [Vec4::ZERO; 3];
     for (dst, c) in rgb.iter_mut().zip(colours) {
@@ -164,12 +179,7 @@ fn source_spec(template: &population::Template) -> AnyResult<Option<Spec>> {
             1.,
         );
     }
-    Ok(Some(Spec {
-        uv,
-        dimensions,
-        colours: rgb,
-        instance_scale: crowd_preview::source_scale_fixture(h, w),
-    }))
+    Ok(rgb)
 }
 fn append_group(
     points: &[Standing],
@@ -283,7 +293,14 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
     let raw = std::fs::read(root.join(shared_resource(&shared, "xml", "typeDefs")?))?;
     let defs = binxml::read(&raw)?;
     let bytes = std::fs::read(root.join(route.file("crowd_standing.bin")))?;
-    let source = crowd_placements::read(&bytes)?;
+    let (source, moving) = match crowd_placements::read_with_paths(&bytes) {
+        Ok(source) => (source.crowd, source.moving),
+        Err(error) => {
+            let standing = crowd_placements::read(&bytes)?;
+            eprintln!("crowd moving paths ignored on {}: {error}", route.path());
+            (standing, Vec::new())
+        }
+    };
     let metadata = population::prepare(
         &source,
         &defs,
@@ -320,6 +337,61 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
         .as_ref()
         .and_then(|doc| grid_tools::crowd_selection::Library::parse(doc).ok());
     let mut omitted = Vec::new();
+    // Reserve the shared sample budget for paths first. Stationary actors can
+    // fall back to a billboard where a walker has no authored impostor.
+    let moving_groups = moving.len();
+    let mut walking_models = Vec::new();
+    let mut walkers = Vec::new();
+    for (group, path_group) in metadata.groups.iter().zip(moving) {
+        let group = group.source;
+        let model = (|| -> AnyResult<_> {
+            let (library, bank) = library
+                .as_ref()
+                .zip(animation_bank.as_ref())
+                .ok_or("missing walker animation library")?;
+            let templates = metadata.moving_templates(group)?;
+            let template = templates.first().ok_or("missing moving actor map")?;
+            let rate = metadata.moving_time_scale(template)?;
+            let colours = source_colours(
+                template
+                    .variants
+                    .first()
+                    .ok_or("missing walking skin palette")?,
+            )?;
+            let body = near::bake(
+                root,
+                template,
+                &metadata,
+                library,
+                bank,
+                near::Motion::Walking,
+            )?
+            .ok_or("missing animated walking skin")?;
+            if near_vertex_count + body.frame_vertices() > NEAR_FRAME_VERTEX_LIMIT {
+                return Err("walking skin exceeds shared sample-vertex budget".into());
+            }
+            Ok((ActorModel { body, colours }, rate))
+        })();
+        match model {
+            Ok((model, rate)) => {
+                near_vertex_count += model.body.frame_vertices();
+                let index = walking_models.len();
+                walking_models.push(model);
+                walkers.extend(
+                    path_group
+                        .actors
+                        .into_iter()
+                        .map(|path| Walker::new(path, index, rate)),
+                );
+            }
+            Err(error) => omitted.push(Omitted {
+                group: path_group.instance_set.to_vec(),
+                records: group.count,
+                moving: true,
+                reason: error.to_string(),
+            }),
+        }
+    }
     for (index, g) in metadata.groups.iter().enumerate() {
         let (moving, reason) = match (&g.source.placements, &g.resolution) {
             (
@@ -335,7 +407,14 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
                         animation_bank.as_ref(),
                         alternatives.as_slice(),
                     ) {
-                        match near::bake(root, template, &metadata, library, bank) {
+                        match near::bake(
+                            root,
+                            template,
+                            &metadata,
+                            library,
+                            bank,
+                            near::Motion::Standing,
+                        ) {
                             Ok(actor) => actor,
                             Err(error) => {
                                 eprintln!("crowd source clip for {}: {error}", template.map_name);
@@ -353,13 +432,22 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
                         near_vertex_count = wanted;
                         true
                     });
-                    actors.push(actor);
+                    actors.push(actor.map(|body| ActorModel {
+                        body,
+                        colours: specs[specs.len() - 1].colours,
+                    }));
                     continue;
                 }
                 (false,"selected source variant has no declared billboard stance; skinned/other role remains undrawn".to_owned())
             }
             (Placements::Moving(_), population::Resolution::UnsupportedMoving { .. }) => {
-                (true, "moving payload unsupported".into())
+                if index < moving_groups {
+                    continue;
+                }
+                (
+                    true,
+                    "moving path decoder did not admit route payload".into(),
+                )
             }
             (Placements::Standing(_), population::Resolution::Unresolved(error)) => {
                 (false, format!("unresolved source metadata: {error}"))
@@ -373,7 +461,13 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
             reason,
         });
     }
-    if rows.len() as u64 + omitted.iter().map(|o| u64::from(o.records)).sum::<u64>()
+    for walker in &mut walkers {
+        walker.model += actors.len();
+    }
+    actors.extend(walking_models.into_iter().map(Some));
+    if rows.len() as u64
+        + walkers.len() as u64
+        + omitted.iter().map(|o| u64::from(o.records)).sum::<u64>()
         != u64::from(source.total_instances)
     {
         return Err("billboard source accounting differs".into());
@@ -424,11 +518,12 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
         flash_dds,
         flash_cells,
         actors,
+        walkers,
     })
 }
 fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     println!(
-        "crowd_population_static region={} atlas={} source={} billboards={} unsupported_static={} moving={} choice=SourceOrderFirst(map,variant,colour) scale_fixture_draw=5000 orientation=camera-facing animation=upper-edge-sway native_rng=false native_lod=false",
+        "crowd_population_static region={} atlas={} source={} billboards={} unsupported_static={} unsupported_moving={} choice=SourceOrderFirst(map,variant,colour) scale_fixture_draw=5000 orientation=camera-facing animation=upper-edge-sway native_rng=false native_lod=false",
         prepared.region,
         prepared.atlas,
         prepared.total,
@@ -446,6 +541,10 @@ fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
             .map(|o| o.records)
             .sum::<u32>()
     );
+    println!(
+        "crowd_population_moving walkers={} clock=race-or-replay",
+        prepared.walkers.len()
+    );
     for o in &prepared.omitted {
         println!(
             "crowd_population_unsupported group={:?} records={} moving={} reason={}",
@@ -455,7 +554,7 @@ fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
             o.reason
         );
     }
-    if prepared.rows.is_empty() {
+    if prepared.rows.is_empty() && prepared.walkers.is_empty() {
         return Ok(());
     }
     crowd_preview::install_shader(app)?;
@@ -605,17 +704,16 @@ fn spawn(
     let models = prepared
         .actors
         .iter()
-        .zip(&prepared.specs)
-        .map(|(actor, spec)| {
-            let actor = actor.as_ref()?;
+        .map(|actor| {
+            let ActorModel { body, colours } = actor.as_ref()?;
             let diffuse = super::texture_upload::image(
-                &actor.diffuse,
+                &body.diffuse,
                 settings.sampler(false),
                 RenderAssetUsages::default(),
             )
             .ok()?;
             let tint = super::texture_upload::image_linear(
-                &actor.tint,
+                &body.tint,
                 settings.sampler(false),
                 RenderAssetUsages::default(),
             )
@@ -631,14 +729,14 @@ fn spawn(
                 },
                 extension: Tint {
                     map: images.add(tint),
-                    colour0: spec.colours[0],
-                    colour1: spec.colours[1],
-                    colour2: spec.colours[2],
+                    colour0: colours[0],
+                    colour1: colours[1],
+                    colour2: colours[2],
                 },
             });
             Some(NearModel {
-                frames: actor.meshes(&mut meshes),
-                foot_offset: actor.foot_offset,
+                frames: body.meshes(&mut meshes),
+                foot_offset: body.foot_offset,
                 material,
             })
         })
@@ -733,6 +831,79 @@ const NEAR_DISTANCE: f32 = 20.;
 const NEAR_LIMIT: usize = 64;
 // 320k resident sample vertices ≈ 10 MiB of position/normal/UV data.
 const NEAR_FRAME_VERTEX_LIMIT: usize = 320_000;
+const NATIVE_PATH_KEYS: usize = 100;
+
+struct Walker {
+    path: MovingActor,
+    model: usize,
+    rate: f32,
+    period: f64,
+}
+
+impl Walker {
+    fn new(mut path: MovingActor, model: usize, rate: f32) -> Self {
+        // 0x769D50 copies up to 100 keys on each channel before 0x986960 sorts them.
+        path.positions.truncate(NATIVE_PATH_KEYS);
+        path.yaws.truncate(NATIVE_PATH_KEYS);
+        path.positions
+            .sort_by(|a, b| a.seconds.total_cmp(&b.seconds));
+        path.yaws.sort_by(|a, b| a.seconds.total_cmp(&b.seconds));
+        let period = f64::from(
+            path.positions
+                .last()
+                .unwrap()
+                .seconds
+                .max(path.yaws.last().unwrap().seconds),
+        );
+        Self {
+            path,
+            model,
+            rate,
+            period,
+        }
+    }
+
+    fn pose(&self, seconds: f64) -> (Vec3, f32) {
+        // A global race/replay clock keeps the port deterministic after seeking.
+        // Original paths integrate the deltas of their admitted culling updates.
+        let time = seconds * f64::from(self.rate);
+        let wrapped = if self.period <= 0. {
+            0.
+        } else if (0. ..=self.period).contains(&time) {
+            time
+        } else {
+            let wrapped = time.rem_euclid(self.period);
+            if wrapped == 0. && time > 0. {
+                self.period
+            } else {
+                wrapped
+            }
+        } as f32;
+        let (a, b, t) = path_span(&self.path.positions, wrapped, |key| key.seconds);
+        let position = Vec3::from_array(a.position).lerp(Vec3::from_array(b.position), t);
+        let (a, b, t) = path_span(&self.path.yaws, wrapped, |key| key.seconds);
+        let mut turn = b.degrees - a.degrees;
+        if turn > 180. {
+            turn -= 360.;
+        } else if turn < -180. {
+            turn += 360.;
+        }
+        (position, a.degrees + turn * t)
+    }
+}
+
+fn path_span<T>(keys: &[T], seconds: f32, time: impl Fn(&T) -> f32) -> (&T, &T, f32) {
+    let after = keys.partition_point(|key| time(key) <= seconds);
+    let left = &keys[after.saturating_sub(1)];
+    let right = keys.get(after).unwrap_or(left);
+    let interval = time(right) - time(left);
+    let progress = if interval >= 1e-5 {
+        (seconds - time(left)) / interval
+    } else {
+        0.
+    };
+    (left, right, progress)
+}
 
 #[derive(Resource)]
 struct NearModels(Vec<Option<NearModel>>);
@@ -756,7 +927,7 @@ fn update_actors(
         Single<&Transform, With<super::ViewerCamera>>,
         Query<&CardCell>,
     ),
-    mut meshes: Query<&mut Mesh3d, Without<CardCell>>,
+    mut actors: Query<(&mut Mesh3d, &mut Transform), Without<super::ViewerCamera>>,
 ) {
     let Some(models) = models else { return };
     let eye = view.translation;
@@ -777,6 +948,19 @@ fn update_actors(
             (d <= range).then_some((d, row))
         }));
     }
+    let first_walker = prepared.rows.len();
+    let walker_poses: Vec<_> = prepared
+        .walkers
+        .iter()
+        .map(|walker| walker.pose(clock.seconds))
+        .collect();
+    for (index, (walker, &(position, _))) in prepared.walkers.iter().zip(&walker_poses).enumerate()
+    {
+        let distance = eye.distance_squared(position);
+        if distance <= ACTIVE_RANGE * ACTIVE_RANGE && models.0[walker.model].is_some() {
+            candidates.push((distance, first_walker + index));
+        }
+    }
     candidates.sort_unstable_by(|(a, i), (b, j)| a.total_cmp(b).then(i.cmp(j)));
     candidates.truncate(NEAR_LIMIT);
     let selected = candidates
@@ -792,29 +976,66 @@ fn update_actors(
         }
     });
     for (_, index) in candidates {
-        let row = &prepared.rows[index];
-        let Some(model) = &models.0[row.material] else {
+        let walker = index.checked_sub(first_walker);
+        let (model, position, yaw) = if let Some(walker) = walker {
+            let (position, degrees) = walker_poses[walker];
+            (
+                prepared.walkers[walker].model,
+                position,
+                Quat::from_rotation_y(degrees.to_radians()),
+            )
+        } else {
+            let row = &prepared.rows[index];
+            // The saved two-vector represents actor local X in world XZ.
+            let [x, z] = row.orientation;
+            (
+                row.material,
+                row.position,
+                Quat::from_rotation_y((-z).atan2(x)),
+            )
+        };
+        let Some(model) = &models.0[model] else {
             continue;
         };
         let unit_phase = f64::from(phase(index) / std::f32::consts::TAU);
-        let handle = model.frames.frame(clock.seconds, unit_phase);
+        let handle = if let Some(walker) = walker {
+            // Start the selected clip at its first key. The global, rate-scaled
+            // phase rewinds with the path using the same shown race coordinate.
+            model.frames.walking_frame(
+                clock.seconds * f64::from(prepared.walkers[walker].rate),
+                unit_phase,
+            )
+        } else {
+            model.frames.frame(clock.seconds, unit_phase)
+        };
+        let transform =
+            Transform::from_translation(position + yaw * model.foot_offset).with_rotation(yaw);
         if let Some(&entity) = live.0.get(&index) {
-            if let Ok(mut mesh) = meshes.get_mut(entity)
-                && mesh.id() != handle.id()
-            {
-                mesh.0 = handle.clone();
+            if let Ok((mut mesh, mut current)) = actors.get_mut(entity) {
+                if mesh.id() != handle.id() {
+                    mesh.0 = handle.clone();
+                }
+                if walker.is_some() && *current != transform {
+                    *current = transform;
+                }
             }
         } else {
-            // The saved two-vector represents actor local X in world XZ.
-            let [x, z] = row.orientation;
-            let yaw = Quat::from_rotation_y((-z).atan2(x));
+            if let Some(walker) = walker {
+                println!(
+                    "crowd_walker_visible index={walker} source_cell={} seconds={:.3} position={position:?} yaw={:.3}",
+                    prepared.walkers[walker].path.cell, clock.seconds, walker_poses[walker].1
+                );
+            }
             let entity = commands
                 .spawn((
-                    Name::new("crowd/source-animation"),
+                    Name::new(if walker.is_some() {
+                        "crowd/source-walk"
+                    } else {
+                        "crowd/source-animation"
+                    }),
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(model.material.clone()),
-                    Transform::from_translation(row.position + yaw * model.foot_offset)
-                        .with_rotation(yaw),
+                    transform,
                     bevy::camera::visibility::NoFrustumCulling,
                     NotShadowCaster,
                 ))
@@ -1128,6 +1349,7 @@ mod tests {
             flash_dds: None,
             flash_cells: Vec::new(),
             actors: Vec::new(),
+            walkers: Vec::new(),
         };
         let eye = Vec3::new(3., 5., 10.);
         let a = make_batch(&source, &[0], &spec, eye, 0.).unwrap();
@@ -1140,6 +1362,44 @@ mod tests {
         assert_ne!(a.p[3], b.p[3]);
         let footing = (Vec3::from_array(b.p[0]) + Vec3::from_array(b.p[2])) * 0.5;
         assert_eq!(footing, source.rows[0].position);
+    }
+
+    #[test]
+    fn walking_pose_seeks_and_holds_the_native_loop_endpoint() {
+        use crowd_placements::{PositionKey, YawKey};
+
+        let actor = Walker::new(
+            MovingActor {
+                cell: 0,
+                positions: (0..101)
+                    .map(|i| PositionKey {
+                        seconds: i as f32,
+                        position: [i as f32, 0., 0.],
+                    })
+                    .collect(),
+                yaws: vec![
+                    YawKey {
+                        seconds: 2.,
+                        degrees: 10.,
+                    },
+                    YawKey {
+                        seconds: 0.,
+                        degrees: 350.,
+                    },
+                ],
+            },
+            0,
+            0.5,
+        );
+        let at_start = actor.pose(0.);
+        let at_turn = actor.pose(2.);
+        assert_eq!(at_start, (Vec3::ZERO, 350.));
+        assert_eq!(at_turn, (Vec3::X, 360.));
+        assert_eq!(actor.pose(198.), (Vec3::X * 99., 10.));
+        assert_eq!(actor.pose(396.), (Vec3::X * 99., 10.));
+        assert_eq!(actor.pose(200.), at_turn);
+        assert_eq!(actor.pose(-2.), (Vec3::X * 98., 10.));
+        assert_eq!(actor.pose(0.), at_start);
     }
 
     #[test]
@@ -1189,7 +1449,7 @@ mod tests {
                 p.actors
                     .iter()
                     .flatten()
-                    .any(near::Baked::has_animated_action),
+                    .any(|model| model.body.has_animated_action()),
                 "{region}: no distinct source action reached the actor consumer"
             );
             assert!(p.diffuse.starts_with(b"DDS "));
@@ -1211,6 +1471,52 @@ mod tests {
                     assert_eq!(p.rows[row].cell as usize, index);
                     assert!(p.rows[row].has_camera);
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires purchased GRID_GAME_ROOT, CPU only"]
+    fn purchased_two_regions_prepare_walking_spectators_and_marshals() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        for (route, spectators, marshals) in [
+            ("tracks/europe/milan/route_0", 3, 1),
+            ("tracks/japan/yokohama_docks/route_5", 1, 0),
+        ] {
+            let prepared = prepare(&root, &Route::new(route).unwrap()).unwrap();
+            assert_eq!(
+                prepared.walkers.len(),
+                spectators + marshals,
+                "{route}: {:?}",
+                prepared.omitted
+            );
+            assert_eq!(
+                prepared
+                    .walkers
+                    .iter()
+                    .filter(|actor| actor.rate == 0.547)
+                    .count(),
+                spectators
+            );
+            assert_eq!(
+                prepared
+                    .walkers
+                    .iter()
+                    .filter(|actor| actor.rate == 0.33)
+                    .count(),
+                marshals
+            );
+            for actor in prepared.walkers {
+                let model = prepared.actors[actor.model].as_ref().unwrap();
+                assert!(
+                    model.body.has_animated_action(),
+                    "{route}: second walking clip missing"
+                );
+                assert_ne!(
+                    actor.pose(0.),
+                    actor.pose(1.),
+                    "{route}: path stays at start"
+                );
             }
         }
     }
