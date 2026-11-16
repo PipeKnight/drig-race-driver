@@ -167,6 +167,7 @@ mod skid_marks;
 mod night_lights;
 mod sky;
 mod sky_environment;
+mod sky_motion_projected;
 mod source_trees;
 mod tree_cards;
 mod speech_sound;
@@ -4912,6 +4913,7 @@ pub(crate) fn race_app(
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.video_refresh_hz());
     }
+    sky_motion_projected::install(&app);
     #[cfg(feature = "dlaa")]
     native_dlaa::install(&mut app);
     #[cfg(feature = "dlaa")]
