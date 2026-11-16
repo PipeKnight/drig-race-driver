@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F835](F0835.md) | 2026-11-16 | Fence through smoke: scaled 3D image shown opaque |
 | [F834](F0834.md) | 2026-11-16 | Owner review 2026-11-16: Mac performance, accidental session, fence through smoke |
 | [F833](F0833.md) | 2026-11-12 | Prepare GPLv3 licensing change for future DRIG versions |
 | [F832](F0832.md) | 2026-11-12 | Discover installed DRIG resources for private macOS rebuilds |

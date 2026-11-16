@@ -7,9 +7,12 @@
 //! picture on the phone is fine for a steady 60 FPS). The HUD, pause menu and touch zones are UI on the 3D camera, so
 //! they are drawn into the same image and scaled with it (retargeting every
 //! HUD module to the window camera was not a small change).
+use bevy::asset::uuid_handle;
 use bevy::camera::RenderTarget;
 use bevy::prelude::*;
-use bevy::render::render_resource::TextureFormat;
+use bevy::render::render_resource::{AsBindGroup, RenderPipelineDescriptor, TextureFormat};
+use bevy::shader::ShaderRef;
+use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialKey, UiMaterialPlugin};
 use bevy::window::PrimaryWindow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,6 +412,32 @@ struct DisplayCamera;
 #[derive(Component)]
 struct DisplayImage;
 
+const DISPLAY_SHADER: Handle<Shader> = uuid_handle!("5b0f7e2c-8d4a-4c61-9a3e-71f2c0d84b19");
+
+/// The scaled 3D image shown opaque (F835): its colour replaces the
+/// window, and its alpha is ignored. Scene passes may leave any alpha in the
+/// image, e.g. the source-coverage objects' saved ZERO/ZERO separate alpha
+/// (`foundation_backing.rs`, docs/STATIC_OBJECT_MATERIALS.md); the original
+/// presents its back buffer without blending, so an alpha-blended display
+/// let the window clear colour through those pixels, also through smoke.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct SceneDisplay {
+    #[texture(0)]
+    #[sampler(1)]
+    image: Handle<Image>,
+}
+
+impl UiMaterial for SceneDisplay {
+    fn fragment_shader() -> ShaderRef {
+        DISPLAY_SHADER.into()
+    }
+    fn specialize(descriptor: &mut RenderPipelineDescriptor, _: UiMaterialKey<Self>) {
+        for target in descriptor.fragment.iter_mut().flat_map(|f| f.targets.iter_mut().flatten()) {
+            target.blend = None;
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply(
     mut commands: Commands,
@@ -416,7 +445,8 @@ fn apply(
     window: Query<&Window, With<PrimaryWindow>>,
     viewer: Query<Entity, With<crate::ViewerCamera>>,
     mut images: ResMut<Assets<Image>>,
-    mut shown: Query<&mut ImageNode, With<DisplayImage>>,
+    shown: Query<&MaterialNode<SceneDisplay>, With<DisplayImage>>,
+    mut displays: ResMut<Assets<SceneDisplay>>,
     touch: Option<Res<crate::touch_controls::Mobile>>,
     mut ui_scale: ResMut<UiScale>,
 ) {
@@ -461,8 +491,10 @@ fn apply(
         .insert(RenderTarget::Image(image.clone().into()));
     match scale.display {
         Some(_) => {
-            for mut node in &mut shown {
-                node.image = image.clone();
+            for node in &shown {
+                if let Some(mut display) = displays.get_mut(&node.0) {
+                    display.image = image.clone();
+                }
             }
         }
         None => {
@@ -487,7 +519,7 @@ fn apply(
                     height: percent(100.),
                     ..default()
                 },
-                ImageNode::new(image.clone()),
+                MaterialNode(displays.add(SceneDisplay { image: image.clone() })),
                 GlobalZIndex(i32::MIN),
                 UiTargetCamera(display),
             ));
@@ -596,6 +628,9 @@ pub fn install(app: &mut App, height: RenderHeight) {
             d.floor, d.rows
         );
     }
+    app.add_plugins(UiMaterialPlugin::<SceneDisplay>::default());
+    let shader = Shader::from_wgsl(include_str!("scene_display.wgsl"), "grid_scene_display.wgsl");
+    let _ = app.world_mut().resource_mut::<Assets<Shader>>().insert(DISPLAY_SHADER.id(), shader);
     app.insert_resource(RenderScale {
         height,
         screen: UVec2::ZERO,

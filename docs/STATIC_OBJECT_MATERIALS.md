@@ -91,6 +91,14 @@ while screenshot alpha is unavailable. Native channel analysis preserves this
 absence explicitly; raw captures remain unchanged. A raw-alpha4x per-sample colour/depth fixture for the separate backing pass
 is planned; Bevy A2C sharpening and source D3D9 level2 are not assumed equivalent.
 
+F835: the ZERO/ZERO separate alpha leaves alpha 0 in the 3D colour target
+wherever these objects draw. That is harmless only while nothing composites the
+target by its alpha. With a render height below native (`render_scale.rs`, the
+Mac and phone default) the target is an image shown on the window, and an
+alpha-blended display let the window clear colour through every fence post
+and wire, also through tyre smoke (backlog row 128). The display now ignores
+the image's alpha, so the source alpha state stays as saved.
+
 ## G280: isolated per-sample coverage measurement
 
 An explicit desktop-only `--coverage-sample-probe local/.../fresh-result.json`

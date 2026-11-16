@@ -3,7 +3,7 @@
 Usage: py -I tools/hud_window_check.py EXE SETTINGS OUT_DIR [--data-dir local] [--resize-at S]
        [--size WxH] [--shots S,S,...] [--expect-stale] [--expect-splits]
        [--expect-penalty [--contact-at S]] [--expect-brake] [--expect-drift]
-       [--expect-tag [--teammate K] [--rival R]] [--expect-stack G,G,...]
+       [--expect-tag [--teammate K] [--rival R]] [--expect-stack G,G,...] [--expect-opaque]
 
 Starts EXE silently (GRID_AUDIO=off) with the autopilot (`--drive-ticks`, GRID_AUTOPILOT=1) in a
 1280x800 window, the interactive branch with tick interpolation forced on (GRID_TICK_INTERPOLATION=1). RESIZE_AT seconds after launch it resizes
@@ -48,14 +48,25 @@ opponent number) and requires the rival's tag (tag 0, `tag=rival` lines) shown i
 window: the last `osd_stack groups=...` line (race_osd.rs, printed when the layout changes) must
 name these groups, top down (`main_group,race_group,lap_group,best_group` for a race without a
 time limit, `race_group,lap_group` for the time-limited Le Mans race).
+
+--expect-opaque (F835) also requires the scaled 3D image (`[video] render_height` below the window,
+render_scale.rs) to be shown opaque: a `render_scale ... mode=upscaled-image` line, and at most
+OPAQUE_LIMIT pixels of the window clear colour (36, 28, 15) in every window shot. Before F835 the
+image was alpha-blended over that colour, and the source-coverage objects (alpha 0, e.g. the
+Detroit fence) showed it. Fixture: a race on tracks/usa/detroit/route_8 with `[video]
+render_height = 720` (window 1280x800, then the resize): 1,720-31,675 such pixels per shot before
+F835, 0 after. Route_0 sees too little fence (at most 28 before), so choose a route whose fences
+or other `#object_simple_mesh.fx` objects fill the view.
 """
 import argparse
 import ctypes
 import os
 import re
+import struct
 import subprocess
 import sys
 import time
+import zlib
 from ctypes import wintypes
 from pathlib import Path
 
@@ -74,6 +85,67 @@ def game_window(pid):
 
     user32.EnumWindows(each, 0)
     return found[0] if found else None
+
+
+# The window's ClearColor (main.rs) in 8-bit sRGB, and how many such pixels a shot may hold by chance.
+CLEAR_RGB = bytes((36, 28, 15))
+OPAQUE_LIMIT = 100
+
+
+def png_rgb(path):
+    """(width, height, rows) of an 8-bit RGB or RGBA non-interlaced PNG (the window shots); stdlib only."""
+    data = Path(path).read_bytes()
+    pos, idat = 8, []
+    while pos < len(data):
+        n, kind = struct.unpack('>I4s', data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b'IHDR':
+            w, h, depth, colour, _, _, interlace = struct.unpack('>IIBBBBB', body)
+            if depth != 8 or colour not in (2, 6) or interlace:
+                raise ValueError(f'{path}: unsupported PNG (depth {depth}, colour {colour}, interlace {interlace})')
+            bpp = 3 if colour == 2 else 4
+        elif kind == b'IDAT':
+            idat.append(body)
+        pos += 12 + n
+    raw = zlib.decompress(b''.join(idat))
+    stride = w * bpp
+    prev = bytearray(stride)
+    rows = []
+    for y in range(h):
+        f = raw[y * (stride + 1)]
+        line = bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        if f == 1:
+            for i in range(bpp, stride):
+                line[i] = (line[i] + line[i - bpp]) & 255
+        elif f == 2:
+            line = bytearray((a + b) & 255 for a, b in zip(line, prev))
+        elif f == 3:
+            for i in range(stride):
+                left = line[i - bpp] if i >= bpp else 0
+                line[i] = (line[i] + ((left + prev[i]) >> 1)) & 255
+        elif f == 4:
+            for i in range(stride):
+                a = line[i - bpp] if i >= bpp else 0
+                b = prev[i]
+                c = prev[i - bpp] if i >= bpp else 0
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        prev = line
+        rows.append(bytes(line) if bpp == 3 else bytes(v for i, v in enumerate(line) if i % 4 != 3))
+    return w, h, rows
+
+
+def clear_pixels(path):
+    """Pixels of exactly the window clear colour in a window shot."""
+    _, _, rows = png_rgb(path)
+    n = 0
+    for row in rows:
+        at = row.find(CLEAR_RGB)
+        while at >= 0:
+            if at % 3 == 0:
+                n += 1
+            at = row.find(CLEAR_RGB, at + 1)
+    return n
 
 
 def main():
@@ -95,6 +167,7 @@ def main():
     ap.add_argument('--teammate', type=int, default=1)
     ap.add_argument('--rival')
     ap.add_argument('--expect-stack')
+    ap.add_argument('--expect-opaque', action='store_true')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -220,6 +293,19 @@ def main():
                 verdict = f'FAIL: no {label} name tag up after the resize'
             else:
                 verdict += f'; {label} tag {"up at the resize, " if up else ""}shown {len(shown)} times after it'
+    if args.expect_opaque:
+        scaled = re.findall(r'^render_scale .*mode=upscaled-image.*$', text, re.M)
+        counts = {n: clear_pixels(out / n) for n in names if (out / n).exists()}
+        print(f'render_scale upscaled-image lines: {len(scaled)}; window clear-colour pixels per shot: {counts}')
+        if verdict.startswith('PASS'):
+            if not scaled:
+                verdict = 'FAIL: no upscaled-image render_scale line (set [video] render_height below the window)'
+            elif not counts:
+                verdict = 'FAIL: no window shots to check the scaled display'
+            elif max(counts.values()) > OPAQUE_LIMIT:
+                verdict = f'FAIL: the scaled display lets the window clear colour through ({max(counts.values())} pixels)'
+            else:
+                verdict += f'; scaled display opaque (at most {max(counts.values())} clear-colour pixels)'
     missing = [n for n in names if not (out / n).exists()]
     if missing:
         verdict += f' (shots missing: {", ".join(missing)})'
