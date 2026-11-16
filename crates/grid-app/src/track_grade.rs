@@ -300,7 +300,7 @@ pub fn install(app: &mut App) {
             .add_systems(
                 Core3d,
                 (
-                    prepare_unblurred
+                    prepare_scene
                         .in_set(Core3dSystems::PostProcess)
                         .before(motion_blur),
                     draw.in_set(Core3dSystems::PostProcess)
@@ -316,7 +316,7 @@ struct Stage {
     format: TextureFormat,
 }
 
-const STAGES: [Stage; 11] = [
+const STAGES: [Stage; 12] = [
     Stage {
         name: "display_x4",
         format: COLOUR_FORMAT,
@@ -359,6 +359,10 @@ const STAGES: [Stage; 11] = [
     },
     Stage {
         name: "final_merge",
+        format: TextureFormat::Rgba16Float,
+    },
+    Stage {
+        name: "bound_main_colour",
         format: TextureFormat::Rgba16Float,
     },
 ];
@@ -442,7 +446,7 @@ struct Images {
     view: Entity,
     size: UVec2,
     initialized: bool,
-    scene_frame: Option<u32>,
+    bounded_frame: Option<u32>,
     current: usize,
     scene: TextureView,
     meter_ds: TextureView,
@@ -488,7 +492,7 @@ impl Images {
             view,
             size,
             initialized: false,
-            scene_frame: None,
+            bounded_frame: None,
             current: 0,
             scene: colour("Type2 scene x4", quarter),
             meter_ds: colour("Type2 reduced luminance source", quarter / 4),
@@ -565,9 +569,9 @@ impl StageBindings<'_> {
     }
 }
 
-/// The original moving-scene graph downsamples MainColourTarget before
-/// Swig, while the full-resolution merge receives the blurred scene.
-fn prepare_unblurred(
+/// Match the normalized range of the original MainColourTarget before
+/// any filtering. Swig also needs its quarter scene before motion blur.
+fn prepare_scene(
     view: ViewQuery<RenderView>,
     pipeline: Res<Pipeline>,
     cache: Res<PipelineCache>,
@@ -577,10 +581,13 @@ fn prepare_unblurred(
     mut scratch: ResMut<Scratch>,
 ) {
     let (view, target, effect, index) = view.into_inner();
-    if effect.tone_threshold.w > 0. || target.main_texture_format() != TextureFormat::Rgba16Float {
+    if target.main_texture_format() != TextureFormat::Rgba16Float {
         return;
     }
-    let Some(stage) = cache.get_render_pipeline(pipeline.ids[0]) else {
+    let Some(bound) = cache.get_render_pipeline(pipeline.ids[STAGES.len() - 1]) else {
+        return;
+    };
+    let Some(quarter) = cache.get_render_pipeline(pipeline.ids[0]) else {
         return;
     };
     let Some(binding) = uniforms.uniforms().binding() else {
@@ -593,9 +600,12 @@ fn prepare_unblurred(
         index: index.index(),
     };
     let images = scratch.images(ctx.render_device(), view, target);
-    let source = target.main_texture_view();
-    bindings.draw(&mut ctx, stage, [source; 4], &images.scene);
-    images.scene_frame = Some(frame.0);
+    let write = target.post_process_write();
+    bindings.draw(&mut ctx, bound, [write.source; 4], write.destination);
+    if effect.tone_threshold.w <= 0. {
+        bindings.draw(&mut ctx, quarter, [write.destination; 4], &images.scene);
+    }
+    images.bounded_frame = Some(frame.0);
 }
 
 fn draw(
@@ -627,14 +637,15 @@ fn draw(
         Some(bloom_merge),
         Some(soften),
         Some(final_merge),
+        Some(_),
     ] = ids
     else {
         return;
     };
     let no_blur = effect.tone_threshold.w > 0.;
     let images = scratch.images(ctx.render_device(), view, target);
-    if !no_blur && images.scene_frame != Some(frame.0) {
-        return; // No current unblurred source. Do not advance the history.
+    if images.bounded_frame != Some(frame.0) {
+        return;
     }
     let cur = images.current;
     let prev = 1 - cur;
@@ -645,7 +656,7 @@ fn draw(
             ("CheapFinalMerge", "pre-motion")
         };
         println!(
-            "graphics_source_postprocess active=Type2 size={}x{} domain=display merge={merge} downsample={downsample}",
+            "graphics_source_postprocess active=Type2 size={}x{} domain=display merge={merge} downsample={downsample} main_colour_range=unorm",
             images.size.x, images.size.y
         );
         // 605CB0 seeds the source luminance history with 0.5 in the

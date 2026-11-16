@@ -434,6 +434,16 @@ source final merge. Original MainColourTarget selects an 8- or 10-bit integer
 path by capability; native sRGB state and original optical blur sampling
 remain open.
 
+The source renderer selects integer format 0x0C or 0x12 in 0x605CB0.
+The format names indexed at 0xBB0F40 from table 0xD47338 identify those
+as u8x4 and u10x3u2. The source MainColourTarget therefore stores colour
+within the normalized range before sampling. SwigMotionBlur has
+`config=in`, inheriting that range before CheapFinalMerge, and MainDS
+explicitly writes u8x4. The range test keeps float storage, bounds each
+main RGB texel before filtering, and bounds Swig's exposed intermediate.
+The exact original transfer and bit-depth rounding remain separate
+questions (G385).
+
 Stock shader instruction evidence for the threshold, filters, history mix,
 luminance and softening is private under
 `local/graphics/source-effects01/programs/`. No original shaders are shipped.
