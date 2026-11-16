@@ -1,5 +1,6 @@
 //! Crowds (docs/AUDIO_RESEARCH.md §31): the original's crowd object
-//! (`grid_tools::crowd_audio`) runs once per vehicle tick on the route's crowd cells, with the
+//! (`grid_tools::crowd_audio`) runs on the route's crowd cells, with the live vehicle tick or
+//! the ordinary replay's audio frame as its clock and the
 //! race events' excitement from the speech manager's ReactiveCrowd messages. Each voice keeps
 //! the level and pitch it started with and is heard from the camera on the Crowd group (11),
 //! with the A23B70 distance law. Every car's contacts feed the visual crowd's recoil records,
@@ -132,7 +133,10 @@ pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, cells: Cells, tabl
     .insert_resource(PendingSource(Some(source)))
     .add_systems(Startup, start)
     .add_systems(FixedUpdate, tick.after(super::drive_tick))
-    .add_systems(Update, audibility);
+    .add_systems(
+        PostUpdate,
+        present.after(bevy::transform::TransformSystems::Propagate),
+    );
 }
 
 fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets: ResMut<Assets<CrowdSource>>) {
@@ -158,12 +162,16 @@ fn tick(
         }
     }
     let now = (driving.segment, driving.runtime.ticks);
-    if sound.last == Some(now) || now.1 == 0 || driving.paused || driving.failure.is_some() {
+    if sound.last == Some(now)
+        || now.1 == 0
+        || driving.paused
+        || driving.failure.is_some()
+        || listening.replay_session().is_some()
+    {
         sound.last = Some(now);
         return;
     }
     sound.last = Some(now);
-    sound.hushed = false;
     let pose = driving.runtime.pose();
     let v = driving.runtime.velocity();
     let car = Listener {
@@ -171,8 +179,6 @@ fn tick(
         forward: [pose[8], pose[9], pose[10]],
         speed: (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
     };
-    let modes = listening.modes();
-    let ear = listening.ear(&pose);
     // The visual crowd's frame (0x608940, 0x76A620): last tick's records broadcast, then this
     // tick's contacts of every car are recorded (0x756E40).
     let mut recoils = Vec::new();
@@ -189,8 +195,21 @@ fn tick(
         Some(o) => (0..o.multi.cars.len()).for_each(|k| record(k, o.multi.contact_impacts(k))),
         None => record(0, driving.runtime.contact_impacts()),
     }
+    advance_crowd(sound, &car, &pose, &listening, DELTA);
+}
+
+fn advance_crowd(
+    sound: &mut CrowdSound,
+    car: &Listener,
+    pose: &[f32; 16],
+    listening: &super::engine_sound::Listening,
+    dt: f32,
+) {
+    sound.hushed = false;
+    let modes = listening.modes();
+    let ear = listening.ear(pose);
     sound.events.clear();
-    sound.crowd.tick(&sound.cells, &car, modes.mode(), ear.to_array(), DELTA, &mut sound.events);
+    sound.crowd.tick(&sound.cells, car, modes.mode(), ear.to_array(), dt, &mut sound.events);
     for event in sound.events.drain(..) {
         match event {
             Event::Start { slot } => {
@@ -216,12 +235,70 @@ fn tick(
     }
 }
 
-/// As the ambience: silent until the next tick once the ticks stop (backlog row 95).
-fn audibility(mut sound: ResMut<CrowdSound>, driving: Res<super::Driving>, listening: super::engine_sound::Listening) {
-    let audible = !driving.paused && driving.failure.is_none() && !listening.stopped(&driving);
+fn replay_car(session: &super::replay::Session) -> Option<&super::replay::frame::Car> {
+    if session.terminal {
+        return None;
+    }
+    session.shown.as_ref()?.cars.first()
+}
+
+/// AudioManager 0x4549F0 updates Crowd through 0x453200 once per audio frame.
+/// Keep the flow mix (e.g. Paused for a pause-menu replay). The replay shuttle
+/// level 0x4430C0 targets groups 0..=7, whereas Crowd is group 11.
+fn present(
+    mut sound: ResMut<CrowdSound>,
+    driving: Res<super::Driving>,
+    listening: super::engine_sound::Listening,
+    time: Res<Time<Real>>,
+) {
+    let replay = listening.replay_session();
+    if let Some(car) = replay.and_then(replay_car) {
+        // The port's replay follows car 0. Replay frames supply its world
+        // transform and speed; the listener is the active rendered camera.
+        let pose = car.pose.to_mat4();
+        let sample = Listener {
+            position: pose.w_axis.truncate().to_array(),
+            forward: pose.z_axis.truncate().to_array(),
+            speed: car.velocity.length(),
+        };
+        advance_crowd(
+            &mut sound,
+            &sample,
+            &pose.to_cols_array(),
+            &listening,
+            time.delta_secs().min(0.1),
+        );
+        return;
+    }
+    let audible = replay.is_none()
+        && !driving.paused
+        && driving.failure.is_none()
+        && !listening.stopped(&driving);
     if !audible && !sound.hushed {
         let _ = sound.messages.send(Message::Hush);
         sound.hushed = true;
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn ordinary_replay_uses_the_recorded_player_after_a_sample_is_shown() {
+    use crate::replay::{self, Kind, Origin, frame, stream};
+
+    let sample = frame::tests::snapshot(100);
+    for origin in [Origin::Race, Origin::PauseMenu, Origin::Results] {
+        let mut stream = stream::Stream::new(stream::Limits::default(), None);
+        let encoded = frame::Encoder::default().encode(&sample, 0);
+        assert!(stream.push(sample.tick, &encoded));
+        let mut playback = replay::Replay::new(stream, None);
+        let views = crate::camera::Views::fallback();
+        assert!(playback.start(Kind::Instant, origin, false, &views));
+        let session = playback.session.as_mut().unwrap();
+        assert!(replay_car(session).is_none());
+        session.shown = Some(sample.clone());
+        assert_eq!(replay_car(session), sample.cars.first());
+        session.terminal = true;
+        assert!(replay_car(session).is_none());
     }
 }
 

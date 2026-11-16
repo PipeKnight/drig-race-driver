@@ -2405,3 +2405,29 @@ open and close (§36, [I]).
 
 **Tests.** `confirmations_queue_the_popup_sounds` (pause_menu),
 `steps_queue_the_widget_and_popup_sounds` (post_race), `hud_sound::tests`.
+
+## Ordinary replay crowd updates (G386)
+
+The active audio-manager frame function 0x4549F0 reaches Ambience at
+manager+0x24BA0 through virtual slot +0x10. Its 0x453200 update reaches
+Crowd at Ambience+0x230 through the same slot. The Crowd table 0xCB2B44
+maps that slot to 0x44E220. The constructors confirm both receiver
+offsets. Original replay shuttle audio 0x44E860 runs under the same
+active manager gate. Its 0x4430C0 trim covers groups 0 through 7.
+Crowd is group 11 and follows the surrounding flow mode. Ordinary race
+replay inherits the race mode, a pause-menu replay keeps Paused, and
+results replay sets Normal.
+
+The explicit crowd override runs in the Drift GP cinematic. Its entry
+0x5986F0 supplies the cinematic camera position and the source
+small_crowd/race_end_method options through 0x429560 and 0x427950.
+Its teardown 0x598180 calls 0x4120C0 and clears the override. The
+ordinary replay still uses a selected car and the camera listener.
+
+The port updates ordinary replay crowd from the shown recorded player
+after camera propagation. It reuses the source emitter bank and the
+existing flow mix. Live contact-triggered gasps stay on the live
+simulation path. The device-free fixture checks the active signal from
+race and results, pause attenuation, and hush after exit and after
+discarding future frames. Terminal replay keeps the existing behavior.
+This check exercises the real decoder up to PCM.

@@ -9227,9 +9227,8 @@ mod driving_tests {
             .unwrap();
     }
 
-    fn ambience_windows(root: &Path) -> Vec<String> {
+    fn ambience_audio_fixture(root: &Path) -> App {
         use grid_tools::{
-            engine_audio_continuous::BLOCK,
             source_vehicle::{Controls, DELTA},
             time_trial::State,
         };
@@ -9281,16 +9280,24 @@ mod driving_tests {
         ambience_sound::install_systems(&mut app, play, mix.clone());
         let cells = grid_tools::crowd_audio::Cells::load(root, &route).unwrap();
         crowd_sound::install_systems(&mut app, grid_tools::crowd_audio::Bank::load(root).unwrap(), cells, mix);
+        app
+    }
+
+    fn fixture_decoder<T: Asset + Decodable>(app: &mut App) -> T::Decoder {
+        let world = app.world_mut();
+        let handle = world.query::<&AudioPlayer<T>>().single(world).unwrap().0.clone();
+        world.resource::<Assets<T>>().get(&handle).unwrap().decoder()
+    }
+
+    fn ambience_windows(root: &Path) -> Vec<String> {
+        use grid_tools::{engine_audio_continuous::BLOCK, source_vehicle::DELTA};
+
+        let mut app = ambience_audio_fixture(root);
         app.update();
-        fn decoder<T: Asset + Decodable>(app: &mut App) -> T::Decoder {
-            let world = app.world_mut();
-            let handle = world.query::<&AudioPlayer<T>>().single(world).unwrap().0.clone();
-            world.resource::<Assets<T>>().get(&handle).unwrap().decoder()
-        }
         let mut sources: [Box<dyn Iterator<Item = f32>>; 3] = [
-            Box::new(decoder::<engine_sound::EngineSource>(&mut app)),
-            Box::new(decoder::<ambience_sound::AmbienceSource>(&mut app)),
-            Box::new(decoder::<crowd_sound::CrowdSource>(&mut app)),
+            Box::new(fixture_decoder::<engine_sound::EngineSource>(&mut app)),
+            Box::new(fixture_decoder::<ambience_sound::AmbienceSource>(&mut app)),
+            Box::new(fixture_decoder::<crowd_sound::CrowdSource>(&mut app)),
         ];
         let mut frame = |app: &mut App, throttle: f32| -> [f64; 3] {
             app.world_mut().resource_mut::<Driving>().scripted.throttle = throttle;
@@ -9366,6 +9373,123 @@ mod driving_tests {
             }
         }
         failures
+    }
+
+    /// Device-free mixer coverage for ordinary replay on the purchased Washington grid.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn crowd_replay_audio_follows_flow_and_drops_stale_output() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+                replay_crowd_windows(Path::new(&root));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn replay_crowd_windows(root: &Path) {
+        use crate::replay::{Kind, Origin, Replay, frame, seconds, stream};
+        use grid_tools::{
+            audio_mix,
+            engine_audio_continuous::BLOCK,
+            source_vehicle::DELTA,
+        };
+
+        let mut app = ambience_audio_fixture(root);
+        app.world_mut().remove_resource::<time_trial::Trial>();
+        // Hold the live engine at the grid. Sound now requires a shown replay car.
+        app.world_mut().resource_mut::<Driving>().paused = true;
+        let near = Mat4::from_cols_array(&app.world().resource::<Driving>().runtime.pose());
+        let mut far = near;
+        far.w_axis.y += 1000.;
+        let mut encoder = frame::Encoder::default();
+        let mut recording = stream::Stream::new(stream::Limits::default(), None);
+        for (tick, pose) in [(100, far), (200, near)] {
+            let mut car = frame::tests::car(0., 0.);
+            car.pose = frame::Pose::from_mat4(pose);
+            car.velocity = Vec3::ZERO;
+            let sample = frame::Snapshot {
+                tick,
+                cars: vec![car],
+                props: None,
+                shots: Vec::new(),
+            };
+            let bytes = encoder.encode(&sample, recording.next());
+            assert!(recording.push(tick, &bytes));
+        }
+        app.insert_resource(Replay::new(recording, None));
+        app.update();
+
+        let mut decoder = fixture_decoder::<crowd_sound::CrowdSource>(&mut app);
+        let second = (1. / DELTA).round() as usize;
+        // Measure the last second after the mode and mixer gain glide settle.
+        let mut rms = |app: &mut App, duration: usize| {
+            let mut energy = 0.;
+            for tick in 0..duration * second {
+                app.update();
+                for _ in 0..BLOCK * 2 {
+                    let sample = f64::from(decoder.next().unwrap());
+                    if tick >= (duration - 1) * second {
+                        energy += sample * sample;
+                    }
+                }
+            }
+            (energy / (second * BLOCK * 2) as f64).sqrt()
+        };
+        let show_near = |app: &mut App, origin: Origin| {
+            let mut replay = app.world_mut().resource_mut::<Replay>();
+            replay.finish();
+            let views = crate::camera::Views::fallback();
+            assert!(replay.start(Kind::Instant, origin, true, &views));
+            let shown = replay.snapshot(1).expect("recorded near-grid sample");
+            replay.session.as_mut().unwrap().shown = Some(shown);
+        };
+        let mode = |app: &App| {
+            app.world().resource::<engine_sound::AudioMode>().0.lock().unwrap().mode()
+        };
+
+        show_near(&mut app, Origin::Race);
+        let live_replay = rms(&mut app, 12);
+        assert_eq!(mode(&app), audio_mix::NORMAL);
+        assert!(live_replay > 1e-4, "ordinary replay crowd RMS {live_replay}");
+
+        show_near(&mut app, Origin::PauseMenu);
+        let paused_replay = rms(&mut app, 3);
+        assert_eq!(mode(&app), audio_mix::PAUSED);
+        assert!(
+            paused_replay < live_replay * 0.1,
+            "pause-origin replay crowd RMS {paused_replay}, race-origin {live_replay}"
+        );
+
+        show_near(&mut app, Origin::Results);
+        let results_replay = rms(&mut app, 3);
+        assert_eq!(mode(&app), audio_mix::NORMAL);
+        assert!(results_replay > 1e-4, "results replay crowd RMS {results_replay}");
+        assert_eq!(app.world_mut().resource_mut::<Replay>().finish(), Some(Origin::Results));
+        let exited = rms(&mut app, 2);
+        assert!(exited < 1e-4, "held simulation after Replay Exit still sounds: RMS {exited}");
+
+        show_near(&mut app, Origin::Race);
+        let before_cut = rms(&mut app, 3);
+        assert!(before_cut > 1e-4, "reopened replay crowd RMS {before_cut}");
+        // Abandon the near-grid future and hold the recorded far-away frame.
+        {
+            let mut replay = app.world_mut().resource_mut::<Replay>();
+            assert!(replay.cut(0, 100));
+            replay.freeze(seconds(100));
+            let shown = replay.snapshot(0).expect("retained far sample");
+            replay.session.as_mut().unwrap().shown = Some(shown);
+            assert!(replay.snapshot(1).is_none());
+        }
+        let after_cut = rms(&mut app, 2);
+        assert_eq!(mode(&app), audio_mix::NORMAL);
+        println!(
+            "crowd_replay_pcm race={live_replay:.6} pause={paused_replay:.6} results={results_replay:.6} exit={exited:.6} before_cut={before_cut:.6} after_cut={after_cut:.6}"
+        );
+        assert!(after_cut < 1e-4, "replay cut kept discarded crowd output: RMS {after_cut}");
     }
 
     /// Backlog row 95: a loop must not hold its last level once the vehicle
