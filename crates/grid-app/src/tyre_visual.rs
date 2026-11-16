@@ -7,6 +7,19 @@ use bevy::{
 use std::collections::BTreeMap;
 
 pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
+    let supported = [
+        Mesh::ATTRIBUTE_POSITION.id,
+        Mesh::ATTRIBUTE_NORMAL.id,
+        Mesh::ATTRIBUTE_UV_0.id,
+        Mesh::ATTRIBUTE_UV_1.id,
+        Mesh::ATTRIBUTE_TANGENT.id,
+    ];
+    if mesh
+        .attributes()
+        .any(|(attr, _)| !supported.contains(&attr.id))
+    {
+        return Err("unsupported tyre attribute");
+    }
     let Some(VertexAttributeValues::Float32x3(source)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
         return Err("tyre positions absent");
@@ -28,6 +41,25 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
     let mut positions: Vec<Vec3> = source.iter().copied().map(Vec3::from_array).collect();
     let mut normals: Vec<Vec3> = normals.iter().copied().map(Vec3::from_array).collect();
     let mut uvs: Vec<Vec2> = uvs.iter().copied().map(Vec2::from_array).collect();
+    // The UV1 lanes carry the source car shader controls. Leaving the
+    // original stream on a refined mesh truncates Bevy's packed vertices
+    // while the new indices still address the full refined surface.
+    let mut controls = match mesh.attribute(Mesh::ATTRIBUTE_UV_1) {
+        None => None,
+        Some(VertexAttributeValues::Float32x2(values))
+            if values.len() == positions.len()
+                && values.iter().flatten().all(|v| v.is_finite()) =>
+        {
+            Some(
+                values
+                    .iter()
+                    .copied()
+                    .map(Vec2::from_array)
+                    .collect::<Vec<_>>(),
+            )
+        }
+        _ => return Err("invalid tyre control stream"),
+    };
     let mut tangents = match mesh.attribute(Mesh::ATTRIBUTE_TANGENT) {
         None => None,
         Some(VertexAttributeValues::Float32x4(values))
@@ -114,6 +146,9 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
                     positions.push(p);
                     normals.push(n);
                     uvs.push(uv);
+                    if let Some(values) = &mut controls {
+                        values.push((values[a as usize] + values[b as usize]) * 0.5);
+                    }
                     if let (Some(ts), Some(t)) = (&mut tangents, tangent) {
                         ts.push(t)
                     }
@@ -146,6 +181,12 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
         uvs.into_iter().map(|v| v.to_array()).collect::<Vec<_>>(),
     );
     mesh.insert_indices(Indices::U32(indices));
+    if let Some(values) = controls {
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_UV_1,
+            values.into_iter().map(|v| v.to_array()).collect::<Vec<_>>(),
+        );
+    }
     if let Some(tangents) = tangents {
         mesh.insert_attribute(
             Mesh::ATTRIBUTE_TANGENT,
@@ -189,6 +230,7 @@ mod tests {
                     .attribute(Mesh::ATTRIBUTE_POSITION)
                     .unwrap()
                     .clone();
+                let source_controls = part.mesh.attribute(Mesh::ATTRIBUTE_UV_1).cloned();
                 let (a, b) = refine(&mut part.mesh).unwrap();
                 assert_eq!(b, a * 16);
                 let VertexAttributeValues::Float32x3(original) = before else {
@@ -200,6 +242,28 @@ mod tests {
                     panic!()
                 };
                 assert_eq!(&refined[..original.len()], original.as_slice());
+                for (attribute, values) in part.mesh.attributes() {
+                    assert_eq!(values.len(), refined.len(), "stream {}", attribute.name);
+                }
+                assert!(
+                    part.mesh
+                        .indices()
+                        .unwrap()
+                        .iter()
+                        .all(|index| index < refined.len())
+                );
+                match source_controls {
+                    Some(VertexAttributeValues::Float32x2(saved)) => {
+                        let Some(VertexAttributeValues::Float32x2(values)) =
+                            part.mesh.attribute(Mesh::ATTRIBUTE_UV_1)
+                        else {
+                            panic!("refined tyre omitted source controls")
+                        };
+                        assert_eq!(&values[..saved.len()], saved.as_slice());
+                    }
+                    None => assert!(part.mesh.attribute(Mesh::ATTRIBUTE_UV_1).is_none()),
+                    _ => panic!("unsupported source tyre controls"),
+                }
                 assert_eq!(part.matrices, transform);
                 assert!(refined.iter().flatten().all(|v| v.is_finite()));
                 if part.material == "Tyre Tread" && lod == "LOD0_" {
@@ -258,7 +322,9 @@ mod tests {
         }
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, p);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, n);
+        let source_controls: Vec<_> = uv.iter().map(|&[u, v]| [u * 2., v + 0.125]).collect();
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, source_controls.clone());
         mesh.insert_indices(Indices::U32(ix));
         assert_eq!(refine(&mut mesh).unwrap(), (16, 256));
         let VertexAttributeValues::Float32x3(p) = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
@@ -273,6 +339,19 @@ mod tests {
             assert!((p[1].hypot(p[2]) - 0.3).abs() < 1e-6);
             assert!((0. ..=0.2).contains(&p[0]));
         }
+        let Some(VertexAttributeValues::Float32x2(controls)) = mesh.attribute(Mesh::ATTRIBUTE_UV_1)
+        else {
+            panic!("refined tyre omitted source controls")
+        };
+        assert_eq!(controls.len(), p.len());
+        assert_eq!(
+            &controls[..source_controls.len()],
+            source_controls.as_slice()
+        );
+        // First new vertex is the midpoint of source edge 0–1.
+        assert_eq!(controls[source_controls.len()], [0.125, 0.125]);
+        assert!(mesh.indices().unwrap().iter().all(|i| i < p.len()));
+        assert_eq!(mesh.count_vertices(), p.len());
         assert_eq!(uv[0], [0., 0.]);
         assert_eq!(uv[8], [1., 0.]);
         let mut angles: Vec<_> = p

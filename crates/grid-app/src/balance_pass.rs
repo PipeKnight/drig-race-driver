@@ -76,7 +76,9 @@ pub fn install(app: &mut App) {
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
         render.add_systems(RenderStartup, initialize).add_systems(
             Core3d,
-            draw.in_set(Core3dSystems::PostProcess).after(tonemapping),
+            draw.in_set(Core3dSystems::PostProcess)
+                .after(tonemapping)
+                .after(crate::track_grade::RaceMerge),
         );
     }
 }

@@ -251,22 +251,44 @@ impl Balance {
 /// The effect's own ColourBalance; absent parameters stay neutral.
 pub fn read_balance(bytes: &[u8], effect: &str) -> Result<Balance> {
     let values = parameters(bytes, effect)?;
+    balance_from_parameters(&values, |text| {
+        text.parse().map_err(|_| Error {
+            offset: 0,
+            message: "invalid grade number",
+        })
+    })
+}
+
+pub(crate) fn balance_from_parameters(
+    values: &BTreeMap<String, String>,
+    parse: impl Fn(&str) -> Result<f32>,
+) -> Result<Balance> {
+    if values.contains_key("brighness") && values.contains_key("brightness") {
+        return fail(0, "ambiguous grade brightness");
+    }
     let n = Balance::NEUTRAL;
     let number = |key: &str, minimum, maximum, neutral| {
-        if values.contains_key(key) {
-            number(&values, key, minimum, maximum)
-        } else {
-            Ok(neutral)
+        let Some(raw) = values.get(key) else {
+            return Ok(neutral);
+        };
+        let value = parse(raw)?;
+        if !value.is_finite() || !(minimum..=maximum).contains(&value) {
+            return fail(0, "grade control outside bound");
         }
+        Ok(value)
     };
     let colour = |key: &str, neutral| {
         if values.contains_key(key) {
-            colour(&values, key)
+            colour(values, key)
         } else {
             Ok(neutral)
         }
     };
-    let brightness = if values.contains_key("brighness") { "brighness" } else { "brightness" };
+    let brightness = if values.contains_key("brighness") {
+        "brighness"
+    } else {
+        "brightness"
+    };
     Ok(Balance {
         contrast: number("contrast", 0., 4., n.contrast)?,
         brightness: number(brightness, -1., 1., n.brightness)?,

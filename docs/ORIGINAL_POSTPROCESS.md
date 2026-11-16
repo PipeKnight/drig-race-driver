@@ -391,3 +391,49 @@ the field remains null. Generic fallback stays conditional. A concrete named
 texture binding is retained as a future port-to-sampler lead; it does not close
 factory or colour-domain selection. Private evidence:
 local/handoff/drafts/postprocess-first-completion146/ (G377).
+
+## Shared Type2 race rendering candidate
+
+The ordinary race view and cockpit select the saved global Type2 effects 2 and
+3. The candidate overlays one route description where available, otherwise its
+parent track description. It leaves the other effect IDs to their current
+consumers. This reuses the purchased files for all supported track paths and
+handles text and sectioned binary XML. Route-file selection and the mapping from
+the port's camera to these slots are explicit integration choices. Spa's saved
+interior brightness spells zero as `0.0.0173`; the original numeric reader
+accepts its finite decimal prefix, which the port also reads as zero.
+
+The graph combines a quarter-resolution scene, an eighth-resolution bright
+pass, two bloom filters and the previous bloom frame. It calculates luminance
+from the reduced scene, clamps the requested luminance to the effect's bounds,
+and advances the adapted exposure using the previous frame's rate and exposure.
+Type2 uses the adapted exposure for softening and the full-resolution scene.
+The source SwigMotionBlur programs apply exposure before ColourBlend scales
+the scene. The port applies that RGB operation to the full-resolution scene
+before mixing softening and adding bloom. The Swig branch downsamples the
+same camera's input before motion blur for luminance, bloom and softening.
+The blurred scene enters the final merge. ColourBalance follows the merge.
+The pause waypoint blends to the saved pause description, with the track
+tone-map override selected by source track data and the same fade durations.
+Flashback and terminal ColourBalance run after the race pass.
+
+The Le Mans clock samples the saved ColourBalance, bloom and ToneMapFast
+curves. The named global handler created by `0xC76620` reads the value at
+E5EBE8, registered by `0x5E8B10` with the daynight manager. The writer at
+`0x9ACFB0` selects the exterior or head-camera luminance factor. FastLumAdapt
+uses that factor to scale its limits before computing exposure. The renderer
+initializes the prior 1×1 luminance to (0.5, 0.5, 0.5, 1), and bloom history to
+black at one eighth size.
+
+Select the Type2 display pass via `grid-app --menu --graphics enhanced --grade track`.
+Race Day forwards the selection when starting the race and returning to the
+menu. The standard launchers keep the authored display settings. A zero motion
+shutter selects FinalMergeNoBlur. A positive shutter selects CheapFinalMerge
+and keeps Bevy motion samples. The camera retains float headroom to the
+source final merge. Original MainColourTarget selects an 8- or 10-bit integer
+path by capability; native sRGB state and original optical blur sampling
+remain open.
+
+Stock shader instruction evidence for the threshold, filters, history mix,
+luminance and softening is private under
+`local/graphics/source-effects01/programs/`. No original shaders are shipped.

@@ -1094,6 +1094,7 @@ pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
         if matches!(
             args[i].as_str(),
             "--game-root" | "--data-dir" | "--settings" | "--aa" | "--tone-map" | "--post-saturation"
+                | "--graphics" | "--grade" | "--motion-shutter"
         ) && i + 1 < args.len()
         {
             out.extend_from_slice(&args[i..i + 2]);
@@ -2073,5 +2074,18 @@ mod shared_display_forwarding_tests {
         let expected:Vec<String>=["--tone-map","agx","--post-saturation","1","--tone-map","reinhard","--post-saturation","0.9","--aa","dlaa"].into_iter().map(String::from).collect();
         assert_eq!(forwarded,expected); assert_eq!(super::passed_on(&forwarded),expected);
         assert!(super::passed_on(&["--tone-map".into()]).is_empty());
+    }
+
+    #[test]
+    fn menu_forwards_source_grade_on_every_race_launch() {
+        let display = ["--graphics", "enhanced", "--grade", "track", "--motion-shutter", "0.25"];
+        let args: Vec<_> = ["--menu", "--route", "ignored-route"]
+            .into_iter()
+            .chain(display)
+            .map(String::from)
+            .collect();
+        let expected = display.map(String::from);
+        assert_eq!(super::passed_on(&args), expected);
+        assert_eq!(super::launcher_menu_flags(&args), expected);
     }
 }

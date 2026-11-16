@@ -140,6 +140,11 @@ impl Curve {
         Self { keys }
     }
 
+    /// Whether the original supplies a value to write for this curve.
+    pub fn has_keys(&self) -> bool {
+        !self.keys.is_empty()
+    }
+
     /// Linear value at day fraction `t` (0..1) [V 0x9ACE90]: from key i's
     /// outgoing value to key i+1's incoming value.
     pub fn value(&self, t: f64) -> f32 {

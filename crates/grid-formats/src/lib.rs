@@ -39,7 +39,9 @@ pub mod track_environment;
 pub mod tree_placements;
 pub mod physparams;
 pub mod progress;
+pub mod postprocess;
 pub mod pssg;
+pub mod race_postprocess;
 pub mod replay_cameras;
 pub mod scene;
 pub mod skidmarks;
@@ -54,6 +56,7 @@ pub mod vehicle;
 pub mod vehicle_properties;
 pub mod vehicle_views;
 mod vehicle_properties_fields;
+pub mod xml_document;
 
 use std::{fmt, ops::Range};
 

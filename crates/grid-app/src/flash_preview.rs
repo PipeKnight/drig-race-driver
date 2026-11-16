@@ -60,7 +60,7 @@ impl Mode {
 pub struct FlashMaterial {
     #[texture(0)]
     #[sampler(1)]
-    map: Handle<Image>,
+    pub(crate) map: Handle<Image>,
 }
 impl Material for FlashMaterial {
     fn fragment_shader() -> ShaderRef {
@@ -149,8 +149,15 @@ pub fn prepare(root: &Path, mode: Mode, anchors: &[Anchor]) -> AnyResult<Prepare
     }) {
         return Err("duplicate diagnostic flash source anchor".into());
     }
-    let path = root.join("anims/cr_camera_flash.pssg");
-    if std::fs::metadata(&path)?.len() > 1024 * 1024 {
+    let dds = source_dds(&root.join("anims/cr_camera_flash.pssg"))?;
+    Ok(Prepared {
+        mode,
+        dds,
+        anchors: anchors.to_vec(),
+    })
+}
+pub(crate) fn source_dds(path: &Path) -> AnyResult<Vec<u8>> {
+    if std::fs::metadata(path)?.len() > 1024 * 1024 {
         return Err("flash resource size limit".into());
     }
     let raw = std::fs::read(path)?;
@@ -168,11 +175,18 @@ pub fn prepare(root: &Path, mode: Mode, anchors: &[Anchor]) -> AnyResult<Prepare
     if levels != 8 {
         return Err("flash full source mip chain not admitted".into());
     }
-    Ok(Prepared {
-        mode,
-        dds,
-        anchors: anchors.to_vec(),
-    })
+    Ok(dds)
+}
+pub(crate) fn register_material(app: &mut App) -> AnyResult<()> {
+    app.world_mut().resource_mut::<Assets<Shader>>().insert(
+        SHADER.id(),
+        Shader::from_wgsl(
+            include_str!("flash_preview.wgsl"),
+            "grid_flash_fixture.wgsl",
+        ),
+    )?;
+    app.add_plugins(MaterialPlugin::<FlashMaterial>::default());
+    Ok(())
 }
 pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     println!(
@@ -183,15 +197,8 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     if prepared.mode != Mode::FrozenPulse {
         return Ok(());
     }
-    app.world_mut().resource_mut::<Assets<Shader>>().insert(
-        SHADER.id(),
-        Shader::from_wgsl(
-            include_str!("flash_preview.wgsl"),
-            "grid_flash_fixture.wgsl",
-        ),
-    )?;
+    register_material(app)?;
     app.insert_resource(prepared)
-        .add_plugins(MaterialPlugin::<FlashMaterial>::default())
         .add_systems(PostStartup, spawn);
     Ok(())
 }
@@ -226,24 +233,8 @@ fn spawn(
     for anchor in &p.anchors {
         let mut attached = *anchor;
         attached.position[1] += 1.2; // AUTHORED sitting-camera fixture offset; no node binding claim.
-        let quad = flash_fixture::quad(attached, view.translation.to_array(), [0., 1., 0.], 0.5)
+        let (mesh, center) = event_mesh(attached, view.translation.to_array(), 0.5)
             .expect("validated authored flash card");
-        let mut mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        );
-        // Authored event-centred local mesh representation. Bevy0.19 sorts
-        // transformed mesh AABB centres; static world-baked cards would also
-        // have valid centres. This transform is not recovered source ABI.
-        let center = Vec3::from_array(attached.position);
-        let local = quad
-            .positions
-            .map(|v| (Vec3::from_array(v) - center).to_array());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, local.to_vec());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 0., 1.]; 4]);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, quad.uv.to_vec());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1., 1., 1., quad.opacity]; 4]);
-        mesh.insert_indices(Indices::U32(vec![0, 1, 2, 1, 3, 2]));
         commands.spawn((
             Name::new(format!(
                 "flash-fixture/cell{}/source{}",
@@ -257,6 +248,30 @@ fn spawn(
     }
 }
 
+pub(crate) fn event_mesh(
+    attached: Anchor,
+    eye: [f32; 3],
+    phase: f32,
+) -> Result<(Mesh, Vec3), &'static str> {
+    let quad = flash_fixture::quad(attached, eye, [0., 1., 0.], phase)?;
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    // Authored event-centred local mesh representation. Bevy0.19 sorts
+    // transformed mesh AABB centres; static world-baked cards would also
+    // have valid centres. This transform is not recovered source ABI.
+    let center = Vec3::from_array(attached.position);
+    let local = quad
+        .positions
+        .map(|v| (Vec3::from_array(v) - center).to_array());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, local.to_vec());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 0., 1.]; 4]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, quad.uv.to_vec());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1., 1., 1., quad.opacity]; 4]);
+    mesh.insert_indices(Indices::U32(vec![0, 1, 2, 1, 3, 2]));
+    Ok((mesh, center))
+}
 #[cfg(test)]
 mod tests {
     use super::*;

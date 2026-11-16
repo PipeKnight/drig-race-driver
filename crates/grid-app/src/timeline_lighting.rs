@@ -1,4 +1,4 @@
-//! Time-of-day routes (Le Mans' daynight.xml): the baseline sun, back light,
+//! Time-of-day routes (Le Mans' daynight.xml): the sun, baseline back light,
 //! ambient and road specular follow the timeline's `backlight_*` colours and
 //! scales at the event's clock, or at `sky::static_start` in a static scene,
 //! instead of keeping the static lighting.xml's day values. The light unit
@@ -7,7 +7,7 @@
 //! the night keeps its authored level (docs/TRACK_ENVIRONMENT.md "Night
 //! level"). Colours resolve through the source packing
 //! (`effective_lighting::PackedLighting`). The sun keeps the baseline's
-//! colour and direction; only its lux follows the timeline's sun peak.
+//! colour and direction. Enhanced scenes also use the sampled sun hue.
 use crate::{
     effective_lighting::{EffectiveLighting, PackedLighting, SpecularColour},
     graphics, source_light_trial, track_surface,
@@ -24,12 +24,14 @@ pub(crate) struct TimelineLighting {
     /// preset's sun reference.
     unit: f32,
     last: Option<EffectiveLighting>,
+    enhanced: bool,
 }
 
 /// The Bevy lights for one resolved sample.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Lights {
     pub sun_lux: f32,
+    pub sun_colour: [f32; 3],
     pub fill: graphics::Fill,
     pub phong_colour: [f32; 3],
 }
@@ -44,7 +46,7 @@ impl TimelineLighting {
         let specular = SpecularColour::from_static(lighting)?;
         let sun = lighting.rgb("backlight_suncolour").ok_or("source sun absent")?;
         let unit = sun_lux / graphics::sun_reference(sun, false);
-        Ok(Self { packed, specular, timeline, unit, last: None })
+        Ok(Self { packed, specular, timeline, unit, last: None, enhanced: false })
     }
 
     /// The timeline's lighting at day fraction `t`, in the scene's unit
@@ -53,8 +55,10 @@ impl TimelineLighting {
         let (packed, source) = self.packed.resolve(Mode::Timeline, Some(&self.timeline), t)?;
         let peak = |c: [f32; 3], floor: f32| c.into_iter().fold(floor, f32::max);
         let fill: [f32; 3] = std::array::from_fn(|i| source.ambient[i] + source.back[i] / 2.);
+        let sun_peak = peak(source.sun, 0.);
         let lights = Lights {
-            sun_lux: peak(source.sun, 0.) * self.unit,
+            sun_lux: sun_peak * self.unit,
+            sun_colour: source.sun.map(|channel| channel / sun_peak.max(1e-6)),
             fill: graphics::Fill {
                 ambient: fill.map(|c| c / peak(fill, 1e-6)),
                 ambient_brightness: peak(fill, 1e-6) * self.unit
@@ -72,8 +76,7 @@ impl TimelineLighting {
     }
 }
 
-/// Installs the follower on a baseline time-of-day scene with the default
-/// linear fill (not with the source-lighting trial, which owns these lights).
+/// Follows the source timeline on scenes using the standard lighting path.
 pub(crate) fn install(
     app: &mut App,
     lighting: &grid_formats::track_environment::Lighting,
@@ -82,12 +85,15 @@ pub(crate) fn install(
 ) {
     let linear = std::env::var("GRID_BASELINE_FILL").map_or(true, |m| m == "linear");
     let Some(timeline) = timeline else { return };
-    if settings.enhanced() || settings.baseline_fill.is_none() || !linear || app.world().contains_resource::<source_light_trial::Trial>() {
+    if (!settings.enhanced() && (settings.baseline_fill.is_none() || !linear))
+        || app.world().contains_resource::<source_light_trial::Trial>()
+    {
         println!("timeline_lighting skipped enhanced={} fill={} linear={linear}", settings.enhanced(), settings.baseline_fill.is_some());
         return;
     }
     match TimelineLighting::new(lighting, timeline, settings.sun_illuminance()) {
-        Ok(follower) => {
+        Ok(mut follower) => {
+            follower.enhanced = settings.enhanced();
             println!("timeline_lighting version=1 unit={:.1}", follower.unit);
             app.insert_resource(follower).add_systems(Update, follow.after(crate::le_mans_event::tick));
         }
@@ -116,16 +122,25 @@ fn follow(
     for (mut light, sun, back) in &mut lights {
         if sun {
             light.illuminance = sample.sun_lux;
-        } else if back {
+            if follower.enhanced {
+                let [r, g, b] = sample.sun_colour;
+                light.color = Color::linear_rgb(r, g, b);
+            }
+        } else if back && !follower.enhanced {
             let [r, g, b] = sample.fill.back;
             light.color = Color::linear_rgb(r, g, b);
             light.illuminance = sample.fill.back_lux;
         }
     }
-    let [r, g, b] = sample.fill.ambient;
-    ambient.color = Color::linear_rgb(r, g, b);
-    ambient.brightness = sample.fill.ambient_brightness;
-    let phong = track_surface::set_trial_phong_colour(&mut materials, sample.phong_colour);
+    let phong = if follower.enhanced {
+        // The enhanced renderer gets its fill from its environment.
+        0
+    } else {
+        let [r, g, b] = sample.fill.ambient;
+        ambient.color = Color::linear_rgb(r, g, b);
+        ambient.brightness = sample.fill.ambient_brightness;
+        track_surface::set_trial_phong_colour(&mut materials, sample.phong_colour)
+    };
     if follower.last.is_none() {
         println!(
             "timeline_lighting apply t={t:.4} sun_lux={:.0} ambient={:.1} back_lux={:.0} phong_materials={phong}",
