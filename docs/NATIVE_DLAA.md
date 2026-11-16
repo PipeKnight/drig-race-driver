@@ -410,3 +410,25 @@ pre-temporal HDR input matched byte-for-byte. Two 120-frame camera/lifecycle
 runs matched five camera changes, restart and six history resets, with no
 shader errors. This corrects the depth-zero branch. The existing antenna trail
 diagnostic samples positive-depth road and remains a separate open item.
+
+### Thin opaque geometry separated from DLAA history (G391)
+
+Three source-matched Donington runs use native DLAA and the same fixed
+history reset. Stock includes the authored Lacetti antenna. Overlay adds
+current 4× coverage while the antenna still enters the native history.
+Separation excludes that exact draw from the input colour, depth and motion
+and composites its current coverage in linear HDR after EarlyPostProcess.
+
+At frame 793, tick 1652, only 34 source pixels in the current shaft change
+in the bounded input HDR and raw depth/motion packets. The measured old
+lane contrast after EarlyPostProcess is 0.02411 for Stock, 0.02404 for
+Overlay and 0.00050 for Separation. On the GPU, all three coverage tiles
+are byte-identical and contain 77 shaft pixels with fractional alpha.
+They account for 144 of the 4× samples in that tile. The corrected scratch
+graphs run Bevy's normal instance preprocessing and restore visible
+current shaft coverage in the last arm.
+
+The fixture constrains the geometry, motion, camera, opacity and scene.
+Ordinary rendering still requires efficient source-role selection, matched
+depth/coverage for cutout surfaces, transparent occlusion and motion
+integration. The experimental passes and captures are private. See G391.
