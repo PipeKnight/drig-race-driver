@@ -71,6 +71,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00411C10	audio_mix_set	func	crates/grid-app/src/engine_sound.rs:429 grid-app::engine_sound::AudioMode ; crates/grid-tools/src/audio_mix.rs:201 grid-tools::audio_mix::ModeMix ; crates/grid-tools/src/collision_audio.rs:640 grid-tools::collision_audio::impact	docs/AUDIO_RESEARCH.md:16	F496 F493	[O]	AudioMode ModeMix change set	The mix mode (411C10/427ED0, `audio_mix::ModeMix`) shared by the car, | note: merge retained additional port provenance: crates/grid-tools/src/collision_audio.rs:593 grid-tools::collision_audio::impact | note: merge retained theirs comment: minVel asks for the Crashed mix (`crash`, 411C10 for 0.2 s); when that
 0x00411D40	audio_mode_set_voice	func	crates/grid-tools/src/audio_mix.rs:283 grid-tools::audio_mix::set_tied ; crates/grid-app/src/speech_sound.rs:5 grid-app::speech_sound	docs/SPEECH_AUDIO_RESEARCH.md:185	F595	[I]	set_tied	+C28: the mode is tied to a playing voice (0x411D40) instead of a duration.
 0x00411DE0	slider_of	func	crates/grid-tools/src/audio_mix.rs:399 grid-tools::audio_mix::slider_of	docs/AUDIO_RESEARCH.md:112				Which slider (411DE0 kind) trims a group: 0 Effects, 2 Speech, 3 Music.
+0x004120C0	clear_cinematic_crowd_override	func		docs/AUDIO_RESEARCH.md:2409	G386	[D]		Clears the camera-centred Crowd override during Drift GP teardown.
 0x004120E0		func	not ported	docs/AUDIO_RESEARCH.md:716		[O]		`start_race`, 4120E0 (race-started flags, no mix change). `states.bin` defines eight
 0x00412100		func	not ported	docs/AUDIO_RESEARCH.md:1153				the camera rows and position (written by 412100, one call behind);
 0x004124A0	engine_sound_trim	func	crates/grid-app/src/engine_sound.rs:605 grid-app::engine_sound::trim ; crates/grid-tools/src/audio_mix.rs:386 grid-tools::audio_mix::slider_db ; crates/grid-app/src/pause_menu.rs:141 grid-app::pause_menu	docs/AUDIO_RESEARCH.md:111 ; docs/PAUSE_MENU.md:112	F481 F422 G130	[O]	slider_db speech_trim trim	groups, 4124A0/411DE0 [O]; the port has no speech or music yet).
@@ -203,8 +204,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00427730	crowd_ctor	func	crates/grid-tools/src/crowd_audio.rs:1 grid-tools::crowd_audio	docs/AUDIO_RESEARCH.md:1898	F667	[O]		Crowds (docs/AUDIO_RESEARCH.md §31): the original's crowd object (constructor 0x427730,
 0x00427789	SLOTS	label	crates/grid-tools/src/crowd_audio.rs:21 grid-tools::crowd_audio::SLOTS					inside 0x00427730; Emitter slots (constructor 0x427789: 0x23).
 0x004277AD		label	not ported	docs/AUDIO_RESEARCH.md:1902				inside 0x00427730; stride 0x60). Every slot plays on group 11 (Crowd, E+0x18, 0x4277AD), on the Camera listener.
+0x00427950	set_cinematic_crowd_override	func		docs/AUDIO_RESEARCH.md:2409	G386	[D]		Sets camera-centred crowd position and cinematic density/excitement options.
 0x00427DC0		func	not ported	docs/AUDIO_RESEARCH.md:15				`20261018T1806256670212Z` (427DC0, 427ED0 update), `20261018T1807357765524Z`
 0x00427ED0	group_db	func	crates/grid-tools/src/audio_mix.rs:191 grid-tools::audio_mix::group_db ; crates/grid-app/src/speech_sound.rs:381 grid-app::speech_sound (in tick)	docs/AUDIO_RESEARCH.md:15 ; docs/SPEECH_AUDIO_RESEARCH.md:188	F496 F493 F422	[O]	SETTLE frame release	value for 21 groups. 427ED0 publishes, per frame and group,
+0x00429560	forward_cinematic_crowd_override	func		docs/AUDIO_RESEARCH.md:2409	G386	[D]		Wrapper adjusts AudioManager to the Crowd subobject at +0x24DD0.
 0x00429640		func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:582				The wrong-way flag (race interface +0x18, set by the WrongWay message 0x431470 → 0x429640): the
 0x0042A9C0		func	not ported	docs/MUSIC_RESEARCH.md:52				Opening (0x42A9C0).** 15 ticks after the chooser runs, it creates a master voice and 7
 0x0042B570		func	not ported	docs/AUDIO_RESEARCH.md:14				`20261018T1805095405303Z` (41FAE0 loader, 41F570 constructor, 42B570 reload),
@@ -370,7 +373,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x0044D9D0		func	not ported	docs/AUDIO_RESEARCH.md:359				Not traced: part separation and impact sounds (43BB10, 43C0C0, 44D9D0),
 0x0044DB50	brake_damage_voice	func	not ported	docs/AUDIO_RESEARCH.md:1613	F586 F583 F582	[O]		453A70 / 44DB50, brake damage [O].** b = 9961D0(2), the brake pedal. | note: merge retained theirs comment: 453A70 / 44DB50, brake damage [O].** b = 9961D0(2), the brake pedal.
 0x0044DF60	engine_damage_loop	func	crates/grid-tools/src/damage_audio.rs:186 grid-tools::damage_audio::engine	docs/AUDIO_RESEARCH.md:1587	F586 F583 F582	[O]	engine	§27): the engine damage loop 44DF60, the brake damage loops 453A70/44DB50, | note: merge retained theirs comment: §27): the engine damage loop 44DF60, the brake damage loops 453A70/44DB50,
-0x0044E220	crowd_sound_tick	func	crates/grid-app/src/crowd_sound.rs:146 grid-app::crowd_sound::tick ; crates/grid-tools/src/crowd_audio.rs:488 grid-tools::crowd_audio::tick	docs/AUDIO_RESEARCH.md:407	F667 F656	[O]	crowd_audio_tick tick	Once per successful vehicle tick: 0x44E220 for the player's car.
+0x0044E220	crowd_sound_tick	func	crates/grid-app/src/crowd_sound.rs:146 grid-app::crowd_sound::tick ; crates/grid-tools/src/crowd_audio.rs:488 grid-tools::crowd_audio::tick	docs/AUDIO_RESEARCH.md:407 ; docs/AUDIO_RESEARCH.md:2409	F667 F656 G386	[O]	crowd_audio_tick tick	Native per audio-manager frame through Ambience; the port also uses the shown pose during ordinary replay.
 0x0044E543		label	crates/grid-tools/src/crowd_audio.rs:23 grid-tools::crowd_audio::RADIUS					inside 0x0044E220; Query radius (0xCB3EB4) and result capacity (0x44E543: 250).
 0x0044E694	GRANDSTAND_PEOPLE	label	crates/grid-tools/src/crowd_audio.rs:26 grid-tools::crowd_audio::GRANDSTAND_PEOPLE					inside 0x0044E220; More people than this in the queried cells selects GrandStandCrowd (0x44E694).
 0x0044E860		func	not ported	docs/AUDIO_RESEARCH.md:373 ; docs/REPLAY.md:186	F797	[D]		Swooshes** (`cmr6_audio_swoosh_manager.cpp`, constructor 441F40, update 44E860): six
@@ -427,6 +430,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00454560		func	crates/grid-tools/src/collision_audio.rs:765 grid-tools::collision_audio::landing	docs/AUDIO_RESEARCH.md:871	F502	[O]		the car's position, and cleared. The 454560 call while airborne with
 0x00454870		func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:189				Reset per race (re)start (0x454870 → 0x444E30(1) → 0x438840):**
 0x00454910		func	crates/grid-tools/src/speech.rs:1915 grid-tools::speech::flashback	docs/SPEECH_AUDIO_RESEARCH.md:462				A flashback (0x453000, 0x454910): 0x452520(0), then `usedFlashback`.
+0x004549F0	audio_manager_frame	func		docs/AUDIO_RESEARCH.md:2409	G386	[D]		Shared active-frame Ambience/Crowd and ordinary replay audio dispatch.
 0x00454C39		label	not ported	docs/AUDIO_RESEARCH.md:1229		[O]		inside 0x004549F0; mode (6 = EndOfRace). 454C39 forces camera 3 while +0x34D60 is set. So:
 0x00455410		func	crates/grid-tools/src/tyre_audio.rs:2 grid-tools::tyre_audio	docs/TYRE_AUDIO_RESEARCH.md:132 ; docs/TYRE_AUDIO.md:5	F282			original 456640 chain (roll 455410, peel/slide 44F330, skid/scrub 44FE60)
 0x00455900	info_collector_unload	func	not ported	docs/SPEECH_AUDIO_RESEARCH.md:269	F596	[I]		not a function entry in the master analysis; load and unload handlers (0x4391E0, 0x455900, §8) clear it; a restart does not reload the audio
@@ -847,6 +851,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00596440	vehicle_lights	func	crates/grid-tools/src/environment.rs:74 grid-tools::environment::vehicle_lights ; crates/grid-app/src/dash.rs:326 grid-app::dash::backlight_on	docs/COCKPIT.md:295 ; docs/TRACK_ENVIRONMENT.md:98	F678	[V]		the car lights on at the start (0x596440 → 0xA08DA0). The lighting
 0x00596A40	state_instant_replay_enter	func	not ported	docs/REPLAY.md:473 ; docs/FLASHBACK.md:252	F794 F780 F778	[D]	request_terminal	not a function entry in the master analysis; and its exit (terminal). The silent replay's enter 0x596A40 (its arguments read by 0x57B1B0:
 0x00596C90	state_instant_replay_rewind_enter	func	not ported	docs/REPLAY.md:63 ; docs/RACE_HUD.md:509	F778	[D]		rewind (0x596C90) adds. Afterwards `flow.bin` plays the crash replay
+0x00598180	teardown_drift_gp_cinematic_camera	func		docs/AUDIO_RESEARCH.md:2409	G386	[D]		Releases the Drift GP dolly and clears the cinematic crowd override.
 0x005986F0		func	not ported	docs/GARAGE_WORLD.md:52		[V]		The pre-race info screens send it: 0x58C150, 0x5986F0, 0x5991C0 and 0x59C550 (`C.pre_race_info_%d`, the drift GP page).
 0x005991C0		func	not ported	docs/GARAGE_WORLD.md:52		[V]		The pre-race info screens send it: 0x58C150, 0x5986F0, 0x5991C0 and 0x59C550 (`C.pre_race_info_%d`, the drift GP page).
 0x0059AA22		label	not ported	docs/CAMERA_VIEWS.md:269				inside 0x0059A8F0; +0x123 = 1**, transitions enabled. Writers (setter 0x7F6E20): the car attach 0x98D741 (1), the enter of StateRaceTransitions (0x59AA22, vtable 0xCD9F24, the ...
@@ -4098,6 +4103,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CB22B4	interior_emissive_default	global	not ported					note: 0.15, backlight EmissiveMapScale without an emissive_scale attribute [D]
 0x00CB22BC		global	crates/grid-app/src/camera.rs:1293 grid-app::camera::shake_table					in x87 precision with the f32 constants (0xCB22BC, 0xCFE6E8..0xCFE6F8,
 0x00CB22E4	RAY_TOLERANCE	global	crates/grid-tools/src/speech.rs:28 grid-tools::speech::TINY_PROGRESS ; crates/grid-world/src/continuous.rs:24 grid-world::continuous::RAY_TOLERANCE	docs/JOINTS_RESEARCH.md:434 ; docs/SPEECH_AUDIO_RESEARCH.md:215	F595		TINY_PROGRESS	A zero race progress divides by this instead (RAY_TOLERANCE 0xCB22E4, 0x438C10).
+0x00CB2B44	CrowdAudioVtable	vtable		docs/AUDIO_RESEARCH.md:2409	G386	[D]		Virtual slot +0x10 reaches 0x44E220.
 0x00CB2B74		global	not ported	docs/DISCIPLINES.md:409				0xCB8DA4 2, 0xCB47E4 −12, 0xCAFBD8 20, 0xCB0C44 8, 0xCB2B74 48, 0xCB0F3C 16, 0xCB0C48 24, 0xCB3BA8
 0x00CB3000		global	not ported	docs/DEFORMATION_CONTACT_LIMIT.md:46				Retained draft01 faulted C0000005 before producing outputs: the harness attempted to supply CB3BA8 outside its first writable CB0000 page. Adding the private...
 0x00CB31C0		global	not ported	docs/AUDIO_RESEARCH.md:938		[O]		broadcaster" message (CB31C0) and adds 1 to +5B4C.

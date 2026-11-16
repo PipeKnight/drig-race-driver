@@ -1016,3 +1016,23 @@ The independently authored pose adapter now follows the existing renderer policy
 ### G383 integrating verification
 
 The actual default-feature run passes61 crowd CPU regressions, including30 modifier instances across six dataset-selected resource banks after the shared normal repair, and the required734-test package gate/Clippy/release/Washington render. A matched1920x1080 offscreen pair then imports the same786-vertex/3468-index modifier and material through Control/Pose modes. Saved locals produce a standing T-pose; selected clip f_gs_s1_id_01 at explicitly supplied bank coordinate2 produces a coherent seated pose with crossed legs and hands on the knee. The73,974 changed RGB pixels lie entirely inside the actor ROI; background pixels are byte-identical. Both child processes complete and reap with exit0. Exact provenance, failed attempts and tool versions are retained in G383 and local/handoff/drafts/crowd-visual-review186/. This proves the bounded static clip-to-skin-to-render path, not native clock/reference/Delta, all actor modifiers per placement, full population, flashes or sound. Feet/seat contact are partially occluded and source orientation remains authored.
+
+### Installed race population coverage
+
+The installed corpus contains 92 race layouts with a standing-crowd file.
+Every one resolves its source dataset and regional billboard atlas. The
+current static producer accepts 1,290,320 standing placement records across
+those layouts. Its largest single route accepts 29,922. The ordinary
+Le Mans transition race emitted 18,733 standing placements on its current
+layout. The three regional CPU fixtures and the matched runtime examples in
+G384 exercise the production consumer.
+
+The catalogue audit also identified 876 standing race records outside the
+current adapter. Of those, 826 are course officials without a billboard
+stance and 50 have the absent instance-set definition ma_fl on Nürburgring
+and Spa. The separate moving payloads contain 181 race records, including
+115 walking spectators. Their path/spawn contract remains open. The closest
+source actors use the existing camera budget and the other admitted
+spectators use route billboards. Five frontend garage placement files were
+audited separately. Counts, routes and exact omissions are retained in
+local/handoff/drafts/crowd-installed-coverage01/inventory.json.
