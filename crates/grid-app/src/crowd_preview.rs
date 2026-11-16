@@ -81,11 +81,11 @@ impl Mode {
     }
 }
 #[derive(Clone, Debug)]
-struct Spec {
-    uv: [f32; 4],
-    dimensions: [f32; 2],
-    colours: [Vec4; 3],
-    instance_scale: [f32; 2],
+pub(crate) struct Spec {
+    pub(crate) uv: [f32; 4],
+    pub(crate) dimensions: [f32; 2],
+    pub(crate) colours: [Vec4; 3],
+    pub(crate) instance_scale: [f32; 2],
 }
 #[derive(Clone, Debug)]
 struct Row {
@@ -141,7 +141,7 @@ fn one<'d, 'a>(
 // Explicit source-draw fixture, NOT replay of the original global CRT RNG.
 // 0x986990 packs width in low half and height in high half; finite positive
 // normal scales only. Its first branch uses x87, its second branch uses SSE.
-fn source_scale_fixture(height_range: f32, width_range: f32) -> [f32; 2] {
+pub(crate) fn source_scale_fixture(height_range: f32, width_range: f32) -> [f32; 2] {
     const DRAW: f32 = 5000.;
     const RATIO: f32 = f32::from_bits(0x38d1b717);
     fn truncate_half_normal(v: f32) -> f32 {
@@ -302,12 +302,12 @@ fn selected_tints(template:&crowd_population::Template,variant:usize,set:usize)-
         let result=Vec4::new(rgb[0],rgb[1],rgb[2],1.);if !result.is_finite(){return Err("nonfinite selected tint".into());}Ok(result)
     };Ok([colour(a)?,colour(b)?,colour(c)?])
 }
-fn shader_texture<'a>(bindings:&[grid_formats::material::TextureBinding<'a>],shader:&[u8],sampler:&[u8])->AnyResult<&'a [u8]>{
+pub(crate) fn shader_texture<'a>(bindings:&[grid_formats::material::TextureBinding<'a>],shader:&[u8],sampler:&[u8])->AnyResult<&'a [u8]>{
     let mut entries=bindings.iter().filter(|b|b.shader==shader && b.sampler==sampler);
     let b=entries.next().ok_or("selected source shader texture absent")?;
     if entries.next().is_some() || b.container.is_some(){return Err("selected source shader texture ambiguous/external".into());}Ok(b.texture)
 }
-fn unique_texture<'t,'a>(textures:&'t [texture::Texture<'a>],id:&[u8])->AnyResult<&'t texture::Texture<'a>> {
+pub(crate) fn unique_texture<'t,'a>(textures:&'t [texture::Texture<'a>],id:&[u8])->AnyResult<&'t texture::Texture<'a>> {
     let mut matches=textures.iter().filter(|t|t.id==id);
     let result=matches.next().ok_or("selected texture object absent")?;
     if matches.next().is_some(){return Err("selected texture object ambiguous".into());}
@@ -598,23 +598,33 @@ pub(crate) fn flash_fixture_anchors(
 }
 
 const SHADER: Handle<Shader> = uuid_handle!("3f1983b1-35cd-4ea7-986e-22b81999f3a2");
-type CrowdMaterial = ExtendedMaterial<StandardMaterial, Tint>;
+pub(crate) type CrowdMaterial = ExtendedMaterial<StandardMaterial, Tint>;
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct Tint {
     #[texture(100)]
     #[sampler(101)]
-    map: Handle<Image>,
+    pub(crate) map: Handle<Image>,
     #[uniform(102)]
-    colour0: Vec4,
+    pub(crate) colour0: Vec4,
     #[uniform(103)]
-    colour1: Vec4,
+    pub(crate) colour1: Vec4,
     #[uniform(104)]
-    colour2: Vec4,
+    pub(crate) colour2: Vec4,
 }
 impl MaterialExtension for Tint {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
     }
+}
+pub(crate) fn install_shader(app: &mut App) -> AnyResult<()> {
+    app.world_mut().resource_mut::<Assets<Shader>>().insert(
+        SHADER.id(),
+        Shader::from_wgsl(
+            include_str!("crowd_preview.wgsl"),
+            "grid_crowd_preview.wgsl",
+        ),
+    )?;
+    Ok(())
 }
 pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     if !prepared.mode.selected_source() && !matches!(
@@ -634,13 +644,7 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     ) {
         return Ok(());
     }
-    app.world_mut().resource_mut::<Assets<Shader>>().insert(
-        SHADER.id(),
-        Shader::from_wgsl(
-            include_str!("crowd_preview.wgsl"),
-            "grid_crowd_preview.wgsl",
-        ),
-    )?;
+    install_shader(app)?;
     if prepared.mode == Mode::OneKeySweep {
         app.get_sub_app_mut(bevy::render::RenderApp).ok_or("sweep renderer absent")?
             .add_systems(bevy::render::ExtractSchedule, extract_sweep);
@@ -653,16 +657,19 @@ pub fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
     Ok(())
 }
 #[derive(Default)]
-struct Batch {
-    p: Vec<[f32; 3]>,
-    n: Vec<[f32; 3]>,
-    uv: Vec<[f32; 2]>,
-    indices: Vec<u32>,
+pub(crate) struct Batch {
+    pub(crate) p: Vec<[f32; 3]>,
+    pub(crate) n: Vec<[f32; 3]>,
+    pub(crate) uv: Vec<[f32; 2]>,
+    pub(crate) indices: Vec<u32>,
 }
 fn card(batch: &mut Batch, row: &Row, s: &Spec, eye: Vec3) -> Result<(), &'static str> {
-    let d = eye - row.position;
+    card_values(batch, row.position, s, eye)
+}
+pub(crate) fn card_values(batch: &mut Batch, position: Vec3, s: &Spec, eye: Vec3) -> Result<(), &'static str> {
+    let d = eye - position;
     let len = d.x.hypot(d.z);
-    if !row.position.is_finite() || !eye.is_finite() || !d.is_finite() || !len.is_finite() {
+    if !position.is_finite() || !eye.is_finite() || !d.is_finite() || !len.is_finite() {
         return Err("nonfinite static crowd card basis");
     }
     if len < 0.0001 {
@@ -701,7 +708,7 @@ fn card(batch: &mut Batch, row: &Row, s: &Spec, eye: Vec3) -> Result<(), &'stati
     .enumerate()
     {
         let position =
-            row.position + right * x * s.instance_scale[0] + Vec3::Y * y * s.instance_scale[1];
+            position + right * x * s.instance_scale[0] + Vec3::Y * y * s.instance_scale[1];
         // Authored curved-normal approximation, not source backlight/fog.
         let normal = (forward + right * (4. * x.signum())).normalize();
         // Finite basis alone does not prevent scaled corner/addition overflow.

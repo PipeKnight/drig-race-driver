@@ -229,100 +229,142 @@ pub(crate) struct ChannelSample {
     pub kind: anim_packet::Kind,
     pub raw: [f32; 4],
 }
+pub(crate) struct BoundClip<'a> {
+    packets: Vec<anim_packet::Packet<'a>>,
+}
+
+impl<'a> BoundClip<'a> {
+    pub(crate) fn read(
+        selected: &Selected<'_>,
+        binding: ExplicitClipBinding<'_>,
+        bank: &pssg::Tree<'a>,
+    ) -> AnyResult<Self> {
+        if selected.raw_ordinal != binding.raw_ordinal {
+            return Err("explicit binding mismatch".into());
+        }
+        if selected.candidate.mirrored {
+            return Err("selected mirroring pose operation unresolved".into());
+        }
+        let mut clips = (0..bank.nodes.len()).filter(|&i| {
+            bank.name(i) == b"NeAnimClip" && bank.string(i, b"id").ok() == Some(binding.clip_id)
+        });
+        let clip = clips.next().ok_or("explicit clip ID absent")?;
+        if clips.next().is_some() {
+            return Err("explicit clip ID ambiguous".into());
+        }
+        let refs: Vec<_> = bank.nodes[clip]
+            .children
+            .iter()
+            .copied()
+            .filter(|&i| bank.name(i) == b"NeAnimClipPacketRef")
+            .collect();
+        if refs.is_empty()
+            || refs.len() > 64
+            || bank.integer(clip, b"packetCount")? as usize != refs.len()
+        {
+            return Err("clip packet count absent/inconsistent/over authored cap".into());
+        }
+        let mut packets = Vec::with_capacity(refs.len());
+        let mut targets = BTreeSet::new();
+        let mut seen_packets = BTreeSet::new();
+        for reference in refs {
+            let id = bank
+                .string(reference, b"packet")?
+                .strip_prefix(b"#")
+                .ok_or("external packet reference unsupported")?;
+            if !seen_packets.insert(id) {
+                return Err("duplicate packet reference".into());
+            }
+            let mut parents = (0..bank.nodes.len()).filter(|&i| {
+                matches!(bank.name(i), b"NeAnimPacket_S4" | b"NeAnimPacket_L4")
+                    && bank.string(i, b"id").ok() == Some(id)
+            });
+            let parent = parents
+                .next()
+                .ok_or("ordinary packet reference unresolved")?;
+            if parents.next().is_some() {
+                return Err("ordinary packet reference ambiguous".into());
+            }
+            let (parent_type, leaf_type) = if bank.name(parent) == b"NeAnimPacket_S4" {
+                ("NeAnimPacket_S4", "NeAnimPacketData_S4")
+            } else {
+                ("NeAnimPacket_L4", "NeAnimPacketData_L4")
+            };
+            let [leaf] = bank.nodes[parent].children.as_slice() else {
+                return Err("ordinary packet requires exact direct leaf".into());
+            };
+            let node = &bank.nodes[*leaf];
+            if bank.name(*leaf) != leaf_type.as_bytes()
+                || node.parent != Some(parent)
+                || !node.children.is_empty()
+                || !node.attributes.is_empty()
+            {
+                return Err("ordinary packet leaf shape unsupported".into());
+            }
+            let packet = anim_packet::read(
+                node.data.ok_or("ordinary packet payload absent")?,
+                anim_packet::Envelope {
+                    parent_type,
+                    leaf_type,
+                    parent_alignment: bank.integer(parent, b"alignment")?,
+                    native_size: bank.integer(parent, b"size")? as usize,
+                },
+            )?;
+            let kind = match packet.kind {
+                anim_packet::Kind::L4 => 0u8,
+                anim_packet::Kind::S4 => 1u8,
+            };
+            for channel in &packet.channels {
+                if !targets.insert((kind, channel.target)) {
+                    return Err("duplicate channel semantic/target across selected packets".into());
+                }
+            }
+            packets.push(packet);
+        }
+        Ok(Self { packets })
+    }
+
+    pub(crate) fn key_range(&self) -> AnyResult<(f32, f32)> {
+        let mut range = (f32::INFINITY, f32::NEG_INFINITY);
+        for channel in self.packets.iter().flat_map(|packet| &packet.channels) {
+            let first = channel.keys.first().ok_or("empty animation channel")?;
+            let last = channel.keys.last().ok_or("empty animation channel")?;
+            range.0 = range.0.min(first.time);
+            range.1 = range.1.max(last.time);
+        }
+        if !range.0.is_finite() || !range.1.is_finite() || range.0 > range.1 {
+            return Err("invalid animation key range".into());
+        }
+        Ok(range)
+    }
+
+    pub(crate) fn sample(&self, bank_coordinate: f32) -> AnyResult<Vec<ChannelSample>> {
+        if !bank_coordinate.is_finite() {
+            return Err("nonfinite bank coordinate".into());
+        }
+        let mut samples = Vec::new();
+        for packet in &self.packets {
+            for (i, channel) in packet.channels.iter().enumerate() {
+                samples.push(ChannelSample {
+                    target: channel.target.to_owned(),
+                    kind: packet.kind,
+                    raw: packet.sample(i, bank_coordinate)?,
+                });
+            }
+        }
+        Ok(samples)
+    }
+}
+
 pub(crate) fn sample_bound_clip(
     selected: &Selected<'_>,
     binding: ExplicitClipBinding<'_>,
     bank: &pssg::Tree<'_>,
     bank_coordinate: f32,
 ) -> AnyResult<Vec<ChannelSample>> {
-    if selected.raw_ordinal != binding.raw_ordinal || !bank_coordinate.is_finite() {
-        return Err("explicit binding/coordinate mismatch".into());
-    }
-    if selected.candidate.mirrored {
-        return Err("selected mirroring pose operation unresolved".into());
-    }
-    let mut clips = (0..bank.nodes.len()).filter(|&i| {
-        bank.name(i) == b"NeAnimClip" && bank.string(i, b"id").ok() == Some(binding.clip_id)
-    });
-    let clip = clips.next().ok_or("explicit clip ID absent")?;
-    if clips.next().is_some() {
-        return Err("explicit clip ID ambiguous".into());
-    }
-    let refs: Vec<_> = bank.nodes[clip]
-        .children
-        .iter()
-        .copied()
-        .filter(|&i| bank.name(i) == b"NeAnimClipPacketRef")
-        .collect();
-    if refs.is_empty()
-        || refs.len() > 64
-        || bank.integer(clip, b"packetCount")? as usize != refs.len()
-    {
-        return Err("clip packet count absent/inconsistent/over authored cap".into());
-    }
-    let mut samples = Vec::new();
-    let mut targets = BTreeSet::new();
-    let mut seen_packets = BTreeSet::new();
-    for reference in refs {
-        let id = bank
-            .string(reference, b"packet")?
-            .strip_prefix(b"#")
-            .ok_or("external packet reference unsupported")?;
-        if !seen_packets.insert(id) {
-            return Err("duplicate packet reference".into());
-        }
-        let mut parents = (0..bank.nodes.len()).filter(|&i| {
-            matches!(bank.name(i), b"NeAnimPacket_S4" | b"NeAnimPacket_L4")
-                && bank.string(i, b"id").ok() == Some(id)
-        });
-        let parent = parents
-            .next()
-            .ok_or("ordinary packet reference unresolved")?;
-        if parents.next().is_some() {
-            return Err("ordinary packet reference ambiguous".into());
-        }
-        let (parent_type, leaf_type) = if bank.name(parent) == b"NeAnimPacket_S4" {
-            ("NeAnimPacket_S4", "NeAnimPacketData_S4")
-        } else {
-            ("NeAnimPacket_L4", "NeAnimPacketData_L4")
-        };
-        let [leaf] = bank.nodes[parent].children.as_slice() else {
-            return Err("ordinary packet requires exact direct leaf".into());
-        };
-        let node = &bank.nodes[*leaf];
-        if bank.name(*leaf) != leaf_type.as_bytes()
-            || node.parent != Some(parent)
-            || !node.children.is_empty()
-            || !node.attributes.is_empty()
-        {
-            return Err("ordinary packet leaf shape unsupported".into());
-        }
-        let packet = anim_packet::read(
-            node.data.ok_or("ordinary packet payload absent")?,
-            anim_packet::Envelope {
-                parent_type,
-                leaf_type,
-                parent_alignment: bank.integer(parent, b"alignment")?,
-                native_size: bank.integer(parent, b"size")? as usize,
-            },
-        )?;
-        for (i, channel) in packet.channels.iter().enumerate() {
-            let kind = match packet.kind {
-                anim_packet::Kind::S4 => 0u8,
-                anim_packet::Kind::L4 => 1u8,
-            };
-            if !targets.insert((kind, channel.target.to_owned())) {
-                return Err("duplicate channel semantic/target across selected packets".into());
-            }
-            samples.push(ChannelSample {
-                target: channel.target.to_owned(),
-                kind: packet.kind,
-                raw: packet.sample(i, bank_coordinate)?,
-            });
-        }
-    }
-    Ok(samples)
+    BoundClip::read(selected, binding, bank)?.sample(bank_coordinate)
 }
+
 /// Explicit complete diagnostic frame input, never a selected runtime default.
 pub(crate) struct DiagnosticPoseRequest<'a> {
     pub clip: ExplicitClipBinding<'a>,

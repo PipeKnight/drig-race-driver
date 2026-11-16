@@ -389,7 +389,7 @@ impl ReplayEffects {
 
 fn reset(world: &mut World) {
     if let Some(mut m) = world.get_resource_mut::<SkidMarks>() {
-        m.reset();
+        m.reset_for_replay();
     }
     if let Some(mut d) = world.get_resource_mut::<WheelDebris>() {
         d.reset();

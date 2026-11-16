@@ -281,7 +281,7 @@ where
         key: format!("{tag}/{name:?}"),
     })
 }
-fn resource_path(filename: &str) -> Result<String, Error> {
+pub(crate) fn resource_path(filename: &str) -> Result<String, Error> {
     let relative = filename
         .strip_prefix("/data/")
         .ok_or_else(|| Error::InvalidResourcePath(filename.to_owned()))?;

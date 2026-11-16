@@ -12,6 +12,7 @@ mod foundation_front;
 mod foundation_front_audit;
 mod foundation_backing;
 mod foundation_backing_audit;
+mod crowd_billboards;
 mod crowd_population;
 mod crowd_preview;
 mod crowd_rig;
@@ -160,6 +161,8 @@ mod replay_effects;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
+mod skid_banks;
+mod skid_color;
 mod skid_marks;
 mod night_lights;
 mod sky;
@@ -1719,7 +1722,6 @@ fn shared_source_material_scene(settings: &graphics::Settings, scene: EnhancedMa
         && settings.layered_car
         && settings.layered_track
         // These unrelated pilots still select diagnostic-specific sources/context.
-        && !settings.track_grade
         && settings.paint_environment == 0.
         && !scene.reflection_calibration
         && (scene.track || scene.drive)
@@ -3845,6 +3847,16 @@ pub(crate) fn race_app(
                 environment.lighting.rgb("backlight_suncolour").map_or(0., |sun| graphics::sun_reference(sun, false)));
         }
     }
+    if graphics.enhanced() && track && !collision && !headless {
+        let environment = grid_tools::environment::Environment::for_route(&root, &route)?;
+        let mode = environment.mode();
+        if mode == grid_tools::time_of_day::Mode::ForcedNight {
+            graphics.sun_level = graphics::sun_level(&environment.lighting, false).unwrap_or(1.);
+        }
+        if mode != grid_tools::time_of_day::Mode::None {
+            graphics.emissive_unit = graphics::light_unit(&environment.lighting, graphics.sun_illuminance(), false);
+        }
+    }
     if source_haze {
         if !graphics.enhanced() || (!track && !drive) {
             return Err("--haze source requires an enhanced track scene".into());
@@ -3856,12 +3868,7 @@ pub(crate) fn race_app(
         if !graphics.enhanced() {
             return Err("--grade track requires --graphics enhanced".into());
         }
-        let bytes = read(&root.join("tracks/europe/donington/effects.xml"))?;
-        let grade = grid_formats::graphics_grade::read(&bytes, "Effect_0000")?;
-        println!(
-            "graphics_grade source=donington/effects.xml effect=Effect_0000 mapping=track-inspired-display controls={grade:?}"
-        );
-        graphics.saved_grade = Some(grade);
+        graphics.saved_grade = Some(track_grade::load(&root, &route)?);
     }
     if drive_ticks.is_some_and(|n| n > 72_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=72000".into());
@@ -5034,7 +5041,7 @@ pub(crate) fn race_app(
         tyre_smoke::install(&mut app, &root, smoke_order, particle_light);
         if ground_effect_assets::enabled() {
             wheel_ground::install(&mut app);
-            if let Err(error) = skid_marks::install(&mut app, &root, skid_order, skid_reflectance) {
+            if let Err(error) = skid_marks::install(&mut app, &root, &field.models, &field.car_model, skid_order, skid_reflectance) {
                 warn!("Skid marks unavailable; driving continues: {error}");
             }
             if let Err(error) = wheel_debris::install(&mut app, &root) {
@@ -5345,7 +5352,7 @@ pub(crate) fn race_app(
             timeline,
         })?;
     }
-    // Time-of-day routes: the baseline lights follow the timeline
+    // Time-of-day routes: the scene lights follow the timeline
     // (docs/TRACK_ENVIRONMENT.md "Night level").
     if track && !collision && grid_tools::time_of_day::Mode::for_route(&root, &route).ok() == Some(grid_tools::time_of_day::Mode::Timeline) {
         let environment = grid_tools::environment::Environment::for_route(&root, &route)?;
@@ -5528,6 +5535,10 @@ pub(crate) fn race_app(
         } else { None };
         crowd_preview::install(&mut app, prepared)?;
         if let Some(flash) = flash { flash_preview::install(&mut app, flash)?; }
+    } else if drive && !headless && track && !collision
+        && let Err(error) = crowd_billboards::install_route(&mut app, &root, &route)
+    {
+        warn!("Crowd population unavailable on {}: {error}", route.path());
     }
     // Private trial integration: historic target adapters require their old artifact.
     if foundation_front != foundation_front::Mode::Off || foundation_backing != foundation_backing::Mode::Off
@@ -10106,7 +10117,7 @@ mod enhanced_material_admission_tests {
         changed=graphics;changed.preset=graphics::Preset::Baseline;
         assert!(!shared_source_material_scene(&changed,ordinary));
         changed=graphics;changed.track_grade=true;
-        assert!(!shared_source_material_scene(&changed,ordinary));
+        assert!(shared_source_material_scene(&changed,ordinary));
         changed=graphics;changed.paint_environment=0.5;
         assert!(!shared_source_material_scene(&changed,ordinary));
         assert!(!shared_source_material_scene(&graphics,EnhancedMaterialContext {reflection_calibration:true,..ordinary}));

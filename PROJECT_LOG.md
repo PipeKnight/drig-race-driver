@@ -99,7 +99,9 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - G311 (2026-10-27): one finite forearm sweep passes466app tests/Clippy/build,31Extract/3callbacks/5PNGs after preserved compile/lint failures. Coherent bend, exact neutral/final controls; native clock/full animation/default remain open. See CROWD_ANIMATION_RESEARCH.
 - G310 (2026-10-27): same-artifact angular asphalt plus accepted gentle Motion passes2nativeDLAA1800tick controls and strict physical/ledger/motion equivalence; selected frames look continuous. Owner accepts moving road quality; antenna doubling remains open. R/C/multitrack/default acceptance open. See ASPHALT_PAINT_REFLECTION_CHECK.
 - Graphics records: log/G*.md and docs/GRAPHICS_ROADMAP_RU.md; optional graphics builds remain separate from the general playable. Every circuit draws its own sky and layered road (F515, docs/SKY.md).
-- Open: night lighting (only the sky darkens), the original post-process chain (row 77), the enhanced
+- F776/F781 (in main) render street and vehicle lights from route and car data and apply the baseline
+  night level and Le Mans timeline lighting. G384 resumes enhanced time-of-day and its verification.
+- Open: the original post-process chain (row 77), the enhanced
   profile only for Lacetti on Donington (row 78), strobing wheels (row 81).
 
 ### Android and platforms

@@ -134,7 +134,7 @@ pub struct Settings {
     pub source_ibl: bool,
     pub smooth_tyres: bool,
     pub track_grade: bool,
-    pub saved_grade: Option<grid_formats::graphics_grade::Grade>,
+    pub saved_grade: Option<grid_formats::race_postprocess::RaceEffects>,
     /// Opt-in distance-only adaptation of saved source fog; height formula unknown.
     pub saved_fog: Option<grid_formats::track_lighting::Fog>,
     pub benchmark_frames: Option<u32>,
@@ -747,9 +747,11 @@ pub fn configure(
     }
     configure_display(commands, camera, settings);
     if let Some(grade) = settings.saved_grade {
+        commands.entity(camera).insert(Tonemapping::None);
         commands
             .entity(camera)
-            .insert(super::track_grade::TrackGrade::from(grade));
+            .remove::<Bloom>()
+            .insert(super::track_grade::TrackGrade::new(grade, settings.motion_shutter > 0.));
     }
 }
 

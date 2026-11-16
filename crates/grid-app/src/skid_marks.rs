@@ -1,19 +1,20 @@
 //! Tyre skid marks for every car, following the original skid-mark plugin
 //! (docs/GROUND_EFFECTS_RESEARCH.md, emission 73F860, vertices 739570).
-//! The surface profile `skidmarks/road_tm.xml` (Lacetti `vehicle_skid_type`
-//! 4) and the atlas `skidmarks/road_tm.pssg` are read from the purchased
-//! installation. Presentation only; never feeds physics.
+//! Source profile/atlas selection follows each actual model's database skid-type
+//! FK. One global strip pool, stream and draw retain explicit per-strip banks.
+//! Purchased assets stay local; presentation never feeds physics.
 use super::mesh_stream::{MeshStream, VertexLayout, put};
 use super::wheel_ground::{Wheel, WheelGround};
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     camera::primitives::Aabb,
-    mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology},
+    mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology},
     pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline},
     prelude::*,
-    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError},
+    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, VertexFormat},
 };
 use grid_formats::skidmarks::{Layer, Profile};
+use super::skid_color::SupportedSourcePacking;
 use std::path::Path;
 use bevy::shader::ShaderRef;
 
@@ -56,11 +57,12 @@ pub(crate) fn parse_reflectance(value: &str) -> Result<f32, &'static str> {
 // One diffuse crossfade fragment for ordinary rendering and smoke replay;
 // base PBR lighting and the existing raster/sort policy remain authored.
 pub(crate) type SkidMaterial = ExtendedMaterial<StandardMaterial, SkidRasterBias>;
+const BANK_ATTRIBUTE: MeshVertexAttribute = MeshVertexAttribute::new("SkidBank", 0x534b4944, VertexFormat::Uint32);
 const LAYER_SHADER: Handle<Shader> = uuid_handle!("28837716-d9b9-4d87-b230-4055be1080b8");
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 #[bind_group_data(SkidRasterKey)]
 pub(crate) struct SkidRasterBias {
-    #[texture(100)]
+    #[texture(100, dimension = "2d_array")]
     #[sampler(101)]
     atlas: Handle<Image>,
     raster_constant: i32,
@@ -73,15 +75,26 @@ impl From<&SkidRasterBias> for SkidRasterKey {
 impl MaterialExtension for SkidRasterBias {
     // Fixed AlphaMode::Blend uses the native forward queue only. No custom
     // deferred/prepass/meshlet shader support is advertised by this material.
+    fn vertex_shader() -> ShaderRef { LAYER_SHADER.into() }
     fn fragment_shader() -> ShaderRef { LAYER_SHADER.into() }
     fn specialize(
         _: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
-        _: &MeshVertexBufferLayoutRef,
+        layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // ExtendedMaterial calls this AFTER StandardMaterial specialization.
-        // Preserve slope/clamp, compare, write-enable, blend and every shader.
+        // The extension is also specialized for the stock depth/shadow
+        // prepass, whose vertex locations differ from the forward shader.
+        if descriptor.vertex.shader == LAYER_SHADER {
+            descriptor.vertex.buffers = vec![layout.0.get_layout(&[
+                Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+                Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+                Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+                Mesh::ATTRIBUTE_UV_1.at_shader_location(3),
+                Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
+                BANK_ATTRIBUTE.at_shader_location(8),
+            ])?];
+        }
         restore_raster_constant(descriptor, key.bind_group_data.0);
         Ok(())
     }
@@ -121,7 +134,7 @@ const QUADS: usize = 32;
 const SLOT: usize = QUADS * 4;
 /// Retire the farthest finished strip while free + retiring strips < 40 [D].
 const SPARE: usize = 40;
-/// Alpha lost by the oldest quad of a retiring strip per update (25/255) [D].
+// Existing authored diffuse lifecycle, separate from source normal byte2.
 const RETIRE_STEP: f32 = 25. / 255.;
 /// A point is laid after the wheel moved more than 0.1 m [D].
 const STEP: f32 = 0.1;
@@ -182,16 +195,27 @@ struct Point {
     u: [f32; 2],
     // Independent UV0/UV1 endpoint phases, seeded from persistent pool-slot state.
     v: [f32; 2],
-    alpha: f32,
+    source_color: SupportedSourcePacking,
+    // Diffuse-only adapter: preserve the existing per-point end/retire policy.
+    // This is not an original shader alpha lane or source normal-depth value.
+    diffuse_envelope: f32,
 }
 
 impl Point {
+    fn color_for_draw(self, ramp: f32, current: bool) -> [f32; 4] {
+        let mut decoded = self.source_color.gpu(ramp, current);
+        // Exactly one source opacity and one pre-existing authored lifecycle;
+        // normal/wet/layer mix retain their recovered lane identities.
+        decoded[2] *= self.diffuse_envelope;
+        decoded
+    }
     fn finite_payload(&self) -> bool {
         self.center.is_finite() && self.side.is_finite() && self.normal.is_finite()
             && self.normal.length_squared().is_finite() && self.normal.length_squared() > 0.
             && self.half_width.is_finite() && self.half_width > 0.
             && self.u.into_iter().all(f32::is_finite) && finite_phase(self.v)
-            && self.alpha.is_finite() && (0. ..=1.).contains(&self.alpha)
+            && self.source_color.valid()
+            && self.diffuse_envelope.is_finite() && (0. ..=1.).contains(&self.diffuse_envelope)
             && (self.center - self.side * self.half_width).is_finite()
             && (self.center + self.side * self.half_width).is_finite()
     }
@@ -240,6 +264,8 @@ fn capacity_phase(previous: [f32; 2]) -> Option<[f32; 2]> {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Strip {
+    /// Retained when owner=None; never inferred from a retired slot.
+    bank: u32,
     points: Vec<Point>,
     segments: Vec<QuadUv>,
     /// Contact-start ramp position at point zero; capacity chains retain it.
@@ -260,9 +286,12 @@ struct Head {
 
 #[derive(Resource)]
 pub(crate) struct SkidMarks {
-    profile: Profile,
+    profiles: Vec<Profile>,
+    slot_banks: Vec<u32>,
     /// Initial construction zeros phases; geometry recycle/reset does not.
     phases: [[f32; 2]; STRIPS],
+    /// Phase seeds before the first live ground sample of this segment.
+    segment_start_phases: [[f32; 2]; STRIPS],
     strips: Vec<Strip>,
     heads: Vec<[Option<Head>; 4]>,
     camera: Vec3,
@@ -322,8 +351,15 @@ impl SkidMarks {
         self.dirty = true;
     }
 
-    /// No marks (a segment start).
-    pub(crate) fn reset(&mut self) {
+    /// Begin a live segment, retaining the strip pool's current phases.
+    fn begin_segment(&mut self) {
+        self.segment_start_phases = self.phases;
+        self.clear();
+    }
+
+    /// Rebuild before the first checkpoint from the live segment's initial phases.
+    pub(crate) fn reset_for_replay(&mut self) {
+        self.phases = self.segment_start_phases;
         self.clear();
     }
 
@@ -349,10 +385,16 @@ impl SkidMarks {
     pub(crate) fn owned_ground_draw(&self) -> Option<super::ground_skid_pass::OwnedGroundSkid> {
         self.owned_ground.filter(|draw| draw.mesh == self.mesh.id())
     }
+    #[cfg(test)]
     fn new(profile: Profile) -> Self {
-        Self {
-            profile,
+        Self::with_banks(vec![profile],vec![0;20]).unwrap()
+    }
+    fn with_banks(profiles:Vec<Profile>,slot_banks:Vec<u32>)->Result<Self,String>{
+        if profiles.is_empty()||slot_banks.is_empty()||slot_banks.iter().any(|&b|b as usize>=profiles.len()) {return Err("invalid admitted skid bank/slot mapping".into());}
+        Ok(Self {
+            profiles,slot_banks,
             phases: [[0.; 2]; STRIPS],
+            segment_start_phases: [[0.; 2]; STRIPS],
             strips: vec![Strip::default(); STRIPS],
             heads: Vec::new(),
             camera: Vec3::ZERO,
@@ -365,7 +407,7 @@ impl SkidMarks {
             written: None,
             laid: 0,
             phase_safety_events: 0,
-        }
+        })
     }
 
     fn clear(&mut self) {
@@ -413,17 +455,19 @@ impl SkidMarks {
         Some(index)
     }
 
-    /// End a wheel's strip: last point transparent, the one before halved [D].
+    /// Source ending edits raw byte2 (normal weight), not the recovered opacity lane.
     fn end(&mut self, car: usize, wheel: usize) {
         if let Some(head) = self.heads[car][wheel].take() {
             let strip = &mut self.strips[head.strip];
             strip.owner = None;
             let n = strip.points.len();
             if n >= 1 {
-                strip.points[n - 1].alpha = 0.;
+                strip.points[n - 1].source_color.clear_normal();
+                strip.points[n - 1].diffuse_envelope = 0.;
             }
             if n >= 2 {
-                strip.points[n - 2].alpha *= 0.5;
+                strip.points[n - 2].source_color.half_normal();
+                strip.points[n - 2].diffuse_envelope *= 0.5;
             }
             if n < 2 {
                 *strip = Strip::default();
@@ -451,6 +495,7 @@ impl SkidMarks {
             self.safety_event(car, wheel, "point-suppressed");
             return;
         }
+        self.strips[strip].bank = *self.slot_banks.get(car).expect("admitted actual skid slot");
         self.strips[strip].owner = Some((car, wheel));
         self.strips[strip].points.push(point);
         self.heads[car][wheel] = Some(Head { strip, direction: None });
@@ -474,8 +519,17 @@ impl SkidMarks {
 
     /// Advance one wheel by one physics sample.
     fn advance(&mut self, car: usize, index: usize, wheel: &Wheel) {
-        let Some((_kind, layer)) = choose(wheel, &self.profile) else {
+        let bank=*self.slot_banks.get(car).expect("actual wheel slot outside skid Field");
+        let profile=&self.profiles[bank as usize];
+        let offset=profile.offset;
+        let Some((_kind, layer)) = choose(wheel, profile) else {
             self.end(car, index);
+            return;
+        };
+        let wet = profile.surfaces.iter().find(|s| s.code == wheel.code)
+            .map(|s| s.wet_lighting_scale).expect("choose resolved exact surface");
+        let Some(source_color) = SupportedSourcePacking::new(layer.fade[0], wet, layer.normal_depth) else {
+            self.recover(car, index, None, "unsupported-source-color");
             return;
         };
         let side = wheel.normal.cross(wheel.forward).normalize_or(Vec3::X);
@@ -487,13 +541,14 @@ impl SkidMarks {
         };
         let width = wheel.width * layer.width_scale;
         let mut point = Point {
-            center: wheel.point + wheel.normal * self.profile.offset,
+            center: wheel.point + wheel.normal * offset,
             side,
             normal: wheel.normal,
             half_width: 0.5 * width,
             u,
             v: [0.; 2],
-            alpha: 1.,
+            source_color,
+            diffuse_envelope: 1.,
         };
         if !point.finite_payload() {
             self.recover(car, index, None, "point-domain");
@@ -529,11 +584,13 @@ impl SkidMarks {
                 let strip = if full {
                     // Source capacity is32 emitted quads; this port reaches the
                     // same limit via33 points, at its next accepted-point tick.
+                    let bank=self.strips[head.strip].bank;
                     self.strips[head.strip].owner = None;
                     let Some(next) = self.allocate() else {
                         self.heads[car][index] = None;
                         return;
                     };
+                    self.strips[next].bank=bank;
                     if next == head.strip {
                         //73F860 drops the predecessor when allocation steals it.
                         // No linked capacity wrap or old-to-new bridge remains.
@@ -613,14 +670,15 @@ impl SkidMarks {
             self.strips[far].retiring = true;
         }
         for strip in self.strips.iter_mut().filter(|s| s.retiring) {
-            while strip.fade < strip.points.len() && strip.points[strip.fade].alpha <= 0. {
+            while strip.fade < strip.points.len() && strip.points[strip.fade].diffuse_envelope <= 0. {
                 strip.fade += 1;
             }
             if strip.fade + 1 >= strip.points.len() {
                 *strip = Strip::default();
             } else {
                 let p = &mut strip.points[strip.fade];
-                p.alpha = (p.alpha - RETIRE_STEP).max(0.);
+                p.source_color.retire_normal();
+                p.diffuse_envelope = (p.diffuse_envelope - RETIRE_STEP).max(0.);
             }
             self.dirty = true;
         }
@@ -649,10 +707,11 @@ impl SkidMarks {
         let p = &strip.points[i];
         let ordinal = strip.ramp_start + i;
         let ramp = match ordinal { 0 => 0., 1 => 0.5, _ => 1. };
-        let alpha = p.alpha * if strip.owner.is_some() || ordinal < 2 { ramp } else { 1. };
+        let ramp = if strip.owner.is_some() || ordinal < 2 { ramp } else { 1. };
+        let color = p.color_for_draw(ramp, edge >= 2);
         let sign = if edge.is_multiple_of(2) { -1. } else { 1. };
         ((p.center + p.side * p.half_width * sign).to_array(), p.normal.to_array(),
-            uv.old[edge], uv.new[edge], [if edge < 2 { 0. } else { 1. }, 1., 1., alpha])
+            uv.old[edge], uv.new[edge], color)
     }
 
     /// Every strip slot at its full length, so later changes are written over
@@ -667,6 +726,7 @@ impl SkidMarks {
             Vec::with_capacity(count),
             Vec::with_capacity(count),
         );
+        let mut bank_values=Vec::with_capacity(count);
         let mut indices = Vec::with_capacity(STRIPS * QUADS * 6);
         for (s, strip) in self.strips.iter().enumerate() {
             for k in 0..SLOT {
@@ -676,6 +736,7 @@ impl SkidMarks {
                 uvs.push(uv);
                 uvs_new.push(uv_new);
                 colors.push(c);
+                bank_values.push(strip.bank);
             }
             for i in 0..QUADS as u32 {
                 let a = (s * SLOT) as u32 + i * 4;
@@ -691,6 +752,7 @@ impl SkidMarks {
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uvs_new);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        mesh.insert_attribute(BANK_ATTRIBUTE,bank_values);
         mesh.insert_indices(Indices::U32(indices));
         mesh
     }
@@ -737,6 +799,7 @@ impl SkidMarks {
             at(Mesh::ATTRIBUTE_UV_1),
             at(Mesh::ATTRIBUTE_COLOR),
         );
+        let bank_offset=at(BANK_ATTRIBUTE);
         let start = bytes.len();
         bytes.resize(start + strips.len() * SLOT * layout.stride, 0);
         let mut vertex = start;
@@ -748,6 +811,7 @@ impl SkidMarks {
                 put(bytes, vertex + uv, uvv);
                 put(bytes, vertex + uv_new, uvn);
                 put(bytes, vertex + c, cv);
+                bytes[vertex+bank_offset..vertex+bank_offset+4].copy_from_slice(&strip.bank.to_le_bytes());
                 vertex += layout.stride;
             }
         }
@@ -780,17 +844,13 @@ impl SkidMarks {
                     1 => 0.5,
                     _ => 1.,
                 };
-                let alpha = p.alpha
-                    * if strip.owner.is_some() || i < 2 {
-                        ramp
-                    } else {
-                        1.
-                    };
+                let ramp = if strip.owner.is_some() || i < 2 { ramp } else { 1. };
+                let color = p.color_for_draw(ramp, false);
                 for (sign, u) in [(-1., p.u[0]), (1., p.u[1])] {
                     positions.push((p.center + p.side * p.half_width * sign).to_array());
                     normals.push(p.normal.to_array());
                     uvs.push([u, p.v[0]]);
-                    colors.push([1., 1., 1., alpha]);
+                    colors.push(color);
                 }
             }
             for i in 0..strip.points.len() as u32 - 1 {
@@ -802,20 +862,9 @@ impl SkidMarks {
     }
 }
 
-pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode, reflectance: Option<f32>) -> Result<(), Box<dyn std::error::Error>> {
-    let text = std::fs::read_to_string(root.join("skidmarks/road_tm.xml"))?;
-    let profile = grid_formats::skidmarks::read(&text)?;
-    let textures =
-        super::ground_effect_assets::package(root, "skidmarks/road_tm.pssg", &["diffuse.tga"])?;
-    let diffuse = textures
-        .get("diffuse.tga")
-        .ok_or("skidmark diffuse texture absent")?;
-    let diffuse = diffuse.clone();
-    println!(
-        "skid_marks enabled=true profile=road_tm surfaces={} offset={} strips={STRIPS}x{QUADS} cars=all fidelity=experimental",
-        profile.surfaces.len(),
-        profile.offset
-    );
+pub(crate) fn install(app: &mut App, root: &Path, models:&[grid_tools::car::Car],slots:&[usize], mode: OrderMode, reflectance: Option<f32>) -> Result<(), Box<dyn std::error::Error>> {
+    let prepared=crate::skid_banks::prepare(root,models,slots)?;
+    println!("skid_marks enabled=true bank_sources={} actual_slots={} strips={STRIPS}x{QUADS} pool=global source_type_from_database=true",prepared.banks.len(),prepared.slots.len());
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
         LAYER_SHADER.id(), Shader::from_wgsl(include_str!("skid_layers.wgsl"), "grid_skid_layers.wgsl"),
     ).expect("UUID skid layer shader");
@@ -824,7 +873,7 @@ pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode, reflectance: 
     println!("skid_order mode={mode:?} raster_constant=50 sort_bias={} source_parity=false",
         mode.sort_bias());
     app.init_resource::<MeshStream>()
-        .insert_resource(Pending { profile, diffuse, mode, reflectance })
+        .insert_resource(Pending { prepared, mode, reflectance })
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, lay.after(super::wheel_ground::update))
         .add_systems(Update, present.after(super::drive_present));
@@ -833,8 +882,7 @@ pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode, reflectance: 
 
 #[derive(Resource)]
 struct Pending {
-    profile: Profile,
-    diffuse: Vec<u8>,
+    prepared: crate::skid_banks::Prepared,
     mode: OrderMode,
     reflectance: Option<f32>,
 }
@@ -846,18 +894,22 @@ fn start(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SkidMaterial>>,
     ground_pass: Option<Res<super::ground_skid_pass::ProducerPolicy>>,
+    device: Res<bevy::render::renderer::RenderDevice>,
 ) {
     let Some(pending) = pending else { return };
     // Device-dependent upload must follow texture_upload::configure (PreStartup).
     // install() runs before the render device has selected BC/ETC2/RGBA support.
-    let image = match super::ground_effect_assets::image(&pending.diffuse, true) {
+    let image = match crate::skid_banks::upload(&pending.prepared,&device) {
         Ok(image) => image,
         Err(error) => {
             warn!("skid mark texture: {error}");
             return;
         }
     };
-    let mut marks = SkidMarks::new(pending.profile.clone());
+    let profiles=pending.prepared.banks.iter().map(|b|b.profile.clone()).collect();
+    let mut marks = SkidMarks::with_banks(profiles,pending.prepared.slots.clone()).expect("prepared actual bank mapping");
+    for (bank,source) in pending.prepared.banks.iter().enumerate(){println!("skid_bank bank={bank} source_type={} actual_slots={:?}",source.label,pending.prepared.slots);}
+
     println!("skid_phase_safety authored=true policy=terminate-reseed finite_only=true initial_events=0 source_CRT_domain_parity=false");
     let mesh = marks.streamed();
     marks.layout = Some(VertexLayout::of(&mesh));
@@ -894,7 +946,7 @@ pub(crate) fn lay(
     marks.generation = ground.generation;
     let start = std::time::Instant::now();
     if ground.reset {
-        marks.clear();
+        marks.begin_segment();
     }
     marks.step(&ground.cars, camera.single().ok().map(|c| c.translation()));
     super::ground_effect_assets::charge(super::ground_effect_assets::TICK, start);
@@ -993,7 +1045,7 @@ mod tests {
         let untouched = no_depth.clone();
         restore_raster_constant(&mut no_depth, 50);
         assert_eq!(no_depth, untouched);
-        assert!(matches!(<SkidRasterBias as MaterialExtension>::vertex_shader(), bevy::shader::ShaderRef::Default));
+        assert!(matches!(<SkidRasterBias as MaterialExtension>::vertex_shader(), ShaderRef::Handle(h) if h == LAYER_SHADER));
         assert!(matches!(<SkidRasterBias as MaterialExtension>::fragment_shader(), ShaderRef::Handle(_)));
         assert!(matches!(<SkidRasterBias as MaterialExtension>::prepass_fragment_shader(), bevy::shader::ShaderRef::Default));
         assert!(matches!(<SkidRasterBias as MaterialExtension>::deferred_fragment_shader(), ShaderRef::Default));
@@ -1023,6 +1075,46 @@ mod tests {
             excess,
             side_factor: side,
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn early_replay_uses_segment_start_phases_after_restart_and_seek() {
+        let mut marks = SkidMarks::new(profile());
+        let lay_pair = |marks: &mut SkidMarks| {
+            for x in [0., 1.] {
+                let tyres = [
+                    wheel(b"STDR", 3., 0., x),
+                    Wheel::default(),
+                    Wheel::default(),
+                    Wheel::default(),
+                ];
+                marks.step(&[tyres], None);
+            }
+        };
+
+        marks.begin_segment();
+        lay_pair(&mut marks);
+        let restart_phases = marks.phases;
+        assert_ne!(restart_phases[0], [0.; 2]);
+
+        // The live restart clears geometry while retaining the pool's phases.
+        marks.begin_segment();
+        assert_eq!(marks.used(), 0);
+        assert_eq!(marks.phases, restart_phases);
+        lay_pair(&mut marks);
+        let live = marks.save();
+        assert_ne!(live.phases[0], restart_phases[0]);
+
+        // The no-checkpoint replay fallback may follow either the live endpoint
+        // or a seek to a later checkpoint. Both must start from the same seed.
+        for _ in 0..2 {
+            marks.reset_for_replay();
+            assert_eq!(marks.used(), 0);
+            assert_eq!(marks.phases, restart_phases);
+            lay_pair(&mut marks);
+            assert_eq!(marks.phases, live.phases);
+            marks.restore(&live);
         }
     }
 
@@ -1069,7 +1161,7 @@ mod tests {
         let strip = marks.heads[0][0].unwrap().strip;
         marks.advance(0, 0, &wheel(b"STDR", 0.5, 0., 41.));
         assert!(marks.heads[0][0].is_none());
-        assert_eq!(marks.strips[strip].points.last().unwrap().alpha, 0.);
+        assert_eq!(marks.strips[strip].points.last().unwrap().source_color.normal_depth(), 0);
         // The pool never exceeds its fixed size and retires far strips.
         for k in 0..2000 {
             let x = 100. + k as f32 * 0.5;
@@ -1092,8 +1184,8 @@ mod tests {
         let profile = grid_formats::skidmarks::read(r#"<SKIDMARKS offset="0.04">
 <SURFACE name="GRAS" tread="1" treadStartU="0.1" treadEndU="0.2" treadWidthScale="1.1"
  skid="1" skidStartU="0.4" skidEndU="0.55" skidWidthScale="2.0"
- sideSkidStartU="0.8" sideSkidEndU="0.9" sideSkidWidthScale="2.25"/>
-<SURFACE name="STDR" tread="0" skid="1" skidStartU="0.65" skidEndU="0.7" skidWidthScale="1.1"/>
+ sideSkidStartU="0.8" sideSkidEndU="0.9" sideSkidWidthScale="2.25" treadFadeLowerBound="1" skidFadeLowerBound="1" sideSkidFadeLowerBound="1"/>
+<SURFACE name="STDR" tread="0" skid="1" skidStartU="0.65" skidEndU="0.7" skidWidthScale="1.1" skidFadeLowerBound="1"/>
 </SKIDMARKS>"#).unwrap();
         let mut marks = SkidMarks::new(profile);
         assert!(marks.phases.iter().all(|phase| *phase == [0.; 2]));
@@ -1134,8 +1226,8 @@ mod tests {
             let strip = &marks.strips[first];
             let k = (strip.segments.len() - 1) * 4;
             // Warmed contact never fades merely because the selected layer changes.
-            assert_eq!(SkidMarks::slot_vertex(strip, k).4[3], 1.);
-            assert_eq!(SkidMarks::slot_vertex(strip, k + 2).4[3], 1.);
+            assert_eq!(SkidMarks::slot_vertex(strip, k).4[2], 1.);
+            assert_eq!(SkidMarks::slot_vertex(strip, k + 2).4[2], 1.);
             let uv = strip.segments.last().unwrap();
             // Each sample travels along one band, never through intermediate bands.
             assert_eq!(uv.old[0][0], uv.old[2][0]);
@@ -1159,8 +1251,8 @@ mod tests {
         let b = SkidMarks::slot_vertex(&marks.strips[chain], 0);
         assert_eq!(a.0, b.0); // physical capacity seam
         assert_eq!(a.1, b.1);
-        assert_eq!(a.4[3], 1.);
-        assert_eq!(a.4[3], b.4[3]); // no contact-start ramp on a capacity chain
+        assert_eq!(a.4[2], 1.);
+        assert_eq!(a.4[2], b.4[2]); // no contact-start ramp on a capacity chain
         // Wrapping subtracts whole texture periods from each lane using one
         // common integer divisor; geometry/opacity stays continuous.
         assert!((a.2[1].fract() - b.2[1].fract()).abs() < 2e-6);
@@ -1171,7 +1263,7 @@ mod tests {
                     let end = SkidMarks::slot_vertex(strip, (q - 1) * 4 + 2 + edge);
                     let start = SkidMarks::slot_vertex(strip, q * 4 + edge);
                     assert_eq!(end.0, start.0);
-                    assert_eq!(end.4[3], start.4[3]);
+                    assert_eq!(end.4[2], start.4[2]);
                     assert_eq!(end.2[1], start.2[1]);
                     assert_eq!(end.3[1], start.3[1]);
                 }
@@ -1182,7 +1274,7 @@ mod tests {
         airborne.contact = false;
         marks.advance(0, 0, &airborne);
         assert!(marks.heads[0][0].is_none());
-        assert_eq!(marks.strips[chain].points.last().unwrap().alpha, 0.);
+        assert_eq!(marks.strips[chain].points.last().unwrap().source_color.normal_depth(), 0);
         for x in [20., 20.2, 20.4] {
             marks.advance(0, 0, &wheel(b"GRAS", 3., 0., x));
         }
@@ -1399,7 +1491,8 @@ mod tests {
                         half_width: 0.1,
                         u: [0., 1.],
                         v: [0.; 2],
-                        alpha: 1.,
+                        source_color: SupportedSourcePacking::new(1., 1., [1.; 2]).unwrap(),
+                        diffuse_envelope: 1.,
                     };
                     2
                 ];
@@ -1414,4 +1507,105 @@ mod tests {
         assert_same_triangles(&marks);
         assert_same_triangles(&SkidMarks::new(profile()));
     }
+    #[test]
+    fn source_color_and_authored_lifecycle_remain_separate_in_actual_stream() {
+        use bevy::mesh::VertexAttributeValues;
+        let mut p = profile();
+        p.surfaces[0].skid.fade = [0.25, 0.9];
+        p.surfaces[0].skid.normal_depth = [0.5; 2];
+        p.surfaces[0].wet_lighting_scale = 0.25;
+        p.surfaces[1].tread.fade = [0.75, 0.9];
+        p.surfaces[1].tread.normal_depth = [0.25; 2];
+        p.surfaces[1].wet_lighting_scale = 0.5;
+        let mut marks = SkidMarks::new(p);
+        marks.heads.resize(1, [None; 4]);
+        for (w, code, excess) in [(0, b"STDR", 3.), (1, b"GRAS", 0.)] {
+            for x in [0., 0.2, 0.4] { marks.advance(0, w, &wheel(code, excess, 0., x)); }
+        }
+        let hard = marks.heads[0][0].unwrap().strip;
+        let grass = marks.heads[0][1].unwrap().strip;
+        let hard_color = SkidMarks::slot_vertex(&marks.strips[hard], 6).4;
+        assert_eq!(hard_color, [127., 63., 63., 255.].map(|v| v / 255.));
+        assert_eq!(SkidMarks::slot_vertex(&marks.strips[hard], 4).4,
+            [127., 63., 31., 0.].map(|v| v / 255.)); // ramp precedes truncation
+        assert_eq!(SkidMarks::slot_vertex(&marks.strips[grass], 6).4,
+            [63., 127., 191., 255.].map(|v| v / 255.));
+        let mesh = marks.streamed();
+        let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
+            panic!("missing actual streamed color attribute");
+        };
+        assert_eq!(colors[hard * SLOT + 6], hard_color);
+        let raw_before_end = marks.strips[hard].points[2].source_color.gpu(1., true);
+        marks.end(0, 0);
+        let raw_after_end = marks.strips[hard].points[2].source_color.gpu(1., true);
+        assert_eq!(raw_after_end[0], 0.);
+        assert_eq!(&raw_after_end[1..], &raw_before_end[1..]); // raw opacity unchanged
+        let ended = SkidMarks::slot_vertex(&marks.strips[hard], 6).4;
+        assert_eq!(ended, [0., hard_color[1], 0., hard_color[3]]); // authored envelope0
+        let preceding_point = marks.strips[hard].points[1];
+        let preceding = SkidMarks::slot_vertex(&marks.strips[hard], 4).4;
+        assert_eq!(preceding[0], 63. / 255.); // source byte2 half
+        assert_eq!(preceding[2], preceding_point.source_color.gpu(0.5, false)[2] * 0.5);
+        assert_eq!(preceding_point.diffuse_envelope, 0.5);
+        marks.strips[grass].retiring = true;
+        marks.strips[grass].fade = 1;
+        let before_retire = marks.strips[grass].points[1].source_color.gpu(0.5, false);
+        marks.maintain();
+        let retired_point = marks.strips[grass].points[1];
+        let raw_retired = retired_point.source_color.gpu(0.5, false);
+        assert_eq!(raw_retired[0], 38. / 255.); // source byte2 by25
+        assert_eq!(&raw_retired[1..], &before_retire[1..]);
+        let retired = SkidMarks::slot_vertex(&marks.strips[grass], 4).4;
+        assert_eq!(retired[2], raw_retired[2] * (1. - RETIRE_STEP));
+        assert_eq!(retired_point.diffuse_envelope, 1. - RETIRE_STEP);
+        let mesh = marks.streamed();
+        let layout = VertexLayout::of(&mesh);
+        let mut packed = Vec::new();
+        marks.pack(&layout, &mut packed);
+        assert_eq!(packed, mesh.create_packed_vertex_buffer_data());
+        let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
+            panic!("missing updated stream color attribute");
+        };
+        assert_eq!(colors[grass * SLOT + 4], retired);
+        assert_same_triangles(&marks);
+    }
+
+    #[test]
+    fn authored_envelope_changes_only_decoded_opacity_at_zero_half_one() {
+        let mut marks = SkidMarks::new(profile());
+        marks.heads.resize(1, [None; 4]);
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., 0.));
+        let slot = marks.heads[0][0].unwrap().strip;
+        let mut p = marks.strips[slot].points[0];
+        p.source_color = SupportedSourcePacking::new(0.25, 0.5, [0.75; 2]).unwrap();
+        let decoded = p.source_color.gpu(1., true);
+        for envelope in [0., 0.5, 1.] {
+            p.diffuse_envelope = envelope;
+            let display = p.color_for_draw(1., true);
+            assert_eq!(display[0], decoded[0]);
+            assert_eq!(display[1], decoded[1]);
+            assert_eq!(display[2], decoded[2] * envelope);
+            assert_eq!(display[3], decoded[3]);
+        }
+        p.diffuse_envelope = f32::NAN;
+        assert!(!p.finite_payload());
+    }
+
+    #[test]
+    fn bank_survives_owner_release_and_stream_packing_without_colour_or_uv_reuse(){
+        let mut marks=SkidMarks::with_banks(vec![profile(),profile()],vec![0,1]).unwrap();
+        marks.heads.resize(2,[None;4]);
+        for x in [0.,1.,2.] {marks.advance(1,0,&wheel(b"STDR",2.5,0.,x));}
+        let strip=marks.heads[1][0].unwrap().strip;assert_eq!(marks.strips[strip].bank,1);
+        let original=SkidMarks::slot_vertex(&marks.strips[strip],0);
+        marks.end(1,0);assert!(marks.strips[strip].owner.is_none());assert_eq!(marks.strips[strip].bank,1);
+        let mesh=marks.streamed();let layout=VertexLayout::of(&mesh);let mut bytes=Vec::new();marks.pack(&layout,&mut bytes);
+        let offset=layout.offset(BANK_ATTRIBUTE).unwrap();let at=strip*SLOT*layout.stride+offset;
+        assert_eq!(&bytes[at..at+4],&1u32.to_le_bytes());
+        assert_eq!(SkidMarks::slot_vertex(&marks.strips[strip],0).2,original.2);
+        assert_eq!(SkidMarks::slot_vertex(&marks.strips[strip],0).3,original.3);
+        assert_eq!(marks.strips.len(),STRIPS);
+        marks.clear();assert_eq!(marks.slot_banks,vec![0,1]);assert!(marks.strips.iter().all(|s|!s.used));
+    }
+
 }
