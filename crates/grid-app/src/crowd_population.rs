@@ -116,6 +116,7 @@ pub enum Error {
     MissingAttribute { element: String, key: &'static str },
     InvalidResourcePath(String),
     InvalidInstanceSetName,
+    InvalidTimeScale(String),
     NoMaps(String),
     NoVariants(String),
 }
@@ -356,15 +357,15 @@ fn selected_set(d: &Document<'_>, name: Option<&str>) -> Result<Option<usize>, E
     .transpose()
     .map(Option::flatten)
 }
-struct Context<'d, 'a> {
+struct Context<'d, 'a, 'r> {
     doc: &'d Document<'a>,
     primary: Option<usize>,
     fallback: Option<usize>,
     maps: usize,
     billboard: ResourceRef,
-    resources: BTreeMap<String, ResourceRef>,
+    resources: &'r BTreeMap<String, ResourceRef>,
 }
-fn template(c: &Context<'_, '_>, map_name: &str) -> Result<Template, Error> {
+fn template(c: &Context<'_, '_, '_>, map_name: &str) -> Result<Template, Error> {
     let d = c.doc;
     let (_, map) = one(d, c.maps, "instanceMap", Some(map_name))?;
     let def_name = attr(map, "crowdDef")?;
@@ -387,7 +388,7 @@ fn template(c: &Context<'_, '_>, map_name: &str) -> Result<Template, Error> {
     })?;
     let (_, stance) = one(d, def_i, "stance", Some(stance_name))?;
     let mesh = optional(d, def_i, "skinData", None)?
-        .map(|(_, skin)| resource(&c.resources, attr(skin, "meshTag")?))
+        .map(|(_, skin)| resource(c.resources, attr(skin, "meshTag")?))
         .transpose()?;
     let mut variants = Vec::new();
     for (vi, v) in children(d, def_i, "textureVariant") {
@@ -431,7 +432,7 @@ fn template(c: &Context<'_, '_>, map_name: &str) -> Result<Template, Error> {
         variants,
     })
 }
-fn group_templates(c: &Context<'_, '_>, group: &Group<'_>) -> Result<Vec<Template>, Error> {
+fn group_templates(c: &Context<'_, '_, '_>, group: &Group<'_>) -> Result<Vec<Template>, Error> {
     let name =
         std::str::from_utf8(group.instance_set).map_err(|_| Error::InvalidInstanceSetName)?;
     let (si, set) = one(c.doc, 0, "instanceSet", Some(name))?;
@@ -447,6 +448,51 @@ fn group_templates(c: &Context<'_, '_>, group: &Group<'_>) -> Result<Vec<Templat
             Ok(t)
         })
         .collect()
+}
+
+impl Prepared<'_, '_, '_, '_> {
+    /// Resolve skin metadata for a moving group whose placement paths were decoded.
+    pub(super) fn moving_templates(&self, group: &Group<'_>) -> Result<Vec<Template>, Error> {
+        let context = &self.context;
+        let (maps, _) = one(
+            self.definitions,
+            0,
+            "instanceMapGroup",
+            Some(&context.map_group),
+        )?;
+        let resolver = Context {
+            doc: self.definitions,
+            primary: selected_set(self.definitions, context.primary_definition_set.as_deref())?,
+            fallback: selected_set(self.definitions, context.fallback_definition_set.as_deref())?,
+            maps,
+            billboard: resource(&self.dataset_resources, &context.billboard_userdata)?,
+            resources: &self.dataset_resources,
+        };
+        group_templates(&resolver, group)
+    }
+
+    pub(super) fn moving_time_scale(&self, template: &Template) -> Result<f32, Error> {
+        let Some((_, name)) = template
+            .map_fields
+            .iter()
+            .find(|(k, _)| k == "animSelector")
+        else {
+            return Ok(1.);
+        };
+        let (_, selector) =
+            source_named(self.definitions, 0, "animSelector", name)?.ok_or_else(|| {
+                Error::Missing {
+                    kind: "animSelector",
+                    key: name.clone(),
+                }
+            })?;
+        let value = attr(selector, "timeScale")?;
+        value
+            .parse::<f32>()
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.)
+            .ok_or_else(|| Error::InvalidTimeScale(value.to_owned()))
+    }
 }
 /// Call with documents produced by existing binxml::read and crowd_placements::read.
 /// Reader admission/range/count checks stay there. This is graphics resource semantics.
@@ -477,7 +523,7 @@ pub fn prepare<'p, 'asset, 'd, 'def>(
         fallback,
         maps,
         billboard,
-        resources: refs,
+        resources: &refs,
     };
     let mut result = Prepared {
         definitions: defs,
@@ -487,7 +533,7 @@ pub fn prepare<'p, 'asset, 'd, 'def>(
             map_group: map_group.to_owned(),
             billboard_userdata: billboard_userdata.to_owned(),
         },
-        dataset_resources: c.resources.clone(),
+        dataset_resources: refs.clone(),
         source,
         groups: Vec::with_capacity(source.groups.len()),
         resolved_static_records: 0,

@@ -1031,8 +1031,42 @@ The catalogue audit also identified 876 standing race records outside the
 current adapter. Of those, 826 are course officials without a billboard
 stance and 50 have the absent instance-set definition ma_fl on Nürburgring
 and Spa. The separate moving payloads contain 181 race records, including
-115 walking spectators. Their path/spawn contract remains open. The closest
+115 walking spectators. The moving population is described below. The closest
 source actors use the existing camera budget and the other admitted
 spectators use route billboards. Five frontend garage placement files were
 audited separately. Counts, routes and exact omissions are retained in
 local/handoff/drafts/crowd-installed-coverage01/inventory.json.
+
+### Moving spectators and marshals in ordinary races
+
+The checked placement decoder preserves the complete file arrays. Across 97
+installed placement files it reads 201 moving records, 4,231 position keys and
+2,803 yaw keys. Ordinary race layouts supply 115 walking spectators and 66
+marshals. Each seven-word header identifies the placement cell and absolute
+position/yaw offsets with repeated counts. The native consumer caps each channel
+at 100 keys. Four Spa routes contain a 101-position-key actor, so the format
+reader keeps that key and the runtime sampling applies the native cap.
+
+The original rebases the arrays at 0x00764340 and copies the bounded channels at
+0x00769D50. It loads the selector timeScale at 0x00759B10 and initializes rate,
+time and cursors via 0x00955060 and 0x00986930. The update at 0x00760820 advances
+signed delta times rate and wraps strictly beyond the greater channel end.
+0x00757320 linearly interpolates position and follows the shortest degree yaw
+arc. 0x00750D90 writes XYZ and packs -cos(yaw) low and +sin(yaw) high. The
+purchased spectator rate is 0.547 and the marshal rate is 0.33. The reference
+path heading survey corroborates positive Y rotation for skins facing local -Z.
+
+The race renderer resolves each walker through the route animation data. It
+uses the HLA Base Idle branch and its two source walking clips for each role.
+The source-rig check found all 30 named targets in each of the seven selected
+skins. A stable clip choice and the displayed race/replay clock provide
+repeatable restart, pause, and replay behavior. The original advances selected
+actors by delta. Exact native cull re-entry time, initial skeletal phase and
+random draw state remain unverified. The shared near-actor budget selects
+visible walkers and standing models. The renderer still displays standing
+source records when a moving payload cannot be decoded.
+
+Matched ordinary-race captures exercise Milan route 0 and Yokohama Docks route
+0. The Milan lifecycle run records real menu restart, two replay entries,
+return to the race and visible source walkers. See G388 for checks, limitations
+and private evidence.
