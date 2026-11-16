@@ -6,13 +6,14 @@
 //! the emissive and night-light units, set once at startup, stay valid and
 //! the night keeps its authored level (docs/TRACK_ENVIRONMENT.md "Night
 //! level"). Colours resolve through the source packing
-//! (`effective_lighting::PackedLighting`). The sun keeps the baseline's
-//! colour and direction. Enhanced scenes also use the sampled sun hue.
+//! (`effective_lighting::PackedLighting`). Both profiles follow the authored
+//! sun direction. Enhanced scenes also use the sampled sun hue.
 use crate::{
     effective_lighting::{EffectiveLighting, PackedLighting, SpecularColour},
     graphics, source_light_trial, track_surface,
 };
 use bevy::prelude::*;
+use grid_formats::track_lighting::Sun;
 use grid_tools::time_of_day::{Mode, Timeline};
 
 #[derive(Resource)]
@@ -23,14 +24,19 @@ pub(crate) struct TimelineLighting {
     /// Lux per original light unit: the baseline sun's lux over the static
     /// preset's sun reference.
     unit: f32,
-    last: Option<EffectiveLighting>,
+    last: Option<Lights>,
     enhanced: bool,
+    source_direction: bool,
+    static_sun: [Option<f32>; 2],
+    static_specular_sun: [Option<f32>; 2],
 }
 
 /// The Bevy lights for one resolved sample.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Lights {
     pub sun_lux: f32,
+    pub sun_direction: Option<Sun>,
+    pub phong_direction: Option<Sun>,
     pub sun_colour: [f32; 3],
     pub fill: graphics::Fill,
     pub phong_colour: [f32; 3],
@@ -46,7 +52,11 @@ impl TimelineLighting {
         let specular = SpecularColour::from_static(lighting)?;
         let sun = lighting.rgb("backlight_suncolour").ok_or("source sun absent")?;
         let unit = sun_lux / graphics::sun_reference(sun, false);
-        Ok(Self { packed, specular, timeline, unit, last: None, enhanced: false })
+        Ok(Self {
+            packed, specular, timeline, unit, last: None, enhanced: false, source_direction: true,
+            static_sun: [lighting.scalar("heightangle"), lighting.scalar("rotationangle")],
+            static_specular_sun: [lighting.scalar("spec_heightangle"), lighting.scalar("spec_rotationangle")],
+        })
     }
 
     /// The timeline's lighting at day fraction `t`, in the scene's unit
@@ -56,8 +66,20 @@ impl TimelineLighting {
         let peak = |c: [f32; 3], floor: f32| c.into_iter().fold(floor, f32::max);
         let fill: [f32; 3] = std::array::from_fn(|i| source.ambient[i] + source.back[i] / 2.);
         let sun_peak = peak(source.sun, 0.);
+        let sun_direction = self.source_direction
+            .then(|| sample_angles(&self.timeline, t, ["heightangle", "rotationangle"], self.static_sun))
+            .flatten();
+        let phong_direction = if self.specular.linked() {
+            sun_direction
+        } else {
+            sample_angles(
+                &self.timeline, t, ["spec_heightangle", "spec_rotationangle"], self.static_specular_sun,
+            )
+        };
         let lights = Lights {
             sun_lux: sun_peak * self.unit,
+            sun_direction,
+            phong_direction,
             sun_colour: source.sun.map(|channel| channel / sun_peak.max(1e-6)),
             fill: graphics::Fill {
                 ambient: fill.map(|c| c / peak(fill, 1e-6)),
@@ -76,12 +98,21 @@ impl TimelineLighting {
     }
 }
 
+/// Timeline curves override individual initialized lighting.xml fields.
+fn sample_angles(timeline: &Timeline, t: f64, keys: [&str; 2], fallback: [Option<f32>; 2]) -> Option<Sun> {
+    let [height, rotation] = std::array::from_fn(|i| timeline.value(keys[i], t).or(fallback[i]));
+    let (height_degrees, rotation_degrees) = (height?, rotation?);
+    (height_degrees.is_finite() && rotation_degrees.is_finite())
+        .then_some(Sun { height_degrees, rotation_degrees })
+}
+
 /// Follows the source timeline on scenes using the standard lighting path.
 pub(crate) fn install(
     app: &mut App,
     lighting: &grid_formats::track_environment::Lighting,
     timeline: Option<Timeline>,
     settings: &graphics::Settings,
+    source_direction: bool,
 ) {
     let linear = std::env::var("GRID_BASELINE_FILL").map_or(true, |m| m == "linear");
     let Some(timeline) = timeline else { return };
@@ -94,6 +125,7 @@ pub(crate) fn install(
     match TimelineLighting::new(lighting, timeline, settings.sun_illuminance()) {
         Ok(mut follower) => {
             follower.enhanced = settings.enhanced();
+            follower.source_direction = source_direction;
             println!("timeline_lighting version=1 unit={:.1}", follower.unit);
             app.insert_resource(follower).add_systems(Update, follow.after(crate::le_mans_event::tick));
         }
@@ -105,31 +137,59 @@ fn follow(
     mut follower: ResMut<TimelineLighting>,
     event: Option<Res<crate::le_mans_event::LeMansEvent>>,
     mut ambient: ResMut<GlobalAmbientLight>,
-    mut lights: Query<(&mut DirectionalLight, Has<source_light_trial::SourceSun>, Has<source_light_trial::SourceBack>)>,
+    mut lights: Query<(
+        &mut DirectionalLight, &mut Transform,
+        Has<source_light_trial::SourceSun>, Has<source_light_trial::SourceBack>,
+    )>,
     mut materials: ResMut<Assets<track_surface::SurfaceMaterial>>,
 ) {
     let t = event.as_ref().map_or_else(crate::sky::static_start, |e| e.time_of_day);
-    let (source, sample) = match follower.sample(t) {
+    let (_, sample) = match follower.sample(t) {
         Ok(sample) => sample,
         Err(error) => {
             eprintln!("timeline_lighting t={t}: {error}");
             return;
         }
     };
-    if follower.last == Some(source) {
+    let previous = follower.last;
+    if previous == Some(sample) {
         return;
     }
-    for (mut light, sun, back) in &mut lights {
+    let sun_transform = if previous.is_none_or(|old| old.sun_direction != sample.sun_direction) {
+        sample.sun_direction.map(graphics::source_sun_transform)
+    } else {
+        None
+    };
+    for (mut light, mut transform, sun, back) in &mut lights {
         if sun {
-            light.illuminance = sample.sun_lux;
+            if light.illuminance != sample.sun_lux {
+                light.illuminance = sample.sun_lux;
+            }
+            if let Some(sun_transform) = sun_transform {
+                transform.set_if_neq(sun_transform);
+            }
             if follower.enhanced {
                 let [r, g, b] = sample.sun_colour;
-                light.color = Color::linear_rgb(r, g, b);
+                let colour = Color::linear_rgb(r, g, b);
+                if light.color != colour {
+                    light.color = colour;
+                }
             }
         } else if back && !follower.enhanced {
             let [r, g, b] = sample.fill.back;
-            light.color = Color::linear_rgb(r, g, b);
-            light.illuminance = sample.fill.back_lux;
+            let colour = Color::linear_rgb(r, g, b);
+            if light.color != colour {
+                light.color = colour;
+            }
+            if light.illuminance != sample.fill.back_lux {
+                light.illuminance = sample.fill.back_lux;
+            }
+            if let Some(sun_transform) = sun_transform {
+                let rotation = sun_transform.rotation * Quat::from_rotation_x(std::f32::consts::PI);
+                if transform.rotation != rotation {
+                    transform.rotation = rotation;
+                }
+            }
         }
     }
     let phong = if follower.enhanced {
@@ -137,9 +197,22 @@ fn follow(
         0
     } else {
         let [r, g, b] = sample.fill.ambient;
-        ambient.color = Color::linear_rgb(r, g, b);
-        ambient.brightness = sample.fill.ambient_brightness;
-        track_surface::set_trial_phong_colour(&mut materials, sample.phong_colour)
+        let colour = Color::linear_rgb(r, g, b);
+        if ambient.color != colour {
+            ambient.color = colour;
+        }
+        if ambient.brightness != sample.fill.ambient_brightness {
+            ambient.brightness = sample.fill.ambient_brightness;
+        }
+        if previous.is_none_or(|old| {
+            old.phong_colour != sample.phong_colour || old.phong_direction != sample.phong_direction
+        }) {
+            track_surface::set_phong_lighting(
+                &mut materials, sample.phong_colour, sample.phong_direction.map(Sun::direction_to_light),
+            ).0
+        } else {
+            0
+        }
     };
     if follower.last.is_none() {
         println!(
@@ -147,7 +220,7 @@ fn follow(
             sample.sun_lux, sample.fill.ambient_brightness, sample.fill.back_lux
         );
     }
-    follower.last = Some(source);
+    follower.last = Some(sample);
 }
 
 #[cfg(test)]
@@ -167,6 +240,61 @@ mod tests {
             l.params.insert(k.into(), v.into());
         }
         l
+    }
+
+    #[test]
+    fn source_direction_uses_timeline_and_falls_back_per_angle() {
+        let timeline = Timeline {
+            curves: [(
+                "heightangle".to_string(),
+                Curve::new(&[(0, 93.5), (720, 139.)], None),
+            )].into_iter().collect(),
+        };
+        let mut static_lighting = lighting();
+        static_lighting.params.insert("rotationangle".into(), "62.5".into());
+        let mut follower = TimelineLighting::new(&static_lighting, timeline, 18_000.).unwrap();
+        let (_, night) = follower.sample(0.).unwrap();
+        let (_, day) = follower.sample(0.5).unwrap();
+        let sun = night.sun_direction.unwrap();
+        assert_eq!(sun.height_degrees, 93.5);
+        assert_eq!(sun.rotation_degrees, 62.5);
+        assert_eq!(night.phong_direction, night.sun_direction);
+        assert_ne!(day.sun_direction, night.sun_direction);
+        // The original expects a source vector towards the light. Bevy's
+        // directional light emits from its local -Z in the opposite direction.
+        let toward = Vec3::from_array(sun.direction_to_light());
+        assert!(toward.x > 0. && toward.y > 0.99 && toward.z < 0.);
+        let emit = graphics::source_sun_transform(sun).forward().as_vec3();
+        assert!(emit.distance(-toward) < 1e-6);
+
+        follower.source_direction = false;
+        assert_eq!(follower.sample(0.).unwrap().1.sun_direction, None);
+    }
+
+    #[test]
+    fn unchanged_phong_uniforms_and_non_phong_assets_are_skipped() {
+        let mut assets = Assets::default();
+        let active = assets.add(track_surface::trial_fixture());
+        let inactive = assets.add(track_surface::trial_fixture_with_strength(0.));
+        let inactive_before = track_surface::trial_snapshot(assets.get(&inactive).unwrap());
+        assert_eq!(track_surface::set_phong_lighting(&mut assets, [1., 2., 3.], Some([0., 1., 0.])), (1, 1));
+        assert_eq!(track_surface::set_phong_lighting(&mut assets, [1., 2., 3.], Some([0., 1., 0.])), (1, 0));
+        assert_eq!(track_surface::set_phong_lighting(&mut assets, [1., 2., 3.], Some([1., 0., 0.])), (1, 1));
+        assert_eq!(track_surface::trial_snapshot(assets.get(&active).unwrap()).1, Vec4::X);
+        assert_eq!(track_surface::trial_snapshot(assets.get(&inactive).unwrap()), inactive_before);
+    }
+
+    #[test]
+    fn unlinked_phong_direction_retains_its_separate_static_angles() {
+        let mut static_lighting = lighting();
+        for (k, v) in [("spec_linked", "0"), ("spec_heightangle", "22"), ("spec_rotationangle", "70")] {
+            static_lighting.params.insert(k.into(), v.into());
+        }
+        let timeline = Timeline { curves: Default::default() };
+        let follower = TimelineLighting::new(&static_lighting, timeline, 18_000.).unwrap();
+        let (_, sample) = follower.sample(0.).unwrap();
+        assert_eq!(sample.sun_direction.unwrap().rotation_degrees, 0.);
+        assert_eq!(sample.phong_direction, Some(Sun { height_degrees: 22., rotation_degrees: 70. }));
     }
 
     #[test]

@@ -5359,7 +5359,7 @@ pub(crate) fn race_app(
     if track && !collision && grid_tools::time_of_day::Mode::for_route(&root, &route).ok() == Some(grid_tools::time_of_day::Mode::Timeline) {
         let environment = grid_tools::environment::Environment::for_route(&root, &route)?;
         let timeline = grid_tools::time_of_day::Timeline::load(&root, &route).ok().flatten();
-        timeline_lighting::install(&mut app, &environment.lighting, timeline, &graphics);
+        timeline_lighting::install(&mut app, &environment.lighting, timeline, &graphics, !sun_authored);
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);

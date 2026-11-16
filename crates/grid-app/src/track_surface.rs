@@ -121,22 +121,52 @@ pub struct Surface {
 /// Bounded shared-lighting diagnostic only. Existing sourcePhong semantics,
 /// weights, source directions, textures and material controls are preserved.
 pub(crate) fn set_trial_phong_colour(materials: &mut Assets<SurfaceMaterial>, colour: [f32; 3]) -> usize {
-    let mut count=0;
-    for (_, material) in materials.iter_mut() {
-        if material.extension.phong_light.w > 0. {
-            material.extension.phong_light = Vec3::from_array(colour).extend(material.extension.phong_light.w);
-            count+=1;
+    set_phong_lighting(materials, colour, None).0
+}
+
+/// Set a sampled source lobe, counting participating and actually changed assets.
+pub(crate) fn set_phong_lighting(
+    materials: &mut Assets<SurfaceMaterial>,
+    colour: [f32; 3],
+    direction: Option<[f32; 3]>,
+) -> (usize, usize) {
+    let colour = Vec3::from_array(colour);
+    let direction = direction.map(|value| Vec3::from_array(value).normalize());
+    let mut participating = 0;
+    let updates: Vec<_> = materials.iter().filter_map(|(id, material)| {
+        let surface = &material.extension;
+        if surface.phong_light.w <= 0. {
+            return None;
+        }
+        participating += 1;
+        let light = colour.extend(surface.phong_light.w);
+        let direction = direction.map_or(surface.phong_direction, |value| {
+            value.extend(surface.phong_direction.w)
+        });
+        (light != surface.phong_light || direction != surface.phong_direction)
+            .then_some((id, light, direction))
+    }).collect();
+    for &(id, light, direction) in &updates {
+        // AssetMut emits Modified only after an actual mutable dereference.
+        if let Some(mut material) = materials.get_mut(id) {
+            material.extension.phong_light = light;
+            material.extension.phong_direction = direction;
         }
     }
-    count
+    (participating, updates.len())
 }
 #[cfg(test)]
 pub(crate) fn trial_fixture() -> SurfaceMaterial {
+    trial_fixture_with_strength(1.)
+}
+
+#[cfg(test)]
+pub(crate) fn trial_fixture_with_strength(strength: f32) -> SurfaceMaterial {
     SurfaceMaterial {base: StandardMaterial::default(),extension: Surface {
         first: default(),second: default(),macro_map: default(),skids:default(),
         scales:Vec4::ZERO,controls:Vec4::ZERO,skid_colour:Vec4::ZERO,skid_colour2:Vec4::ZERO,
         dry_ground:Vec4::ZERO,sampling:Vec4::ZERO,rgb_filter:Vec4::ZERO,phong:Vec4::ZERO,
-        phong_light:Vec4::new(3.,2.,1.,1.),phong_direction:Vec4::new(0.2,0.8,0.1,0.),
+        phong_light:Vec4::new(3.,2.,1.,strength),phong_direction:Vec4::new(0.2,0.8,0.1,0.),
     }}
 }
 #[cfg(test)]
