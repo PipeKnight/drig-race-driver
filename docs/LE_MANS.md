@@ -224,7 +224,24 @@ Sarthe lap races, where the clock stays at 15:00) and logs it. AUTHORED: the
 per-car delays come from a fixed generator. The beams and street lights
 are drawn by the shared night-light pass (docs/NIGHT_LIGHTS.md).
 
-### 3.5 Renderer hand-off (graphics side, not ported here)
+The shared timeline lighting follows the saved height and rotation in
+the baseline and enhanced scene. Source 0x00741520 writes the timeline angles
+to the fields also initialized by 0x0072BB40. The mode-1 call at 0x00735250
+runs 0x00730F90 and publishes the result through 0x00743220. The G082 context
+join at 0x00735675 establishes the direction towards the sun. The common
+Bevy light points the other way. Linked Phong follows the source sun,
+unlinked specular keeps its own authored angles, and the baseline back
+light keeps its opposite direction. A static or missing key uses its own
+saved initializer. Explicit authored sun direction is preserved.
+
+G390 exercises the regular baseline palette and the Le Mans event's
+15:00 start, dusk and 03:00 nighttime. The matched diagnostic shows actual
+cluster list entries for 14 of the 16 lit cars across the chase run.
+The beam-only control retains the street lights, event clock, and
+physics. Haruna's authored forced-night route submits both player and AI
+beams. See G390 for the audited scope and remaining coverage.
+
+### 3.5 Renderer hand-off
 
 Per frame in mode 1, `Timeline::value(name, t)` gives:
 

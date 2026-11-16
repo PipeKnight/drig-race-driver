@@ -181,15 +181,16 @@ original's selected final merge (`CheapFinalMerge`) has no luminance adaptation
   render unchanged. Fill, Phong, emissive and night-light units are `18000 / sun_reference`.
 - The sun's lux is `18000 × sun_level`, `sun_level` = peak / reference (1 by day; Haruna night 0.085,
   Shibuya 0.24). The log line is `baseline_sun_level level= reference=`.
-- Time-of-day routes (Le Mans `daynight.xml`): `timeline_lighting` follows the timeline's
-  `backlight_*` colours and scales at the event clock, or at `sky::static_start` in a static scene,
-  through the source packing. The unit stays the static preset's (Le Mans 2.998), so the emissive and
-  night-light units set at startup stay valid. Only the sun's lux follows the timeline; its colour
-  and direction stay the baseline's. Before F781 nothing applied the timeline's light values in the
-  default path, in driving or static scenes; only the sky followed the clock. Log lines:
-  `timeline_lighting version=1 unit=` and, on the first application, `timeline_lighting apply ...`.
-  It is skipped (logged) with the enhanced profile, a non-linear `GRID_BASELINE_FILL` or the
-  source-lighting trial, which own these lights.
+- Time-of-day routes use `timeline_lighting` at the event clock, or
+  `sky::static_start` in a static scene. The shared source path uses the
+  packed light levels and the sampled height and rotation for the sun and
+  linked road Phong. Enhanced also takes the sampled sun hue. In baseline
+  the opposite back light follows the source direction and the sun
+  keeps the baseline colour. The static scene unit keeps the emissive
+  and night-light units stable. The existing source-light trial or
+  non-linear baseline fill can use their own paths. Explicit authored
+  sun direction retains its existing control. See G390 and
+  [Le Mans](LE_MANS.md).
 - The environment map's intensity (sky.rs) is not scaled; Haruna's forced-night sky stays black as in
   the data.
 

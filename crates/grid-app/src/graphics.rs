@@ -381,6 +381,17 @@ impl Phong {
     }
 }
 
+/// Bevy emits along local -Z, away from the source vector towards the sun.
+pub(crate) fn source_sun_transform(sun: grid_formats::track_lighting::Sun) -> Transform {
+    let direction = Vec3::from_array(sun.direction_to_light()).normalize();
+    let up = if direction.dot(Vec3::Y).abs() > 0.9999 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    Transform::from_translation(direction).looking_at(Vec3::ZERO, up)
+}
+
 impl Settings {
     pub fn tone_map(&mut self, value: &str) -> Result<(), &'static str> {
         let mode = match value {
@@ -539,13 +550,7 @@ impl Settings {
         // Saved only for track scenes: --sun source (enhanced) or the
         // baseline's lighting.xml direction.
         if let Some(sun) = self.saved_sun {
-            let direction = Vec3::from_array(sun.direction_to_light()).normalize();
-            let up = if direction.dot(Vec3::Y).abs() > 0.9999 {
-                Vec3::Z
-            } else {
-                Vec3::Y
-            };
-            return Transform::from_translation(direction).looking_at(Vec3::ZERO, up);
+            return source_sun_transform(sun);
         }
         Transform::from_xyz(-4., 8., 5.).looking_at(Vec3::ZERO, Vec3::Y)
     }

@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G390 follows the source timeline sun direction. Matched ordinary-lighting Le Mans day/night renders and Haruna night/day passed. The observed Le Mans chase view uploaded beam slots for 14 of its 16 lit cars across the run, and Haruna uploaded its two slots in-frame. See [Le Mans](docs/LE_MANS.md).
 - G389 corrects sky motion in the shared prepass. Actual native DLAA p99 reprojection error drops from 1.311 to 0.015 px in the audited background ROI. Production Win release and camera/restart checks passed; the separate antenna trail remains open. See [Native DLAA](docs/NATIVE_DLAA.md).
 - G388 (main cf8c3b15/PR44) adds source walkers and moving marshals to ordinary races. Matched Milan/Yokohama captures, restart/replay lifecycle, 1,776 tests, four unchanged identities and 24 quick soaks passed. Source audio, camera flashes and near standing crowds are on main. Exact native cull re-entry timing and flag officials remain open.
 - G384/G385 (main PR41/PR42) cover per-vehicle mark banks and replay continuity, source-driven night intensity, and the optional Type2 postprocess. Native colour-transfer confirmation and the Shibuya exposure mismatch remain open. The 4x and external-motion DLAA trials did not fix the antenna trail.
