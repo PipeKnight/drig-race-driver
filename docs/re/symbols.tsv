@@ -3944,6 +3944,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00BA5950	node_link_by_name	func	not ported	docs/TEAM_LIVERY.md:71		[V]		0xBA5950, given `livery_map_livery_and_blend`).
 0x00BAAFD0		func	not ported	docs/CAMERA_VIEWS.md:303	F461	[D]		The record holds fov · 0.0174533 at +0x30 and the near plane at +0x34. Both projection builders found use it as the **vertical** field of view: 0x8163F0 comp...
 0x00BAEC10	neanim_scene_target_match_visitor	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:303		[D]		Match node+2C exact whole name against target prefix before #; ignore leading #; first traversal hit wins.
+0x00BB0F40		label		docs/ORIGINAL_POSTPROCESS.md:437	G385	[D]		Indexed read of the internal render format name table at 0xD47338.
 0x00BB0F90	texture_resource_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:238		[D]		constructor `0x00BB0F90` installs table `0x00D473C8`. Its virtual+0x2C entry
 0x00BB1E40	texture_update_descriptor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:229		[D]		The normal initialization path reaches descriptor setter `0x00BB1E40`, which
 0x00BB3AC0	texture_prepare_cpu_backing	func	not ported	docs/ORIGINAL_POSTPROCESS.md:239		[D]		`0x00BB3AC0` calculates CPU texture-data sizes, obtains backing memory through
@@ -4517,6 +4518,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D43024	Output	vtable	crates/grid-app/src/force_feedback.rs:717 grid-app::force_feedback::Output	docs/FORCE_FEEDBACK.md:215	F598	[D]		The device's outputs (vtable 0xD43024 fields): force +0x24, friction +0x2C, the three
 0x00D466D0		vtable	not ported	docs/VEHICLE_STATE.md:25				The indexed component's base constructor stores an argument at `+0x18`. Treating that link as a general car was also rejected by a guard: the pointed object ...
 0x00D46A80		global	not ported	docs/CROWD_ANIMATION_RESEARCH.md:533				three current crowd-bank tables at `0x00D46A80`, each with slot+0x1C targeting
+0x00D47338	RenderFormatNames	data		docs/ORIGINAL_POSTPROCESS.md:437	G385	[D]		Internal indices 0x0C u8x4, 0x12 u10x3u2, and 0x19 f16x4.
 0x00D473C8	texture_resource_vtable	vtable	not ported	docs/ORIGINAL_POSTPROCESS.md:238		[D]		constructor `0x00BB0F90` installs table `0x00D473C8`. Its virtual+0x2C entry
 0x00D48320		global	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:238				0x00D48320; its+0x0C entry points exactly to reader0x00BBC6C0. That reader
 0x00D8205A		global	not ported	docs/COMPATIBILITY_MEMORY_PATCHES.md:37				Attempt to reconstruct and reuse the first NTCore result by setting only the flag failed its SHA-256 equality assertion. No candidate executable was saved. N...

@@ -1,4 +1,4 @@
-// Type2 race postprocess over the engine's tonemapped scene.
+// Type2 race postprocess over the normalized scene range.
 // Intermediate unorm attachments store display values, without sRGB conversion.
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 
@@ -34,6 +34,12 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
 
 fn sample_src(uv: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(src, linear_sampler, uv, 0.0).rgb;
+}
+
+@fragment
+fn bound_main_colour(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let base = textureLoad(src, vec2<i32>(input.position.xy), 0);
+    return vec4(saturate(base.rgb), base.a);
 }
 
 @fragment
@@ -152,8 +158,11 @@ fn final_merge(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let threshold_weight = saturate(peak - fx.tone_threshold.x) * fx.tone_threshold.y;
     let factor = select(exposure, 1.0 + threshold_weight * (exposure - 1.0),
                         fx.tone_threshold.z > 0.0 && exposure > 1.0);
-    let mix_weight = select(fx.mix_amounts.x, 1.0, no_blur);
-    let scene = exposure_input * factor * mix_weight + soft * fx.mix_amounts.z;
+    // Swig has an integer output inherited from MainColourTarget.
+    // FinalMergeNoBlur computes exposure inside this pass.
+    let exposed = exposure_input * factor;
+    let scene = select(saturate(exposed) * fx.mix_amounts.x, exposed, no_blur) +
+        soft * fx.mix_amounts.z;
     let inverse_luminance = 1.0 - dot(scene, LUMA);
     let bloom_gate = select(saturate(inverse_luminance), max(inverse_luminance, 0.0), no_blur);
     let merged = scene + bloom * fx.mix_amounts.y * bloom_gate;
