@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G389](G0389.md) | 2026-11-17 | Project sky motion vectors into the previous view |
 | [G388](G0388.md) | 2026-11-17 | Render source walking spectators and marshals in ordinary races |
 | [G387](G0387.md) | 2026-11-16 | Compare native DLAA display-resolution motion preparation |
 | [G386](G0386.md) | 2026-11-16 | Use the source crowd audio in ordinary replays |

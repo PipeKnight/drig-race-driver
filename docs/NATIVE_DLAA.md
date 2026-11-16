@@ -391,3 +391,22 @@ as well. Scope is one joined GPU audit tile plus the 30-frame image comparison.
 The external preparation stays in the private diagnostic. The standard DLAA
 launch path continues with its current input policy. Private receipts are in
 local/graphics/dlaa-display-motion01/ and G387.
+
+### Background motion under view rotation (G389)
+
+Bevy 0.19.1 reconstructs the background at depth zero. It reprojects that
+direction into the current and previous camera, then subtracts homogeneous
+clip XY before converting to UV. Previous W varies under rotation. The shared
+prepass shader now divides each visible projection by its own W. It preserves
+finite offscreen displacements and returns zero when a direction is behind a
+view or has no representable projection. The existing camera history reset
+continues to manage cuts and restart.
+
+On the matched Donington frame 793 at tick 1652 the original shader deviates
+from the projective oracle by 1.31079 pixels at p99. The replacement measured
+0.01451 pixels p99. The count above 0.5 pixels fell from 17,187 to zero among
+43,554 background samples. Positive-depth geometry vectors and the selected
+pre-temporal HDR input matched byte-for-byte. Two 120-frame camera/lifecycle
+runs matched five camera changes, restart and six history resets, with no
+shader errors. This corrects the depth-zero branch. The existing antenna trail
+diagnostic samples positive-depth road and remains a separate open item.
