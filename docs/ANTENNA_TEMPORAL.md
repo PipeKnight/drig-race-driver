@@ -84,3 +84,13 @@ materials in three models. Live phase ownership, resolved pixel coverage and
 temporal history are distinct observations. The next physical validation uses
 one of the positive authored members and then checks the ordinary sampled
 coverage in motion.
+
+## Reflective source closure in the ordinary native view
+
+[G413](../log/G0413.md) measures both authored DBR9 aerials in the native
+Le Mans race. Each parent enters the real opaque and depth/motion phases
+and owns a matching sorted reflection child. Their owners are distinct.
+At the same render stamp, a conservative CPU projection selects a rear
+pixel clear of the front mesh's padded bounds. The next readback must
+establish real fragment coverage and the child's contribution before
+ordinary smoke and native history.

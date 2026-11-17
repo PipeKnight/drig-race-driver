@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G413](G0413.md) | 2026-11-17 | Observe live reflected aerial ownership at native resolution |
 | [G412](G0412.md) | 2026-11-17 | Bind ordinary exterior lamp emission to physical source damage |
 | [G411](G0411.md) | 2026-11-17 | Observe stock native antenna phase ownership and reflection admission |
 | [G410](G0410.md) | 2026-11-17 | Restore authored infield normals through the shared surface renderer |
