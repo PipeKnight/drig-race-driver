@@ -67,7 +67,9 @@ of its `grid_tools::tyre_smoke::SMOKE_TEXTURES` (`SM33`, `SM33_dark`, `SM38`, `W
   - Left wheels mirror the U range.
 - **A strip ends when:** the wheel loses contact; the surface is unmapped or not allowed; the LOD
   mode forbids marks (beyond LOD 4 none, LOD 2–4 rear wheels only); a reset happens; or the
-  direction turns by more than 10° (`73F0A0`).
+  contact-plane angle exceeds 10° (`73F0A0`). For unit travel `D = normalize(Pnew - Pold)`,
+  the routine compares `(D × Nold) × D` with `normalize(Nnew + Nold)` using their dot product
+  and acos. It uses the wheel contact normal at `+0xD0` for the mark offset and angle.
 - **Vertices (`739570`):**
   - half width = 0.5 × tyre width (settings `+10A4`) × layer width scale;
   - two incoming V phases advance independently. Each increment uses its own selected
@@ -612,3 +614,26 @@ identical contact and capture schedules. This change models skid shading.
 Source strip discontinuities due to contact, turn and the atlas remain
 independent. Direct visual parity of grass gaps with original GRID has not
 been established. See [G392](../log/G0392.md) for executable and captures.
+
+### Contact normal and the strip-break angle (G395)
+
+The skid emission at 0x00740155 calls the physical wheel getter at
+0x00990EF0. It reads the world contact normal from wheel+0xD0. The
+emitter uses this normal for the mark offset and sends it to the angle
+test with the current endpoint. F167's tested suspension preparation
+retains this value separately from the regularized solver normal.
+
+For successive endpoints with normalized travel D, previous normal
+Nold and current normal Nnew, 0x0073F0A0 takes the dot product of
+(D cross Nold) cross D and normalize(Nnew + Nold). It applies the
+upper bound of one and converts acos to degrees. The stored threshold
+is 10.0. The older heading-turn interpretation used the angle between
+two travel directions.
+
+The ordinary port reads the physical normal for marks and records it
+with the earlier replay contact sample. Body-based smoke and debris
+geometry retain their original path. Matched Donington Vulkan native
+DLAA arms cut the number of angular terminations from 3 to 1 in the
+430-tick grass fixture. All have 57 contact ends. The exact visual
+similarity of grass gaps in original GRID and separate cross-section
+geometry are open. See [G395](../log/G0395.md).

@@ -769,6 +769,7 @@ pub fn effects(runtime: &Runtime) -> frame::Effects {
             let o = 0x1990 + i * 0x150;
             frame::WheelEffects {
                 token: b[(o + 0xc0) / 4],
+                contact_normal: std::array::from_fn(|lane| f(o + 0xd0 + lane * 4)),
                 radius: f(o + 0xe0),
                 width: f(o + 0xf8),
                 load: f(o + 0x138),

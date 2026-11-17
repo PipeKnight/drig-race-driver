@@ -95,6 +95,8 @@ pub struct Deformation {
 pub struct WheelEffects {
     /// Contact material token (`+C0`, 0 = airborne).
     pub token: u32,
+    /// World contact normal used by skid marks (wheel +0xD0 xyz).
+    pub contact_normal: [f32; 3],
     /// Radius (`+E0`) and tyre width (`+F8`).
     pub radius: f32,
     pub width: f32,
@@ -137,8 +139,8 @@ pub struct Effects {
 }
 
 impl Effects {
-    /// Continuous values interpolate; tokens, constants and flags come from
-    /// `self` (the earlier sample).
+    /// Continuous values interpolate. Contact normals hold the same earlier
+    /// sample as contact tokens, constants and flags.
     pub fn lerp(&self, other: &Self, t: f32) -> Self {
         let l = |a: f32, b: f32| a + (b - a) * t;
         Self {
@@ -283,7 +285,8 @@ pub struct FrameProps {
 /// excess, rear term, omega and steer pair (36), then the engine speed and
 /// throttle (2), the whine's gear change timer and drivetrain throttle (2).
 /// The flag bits carry the gear in bits 6..10.
-const WORDS: usize = 82;
+const CONTACT_NORMAL_WORD: usize = 82;
+const WORDS: usize = CONTACT_NORMAL_WORD + 4 * 3;
 type Words = [u32; WORDS];
 const MASK: usize = WORDS.div_ceil(8);
 /// The mask a key frame leaves: no delta mask can equal it.
@@ -299,8 +302,8 @@ const fn spin_word(wheel: usize) -> usize {
 }
 
 /// The wheel whose omega word is `word`.
-const fn omega_wheel(word: usize) -> Option<usize> {
-    if word >= 42 && (word - 42) % 9 == 6 {
+fn omega_wheel(word: usize) -> Option<usize> {
+    if (42..78).contains(&word) && (word - 42) % 9 == 6 {
         Some((word - 42) / 9)
     } else {
         None
@@ -341,7 +344,10 @@ fn words(car: &Car) -> Words {
     });
     let mut n = 0;
     let engine = [e.rpm, e.throttle, e.shift_time, e.drive_throttle].map(f32::to_bits);
-    for v in floats.chain([bits]).chain(wheels).chain(engine) {
+    // Append the skid normals without moving the existing effect words or
+    // changing the wheel-spin predictor. This is the process-local codec.
+    let normals = e.wheels.iter().flat_map(|w| w.contact_normal.map(f32::to_bits));
+    for v in floats.chain([bits]).chain(wheels).chain(engine).chain(normals) {
         out[n] = v;
         n += 1;
     }
@@ -369,6 +375,7 @@ fn from_words(w: &Words) -> (Pose, Vec3, [Wheel; 4], Effects) {
             let b = 42 + 9 * k;
             WheelEffects {
                 token: w[b],
+                contact_normal: std::array::from_fn(|lane| f(CONTACT_NORMAL_WORD + 3 * k + lane)),
                 radius: f(b + 1),
                 width: f(b + 2),
                 load: f(b + 3),
@@ -1229,6 +1236,7 @@ pub(crate) mod tests {
                 drive_throttle: 0.6,
                 wheels: std::array::from_fn(|k| WheelEffects {
                     token: 0x7461_6d00 + k as u32,
+                    contact_normal: [0., 1., -0.],
                     radius: 0.31,
                     width: 0.22,
                     load: 3000. + x,
@@ -1282,6 +1290,9 @@ pub(crate) mod tests {
             car.velocity.y = -wobble;
             car.wheels[2].displacement = wobble * 0.01;
             car.effects.wheels[3].load += wobble * 900.;
+            for (wheel, effects) in car.effects.wheels.iter_mut().enumerate() {
+                effects.contact_normal = [wobble * (wheel + 1) as f32, 1., -0.];
+            }
             car.effects.wheels[0].token = if n.is_multiple_of(5) { 0 } else { 0x7461_6d00 };
         }
         if n % 3 == 1 {
@@ -1314,6 +1325,30 @@ pub(crate) mod tests {
     /// Snapshot bits, so NaN words compare equal.
     fn bits(s: &Snapshot) -> String {
         format!("{s:?}")
+    }
+
+    #[test]
+    fn skid_contact_normals_survive_codec_and_hold_the_contact_sample() {
+        let a = uneven(2);
+        let b = uneven(3);
+        let mut encoder = Encoder::default();
+        let encoded = [encoder.encode(&a, 0), encoder.encode(&b, 1)];
+        let mut decoder = Decoder::default();
+        let second = decoder.snapshot(1, read(&encoded)).unwrap();
+        let first = decoder.snapshot(0, read(&encoded)).unwrap();
+        let middle = interpolate(&first, &second, 0.5, 0.016);
+        for car in 0..a.cars.len() {
+            for wheel in 0..4 {
+                let expected = a.cars[car].effects.wheels[wheel].contact_normal;
+                let later = b.cars[car].effects.wheels[wheel].contact_normal;
+                let got = |snapshot: &Snapshot| {
+                    snapshot.cars[car].effects.wheels[wheel].contact_normal.map(f32::to_bits)
+                };
+                assert_eq!(got(&first), expected.map(f32::to_bits));
+                assert_eq!(got(&second), later.map(f32::to_bits));
+                assert_eq!(got(&middle), expected.map(f32::to_bits));
+            }
+        }
     }
 
     #[test]

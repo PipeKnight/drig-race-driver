@@ -14,10 +14,13 @@ pub(crate) struct Wheel {
     pub contact: bool,
     /// Four-character code of the wheel's source contact material.
     pub code: [u8; 4],
-    /// Ground point under the wheel centre and its upward unit normal.
+    /// Ground point under the wheel centre and the body-up basis used by
+    /// wheel-ground motion and debris.
     pub point: Vec3,
     pub normal: Vec3,
-    /// Rolling direction of the steered wheel, tangent to the ground.
+    /// Source contact normal for skid displacement, splitting and shading.
+    pub skid_normal: Vec3,
+    /// Rolling direction of the steered wheel in the body-up plane.
     pub forward: Vec3,
     /// Contact-patch velocity (car velocity plus rotation), world m/s.
     pub velocity: Vec3,
@@ -147,6 +150,7 @@ pub(crate) fn compose(source: &Source, code: impl Fn(u32) -> Option<[u8; 4]>) ->
             code,
             point,
             normal,
+            skid_normal: Vec3::from_array(e.contact_normal),
             forward,
             velocity: contact_velocity,
             longitudinal: omega * radius - contact_velocity.dot(forward),
