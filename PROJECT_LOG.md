@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G407 restores the authored nonreflective track surface normal map in ordinary rendering, verified in forward, deferred and Native DLAA. See [track surface](docs/SKY.md).
 - G406 fixes the source mesh coverage panic in deferred views by retaining its forward pass. Washington deferred and forward controls pass. See [static object materials](docs/STATIC_OBJECT_MATERIALS.md).
 - G398 and G400 restore travel-based skid seams and the original first quad/fade in live play and replay. Matched grass and mixed-field tests exercised both. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
 - G397 verifies cropped antenna coverage and the ordinary smoke tap. G403 verifies isolated Full smoke ordering on real shaft samples. Exact post-DLAA isolation and Reduced overlap remain open. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
