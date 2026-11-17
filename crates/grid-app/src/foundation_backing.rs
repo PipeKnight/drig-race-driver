@@ -198,10 +198,16 @@ fn source_depth(d: &RenderPipelineDescriptor) -> Result<(), &'static str> {
 fn specialize_source(d: &mut RenderPipelineDescriptor, key: MeshPipelineKey) -> Result<(), &'static str> {
     let f = d.fragment.as_ref().ok_or("coverage requires a fragment for alpha ownership")?;
     let aux = has_def(&d.vertex.shader_defs, "PREPASS_PIPELINE") || has_def(&f.shader_defs, "PREPASS_PIPELINE");
-    if has_def(&d.vertex.shader_defs, "DEFERRED_PREPASS") || has_def(&f.shader_defs, "DEFERRED_PREPASS") {
-        return Err("source coverage trial has no deferred G-buffer shader");
+    if aux {
+        // Bevy also emits DEFERRED_PREPASS for an ordinary forward view that
+        // binds a G-buffer. Only a prepass descriptor writes that G-buffer.
+        if has_def(&d.vertex.shader_defs, "DEFERRED_PREPASS")
+            || has_def(&f.shader_defs, "DEFERRED_PREPASS")
+        {
+            return Err("source coverage trial has no deferred G-buffer shader");
+        }
+        return specialize_auxiliary(d, key);
     }
-    if aux { return specialize_auxiliary(d, key); }
     if d.multisample.count == 4 { return specialize_raw(d); }
     specialize_main_one(d)
 }
@@ -218,7 +224,7 @@ fn specialize_main_one(d: &mut RenderPipelineDescriptor) -> Result<(), &'static 
         || remaps(&d.vertex.shader_defs) != 0 || remaps(&f.shader_defs) != 0 {
         return Err("source cheap coverage needs actual1x colour/no hardware A2C");
     }
-    const BAD: [&str; 7] = ["PREMULTIPLY_ALPHA", "OIT_ENABLED", "PREPASS_PIPELINE", "DEFERRED_PREPASS",
+    const BAD: [&str; 6] = ["PREMULTIPLY_ALPHA", "OIT_ENABLED", "PREPASS_PIPELINE",
         "FORWARD_DECAL", "MESHLET_MESH_MATERIAL_PASS", "READS_VIEW_TRANSMISSION_TEXTURE"];
     if d.vertex.shader_defs.iter().chain(&f.shader_defs).any(|v| BAD.contains(&def_name(v))) {
         return Err("unsupported source cheap main variant");
@@ -1069,12 +1075,20 @@ mod tests {
         let mut main = pipe();
         main.multisample.count = 1;
         main.multisample.alpha_to_coverage_enabled = false;
-        main.vertex.shader_defs = vec!["MAY_DISCARD".into()];
+        main.vertex.shader_defs = vec![
+            "MAY_DISCARD".into(),
+            "MOTION_VECTOR_PREPASS".into(),
+            "DEFERRED_PREPASS".into(),
+        ];
         main.fragment.as_mut().unwrap().shader_defs = main.vertex.shader_defs.clone();
         main.fragment.as_mut().unwrap().targets[0].as_mut().unwrap().format = TextureFormat::Rgba16Float;
-        specialize_source(&mut main, MeshPipelineKey::NONE).unwrap();
-        assert!(has_def(&main.fragment.as_ref().unwrap().shader_defs, "OBJECT_COVERAGE_QUARTER"));
-        assert_eq!(main.fragment.as_ref().unwrap().targets[0].as_ref().unwrap().blend, Some(source_blend()));
+        let mut expected = main.clone();
+        let fragment = expected.fragment.as_mut().unwrap();
+        fragment.shader_defs.push("OBJECT_COVERAGE_QUARTER".into());
+        fragment.targets[0].as_mut().unwrap().blend = Some(source_blend());
+        let mixed_view = MeshPipelineKey::MOTION_VECTOR_PREPASS | MeshPipelineKey::DEFERRED_PREPASS;
+        specialize_source(&mut main, mixed_view).unwrap();
+        assert_eq!(main, expected);
 
         let mut shadow = pipe();
         shadow.multisample.count = 1; shadow.multisample.alpha_to_coverage_enabled = false;
@@ -1093,6 +1107,22 @@ mod tests {
         let f = camera.fragment.as_mut().unwrap(); f.shader_defs.retain(|d| def_name(d) != "OBJECT_AUX_CLIP_CSM_HALF");
         f.shader_defs.push("PREPASS_FRAGMENT".into()); f.shader_defs.push("MOTION_VECTOR_PREPASS".into());
         f.targets = vec![None, Some(ColorTargetState { format: TextureFormat::Rg16Float, blend: None, write_mask: ColorWrites::ALL }), None, None];
+        let mut gbuffer = camera.clone();
+        gbuffer.vertex.shader_defs.push("DEFERRED_PREPASS".into());
+        let gbuffer_fragment = gbuffer.fragment.as_mut().unwrap();
+        gbuffer_fragment.shader_defs.push("DEFERRED_PREPASS".into());
+        gbuffer_fragment.targets[2] = Some(ColorTargetState {
+            format: TextureFormat::Rgba32Uint,
+            blend: None,
+            write_mask: ColorWrites::ALL,
+        });
+        let before_gbuffer = gbuffer.clone();
+        assert_eq!(
+            specialize_source(&mut gbuffer, mixed_view | MeshPipelineKey::DEPTH_PREPASS),
+            Err("source coverage trial has no deferred G-buffer shader"),
+        );
+        assert_eq!(gbuffer, before_gbuffer);
+
         specialize_source(&mut camera, MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::MOTION_VECTOR_PREPASS).unwrap();
         assert!(has_def(&camera.fragment.as_ref().unwrap().shader_defs, "OBJECT_AUX_CLIP_QUARTER"));
         let mut unsupported = camera.clone(); unsupported.multisample.count = 4;

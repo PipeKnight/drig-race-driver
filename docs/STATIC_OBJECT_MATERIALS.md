@@ -291,3 +291,14 @@ glass/lenses/ground without the prior isolated cutouts. This integration check
 has no new Off arm or exhaustive temporal/device claim. Compiled source88dbfa20,
 EXEcd2139b4; full hashes/receipts are in G337 and ignored local/graphics/
 foundation-source-family01/build03/ and foundation-general01/integration-f644-01/.
+
+
+## Forward mesh coverage with a deferred view
+
+The shared source mesh material selects forward shading. A camera that publishes
+a deferred G-buffer still supplies a forward view binding for that buffer.
+G406 distinguishes the forward binding from the prepass that writes it.
+The source mesh coverage uses its existing single-sample forward shader in
+the mixed view. Two Washington Enhanced controls complete ordinary driving
+with and without the deferred view. The descriptor tests also preserve the
+existing rejection of true G-buffer writes by this material.
