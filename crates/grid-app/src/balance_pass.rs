@@ -78,7 +78,8 @@ pub fn install(app: &mut App) {
             Core3d,
             draw.in_set(Core3dSystems::PostProcess)
                 .after(tonemapping)
-                .after(crate::track_grade::RaceMerge),
+                .after(crate::track_grade::RaceMerge)
+                .before(bevy::anti_alias::smaa::smaa),
         );
     }
 }
