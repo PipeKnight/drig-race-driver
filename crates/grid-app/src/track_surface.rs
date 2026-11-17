@@ -528,7 +528,10 @@ fn read_surfaces(
         let has_macro = macro_map.is_some();
         let macro_map = macro_map.unwrap_or_else(|| first.clone());
         let skids = texture_name(b"TSkidsMap");
-        let normal_map = if group_ref == b"#track_surface.fx" {
+        let normal_map = if matches!(
+            group_ref,
+            b"#track_surface.fx" | b"#track_infield_dxt5nm.fx"
+        ) {
             texture_name(b"TNormalMap")
         } else {
             None
@@ -1185,6 +1188,39 @@ mod tests {
                 accepted[usize::from(id.starts_with("route/"))] += 1;
             }
             assert_eq!(accepted.map(|count| count > 0), [track_positive, route_positive], "{path}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_infield_normals_resolve_with_source_bases_or_fallback() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"),
+        );
+        for (path, draw_id, map, finite_basis) in [
+            ("tracks/europe/le_mans/route_0", "!Wp", "lem_edge_n.tga", true),
+            (
+                "tracks/usa/washington/route_0",
+                "route/!cK",
+                "was_feature1_n.tga",
+                true,
+            ),
+            (
+                "tracks/usa/washington/route_2",
+                "route/!Q",
+                "was_feature1_n.tga",
+                false,
+            ),
+        ] {
+            let route = Route::new(path).unwrap();
+            let source = read_source(&root, &route).unwrap();
+            let draw = &source.draws[draw_id];
+            assert_eq!(
+                source.definitions[&draw.material].normal_map.as_deref(),
+                Some(map)
+            );
+            assert_eq!(&source.normal_maps[map][84..88], b"DXT5");
+            assert_eq!(draw.normal_basis.is_some(), finite_basis, "{path} {draw_id}");
         }
     }
 
