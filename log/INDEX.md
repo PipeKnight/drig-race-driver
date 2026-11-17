@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G406](G0406.md) | 2026-11-17 | Keep the source mesh coverage pass in forward on deferred views |
 | [G405](G0405.md) | 2026-11-17 | Activate source exterior lamps in ordinary races |
 | [G404](G0404.md) | 2026-11-17 | Restore source flag marshal poses and rods |
 | [G403](G0403.md) | 2026-11-17 | Measure isolated real smoke on covered antenna samples |
