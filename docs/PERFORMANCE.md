@@ -2630,7 +2630,8 @@ Ranked plan (expected gain on the bound thread; all general, image-neutral, with
 2. **Render-thread encode at Donington** (5-6 ms, about 360 transparent draw groups): merge the
    blended static track groups that share material and pipeline into fewer draws, check
    specialisation and bind-group churn in the transparent phase, sort once per frame.
-3. **Frame-split overhead**: `gpu_begin` polls the device every frame while the counter is shown
+3. **Measured in F840, not kept**: without the poll the same maintenance runs inside
+   `queue.submit` (see "Frame-split poll (F840)" below). **Frame-split overhead**: `gpu_begin` polls the device every frame while the counter is shown
    (about 1.1 ms in the profile build). Poll every few frames or read back on the submit
    callback; measure first whether wgpu only moves the same work elsewhere.
 4. **Ground-cover gathers** (`ground_detail`, 43 MB/s): blended cover is gathered on each 16 m
@@ -2796,3 +2797,21 @@ claimed. The stage times are the measured effect.
 Fixed-step offscreen captures (1280x720, ticks 600 and 1500, derby and Donington, autopilot):
 before against after differ in 0, 0, 2 and 1 pixels by one level, two runs of after in 0, 0, 1
 and 4. The image is unchanged.
+
+## Frame-split poll (F840)
+
+Item 3 of the F837 plan. `frame_split::gpu_begin` polls the device (`PollType::Poll`) on the
+render thread every frame while the GPU markers exist. wgpu-core 29 `Queue::submit` already ends
+with the same non-blocking `device.maintain`, so the poll looked redundant.
+
+Experiment: `gpu_begin` without the poll, against the pushed F838 binary, 5 alternating
+idle-gated rounds per scene (log/F0840.md has the full table). The marker readbacks still
+complete (99.9 % of frames, no bad frames). Paired per round, `r_submit` grows by 0.66 ms
+(derby) and 0.90 ms (Donington), in all 10 pairs, while `r_encode` (which holds the graph
+begin) falls by 1.3 ms in the derby and not at Donington. The render thread moves by -1.2 ms
+(derby, median -0.4) and +1.8 ms (Donington, worse in 4 of 5 pairs) in a noisy session.
+
+So the cost is the maintenance itself (submission triage, freeing resources dropped this frame,
+callbacks), not the extra call; dropping the poll only moves it. The change was not kept. A real
+gain needs less to maintain: fewer buffers and bind groups created and dropped per frame
+(item 7) and a profile of `Device::maintain`.
