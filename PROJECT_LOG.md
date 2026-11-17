@@ -57,6 +57,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G426 verifies matched native aerial motion on opposite Donington turns, three-owner preparation, controlled Full smoke, and coherent native reset/fallback. Shibuya Reduced live preparation and Detroit ordinary history comparisons pass. A general antenna/fence compositor and owned optical coverage remain open.
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
 - G412 connects live exterior lamp emission to each source physical damage cluster. Real asymmetric damage and ordinary intact controls pass. See [night lamps](docs/NIGHT_LIGHTS.md).
 - G411 verifies native stock Lacetti antenna ownership in opaque and depth/motion. Purchased aerials include both zero and positive reflection responses. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
