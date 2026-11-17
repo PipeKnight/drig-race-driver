@@ -234,12 +234,16 @@ unlinked specular keeps its own authored angles, and the baseline back
 light keeps its opposite direction. A static or missing key uses its own
 saved initializer. Explicit authored sun direction is preserved.
 
-G390 exercises the regular baseline palette and the Le Mans event's
-15:00 start, dusk and 03:00 nighttime. The matched diagnostic shows actual
-cluster list entries for 14 of the 16 lit cars across the chase run.
-The beam-only control retains the street lights, event clock, and
-physics. Haruna's authored forced-night route submits both player and AI
-beams. See G390 for the audited scope and remaining coverage.
+[G390](../log/G0390.md) exercises the regular baseline palette and the Le Mans
+event's 15:00 start, dusk and 03:00 nighttime. Its updated chase diagnostic
+shows cluster list entries for 14 of the 16 lit car slots across the run.
+The beam-disabled run submits no car beams and retains the street lights.
+Haruna's authored forced-night route submits player and AI beams.
+[G396](../log/G0396.md) verifies that the Le Mans comparison arms used different
+opponent fields. The timeline checkpoints and uploads are valid per-run
+observations. The side-by-side images cannot isolate the amount of lighting
+change. A repeatable visual pair must pin the full field as well as the player
+camera and event clock.
 
 ### 3.5 Renderer hand-off
 

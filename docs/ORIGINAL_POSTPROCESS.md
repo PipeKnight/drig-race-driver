@@ -464,8 +464,11 @@ Both fullscreen systems previously followed Bevy tonemapping without a
 relative dependency. They both swap the main view target while recording
 commands. The normal Type2 path now explicitly finishes its final merge
 before SMAA consumes the scene. Current ordered Shibuya and Donington unit-
-intensity pairs match at all tested frames. Nonunit Haruna and Le Mans
-show a positive difference in the fixed-order diagnostic. Haruna matches
-the final executable pixel for pixel. Two final Le Mans repeats are stable
-to one code value, while the diagnostic-to-final raster differs. See
-[G394](../log/G0394.md) for the run conditions and original-evidence gaps.
+intensity pairs match at all tested frames. In Haruna, the nonunit exponent
+produces a measurable change and the final executable matches the diagnostic
+pixel for pixel. The Le Mans captures exercise the nighttime path. Their
+generated opponent fields differ across the formula and executable comparisons,
+so the measured pixel differences cannot be attributed to bloom alone. Two
+repeats of the final executable used the same model order and differed by at
+most one RGB code. [G394](../log/G0394.md) records the runs and
+[G396](../log/G0396.md) audits the field and specifies the pinned recheck.
