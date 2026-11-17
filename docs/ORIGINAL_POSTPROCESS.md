@@ -447,3 +447,25 @@ questions (G385).
 Stock shader instruction evidence for the threshold, filters, history mix,
 luminance and softening is private under
 `local/graphics/source-effects01/programs/`. No original shaders are shipped.
+
+### Source bloom exponent and stable display-pass order
+
+Type2 uses Tone_dsX2 for its threshold pass. The shader takes four
+bilinear samples and saturates each normalized channel using the saved
+lower and upper thresholds. It applies the saved intensity as an
+exponent to each normalized sample, then averages the four. The
+BloomFromDsX4 constructor at 0x00747620 registers the intensity at
+effect+0x20. The named binding at 0x00747778 and typed float handler at
+0x00742790 pass it to c3. The timeline writes the same slot. The prior
+port used an averaged threshold multiplied by that scalar.
+
+The actual Vulkan A/A control exposed unstable Type2 output with SMAA.
+Both fullscreen systems previously followed Bevy tonemapping without a
+relative dependency. They both swap the main view target while recording
+commands. The normal Type2 path now explicitly finishes its final merge
+before SMAA consumes the scene. Current ordered Shibuya and Donington unit-
+intensity pairs match at all tested frames. Nonunit Haruna and Le Mans
+show a positive difference in the fixed-order diagnostic. Haruna matches
+the final executable pixel for pixel. Two final Le Mans repeats are stable
+to one code value, while the diagnostic-to-final raster differs. See
+[G394](../log/G0394.md) for the run conditions and original-evidence gaps.

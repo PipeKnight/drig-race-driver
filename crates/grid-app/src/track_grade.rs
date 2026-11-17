@@ -299,15 +299,19 @@ pub fn install(app: &mut App) {
             .add_systems(RenderStartup, initialize)
             .add_systems(
                 Core3d,
-                (
-                    prepare_scene
-                        .in_set(Core3dSystems::PostProcess)
-                        .before(motion_blur),
-                    draw.in_set(Core3dSystems::PostProcess)
-                        .in_set(RaceMerge)
-                        .after(tonemapping),
-                ),
+                prepare_scene
+                    .in_set(Core3dSystems::PostProcess)
+                    .before(motion_blur),
             );
+        // Type2 and SMAA both swap the main view target. Their command
+        // buffers must consume these textures in the same explicit order.
+        render.add_systems(
+            Core3d,
+            draw.in_set(Core3dSystems::PostProcess)
+                .in_set(RaceMerge)
+                .after(tonemapping)
+                .before(bevy::anti_alias::smaa::smaa),
+        );
     }
 }
 
@@ -764,6 +768,21 @@ mod timeline_tests {
     use super::*;
     use crate::le_mans_event::LeMansEvent;
     use grid_tools::time_of_day::{Mode, Timeline};
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and original postprocess data"]
+    fn purchased_bloom_exponent_reaches_the_type2_uniform() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        for (path, exterior, interior) in [
+            ("tracks/japan/shibuya/route_0", 1.0, 0.5874),
+            ("tracks/japan/haruna/route_1", 0.6451, 0.6451),
+            ("tracks/usa/detroit/route_0", 1.0478, 1.0478),
+        ] {
+            let effects = load(&root, &Route::new(path).unwrap()).unwrap();
+            assert_eq!(EffectUniform::from(effects.exterior).thresholds.z, exterior, "{path}");
+            assert_eq!(EffectUniform::from(effects.interior).thresholds.z, interior, "{path}");
+        }
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and original pause resources"]

@@ -89,15 +89,25 @@ fn adapt(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn bloom_x2(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let intensity = fx.thresholds.z;
+    // ps_3_0 LOG maps zero to -FLT_MAX, so EXP(LOG(x) * 0) is one
+    // for every thresholded input, including zero.
+    if intensity == 0.0 {
+        return vec4(1.0);
+    }
+    let lower = fx.thresholds.x;
+    let inverse_span = 1.0 / (fx.thresholds.y - lower);
     let d = 0.5 / vec2<f32>(textureDimensions(src));
     var rgb = vec3<f32>(0.0);
     for (var y = -1; y <= 1; y += 2) {
         for (var x = -1; x <= 1; x += 2) {
             let sample_rgb = sample_src(input.uv + vec2<f32>(f32(x), f32(y)) * d);
-            rgb += saturate((sample_rgb - fx.thresholds.x) / (fx.thresholds.y - fx.thresholds.x));
+            // Tone_dsX2 applies its LOG/MUL/EXP curve to each sample before averaging.
+            let normalized = saturate((sample_rgb - lower) * inverse_span);
+            rgb += pow(normalized, vec3(intensity));
         }
     }
-    return vec4(rgb * (0.25 * fx.thresholds.z), 1.0);
+    return vec4(rgb * 0.25, 1.0);
 }
 
 fn gauss9(uv: vec2<f32>, step_uv: vec2<f32>) -> vec4<f32> {
