@@ -1126,3 +1126,15 @@ particle array and writes the vector at particle +0. Sample both fields
 and the adjacent +0x10 and +0x30 vectors at the actual solver entry and
 return. The ordinary marshal dispatch and effective runtime timing still
 await reference capture.
+
+
+## Ordinary spectator motion and lifecycle on current main
+
+G408 exercises standing spectators and source camera flashes through the
+ordinary Shibuya race. The two animation frames retain a stable backdrop.
+Both same-tick pause samples freeze the spectator crop exactly. The separate
+ordinary sequence restarts, enters replay, performs Flashback and enters replay
+again. Together with G388's ordinary walking actors and G386's decoded crowd
+audio, this checks the shared spectator behavior across the existing source
+layouts. The selected replay camera and physical audio output remain unmeasured
+for this comparison.
