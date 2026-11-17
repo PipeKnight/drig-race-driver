@@ -651,7 +651,20 @@ edge at a shared point. Replay checkpoints retain that point payload.
 The current streamed mesh keeps the existing index buffer and maps the
 middle two packed vertices to preserve the source's diagonal and winding.
 The first quad tapers to the zero arriving edge. Original three-contact
-emission timing and the first fully transparent fade still require their
-own change and acceptance. Matched live Donington and Detroit pairs exercise
+emission timing and the first fully transparent fade are covered in G400 below. Matched live Donington and Detroit pairs exercise
 grass/hard and mixed vehicle banks. Native original captures still provide a
 separate visual reference requirement.
+
+### First source quad and fade
+
+[G400](../log/G0400.md) applies the original three-contact startup to the
+shared strip generator. The first two accepted contacts keep the initial
+texture phase. The third emits from the tapered second point to the third.
+Both endpoint colours store zero initial fade. Later accepted endpoints use
+half and then full source fade. A linked-capacity strip keeps its arriving
+edge and full fade. A new contact after losing the head starts again.
+
+The same priming and linked state lives in the normal replay checkpoint.
+Matched Donington grass and mixed Detroit road samples show the actual packed
+first alpha pairs and phase shift at emission, with the same physics and
+smoke traces. Comparison against video from the original remains separate.

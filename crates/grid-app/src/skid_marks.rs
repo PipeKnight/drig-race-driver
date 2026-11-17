@@ -346,14 +346,26 @@ struct Strip {
     bank: u32,
     points: Vec<Point>,
     segments: Vec<QuadUv>,
-    /// Contact-start ramp position at point zero; capacity chains retain it.
-    ramp_start: usize,
+    /// A fresh strip starts with one accepted point and no emitted quad.
+    needs_second_point: bool,
+    /// A capacity link keeps the incoming edge and uses the full fade ramp.
+    linked: bool,
     /// (car, wheel) while the strip is being extended.
     owner: Option<(usize, usize)>,
     retiring: bool,
     /// Index of the oldest point still fading during retirement.
     fade: usize,
     used: bool,
+}
+
+impl Strip {
+    fn opacity_ramp(&self, point: usize) -> f32 {
+        match (self.linked, point) {
+            (false, 0 | 1) => 0.,
+            (false, 2) => 0.5,
+            _ => 1.,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -576,9 +588,12 @@ impl SkidMarks {
             self.safety_event(car, wheel, "point-suppressed");
             return;
         }
-        self.strips[strip].bank = *self.slot_banks.get(car).expect("admitted actual skid slot");
-        self.strips[strip].owner = Some((car, wheel));
-        self.strips[strip].points.push(point);
+        let strip_state = &mut self.strips[strip];
+        strip_state.bank = *self.slot_banks.get(car).expect("admitted actual skid slot");
+        strip_state.owner = Some((car, wheel));
+        strip_state.needs_second_point = true;
+        strip_state.linked = false;
+        strip_state.points.push(point);
         self.heads[car][wheel] = Some(Head { strip });
         self.dirty = true;
     }
@@ -665,13 +680,20 @@ impl SkidMarks {
             };
             if split {
                 self.end(car, index);
+            } else if self.strips[head.strip].needs_second_point {
+                // 73F860 primes the endpoint on acceptance two. The first
+                // quad starts here on acceptance three with the untouched V seed.
+                point.v = self.phases[head.strip];
+                let strip = &mut self.strips[head.strip];
+                strip.points[0] = point;
+                strip.needs_second_point = false;
+                self.dirty = true;
+                return;
             } else {
                 // 739570 retains the arriving edge for the next quad. Keep the
                 // cross product's length on slopes and do not use wheel heading.
                 point.side = direction.cross(point.normal);
                 let full = self.strips[head.strip].points.len() > QUADS;
-                let ramp_start = (self.strips[head.strip].ramp_start
-                    + self.strips[head.strip].points.len() - 1).min(2);
                 let previous_phases = self.phases[head.strip];
                 let strip = if full {
                     // Source capacity is32 emitted quads; this port reaches the
@@ -700,7 +722,7 @@ impl SkidMarks {
                     last.v = wrapped;
                     self.phases[next] = last.v;
                     self.strips[next].points.push(last);
-                    self.strips[next].ramp_start = ramp_start;
+                    self.strips[next].linked = true;
                     self.strips[next].owner = Some((car, index));
                     next
                 } else {
@@ -719,7 +741,6 @@ impl SkidMarks {
                     self.strips[strip].owner = None;
                     self.strips[strip].points.clear();
                     self.strips[strip].segments.clear();
-                    self.strips[strip].ramp_start = 0;
                     self.strips[strip].used = true;
                     self.begin(car, index, strip, point);
                     return;
@@ -806,10 +827,7 @@ impl SkidMarks {
         }
         let i = q + edge / 2;
         let p = &strip.points[i];
-        let ordinal = strip.ramp_start + i;
-        let ramp = match ordinal { 0 => 0., 1 => 0.5, _ => 1. };
-        let ramp = if strip.owner.is_some() || ordinal < 2 { ramp } else { 1. };
-        let color = p.color_for_draw(ramp, edge >= 2);
+        let color = p.color_for_draw(strip.opacity_ramp(i), edge >= 2);
         let sign = if edge.is_multiple_of(2) { -1. } else { 1. };
         ((p.center + p.side * p.half_width * sign).to_array(), p.normal.to_array(),
             uv.old[edge], uv.new[edge], color)
@@ -971,16 +989,9 @@ impl SkidMarks {
         let mut colors = Vec::new();
         let mut indices = Vec::new();
         for strip in self.strips.iter().filter(|s| s.points.len() >= 2) {
-            // Fresh strips ramp in over their first two quads [D byte0 ramp].
             let first = positions.len() as u32;
             for (i, p) in strip.points.iter().enumerate() {
-                let ramp = match i {
-                    0 => 0.,
-                    1 => 0.5,
-                    _ => 1.,
-                };
-                let ramp = if strip.owner.is_some() || i < 2 { ramp } else { 1. };
-                let color = p.color_for_draw(ramp, false);
+                let color = p.color_for_draw(strip.opacity_ramp(i), false);
                 for (sign, u) in [(-1., p.u[0]), (1., p.u[1])] {
                     positions.push((p.center + p.side * p.half_width * sign).to_array());
                     normals.push(p.normal.to_array());
@@ -1244,13 +1255,122 @@ mod tests {
     }
 
     #[test]
+    fn skid_startup_primes_the_second_sample_before_advancing_phase_or_opacity() {
+        let mut profile = profile();
+        profile.surfaces[0].skid.fade = [1.; 2];
+        profile.surfaces[1].tread.fade = [1.; 2];
+        let mut marks = SkidMarks::new(profile);
+        marks.heads.resize(1, [None; 4]);
+        let seed = [2.25, 5.5];
+        marks.phases[0] = seed;
+        let mut sample = wheel(b"STDR", 3., 0., 0.);
+        sample.skid_normal = Vec3::new(0., 1., 0.08).normalize();
+
+        marks.advance(0, 0, &sample);
+        let id = marks.heads[0][0].unwrap().strip;
+        assert!(marks.strips[id].needs_second_point);
+        sample.point.x = 0.08;
+        marks.advance(0, 0, &sample);
+        assert!(marks.strips[id].needs_second_point);
+        sample.point.x = 0.4;
+        sample.code = *b"GRAS";
+        sample.excess = 0.;
+        marks.advance(0, 0, &sample);
+        assert!(!marks.strips[id].needs_second_point);
+        assert_eq!(marks.phases[id], seed);
+        assert_eq!(marks.laid, 0);
+        assert!(marks.strips[id].segments.is_empty());
+        assert_eq!(marks.strips[id].points[0].center.x, 0.4);
+        assert_eq!(marks.strips[id].points[0].side, Vec3::ZERO);
+
+        let primed = marks.save();
+        sample.contact = false;
+        marks.advance(0, 0, &sample);
+        assert!(marks.heads[0][0].is_none());
+        assert!(!marks.strips[id].used);
+        assert_eq!(marks.phases[id], seed);
+
+        marks.restore(&primed);
+        sample.contact = true;
+        sample.point.x = 1.;
+        sample.code = *b"STDR";
+        sample.excess = 3.;
+        marks.advance(0, 0, &sample);
+        let strip = &marks.strips[id];
+        assert_eq!(strip.segments.len(), 1);
+        assert_eq!(strip.segments[0].old[0], [0.5, seed[0]]);
+        assert_eq!(strip.segments[0].new[0], [0.02, seed[1]]);
+        let width = 0.27 * 1.1;
+        let expected = [
+            seed[0] + (0.56 - 0.5) * 4. * 0.6 / width,
+            seed[1] + (0.0625 - 0.02) * 4. * 0.6 / width,
+        ];
+        for (actual, expected) in marks.phases[id].into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-5);
+        }
+        assert_eq!(SkidMarks::slot_vertex(strip, 0).0, SkidMarks::slot_vertex(strip, 1).0);
+        assert!((0..4).all(|k| SkidMarks::slot_vertex(strip, k).4[2] == 0.));
+
+        for x in [1.3, 1.6] {
+            sample.point.x = x;
+            marks.advance(0, 0, &sample);
+        }
+        let strip = &marks.strips[id];
+        assert_eq!(SkidMarks::slot_vertex(strip, 6).4[2], 127. / 255.);
+        assert_eq!(SkidMarks::slot_vertex(strip, 8).4[2], 127. / 255.);
+        assert_eq!(SkidMarks::slot_vertex(strip, 10).4[2], 1.);
+        marks.end(0, 0);
+        assert_eq!(marks.strips[id].opacity_ramp(2), 0.5);
+    }
+
+    #[test]
+    fn skid_capacity_self_steal_starts_with_an_unadvanced_seed_and_no_bridge() {
+        let mut marks = SkidMarks::new(profile());
+        marks.heads.resize(1, [None; 4]);
+        for i in 0..=QUADS + 1 {
+            marks.advance(0, 0, &wheel(b"STDR", 3., 0., 200. + i as f32 * 0.25));
+        }
+        let id = marks.heads[0][0].unwrap().strip;
+        assert_eq!(marks.strips[id].segments.len(), QUADS);
+        let mut nearby = marks.strips[id].points[0];
+        nearby.center = Vec3::ZERO;
+        for (slot, strip) in marks.strips.iter_mut().enumerate() {
+            if slot != id {
+                strip.used = true;
+                strip.points.push(nearby);
+            }
+        }
+
+        let seed = marks.phases[id];
+        let start = 200. + (QUADS + 2) as f32 * 0.25;
+        for step in 0..2 {
+            marks.advance(0, 0, &wheel(b"STDR", 3., 0., start + step as f32 * 0.25));
+            assert_eq!(marks.heads[0][0].unwrap().strip, id);
+            assert!(marks.strips[id].segments.is_empty());
+            assert_eq!(marks.phases[id], seed);
+        }
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., start + 0.5));
+        let strip = &marks.strips[id];
+        assert!(!strip.linked);
+        assert_eq!(strip.segments.len(), 1);
+        assert_eq!(strip.points[0].center.x, start + 0.25);
+        assert_eq!(strip.points[1].center.x, start + 0.5);
+        assert_eq!(strip.points[0].side, Vec3::ZERO);
+        assert_eq!(strip.points[0].v, seed);
+        assert_eq!(strip.opacity_ramp(0), 0.);
+        assert_eq!(strip.opacity_ramp(1), 0.);
+    }
+
+    #[test]
     fn skid_cross_section_uses_arriving_travel_and_source_uv_handedness() {
         for left in [false, true] {
             let mut marks = SkidMarks::new(profile());
             marks.heads.resize(1, [None; 4]);
-            let mut sample = wheel(b"STDR", 3., 0., 0.);
+            let mut sample = wheel(b"STDR", 3., 0., -1.);
             sample.left = left;
             sample.forward = Vec3::Z;
+            marks.advance(0, 0, &sample);
+            sample.point.x = 0.;
             marks.advance(0, 0, &sample);
             sample.point.x = 1.;
             marks.advance(0, 0, &sample);
@@ -1299,9 +1419,11 @@ mod tests {
     fn skid_break_depends_on_the_contact_plane_instead_of_heading() {
         let mut marks = SkidMarks::new(profile());
         marks.heads.resize(1, [None; 4]);
-        let mut contact = wheel(b"STDR", 3., 0., 0.);
+        let mut contact = wheel(b"STDR", 3., 0., -1.);
         marks.advance(0, 0, &contact);
         let flat = marks.heads[0][0].unwrap().strip;
+        contact.point = Vec3::ZERO;
+        marks.advance(0, 0, &contact);
         contact.point = Vec3::X;
         marks.advance(0, 0, &contact);
         contact.point += Vec3::Z;
@@ -1325,6 +1447,10 @@ mod tests {
         contact.point += incline;
         marks.advance(0, 0, &contact);
         assert_eq!(marks.heads[0][0].unwrap().strip, ramp);
+        assert!(marks.strips[ramp].segments.is_empty());
+        contact.point += incline;
+        marks.advance(0, 0, &contact);
+        assert_eq!(marks.heads[0][0].unwrap().strip, ramp);
         assert_eq!(marks.strips[ramp].segments.len(), 1);
     }
 
@@ -1335,8 +1461,10 @@ mod tests {
         let mut contact = wheel(b"STDR", 3., 0., 0.);
         marks.advance(0, 0, &contact);
         let first = marks.heads[0][0].unwrap().strip;
-        contact.point.x = 0.3;
-        marks.advance(0, 0, &contact);
+        for x in [0.2, 0.4] {
+            contact.point.x = x;
+            marks.advance(0, 0, &contact);
+        }
         contact.point.x = 0.5;
         contact.contact = false;
         marks.advance(0, 0, &contact);
@@ -1348,10 +1476,11 @@ mod tests {
         assert_ne!(landed, first);
         assert!(marks.strips[landed].segments.is_empty());
 
-        // Give the new strip a visible segment before testing the jump.
-        // An unfinished one-point strip may legitimately reuse its pool slot.
-        contact.point.x = 1.;
-        marks.advance(0, 0, &contact);
+        // Give the new strip a stored segment before testing the jump.
+        for x in [1., 1.3] {
+            contact.point.x = x;
+            marks.advance(0, 0, &contact);
+        }
         assert_eq!(marks.strips[landed].segments.len(), 1);
         contact.point.x = 5.5;
         marks.advance(0, 0, &contact);
@@ -1412,15 +1541,17 @@ mod tests {
         step(&mut replay, 0);
         step(&mut replay, 1);
         let checkpoint = replay.save();
+        assert!(drawn(&replay.streamed()).is_empty());
+        assert_eq!(replay.phases[0], [0.; 2]);
         step(&mut replay, 2);
         step(&mut replay, 3);
         replay.reset_for_replay();
         replay.restore(&checkpoint);
         step(&mut replay, 2);
         step(&mut replay, 3);
-        assert_eq!(original.laid, 3);
+        assert_eq!(original.laid, 2);
         // The first quad tapers to a point and contributes one triangle.
-        assert_eq!(drawn(&original.streamed()).len(), 5);
+        assert_eq!(drawn(&original.streamed()).len(), 3);
         assert_eq!(replay.used(), 1);
         assert_eq!(replay.phases, original.phases);
         assert_eq!(
@@ -1432,8 +1563,8 @@ mod tests {
     #[test]
     fn early_replay_uses_segment_start_phases_after_restart_and_seek() {
         let mut marks = SkidMarks::new(profile());
-        let lay_pair = |marks: &mut SkidMarks| {
-            for x in [0., 1.] {
+        let lay_first_quad = |marks: &mut SkidMarks| {
+            for x in [0., 1., 2.] {
                 let tyres = [
                     wheel(b"STDR", 3., 0., x),
                     Wheel::default(),
@@ -1445,7 +1576,7 @@ mod tests {
         };
 
         marks.begin_segment();
-        lay_pair(&mut marks);
+        lay_first_quad(&mut marks);
         let restart_phases = marks.phases;
         assert_ne!(restart_phases[0], [0.; 2]);
 
@@ -1453,7 +1584,7 @@ mod tests {
         marks.begin_segment();
         assert_eq!(marks.used(), 0);
         assert_eq!(marks.phases, restart_phases);
-        lay_pair(&mut marks);
+        lay_first_quad(&mut marks);
         let live = marks.save();
         assert_ne!(live.phases[0], restart_phases[0]);
 
@@ -1463,7 +1594,7 @@ mod tests {
             marks.reset_for_replay();
             assert_eq!(marks.used(), 0);
             assert_eq!(marks.phases, restart_phases);
-            lay_pair(&mut marks);
+            lay_first_quad(&mut marks);
             assert_eq!(marks.phases, live.phases);
             marks.restore(&live);
         }
@@ -1500,7 +1631,7 @@ mod tests {
             marks.advance(0, 0, &wheel(b"STDR", 3.0, 0., i as f32 * 0.06));
         }
         let head = marks.heads[0][0].unwrap();
-        assert_eq!(marks.strips[head.strip].points.len(), 5);
+        assert_eq!(marks.strips[head.strip].points.len(), 4);
         // Long straight run chains into further strips.
         for i in 0..200 {
             marks.advance(0, 0, &wheel(b"STDR", 3.0, 0., 0.5 + i as f32 * 0.2));
@@ -1591,22 +1722,24 @@ mod tests {
         assert_ne!(surface_change.old[0][1], surface_change.new[0][1]);
         assert_ne!(surface_change.old[0][0], surface_change.new[0][0]);
         assert_eq!(marks.strips.iter().filter(|s| s.used).count(), 1);
-        for i in 14..=32 {
+        for i in 14..=33 {
             marks.advance(0, 0, &wheel(b"GRAS", 3., 0., i as f32 * 0.2));
             flush(&mut marks, &mut gpu);
         }
         let before_capacity = marks.save();
         let after_capacity = |marks: &mut SkidMarks, i: i32| {
             let mut wheel = wheel(b"GRAS", 3., 0., i as f32 * 0.2);
-            wheel.point.z = (i - 32) as f32 * 0.15;
+            wheel.point.z = (i - 33) as f32 * 0.15;
             marks.advance(0, 0, &wheel);
         };
-        for i in 33..=35 {
+        for i in 34..=36 {
             after_capacity(&mut marks, i);
             flush(&mut marks, &mut gpu);
         }
         let chain = marks.heads[0][0].unwrap().strip;
         assert_ne!(first, chain);
+        assert!(marks.strips[chain].linked);
+        assert_eq!(marks.strips[chain].segments.len(), 3);
         assert_eq!(marks.strips.iter().filter(|s| s.used).count(), 2);
         let a = SkidMarks::slot_vertex(&marks.strips[first], (QUADS - 1) * 4 + 2);
         let b = SkidMarks::slot_vertex(&marks.strips[chain], 0);
@@ -1641,7 +1774,7 @@ mod tests {
         assert_same_triangles(&marks);
         marks.reset_for_replay();
         marks.restore(&before_capacity);
-        for i in 33..=35 {
+        for i in 34..=36 {
             after_capacity(&mut marks, i);
         }
         assert_eq!(marks.streamed().create_packed_vertex_buffer_data(), gpu);
@@ -1716,14 +1849,14 @@ mod tests {
         for (invalid, expected_seed) in cases {
             let mut marks = SkidMarks::new(profile());
             marks.heads.resize(1, [None; 4]);
-            for i in 0..=QUADS {
+            for i in 0..=QUADS + 1 {
                 marks.advance(0, 0, &wheel(b"STDR", 3., 0., i as f32 * 0.2));
             }
             let old = marks.heads[0][0].unwrap().strip;
             marks.phases[old] = invalid;
             // Exercise bad/recycled next-slot history as well as the old input.
             marks.phases[1] = invalid;
-            let at = (QUADS + 1) as f32 * 0.2;
+            let at = (QUADS + 2) as f32 * 0.2;
             marks.advance(0, 0, &wheel(b"STDR", 3., 0., at));
             assert!(marks.phase_safety_events > 0);
             let fresh = marks.heads[0][0].expect("valid current point reseeded").strip;
@@ -1733,7 +1866,9 @@ mod tests {
             assert_eq!(marks.phases[fresh], expected_seed);
             // Actual contact stays true: this gap must be the explicit safety
             // deviation, not a fabricated airborne interval or old/new bridge.
-            marks.advance(0, 0, &wheel(b"STDR", 3., 0., at + 0.2));
+            for x in [at + 0.2, at + 0.4] {
+                marks.advance(0, 0, &wheel(b"STDR", 3., 0., x));
+            }
             for tri in drawn(&marks.streamed()) {
                 let lo = tri.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
                 let hi = tri.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
@@ -1753,6 +1888,8 @@ mod tests {
         let mut marks = SkidMarks::new(huge);
         marks.heads.resize(1, [None; 4]);
         marks.advance(0, 0, &wheel(b"STDR", 3., 0., 0.));
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., 1.));
+        assert_eq!(marks.phase_safety_events, 0);
         marks.advance(0, 0, &wheel(b"STDR", 3., 0., 2.));
         assert!(marks.phase_safety_events > 0);
         assert!(drawn(&marks.streamed()).is_empty());
@@ -1815,6 +1952,7 @@ mod tests {
         marks.heads.resize(1, [None; 4]);
         marks.advance(0, 0, &wheel(b"STDR", 3., 0., 0.));
         marks.advance(0, 0, &wheel(b"STDR", 3., 0., 1.));
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., 2.));
 
         let diffuse = marks.streamed();
         assert_eq!(VertexLayout::of(&diffuse).stride, 60);
@@ -1917,42 +2055,42 @@ mod tests {
         let mut marks = SkidMarks::new(p);
         marks.heads.resize(1, [None; 4]);
         for (w, code, excess) in [(0, b"STDR", 3.), (1, b"GRAS", 0.)] {
-            for x in [0., 0.2, 0.4] { marks.advance(0, w, &wheel(code, excess, 0., x)); }
+            for x in [0., 0.2, 0.4, 0.6, 0.8] { marks.advance(0, w, &wheel(code, excess, 0., x)); }
         }
         let hard = marks.heads[0][0].unwrap().strip;
         let grass = marks.heads[0][1].unwrap().strip;
-        let hard_color = SkidMarks::slot_vertex(&marks.strips[hard], 6).4;
+        let hard_color = SkidMarks::slot_vertex(&marks.strips[hard], 10).4;
         assert_eq!(hard_color, [127., 63., 63., 255.].map(|v| v / 255.));
-        assert_eq!(SkidMarks::slot_vertex(&marks.strips[hard], 4).4,
+        assert_eq!(SkidMarks::slot_vertex(&marks.strips[hard], 8).4,
             [127., 63., 31., 0.].map(|v| v / 255.)); // ramp precedes truncation
-        assert_eq!(SkidMarks::slot_vertex(&marks.strips[grass], 6).4,
+        assert_eq!(SkidMarks::slot_vertex(&marks.strips[grass], 10).4,
             [63., 127., 191., 255.].map(|v| v / 255.));
         let mesh = marks.streamed();
         let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
             panic!("missing actual streamed color attribute");
         };
-        assert_eq!(colors[hard * SLOT + 5], hard_color);
-        let raw_before_end = marks.strips[hard].points[2].source_color.gpu(1., true);
+        assert_eq!(colors[hard * SLOT + 9], hard_color);
+        let raw_before_end = marks.strips[hard].points[3].source_color.gpu(1., true);
         marks.end(0, 0);
-        let raw_after_end = marks.strips[hard].points[2].source_color.gpu(1., true);
+        let raw_after_end = marks.strips[hard].points[3].source_color.gpu(1., true);
         assert_eq!(raw_after_end[0], 0.);
         assert_eq!(&raw_after_end[1..], &raw_before_end[1..]); // raw opacity unchanged
-        let ended = SkidMarks::slot_vertex(&marks.strips[hard], 6).4;
+        let ended = SkidMarks::slot_vertex(&marks.strips[hard], 10).4;
         assert_eq!(ended, [0., hard_color[1], 0., hard_color[3]]); // authored envelope0
-        let preceding_point = marks.strips[hard].points[1];
-        let preceding = SkidMarks::slot_vertex(&marks.strips[hard], 4).4;
+        let preceding_point = marks.strips[hard].points[2];
+        let preceding = SkidMarks::slot_vertex(&marks.strips[hard], 8).4;
         assert_eq!(preceding[0], 63. / 255.); // source byte2 half
         assert_eq!(preceding[2], preceding_point.source_color.gpu(0.5, false)[2] * 0.5);
         assert_eq!(preceding_point.diffuse_envelope, 0.5);
         marks.strips[grass].retiring = true;
-        marks.strips[grass].fade = 1;
-        let before_retire = marks.strips[grass].points[1].source_color.gpu(0.5, false);
+        marks.strips[grass].fade = 2;
+        let before_retire = marks.strips[grass].points[2].source_color.gpu(0.5, false);
         marks.maintain();
-        let retired_point = marks.strips[grass].points[1];
+        let retired_point = marks.strips[grass].points[2];
         let raw_retired = retired_point.source_color.gpu(0.5, false);
         assert_eq!(raw_retired[0], 38. / 255.); // source byte2 by25
         assert_eq!(&raw_retired[1..], &before_retire[1..]);
-        let retired = SkidMarks::slot_vertex(&marks.strips[grass], 4).4;
+        let retired = SkidMarks::slot_vertex(&marks.strips[grass], 8).4;
         assert_eq!(retired[2], raw_retired[2] * (1. - RETIRE_STEP));
         assert_eq!(retired_point.diffuse_envelope, 1. - RETIRE_STEP);
         let mesh = marks.streamed();
@@ -1963,7 +2101,7 @@ mod tests {
         let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
             panic!("missing updated stream color attribute");
         };
-        assert_eq!(colors[grass * SLOT + 4], retired);
+        assert_eq!(colors[grass * SLOT + 8], retired);
         assert_same_triangles(&marks);
     }
 
