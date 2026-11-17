@@ -735,6 +735,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G420](G0420.md) | 2026-11-17 | Identify two real native owners in shared thin-detail bins |
 | [G419](G0419.md) | 2026-11-17 | Measure native Reduced smoke overlap at a thin aerial |
 | [G418](G0418.md) | 2026-11-17 | Trace real native thin-detail owners |
 | [G417](G0417.md) | 2026-11-17 | Restore automatic smoke with frame timing |

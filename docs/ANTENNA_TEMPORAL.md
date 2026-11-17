@@ -141,3 +141,13 @@ zero, with a small full-resolution RGB contribution after upsampling. The
 same-depth neighboring control is unchanged within each matched arm.
 The result scopes the controlled 4× scratch route. Ordinary 1× Reduced
 coverage and moving glass remain open.
+
+## Actual shared native keys for thin opponent geometry
+
+[G420](../log/G0420.md) reads both native phase maps at the same Donington
+start used by G418. The complete Opaque and Depth/Motion keys each have
+the same two Lacetti LOD2 aerial owners. Their mesh and material group
+match. Their effective material slots differ. Both phases use distinct
+MainEntity keys and the expected Bevy 3D render-side sentinel.
+The scoped request must account for both owners before taking an intact
+bin. Actual partial-closure refusal and per-owner draw evidence remain open.
