@@ -27,10 +27,12 @@
 //! diagnostics; only GPU counters and visibility lists are read.
 use bevy::camera::visibility::{CascadesVisibleEntities, VisibleEntities};
 use bevy::diagnostic::DiagnosticsStore;
+use bevy::ecs::schedule::common_conditions::run_once;
 use bevy::prelude::*;
 use bevy::render::diagnostic::RenderDiagnosticsPlugin;
 use bevy::render::mesh::{RenderMesh, RenderMeshBufferInfo};
 use bevy::render::render_asset::RenderAssets;
+use bevy::render::renderer::{RenderGraph, RenderGraphSystems};
 use bevy::render::{Render, RenderApp, RenderSystems};
 use std::any::TypeId;
 use std::collections::{BTreeMap, HashMap};
@@ -82,7 +84,6 @@ pub fn install(app: &mut App) {
             .add_systems(Last, (report, view_triangles));
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.add_systems(Render, mesh_triangles.after(RenderSystems::Cleanup));
-            install_shadow_span(render);
         }
     }
     if let Some(budget) = submissions::budget() {
@@ -90,13 +91,15 @@ pub fn install(app: &mut App) {
     }
 }
 
-/// Replaces Bevy's early shadow pass by the timed one (once; the frame split
-/// and the pass profiler both ask for it).
+/// Installs shadow timing after the native transparency installer and before
+/// the first camera graph. Replacing the shadow system builds Core3d.
 pub(crate) fn install_shadow_span(render: &mut SubApp) {
-    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if !DONE.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        shadow_span::install(render);
-    }
+    render.add_systems(
+        RenderGraph,
+        shadow_span::install
+            .before(RenderGraphSystems::Begin)
+            .run_if(run_once),
+    );
 }
 
 /// Copies the meshes' triangle counts when the main world asks (no map).
@@ -292,23 +295,27 @@ mod shadow_span {
     use crate::frame_split::{FrameGpu, Kind, Mark};
     use wgpu::RenderPassTimestampWrites;
 
-    pub fn install(render: &mut SubApp) {
-        let removed = render.remove_systems_in_set(
-            Core3d,
-            per_view_shadow_pass::<EARLY_SHADOW_PASS>,
-            ScheduleCleanupPolicy::RemoveSystemsOnly,
-        );
-        if !matches!(removed, Ok(1)) {
-            log_line!("gpu_shadow_span installed=false removed={removed:?}");
-            return;
+    pub fn install(world: &mut World) {
+        let result = world.try_schedule_scope(Core3d, |world, schedule| {
+            let removed = schedule.remove_systems_in_set(
+                per_view_shadow_pass::<EARLY_SHADOW_PASS>,
+                world,
+                ScheduleCleanupPolicy::RemoveSystemsOnly,
+            );
+            if !matches!(removed, Ok(1)) {
+                log_line!("gpu_shadow_span installed=false removed={removed:?}");
+                return;
+            }
+            schedule.add_systems(
+                timed_shadow_pass
+                    .after(early_prepass_build_indirect_parameters)
+                    .before(early_downsample_depth)
+                    .before(per_view_shadow_pass::<LATE_SHADOW_PASS>),
+            );
+        });
+        if let Err(error) = result {
+            log_line!("gpu_shadow_span installed=false reason={error:?}");
         }
-        render.add_systems(
-            Core3d,
-            timed_shadow_pass
-                .after(early_prepass_build_indirect_parameters)
-                .before(early_downsample_depth)
-                .before(per_view_shadow_pass::<LATE_SHADOW_PASS>),
-        );
     }
 
     /// Bevy's `per_view_shadow_pass::<EARLY_SHADOW_PASS>` with a pass span.
@@ -359,6 +366,85 @@ mod shadow_span {
                 error!("Error encountered while rendering the shadow phase {err:?}");
             }
             span.end(&mut pass);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use bevy::core_pipeline::{
+            core_3d::{main_opaque_pass_3d, main_transparent_pass_3d},
+            schedule::Core3dSystems,
+        };
+        use bevy::ecs::schedule::{IntoSystemSet, NodeId};
+        use bevy::render::renderer::RenderGraph;
+
+        fn before_transparent() {}
+        fn after_transparent() {}
+
+        #[test]
+        fn shadow_timing_installs_after_native_transparency_composition() {
+            let mut render = SubApp::new();
+            render
+                .add_schedule(RenderGraph::base_schedule())
+                .add_schedule(Core3d::base_schedule())
+                .add_systems(
+                    Core3d,
+                    (
+                        (main_opaque_pass_3d, main_transparent_pass_3d)
+                            .chain()
+                            .in_set(Core3dSystems::MainPass),
+                        before_transparent
+                            .in_set(Core3dSystems::MainPass)
+                            .after(main_opaque_pass_3d)
+                            .before(main_transparent_pass_3d),
+                        per_view_shadow_pass::<EARLY_SHADOW_PASS>,
+                    ),
+                );
+            super::super::install_shadow_span(&mut render);
+            let world = render.world_mut();
+            world
+                .try_schedule_scope(Core3d, |world, schedule| {
+                    assert!(schedule.systems().is_err());
+                    crate::ground_skid_pass::compose_native_late(
+                        world,
+                        schedule,
+                        after_transparent,
+                    )
+                    .unwrap();
+                })
+                .unwrap();
+
+            // Exercise the first-graph install and the subsequent run-once guard
+            // without running the camera or GPU draw systems.
+            world.run_schedule(RenderGraph);
+            world.run_schedule(RenderGraph);
+            world
+                .try_schedule_scope(Core3d, |world, schedule| {
+                    schedule.initialize(world).unwrap();
+                    let graph = schedule.graph();
+                    let shadow = timed_shadow_pass.into_system_set().intern();
+                    let old_shadow = per_view_shadow_pass::<EARLY_SHADOW_PASS>
+                        .into_system_set()
+                        .intern();
+                    assert_eq!(graph.systems_in_set(shadow).unwrap().len(), 1);
+                    assert_eq!(
+                        graph.systems_in_set(old_shadow).map_or(0, |set| set.len()),
+                        0
+                    );
+                    let native = main_transparent_pass_3d.into_system_set().intern();
+                    assert_eq!(graph.systems_in_set(native).unwrap().len(), 1);
+                    let marker = before_transparent.into_system_set().intern();
+                    let marker = *graph.systems_in_set(marker).unwrap().iter().next().unwrap();
+                    let native_set = graph.system_sets.get_key(native).unwrap();
+                    assert!(
+                        graph
+                            .dependency()
+                            .graph()
+                            .contains_edge(NodeId::System(marker), NodeId::Set(native_set))
+                    );
+                })
+                .unwrap();
         }
     }
 }

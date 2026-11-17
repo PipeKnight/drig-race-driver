@@ -61,7 +61,8 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - G412 connects live exterior lamp emission to each source physical damage cluster. Real asymmetric damage and ordinary intact controls pass. See [night lamps](docs/NIGHT_LIGHTS.md).
 - G411 verifies native stock Lacetti antenna ownership in opaque and depth/motion. Purchased aerials include both zero and positive reflection responses. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G410 restores authored normals on the nonreflective DXT5 infield family. The purchased loader and matched Washington runtime pass. See [track surface](docs/SKY.md).
-- G415 verifies reversible native thin-geometry routing in a clear two-frame fixture. G409 covers Full smoke isolation. The reflected and Reduced cases are next. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
+- G417 restores Automatic smoke with F836 frame timing in ordinary MSAA4 and native DLAA. Both the repaired smoke passes and GPU cascade measurements were observed.
+- G415 verifies reversible native thin-geometry routing in a clear fixture. G416 measures real Stock rear reflection. Sustained motion and Reduced smoke remain open. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G408 verifies ordinary spectator movement and flashes on Shibuya, two identical same-tick pause crops and restart/Flashback/replay lifecycle. See [crowd research](docs/CROWD_ANIMATION_RESEARCH.md).
 - G407 restores the authored nonreflective track surface normal map in ordinary rendering, verified in forward, deferred and Native DLAA. See [track surface](docs/SKY.md).
 - G406 fixes the source mesh coverage panic in deferred views by retaining its forward pass. Washington deferred and forward controls pass. See [static object materials](docs/STATIC_OBJECT_MATERIALS.md).

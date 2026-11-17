@@ -2451,6 +2451,14 @@ the phase items (draw groups after batching) per pass; `shadow_views` the shadow
 `views3d` 3D views. Per second: `mesh_up_s` and `mesh_kb_s` mesh asset changes (each one is
 an upload to the GPU), `img_up_s` and `img_kb_s` the same for images.
 
+### Ordering with Automatic smoke
+
+The shadow timing wrapper installs once per render world at the start of RenderGraph. Its
+early shadow replacement builds Core3d. The native transparency transaction must inspect
+the unbuilt Core3d graph, so its dedicated pre-Render schedule runs first. The timed shadow
+pass and its dependency edges are available to the first camera. [G417](../log/G0417.md)
+verifies both the Automatic smoke path and actual shadow profiling on Vulkan.
+
 ### GPU markers and Metal
 
 The start line `frame_split version=1 backend=... adapter=... timestamp_query=...
