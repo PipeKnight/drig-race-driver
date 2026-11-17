@@ -2,14 +2,8 @@
 use grid_formats::{mesh, pssg, scene};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Role {
-    Front,
-    Rear,
-    Brake,
-    Reverse,
-    Combi,
-}
+pub(crate) use grid_formats::lamp_clusters::Role;
+use grid_formats::lamp_clusters::catalogue;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Section {
     pub semantic: u16,
@@ -22,44 +16,6 @@ pub(crate) struct Section {
     pub draw: String,
     pub material: String,
     pub joint: String,
-}
-fn catalogue() -> Vec<(u16, Role, u8, String)> {
-    let mut out = Vec::with_capacity(60);
-    for (side_index, side) in ["fl", "fr"].into_iter().enumerate() {
-        for (variant, prefix) in ["", "2_", "3_"].into_iter().enumerate() {
-            for (member, surface) in ["pod", "glass"].into_iter().enumerate() {
-                out.push((
-                    107 + (side_index * 6 + variant * 2 + member) as u16,
-                    Role::Front,
-                    (side_index * 3 + variant) as u8,
-                    format!("light_{prefix}{surface}_{side}"),
-                ));
-            }
-        }
-    }
-    for (side_index, side) in ["bl", "br"].into_iter().enumerate() {
-        for (variant, prefix) in ["", "2_", "3_"].into_iter().enumerate() {
-            for (channel, (kind, role)) in [
-                ("", Role::Rear),
-                ("brake_", Role::Brake),
-                ("rev_", Role::Reverse),
-                ("combi_", Role::Combi),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                for (member, surface) in ["pod", "glass"].into_iter().enumerate() {
-                    out.push((
-                        119 + (side_index * 24 + variant * 8 + channel * 2 + member) as u16,
-                        role,
-                        (6 + variant * 2 + side_index) as u8,
-                        format!("light_{prefix}{kind}{surface}_{side}"),
-                    ));
-                }
-            }
-        }
-    }
-    out
 }
 fn decode_lod(bundle: &[u8]) -> Result<u8, String> {
     // Explicit selected-bundle contract, not native grouping/root inference.

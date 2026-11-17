@@ -1,6 +1,6 @@
 //! Direct purchased-resource deformation construction; explicit player policy.
 //! Graphical selection is an explicit independent prototype policy.
-use grid_formats::{binxml, deformation, pssg};
+use grid_formats::{binxml, deformation, lamp_clusters, pssg};
 use grid_world::{
     deformation_initialization::{self, Output},
     deformation_layout::{Bounds, Parameters},
@@ -11,6 +11,7 @@ pub struct Prepared {
     pub settings: Vec<u32>,
     pub bounds: deformation::Bounds,
     pub consumers: deformation::ConsumerSettings,
+    lamp_anchors: [Option<[f32; 3]>; 12],
 }
 fn read(path: &Path, bound: u64) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
@@ -38,6 +39,8 @@ pub fn load(root: &Path, stem: &str) -> Result<Prepared, Box<dyn std::error::Err
     )?;
     let tree = pssg::read_tree(&pssg_bytes)?;
     let bounds = deformation::player_lod1_bounds(&tree)?;
+    // Incomplete lamp metadata must not reject an otherwise supported body.
+    let lamp_anchors = lamp_clusters::lod0_anchors(&tree).unwrap_or_default();
     // File-backed scalar defaults verified at the whole constructor boundary.
     // The graphical selection is an explicit prototype policy, not a factory claim.
     let construction = deformation_initialization::calculate(
@@ -64,6 +67,7 @@ pub fn load(root: &Path, stem: &str) -> Result<Prepared, Box<dyn std::error::Err
         settings,
         bounds,
         consumers,
+        lamp_anchors,
     })
 }
 
@@ -110,9 +114,12 @@ pub fn initialize_existing(
     ] {
         next[at / 4] = value.to_bits();
     }
-    // Verified outer defaults. No original graphical part/anchor factory claim:
-    // this owner has no graphical parts/lights; wheel anchors derive from the
-    // already source-initialized wheel positions relative to the grid center.
+    grid_world::deformation_publication::bind_initial_lamp_anchors(
+        &mut next,
+        &prepared.lamp_anchors,
+    )?;
+    // Verified outer defaults. Wheel anchors derive from the already
+    // source-initialized wheel positions relative to the grid center.
     for at in [0xcd90, 0xcd94, 0xcd98, 0xcd9c] {
         next[at / 4] = 0.1f32.to_bits();
     }

@@ -29,6 +29,7 @@ pub mod kickup;
 pub mod language;
 pub mod livery_map;
 pub mod livery_numbers;
+pub mod lamp_clusters;
 pub mod material;
 pub mod mesh;
 pub mod neanim;

@@ -100,6 +100,7 @@ pub(crate) fn member(full: &str, lod: u8) -> Result<String, &'static str> {
 pub(crate) struct Receiver {
     slot: usize,
     role: Role,
+    cluster: u8,
     member: String,
     bank: BankKey,
     // App rigid attachment admission, NOT native parent-chain parity.
@@ -110,6 +111,7 @@ impl Receiver {
         Ok(Self {
             slot,
             role: receipt.section.role,
+            cluster: receipt.section.cluster,
             member: member(&receipt.section.joint, receipt.section.lod)?,
             bank: receipt.bank.clone(),
             reachable: true,
@@ -199,11 +201,48 @@ pub(crate) struct Registries<'w> {
     owners: ResMut<'w, Owners>,
     reflective: Option<ResMut<'w, crate::car_reflection_overlay::Reflective>>,
 }
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct LampDamage<'w> {
+    driving: Option<Res<'w, crate::Driving>>,
+    fallback: Option<Res<'w, crate::damage_parts::DamageParts>>,
+    replay: Option<Res<'w, crate::replay::Replay>>,
+}
+
+impl LampDamage<'_> {
+    fn source_smashed(&self, receiver: &Receiver) -> Option<bool> {
+        if self.replay.as_ref().is_some_and(|replay| replay.session.is_some()) {
+            return None;
+        }
+        let driving = self.driving.as_deref()?;
+        // multi.cars[0] is a placeholder outside a tick.
+        let runtime = if receiver.slot == 0 {
+            &driving.runtime
+        } else {
+            driving.opponents.as_ref()?.multi.cars.get(receiver.slot)?
+        };
+        if !runtime.deformation_enabled {
+            return None;
+        }
+        grid_world::deformation_publication::lamp_cluster_smashed(
+            &runtime.state.car.owner.vehicle,
+            receiver.cluster,
+        )
+    }
+
+    fn smashed(&self, receiver: &Receiver) -> bool {
+        self.source_smashed(receiver).unwrap_or_else(|| {
+            self.fallback
+                .as_ref()
+                .is_some_and(|damage| damage.light_smashed(receiver.slot, &receiver.member))
+        })
+    }
+}
+
 pub(crate) fn project(
     mut commands: Commands,
     atlas: Res<Atlas>,
     state: Res<State>,
-    damage: Option<Res<crate::damage_parts::DamageParts>>,
+    damage: LampDamage,
     mut parts: Receivers,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut registries: Registries,
@@ -288,9 +327,7 @@ pub(crate) fn project(
         if image.is_some()
             && let Some(level) = state.value(receiver.slot, receiver.role)
         {
-            let broken = damage
-                .as_ref()
-                .is_some_and(|d| d.light_smashed(receiver.slot, &receiver.member));
+            let broken = damage.smashed(receiver);
             let e = signed(level, receiver.reachable, broken).emission();
             if let Some(mut m) = materials.get_mut(&material.0) {
                 m.emissive = LinearRgba::rgb(e, e, e);
@@ -328,6 +365,7 @@ mod tests {
         Receiver {
             slot,
             role: Role::Brake,
+            cluster: 6,
             member: "light_brake_pod_bl".into(),
             bank: key(bank),
             reachable: true,
