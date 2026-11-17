@@ -170,3 +170,12 @@ passes. The two ordered real phase maps agree across all five sampled
 boundaries through native Early. The stock HDR endpoints swap with no
 extracted reset. Sustained current-frame image and actual per-owner draw
 acceptance are still separate.
+
+## Actual organic Reduced color contribution
+
+[G423](../log/G0423.md) reads the native Main HDR and depth around the real
+G421 Reduced composition on a single frame. Depth and alpha remain exact.
+All 1568 sampled nearest-depth cells match. The stock half-resolution
+compose model reproduces Main RGB within .0006253 linear. In the fence
+region 3956 pixels with scene depth change by more than .001 in one RGB
+channel. Exact fence mesh ownership and sustained motion remain open.
