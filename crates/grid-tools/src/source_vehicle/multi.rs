@@ -935,6 +935,7 @@ impl MultiRuntime {
                     &cars[0].surfaces,
                     bodies,
                     geometry[0].query(),
+                    parallel,
                 )?;
             }
             let bodies: &[contact_groups::Body] = bodies;
@@ -1386,8 +1387,11 @@ impl MultiRuntime {
             self.newly_retired.push(i);
         }
         if let Some((next, disabled)) = props_next {
-            for car in &mut self.cars {
-                crate::dynamic_props::PropWorld::disable(&mut car.track, &disabled);
+            if !disabled.is_empty() {
+                let _disable_timer = crate::perf::Timer::start(crate::perf::Stage::PropDisable);
+                for car in &mut self.cars {
+                    crate::dynamic_props::PropWorld::disable(&mut car.track, &disabled);
+                }
             }
             self.props = Some(next);
         }

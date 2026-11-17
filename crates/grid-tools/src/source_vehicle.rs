@@ -837,6 +837,7 @@ impl Runtime {
                             &self.surfaces,
                             bodies,
                             resource.borrow().query(),
+                            true,
                         )?;
                     }
                     let bodies: &[grid_world::contact_groups::Body] = bodies;

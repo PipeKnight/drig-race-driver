@@ -83,6 +83,28 @@ impl Field {
             )
             .collect()
     }
+    /// Whether `owner` holds the field whose [`Self::key`] is `key`. The key
+    /// holds every value `read` validates, so then `read` would succeed with
+    /// that same key: a caller that keeps the key of its last successful read
+    /// skips the read (two lattice copies, two validations) while the car's
+    /// body is unchanged, which is most frames.
+    pub fn unchanged(owner: &[u32], key: &[u32]) -> bool {
+        if owner.len() != VEHICLE_WORDS || owner[0xc7ac / 4] >> 8 & 255 > 1 || key.len() < 9 {
+            return false;
+        }
+        let count: usize = key[..3].iter().map(|&d| d as usize).product();
+        let word = |at: usize| owner[at / 4];
+        key.len() == 9 + 8 * count
+            && (0..3).all(|i| word(0xc714 + i * 4) == key[i])
+            && word(0xc720) == key[3]
+            && u32::from(word(0xc7ac) >> 8 & 255 != 0) == key[4]
+            && (0..4).all(|i| word(0xc730 + i * 4) == key[5 + i])
+            && (0..count).all(|i| {
+                let (current, rest) = (9 + i * 4, 9 + (count + i) * 4);
+                owner[(0x4880 + i * 80) / 4..][..4] == key[current..current + 4]
+                    && owner[(0x4890 + i * 80) / 4..][..4] == key[rest..rest + 4]
+            })
+    }
     /// Delta relative to the pristine source lattice avoids baseline rounding
     /// shifts and cumulative mesh drift. XYZ are the chosen visual policy.
     pub fn displacements(&self, points: &[[f32; 4]]) -> Result<Vec<[f32; 3]>, Error> {
@@ -109,5 +131,57 @@ impl Field {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owner() -> Vec<u32> {
+        let mut owner = vec![0u32; VEHICLE_WORDS];
+        for (i, d) in [2u32, 3, 2].into_iter().enumerate() {
+            owner[0xc714 / 4 + i] = d;
+        }
+        owner[0xc720 / 4] = 0.5f32.to_bits();
+        owner[0xc7ac / 4] = 1 << 8;
+        for i in 0..12 {
+            for a in 0..4 {
+                owner[(0x4880 + i * 80) / 4 + a] = (i as f32 + a as f32 * 0.25).to_bits();
+                owner[(0x4890 + i * 80) / 4 + a] = (i as f32 - a as f32).to_bits();
+            }
+        }
+        owner
+    }
+
+    #[test]
+    fn unchanged_matches_read_key() {
+        let mut owner = owner();
+        let key = Field::read(&owner).unwrap().key();
+        assert!(Field::unchanged(&owner, &key));
+        // Every word the key covers changes the answer, as it changes the key.
+        let words = [0xc714, 0xc718, 0xc71c, 0xc720, 0xc730, 0xc73c, 0x4880, 0x4890 + 11 * 80 + 12];
+        for at in words {
+            let saved = owner[at / 4];
+            owner[at / 4] ^= 1;
+            let changed = Field::read(&owner).map(|f| f.key());
+            assert!(!Field::unchanged(&owner, &key), "word {at:#x}");
+            assert_ne!(changed.ok().as_ref(), Some(&key));
+            owner[at / 4] = saved;
+        }
+        // An activity byte `read` refuses is never unchanged.
+        owner[0xc7ac / 4] = 2 << 8;
+        assert!(Field::read(&owner).is_err());
+        assert!(!Field::unchanged(&owner, &key));
+        owner[0xc7ac / 4] = 0;
+        assert_eq!(
+            Field::unchanged(&owner, &key),
+            Field::read(&owner).unwrap().key() == key
+        );
+        // A word outside the field does not.
+        let mut other = self::owner();
+        other[0x4880 / 4 + 8] ^= 1;
+        assert!(Field::unchanged(&other, &key));
+        assert!(Field::read(&other).unwrap().key() == key);
     }
 }

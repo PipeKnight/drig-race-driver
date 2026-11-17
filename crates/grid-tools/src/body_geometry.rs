@@ -118,8 +118,10 @@ impl BodyGeometry {
             minimum: std::array::from_fn(|j| f32::from_bits(b[0xc730 / 4 + j])),
             positions: &positions,
         };
+        let rebuild_timer = crate::perf::Timer::start(crate::perf::Stage::HullRebuild);
         let mut geometry = self.clone();
         geometry.rebuild_from_deformation(&grid)?;
+        drop(rebuild_timer);
         let next = deformation_publication::after_geometry_rebuild_owned(state, delta)?;
         Ok((Some(geometry), next))
     }

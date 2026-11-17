@@ -4,8 +4,8 @@
 //! first timer starts; then each [`Stage`] accumulates its total time and call
 //! count, and [`report`] prints them. Timing never feeds back into the
 //! simulation, so results are identical with it on or off.
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 /// Timed stages. App stages are measured by grid-app; the rest by
@@ -20,6 +20,9 @@ pub enum Stage {
     WorldTick,
     /// Every car's vehicle manager (suspension rays, handling, wheel contacts).
     VehicleStage,
+    /// Of the vehicle stage: a deformed car's collision hull rebuild
+    /// (`BodyGeometry::deformation_publication_owned`; cars run in parallel).
+    HullRebuild,
     /// Every car's static track, prop and boundary body contacts.
     BodyContacts,
     /// Car-to-car hull contacts.
@@ -48,6 +51,8 @@ pub enum Stage {
     PropApply,
     /// Of the commit: every car's body events and deformation registration.
     BodyEvents,
+    /// Of the commit: broken prop boxes switched off in every car's track.
+    PropDisable,
     /// Every car's loose-part rules (`detach_wheels`, `Parts::step`) and
     /// the new loose bodies (`add_loose_wheels`).
     LooseParts,
@@ -55,17 +60,20 @@ pub enum Stage {
     DamageParts,
     /// grid-app `dynamic_props::present` (piece transforms).
     PropPresent,
+    /// grid-app `flashback::capture`: a simulation checkpoint (every 4 s).
+    Checkpoint,
     /// The main schedule, First to Last (grid-app).
     MainSchedule,
     /// The render schedule, extract commands to the end of rendering (grid-app).
     RenderSchedule,
 }
 
-const STAGES: [Stage; 23] = [
+const STAGES: [Stage; 26] = [
     Stage::DriveTick,
     Stage::AiDrivers,
     Stage::WorldTick,
     Stage::VehicleStage,
+    Stage::HullRebuild,
     Stage::BodyContacts,
     Stage::CarPairs,
     Stage::PieceContacts,
@@ -80,15 +88,18 @@ const STAGES: [Stage; 23] = [
     Stage::PropDetect,
     Stage::PropApply,
     Stage::BodyEvents,
+    Stage::PropDisable,
     Stage::LooseParts,
     Stage::DamageParts,
     Stage::PropPresent,
+    Stage::Checkpoint,
     Stage::MainSchedule,
     Stage::RenderSchedule,
 ];
 
 static TOTALS: [AtomicU64; STAGES.len()] = [const { AtomicU64::new(0) }; STAGES.len()];
 static COUNTS: [AtomicU64; STAGES.len()] = [const { AtomicU64::new(0) }; STAGES.len()];
+static MAXES: [AtomicU64; STAGES.len()] = [const { AtomicU64::new(0) }; STAGES.len()];
 
 /// Whether timing is on (`GRID_PERF_TIMING` set at the first query).
 pub fn enabled() -> bool {
@@ -106,6 +117,71 @@ pub fn enabled() -> bool {
 pub fn add(stage: Stage, nanos: u64) {
     TOTALS[stage as usize].fetch_add(nanos, Ordering::Relaxed);
     COUNTS[stage as usize].fetch_add(1, Ordering::Relaxed);
+    MAXES[stage as usize].fetch_max(nanos, Ordering::Relaxed);
+    if matches!(stage, Stage::WorldTick) {
+        tick_end(nanos);
+    }
+}
+
+/// Shared-world tick durations: counts over 2, 4 and 8 ms, and the slowest
+/// tick with the stages that ran inside it (worst-window attribution; the
+/// means alone hide collision bursts).
+struct Ticks {
+    local: [u64; STAGES.len()],
+    world: [u64; grid_world::stage_timing::STAGES.len()],
+    over: [u64; 3],
+    worst: u64,
+    worst_stages: Vec<(String, u64)>,
+}
+
+static TICKS: Mutex<Ticks> = Mutex::new(Ticks {
+    local: [0; STAGES.len()],
+    world: [0; grid_world::stage_timing::STAGES.len()],
+    over: [0; 3],
+    worst: 0,
+    worst_stages: Vec::new(),
+});
+
+/// Stages measured around the shared-world tick rather than inside it.
+fn outer(stage: Stage) -> bool {
+    matches!(
+        stage,
+        Stage::DriveTick
+            | Stage::WorldTick
+            | Stage::DamageParts
+            | Stage::PropPresent
+            | Stage::Checkpoint
+            | Stage::MainSchedule
+            | Stage::RenderSchedule
+    )
+}
+
+fn tick_end(nanos: u64) {
+    let Ok(mut ticks) = TICKS.lock() else { return };
+    let mut stages = Vec::new();
+    for stage in STAGES {
+        let total = TOTALS[stage as usize].load(Ordering::Relaxed);
+        let delta = total - std::mem::replace(&mut ticks.local[stage as usize], total);
+        if !outer(stage) && delta > 0 {
+            stages.push((format!("{stage:?}"), delta));
+        }
+    }
+    for stage in grid_world::stage_timing::STAGES {
+        let (total, _) = grid_world::stage_timing::totals(stage);
+        let delta = total - std::mem::replace(&mut ticks.world[stage as usize], total);
+        if !matches!(stage, grid_world::stage_timing::Stage::GroupContacts) && delta > 0 {
+            stages.push((format!("{stage:?}"), delta));
+        }
+    }
+    for (count, limit) in ticks.over.iter_mut().zip([2_000_000, 4_000_000, 8_000_000]) {
+        *count += u64::from(nanos > limit);
+    }
+    if nanos > ticks.worst {
+        stages.sort_by_key(|a| std::cmp::Reverse(a.1));
+        stages.truncate(8);
+        ticks.worst = nanos;
+        ticks.worst_stages = stages;
+    }
 }
 
 /// World size per shared-world tick: bodies, pieces and lost wheels
@@ -186,6 +262,25 @@ pub fn report() -> String {
             " world_bodies={:.1} world_pieces={:.1} contacts_wheel={:.1} contacts_body={:.1} contacts_car={:.1} contacts_piece={:.1} world_asleep={:.1} world_parked={:.1}",
             mean(0), mean(1), mean(2), mean(3), mean(4), mean(5), mean(6), mean(7)
         );
+        if let Ok(ticks) = TICKS.lock() {
+            line += &format!(
+                " ticks_over_2ms={} ticks_over_4ms={} ticks_over_8ms={} worst_tick={:.3}ms",
+                ticks.over[0],
+                ticks.over[1],
+                ticks.over[2],
+                ticks.worst as f64 / 1e6
+            );
+            for (name, nanos) in &ticks.worst_stages {
+                line += &format!(" worst.{name}={:.3}", *nanos as f64 / 1e6);
+            }
+        }
+    }
+    // The slowest single call of each stage over 0.5 ms.
+    for stage in STAGES {
+        let max = MAXES[stage as usize].load(Ordering::Relaxed);
+        if max > 500_000 {
+            line += &format!(" max.{stage:?}={:.3}", max as f64 / 1e6);
+        }
     }
     line
 }

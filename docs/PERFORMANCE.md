@@ -2716,3 +2716,83 @@ the CPU path. Not measured on a phone.
 Donington is still render-thread bound (11.5 ms: `r_encode` 5.7 ms with about 360 transparent
 draw groups), the derby main-thread bound in its dips. Items 2-4, 6 and 7 of the plan above
 remain; item 5 (main thread) is planned as a separate session.
+
+## Main thread: collision bursts and per-frame damage reads (F839)
+
+17 November 2026, Claude Code (session main-thread). Item 5 of the plan above: the derby's
+`fixed_ms` bursts and the main-thread work around them.
+
+### Diagnostics added (`GRID_PERF_TIMING=1`)
+
+- `perf_timing` gains `ticks_over_2ms/4ms/8ms` and `worst_tick` (shared-world ticks), the top
+  eight stages of the slowest tick (`worst.<Stage>`, grid-world stages included) and the
+  slowest single call of every stage over 0.5 ms (`max.<Stage>`). The means hide the bursts;
+  these name them.
+- New stages: `HullRebuild` (a deformed car's collision hull, `BodyGeometry`), `PropDisable`
+  (broken prop boxes switched off in every car's track), `Checkpoint` (grid-app
+  `flashback::capture`, every 4 s).
+- grid-app prints `perf_rebounded` every 600 frames: the entities whose `Aabb` Bevy's
+  `calculate_bounds` recomputes (mesh asset or handle changed), by name, with mean count and
+  vertices per frame. In the derby it is about 5 entities and 2,000 vertices per frame (unnamed
+  meshes and a few ornaments), so AABB recomputation is not a main-thread cost worth a change.
+
+### What the bursts are
+
+Timed derby runs (`frame_split_smoke.ps1`, Detroit route_8, native; props on as in the game):
+
+- The slowest shared-world ticks take 5-7 ms. Their largest stages are the continuous stage of
+  fast prop pieces and lost wheels (`Continuous`, 1.6-2.9 ms in the worst tick), the solver
+  (`WorldAdvance`, `IslandFrame`, `FrameGroup`) and, twice per race, `PropDisable` (1.2-1.7 ms
+  per call, up to 3.3 ms: every car's track copy switches the broken boxes off). One run had a
+  13.7 ms `VehicleStage` tick (single occurrence, machine busy).
+- `Checkpoint` costs 1.1 ms (up to 1.5 ms) every 4 s; minor.
+- Sharing the disabled-box list between the cars' tracks instead of the per-car loop gave no
+  measurable gain (both 1.2-1.4 ms per call), so it was not kept.
+- Dip windows show `fixed_ms` 6-10 ms per frame while the slowest single tick is 5-7 ms: a dip
+  is several expensive ticks in the frames after a slow one, not one pathological tick
+  (interpretation).
+
+### Fixes
+
+| change | where | effect |
+|---|---|---|
+| The continuous stage sweeps every fast body at once on the compute pool when each part has its own body, then applies the results in part order. A sweep reads only its body and the static track; an early sweep is used only when the record cap (`MAX_RECORDS`) could not have cut it (every query keeps the hits it found before its capacity, so with fewer hits than the room left it is the same sweep), otherwise it is swept again in order. | `PropWorld::continuous` (`dynamic_props.rs`), callers in `source_vehicle.rs` and `multi.rs` | identical results; see below |
+| Damage presentation skips a car whose deformation words equal the last presented key, checked in place (`body_deformation::unchanged`) before `Field::read` copies up to 800 nodes and builds a new key | `drive_present` (player, opponents), `damage_parts::present` (live only; replays keep their path) | about 0.03-0.05 ms per frame less in `DamageParts` alone |
+
+### Identity
+
+`grid-opponent-race` with `GRID_THREADS=1` (sequential) against the default pool: 12-car,
+12-car-df and derby-df match `tools/identity.tsv`; with `GRID_DYNAMIC_PROPS=1` the 11,200-tick
+derby (4 breaks, 48 pieces) gives the same hash sequential and parallel (`4818bd38…`), as do
+the other three runs. Unit test `unchanged_matches_read_key` checks that `unchanged` agrees
+with `Field::read`'s key, also for words outside the key and refused activity bytes.
+
+### A/B
+
+Headless continuous stage, derby 11,200 ticks with props (48 pieces), pool on, sequential
+(temporary switch, removed) against parallel, three alternating pairs, identical hashes:
+
+| pair | `Continuous` mean ms, seq / par | `max.Continuous` ms, seq / par |
+|---|---|---|
+| 1 | 0.107 / 0.071 | 1.29 / 0.68 |
+| 2 | 0.128 / 0.090 | 1.70 / 0.77 |
+| 3 | 0.151 / 0.103 | 2.27 / 0.92 |
+
+In-app derby (native, 1280x800 window, `GRID_PERF_TIMING=1`, `before.exe` = F837 with the
+timers, `after.exe` this change; two alternating pairs, other sessions' cargo builds ran during
+3 of the 4 runs):
+
+| variant | `Continuous` ms/call | `DamageParts` ms/call | `DriveTick` ms | ticks > 4 ms |
+|---|---|---|---|---|
+| before | 0.45 / 0.36 | 0.103 / 0.086 | 3.02 / 2.54 | 217 / 41 |
+| after | 0.17 / 0.18 | 0.070 / 0.067 | 2.36 / 2.33 | 4 / 27 |
+
+Three further untimed pairs (busy machine in 2 of 6 runs) gave 87.2 / 84.3 / 78.0 fps before and
+75.5 / 83.1 / 85.4 fps after: the whole-frame effect is inside the run-to-run spread and is not
+claimed. The stage times are the measured effect.
+
+### Image
+
+Fixed-step offscreen captures (1280x720, ticks 600 and 1500, derby and Donington, autopilot):
+before against after differ in 0, 0, 2 and 1 pixels by one level, two runs of after in 0, 0, 1
+and 4. The image is unchanged.

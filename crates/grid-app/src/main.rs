@@ -7416,9 +7416,15 @@ fn drive_present(
         .map_or_else(pause_menu::Options::default, |m| m.values);
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
-            let field =
-                grid_tools::body_deformation::Field::read(&driving.runtime.state.car.owner.vehicle)
-                    .map_err(|e| e.0)?;
+            let owner = &driving.runtime.state.car.owner.vehicle;
+            if presentation
+                .0
+                .as_ref()
+                .is_some_and(|key| grid_tools::body_deformation::Field::unchanged(owner, key))
+            {
+                return Ok(());
+            }
+            let field = grid_tools::body_deformation::Field::read(owner).map_err(|e| e.0)?;
             let key = field.key();
             if presentation.0.as_ref() == Some(&key) {
                 return Ok(());
@@ -7529,8 +7535,14 @@ fn drive_present(
             if !runtime.deformation_enabled {
                 continue;
             }
-            if let Ok(field) =
-                grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle)
+            let owner = &runtime.state.car.owner.vehicle;
+            if opponent_keys[car]
+                .as_ref()
+                .is_some_and(|key| grid_tools::body_deformation::Field::unchanged(owner, key))
+            {
+                continue;
+            }
+            if let Ok(field) = grid_tools::body_deformation::Field::read(owner)
                 && opponent_keys[car].as_ref() != Some(&field.key())
             {
                 opponent_keys[car] = Some(field.key());

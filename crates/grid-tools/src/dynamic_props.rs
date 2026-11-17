@@ -2387,20 +2387,30 @@ impl PropWorld {
     /// move it back (B14550). Returns the number of bodies moved. Cars, the
     /// boundary sheet, route boxes and piece pairs are not swept here
     /// (docs/ROBUSTNESS_RESEARCH.md).
+    ///
+    /// With `parallel` (and more than one pool thread), the bodies' sweeps run at once first (a sweep reads
+    /// only its own body and the static track, and no body is moved before
+    /// every sweep is done when each part has its own body). The pass in
+    /// part order then takes a body's early sweep only when the record cap
+    /// could not have cut it: every query stops at its capacity and keeps
+    /// the hits found before, so with fewer hits than the room left it is the
+    /// same sweep. Otherwise, and on an error, it sweeps again here, so the
+    /// result is the sequential one.
     pub fn continuous(
         &self,
         track: &Track,
         surfaces: &Surfaces,
         bodies: &mut [contact_groups::Body],
         directions: &convex_distance::ContactSettings,
+        parallel: bool,
     ) -> Result<usize, Error> {
-        let mut records = 0;
-        let mut moved = 0;
-        for (spec, index, _) in self.parts() {
-            let body = bodies.get(index).ok_or(Error("missing prop piece body"))?;
+        type Swept = Option<(Vec<grid_world::continuous::Hit>, [f32; 4], [f32; 4])>;
+        // One body's hits, `records` taken this step before it; `None` when
+        // it does not collide with fixed shapes or is not fast.
+        let sweep = |spec: &PieceSpec, body: &contact_groups::Body, records: usize| -> Result<Swept, Error> {
             // B15B70 sweeps against the road only with body byte +0x416.
             if byte(body, COLLIDES_WITH_FIXED) == 0 {
-                continue;
+                return Ok(None);
             }
             let (displacement, previous, start, end) = grid_world::continuous::step(body);
             // B15B70: fast when one of its shapes is; every shape of a fast
@@ -2409,7 +2419,7 @@ impl PropWorld {
             if !(spec.shapes.iter()).any(|shape| {
                 grid_world::continuous::is_fast(grid_world::continuous::radius(shape.collider()), displacement)
             }) {
-                continue;
+                return Ok(None);
             }
             let mut hits = Vec::new();
             for shape in &spec.shapes {
@@ -2427,6 +2437,41 @@ impl PropWorld {
                 let room = grid_world::continuous::MAX_RECORDS - records - hits.len();
                 hits.extend(track.sweep_props(shape.collider(), start, end, &query, room)?);
             }
+            Ok(Some((hits, displacement, previous)))
+        };
+        let parts = self.parts();
+        let own_bodies = {
+            let mut indices: Vec<usize> = parts.iter().map(|p| p.1).collect();
+            indices.sort_unstable();
+            indices.windows(2).all(|w| w[0] != w[1])
+        };
+        let mut early = if parallel && own_bodies && parts.len() > 1 && crate::parallel::threads() > 1 {
+            let shared: &[contact_groups::Body] = bodies;
+            crate::parallel::map(parts.len(), true, |k| {
+                let (spec, index, _) = parts[k];
+                shared.get(index).map(|body| sweep(spec, body, 0))
+            })
+        } else {
+            Vec::new()
+        }
+        .into_iter();
+        let mut records = 0;
+        let mut moved = 0;
+        for &(spec, index, _) in &parts {
+            let body = bodies.get(index).ok_or(Error("missing prop piece body"))?;
+            let swept = match early.next().flatten() {
+                Some(Ok(swept))
+                    if swept.as_ref().is_none_or(|(hits, ..)| {
+                        records + hits.len() < grid_world::continuous::MAX_RECORDS
+                    }) =>
+                {
+                    swept
+                }
+                _ => sweep(spec, body, records)?,
+            };
+            let Some((hits, displacement, previous)) = swept else {
+                continue;
+            };
             records += hits.len();
             let inverse_mass = f32::from_bits(body[0x3f4 / 4]);
             let positions: Vec<_> = hits

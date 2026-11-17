@@ -1188,8 +1188,17 @@ fn present(
         if !runtime.deformation_enabled || runtime.ticks == 0 {
             continue;
         }
-        let Ok(mut field) = grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle)
-        else {
+        let owner = &runtime.state.car.owner.vehicle;
+        // Live, an unchanged field needs no read (`Field::unchanged`).
+        if !replaying
+            && car
+                .field_key
+                .as_ref()
+                .is_some_and(|key| grid_tools::body_deformation::Field::unchanged(owner, key))
+        {
+            continue;
+        }
+        let Ok(mut field) = grid_tools::body_deformation::Field::read(owner) else {
             continue;
         };
         if replaying {

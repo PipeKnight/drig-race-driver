@@ -624,6 +624,7 @@ pub fn capture(
     }
     flashback.last = Some(last(&driving));
     if flashback.checkpoints.is_empty() || tick.is_multiple_of(CHECKPOINT_TICKS) {
+        let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::Checkpoint);
         let c = Checkpoint::take(
             &driving,
             trial.as_deref(),
