@@ -736,6 +736,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G425](G0425.md) | 2026-11-17 | Measure native DLAA detail failures through paired moving scenes |
 | [G424](G0424.md) | 2026-11-17 | Verify native thin-detail separation through a real turn |
 | [G423](G0423.md) | 2026-11-17 | Measure organic native Reduced smoke contribution in the fence region |
 | [G422](G0422.md) | 2026-11-17 | Verify real native shared-group refusal before mutation |

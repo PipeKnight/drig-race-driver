@@ -74,6 +74,18 @@ impl From<&WindowLayer> for WindowKey {
         Self { write_depth: value.write_depth, base_mip: value.base_mip, base_mip_zero: value.base_mip_zero }
     }
 }
+impl WindowLayer {
+    #[cfg(feature = "dlaa")]
+    pub(super) fn native_base_mip(zero: bool) -> Self {
+        Self {
+            controls: Vec4::ZERO,
+            write_depth: false,
+            base_mip: true,
+            base_mip_zero: zero,
+        }
+    }
+}
+
 impl MaterialExtension for WindowLayer {
     fn fragment_shader() -> ShaderRef { SHADER.into() }
     fn specialize(
@@ -100,6 +112,14 @@ impl MaterialExtension for WindowLayer {
 pub fn install(app: &mut App, mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
     // main installs materials before it inserts graphics::Settings. The caller
     // already owns the validated mode; runtime systems read Settings later.
+    register_material(app, mode)?;
+    app.init_resource::<Cache>()
+        .add_systems(PostStartup, attach)
+        .add_systems(PostUpdate, sync.before(VisibilitySystems::CheckVisibility));
+    Ok(())
+}
+
+pub(super) fn register_material(app: &mut App, mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
     let fragment = fragment_source(include_str!("window_response.wgsl"), mode)?;
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
         SHADER.id(), Shader::from_wgsl(fragment, "grid_window_response.wgsl"),
@@ -109,10 +129,7 @@ pub fn install(app: &mut App, mode: Mode) -> Result<(), Box<dyn std::error::Erro
         // Clone only after the existing pinned normal/clearcoat repair.
         app.add_systems(Update, prepare_base_mip_library.after(super::clearcoat_prepass::patch_loaded_library));
     }
-    app.init_resource::<Cache>()
-        .add_plugins(MaterialPlugin::<Window>::default())
-        .add_systems(PostStartup, attach)
-        .add_systems(PostUpdate, sync.before(VisibilitySystems::CheckVisibility));
+    app.add_plugins(MaterialPlugin::<Window>::default());
     Ok(())
 }
 

@@ -143,6 +143,8 @@ mod name_tag;
 #[cfg(feature = "dlaa")]
 mod native_dlaa;
 #[cfg(feature = "dlaa")]
+mod native_glazing;
+#[cfg(feature = "dlaa")]
 mod opaque_conservative_motion;
 mod livery_carousel;
 mod particles;
@@ -5407,6 +5409,8 @@ pub(crate) fn race_app(
     if graphics.window_pilot != window_response::Mode::Off {
         window_response::install(&mut app, graphics.window_pilot)?;
     }
+    #[cfg(feature = "dlaa")]
+    native_glazing::install(&mut app, &graphics)?;
     perf_timing::install(&mut app);
     asset_counts::install(&mut app);
     pipeline_warmup::install(&mut app);
@@ -5642,6 +5646,8 @@ struct PaintMaskResources<'w> {
     lamp_prepared: Option<Res<'w, lamp_signals::Prepared>>,
     #[cfg(feature = "paint-specular")]
     specular: ResMut<'w, body_specular::Prepared>,
+    #[cfg(feature = "dlaa")]
+    glazing: Option<Res<'w, native_glazing::Sampling>>,
 }
 
 // Bevy system parameters are separate ECS borrows, not a public call interface.
@@ -5672,6 +5678,8 @@ fn setup(
         adapter.driver_info,
         device.features()
     );
+    #[cfg(feature = "dlaa")]
+    let native_glazing = paint_masks.glazing.is_some();
     // One grouped SystemParam preserves setup's existing argument count.
     let foundation_backing::SourceAssets { standard: mut materials, raw: mut source_materials, decals } = material_assets;
     let mut source_handles = std::collections::HashMap::new();
@@ -6002,6 +6010,13 @@ fn setup(
             if track && let Some(entity) = &mut entity {
                 entity.insert(track_surface::SourcePart(part.material.clone()));
             }
+            #[cfg(feature = "dlaa")]
+            if native_glazing
+                && native_glazing::is_window(&part.material)
+                && let Some(entity) = &mut entity
+            {
+                entity.insert(native_glazing::Pane);
+            }
             if graphics.lamp_signals != lamp_signals::Mode::Off
                 && let Some(entity) = &mut entity
                 && let Some(section) = lamp_section.clone()
@@ -6134,6 +6149,10 @@ fn setup(
                         },
                         damage_parts::Joint::new(&part.joint),
                     ));
+                    #[cfg(feature = "dlaa")]
+                    if native_glazing && native_glazing::is_window(&part.material) {
+                        opponent.insert(native_glazing::Pane);
+                    }
                     if let Some(receipt)=lamp_section.as_ref() {
                         opponent.insert(lamp_signals::runtime::Receiver::from_receipt(car,receipt).expect("preflight source lamp member"));
                         lamp_signals::audit::spawned(&mut opponent,car,receipt);
@@ -6235,6 +6254,10 @@ fn setup(
                         car_batch::hidden_layer(),
                         bevy::light::NotShadowCaster,
                     ));
+                    #[cfg(feature = "dlaa")]
+                    if native_glazing && native_glazing::is_window(&part.material) {
+                        entity.insert(native_glazing::Pane);
+                    }
                     if let Some(receipt)=lamp_receipt.as_ref() {
                         entity.insert(lamp_signals::runtime::Receiver::from_receipt(k,receipt).expect("preflight low source lamp member"));
                         lamp_signals::audit::spawned(&mut entity,k,receipt);
