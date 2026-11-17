@@ -14,9 +14,15 @@ use grid_formats::{mesh, pssg, scene, texture};
 use grid_tools::crowd_selection::Library;
 use std::{error::Error, path::Path};
 
+#[path = "crowd_near/budget.rs"]
+mod budget;
+#[path = "crowd_near/flag_bank.rs"]
+pub(super) mod flag_bank;
+#[path = "crowd_near/flag_rod.rs"]
+pub(super) mod flag_rod;
+pub(super) use budget::MAX_FRAME_VERTICES as NEAR_FRAME_VERTEX_LIMIT;
+
 type AnyResult<T> = Result<T, Box<dyn Error>>;
-const FRAME_RATE: f32 = 20.0;
-const MAX_FRAMES: usize = 48;
 const MAX_VARIANTS: usize = 24;
 
 struct Clip {
@@ -106,20 +112,7 @@ impl Baked {
 
     pub(super) fn meshes(&self, assets: &mut Assets<Mesh>) -> PoseMeshes {
         let mut meshes = |frames: &[VertexBuffers]| {
-            frames
-                .iter()
-                .map(|frame| {
-                    let mut mesh = Mesh::new(
-                        PrimitiveTopology::TriangleList,
-                        RenderAssetUsages::default(),
-                    );
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, frame.positions.clone());
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, frame.normals.clone());
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uv.clone());
-                    mesh.insert_indices(Indices::U16(self.indices.clone()));
-                    assets.add(mesh)
-                })
-                .collect()
+            upload_frames(frames.iter(), &self.uv, &self.indices, assets)
         };
         let idle = meshes(&self.idle.frames);
         let (action, action_duration) = self.action.as_ref().map_or_else(
@@ -133,6 +126,24 @@ impl Baked {
             action_duration,
         }
     }
+}
+
+pub(super) fn upload_frames<'a>(
+    frames: impl Iterator<Item = &'a VertexBuffers>,
+    uv: &[[f32; 2]],
+    indices: &[u16],
+    assets: &mut Assets<Mesh>,
+) -> Vec<Handle<Mesh>> {
+    frames
+        .map(|frame| {
+            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, frame.positions.clone());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, frame.normals.clone());
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv.to_vec());
+            mesh.insert_indices(Indices::U16(indices.to_vec()));
+            assets.add(mesh)
+        })
+        .collect()
 }
 
 pub(super) fn bake(
@@ -175,22 +186,7 @@ pub(super) fn bake(
     let policy = || PosePolicy::AbsoluteLocalChannelsIgnoringSourceDelta { mirrored: false };
     let prior = rig.saved_locals();
     let neutral = rig.sample(&prior, &[], policy())?;
-    let min = neutral
-        .positions
-        .iter()
-        .copied()
-        .map(Vec3::from_array)
-        .fold(Vec3::splat(f32::INFINITY), Vec3::min);
-    let max = neutral
-        .positions
-        .iter()
-        .copied()
-        .map(Vec3::from_array)
-        .fold(Vec3::splat(f32::NEG_INFINITY), Vec3::max);
-    let foot_offset = Vec3::new(-(min.x + max.x) * 0.5, -min.y, -(min.z + max.z) * 0.5);
-    if !foot_offset.is_finite() {
-        return Err("invalid source spectator mesh anchor".into());
-    }
+    let foot_offset = foot_offset(&neutral)?;
 
     let texture_bindings = grid_formats::material::read_texture_bindings(&geometry)?;
     let diffuse_id = shader_texture(&texture_bindings, &rig.material_shader, b"TDiffuseAlphaMap")?;
@@ -233,6 +229,43 @@ pub(super) fn bake(
         uv: rig.uv.clone(),
         indices: rig.indices.clone(),
     }))
+}
+
+fn foot_offset(neutral: &VertexBuffers) -> AnyResult<Vec3> {
+    let min = neutral
+        .positions
+        .iter()
+        .copied()
+        .map(Vec3::from_array)
+        .fold(Vec3::splat(f32::INFINITY), Vec3::min);
+    let max = neutral
+        .positions
+        .iter()
+        .copied()
+        .map(Vec3::from_array)
+        .fold(Vec3::splat(f32::NEG_INFINITY), Vec3::max);
+    let foot_offset = Vec3::new(-(min.x + max.x) * 0.5, -min.y, -(min.z + max.z) * 0.5);
+    if !foot_offset.is_finite() {
+        return Err("invalid source spectator mesh anchor".into());
+    }
+    Ok(foot_offset)
+}
+
+fn sample_clip_frame<T>(
+    clip: &BoundClip<'_>,
+    coordinate: f32,
+    sample: impl FnOnce(&[PoseChannel<'_>]) -> AnyResult<T>,
+) -> AnyResult<T> {
+    let samples = clip.sample(coordinate)?;
+    let channels: Vec<_> = samples
+        .iter()
+        .map(|channel| PoseChannel {
+            target: channel.target.as_bytes(),
+            kind: channel.kind,
+            raw: channel.raw,
+        })
+        .collect();
+    sample(&channels)
 }
 
 struct PoseSource<'r, 'lib, 'tree, 'm, 'p, 'layout, 'd, 'def> {
@@ -284,27 +317,19 @@ impl PoseSource<'_, '_, '_, '_, '_, '_, '_, '_> {
                 continue;
             };
             let duration = right - left;
-            if !duration.is_finite() || duration <= 0. || duration > 60. {
+            let Some(count) = budget::frame_count(duration) else {
                 continue;
-            }
-            let count = ((duration * FRAME_RATE).ceil() as usize).clamp(2, MAX_FRAMES);
+            };
             let frames = (0..count)
                 .map(|i| -> AnyResult<VertexBuffers> {
                     let coordinate = left + duration * i as f32 / count as f32;
-                    let samples = clip.sample(coordinate)?;
-                    let channels: Vec<_> = samples
-                        .iter()
-                        .map(|channel| PoseChannel {
-                            target: channel.target.as_bytes(),
-                            kind: channel.kind,
-                            raw: channel.raw,
-                        })
-                        .collect();
-                    self.rig.sample(
-                        self.prior,
-                        &channels,
-                        PosePolicy::AbsoluteLocalChannelsIgnoringSourceDelta { mirrored: false },
-                    )
+                    sample_clip_frame(&clip, coordinate, |channels| {
+                        self.rig.sample(
+                            self.prior,
+                            channels,
+                            PosePolicy::AbsoluteLocalChannelsIgnoringSourceDelta { mirrored: false },
+                        )
+                    })
                 })
                 .collect::<AnyResult<Vec<_>>>();
             if let Ok(frames) = frames

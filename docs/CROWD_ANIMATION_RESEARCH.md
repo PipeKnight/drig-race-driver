@@ -1093,3 +1093,36 @@ role. The 0x00769D50 standing loader skips its 50 rows in the audited Spa
 and Nürburgring layouts. The 136 defined flag roles have separate action
 and prop data. See [G393](../log/G0393.md) for the paired Donington and
 Detroit runtime checks and the retained source evidence.
+
+### Authored flag roles and hand attachments
+
+[G404](../log/G0404.md) adds the authored Start, Danger and Finish bodies
+to the normal source-driven crowd path. Placements and skins follow the
+track definition. Actual green, local yellow and chequered events trigger
+the corresponding action. The source rigid rod follows the animated hand.
+The live and replay actor budget is shared with other near bodies. Cue,
+admission history and displayed tick drive historical phase selection, with
+authored idle when the retained prefix cannot reconstruct a pose.
+
+Matched Donington and Jarama driving captures show the Start and Danger
+poses advance on the actual recorded events. The Jarama control also
+visibly isolates the raised rod. The exact original cloth solver and its
+initialization, rewind and cull re-entry still need runtime reference
+evidence. The available source topology joins six pins to the authored
+48-vertex flag layout.
+
+The ordinary build matches both sides of the restart boundary and two
+Flashback cuts, as detailed in G404. The Jarama actor crops at ticks 958,
+1041 and 1110 match the corresponding diagnostic candidate pixels.
+
+### Native cloth solver tap
+
+Static inspection joins the allocated wrapper to the exact solver through
+0xAD3EE0, which stores the solver at wrapper +0 and links that wrapper to
+group +0x1C. The known pin writer 0xB686E0 stores the supplied vector at
+particle +0x20. In the solver kernel 0xB6DFC0 a binary32 input at [EBP+8]
+is passed to worker 0xB6A8B0 and its siblings. The worker indexes the same
+particle array and writes the vector at particle +0. Sample both fields
+and the adjacent +0x10 and +0x30 vectors at the actual solver entry and
+return. The ordinary marshal dispatch and effective runtime timing still
+await reference capture.

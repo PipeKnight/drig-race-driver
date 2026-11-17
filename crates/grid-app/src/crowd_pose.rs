@@ -16,6 +16,24 @@ pub(crate) struct Node {
     pub(crate) parent: Option<usize>,
     pub(crate) local: [f32; 16],
 }
+fn node_world(nodes: &[Node], start: usize) -> AnyResult<[f32; 16]> {
+    let mut m = IDENTITY;
+    let mut at = Some(start);
+    let mut seen = Vec::new();
+    while let Some(i) = at {
+        if i >= nodes.len() || seen.contains(&i) || seen.len() >= 128 {
+            return Err("neutral hierarchy cycle/range/depth".into());
+        }
+        seen.push(i);
+        m = scene::compose(&m, &nodes[i].local);
+        at = nodes[i].parent;
+    }
+    if m.iter().any(|v| !v.is_finite()) {
+        return Err("nonfinite neutral world".into());
+    }
+    Ok(m)
+}
+
 pub(crate) fn palette_values(
     nodes: &[Node],
     joints: &[Vec<u8>],
@@ -36,24 +54,9 @@ pub(crate) fn palette_values(
             return Err("duplicate/nonfinite neutral transform".into());
         }
     }
-    let mut worlds = Vec::with_capacity(nodes.len());
-    for start in 0..nodes.len() {
-        let mut m = IDENTITY;
-        let mut at = Some(start);
-        let mut seen = Vec::new();
-        while let Some(i) = at {
-            if i >= nodes.len() || seen.contains(&i) || seen.len() >= 128 {
-                return Err("neutral hierarchy cycle/range/depth".into());
-            }
-            seen.push(i);
-            m = scene::compose(&m, &nodes[i].local);
-            at = nodes[i].parent;
-        }
-        if m.iter().any(|v| !v.is_finite()) {
-            return Err("nonfinite neutral world".into());
-        }
-        worlds.push(m);
-    }
+    let worlds = (0..nodes.len())
+        .map(|start| node_world(nodes, start))
+        .collect::<AnyResult<Vec<_>>>()?;
     let mut result = Vec::new();
     let mut max_error = 0f32;
     let mut names = Vec::new();
@@ -393,6 +396,15 @@ impl Source {
         channels: &[PoseChannel<'_>],
         policy: PosePolicy,
     ) -> AnyResult<VertexBuffers> {
+        self.deform_with_locals(&self.sample_locals(prior_locals, channels, policy)?)
+    }
+
+    fn sample_locals(
+        &self,
+        prior_locals: &[[f32; 16]],
+        channels: &[PoseChannel<'_>],
+        policy: PosePolicy,
+    ) -> AnyResult<Vec<[f32; 16]>> {
         let PosePolicy::AbsoluteLocalChannelsIgnoringSourceDelta { mirrored } = policy;
         if mirrored {
             return Err("diagnostic mirror transform is unresolved".into());
@@ -436,9 +448,31 @@ impl Source {
                 }
             }
         }
-        self.deform_with_locals(&locals)
+        Ok(locals)
     }
+    pub(crate) fn named_node(&self, name: &[u8]) -> AnyResult<usize> {
+        self.nodes.iter().position(|node| node.name == name)
+            .ok_or_else(|| "named pose node absent".into())
+    }
+
+    pub(crate) fn sample_with_node(
+        &self,
+        prior: &[[f32; 16]],
+        channels: &[PoseChannel<'_>],
+        policy: PosePolicy,
+        node: usize,
+    ) -> AnyResult<(VertexBuffers, [f32; 16])> {
+        let locals = self.sample_locals(prior, channels, policy)?;
+        let nodes = self.nodes_with_locals(&locals)?;
+        let named = node_world(&nodes, node)?;
+        Ok((self.deform_nodes(&nodes)?, named))
+    }
+
     fn deform_with_locals(&self, locals: &[[f32; 16]]) -> AnyResult<VertexBuffers> {
+        self.deform_nodes(&self.nodes_with_locals(locals)?)
+    }
+
+    fn nodes_with_locals(&self, locals: &[[f32; 16]]) -> AnyResult<Vec<Node>> {
         if locals.len() != self.nodes.len() {
             return Err("prior-local count changed".into());
         }
@@ -446,7 +480,11 @@ impl Source {
         for (n, local) in nodes.iter_mut().zip(locals) {
             n.local = *local;
         }
-        let (palette, _) = palette_values(&nodes, &self.names, &self.inverse, false)?;
+        Ok(nodes)
+    }
+
+    fn deform_nodes(&self, nodes: &[Node]) -> AnyResult<VertexBuffers> {
+        let (palette, _) = palette_values(nodes, &self.names, &self.inverse, false)?;
         let mut positions = Vec::with_capacity(self.positions.len());
         let mut normals = Vec::with_capacity(self.normals.len());
         for i in 0..self.positions.len() {
@@ -463,6 +501,9 @@ impl Source {
         Ok(VertexBuffers { positions, normals })
     }
 }
+#[cfg(test)]
+mod flag_attachment;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -986,7 +986,10 @@ fn resume(world: &mut World) {
     // The effects as the replay shows them at the jump-in frame; the
     // abandoned future's marks and smoke go.
     crate::replay_effects::adopt(world);
-    let origin = world.resource_mut::<Replay>().finish();
+    let origin = world.resource_scope(|world, mut replay: Mut<Replay>| {
+        replay.restore_crowd_flag_seed(world.resource::<crate::Driving>());
+        replay.finish()
+    });
     grade(world, None);
     world.resource_mut::<crate::Driving>().paused = false;
     if let Some(mut menu) = world.get_resource_mut::<crate::pause_menu::PauseMenu>()

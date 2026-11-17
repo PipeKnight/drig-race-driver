@@ -1,6 +1,9 @@
 //! Source population from each route, batched by occupied cell and billboard material.
 #[path = "crowd_near.rs"]
 mod near;
+#[path = "crowd_near/flag_render.rs"]
+mod flag_render;
+use near::NEAR_FRAME_VERTEX_LIMIT;
 use super::{
     crowd_population as population,
     crowd_preview::{self, Batch, CrowdMaterial, Spec, Tint},
@@ -62,6 +65,7 @@ pub(crate) struct Prepared {
     actors: Vec<Option<ActorModel>>,
     walkers: Vec<Walker>,
     skin_only: Vec<Row>,
+    flags: Option<flag_render::Prepared>,
 }
 fn field<'a>(fields: &'a population::Fields, name: &str) -> AnyResult<&'a str> {
     let mut found = fields.iter().filter(|(k, _)| k == name);
@@ -284,7 +288,12 @@ fn atlas_from_tree(tree: &pssg::Tree<'_>) -> AnyResult<(Vec<u8>, Vec<u8>)> {
     }
     Ok((diffuse.validated_dds().0, tint.validated_dds().0))
 }
+#[cfg(test)]
 fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
+    prepare_scene(root, route, false)
+}
+
+fn prepare_scene(root: &Path, route: &Route, flags_enabled: bool) -> AnyResult<Prepared> {
     let graph = grid_tools::tyre_smoke::read_xml(
         &root.join(route.track_file("organism_track_dataset.xml")),
     )?;
@@ -455,6 +464,38 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
             Err(error) => eprintln!("crowd skin for {}: {error}", template.map_name),
         }
     }
+    let flags = if flags_enabled {
+        let candidate = (|| -> AnyResult<Option<flag_render::Prepared>> {
+            let (Some(library), Some(animation_bank)) = (&library, &animation_bank) else {
+                return Ok(None);
+            };
+            let Some(bank) = near::flag_bank::prepare(
+                root, &metadata, library, animation_bank, near_vertex_count,
+            )? else {
+                return Ok(None);
+            };
+            let props = root.join(shared_resource(&shared, "pssg", "props")?);
+            let definitions = root.join(shared_resource(&shared, "binary", "props")?);
+            let rods = near::flag_rod::Rods::read(
+                &std::fs::read(props)?, &std::fs::read(definitions)?,
+            )?;
+            Ok(Some(flag_render::Prepared::new(bank, rods)?))
+        })();
+        match candidate {
+            Ok(Some(flags)) => {
+                near_vertex_count = flags.total_vertices();
+                prepared_skin_groups.extend(flags.source_groups());
+                Some(flags)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                eprintln!("crowd flag officials unavailable on {}: {error}", route.path());
+                None
+            }
+        }
+    } else {
+        None
+    };
     for (index, g) in metadata.groups.iter().enumerate() {
         if prepared_skin_groups.contains(&index) {
             continue;
@@ -537,6 +578,7 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
     if rows.len() as u64
         + walkers.len() as u64
         + skin_only.len() as u64
+        + flags.as_ref().map_or(0, |flags| flags.rows.len() as u64)
         + omitted.iter().map(|o| u64::from(o.records)).sum::<u64>()
         != u64::from(source.total_instances)
     {
@@ -590,6 +632,7 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
         actors,
         walkers,
         skin_only,
+        flags,
     })
 }
 fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
@@ -629,7 +672,9 @@ fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
             o.reason
         );
     }
-    if prepared.rows.is_empty() && prepared.walkers.is_empty() && prepared.skin_only.is_empty() {
+    if prepared.rows.is_empty() && prepared.walkers.is_empty()
+        && prepared.skin_only.is_empty() && prepared.flags.is_none()
+    {
         return Ok(());
     }
     crowd_preview::install_shader(app)?;
@@ -648,7 +693,8 @@ fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
                 .chain()
                 .after(crate::drive_present)
                 .after(crate::replay::control)
-                .after(crate::replay::frame_camera),
+                .after(crate::replay::frame_camera)
+                .after(crate::ground_effect_assets::validation_camera),
         )
         .add_systems(
             PostUpdate,
@@ -663,10 +709,13 @@ fn spawn(
     mut commands: Commands,
     prepared: Res<Prepared>,
     view: Query<(&Transform, &Msaa), With<super::ViewerCamera>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut images: ResMut<Assets<Image>>,
+    (mut meshes, mut images): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>),
     mut materials: ResMut<Assets<CrowdMaterial>>,
     settings: Res<super::graphics::Settings>,
+    (mut replay, mut rod_materials): (
+        Option<ResMut<super::replay::Replay>>,
+        Option<ResMut<Assets<StandardMaterial>>>,
+    ),
 ) {
     let Ok((camera, msaa)) = view.single() else {
         return;
@@ -821,6 +870,18 @@ fn spawn(
         models.iter().flatten().count()
     );
     commands.insert_resource(NearModels(models));
+    if let (Some(flags), Some(replay), Some(rod_materials)) = (
+        &prepared.flags, replay.as_deref_mut(), rod_materials.as_deref_mut(),
+    ) {
+        match flags.install(
+            replay, &settings, &mut meshes, &mut images, &mut materials, rod_materials,
+        ) {
+            Ok(installed) => {
+                commands.insert_resource(installed);
+            }
+            Err(error) => eprintln!("crowd flag asset installation failed: {error}"),
+        }
+    }
     println!(
         "crowd_population_spawn rows={} source_metadata_checksum={raw}",
         prepared.rows.len()
@@ -840,6 +901,7 @@ struct CardCell {
 
 #[derive(Default, Resource)]
 struct CrowdClock {
+    tick: u64,
     seconds: f64,
     segment: u64,
     replaying: bool,
@@ -851,6 +913,7 @@ fn advance_clock(
     replay: Option<Res<super::replay::Replay>>,
 ) {
     let shown = replay.as_deref().and_then(|replay| replay.session.as_ref());
+    clock.tick = drive.runtime.ticks;
     clock.segment = drive.segment;
     clock.replaying = shown.is_some();
     clock.seconds = shown.map_or_else(
@@ -904,8 +967,6 @@ fn make_batch(
 
 const NEAR_DISTANCE: f32 = 20.;
 const NEAR_LIMIT: usize = 64;
-// 320k resident sample vertices ≈ 10 MiB of position/normal/UV data.
-const NEAR_FRAME_VERTEX_LIMIT: usize = 320_000;
 const NATIVE_PATH_KEYS: usize = 100;
 
 struct Walker {
@@ -990,13 +1051,19 @@ struct NearModel {
 }
 
 #[derive(Resource, Default)]
-struct NearRuntime(BTreeMap<usize, Entity>);
+struct NearRuntime {
+    bodies: BTreeMap<usize, Entity>,
+    flags: BTreeMap<usize, flag_render::Live>,
+}
 
 fn update_actors(
     mut commands: Commands,
-    prepared: Res<Prepared>,
-    clock: Res<CrowdClock>,
+    (prepared, clock): (Res<Prepared>, Res<CrowdClock>),
     models: Option<Res<NearModels>>,
+    (flag_models, mut replay): (
+        Option<Res<flag_render::Installed>>,
+        Option<ResMut<super::replay::Replay>>,
+    ),
     mut live: ResMut<NearRuntime>,
     (view, cells): (
         Single<&Transform, With<super::ViewerCamera>>,
@@ -1043,13 +1110,25 @@ fn update_actors(
             candidates.push((distance, first_skin + index));
         }
     }
+    let first_flag = first_skin + prepared.skin_only.len();
+    let flag_scene = prepared.flags.as_ref().zip(flag_models.as_deref());
+    if let Some((flags, _)) = flag_scene
+        && replay.is_some()
+    {
+        for (row, flag) in flags.rows.iter().enumerate() {
+            let distance = eye.distance_squared(flag.position);
+            if distance <= ACTIVE_RANGE * ACTIVE_RANGE {
+                candidates.push((distance, first_flag + row));
+            }
+        }
+    }
     candidates.sort_unstable_by(|(a, i), (b, j)| a.total_cmp(b).then(i.cmp(j)));
     candidates.truncate(NEAR_LIMIT);
     let selected = candidates
         .iter()
         .map(|(_, row)| *row)
         .collect::<std::collections::BTreeSet<_>>();
-    live.0.retain(|row, entity| {
+    live.bodies.retain(|row, entity| {
         if selected.contains(row) {
             true
         } else {
@@ -1057,7 +1136,46 @@ fn update_actors(
             false
         }
     });
+    live.flags.retain(|row, pair| {
+        if selected.contains(row) {
+            true
+        } else {
+            commands.entity(pair.body).despawn();
+            false
+        }
+    });
+    if let (Some((flags, _)), Some(replay)) = (flag_scene, replay.as_deref_mut()) {
+        flags.publish(
+            replay, clock.segment, clock.tick,
+            selected.iter().filter_map(|index| index.checked_sub(first_flag)),
+        );
+    }
+    let mut flag_choices = BTreeMap::new();
     for (_, index) in candidates {
+        if let Some(row) = index.checked_sub(first_flag) {
+            let (Some((flags, installed)), Some(replay)) = (flag_scene, replay.as_deref()) else {
+                continue;
+            };
+            let group = flags.group(row);
+            let choice = flag_choices.entry(group).or_insert_with(|| flags.choice(replay, group));
+            let Some(pose) = (*choice).and_then(|choice| flags.pose(installed, row, choice)) else {
+                continue;
+            };
+            if let Some(pair) = live.flags.get(&index) {
+                if let Ok([(mut body, _), (_, mut rod)]) = actors.get_many_mut([pair.body, pair.rod]) {
+                    if body.id() != pose.mesh.id() {
+                        body.0 = pose.mesh.clone();
+                    }
+                    if *rod != pose.hand {
+                        *rod = pose.hand;
+                    }
+                }
+            } else {
+                let pair = flags.spawn(installed, &mut commands, &pose, clock.tick);
+                live.flags.insert(index, pair);
+            }
+            continue;
+        }
         let skin = index
             .checked_sub(first_skin)
             .map(|index| &prepared.skin_only[index]);
@@ -1097,7 +1215,7 @@ fn update_actors(
         };
         let transform =
             Transform::from_translation(position + yaw * model.foot_offset).with_rotation(yaw);
-        if let Some(&entity) = live.0.get(&index) {
+        if let Some(&entity) = live.bodies.get(&index) {
             if let Ok((mut mesh, mut current)) = actors.get_mut(entity) {
                 if mesh.id() != handle.id() {
                     mesh.0 = handle.clone();
@@ -1129,7 +1247,7 @@ fn update_actors(
                     NotShadowCaster,
                 ))
                 .id();
-            live.0.insert(index, entity);
+            live.bodies.insert(index, entity);
         }
     }
 }
@@ -1155,7 +1273,7 @@ fn update_cards(
                 cell.rows
                     .iter()
                     .copied()
-                    .filter(|row| live.0.contains_key(row))
+                    .filter(|row| live.bodies.contains_key(row))
                     .collect()
             } else {
                 Vec::new()
@@ -1171,7 +1289,7 @@ fn update_cards(
             .rows
             .iter()
             .copied()
-            .filter(|row| !live.0.contains_key(row))
+            .filter(|row| !live.bodies.contains_key(row))
             .collect();
         if visible.is_empty() {
             *visibility = Visibility::Hidden;
@@ -1400,7 +1518,10 @@ fn update_flash(
 /// need no crowd material registration or asset lookup.
 pub(crate) fn install_route(app: &mut App, root: &Path, route: &Route) -> AnyResult<()> {
     match std::fs::metadata(root.join(route.file("crowd_standing.bin"))) {
-        Ok(_) => install(app, prepare(root, route)?),
+        Ok(_) => {
+            let flags = app.world().contains_resource::<super::replay::Replay>();
+            install(app, prepare_scene(root, route, flags)?)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
@@ -1440,6 +1561,7 @@ mod tests {
             actors: Vec::new(),
             walkers: Vec::new(),
             skin_only: Vec::new(),
+            flags: None,
         };
         let eye = Vec3::new(3., 5., 10.);
         let a = make_batch(&source, &[0], &spec, eye, 0.).unwrap();
@@ -1560,6 +1682,135 @@ mod tests {
                 for &row in &cell.eligible {
                     assert_eq!(p.rows[row].cell as usize, index);
                     assert!(p.rows[row].has_camera);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires purchased GRID_GAME_ROOT, CPU only"]
+    fn purchased_standing_flag_banks_fit_with_existing_actor_reservations() {
+        use crate::replay::{flag_demand::Demand, flag_phase::{Phase, State}};
+        use grid_tools::crowd_flags::{Cue, Role};
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let shared = grid_tools::tyre_smoke::read_xml(
+            &root.join("anims/organism_static_dataset.xml"),
+        ).unwrap();
+        let props_path = shared_resource(&shared, "pssg", "props").unwrap();
+        let definitions_path = shared_resource(&shared, "binary", "props").unwrap();
+        let rods = near::flag_rod::Rods::read(
+            &std::fs::read(root.join(props_path)).unwrap(),
+            &std::fs::read(root.join(definitions_path)).unwrap(),
+        ).unwrap();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut images = Assets::<Image>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let rod_draws = rods.install(
+            &crate::graphics::Settings::default(), &mut meshes, &mut images, &mut materials,
+        ).unwrap();
+        assert_eq!((meshes.len(), images.len(), materials.len()), (1, 1, 1));
+        for (route, roles) in [
+            ("tracks/europe/donington/route_0", 2),
+            ("tracks/europe/jarama/route_0", 3),
+            ("tracks/europe/milan/route_0", 2),
+        ] {
+            let route = Route::new(route).unwrap();
+            let control = prepare(&root, &route).unwrap();
+            let prepared = prepare_scene(&root, &route, true).unwrap();
+            let flags = prepared.flags.as_ref().unwrap();
+            let bank = flags.bank();
+            assert_eq!(control.rows.len(), prepared.rows.len());
+            assert_eq!(control.walkers.len(), prepared.walkers.len());
+            assert_eq!(control.skin_only.len(), prepared.skin_only.len());
+            let actor_reserve: usize = prepared.actors.iter().flatten()
+                .map(|actor| actor.body.frame_vertices()).sum();
+            let used: usize = bank.clips.values()
+                .map(|clip| clip.frames.len() * bank.uv.len()).sum();
+            assert!(actor_reserve + used <= NEAR_FRAME_VERTEX_LIMIT);
+            assert!(bank.total_vertices <= actor_reserve + used);
+            assert_eq!(bank.groups.len(), roles);
+            assert_eq!(bank.clips.len(), 1 + roles * 3);
+
+            let mut replay = crate::replay::Replay::new(
+                crate::replay::stream::Stream::new(Default::default(), None), None,
+            );
+            let mut body_materials = Assets::<CrowdMaterial>::default();
+            let installed = flags.install(
+                &mut replay, &crate::graphics::Settings::default(),
+                &mut meshes, &mut images, &mut body_materials, &mut materials,
+            ).unwrap();
+            assert_eq!(body_materials.len(), roles);
+            let idle = flags.choice(&replay, flags.group(0)).unwrap();
+            let idle_pose = flags.pose(&installed, 0, idle).unwrap();
+            assert_eq!((idle.phase, idle.sample), (Phase::Idle, 0));
+            let mut world = World::new();
+            let pair = flags.spawn(&installed, &mut world.commands(), &idle_pose, 0);
+            world.flush();
+            assert_eq!(world.get::<ChildOf>(pair.rod).unwrap().parent(), pair.body);
+            assert_eq!(world.get::<Mesh3d>(pair.body).unwrap().id(), idle_pose.mesh.id());
+            assert_eq!(*world.get::<Transform>(pair.rod).unwrap(), idle_pose.hand);
+            let next = flags.pose(&installed, 0, crate::replay::flag_phase::Frame {
+                phase: Phase::Start, sample: 0,
+            }).unwrap();
+            assert_ne!(idle_pose.mesh.id(), next.mesh.id());
+            world.despawn(pair.body);
+            assert!(world.get_entity(pair.rod).is_err());
+            assert!(bank.modifier.windows(7).any(|w| w == b"mar_LOD"));
+            assert!(!bank.diffuse.is_empty() && !bank.tint.is_empty());
+            assert!(bank.foot_offset.is_finite());
+            assert!(bank.indices.iter().all(|&i| usize::from(i) < bank.uv.len()));
+            let mut source_groups = std::collections::BTreeSet::new();
+            for group in &bank.groups {
+                assert!(source_groups.insert(group.source_group));
+                let clips = match group.role {
+                    Role::Start => [183, 107, 70, 106],
+                    Role::Finish => [183, 103, 71, 72],
+                    Role::Danger => [183, 105, 108, 104],
+                };
+                assert_eq!(group.clips, clips);
+                let phase_clips = bank.phase_clips(group).unwrap();
+                let demand = Demand::observed(1 << (group.role as u8 - 1)).unwrap();
+                let mut state = State::default();
+                state.step(&phase_clips, group.role, demand, &[Cue::Begin(group.role)]);
+                let choice = state.frame(&phase_clips);
+                assert_eq!(choice.phase, Phase::Start);
+                let selected = bank.chosen_frame(group, choice).unwrap();
+                assert!(std::ptr::eq(selected, &bank.clips[&group.clips[1]].frames[0]));
+                let point = &group.placements[0];
+                let [x, z] = point.orientation_pair;
+                let yaw = Quat::from_rotation_y((-z).atan2(x));
+                let body = Transform::from_translation(
+                    Vec3::from_array(point.position) + yaw * bank.foot_offset,
+                ).with_rotation(yaw);
+                let mut world = World::new();
+                let actor = world.spawn(body).id();
+                let child = world.spawn(rods.child(
+                    &rod_draws, group.role, actor, rods.pose(group.role, selected.hand).unwrap(),
+                )).id();
+                assert_eq!(world.get::<ChildOf>(child).unwrap().parent(), actor);
+                for id in group.clips {
+                    for frame in &bank.clips[&id].frames {
+                        rods.check_pose(group.role, frame.hand, body).unwrap();
+                        *world.get_mut::<Transform>(child).unwrap() =
+                            rods.pose(group.role, frame.hand).unwrap();
+                    }
+                }
+                world.despawn(actor);
+                assert!(world.get_entity(child).is_err());
+                assert!(group.colours.iter().all(|colour| colour.is_finite()));
+                let expected = if group.role == Role::Danger { 6 } else { 1 };
+                assert_eq!(group.placements.len(), expected);
+                let idle = &bank.clips[&group.clips[0]];
+                assert_eq!(idle.id, "m_np_s1_id_01");
+                assert_eq!(idle.frames.len(), 2);
+                for ordinal in &group.clips[1..] {
+                    let clip = &bank.clips[ordinal];
+                    assert!(clip.first.is_finite() && clip.duration > 0.);
+                    assert!(clip.frames.iter().all(|frame| {
+                        frame.body.positions.len() == bank.uv.len()
+                            && frame.hand.iter().all(|value| value.is_finite())
+                    }));
+                    assert!(clip.frames.windows(2).any(|f| f[0].hand != f[1].hand));
                 }
             }
         }
