@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G405](G0405.md) | 2026-11-17 | Activate source exterior lamps in ordinary races |
 | [G404](G0404.md) | 2026-11-17 | Restore source flag marshal poses and rods |
 | [G403](G0403.md) | 2026-11-17 | Measure isolated real smoke on covered antenna samples |
 | [G402](G0402.md) | 2026-11-17 | Reset source flag rules on race restart |

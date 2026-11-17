@@ -392,6 +392,10 @@ mod tests {
         let peer = current(&app, b);
         assert_ne!(intact, peer);
         assert_ne!(intact, base);
+        let owned = app.world().resource::<Assets<StandardMaterial>>().get(&intact).unwrap();
+        assert_eq!(owned.alpha_mode, original.alpha_mode);
+        assert_eq!(owned.base_color, original.base_color);
+        assert_eq!(owned.depth_bias, original.depth_bias);
         assert_eq!(
             app.world()
                 .resource::<Assets<StandardMaterial>>()

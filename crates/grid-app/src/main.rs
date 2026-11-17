@@ -2361,6 +2361,7 @@ pub(crate) fn race_app(
     let mut smoke_policy_explicit=false;
     let mut native_smoke_arm: Option<native_smoke::Arm> = None;
     let mut native_smoke_data_dir_explicit = false;
+    let mut lamp_signals_explicit = false;
     let mut native_smoke_capture_profile = None;
     let mut native_smoke_script_flags = native_smoke::ScriptFlags::default();
     let mut crowd_preview = crowd_preview::Mode::Off;
@@ -2791,6 +2792,7 @@ pub(crate) fn race_app(
             }
             "--lamp-signals" => {
                 graphics.lamp_signals = lamp_signals::Mode::parse(&args.next().ok_or("--lamp-signals needs a mode")?)?;
+                lamp_signals_explicit = true;
             }
             "--lamp-lenses" => {
                 graphics.lamp_lenses = lamp_materials::Mode::parse(&args.next().ok_or("--lamp-lenses needs off, pbr, normals or combined")?)
@@ -3133,7 +3135,7 @@ pub(crate) fn race_app(
                 };
             }
             "--help" => {
-                println!("--lamp-signals off|live|brake|reverse|headlights: default-off player section emission pilot; authored Bevy radiometry, daytime live controls.");
+                println!("--lamp-signals off|live|brake|reverse|headlights: ordinary races use source main-lamp activation. off disables exterior lamp emission. Other modes are enhanced layered test controls.");
                 println!("--lamp-lenses off|pbr|normals|combined: independent default-off authored Lacetti cover pilot; source alpha/emission unchanged.");
                 println!("--lamp-reflectors off|pbr|normals|combined: default-off authored Lacetti inner-reflector pilot; covers/matt unchanged.");
                 #[cfg(feature = "paint-specular")]
@@ -5364,10 +5366,24 @@ pub(crate) fn race_app(
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
     }
+    if !lamp_signals_explicit && drive && !collision && !headless && native_smoke_context.is_none() {
+        // The isolated native smoke diagnostic requires lamps off in all three arms.
+        graphics.lamp_signals = lamp_signals::Mode::from_authored_state(
+            app.world().get_resource::<vehicle_lights::State>(),
+        );
+    }
     if graphics.lamp_signals != lamp_signals::Mode::Off {
-        let prepared=lamp_signals::prepare(&root,&car,field.car_model.len().max(1))?;
-        app.insert_resource(prepared);
-        lamp_signals::install(&mut app)?;
+        match lamp_signals::prepare(&root, &car, field.car_model.len().max(1)) {
+            Ok(prepared) => {
+                app.insert_resource(prepared);
+                lamp_signals::install(&mut app)?;
+            }
+            Err(error) if graphics.lamp_signals == lamp_signals::Mode::Authored => {
+                eprintln!("lamp_signals authored source unavailable: {error}; using scene materials");
+                graphics.lamp_signals = lamp_signals::Mode::Off;
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
     lamp_materials::prepare_frames(&mut car, graphics.lamp_reflectors, graphics.lamp_lenses)?;
     lamp_materials::validate(&car, graphics.lamp_reflectors, graphics.lamp_lenses)?;

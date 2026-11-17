@@ -37,6 +37,12 @@ impl State {
             Mode::Timeline | Mode::ForcedNight => Ok(self.headlights.car(slot).is_some()),
         }
     }
+    pub(crate) fn uses_authored_lamps(&self) -> bool {
+        match self.mode {
+            Mode::None => self.marker_lights == Some(true),
+            Mode::Timeline | Mode::ForcedNight => true,
+        }
+    }
     pub(crate) fn segment_changed(&self, segment: u64) -> bool {
         self.segment != segment
     }
