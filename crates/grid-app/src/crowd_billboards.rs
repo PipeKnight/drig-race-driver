@@ -1259,6 +1259,7 @@ fn update_cards(
     view: Single<&Transform, With<super::ViewerCamera>>,
     mut cells: Query<(&Mesh3d, &mut CardCell, &mut Visibility)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    stream: Option<Res<super::mesh_stream::MeshStream>>,
 ) {
     let eye = view.translation;
     let frame = (clock.seconds * UPDATES_PER_SECOND) as u64;
@@ -1304,18 +1305,55 @@ fn update_cards(
                 continue;
             };
             *visibility = Visibility::Inherited;
-            if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
-                mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, batch.p);
-                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, batch.n);
-                if topology_changed {
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv);
-                    mesh.insert_indices(Indices::U32(batch.indices));
+            // The cards face the camera, so their corners change with every
+            // move of the eye. Same cards: their bytes go over the mesh's GPU
+            // allocation (mesh_stream), as replacing the asset would upload
+            // and repack the whole mesh every frame. Other cards: a new asset.
+            let same = !topology_changed
+                && meshes
+                    .get(&mesh.0)
+                    .is_some_and(|m| m.count_vertices() == batch.p.len());
+            match (same, stream.as_deref()) {
+                (true, Some(stream)) => {
+                    let layout = meshes.get(&mesh.0).map(super::mesh_stream::VertexLayout::of);
+                    if let Some(layout) = layout {
+                        stream.write(mesh.0.id(), |bytes| pack_cards(&batch, &layout, bytes));
+                    }
+                }
+                _ => {
+                    if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, batch.p);
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, batch.n);
+                        if topology_changed || !same {
+                            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv);
+                            mesh.insert_indices(Indices::U32(batch.indices));
+                        }
+                    }
                 }
             }
         }
         cell.omitted = omitted;
         cell.last_frame = frame;
         cell.last_eye = eye;
+    }
+}
+
+/// A card batch packed as `Mesh::write_packed_vertex_buffer_data` packs the
+/// cell's asset (POSITION, NORMAL, UV_0 in `layout`'s order).
+fn pack_cards(batch: &Batch, layout: &super::mesh_stream::VertexLayout, bytes: &mut Vec<u8>) {
+    use super::mesh_stream::put;
+    let at = |attribute| layout.offset(attribute).expect("card attribute");
+    let (p, n, uv) = (
+        at(Mesh::ATTRIBUTE_POSITION),
+        at(Mesh::ATTRIBUTE_NORMAL),
+        at(Mesh::ATTRIBUTE_UV_0),
+    );
+    let start = bytes.len();
+    bytes.resize(start + batch.p.len() * layout.stride, 0);
+    for (k, vertex) in (start..bytes.len()).step_by(layout.stride).enumerate() {
+        put(bytes, vertex + p, batch.p[k]);
+        put(bytes, vertex + n, batch.n[k]);
+        put(bytes, vertex + uv, batch.uv[k]);
     }
 }
 
@@ -1574,6 +1612,27 @@ mod tests {
         assert_ne!(a.p[3], b.p[3]);
         let footing = (Vec3::from_array(b.p[0]) + Vec3::from_array(b.p[2])) * 0.5;
         assert_eq!(footing, source.rows[0].position);
+    }
+
+    #[test]
+    fn streamed_cards_equal_the_packed_asset() {
+        let batch = Batch {
+            p: (0..8).map(|i| [i as f32, 0.5 * i as f32, -1.25]).collect(),
+            n: (0..8).map(|i| [0., 1., i as f32 * 0.1]).collect(),
+            uv: (0..8).map(|i| [i as f32 * 0.125, 1.]).collect(),
+            indices: vec![0, 1, 2, 3, 2, 1, 4, 5, 6, 7, 6, 5],
+        };
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, batch.p.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, batch.n.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv.clone());
+        mesh.insert_indices(Indices::U32(batch.indices.clone()));
+        let layout = crate::mesh_stream::VertexLayout::of(&mesh);
+        let expected = mesh.create_packed_vertex_buffer_data();
+        let mut streamed = vec![7];
+        pack_cards(&batch, &layout, &mut streamed);
+        assert_eq!(streamed[0], 7);
+        assert_eq!(&streamed[1..], &expected[..]);
     }
 
     #[test]

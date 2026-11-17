@@ -8,21 +8,53 @@ use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryWindow};
 
 /// Frame times of the current one-second window.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Window {
     frames: u32,
     elapsed: f64,
     worst: f64,
+    /// Every frame time of the window (s), for the percentile and the histogram.
+    times: Vec<f64>,
 }
 
 /// Summary of one finished window.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Stats {
     pub fps: f64,
     pub mean_ms: f64,
     pub worst_ms: f64,
     pub frames: u32,
     pub seconds: f64,
+    /// 99th-percentile frame time (nearest rank).
+    pub p99_ms: f64,
+    /// Frames over 10 ms (below 100 fps) and over 16.7 ms (below 60 fps).
+    pub over10: u32,
+    pub over16: u32,
+    /// Sparse frame-time histogram `lower_edge_ms:count,...` (`HIST_EDGES_MS`), so a log
+    /// reader can add windows and take an exact-to-the-bucket 1 % low of a whole run.
+    pub hist: String,
+}
+
+/// Lower bucket edges of `Stats::hist` (ms): half-millisecond steps around the 100 and
+/// 60 fps marks, coarser above.
+pub const HIST_EDGES_MS: [f64; 35] = [
+    0., 5., 5.5, 6., 6.5, 7., 7.5, 8., 8.5, 9., 9.5, 10., 10.5, 11., 11.5, 12., 12.5, 13., 13.5,
+    14., 14.5, 15., 15.5, 16., 16.5, 17., 17.5, 18., 18.5, 19., 19.5, 20., 25., 33.3, 50.,
+];
+
+fn histogram(times_ms: &[f64]) -> String {
+    let mut counts = [0u32; HIST_EDGES_MS.len()];
+    for &t in times_ms {
+        let i = HIST_EDGES_MS.partition_point(|&e| e <= t).saturating_sub(1);
+        counts[i] += 1;
+    }
+    HIST_EDGES_MS
+        .iter()
+        .zip(counts)
+        .filter(|(_, n)| *n > 0)
+        .map(|(e, n)| format!("{e}:{n}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 impl Window {
@@ -35,15 +67,27 @@ impl Window {
         self.frames += 1;
         self.elapsed += dt;
         self.worst = self.worst.max(dt);
+        self.times.push(dt * 1000.);
         (self.elapsed >= 1.).then(|| {
+            let mut sorted = std::mem::take(&mut self.times);
+            sorted.sort_by(f64::total_cmp);
+            // Nearest rank: the smallest time with at least 99 % of the frames at or below it.
+            let rank = (sorted.len() * 99).div_ceil(100).max(1);
             let stats = Stats {
                 fps: f64::from(self.frames) / self.elapsed,
                 mean_ms: self.elapsed * 1000. / f64::from(self.frames),
                 worst_ms: self.worst * 1000.,
                 frames: self.frames,
                 seconds: self.elapsed,
+                p99_ms: sorted[rank - 1],
+                over10: sorted.iter().filter(|&&t| t > 10.).count() as u32,
+                over16: sorted.iter().filter(|&&t| t > 1000. / 60.).count() as u32,
+                hist: histogram(&sorted),
             };
             *self = Self::default();
+            // Keep the allocation for the next window.
+            sorted.clear();
+            self.times = sorted;
             stats
         })
     }
@@ -182,12 +226,16 @@ fn update(
     // Where the frame's time went (frame_split.rs, docs/PERFORMANCE.md).
     let (split, detail) = crate::frame_split::window_report(stats.seconds);
     println!(
-        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} frames={} sim_ticks_per_s={rate}{res}{}{split}",
+        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} p99_ms={:.2} over10={} over16={} frames={} sim_ticks_per_s={rate}{res}{}{split} ft_hist={}",
         stats.fps,
         stats.mean_ms,
         stats.worst_ms,
+        stats.p99_ms,
+        stats.over10,
+        stats.over16,
         stats.frames,
-        crate::perf_test::stats_suffix()
+        crate::perf_test::stats_suffix(),
+        stats.hist
     );
     for line in detail {
         println!("{line}");
@@ -259,6 +307,28 @@ mod tests {
             )
         );
         // A fresh window starts.
+        assert_eq!(w, Window::default());
+    }
+
+    #[test]
+    fn windows_give_p99_slow_frame_counts_and_a_histogram() {
+        let mut w = Window::default();
+        // 96 frames of 9.75 ms, three of 12 ms and one of 30 ms: the window closes on the
+        // 100th frame (1.002 s).
+        for i in 0..99 {
+            let dt = match i {
+                10 | 50 | 90 => 0.012,
+                60 => 0.030,
+                _ => 0.00975,
+            };
+            assert_eq!(w.push(dt), None);
+        }
+        let s = w.push(0.00975).unwrap();
+        assert_eq!(s.frames, 100);
+        // Nearest rank 99 of 100: below the 30 ms frame, a 12 ms one.
+        assert!((s.p99_ms - 12.).abs() < 1e-9);
+        assert_eq!((s.over10, s.over16), (4, 1));
+        assert_eq!(s.hist, "9.5:96,12:3,25:1");
         assert_eq!(w, Window::default());
     }
 

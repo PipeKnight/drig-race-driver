@@ -114,6 +114,7 @@ mod transition;
 mod frame_pacing;
 mod gpu_passes;
 mod frame_split;
+mod mesh_upload_probe;
 #[cfg(feature = "profile")]
 mod span_profile;
 mod ground_detail;
@@ -5415,6 +5416,7 @@ pub(crate) fn race_app(
         gpu_passes::install(&mut app);
     }
     frame_split::install(&mut app);
+    mesh_upload_probe::install(&mut app);
     mesh_stream::install(&mut app);
     shadow_cull::install(&mut app);
     light_clusters::install(&mut app, graphics.reflection_mode == 3);
@@ -7418,7 +7420,12 @@ fn drive_present(
                     staged.push((handle.0.clone(), mesh, bounds));
                 }
             }
+            // A part the change left as drawn keeps its mesh: rewriting it
+            // would upload it again.
             for (handle, mesh, _) in &staged {
+                if meshes.get(handle).is_some_and(|m| body_damage::same_shape(m, mesh)) {
+                    continue;
+                }
                 *meshes.get_mut(handle).expect("staged owned mesh") = mesh.clone();
             }
             for (_, _, _, handle, mut bounds) in &mut parts {

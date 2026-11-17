@@ -49,6 +49,7 @@ use bevy::{
     prelude::*,
     transform::TransformSystems,
 };
+use bevy::asset::AssetId;
 use std::collections::HashSet;
 
 /// The layer of batched parts: no camera or light draws it.
@@ -219,6 +220,8 @@ struct CarBatches {
     refresh_ns: u64,
     frames: u64,
     rebuilds: u64,
+    /// Batches written in place (only their changed parts' vertices).
+    streamed: u64,
     /// Rebuilds for a deformed member mesh only, and the time of all.
     reshaped: u64,
     rebuild_ns: u64,
@@ -295,6 +298,7 @@ fn refresh(
     mut events: MessageReader<AssetEvent<Mesh>>,
     own: OwnCarView,
     time: Option<Res<Time>>,
+    stream: Option<Res<crate::mesh_stream::MeshStream>>,
 ) {
     let state = &mut *state;
     // A view that hides some of the player car draws its parts on their own
@@ -551,17 +555,18 @@ fn refresh(
             stats[1] += usize::from(member.batched);
         }
         let pose = poses[group.slot];
-        if std::mem::take(&mut group.dirty) {
+        let fading = state.fades.get(group.slot).copied().flatten().is_some_and(|f| f.from == group.level);
+        let wanted = drawn_soon(group, &state.shown, &state.posed, fading);
+        if wanted && std::mem::take(&mut group.dirty) {
             state.rebuilds += 1;
             state.reshaped += u64::from(reshaped);
             let start = std::time::Instant::now();
             let shown = state.shown.get(group.slot).copied().unwrap_or(0) == group.level;
-            rebuild(&mut commands, group, pose, shown, &mut meshes, &mut batches);
+            state.streamed += rebuild(&mut commands, group, pose, shown, &mut meshes, &mut batches, stream.as_deref());
             state.rebuild_ns += start.elapsed().as_nanos() as u64;
         }
         // Batches of a level the car does not show keep their pose; a level
         // fading out still follows the car.
-        let fading = state.fades.get(group.slot).copied().flatten().is_some_and(|f| f.from == group.level);
         if let Some(pose) = pose.filter(|_| state.shown[group.slot] == group.level || fading) {
             let next = Transform::from_matrix(pose);
             for &batch in &group.batches {
@@ -604,7 +609,7 @@ fn refresh(
     if state.frames == 1 || state.frames.is_multiple_of(REPORT_FRAMES) {
         let spawned: usize = state.groups.iter().map(|g| g.batches.len()).sum();
         println!(
-            "car_batch version=2 frame={} cars={} groups={} parts={} batched={} batches={spawned} extras={} rebuilds={} reshaped={} rebuild_ms={:.1} refresh_ms={:.1} level_changes={} level_car_frames={:?}",
+            "car_batch version=2 frame={} cars={} groups={} parts={} batched={} batches={spawned} extras={} rebuilds={} streamed={} reshaped={} rebuild_ms={:.1} refresh_ms={:.1} level_changes={} level_car_frames={:?}",
             state.frames,
             state.anchors.len(),
             state.groups.len(),
@@ -612,6 +617,7 @@ fn refresh(
             stats[1],
             state.extras.len(),
             state.rebuilds,
+            state.streamed,
             state.reshaped,
             state.rebuild_ns as f64 / 1e6,
             state.refresh_ns as f64 / 1e6,
@@ -867,9 +873,22 @@ fn select_levels(
     levels
 }
 
+/// Whether a group's batches are drawn this frame or the next: its level is
+/// shown, fading out, or posed (it shows next frame). Only such a group
+/// rebuilds when its parts change; another level keeps its batches until it
+/// is posed, as a dent would otherwise rebuild and upload every low level of
+/// the car each time. A group without batches yet builds them at once.
+fn drawn_soon(group: &Group, shown: &[u8], posed: &[u8], fading: bool) -> bool {
+    group.batches.is_empty()
+        || shown.get(group.slot) == Some(&group.level)
+        || posed.get(group.slot) == Some(&group.level)
+        || fading
+}
+
 /// The group's batched parts in batches of at most [`MAX_VERTICES`], in
 /// spawn order; unused batches are hidden. New batches of a level the car
 /// does not show start on the hidden layer.
+/// Returns the number of batches streamed in place.
 fn rebuild(
     commands: &mut Commands,
     group: &mut Group,
@@ -877,7 +896,9 @@ fn rebuild(
     shown: bool,
     meshes: &mut Assets<Mesh>,
     batches: &mut Query<(&mut Transform, &mut Visibility, &Mesh3d, &mut Aabb), With<Batch>>,
-) {
+    stream: Option<&crate::mesh_stream::MeshStream>,
+) -> u64 {
+    let mut streamed = 0;
     let mut chunks: Vec<Vec<Part<StandardMaterial>>> = Vec::new();
     let mut count = MAX_VERTICES;
     for member in group.members.iter().filter(|m| m.batched) {
@@ -900,7 +921,19 @@ fn rebuild(
         let bounds = mesh.compute_aabb().unwrap_or_default();
         match group.batches.get(i).and_then(|&e| batches.get_mut(e).ok()) {
             Some((_, mut visibility, handle, mut aabb)) => {
-                if let Some(mut target) = meshes.get_mut(&handle.0) {
+                // Dents move vertices, not the batch's structure: the changed
+                // parts' vertices are written over the batch's buffer and the
+                // asset is kept current without being prepared again.
+                let parts: Vec<usize> = chunk.iter().map(|p| p.vertices).collect();
+                let written = stream.zip(meshes.get(&handle.0)).and_then(|(stream, old)| {
+                    stream_changed(old, &mesh, &parts, handle.0.id(), stream)
+                });
+                if written.is_some() {
+                    streamed += 1;
+                    if let Some(target) = meshes.get_mut_untracked(&handle.0) {
+                        *target = mesh;
+                    }
+                } else if let Some(mut target) = meshes.get_mut(&handle.0) {
                     *target = mesh;
                 }
                 *aabb = bounds;
@@ -932,6 +965,55 @@ fn rebuild(
             visibility.set_if_neq(Visibility::Hidden);
         }
     }
+    streamed
+}
+
+/// Streams the vertices of the parts (`parts`: vertex counts in order) that
+/// differ between the drawn batch `old` and its rebuild `new`, when both have
+/// the same structure (attributes, vertex count, indices) and are uploaded.
+/// `None`: the structure changed, so the asset must be replaced.
+fn stream_changed(
+    old: &Mesh,
+    new: &Mesh,
+    parts: &[usize],
+    id: AssetId<Mesh>,
+    stream: &crate::mesh_stream::MeshStream,
+) -> Option<usize> {
+    let attributes = |m: &Mesh| m.attributes().map(|(a, _)| (a.id, a.format)).collect::<Vec<_>>();
+    if !crate::frame_split::uploaded(old)
+        || old.asset_usage != new.asset_usage
+        || old.count_vertices() != new.count_vertices()
+        || parts.iter().sum::<usize>() != new.count_vertices()
+        || attributes(old) != attributes(new)
+        || old.indices() != new.indices()
+    {
+        return None;
+    }
+    let stride = crate::mesh_stream::VertexLayout::of(new).stride;
+    let mut written = 0;
+    let mut first = 0;
+    let mut run: Option<std::ops::Range<usize>> = None;
+    let mut flush = |run: std::ops::Range<usize>| {
+        written += run.len();
+        stream.write_at(id, run.start as u32, stride, |bytes| {
+            crate::mesh_stream::pack_vertices(new, run.clone(), bytes);
+        });
+    };
+    for &count in parts {
+        let range = first..first + count;
+        first += count;
+        if crate::mesh_stream::same_vertices(old, new, range.clone()) {
+            if let Some(done) = run.take() {
+                flush(done);
+            }
+        } else {
+            run = Some(run.map_or(range.clone(), |r| r.start..range.end));
+        }
+    }
+    if let Some(done) = run {
+        flush(done);
+    }
+    Some(written)
 }
 
 fn in_place(matrix: Mat4, expected: Mat4) -> bool {
@@ -948,6 +1030,60 @@ fn in_place(matrix: Mat4, expected: Mat4) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dent_streams_only_the_changed_parts_vertices() {
+        use bevy::{asset::RenderAssetUsages, mesh::Indices};
+        let mesh = |dent: f32, indices: Vec<u16>| {
+            let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            let p: Vec<[f32; 3]> = (0..12)
+                .map(|i| [i as f32, if (4..8).contains(&i) { dent } else { 0. }, 1.])
+                .collect();
+            m.insert_attribute(Mesh::ATTRIBUTE_POSITION, p);
+            m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 1., 0.]; 12]);
+            m.insert_attribute(Mesh::ATTRIBUTE_UV_0, (0..12).map(|i| [i as f32 * 0.1, 0.]).collect::<Vec<_>>());
+            m.insert_indices(Indices::U16(indices));
+            m
+        };
+        let tris: Vec<u16> = vec![0, 1, 2, 4, 5, 6, 8, 9, 10];
+        let (old, new) = (mesh(0., tris.clone()), mesh(-0.25, tris.clone()));
+        let stream = crate::mesh_stream::MeshStream::default();
+        let id = AssetId::<Mesh>::default();
+        // Parts of 4 vertices each; only the middle one moved.
+        assert_eq!(stream_changed(&old, &new, &[4, 4, 4], id, &stream), Some(4));
+        let stride = crate::mesh_stream::VertexLayout::of(&new).stride;
+        let packed = new.create_packed_vertex_buffer_data();
+        assert_eq!(stream.queued(id).as_deref(), Some(&packed[4 * stride..8 * stride]));
+        // Unchanged: nothing written; another structure: replaced instead.
+        let quiet = crate::mesh_stream::MeshStream::default();
+        assert_eq!(stream_changed(&new, &new, &[4, 4, 4], id, &quiet), Some(0));
+        assert_eq!(quiet.queued(id), None);
+        let other = mesh(-0.25, vec![0, 2, 1, 4, 5, 6, 8, 9, 10]);
+        assert_eq!(stream_changed(&old, &other, &[4, 4, 4], id, &stream), None);
+    }
+
+    #[test]
+    fn a_hidden_level_keeps_its_batches_until_it_is_posed() {
+        let group = |level, built| Group {
+            car: 0,
+            slot: 0,
+            material: Handle::default(),
+            layout: Vec::new(),
+            members: Vec::new(),
+            batches: if built { vec![Entity::PLACEHOLDER] } else { Vec::new() },
+            dirty: true,
+            shadow_body: false,
+            level,
+        };
+        // Level 0 shown, 3 hidden: only the shown level rebuilds on a dent.
+        assert!(drawn_soon(&group(0, true), &[0], &[0], false));
+        assert!(!drawn_soon(&group(3, true), &[0], &[0], false));
+        // Posed (shows next frame) or fading out: rebuilt now.
+        assert!(drawn_soon(&group(3, true), &[0], &[3], false));
+        assert!(drawn_soon(&group(3, true), &[0], &[0], true));
+        // Not built yet: builds at once.
+        assert!(drawn_soon(&group(3, false), &[0], &[0], false));
+    }
 
     #[test]
     fn rounding_stays_in_place_and_a_loose_panel_leaves() {

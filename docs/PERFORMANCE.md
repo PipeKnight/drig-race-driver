@@ -2448,8 +2448,10 @@ missing interval (dropped). Every tenth window adds `frame_gpu_views` lines per 
 Counts (means per render frame): `d_opaque`, `d_alpha`, `d_shadow`, `d_transp`, `d_ui` are
 the phase items (draw groups after batching) per pass; `shadow_views` the shadow views;
 `vis` visible meshes of the 3D cameras, `casters` shadow casters of the cascades,
-`views3d` 3D views. Per second: `mesh_up_s` and `mesh_kb_s` mesh asset changes (each one is
-an upload to the GPU), `img_up_s` and `img_kb_s` the same for images.
+`views3d` 3D views. Per second: `mesh_up_s` and `mesh_kb_s` mesh asset changes that reach
+the render world (each one is prepared and uploaded again; a mesh kept for the main world only
+is not counted), `mesh_stream_kb_s` vertex bytes written in place over existing GPU buffers
+(`mesh_stream`, no preparation; F837), `img_up_s` and `img_kb_s` the same for images.
 
 ### Ordering with Automatic smoke
 
@@ -2493,3 +2495,155 @@ timestamps, and one query resolve with a readback of at most 2 KiB per frame (a 
 
 The parts sum to the frame as checked by the smoke. On this PC the frame is set by the CPU
 (render thread and main update); the GPU is busy under 3.2 ms per frame.
+
+## Mesh uploads per frame (F837)
+
+17 November 2026, Claude Code (session mac-perf). The frame split showed about 5,000 mesh
+asset uploads per second in a race (5,369 in the derby, 4,793 at Donington). Every mesh asset
+that is `Added` or `Modified` in a frame is prepared again in the render world and its whole
+vertex and index buffers are uploaded again. `GRID_MESH_UPLOADS=1`
+(`crates/grid-app/src/mesh_upload_probe.rs`) prints every five seconds which meshes change,
+how often and who draws them (`mesh_uploads`, `mesh_upload`, `mesh_upload_group`), and the
+bytes written in place by `mesh_stream` per owner (`mesh_stream_group`).
+
+### Sources and fixes
+
+| source | before | fix |
+|---|---|---|
+| crowd card cells (`crowd_billboards::update_cards`) | every cell in range replaced its positions and normals at 15 Hz or whenever the eye moved 0.5 m | same cards: the bytes go over the mesh's GPU allocation (`mesh_stream::write`); a new asset only when the cards change |
+| car batches (`car_batch`) | a dirty group rebuilt and replaced every batch mesh, also for detail levels not drawn | a group is rebuilt only while its level is shown, posed or fading out; a batch with the same layout, vertex counts and indices gets only its changed vertex runs written in place (`mesh_stream::write_at`) |
+| owned part meshes (`main.rs`, `drive_present`) | every staged part mesh was assigned again, also when its shape had not changed | skipped when `body_damage::same_shape` holds |
+
+What remains is the camera flashes, unnamed custom-material meshes (probably OSD texts whose
+glyph count changes) and meshes that really change shape (the damaged car bodies).
+
+### Statistics added
+
+`frame_stats` now also gives `p99_ms` (nearest rank), `over10` and `over16` (frames slower
+than 10 ms and 1/60 s) and, last on the line, `ft_hist=edge:count,...`: a sparse histogram of
+frame times with half-millisecond buckets from 5 to 20 ms and edges at 0, 25, 33.3 and 50 ms.
+`tools/frame_split_smoke.ps1` sums the histograms over the driving windows and prints the 1 %
+low (the bucket that holds the slowest 1 % of frames), the share of slow frames, the slowest
+window's split and whether the machine was idle at the start and the end.
+
+### A/B on Windows (RTX 4070, i7-12700, Vulkan, 1280x800 window, Fifo at 165 Hz)
+
+`before.exe` is this branch with the three fixes reverted (probe and statistics kept);
+`after.exe` the branch. Five alternating runs of `frame_split_smoke.ps1` per scene and
+variant, `GRID_MESH_UPLOADS=0`, each started only when no cargo, rustc, linker, Gradle or other
+grid process ran (26 of 30 runs idle at start and end; in 4 a build started near the end).
+Pooled driving windows (the first two skipped):
+
+| scene | variant | fps | per run | 1 % low | worst window | p10 window | >1/60 s | main | outside | render | r_meshes | r_encode | GPU | uploads/s | upload KB/s | stream KB/s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Detroit derby route_8, 720 rows | before | 95.9 | 97.7/108.7/104.5/77.9/90.7 | 40-50 | 18.9 | 66.6 | 5.1 % | 7.34 | 3.94 | 10.10 | 2.23 | 4.27 | 2.49 | 4,941 | 33,636 | 142,797 |
+| | after | 97.9 | 92.0/92.3/104.5/97.1/103.3 | 40-50 | 17.0 | 75.7 | 3.0 % | 7.13 | 3.76 | 9.80 | 1.75 | 4.30 | 2.52 | 324 | 4,576 | 165,624 |
+| Detroit derby route_8, native | before | 102.3 | 91.4/105.6/111.8/97.1/105.7 | 40-50 | 51.4 | 72.5 | 3.4 % | 6.87 | 3.45 | 9.20 | 2.16 | 3.75 | 2.59 | 5,001 | 34,081 | 151,678 |
+| | after | 107.9 | 112.7/100.9/116.4/105.1/104.6 | 50-57 | 57.5 | 88.7 | 1.0 % | 6.40 | 3.15 | 8.51 | 1.64 | 3.64 | 2.55 | 348 | 4,903 | 179,788 |
+| Donington route_0, native | before | 69.8 | 75.4/67.4/73.0/66.2/66.9 | 40-50 | 46.2 | 60.3 | 8.6 % | 7.85 | 6.64 | 13.48 | 4.66 | 5.02 | 2.34 | 5,073 | 15,506 | 396,551 |
+| | after | 69.0 | 60.8/69.5/74.5/69.4/71.0 | 40-50 | 45.8 | 59.9 | 13.1 % | 7.64 | 7.01 | 12.97 | 4.12 | 5.04 | 2.43 | 129 | 328 | 404,289 |
+
+ms are means per frame; `1 % low` is the histogram bucket (fps) that holds the slowest 1 %.
+
+- Uploads fall by 93-97 % and their bytes by 86-98 %. `r_meshes` falls by 0.5 ms and the
+  render thread by 0.3-0.7 ms per frame.
+- The mean fps moves by +2 %, +5 % and -1 %. Runs of one binary differ by up to ±10 %, so the
+  fps effect is inside the noise; the per-stage times are the measured effect.
+- The GPU needs about 2.5 ms per frame: every scene is CPU-bound. Donington is bound by the
+  render thread (13 ms: `r_meshes` 4.1 ms with few uploads, `r_encode` 5 ms with about 360
+  transparent, 85 shadow and 55 opaque draw groups); the main thread takes 7-8 ms.
+- Single windows fall to 17-19 fps in both variants: one frame of 0.5-0.8 s with `r_prepare`
+  25-44 ms near the start of the drive (pipeline or resource creation). Derby dip windows show
+  `main_ms` 14-16 ms with `fixed_ms` 5-7 ms (simulation and collision bursts).
+- In-place vertex writes (`mesh_stream`) carry 140-180 MB/s in the derby and about 400 MB/s at
+  Donington (about 4-6 MB per frame) in both variants; the crowd cards moved about 25 MB/s from
+  uploads to it. `mesh_stream_group` (one probe run per scene, not idle) names the writers:
+
+  | owner | derby native, MB/s | Donington, MB/s |
+  |---|---|---|
+  | trees, facing and sheet billboards (`source_trees::present`) | 91 | 228 |
+  | ground cover (`ground_detail`, gathers) | - | 43 |
+  | skid marks | 19 | - |
+  | tyre smoke | 20 | 1 |
+  | car batches | 14 | - |
+  | crowd cards | 8 | 9 |
+
+  The trees face every billboard of every shown level toward the camera on the CPU each frame
+  and write the whole vertex buffer again (F392). Facing them in the vertex shader, as the grass
+  does since F580, would remove these writes and the main-thread facing work.
+
+### Image
+
+Offscreen fixed-step captures (`--render-fixed-step --render ... --resolution 1280x720
+--drive-ticks 600|1500`, autopilot) from `before.exe` and `after.exe`, plus a second `after.exe`
+run as the noise floor, compared pixel by pixel:
+
+| scene, tick | after vs after | before vs after |
+|---|---|---|
+| Detroit derby, 600 | 0 px | 2 px, max delta 1 |
+| Detroit derby, 1500 | 1 px, max delta 1 | 2 px, max delta 1 |
+| Donington, 600 | 1 px, max delta 1 | 1 px, max delta 1 |
+| Donington, 1500 | 0 px | 3 px, max delta 1 |
+
+The image is unchanged (at most 3 of 921,600 pixels differ by one level, as between two runs of
+one binary). Without `--render-fixed-step` two runs of one binary differ in 62 % of the pixels
+(the frames fall on other ticks), so only fixed-step captures can be matched. Crops (centre and
+lower 320x180, before | after) are in `local/ab/crops/` (private).
+
+### Android
+
+The same sources run on the phone, so the same uploads and their buffer reallocations go
+away there. Not measured on a phone.
+
+### Where the rest of the frame goes, and the plan to 100+ fps up to 2560x1440
+
+Owner target (2026-11-17): 100+ fps under any conditions at up to 2560x1440 on the RTX 4070 /
+i7-12700. The GPU needs 2.3-2.6 ms at 1280x800 (about 6 ms at 2560x1440 if it scales with the
+pixels), so the target is a CPU problem: both threads must stay under 10 ms, also in the worst
+frames.
+
+Profile build (`--features profile`, `GRID_PROFILE_SECONDS=10`, `frame_split_smoke.ps1
+-RenderHeight native`, idle machine; the trace spans slow the build to about 65 fps, so the
+absolute numbers are inflated and only the ranking counts). Exclusive ms per frame:
+
+| span (thread) | derby native | Donington |
+|---|---|---|
+| `mesh_stream::upload` (render: `queue.write_buffer` of the in-place writes) | 0.93 | 3.26 |
+| `source_trees::present` (main: CPU facing of every tree billboard) | 0.50 | 1.48 |
+| `drive_tick` (main: simulation step) | 2.90 | 1.73 |
+| `frame_split::gpu_begin` (render: `device.poll` for the GPU markers, only while the counter is shown) | 1.10 | 1.17 |
+| transparent pass encode (render) | 0.51 | 1.27 |
+| `prepare_preprocess_bind_groups`, binned instance buffers (render) | 2.2 | 1.2 |
+| visibility `par_for_each` and AABB updates (main, task pool) | 0.9 | 1.3 |
+| `smoke_boundary::live::extract` | 0.26 | 0.52 |
+| `mesh_stream::resort` | 0.15 | 0.36 |
+| `skid_marks::present`, `car_batch::refresh`, `crowd_billboards::update_cards`, `drive_present` | 0.3-0.6 each | 0.2-0.3 each |
+
+Ranked plan (expected gain on the bound thread; all general, image-neutral, with matched crops):
+
+1. **Tree billboards faced in the vertex shader** (`source_trees.rs` `present`/`expanded`/
+   `sheet_expanded`, `tree_cards.rs` `CardMaterial`, the facing `StandardMaterial` parts via an
+   extended material, shadow twins faced to the sun by a view uniform). Removes 90-230 MB/s of
+   in-place writes: about 3 ms of render thread and 1.5 ms of main thread at Donington, 1.5 ms
+   in the derby. Grass did the same in F580. Biggest single item.
+2. **Render-thread encode at Donington** (5-6 ms, about 360 transparent draw groups): merge the
+   blended static track groups that share material and pipeline into fewer draws, check
+   specialisation and bind-group churn in the transparent phase, sort once per frame.
+3. **Frame-split overhead**: `gpu_begin` polls the device every frame while the counter is shown
+   (about 1.1 ms in the profile build). Poll every few frames or read back on the submit
+   callback; measure first whether wgpu only moves the same work elsewhere.
+4. **Ground-cover gathers** (`ground_detail`, 43 MB/s): blended cover is gathered on each 16 m
+   bucket change synchronously and the whole capacity buffer is written; stream only the
+   changed range or keep static chunks.
+5. **Main thread** (7-8 ms in release): `drive_tick` (derby collisions, 5-7 ms bursts of
+   `fixed_ms` in the dip windows), visibility and AABB recomputation for meshes changed by the
+   streams, `smoke_boundary`, `mesh_stream::resort`. This fits a second session: files
+   `main.rs` (`drive_tick`, `drive_present`), `smoke_boundary/live.rs`, `mesh_stream.rs`
+   (`resort`), `damage_parts.rs`, `car_batch.rs`, `skid_marks.rs`; it does not touch the
+   render-thread or shader work of items 1-4.
+6. **Dips**: the start hitch (one 0.5-0.8 s frame, `r_prepare` 25-44 ms: pipelines and bind
+   groups created on first sight; pre-warm them behind the loading screen) and the derby
+   `fixed_ms` bursts (item 5).
+7. **Remaining uploads**: player and opponent body meshes (about 400/s in the derby: stream the
+   deformed vertices with `write_at` as the car batches do), unnamed custom-material meshes
+   (probably OSD texts whose glyph count changes, `osd_scene::texts`; 54-81/s), camera flashes.

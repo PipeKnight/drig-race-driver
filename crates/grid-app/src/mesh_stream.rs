@@ -75,6 +75,39 @@ impl Writes {
 #[derive(Resource, Clone, Default)]
 pub(crate) struct MeshStream(Arc<Mutex<Writes>>);
 
+/// Vertex bytes queued since start (frame_split's `mesh_stream_kb_s`).
+static QUEUED_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Vertex bytes queued for in-place writes since the app started.
+pub(crate) fn queued_bytes() -> u64 {
+    QUEUED_BYTES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Per-mesh byte tally for the upload probe (`GRID_MESH_UPLOADS=1`); `None` while off.
+static PER_MESH: Mutex<Option<HashMap<AssetId<Mesh>, u64>>> = Mutex::new(None);
+
+/// Starts the per-mesh tally (mesh_upload_probe).
+pub(crate) fn tally_per_mesh() {
+    *PER_MESH.lock().unwrap_or_else(|e| e.into_inner()) = Some(Default::default());
+}
+
+/// Bytes queued per mesh since the last call (empty while the tally is off).
+pub(crate) fn take_per_mesh() -> HashMap<AssetId<Mesh>, u64> {
+    PER_MESH
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .map(std::mem::take)
+        .unwrap_or_default()
+}
+
+fn count(mesh: AssetId<Mesh>, bytes: usize) {
+    QUEUED_BYTES.fetch_add(bytes as u64, std::sync::atomic::Ordering::Relaxed);
+    if let Some(tally) = PER_MESH.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        *tally.entry(mesh).or_default() += bytes as u64;
+    }
+}
+
 #[derive(Resource, Default)]
 struct RenderWrites(Writes);
 
@@ -86,6 +119,7 @@ impl MeshStream {
         let start = writes.bytes.len();
         fill(&mut writes.bytes);
         let end = writes.bytes.len();
+        count(mesh, end - start);
         writes.meshes.push((mesh, start..end, None));
     }
 
@@ -104,6 +138,7 @@ impl MeshStream {
         let start = writes.bytes.len();
         fill(&mut writes.bytes);
         let end = writes.bytes.len();
+        count(mesh, end - start);
         writes.meshes.push((mesh, start..end, Some((first, stride))));
     }
 
@@ -262,6 +297,31 @@ impl VertexLayout {
             .find(|(id, _)| *id == attribute.id)
             .map(|(_, offset)| *offset)
     }
+}
+
+/// Appends vertices `range` of `mesh` packed as
+/// `Mesh::write_packed_vertex_buffer_data` packs them (attributes interleaved
+/// in attribute-id order).
+pub(crate) fn pack_vertices(mesh: &Mesh, range: Range<usize>, bytes: &mut Vec<u8>) {
+    let attributes: Vec<(&[u8], usize)> = mesh
+        .attributes()
+        .map(|(a, v)| (v.get_bytes(), a.format.size() as usize))
+        .collect();
+    for v in range {
+        for (data, size) in &attributes {
+            bytes.extend_from_slice(&data[v * size..(v + 1) * size]);
+        }
+    }
+}
+
+/// Whether vertices `range` hold the same values in `a` and `b` (same
+/// attributes assumed).
+pub(crate) fn same_vertices(a: &Mesh, b: &Mesh, range: Range<usize>) -> bool {
+    a.attributes().zip(b.attributes()).all(|((attribute, x), (_, y))| {
+        let size = attribute.format.size() as usize;
+        let span = range.start * size..range.end * size;
+        x.get_bytes().get(span.clone()) == y.get_bytes().get(span)
+    })
 }
 
 /// Little-endian f32 components at `at` (wgpu vertex data).

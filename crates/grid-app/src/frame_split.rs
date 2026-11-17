@@ -252,12 +252,22 @@ fn main_end(
     image_assets: Res<Assets<Image>>,
     cameras: Query<(Entity, &Camera, &VisibleEntities), With<Camera3d>>,
     lights: Query<&CascadesVisibleEntities>,
+    mut streamed_before: Local<u64>,
 ) {
+    // The render world prepares each added or modified mesh once per frame, however many
+    // events it got: count distinct ids. A mesh kept for the main world only is not uploaded.
     let mut mesh = (0u64, 0u64);
+    let mut seen = std::collections::HashSet::new();
     for event in meshes.read() {
-        if let AssetEvent::Added { id } | AssetEvent::Modified { id } = event {
+        if let AssetEvent::Added { id } | AssetEvent::Modified { id } = event
+            && seen.insert(*id)
+        {
+            let asset = mesh_assets.get(*id);
+            if asset.is_some_and(|m| !uploaded(m)) {
+                continue;
+            }
             mesh.0 += 1;
-            mesh.1 += mesh_assets.get(*id).map_or(0, mesh_bytes);
+            mesh.1 += asset.map_or(0, mesh_bytes);
         }
     }
     let mut image = (0u64, 0u64);
@@ -285,6 +295,9 @@ fn main_end(
             }
         }
     }
+    // Vertex bytes written in place (mesh_stream), not counted as uploads.
+    let queued = crate::mesh_stream::queued_bytes();
+    let streamed = queued.saturating_sub(std::mem::replace(&mut *streamed_before, queued));
     let now = Instant::now();
     let mut c = MAIN_CLOCK.lock().unwrap_or_else(|e| e.into_inner());
     let main = c.begin.take().map_or(0, |b| ns(b, now));
@@ -295,12 +308,18 @@ fn main_end(
         a.main += main;
         a.mesh_up += mesh.0;
         a.mesh_bytes += mesh.1;
+        a.stream_bytes += streamed;
         a.image_up += image.0;
         a.image_bytes += image.1;
         a.visible += visible;
         a.casters += casters;
         a.views3d += views;
     });
+}
+
+/// Whether a changed mesh goes to the render world (is prepared and uploaded).
+pub(crate) fn uploaded(mesh: &Mesh) -> bool {
+    mesh.asset_usage.contains(bevy::asset::RenderAssetUsages::RENDER_WORLD)
 }
 
 /// CPU bytes of a mesh's vertex attributes and indices (what an upload
@@ -759,6 +778,7 @@ struct Acc {
     counts: [u64; 6],
     mesh_up: u64,
     mesh_bytes: u64,
+    stream_bytes: u64,
     image_up: u64,
     image_bytes: u64,
     visible: u64,
@@ -838,12 +858,13 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
         let m = f64::from(a.main_frames.max(1));
         let secs = seconds.max(1e-3);
         s += &format!(
-            " vis={:.0} casters={:.0} views3d={:.1} mesh_up_s={:.1} mesh_kb_s={:.0} img_up_s={:.1} img_kb_s={:.0}",
+            " vis={:.0} casters={:.0} views3d={:.1} mesh_up_s={:.1} mesh_kb_s={:.0} mesh_stream_kb_s={:.0} img_up_s={:.1} img_kb_s={:.0}",
             a.visible as f64 / m,
             a.casters as f64 / m,
             a.views3d as f64 / m,
             a.mesh_up as f64 / secs,
             a.mesh_bytes as f64 / 1024. / secs,
+            a.stream_bytes as f64 / 1024. / secs,
             a.image_up as f64 / secs,
             a.image_bytes as f64 / 1024. / secs,
         );
