@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G411 verifies native stock Lacetti antenna ownership in opaque and depth/motion. Purchased aerials include both zero and positive reflection responses. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G410 restores authored normals on the nonreflective DXT5 infield family. The purchased loader and matched Washington runtime pass. See [track surface](docs/SKY.md).
 - G409 verifies actual DLAA isolation for the selected Full smoke source. Ordinary Static reflection ownership and the Reduced path are next. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G408 verifies ordinary spectator movement and flashes on Shibuya, two identical same-tick pause crops and restart/Flashback/replay lifecycle. See [crowd research](docs/CROWD_ANIMATION_RESEARCH.md).

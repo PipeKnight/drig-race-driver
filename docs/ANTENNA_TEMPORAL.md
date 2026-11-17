@@ -71,3 +71,16 @@ isolated submission. The verified archived before-Early, motion/depth and
 positive sample controls match. This single-frame structural result applies
 to the G403 diagnostic. The ordinary Static overlay and Reduced smoke
 still need their own live evidence.
+
+
+## Ordinary native owner and its authored reflection response
+
+G411 uses Static car reflections in the actual native scene. The selected
+Lacetti aerial has zero authored environment colour. The exact tagged parent
+is in both native multidraw phase bins, opaque and depth/motion, at the same
+stamped frame. Its actual reflective response and transparent child are absent.
+The purchased high/low asset census also identifies source-positive aerial
+materials in three models. Live phase ownership, resolved pixel coverage and
+temporal history are distinct observations. The next physical validation uses
+one of the positive authored members and then checks the ordinary sampled
+coverage in motion.
