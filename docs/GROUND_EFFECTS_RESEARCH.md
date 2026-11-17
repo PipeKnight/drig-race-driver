@@ -637,3 +637,21 @@ DLAA arms cut the number of angular terminations from 3 to 1 in the
 430-tick grass fixture. All have 57 contact ends. The exact visual
 similarity of grass gaps in original GRID and separate cross-section
 geometry are open. See [G395](../log/G0395.md).
+
+### Source-shaped strip cross-section
+
+[G398](../log/G0398.md) takes the lateral edge from each accepted contact's
+arriving direction crossed with its saved normal. Source 0x007404F6 supplies
+the retained contact contexts to 0x00739570. The native cross product is left
+unnormalized, preserving its effect on the width on slopes. Both UV layers
+select their start and end U for the corresponding edges, with left-wheel
+mirroring. Adjacent quads and capacity-linked strips reuse the exact same
+edge at a shared point. Replay checkpoints retain that point payload.
+
+The current streamed mesh keeps the existing index buffer and maps the
+middle two packed vertices to preserve the source's diagonal and winding.
+The first quad tapers to the zero arriving edge. Original three-contact
+emission timing and the first fully transparent fade still require their
+own change and acceptance. Matched live Donington and Detroit pairs exercise
+grass/hard and mixed vehicle banks. Native original captures still provide a
+separate visual reference requirement.

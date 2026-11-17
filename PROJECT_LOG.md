@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G398 follows retained tyre travel at strip seams and preserves its edge through replay. Matched grass and mixed-field controls ran. Original startup/fade remains open. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
 - G397 verifies cropped antenna depth/coverage and the ordinary smoke tap. The chosen capture has no smoke over the shaft. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G395 uses the source contact normal and surface-angle test for live and replay tyre marks. Matched native DLAA grass control has two fewer premature angular terminations, with the same contact gaps. Original visual comparison and strip cross-section remain open. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
 - G394 orders optional Type2 before SMAA and restores the source bloom exponent. Neutral controls and final Haruna match. G396 found differing Le Mans fields. Pinned Le Mans visuals and original transfer remain open. See [original postprocess](docs/ORIGINAL_POSTPROCESS.md).

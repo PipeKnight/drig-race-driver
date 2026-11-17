@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G398](G0398.md) | 2026-11-17 | Follow tyre travel at skid strip seams |
 | [G397](G0397.md) | 2026-11-17 | Measure thin-geometry tile and smoke capture controls |
 | [G396](G0396.md) | 2026-11-17 | Qualify the Le Mans lighting and bloom comparisons |
 | [G395](G0395.md) | 2026-11-17 | Use surface geometry to continue skid strips |
