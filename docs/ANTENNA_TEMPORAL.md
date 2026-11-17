@@ -151,3 +151,12 @@ match. Their effective material slots differ. Both phases use distinct
 MainEntity keys and the expected Bevy 3D render-side sentinel.
 The scoped request must account for both owners before taking an intact
 bin. Actual partial-closure refusal and per-owner draw evidence remain open.
+
+## Ordinary native Reduced with organic smoke
+
+[G421](../log/G0421.md) witnesses the live Automatic sequence at BMW
+Shibuya tick 452. The native 1280×800 single-sample view uses real 640×400
+Reduced color and depth, with 1342 active prepared sprites across five
+restored groups. The fence overlap in the capture nominates the region.
+Per-pixel fence coverage and the exact Reduced color/opacity contribution
+remain open.
