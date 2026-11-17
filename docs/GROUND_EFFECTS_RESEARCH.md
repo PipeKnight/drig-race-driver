@@ -532,8 +532,8 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
   The kick-up handbrake ×2 and the rear drive-slip term from that section are not in the debris
   port.
 - The tyre-width settings field `+10A4`.
-- Skid COLOR channel mapping (runtime capture would settle it); skid normal map and two-UV
-  crossfade; per-car mark LOD.
+- Per-car mark LOD and the selected source shader's separate sun, shadow, AO and fog response.
+  G384 and G392 resolve the COLOR, source normal and two-UV items below.
 - Emitter direction convention: the tyre-smoke research has emitters along local +Z of a
   rearward wheel frame, while the debris port emits along the tilted up axis. Also open: birth
   timelines (`start`/`end`), spin (`initialRotationVariance` is not parsed).
@@ -553,6 +553,9 @@ failed shader trial and exact control records are in G340.
 
 
 ## Selected skid colour roles and declaration boundary (G377)
+
+This section records the earlier state. G392 resolves the native COLOR declaration
+and the paired normal atlas below.
 
 The selected original skid vertex program passes COLOR onward unchanged; its
 pixel program consumes x,z,w. There x weights geometric versus mapped normal,
@@ -574,3 +577,38 @@ path. These facts do not prove the remaining ragged grass pixels are an alpha
 bug or justify forced continuous marks. Private evidence:
 local/handoff/drafts/skid-color-contract149/ and skid-declaration-boundary150/.
 No renderer, material values, contact rules or source assets changed.
+
+## Source skid colour declaration and paired normal atlas (G392)
+
+The original skid finalizer selects the Color semantic at the sixth slot
+and native type 0x13 at `0x0073EA86`. `0x0073A200` copies each quad as
+six 60-byte records without swizzling the COLOR at byte 56. The D3D9
+declaration path at `0x00BDC513` selects D3DCOLOR. The normalized shader
+values are raw bytes [2, 1, 0, 3] divided by 255, matching G384.
+
+`0x0072EEE0` selects a shared skid asset package. `0x0072EF04` and
+`0x0072EF2A` resolve diffuse.tga and normal.tga within it. Their pointers
+at plugin +0x82548/+0x8254C reach TDiffuseMap and TNormalMap at
+`0x0073EE9C` and `0x0073EEC5`. The four purchased banks all carry
+1024×256 DXT5 images for both names.
+
+The selected pixel program decodes A/G/B as signed X/Y/Z and crossfades
+the two source UV samples by COLOR.w, with the identical-UV bypass.
+`0x00740363` through `0x00740382` subtract and normalize the two ground
+points for the segment binormal. The vertex writer at `0x00739570` stores
+both endpoint normals and one segment frame. The tangent is the binormal
+cross current normal. The mirror flag also reverses the tangent. COLOR.x
+mixes the source normal into the geometric normal before normalization,
+and COLOR.z controls the diffuse opacity.
+
+The renderer uses the same per-model bank for the diffuse and linear
+normal maps. Unsupported devices or an incomplete normal bank use the
+diffuse route and its 60-byte vertex layout. The normal route adds 24 bytes
+per vertex. Existing PBR lighting consumes the resolved normal. The
+original shader's separate sun, shadow, AO and fog response remains open.
+
+Matched Donington native DLAA and mixed Detroit baseline runs retain
+identical contact and capture schedules. This change models skid shading.
+Source strip discontinuities due to contact, turn and the atlas remain
+independent. Direct visual parity of grass gaps with original GRID has not
+been established. See [G392](../log/G0392.md) for executable and captures.
