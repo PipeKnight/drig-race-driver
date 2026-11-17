@@ -82,11 +82,20 @@ pub fn install(app: &mut App) {
             .add_systems(Last, (report, view_triangles));
         if let Some(render) = app.get_sub_app_mut(RenderApp) {
             render.add_systems(Render, mesh_triangles.after(RenderSystems::Cleanup));
-            shadow_span::install(render);
+            install_shadow_span(render);
         }
     }
     if let Some(budget) = submissions::budget() {
         submissions::install(app, budget);
+    }
+}
+
+/// Replaces Bevy's early shadow pass by the timed one (once; the frame split
+/// and the pass profiler both ask for it).
+pub(crate) fn install_shadow_span(render: &mut SubApp) {
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !DONE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        shadow_span::install(render);
     }
 }
 
@@ -261,6 +270,10 @@ fn report(
 /// in another system first panicked the renderer (two pool threads, the F633
 /// hang at exit), then, on the render thread, lost the device. The late shadow
 /// pass only runs with occlusion culling, which grid-app does not use.
+///
+/// The frame split (crate::frame_split) also times each cascade through the
+/// pass descriptor's timestamp writes, which need only TIMESTAMP_QUERY (Metal
+/// has no timestamps inside passes, which the pass span needs).
 mod shadow_span {
     use bevy::core_pipeline::mip_generation::experimental::depth::early_downsample_depth;
     use bevy::core_pipeline::schedule::Core3d;
@@ -276,6 +289,8 @@ mod shadow_span {
     use bevy::render::render_resource::{RenderPassDescriptor, StoreOp};
     use bevy::render::renderer::{RenderContext, ViewQuery};
     use bevy::render::view::ExtractedView;
+    use crate::frame_split::{FrameGpu, Kind, Mark};
+    use wgpu::RenderPassTimestampWrites;
 
     pub fn install(render: &mut SubApp) {
         let removed = render.remove_systems_in_set(
@@ -299,12 +314,13 @@ mod shadow_span {
     /// Bevy's `per_view_shadow_pass::<EARLY_SHADOW_PASS>` with a pass span.
     fn timed_shadow_pass(
         world: &World,
-        view: ViewQuery<(&ViewLightEntities, &ExtractedCamera)>,
+        view: ViewQuery<(Entity, &ViewLightEntities, &ExtractedCamera)>,
         view_lights: Query<(&ShadowView, &ExtractedView)>,
         phases: Res<ViewBinnedRenderPhases<Shadow>>,
+        gpu: Option<Res<FrameGpu>>,
         mut ctx: RenderContext,
     ) {
-        let (lights, camera) = view.into_inner();
+        let (entity, lights, camera) = view.into_inner();
         let diagnostics = ctx.diagnostic_recorder();
         let diagnostics = diagnostics.as_deref();
         for (i, &light) in lights.lights.iter().enumerate() {
@@ -314,13 +330,27 @@ mod shadow_span {
             let Some(phase) = phases.get(&extracted.retained_view_entity) else {
                 continue;
             };
+            let cascade = u8::try_from(i).unwrap_or(u8::MAX);
+            let mark = |kind| Mark {
+                kind,
+                order: camera.order,
+                view: entity.index_u32(),
+            };
+            let queries = gpu.as_ref().and_then(|g| {
+                g.alloc(&[mark(Kind::ShadowBegin(cascade)), mark(Kind::ShadowEnd(cascade))])
+            });
+            let timestamps = queries.as_ref().map(|(set, index)| RenderPassTimestampWrites {
+                query_set: set,
+                beginning_of_pass_write_index: Some(*index),
+                end_of_pass_write_index: Some(index + 1),
+            });
             let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
                 label: Some(&shadow_view.pass_name),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(
                     shadow_view.depth_attachment.get_attachment(StoreOp::Store),
                 ),
-                timestamp_writes: None,
+                timestamp_writes: timestamps,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });

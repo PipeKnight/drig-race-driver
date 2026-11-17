@@ -172,6 +172,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F836](log/F0836.md) | 2026-11-17 | Frame split in frame_stats for the Mac performance log |
 | [F835](log/F0835.md) | 2026-11-16 | Fence through smoke: scaled 3D image shown opaque |
 | [F834](log/F0834.md) | 2026-11-16 | Owner review 2026-11-16: Mac performance, accidental session, fence through smoke |
 | [F833](log/F0833.md) | 2026-11-12 | Prepare GPLv3 licensing change for future DRIG versions |
@@ -231,7 +232,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F775](log/F0775.md) | 2026-11-10 | Replay frame compaction and the Flashback transition effects |
 | [F774](log/F0774.md) | 2026-11-10 | Career season end, Le Mans entry, team name and livery (row 60) |
 | [F773](log/F0773.md) | 2026-11-10 | Launcher race to menu hand-off; window-show hang and ready-marker fixes |
-| [F772](log/F0772.md) | 2026-11-10 | Menu and screen sounds; speech race and event win counts |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

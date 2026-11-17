@@ -2390,3 +2390,98 @@ whole-frame and render-app totals moved by about ±1 ms between runs and are not
   19 command buffers instead of 21.
 - The phone already clustered on the CPU; `ClusterConfig::None` there skips the assignment for both
   cameras (F652's phone log: CPU clustering about 0.6 ms) [I until the owner's log].
+
+## Frame split (F836)
+
+17 November 2026, Claude Code (session mac-perf). Goal: one owner log from the Mac must say
+where a frame goes, so the optimisations for the Mac can be chosen by measured cost.
+`crates/grid-app/src/frame_split.rs` appends the split to the periodic `frame_stats` line
+(the fps counter's one-second window, written while the counter is shown: Video → FPS
+counter, or F9).
+
+### Fields
+
+Main world (the app thread, means per frame over the window):
+
+- `main_ms`: `First` to `Last` of the main schedule, the whole update.
+- `fixed_ms`: the fixed-step loop inside it (simulation ticks).
+- `outside_ms`: the rest of the frame: waiting for the render thread, extract, window events.
+  `main_ms + outside_ms` equals `avg_ms`.
+- `extract_ms`: the extract step (runs on the main thread while the render world waits).
+
+Render world (the render thread, means per render frame, they sum to `render_ms`):
+
+| field | stage |
+|---|---|
+| `r_meshes` | extract commands, asset preparation (mesh and texture uploads to the GPU), view management, specialisation |
+| `r_views` | view preparation (`PrepareViews`) without the acquire |
+| `acquire` | swap-chain image acquire (`prepare_windows`); high values mean a GPU or vsync wait |
+| `r_queue` | queue (phase items) |
+| `r_sort` | phase sort |
+| `r_prepare` | prepare resources: batching, instance and uniform buffers (up to the resource flush) |
+| `r_bind` | bind groups and the rest of `Prepare` |
+| `r_encode` | render graph: command encoding of all views and passes |
+| `r_submit` | queue submit and the graph's finish |
+| `r_present` | the rest of the render set (present) |
+| `r_cleanup` | cleanup |
+
+`render_frames` counts render frames in the window.
+
+GPU (timestamp queries, means per frame; needs `TIMESTAMP_QUERY`):
+
+| field | interval |
+|---|---|
+| `gpu_ms` | first to last marker of the frame |
+| `g_pre` | 3D view start to main pass, without the shadows (prepass, clears, culling) |
+| `g_shadow` | the sun cascades' shadow passes (per cascade in `frame_gpu_views ... shadow_cN=`) |
+| `g_opaque` | opaque and alpha-mask passes |
+| `g_transp` | transparent pass (cars' glass, smoke, particles) |
+| `g_post` | post process to the end of the 3D view; with `render_height = native` also the UI and the window copy |
+| `g_ui` | the display camera's UI pass (scaled image shown, `mode=upscaled-image`) |
+| `g_upscale` | the display camera's copy to the window |
+| `g_gap` | `gpu_ms` minus the sum of the segments (between views, idle) |
+
+`g_frames` counts frames with readable timestamps, `g_bad` frames with a negative or
+missing interval (dropped). Every tenth window adds `frame_gpu_views` lines per camera
+(`cam=` order, `kind=3d|2d`).
+
+Counts (means per render frame): `d_opaque`, `d_alpha`, `d_shadow`, `d_transp`, `d_ui` are
+the phase items (draw groups after batching) per pass; `shadow_views` the shadow views;
+`vis` visible meshes of the 3D cameras, `casters` shadow casters of the cascades,
+`views3d` 3D views. Per second: `mesh_up_s` and `mesh_kb_s` mesh asset changes (each one is
+an upload to the GPU), `img_up_s` and `img_kb_s` the same for images.
+
+### GPU markers and Metal
+
+The start line `frame_split version=1 backend=... adapter=... timestamp_query=...
+inside_encoders=... inside_passes=... gpu_markers=on|off reason=...` names what the adapter
+supports. A marker is an empty compute pass with a beginning timestamp, so it needs only
+`TIMESTAMP_QUERY`, which Metal on Apple GPUs has; the shadow cascades use the render pass
+descriptor's timestamps. Without the feature the line says `gpu_markers=off reason=...` and
+`frame_stats` says `gpu=off`; the CPU split is unchanged. `GRID_FRAME_GPU=0` turns the
+markers off. They run only while the counter is shown (`gpu=hidden` otherwise).
+
+Bevy's `RenderDiagnosticsPlugin` measures passes with `TIMESTAMP_QUERY_INSIDE_PASSES`,
+which Metal lacks, and on macOS Bevy skips encoder timestamps near present
+(bevy#22257, flicker), so on the Mac it gives no GPU pass times. The frame split avoids
+both: no timestamps inside passes, and on macOS no marker after the last pass of the frame
+(`near_present_marker=false`), so there `g_upscale` and the tail of `gpu_ms` are not measured.
+
+### Cost
+
+The CPU split reads `Instant::now()` about 20 times per frame and takes an uncontended mutex
+per point. While the counter is shown, the markers add one empty compute pass per marker
+(two per frame, four or five per 3D view, three per display view), the cascades' pass
+timestamps, and one query resolve with a readback of at most 2 KiB per frame (a ring of three).
+
+### Windows check (RTX 4070, Vulkan, 1280x800 window, Fifo at 165 Hz)
+
+`tools/frame_split_smoke.ps1` (interactive window, autopilot), means over the driving windows:
+
+| run | fps | avg | main (fixed) | outside | render | r_meshes | r_encode | GPU | mesh uploads/s |
+|---|---|---|---|---|---|---|---|---|---|
+| Detroit derby route_8, 12 cars, 720 rows | 61.2 | 17.37 | 11.44 (4.41) | 5.93 | 13.78 | 3.12 | 5.87 | 3.16 | 5369 |
+| Donington route_0, 12 cars, native | 60.0 | 16.86 | 9.42 (2.46) | 7.43 | 15.65 | 5.37 | 5.83 | 2.82 | 4793 |
+
+The parts sum to the frame as checked by the smoke. On this PC the frame is set by the CPU
+(render thread and main update); the GPU is busy under 3.2 ms per frame.

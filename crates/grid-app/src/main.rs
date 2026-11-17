@@ -113,6 +113,7 @@ mod pipeline_warmup;
 mod transition;
 mod frame_pacing;
 mod gpu_passes;
+mod frame_split;
 #[cfg(feature = "profile")]
 mod span_profile;
 mod ground_detail;
@@ -5413,6 +5414,7 @@ pub(crate) fn race_app(
     if gpu_passes::enabled() {
         gpu_passes::install(&mut app);
     }
+    frame_split::install(&mut app);
     mesh_stream::install(&mut app);
     shadow_cull::install(&mut app);
     light_clusters::install(&mut app, graphics.reflection_mode == 3);

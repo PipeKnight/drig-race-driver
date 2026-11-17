@@ -119,7 +119,10 @@ fn update(
     if keys.is_some_and(|k| k.just_pressed(KeyCode::F9)) {
         counter.shown = !counter.shown;
         counter.window = Window::default();
+        // The frame split's window starts with the counter's.
+        let _ = crate::frame_split::window_report(0.);
     }
+    crate::frame_split::set_shown(counter.shown);
     for (_, mut visibility) in &mut text {
         visibility.set_if_neq(if counter.shown {
             Visibility::Inherited
@@ -176,14 +179,19 @@ fn update(
     let res = sizes.map_or(String::new(), |(r, s)| {
         format!(" render={}x{} screen={}x{}", r.x, r.y, s.x, s.y)
     });
+    // Where the frame's time went (frame_split.rs, docs/PERFORMANCE.md).
+    let (split, detail) = crate::frame_split::window_report(stats.seconds);
     println!(
-        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} frames={} sim_ticks_per_s={rate}{res}{}",
+        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} frames={} sim_ticks_per_s={rate}{res}{}{split}",
         stats.fps,
         stats.mean_ms,
         stats.worst_ms,
         stats.frames,
         crate::perf_test::stats_suffix()
     );
+    for line in detail {
+        println!("{line}");
+    }
     for (mut t, _) in &mut text {
         t.0 = match sizes {
             Some((r, s)) => format!("{}\n{}x{} of {}x{}", stats.label(), r.x, r.y, s.x, s.y),

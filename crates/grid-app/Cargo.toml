@@ -10,6 +10,9 @@ grid-formats = { path = "../grid-formats" }
 grid-tools = { path = "../grid-tools" }
 grid-world = { path = "../grid-world" }
 bevy = { version = "=0.19.1", default-features = false, features = ["3d", "ui_bevy_render", "bevy_audio", "dds", "png", "pbr_clustered_decals"] }
+# Timestamp queries for the frame split (src/frame_split.rs); the version
+# Bevy 0.19.1 uses.
+wgpu = { version = "=29.0.4", default-features = false }
 
 # Android (P9, docs/ANDROID.md): GameActivity loads libgrid_android.so, built
 # by tools/build_android.ps1 with `cargo ndk ... build --lib`. src/lib.rs is
