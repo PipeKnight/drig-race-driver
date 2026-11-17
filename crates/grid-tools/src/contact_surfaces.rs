@@ -106,6 +106,13 @@ impl Surfaces {
         self.keys.get((token as usize).checked_sub(1)?).copied()
     }
 
+    /// Surface code and placement depth from the exact contact token
+    /// (73FC89: wheel+C0 -> mechanics+A4).
+    pub fn code_with_height_offset(&self, token: u32) -> Option<([u8; 4], f32)> {
+        let index = (token as usize).checked_sub(1)?;
+        Some((*self.keys.get(index)?, self.mechanics.get(index)?.height_offset))
+    }
+
     /// Select by the source packed-code policy; this does not establish which
     /// resource key a live car shape owns.
     pub fn physical(

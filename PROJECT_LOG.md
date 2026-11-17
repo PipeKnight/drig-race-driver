@@ -65,6 +65,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - G408 verifies ordinary spectator movement and flashes on Shibuya, two identical same-tick pause crops and restart/Flashback/replay lifecycle. See [crowd research](docs/CROWD_ANIMATION_RESEARCH.md).
 - G407 restores the authored nonreflective track surface normal map in ordinary rendering, verified in forward, deferred and Native DLAA. See [track surface](docs/SKY.md).
 - G406 fixes the source mesh coverage panic in deferred views by retaining its forward pass. Washington deferred and forward controls pass. See [static object materials](docs/STATIC_OBJECT_MATERIALS.md).
+- G414 restores the tyre mark raw wheel-local point and pre-lift spacing, checked on grass, asphalt and Flashback.
 - G398 and G400 restore travel-based skid seams and the original first quad/fade in live play and replay. Matched grass and mixed-field tests exercised both. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
 - G397 verifies cropped antenna coverage and the ordinary smoke tap. G403 verifies isolated Full smoke ordering on real shaft samples. Exact post-DLAA isolation and Reduced overlap remain open. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G395 uses the source contact normal and surface-angle test for live and replay tyre marks. Matched native DLAA grass control has two fewer premature angular terminations, with the same contact gaps. Original visual comparison and strip cross-section remain open. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).

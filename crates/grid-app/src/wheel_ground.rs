@@ -18,6 +18,8 @@ pub(crate) struct Wheel {
     /// wheel-ground motion and debris.
     pub point: Vec3,
     pub normal: Vec3,
+    /// Source skid anchor in world space, before the profile's normal lift.
+    pub skid_base: Vec3,
     /// Source contact normal for skid displacement, splitting and shading.
     pub skid_normal: Vec3,
     /// Rolling direction of the steered wheel in the body-up plane.
@@ -92,14 +94,14 @@ pub(crate) fn sample(runtime: &Runtime) -> [Wheel; 4] {
             steering: poses.map(|w| w.steering),
             effects: &effects,
         },
-        |token| runtime.surfaces().code(token),
+        |token| runtime.surfaces().code_with_height_offset(token),
     )
 }
 
 /// The wheel ground state of a replayed car (crate::replay_effects).
 pub(crate) fn replayed(
     car: &crate::replay::frame::Car,
-    code: impl Fn(u32) -> Option<[u8; 4]>,
+    surface: impl Fn(u32) -> Option<([u8; 4], f32)>,
 ) -> [Wheel; 4] {
     compose(
         &Source {
@@ -112,11 +114,14 @@ pub(crate) fn replayed(
             steering: car.wheels.map(|w| w.steering),
             effects: &car.effects,
         },
-        code,
+        surface,
     )
 }
 
-pub(crate) fn compose(source: &Source, code: impl Fn(u32) -> Option<[u8; 4]>) -> [Wheel; 4] {
+fn compose(
+    source: &Source,
+    surface: impl Fn(u32) -> Option<([u8; 4], f32)>,
+) -> [Wheel; 4] {
     let pose = source.pose;
     let origin = pose.w_axis.truncate();
     let velocity = source.velocity;
@@ -127,18 +132,21 @@ pub(crate) fn compose(source: &Source, code: impl Fn(u32) -> Option<[u8; 4]>) ->
         let token = e.token;
         let radius = e.radius;
         let omega = e.omega;
-        let local = Vec3::from_array(source.anchor[i])
-            + Vec3::from_array(source.axis[i]) * source.displacement[i];
-        // Mark/emitter point: the wheel centre lowered by its radius in the
-        // car frame, then to world, like 73F860 (no track probe) [D].
+        let anchor = Vec3::from_array(source.anchor[i]);
+        let displacement = source.displacement[i];
+        let local = anchor + Vec3::from_array(source.axis[i]) * displacement;
         let point = pose.transform_point3(local - Vec3::Y * radius);
+        let (code, depth) = surface(token).unwrap_or((*b"\0\0\0\0", 0.));
+        // 73FC1F..73FCC0 adjusts only local Y before the world transform.
+        let mut skid_local = anchor;
+        skid_local.y = ((anchor.y + displacement) - radius) + depth;
+        let skid_base = pose.transform_point3(skid_local);
         let normal = pose.transform_vector3(Vec3::Y).normalize_or(Vec3::Y);
         let yaw = source.steering[i][1].atan2(source.steering[i][0]);
         let heading = pose.transform_vector3(Quat::from_rotation_y(yaw) * Vec3::Z);
         let forward = (heading - normal * heading.dot(normal)).normalize_or(heading);
         let side = normal.cross(forward);
         let contact_velocity = velocity + spin.cross(point - origin);
-        let code = code(token).unwrap_or(*b"\0\0\0\0");
         let planar = contact_velocity - normal * contact_velocity.dot(normal);
         let side_factor = if planar.length() > 1e-3 {
             1. - planar.normalize().dot(forward).abs().min(1.)
@@ -150,6 +158,7 @@ pub(crate) fn compose(source: &Source, code: impl Fn(u32) -> Option<[u8; 4]>) ->
             code,
             point,
             normal,
+            skid_base,
             skid_normal: Vec3::from_array(e.contact_normal),
             forward,
             velocity: contact_velocity,
