@@ -31,8 +31,6 @@ pub struct PropBox {
     /// Contact impulse limit written to contact +0x3C: the shape behaviour's
     /// threshold for an armed breakable box, otherwise FLT_MAX.
     pub limit: f32,
-    /// Broken boxes no longer collide.
-    pub enabled: bool,
     /// A static (`infMass`) shape of the entity's damage state: off until
     /// the entity breaks (`dynamic_props`; the close-drift flag's base).
     pub damaged: bool,
@@ -50,6 +48,31 @@ enum Shape {
 #[derive(Clone)]
 pub struct Props {
     pub boxes: std::sync::Arc<Vec<PropBox>>,
+    /// Collision switch per box: broken boxes stop colliding, the damage
+    /// state's static boxes start. Its own list, so that a break copies one
+    /// byte per box for each car's track, not every box (F842).
+    pub enabled: std::sync::Arc<Vec<bool>>,
+}
+
+impl Props {
+    /// Boxes as read: every box collides except the damage states' ones.
+    pub fn new(boxes: Vec<PropBox>) -> Self {
+        Self {
+            enabled: std::sync::Arc::new(boxes.iter().map(|b| !b.damaged).collect()),
+            boxes: std::sync::Arc::new(boxes),
+        }
+    }
+
+    /// Switch a break's boxes: the intact boxes stop colliding, the damage
+    /// state's static boxes start.
+    pub fn disable(&mut self, boxes: &[usize]) {
+        let enabled = std::sync::Arc::make_mut(&mut self.enabled);
+        for &k in boxes {
+            if let (Some(on), Some(b)) = (enabled.get_mut(k), self.boxes.get(k)) {
+                *on = b.damaged;
+            }
+        }
+    }
 }
 
 /// Row-vector placement: translation in elements 12..14.
@@ -104,7 +127,6 @@ impl PropBox {
             positions,
             entity: None,
             limit: f32::MAX,
-            enabled: true,
             damaged: false,
             shape: Shape::Box(BoxShape {
                 matrix,
@@ -251,7 +273,6 @@ impl Props {
                     for s in added.shapes.iter().filter(|s| !s.phantom) {
                         let mut b = entity_box(template.clone(), &e.transform, s)?;
                         b.entity = Some(index);
-                        b.enabled = false;
                         b.damaged = true;
                         damaged.push(b);
                     }
@@ -268,9 +289,7 @@ impl Props {
         if boxes.is_empty() || boxes.len() > MAX_BOXES {
             return Err(format!("unsupported entity collision box count {}", boxes.len()).into());
         }
-        Ok(Self {
-            boxes: std::sync::Arc::new(boxes),
-        })
+        Ok(Self::new(boxes))
     }
 
     /// Diagnostic: deepest penetration of any point inside any box, as
@@ -351,7 +370,7 @@ impl Props {
             if contacts.len() >= capacity && directions.is_none() {
                 break;
             }
-            if !b.enabled
+            if !self.enabled[index]
                 || (0..3).any(|j| bounds[0][j] > b.bounds[j + 3] || bounds[1][j] < b.bounds[j])
             {
                 continue;
@@ -420,7 +439,7 @@ impl Props {
                 break;
             }
             let b = &self.boxes[index];
-            if !b.enabled
+            if !self.enabled[index]
                 || (0..3).any(|j| bounds[0][j] > b.bounds[j + 3] || bounds[1][j] < b.bounds[j])
             {
                 continue;
@@ -604,6 +623,39 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn disable_copies_the_switches_and_shares_the_boxes() {
+        use std::sync::Arc;
+        let boxes: Vec<PropBox> = (0..6)
+            .map(|k| PropBox {
+                template: format!("box{k}"),
+                bounds: [0.; 6],
+                positions: vec![[k as f32; 3]; 8],
+                entity: None,
+                limit: f32::MAX,
+                damaged: k % 3 == 2,
+                shape: Shape::Box(BoxShape {
+                    matrix: [[0.; 4]; 4],
+                    half: [1.; 3],
+                    margin: 0.,
+                }),
+            })
+            .collect();
+        let shared = Props::new(boxes);
+        assert_eq!(*shared.enabled, [true, true, false, true, true, false]);
+        // A car's track and a rollback copy share both lists.
+        let mut car = shared.clone();
+        car.disable(&[0, 2, 4, 99]);
+        assert_eq!(*car.enabled, [false, true, true, true, false, false]);
+        assert_eq!(*shared.enabled, [true, true, false, true, true, false]);
+        assert!(Arc::ptr_eq(&car.boxes, &shared.boxes));
+        // An unshared switch list changes in place.
+        let before = Arc::as_ptr(&car.enabled);
+        car.disable(&[1]);
+        assert_eq!(Arc::as_ptr(&car.enabled), before);
+        assert_eq!(*car.enabled, [false, false, true, true, false, false]);
+    }
+
+    #[test]
     fn box_index_candidates_cover_every_overlap_in_order() {
         // Deterministic pseudo-random boxes over a 600 m square, one with NaN bounds.
         let mut seed = 0x1234_5678u32;
@@ -620,7 +672,6 @@ mod tests {
                     positions: Vec::new(),
                     entity: None,
                     limit: f32::MAX,
-                    enabled: true,
                     damaged: false,
                     shape: Shape::Box(BoxShape {
                         matrix: [[0.; 4]; 4],
@@ -696,9 +747,7 @@ mod tests {
             let basic: Vec<PropBox> =
                 props.boxes.iter().filter(|b| b.entity.is_none()).cloned().collect();
             assert!(basic.len() > 300, "{path} {}", basic.len());
-            let basic = Props {
-                boxes: std::sync::Arc::new(basic),
-            };
+            let basic = Props::new(basic);
             let line = crate::ai_driver::Line::load_route(root, &route).unwrap();
             // The line every 0.5 m or so, 0.5 m up.
             let points = line.points();

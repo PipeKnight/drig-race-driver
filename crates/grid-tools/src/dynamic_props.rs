@@ -2057,19 +2057,20 @@ impl PropWorld {
             .props_mut()
             .ok_or(Error("dynamic props require route props"))?;
         let boxes = std::sync::Arc::make_mut(&mut props.boxes);
+        let enabled = std::sync::Arc::make_mut(&mut props.enabled);
         for (i, b) in self.catalog.breakables.iter().enumerate() {
             for (&k, &(limit, _)) in b.intact.iter().zip(&b.limits) {
-                let prop = boxes
-                    .get_mut(k)
-                    .ok_or(Error("breakable prop box out of range"))?;
+                let (Some(prop), Some(on)) = (boxes.get_mut(k), enabled.get_mut(k)) else {
+                    return Err(Error("breakable prop box out of range"));
+                };
                 prop.limit = limit;
-                prop.enabled = !self.broken[i];
+                *on = !self.broken[i];
             }
             for &k in &b.damaged {
-                let prop = boxes
+                let on = enabled
                     .get_mut(k)
                     .ok_or(Error("breakable prop box out of range"))?;
-                prop.enabled = self.broken[i];
+                *on = self.broken[i];
             }
         }
         Ok(())
@@ -2993,12 +2994,7 @@ impl PropWorld {
     /// the damage state's static boxes start.
     pub fn disable(track: &mut Track, boxes: &[usize]) {
         if let Some(props) = track.props_mut() {
-            let all = std::sync::Arc::make_mut(&mut props.boxes);
-            for &k in boxes {
-                if let Some(b) = all.get_mut(k) {
-                    b.enabled = b.damaged;
-                }
-            }
+            props.disable(boxes);
         }
     }
 
@@ -3769,7 +3765,7 @@ mod tests {
             // The damage state: the static base's two shapes as route boxes,
             // off until the break.
             assert_eq!(b.damaged.len(), 2);
-            assert!(b.damaged.iter().all(|&k| props.boxes[k].damaged && !props.boxes[k].enabled));
+            assert!(b.damaged.iter().all(|&k| props.boxes[k].damaged && !props.enabled[k]));
             assert_eq!(b.bodies, ["close_drift_flag_obj_02_rigidbody", "close_drift_flag_obj_01_rigidbody"]);
             assert_eq!(b.static_pieces, [false, true]);
             // The pole collides with nothing and floats on its spring.

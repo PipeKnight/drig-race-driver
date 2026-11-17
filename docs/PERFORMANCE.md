@@ -2823,3 +2823,60 @@ So the cost is the maintenance itself (submission triage, freeing resources drop
 callbacks), not the extra call; dropping the poll only moves it. The change was not kept. A real
 gain needs less to maintain: fewer buffers and bind groups created and dropped per frame
 (item 7) and a profile of `Device::maintain`.
+
+## Main thread: prop breaks copy switches, not boxes (F842)
+
+17 November 2026, Claude Code (session main-thread). Item 5 of the plan above, the worst
+frames: a prop break cost up to 12 ms on the main thread in one tick.
+
+### What the spike was
+
+`Props.boxes` (`entity_geometry.rs`) is an `Arc<Vec<PropBox>>` shared copy-on-write by the
+twelve cars' track copies and grid-app's flashback checkpoints. A break switched its boxes
+off with `Arc::make_mut`, so the first break after a checkpoint copied the whole box list
+(each box holds a template name, eight corner positions and a shape) once per car. Temporary
+counters in `PropWorld::disable` measured 12 copies of 3,621 boxes = 8.1 ms at Long Beach and
+12 copies of 1,664 boxes = 3.3 ms in the Detroit derby; a second break before the next
+checkpoint changed the now unshared lists in place (1 us). The headless `grid-opponent-race`
+never shares the lists, so it never showed the copy. F839's shared disabled-box list changed
+the loop around the copy, not the copy, and gave nothing.
+
+### Fix
+
+| change | where | effect |
+|---|---|---|
+| The collision switch moves out of `PropBox` into its own shared list, `Props.enabled: Arc<Vec<bool>>`. `Props::new` turns every box on except the damage states' static ones, `Props::disable` turns a break's intact boxes off and its damage boxes on, the queries read `enabled[index]`. The box list stays shared; a break copies one byte per box for each car. | `entity_geometry.rs`, `PropWorld::arm` / `disable` (`dynamic_props.rs`), three probe bins | the copying call 6.1-12.1 ms -> under 0.5 ms |
+
+A draft that copied once for all cars per break (`disable_all`) only went from 4.2 to 2.9 ms on
+noisy runs and was dropped.
+
+### Identity
+
+`grid-opponent-race`, `GRID_THREADS=1` against the pool: 12-car, 12-car-df and derby-df match
+`tools/identity.tsv`; with `GRID_DYNAMIC_PROPS=1` the four runs, including the 11,200-tick derby
+(4 breaks, 48 pieces, `4818bd38…`), hash the same sequential and parallel and as in F839. Unit
+test `disable_copies_the_switches_and_shares_the_boxes` checks that a car's switch copy leaves
+the shared switches and boxes alone and that an unshared list changes in place.
+
+### A/B
+
+In-app, `frame_split_smoke.ps1` (native 1280x800 window, `GRID_PERF_TIMING=1`), before = F839
+with the uncommitted drafts and slow-frame attribution, after = the same plus this change; two
+alternating pairs per track, idle machine (no cargo, rustc or other grid process at the start
+and end of every run). Long Beach (`race-long-beach.ini`, two breaks at ticks 1295-1296):
+
+| pair | `PropDisable` slowest call ms | `max.Commit` ms | `worst_tick` ms | `max.DriveTick` ms | max frame in the break's window ms |
+|---|---|---|---|---|---|
+| 1 before / after | 6.10 / < 0.5 | 6.40 / 1.42 | 7.67 / 3.01 | 8.66 / 4.21 | 18.5 / 14.3 |
+| 2 before / after | 12.06 / < 0.5 | 12.43 / 1.20 | 13.87 / 3.84 | 15.19 / 5.34 | 29.2 / 25.5 |
+
+`PropDisable` per call (mean of the two) 3.05 / 6.03 ms before, 0.008 / 0.010 ms after; in the
+derby 0.004-0.006 ms after (its breaks fall after the last timing print of the before runs).
+Four of the eight runs, of both variants, ran locked near 60 fps for the whole run (16.7 ms
+frames, `outside_ms` 9-10 ms), the others at 84-127 fps, so whole-run fps and frame counts are
+not compared here.
+
+### Image
+
+No render code reads the switches and the simulation is identical, so the image cannot change;
+no captures were made.

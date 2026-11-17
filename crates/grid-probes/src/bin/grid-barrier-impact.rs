@@ -391,7 +391,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 if (0..3).all(|j| p[j] >= pb.bounds[j] - 3. && p[j] <= pb.bounds[j + 3] + 3.) {
                                     eprintln!(
                                         "trace box {i} {} entity={:?} enabled={} bounds={:?} positions={:?}",
-                                        pb.template, pb.entity, pb.enabled, pb.bounds, pb.positions
+                                        pb.template, pb.entity, props.enabled[i], pb.bounds, pb.positions
                                     );
                                 }
                             }

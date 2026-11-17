@@ -351,7 +351,7 @@ fn sweep(
     }
     let props = Props::read_route(root, &route)?;
     for (index, b) in props.boxes.iter().enumerate() {
-        if !b.enabled || b.positions.len() != 8 {
+        if !props.enabled[index] || b.positions.len() != 8 {
             continue;
         }
         box_triangles(&b.positions, Source::Prop, index, &mut world);

@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if near {
             println!(
                 "box {i} {} entity={:?} enabled={} bounds={:?}",
-                b.template, b.entity, b.enabled, b.bounds
+                b.template, b.entity, props.enabled[i], b.bounds
             );
             if std::env::var_os("GRID_BOX_CORNERS").is_some() {
                 println!("corners {i} {:?}", b.positions);
