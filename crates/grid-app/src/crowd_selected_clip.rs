@@ -103,7 +103,7 @@ fn attribute<'a>(e: &Element<'a>, key: &str) -> AnyResult<Option<&'a str>> {
     }
     Ok(value)
 }
-fn field<'a>(fields: &'a Fields, key: &str) -> AnyResult<Option<&'a str>> {
+pub(crate) fn field<'a>(fields: &'a Fields, key: &str) -> AnyResult<Option<&'a str>> {
     let mut found = fields.iter().filter(|(k, _)| k == key);
     let value = found.next().map(|(_, v)| v.as_str());
     if found.next().is_some() {
@@ -179,6 +179,23 @@ fn inputs(
     }
     Ok(result)
 }
+pub(crate) fn performance_index(name: &str) -> Option<u32> {
+    PLAYER_PERFORMANCE
+        .iter()
+        .position(|value| value.eq_ignore_ascii_case(name))
+        .map(|index| index as u32)
+}
+
+pub(crate) fn selected_prop(
+    metadata: &crowd_population::Prepared<'_, '_, '_, '_>,
+    template: &Template,
+) -> AnyResult<&'static str> {
+    inputs(metadata.definitions, &template.map_fields, None)?
+        .into_iter()
+        .find_map(|(factor, value)| (factor == "Prop").then_some(value))
+        .ok_or_else(|| "selected actor prop factor absent".into())
+}
+
 pub(crate) struct Selected<'a> {
     pub candidate: Candidate<'a>,
     pub raw_ordinal: usize,

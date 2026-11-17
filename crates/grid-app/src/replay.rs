@@ -23,6 +23,9 @@
 //! presentation keeps computing and the replay overwrites it last, so
 //! leaving the replay shows the live race again unchanged.
 pub mod director;
+pub(crate) mod flag_demand;
+pub(crate) mod flag_phase;
+pub(crate) mod flags;
 pub mod frame;
 pub mod player;
 pub mod stream;
@@ -35,7 +38,10 @@ use bevy::{
     prelude::*,
 };
 use frame::{Car, Decoder, Deformation, Encoder, Pose, Props, Shared, Snapshot, Wheel, WheelGeometry};
-use grid_tools::source_vehicle::{DELTA, Runtime};
+use grid_tools::{
+    crowd_flags::InZone,
+    source_vehicle::{DELTA, Runtime},
+};
 
 /// [D] sample rate of the original's replay stream.
 pub const SAMPLE_HZ: u64 = 30;
@@ -211,6 +217,12 @@ struct Shots {
     shots: Vec<director::Shot>,
 }
 
+struct FlagActor {
+    role: grid_tools::crowd_flags::Role,
+    clips: flag_phase::Clips,
+    state: flag_phase::State,
+}
+
 #[derive(Resource)]
 pub struct Replay {
     pub stream: stream::Stream,
@@ -219,6 +231,10 @@ pub struct Replay {
     recorded: Option<(u64, u64)>,
     /// The last (segment, tick) whose lap events were read.
     seen: Option<(u64, u64)>,
+    flag_cues: flags::Lane,
+    flag_demand: flag_demand::History,
+    flag_actors: Vec<FlagActor>,
+    flag_tick: Option<(u64, u64)>,
     /// Player lap starts, ticks.
     laps: Vec<u64>,
     pub director: Option<director::Director>,
@@ -269,6 +285,10 @@ impl Replay {
             decoder: Decoder::default(),
             recorded: None,
             seen: None,
+            flag_cues: flags::Lane::default(),
+            flag_demand: flag_demand::History::default(),
+            flag_actors: Vec::new(),
+            flag_tick: None,
             laps: Vec::new(),
             director,
             entries: Vec::new(),
@@ -318,6 +338,15 @@ impl Replay {
         }
         self.recorded = Some((segment, tick));
         self.seen = Some((segment, tick));
+        let states: Vec<_> = self.flag_actors.iter()
+            .map(|actor| self.flag_state_at(actor, tick).unwrap_or_default())
+            .collect();
+        for (actor, state) in self.flag_actors.iter_mut().zip(states) {
+            actor.state = state;
+        }
+        self.flag_tick = Some((segment, tick));
+        self.flag_cues.cut(segment, tick);
+        self.flag_demand.cut(segment, tick);
         self.laps.retain(|&t| t <= tick);
         self.entries.retain(|&(t, _)| t <= tick);
         self.last_target = self
@@ -377,9 +406,151 @@ impl Replay {
         self.decoder = Decoder::default();
         self.recorded = None;
         self.seen = None;
+        self.flag_cues = flags::Lane::default();
+        self.flag_demand = flag_demand::History::default();
+        self.flag_tick = None;
+        for actor in &mut self.flag_actors {
+            actor.state = flag_phase::State::default();
+        }
         self.laps.clear();
         self.entries.clear();
         self.last_target = None;
+    }
+
+    fn record_flag_cues(&mut self, segment: u64, tick: u64, zone: InZone) {
+        let frames = self.stream.frames();
+        let oldest = (!frames.is_empty()).then(|| self.stream.tick(frames.start));
+        let newest = frames.last().map(|index| self.stream.tick(index));
+        // The push that fills the spool can still accept the last frame.
+        let recordable = !self.stream.full() || newest.is_some_and(|last| tick <= last);
+        let previous = self.flag_cues.live().filter(|view| view.segment == segment)
+            .map(|view| view.zone);
+        self.flag_cues.observe(segment, tick, zone, recordable, oldest);
+        self.flag_demand.record(segment, tick, recordable, oldest);
+        if !self.flag_actors.is_empty() && self.flag_tick != Some((segment, tick)) {
+            let prior_tick = self.flag_tick.replace((segment, tick));
+            if prior_tick.is_none_or(|(previous_segment, previous_tick)| {
+                previous_segment != segment || previous_tick > tick
+            }) {
+                for actor in &mut self.flag_actors {
+                    actor.state = flag_phase::State::default();
+                }
+                return;
+            }
+            let cues: Vec<_> = previous.into_iter().flat_map(|old| old.edges(zone)).collect();
+            let demand = self.flag_demand.live()
+                .map_or_else(flag_demand::Demand::default, |sample| sample.demand);
+            for actor in &mut self.flag_actors {
+                let phase = actor.state.frame(&actor.clips).phase;
+                actor.state.step(&actor.clips, actor.role, demand, &cues);
+                let next = actor.state.frame(&actor.clips).phase;
+                if phase != next {
+                    println!("crowd_flag_phase role={:?} segment={segment} tick={tick} from={phase:?} to={next:?}", actor.role);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn install_crowd_flag_profiles(
+        &mut self,
+        profiles: Vec<(grid_tools::crowd_flags::Role, flag_phase::Clips)>,
+    ) {
+        self.flag_actors = profiles.into_iter().map(|(role, clips)| FlagActor {
+            role, clips, state: flag_phase::State::default(),
+        }).collect();
+        self.flag_tick = None;
+    }
+
+    pub(crate) fn crowd_flag_frame(
+        &self,
+        role: grid_tools::crowd_flags::Role,
+    ) -> Option<flag_phase::Frame> {
+        let actor = self.flag_actors.iter().find(|actor| actor.role == role)?;
+        let state = if self.session.is_some() {
+            // An expired input prefix cannot reconstruct the active phase.
+            // The original authored idle is the display fallback in that case.
+            self.crowd_flag_replay_tick()
+                .and_then(|tick| self.flag_state_at(actor, tick))
+                .unwrap_or_default()
+        } else {
+            actor.state
+        };
+        Some(state.frame(&actor.clips))
+    }
+
+    fn flag_state_at(&self, actor: &FlagActor, tick: u64) -> Option<flag_phase::State> {
+        let cues = self.flag_cues.recorded(tick)?;
+        let demand = self.flag_demand.recorded(tick)?;
+        if cues.segment != demand.segment
+            || cues.tick != demand.shown.tick
+            || cues.prefix_missing
+            || demand.prefix_missing
+            || cues.initial_zone != InZone::default()
+        {
+            return None;
+        }
+        let first = demand.samples().next()?;
+        if first.tick != cues.initial_tick {
+            return None;
+        }
+        let seed = flag_phase::Seed {
+            tick: first.tick, state: flag_phase::State::default(), demand: first.demand,
+        };
+        flag_phase::replay_at(
+            &actor.clips, actor.role, seed, tick, cues.edges(), demand.samples(),
+        ).map(|shown| shown.state)
+    }
+
+    pub(crate) fn restore_crowd_flag_seed(&mut self, driving: &crate::Driving) {
+        self.flag_cues.restore_missing_seed(
+            driving.segment,
+            driving.runtime.ticks,
+            crowd_flag_zone(driving),
+        );
+    }
+
+    #[allow(dead_code, reason = "Cue view for the future authored marshal pose consumer")]
+    pub(crate) fn crowd_flag_cues(&self) -> Option<flags::View<'_>> {
+        if self.session.is_none() {
+            return self.flag_cues.live();
+        }
+        self.flag_cues.recorded(self.crowd_flag_replay_tick()?)
+    }
+
+    /// Records the completed normal camera selection for the next fixed tick.
+    /// Its replay counterpart only reads the saved view history.
+    pub(crate) fn publish_crowd_flag_demand(
+        &mut self,
+        segment: u64,
+        tick: u64,
+        demand: flag_demand::Demand,
+    ) {
+        if self.session.is_none() {
+            self.flag_demand.publish(segment, tick, demand);
+        }
+    }
+
+    #[allow(dead_code, reason = "Called by the future authored marshal pose consumer")]
+    pub(crate) fn crowd_flag_replay_demand(&self) -> Option<flag_demand::View<'_>> {
+        self.flag_demand.recorded(self.crowd_flag_replay_tick()?)
+    }
+
+    #[allow(dead_code, reason = "Called by the future authored marshal pose consumer")]
+    pub(crate) fn live_crowd_flag_demand(&self) -> Option<flag_demand::Sample> {
+        if self.session.is_some() {
+            return None;
+        }
+        self.flag_demand.live()
+    }
+
+    fn crowd_flag_replay_tick(&self) -> Option<u64> {
+        let session = self.session.as_ref()?;
+        let frames = self.stream.frames();
+        if frames.is_empty() || !session.player.time.is_finite() {
+            return None;
+        }
+        let tick = (session.player.time / f64::from(DELTA)).max(0.0).floor() as u64;
+        Some(tick.clamp(self.stream.tick(frames.start), self.stream.tick(frames.end - 1)))
     }
 
     /// Records the cars and props if `tick` is due (see [`sample_due`]).
@@ -851,6 +1022,18 @@ pub fn install(app: &mut App, root: &std::path::Path, route: &grid_tools::route:
         );
 }
 
+fn crowd_flag_zone(driving: &crate::Driving) -> InZone {
+    let Some(opponents) = &driving.opponents else {
+        return InZone::default();
+    };
+    let Some(flags) = &opponents.flags else {
+        return InZone::default();
+    };
+    let pose = driving.runtime.pose();
+    let arc = opponents.ai.line.arc([pose[12], pose[13], pose[14]]);
+    InZone::sample(flags, f64::from(arc))
+}
+
 /// Records after the fixed tick (and the damage parts' tick).
 pub fn record(
     mut replay: ResMut<Replay>,
@@ -886,6 +1069,13 @@ pub fn record(
         |car| damage.as_ref().map_or_else(Vec::new, |d| d.shown_parts(car)),
         shots,
     );
+    if replay.session.is_none() {
+        replay.record_flag_cues(
+            driving.segment,
+            driving.runtime.ticks,
+            crowd_flag_zone(&driving),
+        );
+    }
 }
 
 fn input(actions: &Actions) -> player::Input {

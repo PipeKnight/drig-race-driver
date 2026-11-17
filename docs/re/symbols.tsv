@@ -3608,6 +3608,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00ACEB80	HlaWrapperConstruct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:855		[D]		0x00ACEB80. Its delegate+4 starts null.
 0x00AD1040		func	not ported	docs/DYNAMIC_PROPS_RESEARCH.md:331		[D]		`0xAD1040` as a separate scale.
 0x00AD12B0		func	not ported	docs/DISCIPLINES.md:558	F681	[V]		0xAD12B0) and its constraints (+0x94, 0x7D3130). `remove_joint` (0xAD9260) is the pool release
+0x00AD3EE0	link_cloth_solver_wrapper	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G404	[D]		Links the native wrapper, solver and group list after allocation.
 0x00AD43D0	delegate_query_interface_eax_passthrough	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:800		[D]		The selector then loads resource=*[animationData+0x7C] and calls `0x00AD43D0`
 0x00AD4510	HlaNumericSelectionNodeBuild	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G377	[D]		numeric node cases use same constructors
 0x00AD4780	HlaXmlSelectionNodeBuild	func	crates/grid-tools/src/crowd_selection.rs:135 grid-tools::crowd_selection (in parse_node)			[D]		AD4780 converts childless Random to Empty before parsing distribution.
@@ -3863,7 +3864,10 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00B4B0A0		func	crates/grid-world/src/continuous.rs:263 grid-world::continuous (in ray_cast) ; crates/grid-world/src/round_contacts.rs:5 grid-world::round_contacts ; crates/grid-world/src/convex_distance.rs:351 grid-world::convex_distance::Hull	docs/BOX_CONTACTS.md:280	F462	[D]		B4B0A0's support carries the sphere's radius.
 0x00B5DB70	texture_resource_type_query	func	not ported	docs/ORIGINAL_POSTPROCESS.md:237		[D]		not a function entry in the master analysis; Static type query `0x00B5DB70` returns descriptor `0x00F60EB8`; canonical
 0x00B64CA7		label	not ported	docs/LAMP_REFLECTOR_RESEARCH.md:61				inside 0x00B64C50; Further read-only research keeps the delivered9e160be pilot unchanged. The glass part-state vertex program is byte-identical to the pod vertex program (binar...
+0x00B686E0	write_cloth_pin_target	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G404	[D]		Stores native pin target at particle +0x20.
 0x00B692B0		func	not ported	docs/BODY_SLEEPING.md:261				B692B0 creates bodies and sleeps them immediately; owner unidentified.
+0x00B6A8B0	update_cloth_particle_vector	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G404	[D]		Indexes the 96-byte particle array and writes its vector at +0.
+0x00B6DFC0	run_cloth_solver_kernel	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md	G404	[D]		Forwards the first binary32 stack parameter to the indexed particle workers.
 0x00B70000		func	not ported	docs/PHYSICAL_CONTACT_HANDOFF.md:62 ; docs/PHYSICAL_SCHEDULING.md:46	F152			not a function entry in the master analysis; The wrapper now requires the script's completion marker and absence of `REPORT SCRIPT ERROR`, retaining logs and partial evidence on failure. An optional fun...
 0x00B722D0	raw_table_field_layout	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:991		[A]		parsing a pose operator. Source constructor0x00B72470 ->0x00B722D0 builds the packed
 0x00B72470	raw_table_construct	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md		[A]		Retains supplied rawAnim schema and initializes table vectors; callsB722D0.
