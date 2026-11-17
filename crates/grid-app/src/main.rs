@@ -7189,6 +7189,10 @@ fn restart(driving: &mut Driving, trial: Option<&mut time_trial::Trial>) {
         }
         let positions = opponents.positions(&driving.runtime);
         opponents.standings.reset(&opponents.ai.line, &positions);
+        if let Some(flags) = &mut opponents.flags {
+            flags.reset();
+        }
+        opponents.yellow_flag = false;
         opponents.split_times.clear();
         opponents.pacing.reset(&opponents.ai.line, &positions);
         opponents.after_finish = None;

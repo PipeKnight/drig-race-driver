@@ -373,6 +373,7 @@ fn restart_race_resets_cars_damage_ai_timing_and_props() {
             );
             // The attempt really left damage, contacts or broken props behind.
             assert!(damaged || props > 0 || car_contacts > 0);
+            assert!(o.flags.as_ref().unwrap().raised().0);
             assert_ne!(digest(&app), start);
         }
         keys(&mut app).release(KeyCode::KeyW);
@@ -414,6 +415,9 @@ fn restart_race_resets_cars_damage_ai_timing_and_props() {
             assert!(d.notices.is_empty() && d.failure.is_none());
             // The restart frame's own tick already ran (one countdown tick).
             assert_eq!(d.runtime.ticks, 1);
+            let o = d.opponents.as_ref().unwrap();
+            assert_eq!(o.flags.as_ref().unwrap().raised(), (false, false));
+            assert!(!o.yellow_flag);
         }
         // A fresh race given the same input: one frame without keys, then
         // throttle and steering held.
@@ -424,6 +428,19 @@ fn restart_race_resets_cars_damage_ai_timing_and_props() {
         drive_to(&mut app, RUN);
         drive_to(&mut fresh, RUN);
         assert_eq!(digest(&app), digest(&fresh));
+        let raised = |app: &App| {
+            app.world()
+                .resource::<Driving>()
+                .opponents
+                .as_ref()
+                .unwrap()
+                .flags
+                .as_ref()
+                .unwrap()
+                .raised()
+        };
+        assert_eq!(raised(&app), (true, false));
+        assert_eq!(raised(&app), raised(&fresh));
     });
 }
 
