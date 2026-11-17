@@ -338,6 +338,11 @@ impl RaceFlags {
         }
     }
 
+    /// Restart the same event with its original rules, line and car count.
+    pub fn reset(&mut self) {
+        *self = Self::on_line(self.rules.clone(), self.length, self.open, self.entries.len());
+    }
+
     pub fn rules(&self) -> &RuleSet {
         &self.rules
     }
@@ -596,6 +601,28 @@ mod tests {
         // 10 s after the last raise the flag is down.
         run(&mut flags, 10.5, &state(&[moving, moving], 500.));
         assert!(!flags.yellow(1000.));
+    }
+
+    #[test]
+    fn restart_rearms_flags_and_restarts_incident_timing() {
+        let mut flags = RaceFlags::on_line(RuleSet::single_race(), 3000., false, 1);
+        let cars = [car(1000., 0., 0.)];
+        let mut race = state(&cars, 15.);
+        race.chequered = true;
+        run(&mut flags, 11.1, &race);
+        assert_eq!(flags.raised(), (true, true));
+        assert!(flags.yellow(1000.));
+
+        flags.reset();
+        assert_eq!(flags.raised(), (false, false));
+        assert!(flags.top(0.).is_none() && flags.top(1000.).is_none());
+
+        let early = run(&mut flags, 9.9, &race);
+        let names: Vec<_> = early.iter().map(|raised| raised.flag.as_str()).collect();
+        assert_eq!(names, [GREEN_FLAG, CHEQUERED_FLAG]);
+        let incident = run(&mut flags, 1.2, &race);
+        assert_eq!(incident.len(), 1);
+        assert_eq!((incident[0].flag.as_str(), incident[0].car), (YELLOW_FLAG, Some(0)));
     }
 
     #[test]
