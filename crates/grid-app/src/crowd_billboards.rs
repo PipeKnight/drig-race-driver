@@ -61,6 +61,7 @@ pub(crate) struct Prepared {
     flash_cells: Vec<FlashCell>,
     actors: Vec<Option<ActorModel>>,
     walkers: Vec<Walker>,
+    skin_only: Vec<Row>,
 }
 fn field<'a>(fields: &'a population::Fields, name: &str) -> AnyResult<&'a str> {
     let mut found = fields.iter().filter(|(k, _)| k == name);
@@ -340,7 +341,7 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
     // Reserve the shared sample budget for paths first. Stationary actors can
     // fall back to a billboard where a walker has no authored impostor.
     let moving_groups = moving.len();
-    let mut walking_models = Vec::new();
+    let mut uncarded_models = Vec::new();
     let mut walkers = Vec::new();
     for (group, path_group) in metadata.groups.iter().zip(moving) {
         let group = group.source;
@@ -375,8 +376,8 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
         match model {
             Ok((model, rate)) => {
                 near_vertex_count += model.body.frame_vertices();
-                let index = walking_models.len();
-                walking_models.push(model);
+                let index = uncarded_models.len();
+                uncarded_models.push(model);
                 walkers.extend(
                     path_group
                         .actors
@@ -392,7 +393,72 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
             }),
         }
     }
+    // The same near-body budget covers the authored skins that have no
+    // fallback atlas entry. Prepare them before optional billboard upgrades.
+    let mut skin_only = Vec::new();
+    let mut prepared_skin_groups = std::collections::BTreeSet::new();
     for (index, g) in metadata.groups.iter().enumerate() {
+        let (Placements::Standing(points), population::Resolution::StaticTemplates(templates)) =
+            (&g.source.placements, &g.resolution)
+        else {
+            continue;
+        };
+        let [template, ..] = templates.as_slice() else {
+            continue;
+        };
+        let Some(variant) = template.variants.first() else {
+            continue;
+        };
+        if variant.billboard_stance.is_some() {
+            continue;
+        }
+        let model = (|| -> AnyResult<Option<ActorModel>> {
+            if !metadata.unpropped_standing_skin(template)? {
+                return Ok(None);
+            }
+            let (library, bank) = library
+                .as_ref()
+                .zip(animation_bank.as_ref())
+                .ok_or("missing standing skin animation library")?;
+            let colours = source_colours(variant)?;
+            let body = near::bake(
+                root,
+                template,
+                &metadata,
+                library,
+                bank,
+                near::Motion::StandingIdle,
+            )?
+            .ok_or("missing authored standing skin pose")?;
+            if near_vertex_count + body.frame_vertices() > NEAR_FRAME_VERTEX_LIMIT {
+                return Err("standing skin exceeds shared sample-vertex budget".into());
+            }
+            Ok(Some(ActorModel { body, colours }))
+        })();
+        match model {
+            Ok(Some(model)) => {
+                let material = uncarded_models.len();
+                near_vertex_count += model.body.frame_vertices();
+                uncarded_models.push(model);
+                skin_only.extend(points.iter().enumerate().map(|(ordinal, point)| Row {
+                    position: Vec3::from_array(point.position),
+                    orientation: point.orientation_pair,
+                    opaque: point.opaque_scalar,
+                    cell: point.cell,
+                    source: [index, ordinal],
+                    material,
+                    has_camera: false,
+                }));
+                prepared_skin_groups.insert(index);
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!("crowd skin for {}: {error}", template.map_name),
+        }
+    }
+    for (index, g) in metadata.groups.iter().enumerate() {
+        if prepared_skin_groups.contains(&index) {
+            continue;
+        }
         let (moving, reason) = match (&g.source.placements, &g.resolution) {
             (
                 Placements::Standing(points),
@@ -464,9 +530,13 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
     for walker in &mut walkers {
         walker.model += actors.len();
     }
-    actors.extend(walking_models.into_iter().map(Some));
+    for row in &mut skin_only {
+        row.material += actors.len();
+    }
+    actors.extend(uncarded_models.into_iter().map(Some));
     if rows.len() as u64
         + walkers.len() as u64
+        + skin_only.len() as u64
         + omitted.iter().map(|o| u64::from(o.records)).sum::<u64>()
         != u64::from(source.total_instances)
     {
@@ -519,6 +589,7 @@ fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {
         flash_cells,
         actors,
         walkers,
+        skin_only,
     })
 }
 fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
@@ -545,6 +616,10 @@ fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
         "crowd_population_moving walkers={} clock=race-or-replay",
         prepared.walkers.len()
     );
+    println!(
+        "crowd_population_standing_skins={}",
+        prepared.skin_only.len()
+    );
     for o in &prepared.omitted {
         println!(
             "crowd_population_unsupported group={:?} records={} moving={} reason={}",
@@ -554,7 +629,7 @@ fn install(app: &mut App, prepared: Prepared) -> AnyResult<()> {
             o.reason
         );
     }
-    if prepared.rows.is_empty() && prepared.walkers.is_empty() {
+    if prepared.rows.is_empty() && prepared.walkers.is_empty() && prepared.skin_only.is_empty() {
         return Ok(());
     }
     crowd_preview::install_shader(app)?;
@@ -961,6 +1036,13 @@ fn update_actors(
             candidates.push((distance, first_walker + index));
         }
     }
+    let first_skin = first_walker + prepared.walkers.len();
+    for (index, row) in prepared.skin_only.iter().enumerate() {
+        let distance = eye.distance_squared(row.position);
+        if distance <= ACTIVE_RANGE * ACTIVE_RANGE && models.0[row.material].is_some() {
+            candidates.push((distance, first_skin + index));
+        }
+    }
     candidates.sort_unstable_by(|(a, i), (b, j)| a.total_cmp(b).then(i.cmp(j)));
     candidates.truncate(NEAR_LIMIT);
     let selected = candidates
@@ -976,7 +1058,12 @@ fn update_actors(
         }
     });
     for (_, index) in candidates {
-        let walker = index.checked_sub(first_walker);
+        let skin = index
+            .checked_sub(first_skin)
+            .map(|index| &prepared.skin_only[index]);
+        let walker = (first_walker..first_skin)
+            .contains(&index)
+            .then(|| index - first_walker);
         let (model, position, yaw) = if let Some(walker) = walker {
             let (position, degrees) = walker_poses[walker];
             (
@@ -985,7 +1072,7 @@ fn update_actors(
                 Quat::from_rotation_y(degrees.to_radians()),
             )
         } else {
-            let row = &prepared.rows[index];
+            let row = skin.unwrap_or_else(|| &prepared.rows[index]);
             // The saved two-vector represents actor local X in world XZ.
             let [x, z] = row.orientation;
             (
@@ -1030,6 +1117,8 @@ fn update_actors(
                 .spawn((
                     Name::new(if walker.is_some() {
                         "crowd/source-walk"
+                    } else if skin.is_some() {
+                        "crowd/source-standing-skin"
                     } else {
                         "crowd/source-animation"
                     }),
@@ -1350,6 +1439,7 @@ mod tests {
             flash_cells: Vec::new(),
             actors: Vec::new(),
             walkers: Vec::new(),
+            skin_only: Vec::new(),
         };
         let eye = Vec3::new(3., 5., 10.);
         let a = make_batch(&source, &[0], &spec, eye, 0.).unwrap();
@@ -1472,6 +1562,46 @@ mod tests {
                     assert!(p.rows[row].has_camera);
                 }
             }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires purchased GRID_GAME_ROOT, CPU only"]
+    fn purchased_routes_prepare_off_atlas_standing_officials() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        for (route, count, unresolved) in [
+            ("tracks/europe/donington/route_0", 20, 0),
+            ("tracks/europe/spa_francorchamps/route_0", 12, 10),
+            ("tracks/usa/detroit/route_8", 3, 0),
+        ] {
+            let prepared = prepare(&root, &Route::new(route).unwrap()).unwrap();
+            assert_eq!(
+                prepared.skin_only.len(),
+                count,
+                "{route}: {:?}",
+                prepared.omitted
+            );
+            for row in &prepared.skin_only {
+                let body = &prepared.actors[row.material].as_ref().unwrap().body;
+                assert!(
+                    body.has_animated_idle(),
+                    "{route}: missing authored marshal idle"
+                );
+                assert!(
+                    !body.has_animated_action(),
+                    "{route}: unexpected action fallback"
+                );
+            }
+            assert!(!prepared.omitted.iter().any(|entry| entry.group == b"ma_np"));
+            assert_eq!(
+                prepared
+                    .omitted
+                    .iter()
+                    .filter(|entry| !entry.moving)
+                    .map(|entry| entry.records)
+                    .sum::<u32>(),
+                2 + unresolved
+            );
         }
     }
 

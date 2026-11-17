@@ -471,6 +471,31 @@ impl Prepared<'_, '_, '_, '_> {
         group_templates(&resolver, group)
     }
 
+    /// An atlas-free standing body must have an actual source skin and no
+    /// declared prop/action. The flagged actors need their own event consumer.
+    pub(super) fn unpropped_standing_skin(&self, template: &Template) -> Result<bool, Error> {
+        if template.mesh.is_none()
+            || template.map_fields.iter().any(|(key, _)| key == "action")
+            || !template
+                .map_fields
+                .iter()
+                .any(|(key, value)| key == "hasSkin" && value == "1")
+        {
+            return Ok(false);
+        }
+        let Some((_, name)) = template
+            .map_fields
+            .iter()
+            .find(|(key, _)| key == "animSelector")
+        else {
+            return Ok(false);
+        };
+        let Some((_, selector)) = source_named(self.definitions, 0, "animSelector", name)? else {
+            return Ok(false);
+        };
+        Ok(attr(selector, "prop")?.eq_ignore_ascii_case("None"))
+    }
+
     pub(super) fn moving_time_scale(&self, template: &Template) -> Result<f32, Error> {
         let Some((_, name)) = template
             .map_fields
