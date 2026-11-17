@@ -21,3 +21,24 @@ This is source/typecheck evidence until GPU comparisons pass. Required: exact of
 Initial compile rejected old wgpu API assumptions (ownedVertexBufferLayout namespace, optional depth fields and raw buffer slice types). Fixed with installed Bevy/wgpu29 APIs. Also replaced sampling-depth view with actual ViewDepthTexture read-only attachment before GPU. A visibility edit first aborted on a stale multiline-query anchor; the following nominalClippy checked the old source only. The exact one-line retry integrates the test/visibility and actual all-target featureClippy04 passes. No failed compile or aborted edit is treated as runtime acceptance.
 
 Completed source9bec verification:768resource tests/21harness results,0failed/ignored; feature and default workspace all-target Clippy pass. Four short GPU controls pass; offSMAAfinalPNG is byte-identical to mergedbcb control and four physical endpoint records agree across modes. Conservative motion-only pass activates on RTX4070; raw paired depth/validity arrays are byte-identical,91motion pixels change only within x639..640/y436..481 at the antenna. This proves narrow attachment operation and unchanged captured depth, not visual ghost removal or missed-coverage correction at every jitter phase. Gap-phase/orbit/30–300virtualFPS/4K visual acceptance remains. Installed756 unchanged. Private antenna01/motion-only-validation30-01.json and tests01.log preserve evidence. Subsequent paint source uses these exact antenna sources unchanged.
+## Scissored antenna and ordinary smoke controls
+
+[G397](../log/G0397.md) captured a Donington chase frame using both full and
+scissored 4x scratch raster. The 77 covered pixels, 144 coverage samples and
+all four underlying depth values per pixel agree byte for byte. The tile lies
+below the skyline. In the matched output crop the maximum difference is one
+8-bit channel code. This covers the captured sample and footprint.
+
+The ordinary Automatic smoke pass has now been bracketed by actual same-frame
+HDR reads. The first test targeted a physics tick between rendered frames.
+The corrected private capture samples tick 777 and joins the source frame 373
+to Extract and render frame 374. Its Reduced path submitted 170 sprites in
+five groups. Ordinary transparency changed 833 pixels of the antenna tile.
+Visible smoke in this view is below the tile, so the next depth control
+needs actual covered fragments on both sides of the antenna.
+
+Separate DLAA history controls capture the 787 rear aerial at Le Mans and the
+Detroit cutout fence. Each normal/reset pair has equal physics, field, frame
+requests and raw DLAA inputs. On the 787, resetting the history makes the
+visible shaft sharper and opens a gap near its tip. These moving fixtures will
+test broader coverage before any regular renderer change.
