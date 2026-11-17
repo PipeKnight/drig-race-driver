@@ -265,6 +265,7 @@ fn finite_seed(pair: [f32; 2]) -> [f32; 2] {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Point {
     center: Vec3,
+    // The incoming segment crossed with this endpoint's saved normal.
     side: Vec3,
     normal: Vec3,
     half_width: f32,
@@ -569,6 +570,8 @@ impl SkidMarks {
         }
         self.phases[strip] = finite_seed(self.phases[strip]);
         point.v = self.phases[strip];
+        // Fresh contact has no incoming segment. A linked strip copies its edge instead.
+        point.side = Vec3::ZERO;
         if !point.finite_payload() {
             self.safety_event(car, wheel, "point-suppressed");
             return;
@@ -610,7 +613,6 @@ impl SkidMarks {
             self.recover(car, index, None, "unsupported-source-color");
             return;
         };
-        let side = wheel.normal.cross(wheel.forward).normalize_or(Vec3::X);
         // Left-side wheels mirror the atlas U range [D].
         let u = if wheel.left {
             [layer.end_u, layer.start_u]
@@ -620,7 +622,7 @@ impl SkidMarks {
         let width = wheel.width * layer.width_scale;
         let mut point = Point {
             center: wheel.point + wheel.skid_normal * offset,
-            side,
+            side: Vec3::ZERO,
             normal: wheel.skid_normal,
             half_width: 0.5 * width,
             u,
@@ -651,10 +653,11 @@ impl SkidMarks {
             if step <= STEP {
                 return;
             }
+            let direction = delta / step;
             let split = if step > 4.0 {
                 true
             } else {
-                let Some(angle) = surface_angle(delta / step, last.normal, point.normal) else {
+                let Some(angle) = surface_angle(direction, last.normal, point.normal) else {
                     self.recover(car, index, Some(point), "surface-angle-domain");
                     return;
                 };
@@ -663,6 +666,9 @@ impl SkidMarks {
             if split {
                 self.end(car, index);
             } else {
+                // 739570 retains the arriving edge for the next quad. Keep the
+                // cross product's length on slopes and do not use wheel heading.
+                point.side = direction.cross(point.normal);
                 let full = self.strips[head.strip].points.len() > QUADS;
                 let ramp_start = (self.strips[head.strip].ramp_start
                     + self.strips[head.strip].points.len() - 1).min(2);
@@ -809,6 +815,14 @@ impl SkidMarks {
             uv.old[edge], uv.new[edge], color)
     }
 
+    /// The existing index buffer reads [0,2,1,1,2,3]. Swapping the middle
+    /// stored vertices yields the source triangles [-,+,next-] and
+    /// [next-,+,next+] from logical [old-,old+,next-,next+].
+    fn stream_vertex(strip: &Strip, k: usize) -> SkidVertex {
+        let edge_order = [0, 2, 1, 3];
+        Self::slot_vertex(strip, k / 4 * 4 + edge_order[k % 4])
+    }
+
     /// Every strip slot at its full length, so later changes are written over
     /// the mesh's GPU allocation (mesh_stream) instead of replacing the asset.
     /// The triangles with area and their order are the ones `build` makes.
@@ -836,7 +850,7 @@ impl SkidMarks {
                     binormals.push(current_basis.0);
                     tangents.push(current_basis.1);
                 }
-                let (p, n, uv, uv_new, c) = Self::slot_vertex(strip, k);
+                let (p, n, uv, uv_new, c) = Self::stream_vertex(strip, k);
                 positions.push(p);
                 normals.push(n);
                 uvs.push(uv);
@@ -926,7 +940,7 @@ impl SkidMarks {
                     put(bytes, vertex + binormal, basis.0);
                     put(bytes, vertex + tangent, basis.1);
                 }
-                let (pv, nv, uvv, uvn, cv) = Self::slot_vertex(strip, k);
+                let (pv, nv, uvv, uvn, cv) = Self::stream_vertex(strip, k);
                 put(bytes, vertex + p, pv);
                 put(bytes, vertex + n, nv);
                 put(bytes, vertex + uv, uvv);
@@ -976,7 +990,7 @@ impl SkidMarks {
             }
             for i in 0..strip.points.len() as u32 - 1 {
                 let a = first + i * 2;
-                indices.extend([a, a + 2, a + 1, a + 1, a + 2, a + 3]);
+                indices.extend([a, a + 1, a + 2, a + 2, a + 1, a + 3]);
             }
         }
         super::ground_effect_assets::effect_mesh(positions, normals, uvs, colors, indices)
@@ -1230,6 +1244,58 @@ mod tests {
     }
 
     #[test]
+    fn skid_cross_section_uses_arriving_travel_and_source_uv_handedness() {
+        for left in [false, true] {
+            let mut marks = SkidMarks::new(profile());
+            marks.heads.resize(1, [None; 4]);
+            let mut sample = wheel(b"STDR", 3., 0., 0.);
+            sample.left = left;
+            sample.forward = Vec3::Z;
+            marks.advance(0, 0, &sample);
+            sample.point.x = 1.;
+            marks.advance(0, 0, &sample);
+            sample.point = Vec3::new(2., 0., 1.);
+            sample.skid_normal = Vec3::new(0., 1., 0.1).normalize();
+            marks.advance(0, 0, &sample);
+            let id = marks.heads[0][0].unwrap().strip;
+            let strip = &marks.strips[id];
+            assert_eq!(strip.segments.len(), 2);
+            let [first, seam, current] = strip.points.as_slice() else {
+                panic!("expected exactly three accepted points");
+            };
+            assert_eq!(first.side, Vec3::ZERO);
+            assert_eq!(seam.side, Vec3::Z);
+            let travel = (current.center - seam.center).normalize();
+            assert!(current.side.distance(travel.cross(current.normal)) < 1e-6);
+            // The source does not renormalize the endpoint's lateral vector.
+            assert!(current.side.length() < 0.9999);
+            let (u_minus, u_plus) = if left { (0.0625, 0.02) } else { (0.02, 0.0625) };
+            let minus = SkidMarks::slot_vertex(strip, 2);
+            let plus = SkidMarks::slot_vertex(strip, 3);
+            assert_eq!(minus.0, (seam.center - Vec3::Z * seam.half_width).to_array());
+            assert_eq!(plus.0, (seam.center + Vec3::Z * seam.half_width).to_array());
+            assert_eq!((minus.2[0], minus.3[0]), (u_minus, u_minus));
+            assert_eq!((plus.2[0], plus.3[0]), (u_plus, u_plus));
+            assert_eq!(minus.0, SkidMarks::slot_vertex(strip, 4).0);
+            assert_eq!(plus.0, SkidMarks::slot_vertex(strip, 5).0);
+            let tangent_z = if left { -1. } else { 1. };
+            assert_eq!(SkidMarks::quad_basis(strip, 0), ([1., 0., 0.], [0., 0., tangent_z]));
+
+            let mesh = marks.streamed();
+            let actual: Vec<usize> = mesh.indices().unwrap().iter().skip(id * QUADS * 6).take(6)
+                .map(|i| i - id * SLOT).collect();
+            assert_eq!(actual, [0, 2, 1, 1, 2, 3]);
+            let triangles = drawn(&mesh);
+            assert_eq!(triangles.len(), 3);
+            for triangle in triangles {
+                let [a, b, c] = triangle.map(Vec3::from_array);
+                assert!((b - a).cross(c - a).dot(Vec3::Y) > 0.);
+            }
+            assert_same_triangles(&marks);
+        }
+    }
+
+    #[test]
     fn skid_break_depends_on_the_contact_plane_instead_of_heading() {
         let mut marks = SkidMarks::new(profile());
         marks.heads.resize(1, [None; 4]);
@@ -1255,7 +1321,7 @@ mod tests {
         let point = marks.strips[ramp].points[0];
         assert_eq!(point.center, contact.point + 0.04 * contact.skid_normal);
         assert_eq!(point.normal, contact.skid_normal);
-        assert_eq!(point.side, Vec3::X, "width basis remains the wheel heading");
+        assert_eq!(point.side, Vec3::ZERO, "fresh strip has no arriving segment");
         contact.point += incline;
         marks.advance(0, 0, &contact);
         assert_eq!(marks.heads[0][0].unwrap().strip, ramp);
@@ -1353,7 +1419,8 @@ mod tests {
         step(&mut replay, 2);
         step(&mut replay, 3);
         assert_eq!(original.laid, 3);
-        assert_eq!(drawn(&original.streamed()).len(), 6);
+        // The first quad tapers to a point and contributes one triangle.
+        assert_eq!(drawn(&original.streamed()).len(), 5);
         assert_eq!(replay.used(), 1);
         assert_eq!(replay.phases, original.phases);
         assert_eq!(
@@ -1524,8 +1591,18 @@ mod tests {
         assert_ne!(surface_change.old[0][1], surface_change.new[0][1]);
         assert_ne!(surface_change.old[0][0], surface_change.new[0][0]);
         assert_eq!(marks.strips.iter().filter(|s| s.used).count(), 1);
-        for i in 14..=35 {
+        for i in 14..=32 {
             marks.advance(0, 0, &wheel(b"GRAS", 3., 0., i as f32 * 0.2));
+            flush(&mut marks, &mut gpu);
+        }
+        let before_capacity = marks.save();
+        let after_capacity = |marks: &mut SkidMarks, i: i32| {
+            let mut wheel = wheel(b"GRAS", 3., 0., i as f32 * 0.2);
+            wheel.point.z = (i - 32) as f32 * 0.15;
+            marks.advance(0, 0, &wheel);
+        };
+        for i in 33..=35 {
+            after_capacity(&mut marks, i);
             flush(&mut marks, &mut gpu);
         }
         let chain = marks.heads[0][0].unwrap().strip;
@@ -1534,6 +1611,14 @@ mod tests {
         let a = SkidMarks::slot_vertex(&marks.strips[first], (QUADS - 1) * 4 + 2);
         let b = SkidMarks::slot_vertex(&marks.strips[chain], 0);
         assert_eq!(a.0, b.0); // physical capacity seam
+        assert_eq!(
+            SkidMarks::slot_vertex(&marks.strips[first], (QUADS - 1) * 4 + 3).0,
+            SkidMarks::slot_vertex(&marks.strips[chain], 1).0,
+        );
+        assert_ne!(
+            SkidMarks::quad_basis(&marks.strips[first], QUADS - 1).0,
+            SkidMarks::quad_basis(&marks.strips[chain], 0).0,
+        );
         assert_eq!(a.1, b.1);
         assert_eq!(a.4[2], 1.);
         assert_eq!(a.4[2], b.4[2]); // no contact-start ramp on a capacity chain
@@ -1554,6 +1639,12 @@ mod tests {
             }
         }
         assert_same_triangles(&marks);
+        marks.reset_for_replay();
+        marks.restore(&before_capacity);
+        for i in 33..=35 {
+            after_capacity(&mut marks, i);
+        }
+        assert_eq!(marks.streamed().create_packed_vertex_buffer_data(), gpu);
         let mut airborne = wheel(b"GRAS", 3., 0., 7.2);
         airborne.contact = false;
         marks.advance(0, 0, &airborne);
@@ -1682,7 +1773,8 @@ mod tests {
         for i in 0..4 { marks.advance(0, 0, &wheel(b"STDR", 3., 0., i as f32 * 0.2)); }
         let strip = marks.heads[0][0].unwrap().strip;
         let before = drawn(&marks.streamed()).len();
-        marks.strips[strip].segments[0].new[2][1] = f32::NAN;
+        // Corrupt a full-width segment, after the tapered first quad.
+        marks.strips[strip].segments[1].new[2][1] = f32::NAN;
         assert_eq!(drawn(&marks.streamed()).len(), before - 2);
         assert_finite_stream(&marks);
     }
@@ -1839,7 +1931,7 @@ mod tests {
         let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
             panic!("missing actual streamed color attribute");
         };
-        assert_eq!(colors[hard * SLOT + 6], hard_color);
+        assert_eq!(colors[hard * SLOT + 5], hard_color);
         let raw_before_end = marks.strips[hard].points[2].source_color.gpu(1., true);
         marks.end(0, 0);
         let raw_after_end = marks.strips[hard].points[2].source_color.gpu(1., true);
