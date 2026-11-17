@@ -106,3 +106,14 @@ difference is confined to 34 pixels on the measured frame. The next
 frame returns to Stock, witnesses a native reset, and matches its full
 Stock RGB image. Reflective child coverage, ordinary Reduced smoke and
 moving cutout/glass controls remain open.
+
+## Actual reflected energy from the selected rear child
+
+[G416](../log/G0416.md) draws both DBR9 children separately in a
+one-pixel scratch query using the actual read-only main depth. Only the
+rear child passes at the chosen pixel. Two ordinary runs then differ
+only in the reached rear range during Stock. Before-Stock HDR and
+native Depth/MV are exact. The draw adds color in the measured rear
+wire footprint while the destination alpha stays exact. The matched
+evidence extends through Stock transparency. Same-frame Automatic
+smoke fragment ordering remains open.
