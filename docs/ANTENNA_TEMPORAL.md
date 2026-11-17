@@ -59,3 +59,15 @@ comparison still fails. The next comparison needs a same-render proof of
 main attachment ownership or the complete matched temporal history.
 Ordinary Reduced smoke, moving glass and the full production anti-aliasing
 result still require their own evidence.
+
+
+## Main attachment ownership for the isolated Full trial
+
+In G409 the installed Main and Behind phases contain zero instances of the
+isolated source and Coverage contains one. The same captured render stamp
+has zero mutual aliases across six Main and seventeen scratch GPU textures.
+The native Early pass reports its actual two HDR endpoints after the
+isolated submission. The verified archived before-Early, motion/depth and
+positive sample controls match. This single-frame structural result applies
+to the G403 diagnostic. The ordinary Static overlay and Reduced smoke
+still need their own live evidence.

@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G409 verifies actual DLAA isolation for the selected Full smoke source. Ordinary Static reflection ownership and the Reduced path are next. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G408 verifies ordinary spectator movement and flashes on Shibuya, two identical same-tick pause crops and restart/Flashback/replay lifecycle. See [crowd research](docs/CROWD_ANIMATION_RESEARCH.md).
 - G407 restores the authored nonreflective track surface normal map in ordinary rendering, verified in forward, deferred and Native DLAA. See [track surface](docs/SKY.md).
 - G406 fixes the source mesh coverage panic in deferred views by retaining its forward pass. Washington deferred and forward controls pass. See [static object materials](docs/STATIC_OBJECT_MATERIALS.md).

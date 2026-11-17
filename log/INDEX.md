@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G409](G0409.md) | 2026-11-17 | Verify Main and scratch attachment isolation in native DLAA |
 | [G408](G0408.md) | 2026-11-17 | Verify ordinary spectator motion, flashes and lifecycle |
 | [G407](G0407.md) | 2026-11-17 | Restore the source track surface normal map in ordinary rendering |
 | [G406](G0406.md) | 2026-11-17 | Keep the source mesh coverage pass in forward on deferred views |
