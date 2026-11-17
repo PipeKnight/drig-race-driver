@@ -59,7 +59,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
 - G398 and G400 restore travel-based skid seams and the original first quad/fade in live play and replay. Matched grass and mixed-field tests exercised both. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
-- G397 verifies cropped antenna depth/coverage and the ordinary smoke tap. The chosen capture has no smoke over the shaft. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
+- G397 verifies cropped antenna coverage and the ordinary smoke tap. G403 verifies isolated Full smoke ordering on real shaft samples. Exact post-DLAA isolation and Reduced overlap remain open. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G395 uses the source contact normal and surface-angle test for live and replay tyre marks. Matched native DLAA grass control has two fewer premature angular terminations, with the same contact gaps. Original visual comparison and strip cross-section remain open. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
 - G394 orders optional Type2 before SMAA and restores the source bloom exponent. G399 verifies the Le Mans effect with a fixed 16-car field. G401 orders Flashback Balance before SMAA. Original transfer remains open. See [original postprocess](docs/ORIGINAL_POSTPROCESS.md).
 - G393 adds source idle standing course officials in ordinary races. Matched Donington and Detroit captures show pose animation. G402 resets the shared flag producer on Race Restart. Flag actors remain open. See [crowd research](docs/CROWD_ANIMATION_RESEARCH.md).

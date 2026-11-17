@@ -42,3 +42,20 @@ Detroit cutout fence. Each normal/reset pair has equal physics, field, frame
 requests and raw DLAA inputs. On the 787, resetting the history makes the
 visible shaft sharper and opens a gap near its tip. These moving fixtures will
 test broader coverage before any regular renderer change.
+
+## Real isolated Full smoke depth samples
+
+[G403](../log/G0403.md) uses the stock Full SmokeMaterial on a separate
+4x scratch tile with the actual Donington antenna. The same three covered
+lanes at (936,510) retain foreground smoke and reject smoke between the
+background and the shaft. The clear lane retains smoke on either side.
+All 92 ordered smoke/shaft samples in the tile passed in both placements.
+This is evidence for the controlled Full path.
+
+In two independent repeats of each placement, every recorded main input
+at the chosen stamp and both scratch depth planes match. Post-DLAA HDR
+differs even between identical placements. The strict main-output
+comparison still fails. The next comparison needs a same-render proof of
+main attachment ownership or the complete matched temporal history.
+Ordinary Reduced smoke, moving glass and the full production anti-aliasing
+result still require their own evidence.

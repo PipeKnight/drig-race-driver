@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G403](G0403.md) | 2026-11-17 | Measure isolated real smoke on covered antenna samples |
 | [G402](G0402.md) | 2026-11-17 | Reset source flag rules on race restart |
 | [G401](G0401.md) | 2026-11-17 | Order Flashback grading before SMAA |
 | [G400](G0400.md) | 2026-11-17 | Emit the first skid quad from source contact history |
