@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G407](G0407.md) | 2026-11-17 | Restore the source track surface normal map in ordinary rendering |
 | [G406](G0406.md) | 2026-11-17 | Keep the source mesh coverage pass in forward on deferred views |
 | [G405](G0405.md) | 2026-11-17 | Activate source exterior lamps in ordinary races |
 | [G404](G0404.md) | 2026-11-17 | Restore source flag marshal poses and rods |

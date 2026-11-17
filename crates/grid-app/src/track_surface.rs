@@ -1,13 +1,24 @@
 //! Source surface-layer reconstruction with authored Bevy lighting, on the
 //! route's track (docs/SKY.md "Road surface"). The six road/infield shader
-//! groups below share the examined albedo arithmetic; their normal and
-//! reflection maps are not reproduced.
+//! groups share the examined albedo arithmetic. The nonreflective
+//! track_surface program also uses its independently authored normal basis.
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
-    pbr::{ExtendedMaterial, MaterialExtension},
+    ecs::system::SystemParamItem,
+    mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef},
+    pbr::{
+        ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+    },
     prelude::*,
-    render::render_resource::AsBindGroup,
-    shader::ShaderRef,
+    render::{
+        render_resource::{
+            AsBindGroup, AsBindGroupError, BindGroupLayout, BindGroupLayoutEntry, BindingType,
+            RenderPipelineDescriptor, ShaderStages, SpecializedMeshPipelineError,
+            UnpreparedBindGroup, VertexFormat,
+        },
+        renderer::RenderDevice,
+    },
+    shader::{ShaderDefVal, ShaderRef},
 };
 use grid_formats::{material, mesh, pssg, scene, texture};
 use grid_tools::route::Route;
@@ -61,14 +72,50 @@ const GROUPS: [(&[u8], bool); 6] = [
 ];
 
 const SHADER: Handle<Shader> = uuid_handle!("ef412ff6-5acc-4977-bdb9-d5f314970b66");
+const BASIS_SHADER: Handle<Shader> = uuid_handle!("81c59e94-1394-4d97-9544-e05baf815837");
+const NORMAL_BINDING: u32 = 109;
+const NORMAL_DEF: &str = "GRID_TRACK_SOURCE_NORMAL";
+
+fn normal_layout_supported(device: &RenderDevice) -> bool {
+    let limits = device.limits();
+    let standard_textures: u32 = StandardMaterial::bind_group_layout_entries(device, true)
+        .iter()
+        .filter(|entry| {
+            entry.visibility.contains(ShaderStages::FRAGMENT)
+                && matches!(entry.ty, BindingType::Texture { .. })
+        })
+        .map(|entry| entry.count.map_or(1, std::num::NonZeroU32::get))
+        .sum();
+    // Bevy 0.19.1's maximum safe view texture count, plus four existing
+    // Surface textures and the normal. The normal uses the first sampler.
+    const VIEW_TEXTURE_BUDGET: u32 = 10;
+    limits.max_bindings_per_bind_group > NORMAL_BINDING
+        && limits.max_sampled_textures_per_shader_stage >= standard_textures + VIEW_TEXTURE_BUDGET + 5
+        && limits.max_vertex_attributes >= 10
+        && limits.max_inter_stage_shader_variables >= 12
+        && limits.max_vertex_buffer_array_stride >= 80
+}
 pub(crate) type SurfaceMaterial = ExtendedMaterial<StandardMaterial, Surface>;
+
+/// Source track directions are placed in world space before static batching.
+/// Use independent raw lanes; Bevy's standard tangent is a signed vec4.
+pub(crate) const SOURCE_TANGENT: MeshVertexAttribute =
+    MeshVertexAttribute::new("SourceTrackTangent", 0x5354_544e, VertexFormat::Float32x3);
+pub(crate) const SOURCE_BINORMAL: MeshVertexAttribute =
+    MeshVertexAttribute::new("SourceTrackBinormal", 0x5354_424e, VertexFormat::Float32x3);
+
 
 /// IDs are package-local; include the material identity when selecting draws.
 #[derive(Component)]
 pub struct SourcePart(pub String);
 
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-pub struct Surface {
+#[derive(Asset, TypePath, Clone, Debug)]
+pub(crate) struct Surface {
+    bindings: SurfaceBindings,
+}
+
+#[derive(AsBindGroup, Clone, Debug)]
+pub(crate) struct SurfaceBindings {
     #[texture(100)]
     #[sampler(101)]
     first: Handle<Image>,
@@ -81,6 +128,8 @@ pub struct Surface {
     #[texture(106)]
     #[sampler(107)]
     skids: Handle<Image>,
+    #[texture(109, visibility(fragment))]
+    normal: Option<Handle<Image>>,
     // AsBindGroup packs fields at binding 108 in declaration order. Keep
     // SurfaceUniforms in track_surface.wgsl in sync. Separate buffers here can
     // exhaust the Metal vertex-stage slots, even though only the fragment
@@ -118,6 +167,44 @@ pub struct Surface {
     phong_direction: Vec4,
 }
 
+impl AsBindGroup for Surface {
+    type Data = bool;
+    type Param = <SurfaceBindings as AsBindGroup>::Param;
+
+    fn label() -> &'static str { "Surface" }
+
+    fn bind_group_data(&self) -> Self::Data {
+        self.bindings.normal.is_some()
+    }
+
+    fn unprepared_bind_group(
+        &self,
+        layout: &BindGroupLayout,
+        device: &RenderDevice,
+        param: &mut SystemParamItem<'_, '_, Self::Param>,
+        force_no_bindless: bool,
+    ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
+        let mut bindings = self.bindings.unprepared_bind_group(
+            layout, device, param, force_no_bindless,
+        )?;
+        if !normal_layout_supported(device) {
+            bindings.bindings.0.retain(|(slot, _)| *slot != NORMAL_BINDING);
+        }
+        Ok(bindings)
+    }
+
+    fn bind_group_layout_entries(
+        device: &RenderDevice,
+        force_no_bindless: bool,
+    ) -> Vec<BindGroupLayoutEntry> {
+        let mut entries = SurfaceBindings::bind_group_layout_entries(device, force_no_bindless);
+        if !normal_layout_supported(device) {
+            entries.retain(|entry| entry.binding != NORMAL_BINDING);
+        }
+        entries
+    }
+}
+
 /// Bounded shared-lighting diagnostic only. Existing sourcePhong semantics,
 /// weights, source directions, textures and material controls are preserved.
 pub(crate) fn set_trial_phong_colour(materials: &mut Assets<SurfaceMaterial>, colour: [f32; 3]) -> usize {
@@ -134,7 +221,7 @@ pub(crate) fn set_phong_lighting(
     let direction = direction.map(|value| Vec3::from_array(value).normalize());
     let mut participating = 0;
     let updates: Vec<_> = materials.iter().filter_map(|(id, material)| {
-        let surface = &material.extension;
+        let surface = &material.extension.bindings;
         if surface.phong_light.w <= 0. {
             return None;
         }
@@ -149,8 +236,8 @@ pub(crate) fn set_phong_lighting(
     for &(id, light, direction) in &updates {
         // AssetMut emits Modified only after an actual mutable dereference.
         if let Some(mut material) = materials.get_mut(id) {
-            material.extension.phong_light = light;
-            material.extension.phong_direction = direction;
+            material.extension.bindings.phong_light = light;
+            material.extension.bindings.phong_direction = direction;
         }
     }
     (participating, updates.len())
@@ -162,16 +249,16 @@ pub(crate) fn trial_fixture() -> SurfaceMaterial {
 
 #[cfg(test)]
 pub(crate) fn trial_fixture_with_strength(strength: f32) -> SurfaceMaterial {
-    SurfaceMaterial {base: StandardMaterial::default(),extension: Surface {
-        first: default(),second: default(),macro_map: default(),skids:default(),
+    SurfaceMaterial {base: StandardMaterial::default(),extension: Surface { bindings: SurfaceBindings {
+        first: default(),second: default(),macro_map: default(),skids:default(),normal:None,
         scales:Vec4::ZERO,controls:Vec4::ZERO,skid_colour:Vec4::ZERO,skid_colour2:Vec4::ZERO,
         dry_ground:Vec4::ZERO,sampling:Vec4::ZERO,rgb_filter:Vec4::ZERO,phong:Vec4::ZERO,
         phong_light:Vec4::new(3.,2.,1.,strength),phong_direction:Vec4::new(0.2,0.8,0.1,0.),
-    }}
+    }}}
 }
 #[cfg(test)]
 pub(crate) fn trial_snapshot(material:&SurfaceMaterial)->(Vec4,Vec4) {
-    (material.extension.phong_light,material.extension.phong_direction)
+    (material.extension.bindings.phong_light,material.extension.bindings.phong_direction)
 }
 
 impl MaterialExtension for Surface {
@@ -181,12 +268,61 @@ impl MaterialExtension for Surface {
     fn deferred_fragment_shader() -> ShaderRef {
         SHADER.into()
     }
+
+    fn specialize(
+        _: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        layout: &MeshVertexBufferLayoutRef,
+        key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        let Some(fragment) = descriptor.fragment.as_mut() else {
+            return Ok(());
+        };
+        let def = |name: &str| {
+            descriptor.vertex.shader_defs.iter()
+                .any(|value| matches!(value, ShaderDefVal::Bool(key, true) if key == name))
+        };
+        // Default depth, shadow, normal and motion prepasses use their stock
+        // fragment handle. The deferred color pass keeps its prepass IO.
+        if !key.bind_group_data
+            || fragment.shader != SHADER
+            || (def("PREPASS_PIPELINE") && !def("DEFERRED_PREPASS"))
+            || ["SKINNED", "MORPH_TARGETS", "VERTEX_TANGENTS", "MESHLET_MESH_MATERIAL_PASS"]
+                .into_iter().any(def)
+            || !["VERTEX_POSITIONS", "VERTEX_NORMALS", "VERTEX_UVS_A", "VERTEX_UVS_B", "VERTEX_COLORS"]
+                .into_iter().all(|name| {
+                    // Bevy prepass Position is unconditional, unlike forward.
+                    (name == "VERTEX_POSITIONS" && def("PREPASS_PIPELINE")) || def(name)
+                })
+            || !layout.0.contains(SOURCE_TANGENT.id)
+            || !layout.0.contains(SOURCE_BINORMAL.id)
+        {
+            return Ok(());
+        }
+        let extra = layout.0.get_layout(&[
+            SOURCE_TANGENT.at_shader_location(8),
+            SOURCE_BINORMAL.at_shader_location(9),
+        ])?;
+        let Some(buffer) = descriptor.vertex.buffers.first_mut() else {
+            return Ok(());
+        };
+        if buffer.array_stride != extra.array_stride
+            || buffer.attributes.iter().any(|attribute| attribute.shader_location >= 8)
+        {
+            return Ok(());
+        }
+        buffer.attributes.extend(extra.attributes);
+        descriptor.vertex.shader = BASIS_SHADER;
+        fragment.shader_defs.push(NORMAL_DEF.into());
+        Ok(())
+    }
 }
 
 struct Definition {
     dry_ground: Vec4,
     phong: Vec4,
     textures: [String; 4],
+    normal_map: Option<String>,
     scales: Vec4,
     controls: Vec4,
     colours: [Vec4; 2],
@@ -195,12 +331,47 @@ struct Draw {
     material: String,
     uv: Vec<[f32; 2]>,
     masks: Vec<[f32; 4]>,
+    normal_basis: Option<NormalBasis>,
+}
+
+/// The nonreflective track_surface VS exports both authored vectors as-is.
+/// Do not reconstruct either via a cross product or infer handedness.
+struct NormalBasis {
+    tangent: Vec<[f32; 3]>,
+    binormal: Vec<[f32; 3]>,
+}
+
+impl NormalBasis {
+    fn from_draw(
+        source: &mesh::Mesh<'_>,
+        vertices: std::ops::Range<usize>,
+        transform: &[f32; 16],
+    ) -> Option<Self> {
+        let normal = source.normals.get(vertices.clone())?;
+        let linear = Mat3::from_mat4(Mat4::from_cols_array(transform));
+        let to_world = |values: &[[f32; 3]]| {
+            if linear == Mat3::IDENTITY {
+                values.to_vec()
+            } else {
+                values.iter().map(|&v| (linear * Vec3::from_array(v)).to_array()).collect()
+            }
+        };
+        let tangent = to_world(source.tangents.get(vertices.clone())?);
+        let binormal = to_world(source.binormals.get(vertices)?);
+        let finite_basis = [normal, &tangent, &binormal]
+            .into_iter()
+            .flatten()
+            .flatten()
+            .all(|component| component.is_finite());
+        (finite_basis && !normal.is_empty()).then_some(Self { tangent, binormal })
+    }
 }
 #[derive(Resource)]
 pub(crate) struct Source {
     definitions: BTreeMap<String, Definition>,
     draws: BTreeMap<String, Draw>,
     textures: BTreeMap<String, Vec<u8>>,
+    normal_maps: BTreeMap<String, Vec<u8>>,
 }
 
 /// The track's tracksplit plus the route's routesplit (main.rs
@@ -226,7 +397,8 @@ fn read_optional_package(
     package: &str,
 ) -> Result<Source, Box<dyn std::error::Error>> {
     let file = route.track_file(package);
-    read_optional_bytes(&super::read(&root.join(&file))?).map_err(|e| format!("{file}: {e}").into())
+    read_optional_bytes(&super::read(&root.join(&file))?)
+        .map_err(|e| format!("{file}: {e}").into())
 }
 
 /// Adds `other`'s materials and draws under `namespace/`, as main.rs names
@@ -243,6 +415,7 @@ fn merge(source: &mut Source, other: Source, namespace: &str, own_textures: bool
         for t in &mut definition.textures {
             *t = texture(std::mem::take(t));
         }
+        definition.normal_map = definition.normal_map.map(texture);
         source
             .definitions
             .insert(format!("{namespace}/{name}"), definition);
@@ -254,6 +427,9 @@ fn merge(source: &mut Source, other: Source, namespace: &str, own_textures: bool
     for (name, dds) in other.textures {
         source.textures.insert(texture(name), dds);
     }
+    for (name, dds) in other.normal_maps {
+        source.normal_maps.insert(texture(name), dds);
+    }
 }
 
 fn read_optional_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error>> {
@@ -263,6 +439,7 @@ fn read_optional_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error
             definitions: BTreeMap::new(),
             draws: BTreeMap::new(),
             textures: BTreeMap::new(),
+            normal_maps: BTreeMap::new(),
         });
     }
     read_surfaces(&tree, &tree)
@@ -351,6 +528,11 @@ fn read_surfaces(
         let has_macro = macro_map.is_some();
         let macro_map = macro_map.unwrap_or_else(|| first.clone());
         let skids = texture_name(b"TSkidsMap");
+        let normal_map = if group_ref == b"#track_surface.fx" {
+            texture_name(b"TNormalMap")
+        } else {
+            None
+        };
         // The pixel programs' direct specular: pow(sat(dot(reflect(I, N),
         // specularDirection)), PhongPower) * lerp(FresnelMin, FresnelMax,
         // pow_sat(1 + dot(I, N), FresnelPower)). track_infield_wsm.cg.fp
@@ -383,6 +565,7 @@ fn read_surfaces(
                 macro_map.clone(),
                 skids.clone().unwrap_or(macro_map),
             ],
+            normal_map,
             scales: if skidded {
                 Vec4::new(
                     scalar(b"Skid_A_Scale")?,
@@ -420,9 +603,9 @@ fn read_surfaces(
     let mut draws = BTreeMap::new();
     for draw in scene::read_static_draws(tree, &sources)? {
         let material = String::from_utf8(draw.material.to_vec())?;
-        if !definitions.contains_key(&material) {
+        let Some(definition) = definitions.get(&material) else {
             continue;
-        }
+        };
         let source = &sources[draw.source];
         let uv = source
             .additional_texcoords
@@ -436,6 +619,10 @@ fn read_surfaces(
         if uv.iter().flatten().any(|v| !v.is_finite()) {
             return Err("surface UV1 nonfinite".into());
         }
+        let normal_basis = definition
+            .normal_map
+            .as_ref()
+            .and_then(|_| NormalBasis::from_draw(source, draw.vertices.clone(), &draw.transform));
         let masks = source.colors_argb[draw.vertices]
             .iter()
             .map(|&argb| mask(argb))
@@ -447,6 +634,7 @@ fn read_surfaces(
                     material,
                     uv,
                     masks,
+                    normal_basis,
                 },
             )
             .is_some()
@@ -455,10 +643,16 @@ fn read_surfaces(
         }
     }
     let mut textures = BTreeMap::new();
+    let mut normal_maps = BTreeMap::new();
     for t in texture::read_textures(textures_from)? {
         let name = String::from_utf8(t.id.to_vec())?;
         if definitions.values().any(|d| d.textures.contains(&name)) {
-            textures.insert(name, t.validated_dds().0);
+            textures.insert(name.clone(), t.validated_dds().0);
+        }
+        if t.format == texture::Format::Bc3
+            && definitions.values().any(|d| d.normal_map.as_ref() == Some(&name))
+        {
+            normal_maps.insert(name, t.validated_dds().0);
         }
     }
     for d in definitions.values() {
@@ -476,6 +670,7 @@ fn read_surfaces(
         definitions,
         draws,
         textures,
+        normal_maps,
     })
 }
 
@@ -510,6 +705,15 @@ pub fn install(
             "grid_track_surface.wgsl",
         ),
     )?;
+    if !source.normal_maps.is_empty() {
+        app.world_mut().resource_mut::<Assets<Shader>>().insert(
+            BASIS_SHADER.id(),
+            Shader::from_wgsl(
+                include_str!("track_surface_basis.wgsl"),
+                "grid_track_surface_basis.wgsl",
+            ),
+        )?;
+    }
     app.insert_resource(source)
         .add_plugins(MaterialPlugin::<SurfaceMaterial>::default())
         .add_systems(PostStartup, attach)
@@ -588,8 +792,8 @@ fn update_asphalt_softness(
     if settings.asphalt_soften == 0. { return; }
     let bias = driving.as_ref().map_or(0., |d| asphalt_bias(d.runtime.velocity(), settings.asphalt_soften));
     for (_, material) in materials.iter_mut() {
-        if material.extension.sampling.w > 0. {
-            material.extension.sampling.z = bias;
+        if material.extension.bindings.sampling.w > 0. {
+            material.extension.bindings.sampling.z = bias;
         }
     }
 }
@@ -615,6 +819,7 @@ pub(crate) fn attach(
     )>,
     mut meshes: ResMut<Assets<Mesh>>,
     standard: Res<Assets<StandardMaterial>>,
+    render_device: Option<Res<RenderDevice>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<SurfaceMaterial>>,
 ) {
@@ -659,6 +864,20 @@ pub(crate) fn attach(
             (name.clone(), images.add(image))
         })
         .collect();
+    let normal_supported = render_device.as_deref().is_some_and(normal_layout_supported);
+    let mut normal_maps = BTreeMap::new();
+    if normal_supported {
+        for (name, dds) in &source.normal_maps {
+            match super::texture_upload::image_linear(
+                dds, settings.sampler(true), RenderAssetUsages::default(),
+            ) {
+                Ok(image) => { normal_maps.insert(name.as_str(), images.add(image)); }
+                Err(error) => { warn!("track surface normal {name} unavailable: {error}"); }
+            }
+        }
+    }
+    let mut basis_draws = 0;
+    let mut basis_fallbacks = 0;
     let mut handles = BTreeMap::new();
     let mut attached = 0;
     let mut mismatched = 0;
@@ -683,6 +902,20 @@ pub(crate) fn attach(
         target.insert_attribute(Mesh::ATTRIBUTE_UV_1, draw.uv.clone());
         target.insert_attribute(Mesh::ATTRIBUTE_COLOR, draw.masks.clone());
         let d = &source.definitions[&draw.material];
+        let normal_map = d.normal_map.as_deref().and_then(|name| normal_maps.get(name));
+        if normal_map.is_some() {
+            let (tangent, binormal) = if let Some(basis) = &draw.normal_basis {
+                basis_draws += 1;
+                (basis.tangent.clone(), basis.binormal.clone())
+            } else {
+                basis_fallbacks += 1;
+                // Match all draws sharing the material's batch layout.
+                let zero = vec![[0.; 3]; draw.uv.len()];
+                (zero.clone(), zero)
+            };
+            target.insert_attribute(SOURCE_TANGENT, tangent);
+            target.insert_attribute(SOURCE_BINORMAL, binormal);
+        }
         let roughness = settings.asphalt_roughness.filter(|_| standalone_asphalt(d));
         let grazing_gain = settings.asphalt_grazing_gain.filter(|_| standalone_asphalt(d));
         if grazing_gain.is_some() { grazing_draws += 1; }
@@ -703,7 +936,8 @@ pub(crate) fn attach(
                 if grazing_gain.is_some() { grazing_materials += 1; }
                 materials.add(ExtendedMaterial {
                     base,
-                    extension: Surface {
+                    extension: Surface { bindings: SurfaceBindings {
+                        normal: normal_map.cloned(),
                         first: textures[&d.textures[0]].clone(),
                         second: textures[&d.textures[1]].clone(),
                         macro_map: textures[&d.textures[2]].clone(),
@@ -748,7 +982,7 @@ pub(crate) fn attach(
                             d.dry_ground.z,
                             d.dry_ground.w,
                         ),
-                    },
+                    }},
                 })
             })
             .clone();
@@ -757,6 +991,12 @@ pub(crate) fn attach(
             .remove::<MeshMaterial3d<StandardMaterial>>()
             .insert(MeshMaterial3d(handle));
         attached += 1;
+    }
+    if !source.normal_maps.is_empty() {
+        println!(
+            "track_surface_normal layout_supported={normal_supported} maps={} basis_draws={basis_draws} basis_fallbacks={basis_fallbacks}",
+            normal_maps.len(),
+        );
     }
     println!("asphalt_soften maximum={} scope=don_track1-4-rgb-only speed_mps=5..30 default=off alpha_macro_skids=preserved", settings.asphalt_soften);
     println!("asphalt_filter_strength value={} scope=rgb-only alpha_macro_skids=preserved", settings.asphalt_filter_strength);
@@ -912,6 +1152,39 @@ mod tests {
             if track == "usa/washington" {
                 assert_eq!(split, 180);
             }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_surface_normals_resolve_route_and_track_bases() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"),
+        );
+        for (path, track_positive, route_positive) in [
+            ("tracks/europe/donington/route_0", false, false),
+            ("tracks/usa/detroit/route_8", true, true),
+            ("tracks/usa/washington/route_0", true, true),
+            ("tracks/europe/le_mans/route_0", true, false),
+            ("tracks/europe/milan/route_0", false, true),
+            ("tracks/japan/shibuya/route_0", false, false),
+        ] {
+            let route = Route::new(path).unwrap();
+            let source = read_source(&root, &route).unwrap();
+            let mut accepted = [0; 2];
+            for (id, draw) in &source.draws {
+                let Some(name) = &source.definitions[&draw.material].normal_map else {
+                    continue;
+                };
+                assert_eq!(&source.normal_maps[name][84..88], b"DXT5", "{path} {name}");
+                let Some(basis) = &draw.normal_basis else {
+                    continue;
+                };
+                assert_eq!(basis.tangent.len(), draw.uv.len(), "{path} {id}");
+                assert_eq!(basis.binormal.len(), draw.uv.len(), "{path} {id}");
+                accepted[usize::from(id.starts_with("route/"))] += 1;
+            }
+            assert_eq!(accepted.map(|count| count > 0), [track_positive, route_positive], "{path}");
         }
     }
 

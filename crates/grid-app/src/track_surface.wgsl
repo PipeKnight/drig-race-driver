@@ -30,6 +30,9 @@ struct SurfaceUniforms {
     phong_direction: vec4<f32>,
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var<uniform> surface: SurfaceUniforms;
+#ifdef GRID_TRACK_SOURCE_NORMAL
+@group(#{MATERIAL_BIND_GROUP}) @binding(109) var source_normal: texture_2d<f32>;
+#endif
 
 // Independently authored dry response confined to the audited ground band.
 // Source RGB/alpha, road/line texels and the existing layer blend are preserved.
@@ -80,9 +83,27 @@ fn source_specular(pbr: PbrInput, alpha: f32, ao: f32) -> vec3<f32> {
 #endif
 
 @fragment
-fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
+fn fragment(
+    in: VertexOutput, @builtin(front_facing) is_front: bool,
+#ifdef GRID_TRACK_SOURCE_NORMAL
+    @location(10) source_tangent: vec3<f32>,
+    @location(11) source_binormal: vec3<f32>,
+#endif
+) -> FragmentOutput {
     var pbr = pbr_input_from_standard_material(in, is_front);
     let mip_bias = select(0.0, view.mip_bias, surface.sampling.x > 0.5);
+#ifdef GRID_TRACK_SOURCE_NORMAL
+    // The nonreflective source samples UV0 independently of road blend/skids.
+    // DXT5nm uses A/G, with positive reconstructed Z. Both vectors are
+    // authored; they can legitimately be parallel or vary independently.
+    let xy = textureSampleBias(source_normal, first_sampler, in.uv, mip_bias).ag * 2.0 - 1.0;
+    let nz = sqrt(max(1.0 - dot(xy, xy), 0.0));
+    let mapped = source_tangent * xy.x + source_binormal * xy.y + in.world_normal * nz;
+    if dot(source_tangent, source_tangent) + dot(source_binormal, source_binormal) > 1.0e-12
+        && dot(mapped, mapped) > 1.0e-12 {
+        pbr.N = normalize(mapped);
+    }
+#endif
     // track_infield_wsm.cg.fp: diffuse UVs are the world position / PScale,
     // projected along the dominant normal axis (Y wins ties, then X).
     var uv = in.uv;

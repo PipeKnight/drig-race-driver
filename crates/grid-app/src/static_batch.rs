@@ -13,7 +13,7 @@
 //! again (a restart). Foliage that faces the camera, car parts and pieces keep
 //! their own entities. Common build; `GRID_STATIC_BATCH=0` keeps every part
 //! separate (comparisons).
-use crate::track_surface::{SourcePart, SurfaceMaterial};
+use crate::track_surface::{SOURCE_BINORMAL, SOURCE_TANGENT, SourcePart, SurfaceMaterial};
 use bevy::{
     camera::{
         primitives::{Aabb, MeshAabb},
@@ -86,13 +86,15 @@ type Plain = (
     Without<VisibilityRange>,
 );
 
-pub(crate) const ATTRIBUTES: [MeshVertexAttributeId; 6] = [
+pub(crate) const ATTRIBUTES: [MeshVertexAttributeId; 8] = [
     Mesh::ATTRIBUTE_POSITION.id,
     Mesh::ATTRIBUTE_NORMAL.id,
     Mesh::ATTRIBUTE_UV_0.id,
     Mesh::ATTRIBUTE_UV_1.id,
     Mesh::ATTRIBUTE_COLOR.id,
     Mesh::ATTRIBUTE_TANGENT.id,
+    SOURCE_TANGENT.id,
+    SOURCE_BINORMAL.id,
 ];
 
 #[derive(Hash, PartialEq, Eq)]
@@ -372,13 +374,15 @@ pub(crate) fn build<M: Asset>(
     (mesh, indices, ranges)
 }
 
-const ATTRIBUTE_BY_ID: [bevy::mesh::MeshVertexAttribute; 6] = [
+const ATTRIBUTE_BY_ID: [bevy::mesh::MeshVertexAttribute; 8] = [
     Mesh::ATTRIBUTE_POSITION,
     Mesh::ATTRIBUTE_NORMAL,
     Mesh::ATTRIBUTE_UV_0,
     Mesh::ATTRIBUTE_UV_1,
     Mesh::ATTRIBUTE_COLOR,
     Mesh::ATTRIBUTE_TANGENT,
+    SOURCE_TANGENT,
+    SOURCE_BINORMAL,
 ];
 
 /// Intact batches follow their props: a hidden prop's triangles leave the
@@ -435,6 +439,63 @@ mod tests {
             .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 1., 0.]; 3])
             .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0., 0.], [1., 0.], [0., 1.]])
             .with_inserted_indices(Indices::U16(vec![0, 2, 1]))
+    }
+
+    #[test]
+    fn source_track_vectors_keep_their_world_space_and_original_colour() {
+        let mut meshes = Assets::<Mesh>::default();
+        let t = [[0.5, 0., 1.], [-1., 0., 0.], [1., 2., 3.]];
+        let b = [[0., 0.25, -1.], [1., 1., 2.], [3., 0., 1.]];
+        let colour = [[0., 0.2, 0.35, 1.], [0.1, 0., 0.85, 0.6], [1., 0.3, 0.4, 0.]];
+        let mesh = triangle()
+            .with_inserted_attribute(SOURCE_TANGENT, t.to_vec())
+            .with_inserted_attribute(SOURCE_BINORMAL, b.to_vec())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colour.to_vec());
+        let layout: Vec<_> = mesh
+            .attributes()
+            .map(|(attribute, values)| (attribute.id, VertexFormat::from(values)))
+            .collect();
+        assert!(layout.iter().all(|(id, format)| ATTRIBUTES.contains(id) && supported(*format)));
+        let handle = meshes.add(mesh);
+        let transform = Mat4::from_scale_rotation_translation(
+            Vec3::new(-1., 2., 1.5),
+            Quat::from_rotation_y(0.7),
+            Vec3::new(12., 1., -8.),
+        );
+        let part = |matrix| Part::<SurfaceMaterial> {
+            entity: Entity::PLACEHOLDER,
+            material: Handle::default(),
+            intact: false,
+            mesh: handle.clone(),
+            matrix,
+            vertices: 3,
+        };
+        let origin = Vec3::new(10., 5., -7.);
+        let (merged, indices, ranges) =
+            build(&[part(Mat4::IDENTITY), part(transform)], &meshes, origin, &layout);
+        assert_eq!(ranges, vec![0..3, 3..6]);
+        assert_eq!(indices.iter().collect::<Vec<_>>(), vec![0, 2, 1, 3, 5, 4]);
+        assert_eq!(
+            merged.attribute(SOURCE_TANGENT),
+            Some(&VertexAttributeValues::Float32x3([t, t].concat())),
+        );
+        assert_eq!(
+            merged.attribute(SOURCE_BINORMAL),
+            Some(&VertexAttributeValues::Float32x3([b, b].concat())),
+        );
+        assert_eq!(
+            merged.attribute(Mesh::ATTRIBUTE_COLOR),
+            Some(&VertexAttributeValues::Float32x4([colour, colour].concat())),
+        );
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            merged.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions");
+        };
+        assert!(
+            (Vec3::from(positions[4]) + origin)
+                .abs_diff_eq(transform.transform_point3(Vec3::X), 1e-5),
+        );
     }
 
     #[test]

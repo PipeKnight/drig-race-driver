@@ -110,6 +110,16 @@ track file being read, and no route probes for either name].
 | track_infield_dxt5nm | Le Mans 26, Washington 7 | same; plus a normal map |
 | track_infield_wsm | Haruna 36 | same, but A/B UVs from the world position |
 
+G407 restores the s4 normal on `track_surface.fx` in the ordinary source
+materials. The linear BC3 texture supplies X in alpha and Y in green at
+UV0. The positive Z and both authored basis vectors are combined with the
+geometric normal. The evaluated normal feeds forward shading and the packed
+deferred shading data. The ordinary depth, motion and shadow prepasses keep
+the geometric basis. Missing maps or basis data and unsupported layouts
+retain the geometric material response. Source selection is per material.
+Washington, Le Mans and a Donington source-simple control were checked, plus
+an ordinary Washington Native DLAA run.
+
 `track_infield_wsm.cg.fp` [V]: with `s = 1/PScale` and `n` the interpolated normal, the A/B UV is
 `s·(x, z)` when |n.y| is the largest component (ties to y), else `s·(y, z)` when |n.x| is, else
 `s·(x, y)`. Its vertex program passes the object-space position (the track has identity
