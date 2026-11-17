@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F841](F0841.md) | 2026-11-17 | Tree facing: automatic CPU fallback decided from adapter limits, oversize meshes on the CPU |
+| [F840](F0840.md) | 2026-11-17 | Frame-split gpu_begin poll: removing it only moves the work into submit |
 | [F839](F0839.md) | 2026-11-17 | Main thread: parallel continuous sweeps, unchanged-damage skips, burst diagnostics |
 | [F838](F0838.md) | 2026-11-17 | Tree billboards faced on the GPU: a compute pass writes the mesh slabs |
 | [F837](F0837.md) | 2026-11-17 | Mesh uploads per frame: crowd cards, car batches and part meshes stream in place |

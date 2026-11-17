@@ -225,8 +225,11 @@ All routes' distances: `local/r52/tree_attributes.tsv` (d0 10-30 m, d1 90-200 m 
   (`source_trees/gpu_facing.rs`, `tree_facing.wgsl`), which writes each visible placement's
   vertices straight into its mesh slab; the main thread only queues the visible placements.
   The arithmetic is the CPU path's; matched captures are identical to the pixel. The CPU path
-  stays as the fallback (no compute shaders, a slab without `STORAGE`, and
-  `GRID_TREE_FACING=cpu` for review). Shadow twins are still faced to the sun on the CPU.
+  stays as the fallback, chosen automatically: `gpu_path_supported` (F841) takes the GPU path
+  only with compute shaders, at least 4 storage buffers per stage and 64-wide workgroups, so
+  WebGL2, GLES 3.0 and low-limit Vulkan devices use the CPU; meshes in a slab without `STORAGE`
+  or larger than one storage binding are faced on the CPU; placements or sources beyond one
+  binding switch the GPU path off; `GRID_TREE_FACING=cpu` forces it for review. Shadow twins are still faced to the sun on the CPU.
 - Checks (private `local/r46/`): `w-shafts-ab.png`, `spa30-ab.png`, `haruna48-ab.png` (full trees
   everywhere | level switch); `c-x0-vs-n.png` (Washington cards, close crop);
   `switch-large_tree.png` (one `large_tree` at 40, 44, 50, 56 m from its trunk; the switch is at

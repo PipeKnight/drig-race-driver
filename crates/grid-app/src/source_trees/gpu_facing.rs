@@ -299,14 +299,22 @@ fn allow_storage(
     mut settings: ResMut<MeshAllocatorSettings>,
     mut facing: ResMut<RenderFacing>,
 ) {
-    let downlevel = adapter.get_downlevel_capabilities();
-    let limits = device.limits();
-    facing.supported = downlevel.flags.contains(DownlevelFlags::COMPUTE_SHADERS)
-        && limits.max_storage_buffers_per_shader_stage >= 4
-        && limits.max_compute_workgroups_per_dimension >= 1;
+    facing.supported = gpu_path_supported(adapter.get_downlevel_capabilities().flags, &device.limits());
     if facing.supported {
         settings.extra_buffer_usages |= BufferUsages::STORAGE;
     }
+}
+
+/// Whether this device can face on the GPU: compute shaders, the four storage buffers of the
+/// pass in one compute stage, and workgroups. Decided from the adapter alone, so WebGL2, GLES
+/// devices without compute or with fewer storage blocks, and Vulkan devices with a low
+/// `max_storage_buffers_per_shader_stage` keep the CPU path without any setting.
+fn gpu_path_supported(flags: DownlevelFlags, limits: &WgpuLimits) -> bool {
+    flags.contains(DownlevelFlags::COMPUTE_SHADERS)
+        && limits.max_storage_buffers_per_shader_stage >= 4
+        && limits.max_compute_workgroups_per_dimension >= 1
+        && limits.max_compute_invocations_per_workgroup >= 64
+        && limits.max_compute_workgroup_size_x >= 64
 }
 
 fn init_pipeline(mut commands: Commands, cache: Res<PipelineCache>, facing: Res<RenderFacing>) {
@@ -414,7 +422,14 @@ fn dispatch(
     let Some(compiled) = cache.get_compute_pipeline(pipeline.id) else {
         return;
     };
-    facing.active.store(true, Ordering::Release);
+    // Placements or sources beyond one storage binding: the CPU path from the next frame on
+    // (`active` is read by the main world each frame).
+    let max_binding = device.limits().max_storage_buffer_binding_size;
+    let fits = (facing.placements.len() * 4) as u64 <= max_binding && (facing.sources.len() * 4) as u64 <= max_binding;
+    facing.active.store(fits, Ordering::Release);
+    if !fits {
+        return;
+    }
     let facing = &mut *facing;
     if facing.jobs.is_empty() || facing.placements.is_empty() || facing.sources.is_empty() {
         return;
@@ -450,7 +465,6 @@ fn dispatch(
     // Jobs grouped by slab buffer, then into bindable windows.
     let limits = device.limits();
     let align = u64::from(limits.min_storage_buffer_offset_alignment.max(4));
-    let max_binding = limits.max_storage_buffer_binding_size;
     let placements = facing.placements.len() / PLACEMENT_WORDS;
     let mut per_buffer: HashMap<BufferId, SlabJobs> = HashMap::new();
     let mut lacking = Vec::new();
@@ -467,11 +481,12 @@ fn dispatch(
         if u64::from(slice.range.end - slice.range.start) != count || stride == 0 {
             continue;
         }
-        if !slice.buffer.usage().contains(BufferUsages::STORAGE) {
+        let start = u64::from(slice.range.start) * stride;
+        // No STORAGE (large-object slab) or a mesh larger than one binding: faced on the CPU.
+        if !slice.buffer.usage().contains(BufferUsages::STORAGE) || start % align + count * stride > max_binding {
             lacking.push(mesh);
             continue;
         }
-        let start = u64::from(slice.range.start) * stride;
         let entry = per_buffer.entry(slice.buffer.id()).or_insert_with(|| (slice.buffer.clone(), Vec::new()));
         entry.1.push((start, start + count * stride, slot));
     }
@@ -531,6 +546,23 @@ fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gpu_path_needs_compute_and_four_storage_buffers() {
+        // Desktop Vulkan, DX12 and Metal defaults.
+        assert!(gpu_path_supported(DownlevelFlags::all(), &WgpuLimits::default()));
+        // GLES 3.1-class devices with compute and four storage blocks.
+        assert!(gpu_path_supported(DownlevelFlags::all(), &WgpuLimits::downlevel_defaults()));
+        // WebGL2 / GLES 3.0: no compute shaders.
+        let webgl = WgpuLimits::downlevel_webgl2_defaults();
+        assert!(!gpu_path_supported(DownlevelFlags::all() - DownlevelFlags::COMPUTE_SHADERS, &webgl));
+        assert!(!gpu_path_supported(DownlevelFlags::all(), &webgl));
+        // A device with too few storage buffers per stage.
+        for n in 0..4 {
+            let limits = WgpuLimits { max_storage_buffers_per_shader_stage: n, ..WgpuLimits::default() };
+            assert!(!gpu_path_supported(DownlevelFlags::all(), &limits));
+        }
+    }
 
     #[test]
     fn windows_start_aligned_and_stay_within_the_binding_limit() {

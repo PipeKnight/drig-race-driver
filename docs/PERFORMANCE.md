@@ -2712,6 +2712,14 @@ pooled.
 The same code; phones with compute shaders and enough storage buffers take the GPU path, others
 the CPU path. Not measured on a phone.
 
+F841 makes the choice testable and covers the limits: `gpu_path_supported(flags, limits)` needs
+`DownlevelFlags::COMPUTE_SHADERS`, `max_storage_buffers_per_shader_stage >= 4` and 64-wide
+workgroups (tests: wgpu desktop defaults and GLES 3.1-class `downlevel_defaults` take the GPU
+path; WebGL2 limits, no compute, or 0-3 storage buffers take the CPU path). A mesh larger than
+one storage binding goes to the CPU path instead of being skipped, and placement or source
+tables larger than one binding turn the GPU path off from the next frame. Metal on the Mac meets
+the limits and takes the GPU path (not run on a Mac yet).
+
 ### Next
 
 Donington is still render-thread bound (11.5 ms: `r_encode` 5.7 ms with about 360 transparent
