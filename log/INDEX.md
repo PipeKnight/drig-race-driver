@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G395](G0395.md) | 2026-11-17 | Use surface geometry to continue skid strips |
 | [G394](G0394.md) | 2026-11-17 | Stabilize Type2 composition and restore the source bloom curve |
 | [G393](G0393.md) | 2026-11-17 | Render authored idle course officials in ordinary races |
 | [G392](G0392.md) | 2026-11-17 | Restore source normal maps on skid marks |
