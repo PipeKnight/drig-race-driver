@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G394 makes optional original Type2 compose before SMAA and restores the source bloom exponent. Ordered neutral controls and the final Haruna run match. Le Mans cross-build raster equality and original transfer remain open. See [original postprocess](docs/ORIGINAL_POSTPROCESS.md).
 - G393 adds source idle standing course officials in ordinary races. Matched Donington and Detroit captures show pose animation. Flag actors remain open. See [crowd research](docs/CROWD_ANIMATION_RESEARCH.md).
 - G392 restores each vehicle bank's source skid normal atlas and the two-UV signed basis. Donington native DLAA, mixed Detroit baseline and active BMW flashback checks passed. Direct original comparison for grass gaps is open. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
 - G390 follows the source timeline sun direction. Matched ordinary-lighting Le Mans day/night renders and Haruna night/day passed. The observed Le Mans chase view uploaded beam slots for 14 of its 16 lit cars across the run, and Haruna uploaded its two slots in-frame. See [Le Mans](docs/LE_MANS.md).

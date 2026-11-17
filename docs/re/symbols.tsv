@@ -1712,6 +1712,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00741D70	construct_skid_strip	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:156		[D]		[D] Pool allocator `7456F0` calls constructor `741D70` once per newly allocated
 0x00741E10	pack_skid_bounds	func	not ported	docs/GROUND_EFFECTS_RESEARCH.md:169		[D]		shared helper `741E10` packs bounds into the packet. The inspected bodies do
 0x00742510	PostprocessDescriptionApply	func	not ported	docs/ORIGINAL_POSTPROCESS.md	G373	[D]		serializer adapter to destination virtual+40; flag meaning unresolved
+0x00742790	BloomTypedFloatHandler_write	label	crates/grid-app/src/track_grade.wgsl	docs/ORIGINAL_POSTPROCESS.md	G394	[D]		Reads handler+0xE0 and submits the named float unchanged.
 0x00742B00		func	crates/grid-formats/src/track_lighting.rs:254 grid-formats::track_lighting::ParticleLight	docs/ROAD_MATERIAL_RESPONSE.md:105 ; docs/TYRE_SMOKE_RESEARCH.md:1225				0x742B00; that rounding (under 0.4 %) is not reproduced.
 0x00742C40		func	not ported	docs/VEHICLE_STATE.md:11				not a function entry in the master analysis; The plugin's first virtual method at `0x00742c40` returns `0x00e6e834`, used by the original type-validation path. That global is not established as a vehicl...
 0x00742DC0		func	not ported	docs/SOURCE_SKY_LIGHTING.md:47				Private evidence: vegetation01/light-callers01.json, light-context-writer01.txt, light-uniform-dispatch01.txt; existing shaders/track-infield-pixel01.txt and...
@@ -1734,6 +1735,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x007470C0	PostprocessToneMapFastConstruct	func	not ported	docs/ORIGINAL_POSTPROCESS.md		[D]		Constructs the CF3F20 handler and its ToneMapFast parameters.
 0x007471C0	PostprocessToneMapFastPrepare	func	not ported	docs/ORIGINAL_POSTPROCESS.md		[D]		Prepares lumThresholdScale from threshold; one-shot exposure adaptation override flags.
 0x00747240	PostprocessToneMapFastBind	func	not ported	docs/ORIGINAL_POSTPROCESS.md		[D]		Binds limits and rate to FastLumAdapt plus scene shader threshold fields.
+0x00747620	BloomFromDsX4_construct	func	crates/grid-app/src/track_grade.wgsl	docs/ORIGINAL_POSTPROCESS.md	G394	[D]		Installs effect table and registers intensity at effect+0x20 via its parameter constructor.
+0x00747778	BloomFromDsX4_bindIntensity	label	crates/grid-app/src/track_grade.wgsl	docs/ORIGINAL_POSTPROCESS.md	G394	[D]		Registers intensity and links its typed handler to effect+0x20 for shader c3.
 0x00747C50	colour_balance_prepared_object_constructor	func	not ported	docs/ORIGINAL_POSTPROCESS.md:64		[D]		The selected object's constructor at `0x00747C50` creates a parameter subobject
 0x00747D60	colour_balance_prepare_uniforms	func	not ported	docs/ORIGINAL_POSTPROCESS.md:66		[D]		parameter+0x24 and packed tintColour at parameter+0x28. Update `0x00747D60`
 0x00748358		label	not ported	docs/ORIGINAL_POSTPROCESS.md:68				inside 0x00747D60; `0x00748358..0x0074839D` prepare:
