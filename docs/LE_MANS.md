@@ -242,8 +242,13 @@ Haruna's authored forced-night route submits player and AI beams.
 [G396](../log/G0396.md) verifies that the Le Mans comparison arms used different
 opponent fields. The timeline checkpoints and uploads are valid per-run
 observations. The side-by-side images cannot isolate the amount of lighting
-change. A repeatable visual pair must pin the full field as well as the player
-camera and event clock.
+change. [G399](../log/G0399.md) now verifies the direction and beam contribution
+in separate pairs with the same complete 16-car field, poses, camera, time,
+light-energy and street controls. The beam control holds the day/night state
+and the sun direction. It removes the prepared car beams for the comparison.
+The source direction follows the timeline and the ordinary night run submits
+car beams from seven unique slots across the captured chase views. Haruna's
+night run submits both slots; its day route supplies an independent control.
 
 ### 3.5 Renderer hand-off
 
