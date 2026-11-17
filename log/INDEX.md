@@ -735,6 +735,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G418](G0418.md) | 2026-11-17 | Trace real native thin-detail owners |
 | [G417](G0417.md) | 2026-11-17 | Restore automatic smoke with frame timing |
 | [G416](G0416.md) | 2026-11-17 | Measure a real reflected aerial contribution before native history |
 | [G415](G0415.md) | 2026-11-17 | Verify reversible native queue routing for thin geometry |

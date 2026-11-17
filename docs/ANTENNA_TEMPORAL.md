@@ -117,3 +117,16 @@ native Depth/MV are exact. The draw adds color in the measured rear
 wire footprint while the destination alpha stays exact. The matched
 evidence extends through Stock transparency. Same-frame Automatic
 smoke fragment ordering remains open.
+
+## Authored owners in actual native opaque and motion phases
+
+[G418](../log/G0418.md) observes one Lacetti and two DBR9 player aerials as
+separate real prepared owners in the normal Baseline and Enhanced profiles.
+An early Donington start with eleven Lacetti opponents also exposes two LOD2
+owners with bin size two in both phases. Inspect the exact keys and full
+owner lists before measuring a whole-group refusal.
+
+The strict byte equality check across two launches fails even for the exact
+same disabled-tag binary with identical control and capture ledgers. Measure
+native launch variation separately from raw input equality and the visible
+motion comparison. Production temporal admission remains open.
