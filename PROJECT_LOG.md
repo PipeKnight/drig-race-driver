@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G410 restores authored normals on the nonreflective DXT5 infield family. The purchased loader and matched Washington runtime pass. See [track surface](docs/SKY.md).
 - G409 verifies actual DLAA isolation for the selected Full smoke source. Ordinary Static reflection ownership and the Reduced path are next. See [thin antenna](docs/ANTENNA_TEMPORAL.md).
 - G408 verifies ordinary spectator movement and flashes on Shibuya, two identical same-tick pause crops and restart/Flashback/replay lifecycle. See [crowd research](docs/CROWD_ANIMATION_RESEARCH.md).
 - G407 restores the authored nonreflective track surface normal map in ordinary rendering, verified in forward, deferred and Native DLAA. See [track surface](docs/SKY.md).
@@ -72,11 +73,6 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - G389 corrects sky motion in the shared prepass. Actual native DLAA p99 reprojection error drops from 1.311 to 0.015 px in the audited background ROI. Production Win release and camera/restart checks passed; the separate antenna trail remains open. See [Native DLAA](docs/NATIVE_DLAA.md).
 - G388 (main cf8c3b15/PR44) adds source walkers and moving marshals to ordinary races. Matched Milan/Yokohama captures, restart/replay lifecycle, 1,776 tests, four unchanged identities and 24 quick soaks passed. Source audio, camera flashes and near standing crowds are on main. Exact native cull re-entry timing and flag officials remain open.
 - G384/G385 (main PR41/PR42) cover per-vehicle mark banks and replay continuity, source-driven night intensity, and the optional Type2 postprocess. Native colour-transfer confirmation and the Shibuya exposure mismatch remain open. The 4x and external-motion DLAA trials did not fix the antenna trail.
-- G383 (selected-clip diagnostic): general explicit-coordinate selected crowd clip→dynamic named pose→existing preview path compiles;61CPUtests including six actual resource banks/30modifiers plus734-test package gate/Clippy/release/render pass after shared malformed-normal repair. Matched actual selected-clip Control/Pose GPU pair renders coherent seated pose with background byte-identical. Original clock/Delta/reference, populated animation, flashes/audio remain open. Diagnostic is not a production crowd completion.
-- G382 (main ee77df5e/PR36): shared static linked packed-SUN specular colour corrects the constructor-white inference; 23-file source corpus and22focused tests pass, mandatory crate gate715tests/Clippy/defaultbuild/render PASS. Matched Don/STK are identical; Haruna rock highlights change, body nearly unchanged. BMW capture completes but its supervisor OSexit is unverified after an exit race; original aggregate failure retained. Full night/DLAA/crowd remain open.
-- G381 (main671a921b/PR35): shared per-slot/owned-family signals and actualHIGH/LOW bank receipts pass FULL1480tests/24soaks/fouridentities and featureClippy/release, including actual44-model data and real reflection-overlay lifecycle. Shared source-material scenes admit all models/routes structurally; DefaultOff. Four zero-window emission arms and recovered offline/independent visual review pass (BMW plus six-model16-car night field); native focus/sampler/photometry/complete-night remain qualified.
-- G380 (main671a921b/PR35): shared categorical HLA parser passes13tests/Clippy and actual184-record purchased catalogue after correcting null FactorValue handling. Native actor names/source setup linked statically; general animation/clock/pose/render integration remains open.
-- G379 (negative DLAA experiment): matched default/J/K inputs and native creation receipts pass; J worsens antenna trails, K close to default. No hint/default or dependency change delivered; thin-detail quality remains open. Final experimental source/evidence retained privately.
 - G376 (main7dbc50b8/PR32): shared exact semantic/LOD-node/palette mapper consumed by the existing guarded lamp pilot; all60 source catalogue records independently match. Clippy/29 CPU tests pass, including88packages/264bundles/2592sections; publication gate PASS699tests/Clippy/build/render; no new glow or normal default change.
 - G374 (main7dbc50b8/PR32 diagnostic): bounded current CPU mesh observer joins exact consecutive temporal captures; final combined-feature Clippy/14 CPU regressions pass, one actual native GPU candidate pair passes with148 stable CPU shapes; mandatory gate PASS699tests/Clippy/build/render. Antenna fix remains open.
 - G373 (source research): saved lamp jointID-to-runtime Parts identity and postprocess effect/group dispatch verified; semantic section mapping, live glow and typed effect/colour-domain consumers remain open. No renderer/default change.
@@ -116,6 +112,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   night level and Le Mans timeline lighting. G384 resumes enhanced time-of-day and its verification.
 - Open: the original post-process chain (row 77), the enhanced
   profile only for Lacetti on Donington (row 78), strobing wheels (row 81).
+- Earlier foundations are indexed in G379–G383 for DLAA hints, crowd readers, lamp ownership and source lighting.
 
 ### Android and platforms
 - macOS F577: native arm64 release build and code-only `DRIG.app` packaging pass

@@ -120,6 +120,12 @@ retain the geometric material response. Source selection is per material.
 Washington, Le Mans and a Donington source-simple control were checked, plus
 an ordinary Washington Native DLAA run.
 
+G410 also admits `track_infield_dxt5nm.fx` to the shared mapped-colour
+path. Its original mapped vertex program and normal reconstruction match the
+road program. The loader's finite authored basis and BC3 checks provide the
+geometric fallback. The mapped and cheap original shader programs have
+distinct source semantics.
+
 `track_infield_wsm.cg.fp` [V]: with `s = 1/PScale` and `n` the interpolated normal, the A/B UV is
 `s·(x, z)` when |n.y| is the largest component (ties to y), else `s·(y, z)` when |n.x| is, else
 `s·(x, y)`. Its vertex program passes the object-space position (the track has identity
