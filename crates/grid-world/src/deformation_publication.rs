@@ -5,6 +5,53 @@ use crate::{
     spawn::reference_seed,
     vehicle_publication::{self, State, VEHICLE_WORDS},
 };
+const LAMP_CLUSTERS: usize = 12;
+
+fn lamp_record(cluster: usize) -> usize {
+    0xcc10 + cluster * 32
+}
+
+/// Bind source LOD0 centres before the first physical publication. A carried
+/// owner with any existing cluster states keeps its records.
+pub fn bind_initial_lamp_anchors(
+    owner: &mut [u32],
+    anchors: &[Option<[f32; 3]>; LAMP_CLUSTERS],
+) -> Result<(), Error> {
+    if owner.len() != VEHICLE_WORDS
+        || anchors
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|v| !v.is_finite() || v.abs() > 1000.)
+    {
+        return Err(Error("invalid source light cluster anchors"));
+    }
+    if (0..LAMP_CLUSTERS).any(|cluster| owner[lamp_record(cluster) / 4] != 0) {
+        return Ok(());
+    }
+    for (cluster, anchor) in anchors.iter().enumerate() {
+        let Some(anchor) = anchor else { continue };
+        let at = lamp_record(cluster) / 4;
+        owner[at] = 1;
+        owner[at + 4..at + 7].copy_from_slice(&anchor.map(f32::to_bits));
+        owner[at + 7] = 0;
+    }
+    Ok(())
+}
+
+/// The last committed source damage state, before selecting a render LOD.
+pub fn lamp_cluster_smashed(owner: &[u32], cluster: u8) -> Option<bool> {
+    let cluster = usize::from(cluster);
+    if owner.len() != VEHICLE_WORDS || cluster >= LAMP_CLUSTERS {
+        return None;
+    }
+    match owner[lamp_record(cluster) / 4] {
+        1 => Some(false),
+        2 => Some(true),
+        _ => None,
+    }
+}
+
 fn f(b: &[u32], at: usize) -> f32 {
     f32::from_bits(b[at / 4])
 }
@@ -65,9 +112,10 @@ pub fn calculate_owned(mut next: State, delta: f32) -> Result<State, Error> {
     if b[0xc7f8 / 4] != 0xd240
         || !f(b, 0xee40).is_finite()
         || f(b, 0xee40).abs() > 1000.
-        || (0..12).any(|i| {
-            b[(0xcc10 + i * 32) / 4] > 2
-                || vector(b, 0xcc20 + i * 32)
+        || (0..LAMP_CLUSTERS).any(|i| {
+            let at = lamp_record(i);
+            b[at / 4] > 2
+                || vector(b, at + 16)
                     .iter()
                     .any(|v| !v.is_finite() || v.abs() > 1e6)
         })
@@ -102,8 +150,8 @@ pub fn calculate_owned(mut next: State, delta: f32) -> Result<State, Error> {
         minimum: vector(b, 0xc730),
         positions: &positions,
     };
-    for i in 0..12 {
-        let at = 0xcc10 + i * 32;
+    for i in 0..LAMP_CLUSTERS {
+        let at = lamp_record(i);
         if b[at / 4] == 0 {
             continue;
         }
@@ -166,6 +214,29 @@ pub fn after_geometry_rebuild_owned(mut next: State, delta: f32) -> Result<State
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn authored_lamp_anchors_configure_only_pristine_record_slots() {
+        let mut owner = vec![0; VEHICLE_WORDS];
+        let mut anchors = [None; LAMP_CLUSTERS];
+        anchors[3] = Some([1., 2., 3.]);
+        anchors[7] = Some([f32::NAN, 2., 3.]);
+        let original = owner.clone();
+        assert!(bind_initial_lamp_anchors(&mut owner, &anchors).is_err());
+        assert_eq!(owner, original);
+        anchors[7] = None;
+        bind_initial_lamp_anchors(&mut owner, &anchors).unwrap();
+        assert_eq!(lamp_cluster_smashed(&owner, 3), Some(false));
+        assert_eq!(lamp_cluster_smashed(&owner, 7), None);
+        assert_eq!(lamp_cluster_smashed(&owner, 12), None);
+        assert_eq!(vector(&owner, lamp_record(3) + 16), [1., 2., 3., 0.]);
+        owner[lamp_record(3) / 4] = 2;
+        anchors[7] = Some([4., 5., 6.]);
+        let damaged = owner.clone();
+        bind_initial_lamp_anchors(&mut owner, &anchors).unwrap();
+        assert_eq!(owner, damaged);
+        assert_eq!(lamp_cluster_smashed(&owner, 3), Some(true));
+    }
+
     #[test]
     fn late_view_failure_preserves_earlier_decay_mode_and_velocity_state() {
         let mut state = State {

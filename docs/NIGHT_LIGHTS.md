@@ -104,3 +104,18 @@ the route request. The existing lamp-off option remains available for
 matched controls. Replay keeps the guarded exterior-lamp state while
 historical clock, fade and damage representation are established. Exact
 source radiometry remains a separate reference check.
+
+## Live exterior lamp damage ownership
+
+The ordinary exterior shader now reads known lamp cluster state by the
+source receiver's stable cluster and the physical field slot. Slot zero
+reads the player runtime. Each opponent reads its own completed runtime.
+The source deformation loader binds the authored LOD0 cluster centres to
+the existing deformation owner. High and low material receivers share the
+same stable cluster IDs.
+
+An intact cluster continues to emit according to the source lighting
+request. A smashed cluster loses that material emission. Vehicles with
+unknown cluster data or without source deformation use the existing
+graphical estimate. The projector, the texture applied to a cracked or
+smashed lamp and the historical replay presentation are separate consumers.
