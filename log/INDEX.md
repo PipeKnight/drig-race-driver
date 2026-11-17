@@ -735,6 +735,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G422](G0422.md) | 2026-11-17 | Verify real native shared-group refusal before mutation |
 | [G421](G0421.md) | 2026-11-17 | Witness ordinary native Reduced smoke on an organic frame |
 | [G420](G0420.md) | 2026-11-17 | Identify two real native owners in shared thin-detail bins |
 | [G419](G0419.md) | 2026-11-17 | Measure native Reduced smoke overlap at a thin aerial |
