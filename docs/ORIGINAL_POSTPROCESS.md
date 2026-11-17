@@ -479,3 +479,18 @@ capture requests. At ticks 1441 and 1443 the source exponent raises mean luma
 by 4.22 and 3.97 RGB codes, respectively. Roughly 10.6 percent of pixels
 change by more than eight codes. This quantifies the change in Type2 in
 these frames. The exact display transfer of the original remains open.
+
+### Replay Balance before SMAA
+
+The saved Flashback Balance grade is active for selected replay phases. It
+previously shared the post-process schedule with SMAA without a dependency.
+Both operations replace the current view colour, so their order matters.
+[G401](../log/G0401.md) puts Balance after tone mapping and RaceMerge and
+before SMAA.
+
+At the same active BMW/Shibuya Flashback state and camera pose, the old
+authored order changed nearly the entire image on two A/A frames. With the
+ordering dependency, all six active authored frames matched across repeats.
+Track-grade repeats matched in both measured arms. The resumed views
+confirmed that the Balance pass had no active component or draw. Different
+resumed camera hashes prevented exact image comparison in that phase.
