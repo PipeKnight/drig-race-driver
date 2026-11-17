@@ -735,6 +735,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G415](G0415.md) | 2026-11-17 | Verify reversible native queue routing for thin geometry |
 | [G414](G0414.md) | 2026-11-17 | Place tyre marks from the raw wheel-local source point |
 | [G413](G0413.md) | 2026-11-17 | Observe live reflected aerial ownership at native resolution |
 | [G412](G0412.md) | 2026-11-17 | Bind ordinary exterior lamp emission to physical source damage |

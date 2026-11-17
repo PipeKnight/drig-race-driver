@@ -94,3 +94,15 @@ At the same render stamp, a conservative CPU projection selects a rear
 pixel clear of the front mesh's padded bounds. The next readback must
 establish real fragment coverage and the child's contribution before
 ordinary smoke and native history.
+
+## Reversible prepared phase routing
+
+[G415](../log/G0415.md) compares three same-build native recordings of a
+clear Lacetti aerial. A source-only group can be omitted from both native
+prepass and opaque draws while keeping the prepared Stock instance data.
+Both prepared maps restore at the actual phase boundaries. The separate
+current silhouette retains 77 coverage pixels. Its pre-Early input
+difference is confined to 34 pixels on the measured frame. The next
+frame returns to Stock, witnesses a native reset, and matches its full
+Stock RGB image. Reflective child coverage, ordinary Reduced smoke and
+moving cutout/glass controls remain open.
