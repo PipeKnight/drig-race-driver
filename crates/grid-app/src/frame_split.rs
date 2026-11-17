@@ -150,6 +150,7 @@ fn point<const I: usize>() {
         if let Some(done) = done {
             with_acc(|a| {
                 a.render_frames += 1;
+                a.last_render = done[11];
                 for (sum, v) in a.stages.iter_mut().zip(done) {
                     *sum += v;
                 }
@@ -211,21 +212,56 @@ struct MainClock {
     begin: Option<Instant>,
     last_end: Option<Instant>,
     fixed_begin: Option<Instant>,
+    /// This frame's fixed loop, outside time and fixed ticks.
+    frame_fixed: u64,
+    frame_outside: u64,
+    frame_ticks: u32,
 }
 static MAIN_CLOCK: Mutex<MainClock> = Mutex::new(MainClock {
     begin: None,
     last_end: None,
     fixed_begin: None,
+    frame_fixed: 0,
+    frame_outside: 0,
+    frame_ticks: 0,
 });
+
+/// Frame-time limits (ms) of the slow-frame attribution: `slow10_*` and
+/// `slow14_*` in `frame_stats` (the 100 fps budget and the 1 % lows).
+const SLOW_MS: [u64; 2] = [10, 14];
+
+/// Sums over the frames slower than one of `SLOW_MS`: where the worst frames'
+/// time goes (main schedule, its fixed ticks, waiting for the render thread).
+#[derive(Clone, Copy, Default)]
+struct Slow {
+    frames: u32,
+    frame: u64,
+    main: u64,
+    fixed: u64,
+    outside: u64,
+    render: u64,
+    ticks: u64,
+    /// Frames that ran two or more fixed ticks (catch-up).
+    multi: u32,
+}
 
 fn main_begin() {
     let now = Instant::now();
     let mut c = MAIN_CLOCK.lock().unwrap_or_else(|e| e.into_inner());
     c.begin = Some(now);
+    c.frame_fixed = 0;
+    c.frame_ticks = 0;
+    c.frame_outside = 0;
     if let Some(end) = c.last_end {
         let outside = ns(end, now);
+        c.frame_outside = outside;
         with_acc(|a| a.outside += outside);
     }
+}
+
+/// One fixed tick (`FixedFirst`).
+fn fixed_tick() {
+    MAIN_CLOCK.lock().unwrap_or_else(|e| e.into_inner()).frame_ticks += 1;
 }
 
 fn fixed_begin() {
@@ -234,13 +270,12 @@ fn fixed_begin() {
 
 fn fixed_end() {
     let now = Instant::now();
-    if let Some(begin) = MAIN_CLOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .fixed_begin
-        .take()
-    {
-        with_acc(|a| a.fixed += ns(begin, now));
+    let mut c = MAIN_CLOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(begin) = c.fixed_begin.take() {
+        let fixed = ns(begin, now);
+        c.frame_fixed += fixed;
+        drop(c);
+        with_acc(|a| a.fixed += fixed);
     }
 }
 
@@ -301,9 +336,25 @@ fn main_end(
     let now = Instant::now();
     let mut c = MAIN_CLOCK.lock().unwrap_or_else(|e| e.into_inner());
     let main = c.begin.take().map_or(0, |b| ns(b, now));
+    let frame = c.last_end.map(|end| ns(end, now));
+    let (fixed, outside, ticks) = (c.frame_fixed, c.frame_outside, c.frame_ticks);
     c.last_end = Some(now);
     drop(c);
     with_acc(|a| {
+        if let Some(frame) = frame {
+            for (slow, limit) in a.slow.iter_mut().zip(SLOW_MS) {
+                if frame > limit * 1_000_000 {
+                    slow.frames += 1;
+                    slow.frame += frame;
+                    slow.main += main;
+                    slow.fixed += fixed;
+                    slow.outside += outside;
+                    slow.render += a.last_render;
+                    slow.ticks += u64::from(ticks);
+                    slow.multi += u32::from(ticks >= 2);
+                }
+            }
+        }
         a.main_frames += 1;
         a.main += main;
         a.mesh_up += mesh.0;
@@ -788,6 +839,9 @@ struct Acc {
     gpu_bad: u32,
     gpu: [f64; 7],
     gpu_span: f64,
+    /// render_ms of the last finished render frame (kept across resets).
+    last_render: u64,
+    slow: [Slow; 2],
     /// Per-view detail over `DETAIL_WINDOWS` windows (kept across resets).
     detail: BTreeMap<(isize, u32), ViewAcc>,
     detail_windows: u32,
@@ -868,6 +922,19 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
             a.image_up as f64 / secs,
             a.image_bytes as f64 / 1024. / secs,
         );
+        for (slow, limit) in a.slow.iter().zip(SLOW_MS) {
+            let n = slow.frames;
+            s += &format!(
+                " slow{limit}_frames={n} slow{limit}_ms={:.2} slow{limit}_main={:.2} slow{limit}_fixed={:.2} slow{limit}_outside={:.2} slow{limit}_render={:.2} slow{limit}_ticks={:.2} slow{limit}_multi={}",
+                per(slow.frame, n),
+                per(slow.main, n),
+                per(slow.fixed, n),
+                per(slow.outside, n),
+                per(slow.render, n),
+                slow.ticks as f64 / f64::from(n.max(1)),
+                slow.multi
+            );
+        }
         let mut lines = Vec::new();
         a.detail_windows += 1;
         if a.detail_windows >= DETAIL_WINDOWS && !a.detail.is_empty() {
@@ -890,9 +957,11 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
         }
         let detail = std::mem::take(&mut a.detail);
         let detail_windows = a.detail_windows;
+        let last_render = a.last_render;
         *a = Acc {
             detail,
             detail_windows,
+            last_render,
             ..Acc::default()
         };
         (s, lines)
@@ -903,6 +972,7 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
 
 pub fn install(app: &mut App) {
     app.add_systems(First, main_begin)
+        .add_systems(FixedFirst, fixed_tick)
         .add_systems(Last, main_end)
         .add_systems(
             RunFixedMainLoop,

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F843](F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
 | [F842](F0842.md) | 2026-11-17 | Prop breaks copy one switch per box, not every box |
 | [F841](F0841.md) | 2026-11-17 | Tree facing: automatic CPU fallback decided from adapter limits, oversize meshes on the CPU |
 | [F840](F0840.md) | 2026-11-17 | Frame-split gpu_begin poll: removing it only moves the work into submit |

@@ -2880,3 +2880,98 @@ not compared here.
 
 No render code reads the switches and the simulation is identical, so the image cannot change;
 no captures were made.
+
+## Main thread: skid-mark and smoke-boundary caches, slow-frame split (F843)
+
+### Skid marks
+
+`present` (skid_marks.rs) rebuilt every strip's vertices to find the sort
+centre each frame. It now keeps each strip's bounds (`bounds`, set from the
+runs `changes()` reports) and takes the centre from them; a quad's vertices
+come from `quad_vertices`. The unit test checks that the cached centre equals
+the full scan for random edits.
+
+### Smoke boundary
+
+The render-world extract (smoke_boundary/live.rs) searched every mesh entity
+for the five smoke-boundary owners each frame. It now keeps their entities and
+mesh ids (`SmokeOwners`), checks them with one `get` each, and scans again
+only when a cached entity loses its mesh or a changed `Mesh3d` names a cached
+mesh on another entity.
+
+### Slow-frame split in frame_stats
+
+frame_split's window report gains, for frames over 10 ms and 14 ms
+(`slow10_*`, `slow14_*`): their count and mean frame, main, fixed (FixedMain
+time inside the frame), outside, render, fixed ticks per slow frame, and how
+many ran more than one tick. perf_timing gains `RaceUpdate` (the race
+update after the runtime tick in drive_tick).
+
+### A/B
+
+`local/mt/buildsk.ps1` (under the build lock; release tests of the changed
+modules pass, 150 passed): A = `local/mt/base842.exe` (origin/main F842),
+B = `local/mt/new.exe` (this change), `local/mt/cost.ps1`: offscreen
+1280x720, `--render-fixed-step`, the Detroit derby, 1,500 drive ticks,
+`GRID_PERF_TIMING=1`, three alternating pairs. Idle machine: no cargo or
+rustc process before the pairs and no busy process during any run
+(`busy_procs=0`). Raw: `local/mt/buildsk.txt`.
+
+| ms per frame | A1 | B1 | A2 | B2 | A3 | B3 |
+|---|---|---|---|---|---|---|
+| main | 6.112 | 5.860 | 6.017 | 5.626 | 5.814 | 5.546 |
+| MainSchedule | 5.715 | 5.610 | 5.702 | 5.287 | 5.424 | 5.204 |
+| skid present | 0.411 | 0.123 | 0.407 | 0.117 | 0.400 | 0.118 |
+| extract | 0.392 | 0.388 | 0.381 | 0.359 | 0.356 | 0.356 |
+| render | 7.321 | 7.429 | 7.213 | 7.132 | 7.008 | 7.013 |
+
+Main thread −0.25 to −0.39 ms per frame in every pair, most of it the skid
+present (−0.29 ms). The derby has little smoke here, so the extract gains
+less than in the earlier loaded batch (`local/mt/cost-sk.txt`, F839 base:
+extract 1.14–1.31 -> 0.96–1.10 ms). The simulation is not touched (the new
+`RaceUpdate` timer only reads the clock); the skid vertices and the smoke
+mesh are the same, so the image is unchanged by construction.
+
+Two runs (A2 and B1, one per variant) had one tick of 175 and 189 ms, spent
+in different stages (`CarPairs`, `BodyEvents`). Interpretation: the thread
+was stalled by the system (the PC runs near its commit limit), not by
+either variant.
+
+### What slow frames are made of
+
+Six earlier windowed derby runs of the draft (`local/mt/ab/sk-t-B*`,
+`skw-B*`, machine not idle, so only the proportions count) had 1,650–2,275
+frames over 10 ms each. Those frames averaged 7.5–12.7 ms main, 2.9–5.2 ms
+fixed, 9.1–14.6 ms render and 5.3–10.1 ms outside, with 0.98–1.18 fixed
+ticks per slow frame; 1–14 % of them ran more than one tick. Interpretation:
+on this machine the slow frames are mostly render and presentation, and
+catch-up ticks are a minor cause.
+
+### Stdout cost depends on the launcher
+
+RaceUpdate measured 0.42–0.44 ms per tick in Start-Process runs; a temporary
+probe put 0.42 ms of it in the report lines a tick writes to stdout
+(`local/mt/buildsp.txt`, `RPROBE`). A stand-alone writer
+(`local/mt/wbench.rs`: four report-sized lines per tick through `writeln!`;
+raw `local/mt/wbench/`) gives the per-tick cost by launcher:
+
+| Launch | µs per tick |
+|---|---|
+| cmd `> file 2>&1` (the owner's `Play GRID Prototype.cmd`) | 21.3–22.4 |
+| PowerShell `Start-Process -RedirectStandardOutput` | 245.6–253.2 |
+| same, one buffered write per tick | 73.7 |
+
+Formatting is 10–12 µs of it. A WriteFile costs about 5 µs to a file cmd
+opened and about 60 µs to the one Start-Process opened. The owner's launcher therefore pays about 0.02 ms per
+tick; harness scripts that use Start-Process (frame_split_smoke,
+career_loop_smoke, front_end_loops, menu_loop_smoke, run_grid_macro, …) add
+about 0.2 ms per tick that players do not pay. Their absolute DriveTick and
+fixed numbers are high by that much; A/B pairs from the same harness stay
+valid.
+
+### Present mode in the harness
+
+frame_split_smoke uses the default present mode (AutoVsync, which resolves to
+Fifo). Some runs locked at exactly 60.0 fps on the 165 Hz monitor, with about
+9.5 ms outside the frame. The owner plays with `auto_no_vsync`; interactive
+A/B runs pass `-Extra "present_mode = auto_no_vsync"`.

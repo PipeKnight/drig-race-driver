@@ -290,12 +290,26 @@ fn extract(
     windows: Extract<Query<Entity, With<PrimaryWindow>>>,
     smoke: Extract<Option<Res<crate::tyre_smoke::TyreSmoke>>>,
     meshes: Extract<Query<(Entity, &Mesh3d)>>,
+    changed: Extract<Query<(Entity, &Mesh3d), Changed<Mesh3d>>>,
+    mut owners: Local<Option<SmokeOwners>>,
     mut snapshot: ResMut<Snapshot>,
     mut route: ResMut<Routing>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     proof: Res<core::Proof>,
     state: Res<State>,
 ) {
+    // Before any early return: every frame's Mesh3d changes are seen once.
+    if let Some(cached) = owners.as_ref()
+        && changed.iter().any(|(entity, mesh)| {
+            cached
+                .meshes
+                .iter()
+                .zip(&cached.entities)
+                .any(|(id, &owner)| *id == mesh.id() && owner != entity)
+        })
+    {
+        *owners = None;
+    }
     if !route.clean() {
         // Missing a mandatory previous finalizer is an invariant violation, not cold startup.
         state.fail("live previous frame missed finalizer");
@@ -346,18 +360,43 @@ fn extract(
     {
         return;
     }
-    for handle in handles {
-        let mut owners = meshes.iter().filter(|(_, mesh)| mesh.id() == handle.id());
-        let Some((entity, _)) = owners.next() else {
-            snapshot.groups.clear();
-            return;
-        };
-        if owners.next().is_some() {
-            snapshot.groups.clear();
+    let ids: [AssetId<Mesh>; 5] = std::array::from_fn(|i| handles[i].id());
+    let valid = owners.as_ref().is_some_and(|cached| {
+        cached.meshes == ids
+            && cached
+                .entities
+                .iter()
+                .zip(&ids)
+                .all(|(&entity, id)| meshes.get(entity).is_ok_and(|(_, mesh)| mesh.id() == *id))
+    });
+    if !valid {
+        // One pass over every mesh entity: each smoke mesh needs exactly one owner.
+        *owners = None;
+        let mut found = [Entity::PLACEHOLDER; 5];
+        let mut counts = [0u32; 5];
+        for (entity, mesh) in &meshes {
+            if let Some(j) = ids.iter().position(|id| *id == mesh.id()) {
+                counts[j] += 1;
+                found[j] = entity;
+            }
+        }
+        if counts != [1; 5] {
             return;
         }
-        snapshot.groups.push(entity.into());
+        *owners = Some(SmokeOwners { meshes: ids, entities: found });
     }
+    if let Some(cached) = owners.as_ref() {
+        snapshot.groups.extend(cached.entities.map(MainEntity::from));
+    }
+}
+
+/// The five smoke meshes' owner entities from the last full scan. They stay
+/// valid while each still holds its mesh and no changed `Mesh3d` (spawned,
+/// inserted or replaced) names one of the meshes on another entity; before,
+/// every frame scanned every mesh entity once per smoke mesh.
+struct SmokeOwners {
+    meshes: [AssetId<Mesh>; 5],
+    entities: [Entity; 5],
 }
 fn normalize_target(
     target: &RenderTarget,

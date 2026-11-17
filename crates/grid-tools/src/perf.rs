@@ -16,6 +16,9 @@ pub enum Stage {
     DriveTick,
     /// The race manager and every AI driver's controls (grid-app).
     AiDrivers,
+    /// `drive_tick` after the shared-world tick: the reset job, trial,
+    /// standings, flags, lap events and samples (grid-app).
+    RaceUpdate,
     /// One whole shared-world tick.
     WorldTick,
     /// Every car's vehicle manager (suspension rays, handling, wheel contacts).
@@ -68,9 +71,10 @@ pub enum Stage {
     RenderSchedule,
 }
 
-const STAGES: [Stage; 26] = [
+const STAGES: [Stage; 27] = [
     Stage::DriveTick,
     Stage::AiDrivers,
+    Stage::RaceUpdate,
     Stage::WorldTick,
     Stage::VehicleStage,
     Stage::HullRebuild,
@@ -147,6 +151,7 @@ fn outer(stage: Stage) -> bool {
     matches!(
         stage,
         Stage::DriveTick
+            | Stage::RaceUpdate
             | Stage::WorldTick
             | Stage::DamageParts
             | Stage::PropPresent

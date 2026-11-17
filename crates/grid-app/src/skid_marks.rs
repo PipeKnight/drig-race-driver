@@ -396,6 +396,9 @@ pub(crate) struct SkidMarks {
     dirty: bool,
     /// The strips as last written to the mesh (none yet: write it whole).
     written: Option<Vec<Strip>>,
+    /// Per strip slot, the vertex bounds of the written strip (none yet:
+    /// computed whole with the first write).
+    bounds: Vec<Option<(Vec3, Vec3)>>,
     pub laid: u64,
     phase_safety_events: u64,
 }
@@ -497,6 +500,7 @@ impl SkidMarks {
             layout: None,
             dirty: true,
             written: None,
+            bounds: Vec::new(),
             laid: 0,
             phase_safety_events: 0,
         })
@@ -828,37 +832,48 @@ impl SkidMarks {
 
     /// Segment-local attributes, with coincident geometry/opacity at shared seams.
     /// Colour uses the normalized D3DCOLOR lanes defined in skid_color.rs.
-    fn slot_vertex(strip: &Strip, k: usize)
-        -> SkidVertex
-    {
-        let q = k / 4;
-        let edge = k % 4;
+    #[cfg(test)]
+    fn slot_vertex(strip: &Strip, k: usize) -> SkidVertex {
+        Self::quad_vertices(strip, k / 4)[k % 4]
+    }
+
+    /// The four logical vertices [old-,old+,next-,next+] of quad `q`, with
+    /// the payload checked once per quad (it was per vertex).
+    fn quad_vertices(strip: &Strip, q: usize) -> [SkidVertex; 4] {
         let Some(uv) = strip.segments.get(q) else {
             // All four unused vertices coincide: no trailing positive-area quad.
             let p = strip.points.last().map(|p| p.center)
                 .filter(|p| p.is_finite()).unwrap_or(Vec3::ZERO);
-            return (p.to_array(), [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]);
+            return [(p.to_array(), [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]); 4];
         };
         if !uv.finite_payload()
             || !strip.points.get(q).is_some_and(Point::finite_payload)
             || !strip.points.get(q + 1).is_some_and(Point::finite_payload)
         {
-            return ([0.; 3], [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]);
+            return [([0.; 3], [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]); 4];
         }
-        let i = q + edge / 2;
-        let p = &strip.points[i];
-        let color = p.color_for_draw(strip.opacity_ramp(i), edge >= 2);
-        let sign = if edge.is_multiple_of(2) { -1. } else { 1. };
-        ((p.center + p.side * p.half_width * sign).to_array(), p.normal.to_array(),
-            uv.old[edge], uv.new[edge], color)
+        std::array::from_fn(|edge| {
+            let i = q + edge / 2;
+            let p = &strip.points[i];
+            let color = p.color_for_draw(strip.opacity_ramp(i), edge >= 2);
+            let sign = if edge.is_multiple_of(2) { -1. } else { 1. };
+            ((p.center + p.side * p.half_width * sign).to_array(), p.normal.to_array(),
+                uv.old[edge], uv.new[edge], color)
+        })
     }
 
     /// The existing index buffer reads [0,2,1,1,2,3]. Swapping the middle
     /// stored vertices yields the source triangles [-,+,next-] and
     /// [next-,+,next+] from logical [old-,old+,next-,next+].
-    fn stream_vertex(strip: &Strip, k: usize) -> SkidVertex {
-        let edge_order = [0, 2, 1, 3];
-        Self::slot_vertex(strip, k / 4 * 4 + edge_order[k % 4])
+    const STREAM_ORDER: [usize; 4] = [0, 2, 1, 3];
+
+    /// Bounds (min, max) of the strip's vertices that `sort_centre` encloses.
+    fn strip_bounds(strip: &Strip) -> Option<(Vec3, Vec3)> {
+        let quads = strip.points.len().checked_sub(1)?;
+        let mut corners = (0..quads)
+            .flat_map(|q| Self::quad_vertices(strip, q).map(|v| Vec3::from(v.0)));
+        let first = corners.next()?;
+        Some(corners.fold((first, first), |(min, max), v| (min.min(v), max.max(v))))
     }
 
     /// Every strip slot at its full length, so later changes are written over
@@ -879,22 +894,22 @@ impl SkidMarks {
         });
         let mut indices = Vec::with_capacity(STRIPS * QUADS * 6);
         for (s, strip) in self.strips.iter().enumerate() {
-            let mut current_basis = ([0.; 3], [0.; 3]);
-            for k in 0..SLOT {
-                if let Some((binormals, tangents)) = &mut basis {
-                    if k.is_multiple_of(4) {
-                        current_basis = Self::quad_basis(strip, k / 4);
+            for q in 0..QUADS {
+                let vertices = Self::quad_vertices(strip, q);
+                let quad_basis = basis.is_some().then(|| Self::quad_basis(strip, q));
+                for edge in Self::STREAM_ORDER {
+                    if let (Some((binormals, tangents)), Some((b, t))) = (&mut basis, quad_basis) {
+                        binormals.push(b);
+                        tangents.push(t);
                     }
-                    binormals.push(current_basis.0);
-                    tangents.push(current_basis.1);
+                    let (p, n, uv, uv_new, c) = vertices[edge];
+                    positions.push(p);
+                    normals.push(n);
+                    uvs.push(uv);
+                    uvs_new.push(uv_new);
+                    colors.push(c);
+                    bank_values.push(strip.bank);
                 }
-                let (p, n, uv, uv_new, c) = Self::stream_vertex(strip, k);
-                positions.push(p);
-                normals.push(n);
-                uvs.push(uv);
-                uvs_new.push(uv_new);
-                colors.push(c);
-                bank_values.push(strip.bank);
             }
             for i in 0..QUADS as u32 {
                 let a = (s * SLOT) as u32 + i * 4;
@@ -969,29 +984,51 @@ impl SkidMarks {
         bytes.resize(start + strips.len() * SLOT * layout.stride, 0);
         let mut vertex = start;
         for strip in &self.strips[strips] {
-            let mut basis = ([0.; 3], [0.; 3]);
-            for k in 0..SLOT {
-                if let Some((binormal, tangent)) = basis_offsets {
-                    if k.is_multiple_of(4) {
-                        basis = Self::quad_basis(strip, k / 4);
+            for q in 0..QUADS {
+                let vertices = Self::quad_vertices(strip, q);
+                let basis = basis_offsets.map(|_| Self::quad_basis(strip, q));
+                for edge in Self::STREAM_ORDER {
+                    if let (Some((binormal, tangent)), Some(basis)) = (basis_offsets, basis) {
+                        put(bytes, vertex + binormal, basis.0);
+                        put(bytes, vertex + tangent, basis.1);
                     }
-                    put(bytes, vertex + binormal, basis.0);
-                    put(bytes, vertex + tangent, basis.1);
+                    let (pv, nv, uvv, uvn, cv) = vertices[edge];
+                    put(bytes, vertex + p, pv);
+                    put(bytes, vertex + n, nv);
+                    put(bytes, vertex + uv, uvv);
+                    put(bytes, vertex + uv_new, uvn);
+                    put(bytes, vertex + c, cv);
+                    bytes[vertex+bank_offset..vertex+bank_offset+4].copy_from_slice(&strip.bank.to_le_bytes());
+                    vertex += layout.stride;
                 }
-                let (pv, nv, uvv, uvn, cv) = Self::stream_vertex(strip, k);
-                put(bytes, vertex + p, pv);
-                put(bytes, vertex + n, nv);
-                put(bytes, vertex + uv, uvv);
-                put(bytes, vertex + uv_new, uvn);
-                put(bytes, vertex + c, cv);
-                bytes[vertex+bank_offset..vertex+bank_offset+4].copy_from_slice(&strip.bank.to_le_bytes());
-                vertex += layout.stride;
             }
         }
     }
 
+    /// `sort_centre` from per-strip bounds: those of the strips in `changed`
+    /// are recomputed, the rest kept from earlier writes (the strips that
+    /// `changes` did not report are the ones last bounded).
+    fn cached_sort_centre(&mut self, changed: &[std::ops::Range<usize>]) -> Vec3 {
+        if self.bounds.len() != STRIPS {
+            self.bounds = self.strips.iter().map(Self::strip_bounds).collect();
+        } else {
+            for run in changed {
+                for i in run.clone() {
+                    self.bounds[i] = Self::strip_bounds(&self.strips[i]);
+                }
+            }
+        }
+        self.bounds
+            .iter()
+            .flatten()
+            .copied()
+            .reduce(|(min, max), (a, b)| (min.min(a), max.max(b)))
+            .map_or(Vec3::ZERO, |(min, max)| Aabb::from_min_max(min, max).center.into())
+    }
+
     /// Centre of the bounding box `build`'s mesh would have (its transparent
     /// sort key): the strips' vertices, or the origin when there are none.
+    #[cfg(test)]
     fn sort_centre(&self) -> Vec3 {
         let corners = self
             .strips
@@ -1142,13 +1179,15 @@ fn present(marks: Option<ResMut<SkidMarks>>, stream: Res<MeshStream>) {
     marks.dirty = false;
     if let Some(layout) = &marks.layout {
         let layout = layout.clone();
-        for run in marks.changes() {
+        let runs = marks.changes();
+        for run in &runs {
             let first = (run.start * SLOT) as u32;
             stream.write_at(marks.mesh.id(), first, layout.stride, |bytes| {
-                marks.pack_strips(&layout, run, bytes)
+                marks.pack_strips(&layout, run.clone(), bytes)
             });
         }
-        stream.sort_centre(marks.entity, marks.sort_centre());
+        let centre = marks.cached_sort_centre(&runs);
+        stream.sort_centre(marks.entity, centre);
     }
     super::ground_effect_assets::charge(super::ground_effect_assets::SKID, start);
 }
@@ -2030,7 +2069,7 @@ mod tests {
         let mut gpu = Vec::new();
         let apply = |marks: &mut SkidMarks, gpu: &mut Vec<u8>| {
             let runs = marks.changes();
-            for run in runs {
+            for run in &runs {
                 let mut part = Vec::new();
                 marks.pack_strips(&layout, run.clone(), &mut part);
                 let at = run.start * SLOT * layout.stride;
@@ -2042,6 +2081,8 @@ mod tests {
             let mut whole = Vec::new();
             marks.pack(&layout, &mut whole);
             assert_eq!(*gpu, whole);
+            // The per-strip bounds of the changed runs give the whole centre.
+            assert_eq!(marks.cached_sort_centre(&runs), marks.sort_centre());
         };
         apply(&mut marks, &mut gpu);
         for step in 0..120 {

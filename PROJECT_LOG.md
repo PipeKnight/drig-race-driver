@@ -176,6 +176,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F843](log/F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
 | [F842](log/F0842.md) | 2026-11-17 | Prop breaks copy one switch per box, not every box |
 | [F841](log/F0841.md) | 2026-11-17 | Tree facing: automatic CPU fallback decided from adapter limits, oversize meshes on the CPU |
 | [F840](log/F0840.md) | 2026-11-17 | Frame-split gpu_begin poll: removing it only moves the work into submit |
@@ -235,7 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F782](log/F0782.md) | 2026-11-10 | HUD: team-mate name tag; original post-race art research (rows 68, 69) |
 | [F781](log/F0781.md) | 2026-11-10 | Night level, tree sheet shadows, world clear colour |
 | [F780](log/F0780.md) | 2026-11-10 | Replay/Flashback round 4: terminal window from the crash, TerminalFX_01 wreck grade, linear PPS blend, packed solver rows |
-| [F779](log/F0779.md) | 2026-11-10 | Front-end hand-off in the one-window host, loading bars, circle and sounds, pause art findings |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

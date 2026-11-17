@@ -6929,6 +6929,7 @@ fn drive_tick(
     } else {
         driving.runtime.tick(controls)
     };
+    let _race_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::RaceUpdate);
     if let Err(error) = result {
         let text = format!("tick {}: {error}; R resets", driving.runtime.ticks + 1);
         error!("driving paused: {text}");
