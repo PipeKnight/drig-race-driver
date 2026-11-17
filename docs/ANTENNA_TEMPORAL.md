@@ -130,3 +130,14 @@ The strict byte equality check across two launches fails even for the exact
 same disabled-tag binary with identical control and capture ledgers. Measure
 native launch variation separately from raw input equality and the visible
 motion comparison. Production temporal admission remains open.
+
+## Controlled Stock Reduced overlap at a real aerial
+
+[G419](../log/G0419.md) measures the actual Reduced downsample, sprite and
+composition at the G409 isolated shaft. At the measured half pixel the
+shaft increases reverse depth from .00198336 to .01931195. The front sprite
+keeps .43359375 center opacity. A behind sprite drops from that value to
+zero, with a small full-resolution RGB contribution after upsampling. The
+same-depth neighboring control is unchanged within each matched arm.
+The result scopes the controlled 4× scratch route. Ordinary 1× Reduced
+coverage and moving glass remain open.
