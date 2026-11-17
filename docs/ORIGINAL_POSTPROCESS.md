@@ -470,5 +470,12 @@ pixel for pixel. The Le Mans captures exercise the nighttime path. Their
 generated opponent fields differ across the formula and executable comparisons,
 so the measured pixel differences cannot be attributed to bloom alone. Two
 repeats of the final executable used the same model order and differed by at
-most one RGB code. [G394](../log/G0394.md) records the runs and
-[G396](../log/G0396.md) audits the field and specifies the pinned recheck.
+most one RGB code. [G394](../log/G0394.md) records those runs and
+[G396](../log/G0396.md) audits their field.
+
+[G399](../log/G0399.md) repeats the formula comparison on one exact executable
+with a fixed complete 16-car field, matching physics, camera, clock and
+capture requests. At ticks 1441 and 1443 the source exponent raises mean luma
+by 4.22 and 3.97 RGB codes, respectively. Roughly 10.6 percent of pixels
+change by more than eight codes. This quantifies the change in Type2 in
+these frames. The exact display transfer of the original remains open.
