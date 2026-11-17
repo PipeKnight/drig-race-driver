@@ -150,7 +150,7 @@ the same two Lacetti LOD2 aerial owners. Their mesh and material group
 match. Their effective material slots differ. Both phases use distinct
 MainEntity keys and the expected Bevy 3D render-side sentinel.
 The scoped request must account for both owners before taking an intact
-bin. Actual partial-closure refusal and per-owner draw evidence remain open.
+bin. G422 checks the partial-closure refusal below. Per-owner draw evidence remains open.
 
 ## Ordinary native Reduced with organic smoke
 
@@ -160,3 +160,13 @@ Reduced color and depth, with 1342 active prepared sprites across five
 restored groups. The fence overlap in the capture nominates the region.
 Per-pixel fence coverage and the exact Reduced color/opacity contribution
 remain open.
+
+## Partial shared-group request at the native boundary
+
+[G422](../log/G0422.md) runs the G415 read-only prepared-group inspection on
+the real G420 pair. A request for either selected owner alone is refused
+by the complete-owner check for the tested subset. The whole actual pair
+passes. The two ordered real phase maps agree across all five sampled
+boundaries through native Early. The stock HDR endpoints swap with no
+extracted reset. Sustained current-frame image and actual per-owner draw
+acceptance are still separate.
