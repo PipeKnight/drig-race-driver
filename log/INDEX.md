@@ -734,6 +734,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G392](G0392.md) | 2026-11-17 | Restore source normal maps on skid marks |
 | [G391](G0391.md) | 2026-11-17 | Verify that separating thin geometry from DLAA history removes the antenna copies |
 | [G390](G0390.md) | 2026-11-17 | Follow the source sun direction during Le Mans |
 | [G389](G0389.md) | 2026-11-17 | Project sky motion vectors into the previous view |

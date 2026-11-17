@@ -1,5 +1,6 @@
 //! Shared per-model skid profile/bank preparation; no model/type whitelist.
 use bevy::{
+    asset::RenderAssetUsages,
     prelude::*,
     render::{
         render_resource::{
@@ -15,6 +16,7 @@ pub(crate) struct Bank {
     pub label: String,
     pub profile: grid_formats::skidmarks::Profile,
     pub diffuse: Vec<u8>,
+    normal: Option<Vec<u8>>,
 }
 pub(crate) struct Prepared {
     pub banks: Vec<Bank>,
@@ -76,11 +78,16 @@ pub(crate) fn prepare(
             let profile = grid_formats::skidmarks::read(&std::fs::read_to_string(
                 root.join(format!("skidmarks/{label}_tm.xml")),
             )?)?;
-            let mut textures = crate::ground_effect_assets::package(
-                root,
-                &format!("skidmarks/{label}_tm.pssg"),
-                &["diffuse.tga"],
-            )?;
+            let relative = format!("skidmarks/{label}_tm.pssg");
+            let package = |ids: &[&str]| crate::ground_effect_assets::package(root, &relative, ids);
+            let mut textures = if normal_atlas_requested() {
+                package(&["diffuse.tga", "normal.tga"])
+                    .or_else(|_| package(&["diffuse.tga"]))?
+            } else {
+                package(&["diffuse.tga"])?
+            };
+            // DXT5's alpha is a normal component. Do not admit RGB-only atlases.
+            let normal = textures.remove("normal.tga").filter(|dds| dds.get(84..88) == Some(b"DXT5"));
             let diffuse = textures
                 .remove("diffuse.tga")
                 .ok_or("actual skid diffuse absent")?;
@@ -90,6 +97,7 @@ pub(crate) fn prepare(
                 label,
                 profile,
                 diffuse,
+                normal,
             });
             id
         };
@@ -142,6 +150,63 @@ pub(crate) fn upload(prepared: &Prepared, device: &RenderDevice) -> Result<Image
     }
     Ok(image)
 }
+/// Keep one policy for bank preparation, upload and binding layout.
+pub(crate) fn supports_normal_layout(device: &RenderDevice) -> bool {
+    use bevy::render::render_resource::{AsBindGroup, BindingType, ShaderStages};
+    if !normal_atlas_requested() {
+        return false;
+    }
+    let limits = device.limits();
+    let base_textures: u32 = StandardMaterial::bind_group_layout_entries(device, true)
+        .iter()
+        .filter(|e| e.visibility.contains(ShaderStages::FRAGMENT)
+            && matches!(e.ty, BindingType::Texture { .. }))
+        .map(|e| e.count.map_or(1, std::num::NonZeroU32::get))
+        .sum();
+    // Bevy 0.19's debug-only MESH_PIPELINE_VIEW_LAYOUT_SAFE_MAX_TEXTURES
+    // describes the reserved view textures on downlevel adapters.
+    const BEVY_VIEW_TEXTURE_BUDGET: u32 = 10;
+    limits.max_vertex_attributes >= 11
+        && limits.max_inter_stage_shader_variables >= 11
+        && limits.max_vertex_buffer_array_stride >= 84
+        && limits.max_bindings_per_bind_group >= 103
+        && limits.max_sampled_textures_per_shader_stage >= base_textures + BEVY_VIEW_TEXTURE_BUDGET + 2
+}
+
+fn normal_atlas_requested() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("GRID_SKID_NORMAL_ATLAS").as_deref() != Ok("off"))
+}
+
+/// Optional paired linear banks. The diffuse slot index is also the normal slot index.
+pub(crate) fn upload_normals(
+    prepared: &Prepared, device: &RenderDevice, diffuse: &Image,
+) -> Result<Option<Image>, String> {
+    if !supports_normal_layout(device) {
+        return Ok(None);
+    }
+    let mut images = Vec::with_capacity(prepared.banks.len());
+    for bank in &prepared.banks {
+        let Some(dds) = &bank.normal else {
+            return Err(format!("source skid normal atlas absent or has no DXT5 alpha: {}", bank.label));
+        };
+        let image = crate::texture_upload::image_linear(
+            dds, diffuse.sampler.clone(), RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        ).map_err(|e| e.to_string())?;
+        images.push(image);
+    }
+    let image = join_images(images, device.limits().max_texture_array_layers)?;
+    if image.texture_descriptor.size != diffuse.texture_descriptor.size
+        || image.texture_descriptor.mip_level_count != diffuse.texture_descriptor.mip_level_count
+        || image.texture_descriptor.format.is_srgb()
+        || image.texture_descriptor.format.sample_type(None, Some(device.features()))
+            != Some(bevy::render::render_resource::TextureSampleType::Float { filterable: true })
+    {
+        return Err("source skid diffuse/linear normal bank layout disagrees".into());
+    }
+    Ok(Some(image))
+}
+
 fn join_images(mut images: Vec<Image>, max_layers: u32) -> Result<Image, String> {
     let count = u32::try_from(images.len()).map_err(|_| "skid image count overflow")?;
     if count == 0 || count > max_layers {

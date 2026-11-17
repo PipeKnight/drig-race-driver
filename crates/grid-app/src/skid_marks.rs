@@ -8,15 +8,22 @@ use super::wheel_ground::{Wheel, WheelGround};
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     camera::primitives::Aabb,
+    ecs::system::SystemParamItem,
     mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology},
     pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline},
     prelude::*,
-    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, VertexFormat},
+    render::{
+        render_resource::{
+            AsBindGroup, AsBindGroupError, BindGroupLayout, BindGroupLayoutEntry,
+            RenderPipelineDescriptor, SpecializedMeshPipelineError, UnpreparedBindGroup, VertexFormat,
+        },
+        renderer::RenderDevice,
+    },
 };
 use grid_formats::skidmarks::{Layer, Profile};
 use super::skid_color::SupportedSourcePacking;
 use std::path::Path;
-use bevy::shader::ShaderRef;
+use bevy::shader::{ShaderDefVal, ShaderRef};
 
 
 /// Default-off diagnostic; no smoke/skid simulation or atlas changes.
@@ -58,19 +65,64 @@ pub(crate) fn parse_reflectance(value: &str) -> Result<f32, &'static str> {
 // base PBR lighting and the existing raster/sort policy remain authored.
 pub(crate) type SkidMaterial = ExtendedMaterial<StandardMaterial, SkidRasterBias>;
 const BANK_ATTRIBUTE: MeshVertexAttribute = MeshVertexAttribute::new("SkidBank", 0x534b4944, VertexFormat::Uint32);
+const BINORMAL_ATTRIBUTE: MeshVertexAttribute =
+    MeshVertexAttribute::new("SkidBinormal", 0x534b424e, VertexFormat::Float32x3);
+const TANGENT_ATTRIBUTE: MeshVertexAttribute =
+    MeshVertexAttribute::new("SkidTangent", 0x534b544e, VertexFormat::Float32x3);
+const NORMAL_ATLAS_BINDING: u32 = 102;
+const NORMAL_ATLAS_DEF: &str = "GRID_SKID_NORMAL_ATLAS";
 const LAYER_SHADER: Handle<Shader> = uuid_handle!("28837716-d9b9-4d87-b230-4055be1080b8");
-#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-#[bind_group_data(SkidRasterKey)]
+#[derive(Asset, TypePath, Clone, Debug)]
 pub(crate) struct SkidRasterBias {
+    atlas: Handle<Image>,
+    normal_atlas: Option<Handle<Image>>,
+    raster_constant: i32,
+}
+
+#[derive(AsBindGroup)]
+pub(crate) struct SkidBindings {
     #[texture(100, dimension = "2d_array")]
     #[sampler(101)]
     atlas: Handle<Image>,
-    raster_constant: i32,
+    #[texture(102, dimension = "2d_array")]
+    normal_atlas: Handle<Image>,
 }
+
+impl AsBindGroup for SkidRasterBias {
+    type Data = SkidRasterKey;
+    type Param = <SkidBindings as AsBindGroup>::Param;
+
+    fn label() -> &'static str { "SkidRasterBias" }
+
+    fn bind_group_data(&self) -> Self::Data { self.into() }
+
+    fn unprepared_bind_group(
+        &self, layout: &BindGroupLayout, device: &RenderDevice,
+        param: &mut SystemParamItem<'_, '_, Self::Param>, force_no_bindless: bool,
+    ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
+        let mut bind = SkidBindings {
+            atlas: self.atlas.clone(),
+            normal_atlas: self.normal_atlas.clone().unwrap_or_else(|| self.atlas.clone()),
+        }.unprepared_bind_group(layout, device, param, force_no_bindless)?;
+        if !crate::skid_banks::supports_normal_layout(device) {
+            bind.bindings.0.retain(|(slot, _)| *slot != NORMAL_ATLAS_BINDING);
+        }
+        Ok(bind)
+    }
+
+    fn bind_group_layout_entries(device: &RenderDevice, force_no_bindless: bool) -> Vec<BindGroupLayoutEntry> {
+        let mut entries = SkidBindings::bind_group_layout_entries(device, force_no_bindless);
+        if !crate::skid_banks::supports_normal_layout(device) {
+            entries.retain(|entry| entry.binding != NORMAL_ATLAS_BINDING);
+        }
+        entries
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct SkidRasterKey(i32);
+pub(crate) struct SkidRasterKey(i32, bool);
 impl From<&SkidRasterBias> for SkidRasterKey {
-    fn from(value: &SkidRasterBias) -> Self { Self(value.raster_constant) }
+    fn from(value: &SkidRasterBias) -> Self { Self(value.raster_constant, value.normal_atlas.is_some()) }
 }
 impl MaterialExtension for SkidRasterBias {
     // Fixed AlphaMode::Blend uses the native forward queue only. No custom
@@ -86,14 +138,24 @@ impl MaterialExtension for SkidRasterBias {
         // The extension is also specialized for the stock depth/shadow
         // prepass, whose vertex locations differ from the forward shader.
         if descriptor.vertex.shader == LAYER_SHADER {
-            descriptor.vertex.buffers = vec![layout.0.get_layout(&[
+            let mut attributes = vec![
                 Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
                 Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
                 Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
                 Mesh::ATTRIBUTE_UV_1.at_shader_location(3),
                 Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
                 BANK_ATTRIBUTE.at_shader_location(8),
-            ])?];
+            ];
+            if key.bind_group_data.1 {
+                attributes.push(BINORMAL_ATTRIBUTE.at_shader_location(9));
+                attributes.push(TANGENT_ATTRIBUTE.at_shader_location(10));
+                let normal_def = ShaderDefVal::Bool(NORMAL_ATLAS_DEF.into(), true);
+                descriptor.vertex.shader_defs.push(normal_def.clone());
+                if let Some(fragment) = &mut descriptor.fragment {
+                    fragment.shader_defs.push(normal_def);
+                }
+            }
+            descriptor.vertex.buffers = vec![layout.0.get_layout(&attributes)?];
         }
         restore_raster_constant(descriptor, key.bind_group_data.0);
         Ok(())
@@ -107,7 +169,10 @@ fn restore_raster_constant(descriptor: &mut RenderPipelineDescriptor, constant: 
 
 /// Closed factory: callers cannot pass unlit/transmission/UV-transform flags
 /// that the shared forward-Blend fragment does not implement.
-fn skid_material(atlas: Handle<Image>, mode: OrderMode, reflectance: Option<f32>) -> SkidMaterial {
+fn skid_material(
+    atlas: Handle<Image>, normal_atlas: Option<Handle<Image>>,
+    mode: OrderMode, reflectance: Option<f32>,
+) -> SkidMaterial {
     // This existing diagnostic only admits0/0.5; enforce it in release too.
     assert!(reflectance.is_none_or(|v| v == 0. || v == 0.5), "unsupported skid reflectance");
     SkidMaterial {
@@ -123,7 +188,7 @@ fn skid_material(atlas: Handle<Image>, mode: OrderMode, reflectance: Option<f32>
             // existing back-cull/fog defaults. No arbitrary base input.
             ..default()
         },
-        extension: SkidRasterBias { atlas, raster_constant: 50 },
+        extension: SkidRasterBias { atlas, normal_atlas, raster_constant: 50 },
     }
 }
 
@@ -193,6 +258,7 @@ struct Point {
     normal: Vec3,
     half_width: f32,
     u: [f32; 2],
+    mirrored: bool,
     // Independent UV0/UV1 endpoint phases, seeded from persistent pool-slot state.
     v: [f32; 2],
     source_color: SupportedSourcePacking,
@@ -298,6 +364,7 @@ pub(crate) struct SkidMarks {
     generation: u64,
     mesh: Handle<Mesh>,
     owned_ground: Option<super::ground_skid_pass::OwnedGroundSkid>,
+    normal_atlas_active: bool,
     /// The marks entity (alpha blended: its sort centre) and the streamed
     /// mesh's vertex layout.
     entity: Entity,
@@ -401,6 +468,7 @@ impl SkidMarks {
             generation: 0,
             mesh: Handle::default(),
             owned_ground: None,
+            normal_atlas_active: false,
             entity: Entity::PLACEHOLDER,
             layout: None,
             dirty: true,
@@ -546,6 +614,7 @@ impl SkidMarks {
             normal: wheel.normal,
             half_width: 0.5 * width,
             u,
+            mirrored: wheel.left,
             v: [0.; 2],
             source_color,
             diffuse_envelope: 1.,
@@ -684,8 +753,20 @@ impl SkidMarks {
         }
     }
 
+    /// B and T are constant for a quad, with N supplied by each endpoint.
+    /// Source 73F860 stores the normalized old-to-current point difference
+    /// as B, then 739570 writes B x N_current with the same mirror as U.
+    fn quad_basis(strip: &Strip, q: usize) -> ([f32; 3], [f32; 3]) {
+        let (Some(old), Some(current)) = (strip.points.get(q), strip.points.get(q + 1)) else {
+            return ([0.; 3], [0.; 3]);
+        };
+        let binormal = (current.center - old.center).normalize_or_zero();
+        let tangent = binormal.cross(current.normal) * if current.mirrored { -1. } else { 1. };
+        (binormal.to_array(), tangent.to_array())
+    }
+
     /// Segment-local attributes, with coincident geometry/opacity at shared seams.
-    /// COLOR.r is blend metadata; COLOR.a remains visible opacity.
+    /// Colour uses the normalized D3DCOLOR lanes defined in skid_color.rs.
     fn slot_vertex(strip: &Strip, k: usize)
         -> SkidVertex
     {
@@ -727,9 +808,20 @@ impl SkidMarks {
             Vec::with_capacity(count),
         );
         let mut bank_values=Vec::with_capacity(count);
+        let mut basis = self.normal_atlas_active.then(|| {
+            (Vec::with_capacity(count), Vec::with_capacity(count))
+        });
         let mut indices = Vec::with_capacity(STRIPS * QUADS * 6);
         for (s, strip) in self.strips.iter().enumerate() {
+            let mut current_basis = ([0.; 3], [0.; 3]);
             for k in 0..SLOT {
+                if let Some((binormals, tangents)) = &mut basis {
+                    if k.is_multiple_of(4) {
+                        current_basis = Self::quad_basis(strip, k / 4);
+                    }
+                    binormals.push(current_basis.0);
+                    tangents.push(current_basis.1);
+                }
                 let (p, n, uv, uv_new, c) = Self::slot_vertex(strip, k);
                 positions.push(p);
                 normals.push(n);
@@ -753,6 +845,10 @@ impl SkidMarks {
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uvs_new);
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
         mesh.insert_attribute(BANK_ATTRIBUTE,bank_values);
+        if let Some((binormals, tangents)) = basis {
+            mesh.insert_attribute(BINORMAL_ATTRIBUTE, binormals);
+            mesh.insert_attribute(TANGENT_ATTRIBUTE, tangents);
+        }
         mesh.insert_indices(Indices::U32(indices));
         mesh
     }
@@ -800,11 +896,22 @@ impl SkidMarks {
             at(Mesh::ATTRIBUTE_COLOR),
         );
         let bank_offset=at(BANK_ATTRIBUTE);
+        let basis_offsets = self.normal_atlas_active.then(|| {
+            (at(BINORMAL_ATTRIBUTE), at(TANGENT_ATTRIBUTE))
+        });
         let start = bytes.len();
         bytes.resize(start + strips.len() * SLOT * layout.stride, 0);
         let mut vertex = start;
         for strip in &self.strips[strips] {
+            let mut basis = ([0.; 3], [0.; 3]);
             for k in 0..SLOT {
+                if let Some((binormal, tangent)) = basis_offsets {
+                    if k.is_multiple_of(4) {
+                        basis = Self::quad_basis(strip, k / 4);
+                    }
+                    put(bytes, vertex + binormal, basis.0);
+                    put(bytes, vertex + tangent, basis.1);
+                }
                 let (pv, nv, uvv, uvn, cv) = Self::slot_vertex(strip, k);
                 put(bytes, vertex + p, pv);
                 put(bytes, vertex + n, nv);
@@ -906,11 +1013,22 @@ fn start(
             return;
         }
     };
+    let normal_atlas = match crate::skid_banks::upload_normals(&pending.prepared, &device, &image) {
+        Ok(atlas) => atlas.map(|atlas| images.add(atlas)),
+        Err(error) => {
+            warn!("skid normal texture: {error}; using the diffuse pass");
+            None
+        }
+    };
+    println!("skid_normal_atlas active={} layout_supported={} complete_banks={}", normal_atlas.is_some(),
+        crate::skid_banks::supports_normal_layout(&device),
+        if normal_atlas.is_some() { pending.prepared.banks.len() } else { 0 });
     let profiles=pending.prepared.banks.iter().map(|b|b.profile.clone()).collect();
     let mut marks = SkidMarks::with_banks(profiles,pending.prepared.slots.clone()).expect("prepared actual bank mapping");
     for (bank,source) in pending.prepared.banks.iter().enumerate(){println!("skid_bank bank={bank} source_type={} actual_slots={:?}",source.label,pending.prepared.slots);}
 
     println!("skid_phase_safety authored=true policy=terminate-reseed finite_only=true initial_events=0 source_CRT_domain_parity=false");
+    marks.normal_atlas_active = normal_atlas.is_some();
     let mesh = marks.streamed();
     marks.layout = Some(VertexLayout::of(&mesh));
     marks.mesh = meshes.add(mesh);
@@ -918,7 +1036,7 @@ fn start(
     if let Some(value) = pending.reflectance {
         println!("skid_reflectance active=true value={value} mode=Isolated shader=shared-layer-lit-PBR source_parity=false");
     }
-    let material = materials.add(skid_material(atlas, pending.mode, pending.reflectance));
+    let material = materials.add(skid_material(atlas, normal_atlas, pending.mode, pending.reflectance));
     let material_id = material.id();
     let entity = commands.spawn((
         Name::new("skid marks"), Mesh3d(marks.mesh.clone()), MeshMaterial3d(material),
@@ -990,15 +1108,15 @@ mod tests {
     #[test]
     fn isolated_sort_preserves_raster_key_atlas_alpha_and_lighting() {
         let atlas = Handle::default();
-        let control = skid_material(atlas.clone(), OrderMode::Control, None);
-        let isolated = skid_material(atlas.clone(), OrderMode::Isolated, None);
+        let control = skid_material(atlas.clone(), None, OrderMode::Control, None);
+        let isolated = skid_material(atlas.clone(), None, OrderMode::Isolated, None);
         let original = control.base.clone();
         assert_eq!(control.base.depth_bias, 50.);
         assert_eq!(isolated.base.depth_bias, 0.);
         assert_eq!(<SkidMaterial as bevy::pbr::Material>::depth_bias(&control), 50.);
         assert_eq!(<SkidMaterial as bevy::pbr::Material>::depth_bias(&isolated), 0.);
-        assert_eq!(SkidRasterKey::from(&control.extension), SkidRasterKey(50));
-        assert_eq!(SkidRasterKey::from(&isolated.extension), SkidRasterKey(50));
+        assert_eq!(SkidRasterKey::from(&control.extension), SkidRasterKey(50, false));
+        assert_eq!(SkidRasterKey::from(&isolated.extension), SkidRasterKey(50, false));
         for material in [control, isolated] {
             assert_eq!(material.extension.atlas, atlas);
             assert!(material.base.base_color_texture.is_none());
@@ -1009,8 +1127,8 @@ mod tests {
             assert_eq!(material.base.unlit, original.unlit);
             assert_eq!(material.base.fog_enabled, original.fog_enabled);
         }
-        let changed = SkidRasterBias { atlas: Handle::default(), raster_constant: 51 };
-        assert_ne!(SkidRasterKey::from(&changed), SkidRasterKey(50));
+        let changed = SkidRasterBias { atlas: Handle::default(), normal_atlas: None, raster_constant: 51 };
+        assert_ne!(SkidRasterKey::from(&changed), SkidRasterKey(50, false));
     }
 
 
@@ -1061,6 +1179,24 @@ mod tests {
 </SKIDMARKS>"#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn skid_normal_basis_uses_segment_path_current_normal_and_left_mirror() {
+        let point = Point {
+            center: Vec3::ZERO, side: Vec3::X, normal: Vec3::Y, half_width: 1.,
+            u: [0., 1.], mirrored: false, v: [0.; 2],
+            source_color: SupportedSourcePacking::new(1., 1., [1.; 2]).unwrap(),
+            diffuse_envelope: 1.,
+        };
+        let mut strip = Strip::default();
+        strip.points.extend([point, Point {
+            center: Vec3::Z * 2., normal: Vec3::new(0.5, 0.75, 0.), ..point
+        }]);
+        assert_eq!(SkidMarks::quad_basis(&strip, 0), ([0., 0., 1.], [-0.75, 0.5, 0.]));
+        strip.points[1].mirrored = true;
+        assert_eq!(SkidMarks::quad_basis(&strip, 0), ([0., 0., 1.], [0.75, -0.5, 0.]));
+        assert_eq!(SkidMarks::quad_basis(&strip, 1), ([0.; 3], [0.; 3]));
     }
 
     fn wheel(code: &[u8; 4], excess: f32, side: f32, x: f32) -> Wheel {
@@ -1433,6 +1569,26 @@ mod tests {
         assert_eq!(Some(marks.sort_centre()), built);
     }
 
+    #[test]
+    fn normal_atlas_stream_preserves_the_diffuse_layout_and_matches_bevy_packing() {
+        let mut marks = SkidMarks::new(profile());
+        marks.heads.resize(1, [None; 4]);
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., 0.));
+        marks.advance(0, 0, &wheel(b"STDR", 3., 0., 1.));
+
+        let diffuse = marks.streamed();
+        assert_eq!(VertexLayout::of(&diffuse).stride, 60);
+        assert!(!diffuse.contains_attribute(BINORMAL_ATTRIBUTE));
+        assert!(!diffuse.contains_attribute(TANGENT_ATTRIBUTE));
+
+        marks.normal_atlas_active = true;
+        let mapped = marks.streamed();
+        assert_eq!(VertexLayout::of(&mapped).stride, 84);
+        assert!(mapped.contains_attribute(BINORMAL_ATTRIBUTE));
+        assert!(mapped.contains_attribute(TANGENT_ATTRIBUTE));
+        assert_same_triangles(&marks);
+    }
+
     /// Writing only the changed strip runs over the previous bytes gives the
     /// whole packed buffer (F592).
     #[test]
@@ -1490,6 +1646,7 @@ mod tests {
                         normal: Vec3::Y,
                         half_width: 0.1,
                         u: [0., 1.],
+                        mirrored: false,
                         v: [0.; 2],
                         source_color: SupportedSourcePacking::new(1., 1., [1.; 2]).unwrap(),
                         diffuse_envelope: 1.,

@@ -58,6 +58,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 
 ### Graphics
 - [Current graphics completion criteria](docs/GRAPHICS_ROADMAP_RU.md) cover DLAA detail, crowd, surface marks, delivery, original postprocessing and night lighting.
+- G392 restores each vehicle bank's source skid normal atlas and the two-UV signed basis. Donington native DLAA, mixed Detroit baseline and active BMW flashback checks passed. Direct original comparison for grass gaps is open. See [Ground effects](docs/GROUND_EFFECTS_RESEARCH.md).
 - G390 follows the source timeline sun direction. Matched ordinary-lighting Le Mans day/night renders and Haruna night/day passed. The observed Le Mans chase view uploaded beam slots for 14 of its 16 lit cars across the run, and Haruna uploaded its two slots in-frame. See [Le Mans](docs/LE_MANS.md).
 - G389 corrects sky motion in the shared prepass. Actual native DLAA p99 reprojection error drops from 1.311 to 0.015 px in the audited background ROI. Production Win release and camera/restart checks passed; the separate antenna trail remains open. See [Native DLAA](docs/NATIVE_DLAA.md).
 - G388 (main cf8c3b15/PR44) adds source walkers and moving marshals to ordinary races. Matched Milan/Yokohama captures, restart/replay lifecycle, 1,776 tests, four unchanged identities and 24 quick soaks passed. Source audio, camera flashes and near standing crowds are on main. Exact native cull re-entry timing and flag officials remain open.
