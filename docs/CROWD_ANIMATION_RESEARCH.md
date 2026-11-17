@@ -1027,8 +1027,8 @@ Le Mans transition race emitted 18,733 standing placements on its current
 layout. The three regional CPU fixtures and the matched runtime examples in
 G384 exercise the production consumer.
 
-The catalogue audit also identified 876 standing race records outside the
-current adapter. Of those, 826 are course officials without a billboard
+The initial catalogue audit identified 876 standing race records outside the
+G388 adapter. The G393 section below covers 690 of those records. Of those, 826 are course officials without a billboard
 stance and 50 have the absent instance-set definition ma_fl on Nürburgring
 and Spa. The separate moving payloads contain 181 race records, including
 115 walking spectators. The moving population is described below. The closest
@@ -1070,3 +1070,26 @@ Matched ordinary-race captures exercise Milan route 0 and Yokohama Docks route
 0. The Milan lifecycle run records real menu restart, two replay entries,
 return to the race and visible source walkers. See G388 for checks, limitations
 and private evidence.
+
+### Standing course officials without props
+
+G393 loads the installed standing skin when its source definition has a
+resolved skin and an explicit Prop None selector, with no billboard stance
+or named action. The 690 corresponding placements span 56 ordinary race
+layouts on 11 tracks. The source marshall skin and its palettes use the
+normal near-actor material path. The generic no-prop case bakes one chosen
+idle from the authored Base Idle selector. There is no viewer-specific
+crowd profile or route whitelist.
+
+The sample budget keeps moving source clips first, then the standing
+skin-only clip, then optional upgrades from a standing billboard. The
+existing maximum of 64 drawn near bodies is shared. The shown time follows
+the displayed race and replay clock. The renderer may choose deterministic
+motion and palette states where original RNG or cull re-entry is unobserved.
+
+The installed type-definitions file has no ma_fl instance set. The source
+0x00771370 lookup is case-insensitive and returns -1 for that unresolved
+role. The 0x00769D50 standing loader skips its 50 rows in the audited Spa
+and Nürburgring layouts. The 136 defined flag roles have separate action
+and prop data. See [G393](../log/G0393.md) for the paired Donington and
+Detroit runtime checks and the retained source evidence.

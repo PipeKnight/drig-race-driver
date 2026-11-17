@@ -27,6 +27,7 @@ struct Clip {
 
 pub(super) enum Motion {
     Standing,
+    StandingIdle,
     Walking,
 }
 
@@ -84,6 +85,14 @@ impl Baked {
     pub(super) fn frame_vertices(&self) -> usize {
         (self.idle.frames.len() + self.action.as_ref().map_or(0, |clip| clip.frames.len()))
             * self.uv.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_animated_idle(&self) -> bool {
+        self.idle
+            .frames
+            .windows(2)
+            .any(|pair| pair[0].positions != pair[1].positions)
     }
 
     #[cfg(test)]
@@ -209,6 +218,8 @@ pub(super) fn bake(
             blend_action_with_idle(&mut clip, &idle);
             clip
         }),
+        // A no-action skin has its authored idle without a cheer fallback.
+        Motion::StandingIdle => None,
         // Walkers declare two uniform Base Idle leaves. Keep the choices so
         // placements can select a stable variant across replay and restart.
         Motion::Walking => sample(2, true, Some(idle.raw_ordinal)),
