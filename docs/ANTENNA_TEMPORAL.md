@@ -179,3 +179,15 @@ All 1568 sampled nearest-depth cells match. The stock half-resolution
 compose model reproduces Main RGB within .0006253 linear. In the fence
 region 3956 pixels with scene depth change by more than .001 in one RGB
 channel. Exact fence mesh ownership and sustained motion remain open.
+
+## Adjacent native clear-turn history
+
+[G424](../log/G0424.md) runs the exact isolated transaction for eleven
+adjacent frames of a real clear Donington turn. The current aerial covers
+67–77 resolved pixels in every sampled frame. Both arms reset only on
+the two tested mode boundaries. The observed native input changes stay
+within the checked aerial support. Selected finished crops show multiple
+Stock traces and a clearer single shaft in the probe. Full decoded RGB
+matches before entry and at the four sampled Stock return/following ticks.
+The result applies to this clear opaque fixture. Broader motion, active
+smoke, camera/restart lifecycle and production cost remain open.
