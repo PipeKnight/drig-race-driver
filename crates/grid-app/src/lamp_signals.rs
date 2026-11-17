@@ -1,4 +1,4 @@
-//! Default-off shared lamp signal adapter; source focus/sampler/photometry remain unresolved.
+//! Shared exterior lamp signal adapter. Source focus, sampler and photometry remain unresolved.
 use crate::lamp_association::{BankKey, Package, Receipt};
 use bevy::{asset::RenderAssetUsages, image::ImageSampler, prelude::*};
 use std::{
@@ -12,12 +12,25 @@ use runtime::State;
 pub enum Mode {
     #[default]
     Off,
+    /// The source main lamp request in ordinary races.
+    Authored,
     Live,
     Brake,
     Reverse,
     Headlights,
 }
 impl Mode {
+    pub(crate) fn from_authored_state(state: Option<&crate::vehicle_lights::State>) -> Self {
+        if state.is_some_and(crate::vehicle_lights::State::uses_authored_lamps) {
+            Self::Authored
+        } else {
+            Self::Off
+        }
+    }
+    fn channels(self, main: bool, brake: bool, reverse: bool) -> [bool; 3] {
+        let live = self == Self::Live;
+        [main, live && brake, live && reverse]
+    }
     pub fn parse(s: &str) -> Result<Self, &'static str> {
         match s {
             "off" => Ok(Self::Off),
@@ -212,7 +225,7 @@ fn tick(
     lights: Option<Res<super::vehicle_lights::State>>,
     mut state: ResMut<State>,
 ) {
-    if settings.lamp_signals != Mode::Live {
+    if !matches!(settings.lamp_signals, Mode::Live | Mode::Authored) {
         return;
     }
     let Some(driving) = driving else {
@@ -237,11 +250,11 @@ fn tick(
             state.invalidate();
             return;
         };
-        inputs.push([
+        inputs.push(settings.lamp_signals.channels(
             main,
             f32::from_bits(runtime.state.car.owner.vehicle[0xe20 / 4]) > 0.,
             runtime.reverse_gear(),
-        ]);
+        ));
     }
     state
         .advance(driving.segment, driving.runtime.ticks, &inputs)
@@ -301,9 +314,31 @@ mod tests {
         assert!((state.levels(0).unwrap()[2] - 0.32).abs() < 1e-6);
     }
     #[test]
-    fn normal_default_stays_off_and_slot_admission_is_explicit() {
-        assert_eq!(Mode::default(), Mode::Off);
-        assert!(Mode::parse("on").is_err());
+    fn authored_main_lamps_follow_source_requests_and_leave_other_channels_to_live() {
+        use grid_tools::time_of_day::Mode as RouteMode;
+
+        let pick = |route, marker| {
+            let source = crate::vehicle_lights::State::new(route, 2, marker);
+            Mode::from_authored_state(Some(&source))
+        };
+        assert_eq!(pick(RouteMode::None, Some(true)), Mode::Authored);
+        assert_eq!(pick(RouteMode::None, Some(false)), Mode::Off);
+        assert_eq!(pick(RouteMode::None, None), Mode::Off);
+        assert_eq!(pick(RouteMode::Timeline, Some(false)), Mode::Authored);
+        assert_eq!(pick(RouteMode::ForcedNight, Some(false)), Mode::Authored);
+        assert_eq!(Mode::from_authored_state(None), Mode::Off);
+
+        let mut state = State::default();
+        state.advance(0, 1, &[
+            Mode::Authored.channels(true, true, true),
+            Mode::Authored.channels(false, true, true),
+        ]).unwrap();
+        let on = state.levels(0).unwrap();
+        assert!(on[0] > 0.);
+        assert_eq!([on[1], on[2]], [0., 0.]);
+        assert_eq!(state.levels(1), Some([0.; 3]));
+        assert_eq!(Mode::Live.channels(true, true, true), [true; 3]);
+        assert_eq!(Mode::parse("off"), Ok(Mode::Off));
     }
     #[test]
     #[ignore = "requires purchased GRID_GAME_ROOT; actual44models highLOD0+low2..5 source bank DDS admission"]

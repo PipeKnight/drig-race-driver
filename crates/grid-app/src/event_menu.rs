@@ -1094,7 +1094,7 @@ pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
         if matches!(
             args[i].as_str(),
             "--game-root" | "--data-dir" | "--settings" | "--aa" | "--tone-map" | "--post-saturation"
-                | "--graphics" | "--grade" | "--motion-shutter"
+                | "--graphics" | "--grade" | "--motion-shutter" | "--lamp-signals"
         ) && i + 1 < args.len()
         {
             out.extend_from_slice(&args[i..i + 2]);
@@ -2074,6 +2074,14 @@ mod shared_display_forwarding_tests {
         let expected:Vec<String>=["--tone-map","agx","--post-saturation","1","--tone-map","reinhard","--post-saturation","0.9","--aa","dlaa"].into_iter().map(String::from).collect();
         assert_eq!(forwarded,expected); assert_eq!(super::passed_on(&forwarded),expected);
         assert!(super::passed_on(&["--tone-map".into()]).is_empty());
+    }
+
+    #[test]
+    fn menu_preserves_explicit_lamp_off_at_each_race_launch() {
+        let args = ["--menu", "--route", "ignored", "--lamp-signals", "off"].map(String::from);
+        let expected = ["--lamp-signals", "off"].map(String::from);
+        assert_eq!(super::passed_on(&args), expected);
+        assert_eq!(super::launcher_menu_flags(&args), expected);
     }
 
     #[test]

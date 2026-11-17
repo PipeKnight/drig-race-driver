@@ -88,3 +88,19 @@ hour 0 from the same 12 audit cameras and as a scripted windowed drive (`--drive
 --render`), which runs the driving branch of `night_lights::present`, and diffs the pairs with
 `tools/image_ab_compare.ps1`. A forced-night drive must report `night_lights shown ... driving=true`.
 Results of the first run are in log entry F776.
+
+## Authored exterior car lamps in ordinary races
+
+[G405](../log/G0405.md) connects the ordinary vehicle-light request to
+the existing exterior material receiver. Routes can request the main
+vehicle lamps independently from the world projector. The 23 marker-only
+routes include Shibuya, Yokohama Docks and daytime Haruna. The separate
+night projector path continues to follow Le Mans and Haruna source data.
+
+The main channel follows the existing per-slot request and fade. Both
+graphics profiles use the same source high/low geometry and atlas
+association with current per-part damage. Ordinary omitted options use
+the route request. The existing lamp-off option remains available for
+matched controls. Replay keeps the guarded exterior-lamp state while
+historical clock, fade and damage representation are established. Exact
+source radiometry remains a separate reference check.
