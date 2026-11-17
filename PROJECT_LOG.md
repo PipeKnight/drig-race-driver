@@ -175,6 +175,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F838](log/F0838.md) | 2026-11-17 | Tree billboards faced on the GPU: a compute pass writes the mesh slabs |
 | [F837](log/F0837.md) | 2026-11-17 | Mesh uploads per frame: crowd cards, car batches and part meshes stream in place |
 | [F836](log/F0836.md) | 2026-11-17 | Frame split in frame_stats for the Mac performance log |
 | [F835](log/F0835.md) | 2026-11-16 | Fence through smoke: scaled 3D image shown opaque |
@@ -234,7 +235,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F777](log/F0777.md) | 2026-11-10 | HUD: track_mask minimap, world-record pill, drift OSD groups |
 | [F776](log/F0776.md) | 2026-11-10 | Night lights: street lights, night shader term and car headlight beams on every night route |
 | [F775](log/F0775.md) | 2026-11-10 | Replay frame compaction and the Flashback transition effects |
-| [F774](log/F0774.md) | 2026-11-10 | Career season end, Le Mans entry, team name and livery (row 60) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

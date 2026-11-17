@@ -1,4 +1,5 @@
 //! Static closest-LOD source forest. No wind, collision or original shader claim.
+mod gpu_facing;
 mod visibility_census;
 use super::mesh_stream::{MeshStream, VertexLayout, put};
 use super::{Car, Part, read};
@@ -1009,6 +1010,7 @@ pub(crate) fn swap_shadow_twins(
 
 pub fn install(app: &mut App) {
     visibility_census::install(app);
+    gpu_facing::install(app);
     app.add_systems(Update, shadow_twins).add_systems(
         PostUpdate,
         swap_shadow_twins
@@ -1352,10 +1354,14 @@ type FacingDraw<'a> = (Entity, Ref<'a, Facing>, Ref<'a, Mesh3d>, Option<&'a Inhe
 /// Re-faces every billboard toward the camera each frame. The vertex bytes are
 /// written over the mesh's GPU allocation (mesh_stream); the asset keeps its
 /// source vertices, so Bevy does not reallocate and repack it every frame.
+/// With the compute path running (gpu_facing), visible placements are only queued
+/// here and faced on the GPU; the CPU path below remains the fallback.
+#[allow(clippy::too_many_arguments)]
 fn present(
     camera: Query<&Transform, With<super::ViewerCamera>>,
     foliage: Query<FacingDraw>,
     stream: Res<MeshStream>,
+    gpu: Option<ResMut<gpu_facing::GpuFacing>>,
     mut census: Local<Option<FacingCensus>>,
     mut visibility: Option<ResMut<visibility_census::Census>>,
     frame: Option<Res<bevy::diagnostic::FrameCount>>,
@@ -1374,6 +1380,8 @@ fn present(
     if let Some(visibility) = visibility.as_deref_mut() { visibility.camera(camera); }
     let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
     let keys = census.keys_active().then(|| facing_keys(right, up, camera.translation));
+    let mut gpu = gpu.filter(|g| g.active());
+    let cpu_meshes = gpu.as_deref_mut().map(|g| g.begin(right, up, camera.translation)).unwrap_or_default();
     for (entity, facing, handle, inherited) in &foliage {
         // A hidden level (ornament_lod) keeps its last vertices; it is
         // rewritten on its first shown frame.
@@ -1389,7 +1397,10 @@ fn present(
         if let Some(keys) = keys {
             census.observe(entity, &facing, handle.id(), keys);
         }
-        stream.write(handle.id(), |bytes| {
+        let on_gpu = gpu
+            .as_deref_mut()
+            .is_some_and(|g| !cpu_meshes.contains(&handle.id()) && g.push(entity, handle.id()));
+        if !on_gpu { stream.write(handle.id(), |bytes| {
             let start = bytes.len();
             bytes.extend_from_slice(&facing.vertices);
             let vertices = &mut bytes[start..];
@@ -1452,7 +1463,7 @@ fn present(
                     }
                 }
             }
-        });
+        }); }
         if let Some(visibility) = visibility.as_deref_mut() { visibility.produced(entity, &facing, &handle); }
     }
     if let Some(visibility) = visibility.as_deref_mut() { visibility.finish(); }

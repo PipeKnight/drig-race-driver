@@ -2621,7 +2621,8 @@ absolute numbers are inflated and only the ranking counts). Exclusive ms per fra
 
 Ranked plan (expected gain on the bound thread; all general, image-neutral, with matched crops):
 
-1. **Tree billboards faced in the vertex shader** (`source_trees.rs` `present`/`expanded`/
+1. **Done in F838** (a compute pass instead of the vertex shader; see "Tree billboards faced on the
+   GPU (F838)" below). **Tree billboards faced in the vertex shader** (`source_trees.rs` `present`/`expanded`/
    `sheet_expanded`, `tree_cards.rs` `CardMaterial`, the facing `StandardMaterial` parts via an
    extended material, shadow twins faced to the sun by a view uniform). Removes 90-230 MB/s of
    in-place writes: about 3 ms of render thread and 1.5 ms of main thread at Donington, 1.5 ms
@@ -2647,3 +2648,71 @@ Ranked plan (expected gain on the bound thread; all general, image-neutral, with
 7. **Remaining uploads**: player and opponent body meshes (about 400/s in the derby: stream the
    deformed vertices with `write_at` as the car batches do), unnamed custom-material meshes
    (probably OSD texts whose glyph count changes, `osd_scene::texts`; 54-81/s), camera flashes.
+
+## Tree billboards faced on the GPU (F838)
+
+Item 1 of the plan above. The source vegetation (docs/SOURCE_VEGETATION.md) faces its sphere,
+sheet and card billboards toward the camera every frame. Until F838 `source_trees::present` did
+this on the main thread and wrote every shown level's vertices again through `mesh_stream`
+(90-230 MB/s, about 3 ms of render thread at Donington).
+
+### Design
+
+- A compute pass (`source_trees/gpu_facing.rs`, `tree_facing.wgsl`) at the start of the render
+  graph (`RenderGraphSystems::Begin`) writes the faced POSITION, NORMAL and card UV0/UV1 straight
+  into the mesh's vertex slab. The vertex slabs get `STORAGE` usage through
+  `MeshAllocatorSettings::extra_buffer_usages`, set before the allocator is created.
+- The main world registers a placement once (`Changed<Facing>`: world and inverse transform,
+  kind, vertex layout, the unfaced source vertices shared per source mesh) and sends per frame
+  only the list of shown placements and the view (right, up, eye, blend flag). One workgroup of
+  64 lanes per placement; jobs are grouped per slab buffer into bindings aligned to
+  `min_storage_buffer_offset_alignment` and within `max_storage_buffer_binding_size`.
+- The shader mirrors the CPU math, including the guarded normalisation, so the image is the
+  same.
+- Why not the vertex shader, as the grass does (F580): the facing materials are shared with
+  shadow twins, ornament proxies and the card material, and are swapped by the level-of-detail
+  and fade code; a compute pass keeps every material and the shadow path unchanged.
+- CPU fallback, per frame and per mesh: `GRID_TREE_FACING=cpu`; no compute shaders or fewer than
+  4 storage buffers per stage (the install returns early, which is the old path exactly); the
+  pipeline not compiled yet; a mesh in a slab without `STORAGE` (large-object slabs). Shadow
+  twins are still faced to the sun on the CPU.
+
+### A/B on Windows (RTX 4070, i7-12700, Vulkan, 1280x800 window, Fifo at 165 Hz)
+
+One binary; `cpu` = `GRID_TREE_FACING=cpu`; `tools/frame_split_smoke.ps1 -RenderHeight native`;
+5 alternating runs per scene and variant, idle-gated (no build or game process at any start);
+pooled.
+
+| scene | variant | fps (runs) | 1 % low | worst window | over 10 ms | main ms | render ms | `r_meshes` | `r_encode` | GPU ms | in-place writes kB/s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Detroit derby route_8 | cpu | 99.0 (105.9/116.2/110.4/84.6/78.0) | 40-50 | 29.0 | 38.3 % | 7.24 | 9.52 | 1.75 | 4.07 | 3.79 | 166,369 |
+| | gpu | 112.9 (129.1/125.0/122.9/80.7/107.3) | 40-50 | 48.2 | 19.9 % | 6.42 | 8.44 | 1.00 | 3.85 | 3.14 | 53,605 |
+| Donington route_0 | cpu | 67.2 (68.2/78.5/74.3/61.9/53.6) | 40-50 | 32.7 | 100 % | 8.53 | 14.28 | 4.37 | 5.58 | 3.63 | 395,530 |
+| | gpu | 79.1 (81.6/90.4/95.6/60.5/67.4) | 40-50 | 46.7 | 85.1 % | 7.04 | 11.53 | 1.36 | 5.70 | 3.85 | 67,624 |
+
+- In-place writes fall by 68 % (derby) and 83 % (Donington); `r_meshes` by 0.75 and 3.0 ms.
+- Render thread -1.1 and -2.75 ms per frame, main thread -0.8 and -1.5 ms.
+- Mean fps +14 % and +18 %, and in each scene four of the five gpu runs beat the cpu run of the same round. The
+  worst 1 s window rises from 29 to 48 fps and from 33 to 47 fps. The 1 % low bucket is unchanged.
+- Runs 4 and 5 are slower in both variants (the machine, not the variant).
+- GPU time is unchanged within the noise (3.1-3.9 ms in both variants); the pass was not timed on its own.
+
+### Image and probe
+
+- Fixed-step offscreen captures (1280x720, ticks 600 and 1500, derby and Donington), cpu vs gpu:
+  0 px differ in three of the four pairs, 2 px by one level at derby tick 1500, where two gpu
+  runs differ in 1 px. Unchanged. Crops in `local/ab/crops-trees/` (private).
+- `GRID_MESH_UPLOADS=1` (Donington, 900 ticks): with `cpu` the tree groups write about 25, 23 and
+  12 MB/s (facing), 3.1 and 2.5 MB/s (sheets) and 0.6 MB/s (cards); with `gpu` no tree group
+  writes. What is left: ground cover (up to 49 MB/s), crowd cells, skid marks, tyre smoke.
+
+### Android
+
+The same code; phones with compute shaders and enough storage buffers take the GPU path, others
+the CPU path. Not measured on a phone.
+
+### Next
+
+Donington is still render-thread bound (11.5 ms: `r_encode` 5.7 ms with about 360 transparent
+draw groups), the derby main-thread bound in its dips. Items 2-4, 6 and 7 of the plan above
+remain; item 5 (main thread) is planned as a separate session.

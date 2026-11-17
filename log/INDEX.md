@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F838](F0838.md) | 2026-11-17 | Tree billboards faced on the GPU: a compute pass writes the mesh slabs |
 | [F837](F0837.md) | 2026-11-17 | Mesh uploads per frame: crowd cards, car batches and part meshes stream in place |
 | [F836](F0836.md) | 2026-11-17 | Frame split in frame_stats for the Mac performance log |
 | [F835](F0835.md) | 2026-11-16 | Fence through smoke: scaled 3D image shown opaque |

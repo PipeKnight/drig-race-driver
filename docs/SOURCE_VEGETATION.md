@@ -220,6 +220,13 @@ All routes' distances: `local/r52/tree_attributes.tsv` (d0 10-30 m, d1 90-200 m 
   12 ms): Washington 9.48 / 9.46 / 9.94 plain, 10.13 / 9.66 / 9.63 card; Spa 12.08 / 12.07 / 11.80
   plain, 12.07 / 12.45 / 12.42 card: up to +0.6 ms, within the run-to-run spread.
 - Hidden facing entities are no longer rewritten each frame.
+- Since F838 the facing (sphere quads, sheets and cards: POSITION, NORMAL, and for cards UV0
+  and UV1.x) runs in a compute pass at the start of the render graph
+  (`source_trees/gpu_facing.rs`, `tree_facing.wgsl`), which writes each visible placement's
+  vertices straight into its mesh slab; the main thread only queues the visible placements.
+  The arithmetic is the CPU path's; matched captures are identical to the pixel. The CPU path
+  stays as the fallback (no compute shaders, a slab without `STORAGE`, and
+  `GRID_TREE_FACING=cpu` for review). Shadow twins are still faced to the sun on the CPU.
 - Checks (private `local/r46/`): `w-shafts-ab.png`, `spa30-ab.png`, `haruna48-ab.png` (full trees
   everywhere | level switch); `c-x0-vs-n.png` (Washington cards, close crop);
   `switch-large_tree.png` (one `large_tree` at 40, 44, 50, 56 m from its trunk; the switch is at
