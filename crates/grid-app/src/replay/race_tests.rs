@@ -163,7 +163,7 @@ fn check(app: &mut App, lives: &[Live]) {
             // The replayed effects read the race's own inputs
             // (crate::replay_effects).
             assert_eq!(
-                crate::wheel_ground::replayed(car, |t| surfaces.code(t)),
+                crate::wheel_ground::replayed(car, |t| surfaces.code_with_height_offset(t)),
                 l.ground[i],
                 "ground tick {} car {i}",
                 l.tick

@@ -668,3 +668,14 @@ The same priming and linked state lives in the normal replay checkpoint.
 Matched Donington grass and mixed Detroit road samples show the actual packed
 first alpha pairs and phase shift at emission, with the same physics and
 smoke traces. Comparison against video from the original remains separate.
+
+### Raw wheel-local base and spacing
+
+[G414](../log/G0414.md) uses the 73FC1F–73FCC0 construction for the
+skid's raw world point. Only local Y receives suspension displacement,
+radius subtraction and the contact token's authored mechanics depth.
+Before adding the visible lift along the contact normal, 73FD34–73FDBE
+compares squared displacement to the previous accepted raw point.
+The accepted raw point drives the next check and is stored in the
+existing replay checkpoint. The lifted strip positions continue to
+drive the source angle test and texture geometry.

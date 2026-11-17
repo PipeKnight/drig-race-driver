@@ -335,7 +335,7 @@ impl ReplayEffects {
             let surfaces = world.resource::<crate::Driving>().runtime.surfaces();
             let wheels: Vec<[Wheel; 4]> = cars
                 .iter()
-                .map(|c| wheel_ground::replayed(c, |token| surfaces.code(token)))
+                .map(|c| wheel_ground::replayed(c, |token| surfaces.code_with_height_offset(token)))
                 .collect();
             let inputs: Vec<smoke::CarInput> = cars
                 .iter()

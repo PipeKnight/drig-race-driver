@@ -201,8 +201,8 @@ const SLOT: usize = QUADS * 4;
 const SPARE: usize = 40;
 // Existing authored diffuse lifecycle, separate from source normal byte2.
 const RETIRE_STEP: f32 = 25. / 255.;
-/// A point is laid after the wheel moved more than 0.1 m [D].
-const STEP: f32 = 0.1;
+/// 73FD34..73FDBE tests squared displacement before visual lift.
+const STEP_SQUARED: f32 = 0.1 * 0.1;
 /// 73F0A0 tests the old normal projected onto the new travel's normal plane
 /// against the average of the two contact normals.
 const SURFACE_SPLIT_DEGREES: f32 = 10.;
@@ -371,6 +371,7 @@ impl Strip {
 #[derive(Clone, Copy, Debug)]
 struct Head {
     strip: usize,
+    last_base: Vec3,
 }
 
 #[derive(Resource)]
@@ -576,7 +577,7 @@ impl SkidMarks {
         }
     }
 
-    fn begin(&mut self, car: usize, wheel: usize, strip: usize, mut point: Point) {
+    fn begin(&mut self, car: usize, wheel: usize, strip: usize, mut point: Point, base: Vec3) {
         if !finite_phase(self.phases[strip]) {
             self.safety_event(car, wheel, "seed-domain");
         }
@@ -594,22 +595,28 @@ impl SkidMarks {
         strip_state.needs_second_point = true;
         strip_state.linked = false;
         strip_state.points.push(point);
-        self.heads[car][wheel] = Some(Head { strip });
+        self.heads[car][wheel] = Some(Head { strip, last_base: base });
         self.dirty = true;
     }
 
     /// AUTHORED safety deviation, not an original CRT exception fallback.
     /// End first; a fresh current point cannot bridge the invalid continuation.
-    fn recover(&mut self, car: usize, wheel: usize, point: Option<Point>, reason: &'static str) {
+    fn recover(
+        &mut self,
+        car: usize,
+        wheel: usize,
+        point: Option<(Point, Vec3)>,
+        reason: &'static str,
+    ) {
         self.safety_event(car, wheel, reason);
         if let Some(head) = self.heads[car][wheel] {
             self.phases[head.strip] = finite_seed(self.phases[head.strip]);
         }
         self.end(car, wheel);
-        if let Some(point) = point.filter(Point::finite_payload)
+        if let Some((point, base)) = point.filter(|(point, _)| point.finite_payload())
             && let Some(strip) = self.allocate()
         {
-            self.begin(car, wheel, strip, point);
+            self.begin(car, wheel, strip, point, base);
         }
     }
 
@@ -635,8 +642,9 @@ impl SkidMarks {
             [layer.start_u, layer.end_u]
         };
         let width = wheel.width * layer.width_scale;
+        let base = wheel.skid_base;
         let mut point = Point {
-            center: wheel.point + wheel.skid_normal * offset,
+            center: base + wheel.skid_normal * offset,
             side: Vec3::ZERO,
             normal: wheel.skid_normal,
             half_width: 0.5 * width,
@@ -652,7 +660,15 @@ impl SkidMarks {
         }
         if let Some(head) = self.heads[car][index] {
             if !finite_phase(self.phases[head.strip]) {
-                self.recover(car, index, Some(point), "incoming-phase");
+                self.recover(car, index, Some((point, base)), "incoming-phase");
+                return;
+            }
+            let spacing = (base - head.last_base).length_squared();
+            if !spacing.is_finite() {
+                self.recover(car, index, None, "spacing-domain");
+                return;
+            }
+            if spacing <= STEP_SQUARED {
                 return;
             }
             let mut last = *self.strips[head.strip]
@@ -665,7 +681,7 @@ impl SkidMarks {
                 self.recover(car, index, None, "step-domain");
                 return;
             }
-            if step <= STEP {
+            if step == 0. {
                 return;
             }
             let direction = delta / step;
@@ -673,7 +689,7 @@ impl SkidMarks {
                 true
             } else {
                 let Some(angle) = surface_angle(direction, last.normal, point.normal) else {
-                    self.recover(car, index, Some(point), "surface-angle-domain");
+                    self.recover(car, index, Some((point, base)), "surface-angle-domain");
                     return;
                 };
                 angle > SURFACE_SPLIT_DEGREES
@@ -687,6 +703,10 @@ impl SkidMarks {
                 let strip = &mut self.strips[head.strip];
                 strip.points[0] = point;
                 strip.needs_second_point = false;
+                self.heads[car][index] = Some(Head {
+                    strip: head.strip,
+                    last_base: base,
+                });
                 self.dirty = true;
                 return;
             } else {
@@ -708,7 +728,7 @@ impl SkidMarks {
                     if next == head.strip {
                         //73F860 drops the predecessor when allocation steals it.
                         // No linked capacity wrap or old-to-new bridge remains.
-                        self.begin(car, index, next, point);
+                        self.begin(car, index, next, point, base);
                         return;
                     }
                     let Some(wrapped) = capacity_phase(previous_phases) else {
@@ -716,7 +736,7 @@ impl SkidMarks {
                         // reuse that exact slot for a fresh seed, not another allocation.
                         self.safety_event(car, index, "capacity-domain");
                         self.end(car, index);
-                        self.begin(car, index, next, point);
+                        self.begin(car, index, next, point, base);
                         return;
                     };
                     last.v = wrapped;
@@ -731,7 +751,7 @@ impl SkidMarks {
                 };
                 let Some(segment) = QuadUv::between(&last, &point, step) else {
                     if strip == head.strip {
-                        self.recover(car, index, Some(point), "advance-domain");
+                        self.recover(car, index, Some((point, base)), "advance-domain");
                         return;
                     }
                     self.safety_event(car, index, "advance-domain");
@@ -742,14 +762,14 @@ impl SkidMarks {
                     self.strips[strip].points.clear();
                     self.strips[strip].segments.clear();
                     self.strips[strip].used = true;
-                    self.begin(car, index, strip, point);
+                    self.begin(car, index, strip, point, base);
                     return;
                 };
                 point.v = [segment.old[2][1], segment.new[2][1]];
                 self.phases[strip] = point.v;
                 self.strips[strip].segments.push(segment);
                 self.strips[strip].points.push(point);
-                self.heads[car][index] = Some(Head { strip });
+                self.heads[car][index] = Some(Head { strip, last_base: base });
                 self.laid += 1;
                 self.dirty = true;
                 return;
@@ -759,7 +779,7 @@ impl SkidMarks {
         let Some(strip) = self.allocate() else {
             return;
         };
-        self.begin(car, index, strip, point);
+        self.begin(car, index, strip, point, base);
     }
 
     /// Keep spare strips by retiring the farthest finished ones; fade them
@@ -1242,7 +1262,7 @@ mod tests {
         Wheel {
             contact: true,
             code: *code,
-            point: Vec3::new(x, 0., 0.),
+            skid_base: Vec3::new(x, 0., 0.),
             normal: Vec3::Y,
             skid_normal: Vec3::Y,
             forward: Vec3::X,
@@ -1251,6 +1271,37 @@ mod tests {
             excess,
             side_factor: side,
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn skid_spacing_uses_raw_wheel_base_across_contact_normal_changes() {
+        for (distance, normal_x, accepted) in [(0.099, 0.05, false), (0.101, -0.05, true)] {
+            let mut profile = profile();
+            profile.surfaces[1].tread.fade = [1.; 2];
+            let offset = profile.offset;
+            let mut marks = SkidMarks::new(profile);
+            marks.heads.resize(1, [None; 4]);
+            let mut sample = wheel(b"GRAS", 0., 0., 0.);
+            marks.advance(0, 0, &sample);
+            let id = marks.heads[0][0].unwrap().strip;
+            let first = marks.save();
+
+            sample.skid_base = Vec3::X * distance;
+            sample.skid_normal = Vec3::new(normal_x, 1., 0.).normalize();
+            let lift_delta = (sample.skid_normal - Vec3::Y) * offset;
+            let raised_acceptance =
+                (sample.skid_base + lift_delta).length_squared() > STEP_SQUARED;
+            assert_ne!(raised_acceptance, accepted);
+            for _ in 0..2 {
+                marks.advance(0, 0, &sample);
+                let head = marks.heads[0][0].unwrap();
+                assert_eq!(head.strip, id);
+                assert_eq!(marks.strips[id].needs_second_point, !accepted);
+                let expected = if accepted { sample.skid_base } else { Vec3::ZERO };
+                assert_eq!(head.last_base, expected);
+                marks.restore(&first);
+            }
         }
     }
 
@@ -1269,10 +1320,10 @@ mod tests {
         marks.advance(0, 0, &sample);
         let id = marks.heads[0][0].unwrap().strip;
         assert!(marks.strips[id].needs_second_point);
-        sample.point.x = 0.08;
+        sample.skid_base.x = 0.08;
         marks.advance(0, 0, &sample);
         assert!(marks.strips[id].needs_second_point);
-        sample.point.x = 0.4;
+        sample.skid_base.x = 0.4;
         sample.code = *b"GRAS";
         sample.excess = 0.;
         marks.advance(0, 0, &sample);
@@ -1292,7 +1343,7 @@ mod tests {
 
         marks.restore(&primed);
         sample.contact = true;
-        sample.point.x = 1.;
+        sample.skid_base.x = 1.;
         sample.code = *b"STDR";
         sample.excess = 3.;
         marks.advance(0, 0, &sample);
@@ -1312,7 +1363,7 @@ mod tests {
         assert!((0..4).all(|k| SkidMarks::slot_vertex(strip, k).4[2] == 0.));
 
         for x in [1.3, 1.6] {
-            sample.point.x = x;
+            sample.skid_base.x = x;
             marks.advance(0, 0, &sample);
         }
         let strip = &marks.strips[id];
@@ -1370,11 +1421,11 @@ mod tests {
             sample.left = left;
             sample.forward = Vec3::Z;
             marks.advance(0, 0, &sample);
-            sample.point.x = 0.;
+            sample.skid_base.x = 0.;
             marks.advance(0, 0, &sample);
-            sample.point.x = 1.;
+            sample.skid_base.x = 1.;
             marks.advance(0, 0, &sample);
-            sample.point = Vec3::new(2., 0., 1.);
+            sample.skid_base = Vec3::new(2., 0., 1.);
             sample.skid_normal = Vec3::new(0., 1., 0.1).normalize();
             marks.advance(0, 0, &sample);
             let id = marks.heads[0][0].unwrap().strip;
@@ -1422,11 +1473,11 @@ mod tests {
         let mut contact = wheel(b"STDR", 3., 0., -1.);
         marks.advance(0, 0, &contact);
         let flat = marks.heads[0][0].unwrap().strip;
-        contact.point = Vec3::ZERO;
+        contact.skid_base = Vec3::ZERO;
         marks.advance(0, 0, &contact);
-        contact.point = Vec3::X;
+        contact.skid_base = Vec3::X;
         marks.advance(0, 0, &contact);
-        contact.point += Vec3::Z;
+        contact.skid_base += Vec3::Z;
         contact.forward = Vec3::Z;
         marks.advance(0, 0, &contact);
         assert_eq!(marks.heads[0][0].unwrap().strip, flat);
@@ -1435,20 +1486,20 @@ mod tests {
         // Travel keeps the last horizontal heading. Surface normal and grade
         // change from a flat part to a rising ramp.
         let incline = Vec3::new(0., 0.6, 0.8);
-        contact.point += incline;
+        contact.skid_base += incline;
         contact.skid_normal = Vec3::new(0., 0.8, -0.6);
         marks.advance(0, 0, &contact);
         let ramp = marks.heads[0][0].unwrap().strip;
         assert_ne!(ramp, flat);
         let point = marks.strips[ramp].points[0];
-        assert_eq!(point.center, contact.point + 0.04 * contact.skid_normal);
+        assert_eq!(point.center, contact.skid_base + 0.04 * contact.skid_normal);
         assert_eq!(point.normal, contact.skid_normal);
         assert_eq!(point.side, Vec3::ZERO, "fresh strip has no arriving segment");
-        contact.point += incline;
+        contact.skid_base += incline;
         marks.advance(0, 0, &contact);
         assert_eq!(marks.heads[0][0].unwrap().strip, ramp);
         assert!(marks.strips[ramp].segments.is_empty());
-        contact.point += incline;
+        contact.skid_base += incline;
         marks.advance(0, 0, &contact);
         assert_eq!(marks.heads[0][0].unwrap().strip, ramp);
         assert_eq!(marks.strips[ramp].segments.len(), 1);
@@ -1462,14 +1513,14 @@ mod tests {
         marks.advance(0, 0, &contact);
         let first = marks.heads[0][0].unwrap().strip;
         for x in [0.2, 0.4] {
-            contact.point.x = x;
+            contact.skid_base.x = x;
             marks.advance(0, 0, &contact);
         }
-        contact.point.x = 0.5;
+        contact.skid_base.x = 0.5;
         contact.contact = false;
         marks.advance(0, 0, &contact);
         assert!(marks.heads[0][0].is_none());
-        contact.point.x = 0.7;
+        contact.skid_base.x = 0.7;
         contact.contact = true;
         marks.advance(0, 0, &contact);
         let landed = marks.heads[0][0].unwrap().strip;
@@ -1478,18 +1529,18 @@ mod tests {
 
         // Give the new strip a stored segment before testing the jump.
         for x in [1., 1.3] {
-            contact.point.x = x;
+            contact.skid_base.x = x;
             marks.advance(0, 0, &contact);
         }
         assert_eq!(marks.strips[landed].segments.len(), 1);
-        contact.point.x = 5.5;
+        contact.skid_base.x = 5.5;
         marks.advance(0, 0, &contact);
         let moved = marks.heads[0][0].unwrap().strip;
         assert_ne!(moved, landed);
         assert_eq!(marks.strips[landed].segments.len(), 1);
         assert!(marks.strips[landed].owner.is_none());
         assert!(marks.strips[moved].segments.is_empty());
-        assert_eq!(marks.strips[moved].points[0].center.x, contact.point.x);
+        assert_eq!(marks.strips[moved].points[0].center.x, contact.skid_base.x);
     }
 
     #[test]
@@ -1522,7 +1573,9 @@ mod tests {
         let mut encoder = Encoder::default();
         let encoded: Vec<_> = samples.iter().enumerate().map(|(n, s)| encoder.encode(s, n as u32)).collect();
         let sample_wheels = |frame: &Snapshot| {
-            crate::wheel_ground::replayed(&frame.cars[0], |token| (token == 1).then_some(*b"STDR"))
+            crate::wheel_ground::replayed(&frame.cars[0], |token| {
+                (token == 1).then_some((*b"STDR", 0.))
+            })
         };
         let mut original = SkidMarks::new(profile());
         for snapshot in &samples {
@@ -1729,7 +1782,7 @@ mod tests {
         let before_capacity = marks.save();
         let after_capacity = |marks: &mut SkidMarks, i: i32| {
             let mut wheel = wheel(b"GRAS", 3., 0., i as f32 * 0.2);
-            wheel.point.z = (i - 33) as f32 * 0.15;
+            wheel.skid_base.z = (i - 33) as f32 * 0.15;
             marks.advance(0, 0, &wheel);
         };
         for i in 34..=36 {
