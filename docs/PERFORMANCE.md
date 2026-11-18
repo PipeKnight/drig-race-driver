@@ -3176,3 +3176,42 @@ the session) had one 1.5 s (before) and 1.9 s (after) frame in the 6th and 8th w
 Image: fixed-step offscreen captures (1280x720, autopilot, ticks 900 and 1800, Donington and
 Spa, baseline and Enhanced), before against after: 0 pixels differ in all 8 pairs; two runs of
 the after binary differ in 0-2 pixels (noise). Unchanged. Crops in `local/ab/crops-cover/` (private).
+
+## GO spike: single FixedUpdate tick not reproduced (F849)
+
+Report: about 1 in 10 Donington starts (`auto_no_vsync`) showed one 180-290 ms FixedUpdate tick
+just after GO. Task: name the stage with `perf_timing worst_tick` and fix the cause.
+
+Why `worst_tick` cannot name it: `perf.rs` measures only the WorldTick stage
+(`add(Stage::WorldTick)` to `tick_end`), not the whole FixedUpdate schedule, so a stall in another
+fixed system does not appear in it.
+
+Evidence [V]:
+- mac-perf's hitch runs (100 runs with `frame_stats`): 38 one-second windows after tick 150 had a
+  max frame of 100 ms or more. 37 were render-led (the first-sight compiles of the start, which
+  are mac-perf's area). One was fixed-led: `hw-base-b-race-native-2` (05:16 on 2026-11-18),
+  window max 289.9 ms, `slow14_fixed` 35.7 ms over 8 slow frames (286 ms in all), `slow14_ticks`
+  0.88, `slow14_multi` 0, render 10.1 ms, 50.3 ticks/s. The drive samples for ticks 240 to 251
+  are 462 ms apart instead of 176 ms. So one tick held the main thread for about 280 ms at GO
+  while the render thread was not stalled.
+- A local probe build (branch `spike-probe`, never pushed: per-system wall and thread-CPU timers
+  for the 23 FixedUpdate systems, page faults, working set, and a timer over the whole
+  `RunFixedMainLoop`) logged every tick of 15 ms or more. In 40 Donington starts on a quiet PC
+  (10:46-11:26, after the owner's game session), each 400 ticks past GO, no FixedUpdate tick
+  reached 15 ms. The largest frame after the cover lifted was 74-86 ms, and it was render-led.
+  A heartbeat line showed the probe was armed in every run.
+- 16 earlier starts ran while another game used the PC. Their durations are not used.
+- The race checkpoint written at GO took 0.6-1.9 ms in every run.
+
+Interpretation [I]: on a quiet PC the rate is below about 1 in 19 (0 of 56, rule of three at
+95 %). A 1-in-10 rate would give 0 of 40 with a probability of about 0.3 %. The one observed case
+ran during mac-perf's series, whose idle gate is checked only at the start of each run, so other
+sessions' builds or captures may have been running at that moment. The likeliest causes are
+contention outside the game (paging or disk I/O while code and data are touched for the first
+time at GO) rather than a fixed system with a slow path. This is not proven: without per-system
+times from a spiking run, no stage can be named, and nothing was changed.
+
+Next: either a permanent, cheap record of the worst FixedUpdate tick (its tick number, the time
+of each fixed stage, the page-fault delta) in the normal `frame_split`/`perf_timing` output, so
+the next occurrence names its stage; or an overnight series of the probe build while other
+sessions build, to test the contention explanation.
