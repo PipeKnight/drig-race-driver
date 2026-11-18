@@ -3409,7 +3409,7 @@ after (a2) for noise:
 
 | case | after vs before | noise |
 |---|---|---|
-| Donington, baseline and Enhanced, ticks 600 and 1500 | 0 px (4 cases) | 0 px |
+| Donington, baseline and Enhanced, ticks 600 and 1500 | 0 px (4 cases) | 0 px, except 3 px (delta 1) in baseline tick 1500 |
 | Spa, baseline and Enhanced, ticks 600 and 1500 | 0 px (4 cases) | 0-2 px |
 | Haruna touge, baseline and Enhanced, tick 900 | 0 px (2 cases) | 0 px |
 
@@ -3506,3 +3506,84 @@ Images: matched offscreen frames (1280x720, `--render-fixed-step`, autopilot) of
 the derby at ticks 600 and 1500, HEAD against the fix, with a second fix run as noise. Three
 pairs are identical; derby 1500 differs in 1 pixel by 1 level, as does its noise pair. A
 bottom-left crop shows the minimap ribbon drawn the same in both (local/mt/vis/img).
+
+## HUD as an overlay pass; no OSD camera (F856)
+
+F853 cut the OSD camera's schedule to the passes it used, which left the per-view cost of a
+separate camera: view preparation, specialization, batching, bind groups, main-thread visibility
+and the encode of about 80 blended draws. The coordinator chose to draw the HUD as an overlay
+in the main frame instead of with a second camera, keeping the image unchanged.
+
+Design (`osd_scene::overlay`):
+
+- No OSD camera. The scene camera's view and projection live in the `Osd` resource
+  (`Osd::view()`, `Osd::projection()`); the name tags and the minimap read them from there.
+- The OSD's mesh nodes carry `OsdDraw` (mesh, material, optional sort centre) instead of
+  `Mesh3d`/`MeshMaterial3d`/`RenderLayers`, so Bevy's visibility, extraction, specialization
+  and batching never see them.
+- One render-graph system (`RenderGraph` schedule, `RenderGraphSystems::Render`, before
+  `camera_driver`) clears the transparent OSD image and draws the visible nodes with the
+  `osd.wgsl` pipeline: 4x MSAA resolved into the sRGB image (1 sample on Android), alpha
+  blending, no depth. It is one render pass with its own small bind groups prepared in
+  `RenderSystems::PrepareBindGroups`.
+- Draw order copies the former camera's: Bevy 0.19's retained `Transparent3d` order (items that
+  left are swap-removed in Bevy's `Entity` order, new items are appended in that order, then a stable
+  sort by view-space depth of the bounds centre). Ties stay in the same order as before (test
+  `retained_order_keeps_ties_and_swap_removes`). Streamed meshes sort by their unpadded centre,
+  as `mesh_stream` does for Bevy's phase: the texts (F398) and the minimap ribbon (F854).
+- The viewer camera's UI composites the image after tonemapping, post-processing and
+  upscaling, under every other UI node, as before. Bloom, anti-aliasing and grading never
+  touch the HUD. The image stays as an intermediate target, because the UI tree draws over it
+  (pause menu, post-race screens, touch zones).
+
+Image: the F853 10 fixed-step cases (1280x720, autopilot), after against current main, with a
+second after run as noise:
+
+| case | after vs main | noise |
+|---|---|---|
+| Donington, baseline and Enhanced, ticks 600 and 1500 | 0 px (4 cases) | 0 px, except 3 px (delta 1) in baseline tick 1500 |
+| Spa, baseline tick 600 | 1 px in the first run (delta 1, at (1177, 63)); 0 px in 3 repeats | 3 px, delta 1 |
+| Spa, baseline tick 1500 and Enhanced ticks 600 and 1500 | 0 px (3 cases) | 0 px |
+| Haruna touge, baseline and Enhanced, tick 900 | 0 px (2 cases) | 0 px |
+
+The one Spa pixel is run-to-run noise. Three more runs of each build matched the first main run exactly, and the first
+overlay run differs from them by that pixel alone. Two runs of the same build also differed by delta-1 pixels in two cases
+(Donington and Spa, baseline). Crops: `local/ab/crops-ov2/base-spa-600-*`, repeats in `local/ab/crops-ov2/spa600/`.
+
+Cost: Donington, `present_mode = auto_no_vsync`, both orders x2 runs per cell, play windows
+after the cover lift, against the F853 release (both builds without F854):
+
+| resolution, mode | build | fps | 1 % low | worst window | main ms | render ms | `r_encode` | GPU ms |
+|---|---|---|---|---|---|---|---|---|
+| 2560x1440 baseline | F853 | 92.9 | 67.8 | 72.1 | 5.87 | 10.24 | 4.59 | 4.63 |
+| 2560x1440 baseline | overlay | 90.0 | 56.3 | 60.3 | 6.33 | 10.64 | 4.78 | 4.94 |
+| 2560x1440 Enhanced | F853 | 76.7 | 51.9 | 56.9 | 6.32 | 12.57 | 5.82 | 4.26 |
+| 2560x1440 Enhanced | overlay | 78.2 | 59.7 | 63.5 | 6.35 | 12.33 | 5.64 | 4.41 |
+| 1280x800 baseline | F853 | 89.7 | 44.4 | 55.8 | 6.49 | 10.87 | 5.13 | 2.58 |
+| 1280x800 baseline | overlay | 95.7 | 58.0 | 64.1 | 6.10 | 10.11 | 4.65 | 2.30 |
+| 1280x800 Enhanced | F853 | 69.8 | 44.4 | 43.9 | 7.76 | 14.10 | 6.97 | 2.19 |
+| 1280x800 Enhanced | overlay | 72.5 | 44.4 | 47.8 | 7.42 | 13.41 | 6.70 | 2.08 |
+
+Single runs spread widely (2560x1440 baseline, overlay: 80.7 to 102.1 fps), and the frames-over-16-ms share
+fell in three cells (4.1 to 1.3 %, 4.3 to 1.4 %, 19.7 to 12.6 %) and rose in one (0.3 to 1.7 %).
+Render time fell by 0.2-0.7 ms in three cells and rose by 0.4 ms in 2560x1440 baseline. That is inside this PC's noise
+(F850: about 1 ms, 5 fps between identical runs), so the gain is not proven by these runs; what
+is certain is the removed work (a whole camera's view, specialization and batching).
+
+### Post-lift windows with a slow frame, by stage
+
+`frame_split` prints the stages of each window's slowest render frame (`rworst=`), so this
+counts windows, not frames. Each window is attributed to the stage furthest above its window
+mean (`local/ab/spikestage.py`). F853 runs, 8 per mode:
+
+| set | mode | windows | encode | meshes | present/acquire | prepare/bind | submit |
+|---|---|---|---|---|---|---|---|
+| native 1280x800, slowest frame >= 20 ms | baseline | 41 | 61 % | 20 % | 12 % | 7 % | - |
+| native 1280x800, slowest frame >= 20 ms | Enhanced | 60 | 87 % | 7 % | - | 7 % | - |
+| 2560x1440, slowest frame >= 30 ms | baseline | 9 | 44 % | - | 33 % | 22 % | - |
+| 2560x1440, slowest frame >= 30 ms | Enhanced | 20 | 60 % | - | 10 % | 20 % | 5 % |
+
+The slow windows spread over the whole run (windows 0-17), not over one track section. Encode
+dominates in both modes, so frame pacing settings (present mode, frame latency) can at most
+address the present/acquire minority; the next step is to find which pass or phase grows in
+those frames.

@@ -8,21 +8,19 @@
 //! [I] What each shader family does with its parameters (`osd.wgsl`), the
 //! Euler order (X, Y, Z) and the text layout inside a text node's box.
 //!
-//! The scene renders through its own camera into a transparent image, which
-//! is drawn under every other UI node, so the pause menu, the post-race
-//! screens and the touch zones stay on top and the 3D post-processing does
-//! not touch it (AUTHORED composition).
+//! The scene is drawn by an overlay pass ([`overlay`]) at the start of the
+//! frame's render graph, with the scene camera's view, into a transparent
+//! image. The viewer camera's UI draws that image under every other UI node,
+//! after tonemapping, post-processing and upscaling, so bloom, anti-aliasing
+//! and grading never touch the HUD, and the pause menu, the post-race screens
+//! and the touch zones stay on top (AUTHORED composition). No second camera.
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
-    camera::{RenderTarget, visibility::RenderLayers},
-    core_pipeline::tonemapping::Tonemapping,
     image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
-    mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology},
-    pbr::{MaterialPipeline, MaterialPipelineKey},
+    mesh::{Indices, PrimitiveTopology},
     prelude::*,
     render::render_resource::{
-        AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, CompareFunction,
-        Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension,
+        AsBindGroup, BlendState, Extent3d, RenderPipelineDescriptor, TextureDimension,
         TextureFormat, TextureViewDescriptor, TextureViewDimension,
     },
     shader::ShaderRef,
@@ -37,9 +35,6 @@ use std::path::Path;
 const SHADER: Handle<Shader> = uuid_handle!("6a4a8f0e-1d0f-4f63-9a4e-6c8f1e7b2d31");
 const DISPLAY_SHADER: Handle<Shader> = uuid_handle!("0c7e5a52-93a4-4b4e-8f63-2a9d6b1e4c70");
 
-/// The render layer of the OSD meshes and camera.
-pub const LAYER: usize = 23;
-
 /// The fonts of `Osd/fontDescriptions.xml`, in order; a text node's
 /// `rd4text parameter` indexes this list [D order, I meaning of the index].
 pub const FONTS: [&str; 5] = [
@@ -50,23 +45,39 @@ pub const FONTS: [&str; 5] = [
     "swiss_time.pssg",
 ];
 
-/// One shader instance of the scene.
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+/// One shader instance of the scene: the textures and values `osd.wgsl`
+/// reads (the overlay pass binds them).
+#[derive(Asset, TypePath, Debug, Clone)]
 pub struct OsdMaterial {
-    #[texture(0)]
-    #[sampler(1)]
     diffuse: Handle<Image>,
-    #[texture(2)]
-    #[sampler(3)]
     glow: Handle<Image>,
-    #[texture(4, dimension = "cube")]
-    #[sampler(5)]
     soft: Handle<Image>,
-    #[texture(6, dimension = "cube")]
-    #[sampler(7)]
     sharp: Handle<Image>,
-    #[uniform(8)]
     params: Params,
+}
+
+/// A mesh node of the OSD scene, drawn by the overlay pass with its
+/// [`OsdMaterial`] while visible.
+#[derive(Component, Clone, Debug)]
+#[require(Transform, Visibility)]
+pub struct OsdDraw {
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<OsdMaterial>,
+    /// Local blend-sort centre of a streamed mesh (a text's current glyphs,
+    /// F398; the minimap ribbon, F854); otherwise the mesh's bounds centre.
+    centre: Option<Vec3>,
+}
+
+impl OsdDraw {
+    pub fn new(mesh: Handle<Mesh>, material: Handle<OsdMaterial>) -> Self {
+        OsdDraw { mesh, material, centre: None }
+    }
+
+    /// Sets the local blend-sort centre of a streamed, padded mesh to the
+    /// bounds centre of its drawn vertices.
+    pub(crate) fn set_centre(&mut self, centre: Vec3) {
+        self.centre = Some(centre);
+    }
 }
 
 /// `osd.wgsl` parameters.
@@ -76,57 +87,6 @@ pub struct Params {
     a: Vec4,
     b: Vec4,
     c: Vec4,
-}
-
-impl Material for OsdMaterial {
-    fn vertex_shader() -> ShaderRef {
-        SHADER.into()
-    }
-    fn fragment_shader() -> ShaderRef {
-        SHADER.into()
-    }
-    fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Blend
-    }
-    fn enable_prepass() -> bool {
-        false
-    }
-    fn enable_shadows() -> bool {
-        false
-    }
-    fn specialize(
-        _: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        _: &MeshVertexBufferLayoutRef,
-        _: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None;
-        if let Some(depth) = descriptor.depth_stencil.as_mut() {
-            depth.depth_write_enabled = Some(false);
-            depth.depth_compare = Some(CompareFunction::Always);
-        }
-        // Premultiplied result over a transparent target.
-        if let Some(target) = descriptor
-            .fragment
-            .as_mut()
-            .and_then(|f| f.targets.first_mut())
-            .and_then(|t| t.as_mut())
-        {
-            target.blend = Some(BlendState {
-                color: BlendComponent {
-                    src_factor: BlendFactor::SrcAlpha,
-                    dst_factor: BlendFactor::OneMinusSrcAlpha,
-                    operation: BlendOperation::Add,
-                },
-                alpha: BlendComponent {
-                    src_factor: BlendFactor::One,
-                    dst_factor: BlendFactor::OneMinusSrcAlpha,
-                    operation: BlendOperation::Add,
-                },
-            });
-        }
-        Ok(())
-    }
 }
 
 /// The OSD image drawn as a UI node (premultiplied blend).
@@ -583,11 +543,29 @@ pub struct Osd {
     image: Handle<Image>,
     /// The UI material that shows `image` over the 3D view.
     display: Handle<OsdDisplay>,
-    camera: Entity,
+    /// The scene camera's placement and lens (`camera_dialcam`); the
+    /// overlay pass draws with them.
+    view: GlobalTransform,
+    projection: PerspectiveProjection,
+    /// False stops the overlay pass (perf_test `hud`); the image keeps its
+    /// last contents.
+    active: bool,
     size: UVec2,
 }
 
 impl Osd {
+    /// The scene camera's world placement.
+    pub fn view(&self) -> &GlobalTransform {
+        &self.view
+    }
+    /// The scene camera's lens, with the image's aspect ratio.
+    pub fn projection(&self) -> &PerspectiveProjection {
+        &self.projection
+    }
+    /// Draws the scene each frame (true) or leaves the image as it is.
+    pub fn set_active(&mut self, on: bool) {
+        self.active = on;
+    }
     /// The aspect ratio of the OSD image, once sized.
     pub fn aspect(&self) -> Option<f32> {
         (self.size.x > 0 && self.size.y > 0).then(|| self.size.x as f32 / self.size.y as f32)
@@ -802,7 +780,7 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         let tree = grid_formats::pssg::read_tree(&bytes).map_err(|e| format!("{f}: {e}"))?;
         fonts.push(font(osd::read_font(&tree).map_err(|e| format!("{f}: {e}"))?));
     }
-    app.add_plugins(MaterialPlugin::<OsdMaterial>::default());
+    app.init_asset::<OsdMaterial>();
     display_plugin(app);
     let world = app.world_mut();
     world.resource_mut::<Assets<Shader>>().insert(SHADER.id(), Shader::from_wgsl(include_str!("osd.wgsl"), "grid_osd.wgsl")).map_err(|e| e.to_string())?;
@@ -869,36 +847,15 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         render
             .add_systems(ExtractSchedule, extract_display_ids)
             .add_systems(Render, check_display.in_set(RenderSystems::Queue));
-        graph::install(render);
+        overlay::install(render);
     }
     app.insert_resource(Installed)
         .init_resource::<crate::mesh_stream::MeshStream>()
         .add_systems(Update, spawn)
-        .add_systems(PostUpdate, (resize, animate, texts, visibility).chain().before(TransformSystems::Propagate))
-        .add_systems(
-            PostUpdate,
-            drop_sun_cascades
-                .after(SimulationLightSystems::UpdateDirectionalLightCascades)
-                .before(SimulationLightSystems::UpdateLightFrusta),
-        );
+        .add_systems(PostUpdate, (resize, animate, texts, visibility).chain().before(TransformSystems::Propagate));
     Ok(())
 }
 
-/// The sun's cascades for the OSD camera: Bevy builds them for every active
-/// camera, but the render world never draws the sun for this view (its layer
-/// is not the sun's), so they only cost main-world frusta and caster
-/// visibility each frame. Dropped; the picture is unchanged.
-fn drop_sun_cascades(osd: Query<Entity, With<OsdCamera>>, mut lights: Query<&mut Cascades>) {
-    for camera in &osd {
-        for mut cascades in &mut lights {
-            if cascades.cascades.contains_key(&camera) {
-                cascades.cascades.remove(&camera);
-            }
-        }
-    }
-}
-
-use bevy::light::{Cascades, SimulationLightSystems};
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::OwnedBindingResource;
 use bevy::render::texture::GpuImage;
@@ -949,9 +906,6 @@ fn check_display(
     }
 }
 
-#[derive(Component)]
-pub struct OsdCamera;
-
 #[allow(clippy::too_many_arguments)]
 fn spawn(
     mut commands: Commands,
@@ -968,31 +922,14 @@ fn spawn(
     let image = images.add(Image::new_target_texture(16, 16, TextureFormat::Rgba8UnormSrgb, None));
     let display = displays.add(OsdDisplay { image: image.clone() });
     let c = &loaded.camera;
-    let camera = commands
-        .spawn((
-            OsdCamera,
-            Camera3d::default(),
-            Camera {
-                order: -20,
-                clear_color: ClearColorConfig::Custom(Color::NONE),
-                ..default()
-            },
-            RenderTarget::Image(image.clone().into()),
-            Projection::Perspective(PerspectiveProjection {
-                fov: c.fov_degrees.to_radians(),
-                near: c.near.max(1.),
-                far: c.far,
-                aspect_ratio: 16. / 9.,
-                ..default()
-            }),
-            transform(&c.world),
-            Tonemapping::None,
-            if cfg!(target_os = "android") { Msaa::Off } else { Msaa::Sample4 },
-            RenderLayers::layer(LAYER),
-            bevy::render::camera::CameraRenderGraph::new(graph::OsdCore3d),
-            bevy::render::view::NoIndirectDrawing,
-        ))
-        .id();
+    let view = GlobalTransform::from(transform(&c.world));
+    let projection = PerspectiveProjection {
+        fov: c.fov_degrees.to_radians(),
+        near: c.near.max(1.),
+        far: c.far,
+        aspect_ratio: 16. / 9.,
+        ..default()
+    };
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -1046,12 +983,7 @@ fn spawn(
                 None => mesh.clone(),
             };
             node_materials.insert(e.id(), r.material);
-            e.insert((
-                Mesh3d(mesh),
-                MeshMaterial3d(loaded.materials[r.material].handle.clone()),
-                RenderLayers::layer(LAYER),
-                bevy::camera::visibility::NoFrustumCulling,
-            ));
+            e.insert(OsdDraw::new(mesh, loaded.materials[r.material].handle.clone()));
         }
         let id = e.id();
         entities.push(id);
@@ -1113,7 +1045,9 @@ fn spawn(
         scrolls: HashMap::new(),
         image,
         display,
-        camera,
+        view,
+        projection,
+        active: true,
         size: UVec2::ZERO,
     });
 }
@@ -1126,7 +1060,6 @@ fn resize(
     ui: Query<&Camera, With<IsDefaultUiCamera>>,
     mut images: ResMut<Assets<Image>>,
     mut displays: ResMut<Assets<OsdDisplay>>,
-    mut projection: Query<&mut Projection, With<OsdCamera>>,
 ) {
     let (Some(mut osd), Some(camera)) = (osd, ui.iter().next().or(viewer.iter().next())) else {
         return;
@@ -1134,13 +1067,8 @@ fn resize(
     let Some(size) = camera.physical_target_size().filter(|s| s.x > 0 && s.y > 0) else {
         return;
     };
-    if !set_size(&mut osd, size, &mut images, &mut displays) {
-        return;
-    }
-    if let Ok(mut p) = projection.get_mut(osd.camera)
-        && let Projection::Perspective(p) = p.as_mut()
-    {
-        p.aspect_ratio = size.x as f32 / size.y as f32;
+    if set_size(&mut osd, size, &mut images, &mut displays) {
+        osd.projection.aspect_ratio = size.x as f32 / size.y as f32;
     }
 }
 
@@ -1171,7 +1099,7 @@ fn animate(
     time: Option<Res<Time<Real>>>,
     mut transforms: Query<&mut Transform>,
     mut materials: ResMut<Assets<OsdMaterial>>,
-    mut bound: Query<&mut MeshMaterial3d<OsdMaterial>>,
+    mut bound: Query<&mut OsdDraw>,
 ) {
     let Some(mut osd) = osd else {
         return;
@@ -1254,7 +1182,7 @@ fn animate(
                 m.params = params;
                 let h = materials.add(m);
                 if let Ok(mut b) = bound.get_mut(*e) {
-                    b.0 = h.clone();
+                    b.material = h.clone();
                 }
                 s.handle = Some(h);
             }
@@ -1273,7 +1201,12 @@ fn animate(
 /// Rebuilds the glyph meshes of changed texts. A string with the same glyph
 /// vertices and triangles as the mesh (a running timer) is written over the
 /// mesh's GPU allocation instead of replacing the asset (mesh_stream, F398).
-fn texts(osd: Option<ResMut<Osd>>, mut meshes: ResMut<Assets<Mesh>>, stream: Res<MeshStream>) {
+fn texts(
+    osd: Option<ResMut<Osd>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    stream: Res<MeshStream>,
+    mut draws: Query<&mut OsdDraw>,
+) {
     let Some(mut osd) = osd else {
         return;
     };
@@ -1295,7 +1228,9 @@ fn texts(osd: Option<ResMut<Osd>>, mut meshes: ResMut<Assets<Mesh>>, stream: Res
             t.indices = glyphs.indices;
             *m = mesh;
         }
-        stream.sort_centre(t.entity, centre);
+        if let Ok(mut d) = draws.get_mut(t.entity) {
+            d.centre = Some(centre);
+        }
     }
 }
 
@@ -1426,7 +1361,6 @@ mod tests {
         let world = app.world_mut();
         let image = world.resource_mut::<Assets<Image>>().add(Image::new_target_texture(16, 16, TextureFormat::Rgba8UnormSrgb, None));
         let display = world.resource_mut::<Assets<OsdDisplay>>().add(OsdDisplay { image: image.clone() });
-        let camera = world.spawn_empty().id();
         let mut osd = Osd {
             entities: HashMap::new(),
             tree: Vec::new(),
@@ -1443,7 +1377,9 @@ mod tests {
             scrolls: HashMap::new(),
             image: image.clone(),
             display: display.clone(),
-            camera,
+            view: GlobalTransform::IDENTITY,
+            projection: PerspectiveProjection::default(),
+            active: true,
             size: UVec2::ZERO,
         };
         let mut resize = |app: &mut App, size: UVec2| {
@@ -1501,7 +1437,9 @@ mod tests {
             scrolls: HashMap::new(),
             image: Handle::default(),
             display: Handle::default(),
-            camera: Entity::PLACEHOLDER,
+            view: GlobalTransform::IDENTITY,
+            projection: PerspectiveProjection::default(),
+            active: true,
             size: UVec2::ZERO,
         };
         let step = |osd: &mut Osd, dt: f32| {
@@ -1585,91 +1523,421 @@ mod tests {
     }
 }
 
-/// The OSD camera's render schedule (F853). The HUD view draws only blended
-/// [`OsdMaterial`] meshes (no prepass, shadows, opaque items, tonemapping or
-/// post-processing), but `Core3d` runs some twenty systems per camera, each
-/// with its own command buffer: the empty prepass and opaque passes, the GPU
-/// marker nodes, and the indirect-parameter clear and build, which cover
-/// every view's batches and run again for the main camera. This schedule
-/// keeps the three steps that write the OSD image: the view's GPU mesh
-/// preprocessing, one pass that clears the target and draws the transparent
-/// phase (the clear `Core3d` does in its opaque pass), and Bevy's upscaling
-/// blit into the image. The camera draws directly (`NoIndirectDrawing`), so
-/// it needs no indirect parameters. Same pipelines, draws, order and
-/// attachments: the picture is unchanged.
-pub(crate) mod graph {
-    use bevy::app::SubApp;
-    use bevy::core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d};
-    use bevy::core_pipeline::upscaling::upscaling;
-    use bevy::ecs::schedule::{ScheduleBuildSettings, ScheduleLabel};
-    use bevy::pbr::{MeshInputUniform, MeshUniform, PreprocessPipelines, early_gpu_preprocess};
-    use bevy::prelude::*;
-    use bevy::render::batching::gpu_preprocessing::BatchedInstanceBuffers;
-    use bevy::render::camera::ExtractedCamera;
-    use bevy::render::render_phase::{ViewBinnedRenderPhases, ViewSortedRenderPhases};
-    use bevy::render::render_resource::{RenderPassDescriptor, StoreOp};
-    use bevy::render::renderer::{RenderContext, ViewQuery};
-    use bevy::render::view::{ExtractedView, ViewDepthTexture, ViewTarget};
 
-    #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash, Default)]
-    pub struct OsdCore3d;
+/// The OSD overlay pass: draws the scene's visible mesh nodes into the OSD
+/// image at the start of the frame's render graph (before
+/// `camera_driver`), with the scene camera's view. It replaces the former
+/// OSD camera (F853) and repeats what that camera did, so the image is the
+/// same: blended draws back to front by the view-space depth of each mesh's
+/// bounds centre (Bevy 0.19's retained `Transparent3d` order, including its
+/// tie order), 4x MSAA resolved into the sRGB image (1 sample on Android),
+/// a transparent clear, no depth test. The viewer camera's UI composites the
+/// image after tonemapping and post-processing.
+pub(crate) mod overlay {
+    use super::{Osd, OsdDraw, OsdMaterial, Params, SHADER};
+    use bevy::app::SubApp;
+    use bevy::camera::CameraProjection;
+    use bevy::core_pipeline::schedule::camera_driver;
+    use bevy::math::{Affine3, Affine3Ext, FloatOrd};
+    use bevy::prelude::*;
+    use bevy::render::mesh::allocator::MeshAllocator;
+    use bevy::render::mesh::{RenderMesh, RenderMeshBufferInfo};
+    use bevy::render::render_asset::RenderAssets;
+    use bevy::render::render_resource::binding_types::{sampler, texture_2d, texture_cube, uniform_buffer};
+    use bevy::render::render_resource::{
+        BindGroup, BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BlendState,
+        CachedRenderPipelineId, ColorTargetState, ColorWrites, DynamicUniformBuffer, Extent3d, FragmentState,
+        LoadOp, MultisampleState, Operations, PipelineCache, PrimitiveState, RenderPassColorAttachment,
+        RenderPassDescriptor, RenderPipelineDescriptor, SamplerBindingType, SamplerId, ShaderStages, ShaderType,
+        StoreOp, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+        TextureViewId, UniformBuffer, VertexFormat, VertexState, VertexStepMode,
+    };
+    use bevy::render::renderer::{RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue};
+    use bevy::render::texture::{CachedTexture, GpuImage, TextureCache};
+    use bevy::render::{Extract, ExtractSchedule, Render, RenderStartup, RenderSystems};
+    use std::collections::{HashMap, HashSet};
+
+    /// The former OSD camera's sample count.
+    const SAMPLES: u32 = if cfg!(target_os = "android") { 1 } else { 4 };
+    const FORMAT: TextureFormat = TextureFormat::Rgba8UnormSrgb;
 
     pub(super) fn install(render: &mut SubApp) {
-        let mut schedule = Schedule::new(OsdCore3d);
-        schedule.set_build_settings(ScheduleBuildSettings { auto_insert_apply_deferred: false, ..default() });
-        render.add_schedule(schedule).add_systems(
-            OsdCore3d,
-            (
-                // Present only with GPU instance building (desktop Vulkan);
-                // otherwise the mesh uniforms are built on the CPU.
-                early_gpu_preprocess.run_if(
-                    resource_exists::<PreprocessPipelines>
-                        .and_then(resource_exists::<BatchedInstanceBuffers<MeshUniform, MeshInputUniform>>),
-                ),
-                pass,
-                upscaling,
-            )
-                .chain(),
-        );
+        render
+            .init_resource::<Frame>()
+            .init_resource::<Prepared>()
+            .add_systems(RenderStartup, initialize)
+            .add_systems(ExtractSchedule, extract)
+            .add_systems(Render, prepare.in_set(RenderSystems::PrepareBindGroups))
+            .add_systems(RenderGraph, draw.in_set(RenderGraphSystems::Render).before(camera_driver));
     }
 
-    /// `main_transparent_pass_3d`, but the pass always begins, so the first
-    /// attachment use clears the image even when nothing is drawn.
-    fn pass(
-        world: &World,
-        view: ViewQuery<(&ExtractedCamera, &ExtractedView, &ViewTarget, &ViewDepthTexture)>,
-        transparent: Res<ViewSortedRenderPhases<Transparent3d>>,
-        opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
-        mask: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
-        mut warned: Local<bool>,
+    /// One visible mesh node, as extracted.
+    struct Item {
+        entity: Entity,
+        mesh: AssetId<Mesh>,
+        world_from_local: Affine3,
+        centre: Option<Vec3>,
+        images: [AssetId<Image>; 4],
+        params: Params,
+    }
+
+    /// The main world's OSD state for this frame.
+    #[derive(Resource, Default)]
+    struct Frame {
+        active: bool,
+        image: Option<AssetId<Image>>,
+        world_from_view: GlobalTransform,
+        clip_from_view: Mat4,
+        items: Vec<Item>,
+    }
+
+    #[derive(Clone, Copy, Default, ShaderType)]
+    struct ViewUniform {
+        clip_from_world: Mat4,
+        world_position: Vec3,
+    }
+
+    #[derive(Clone, Copy, Default, ShaderType)]
+    struct DrawUniform {
+        world_from_local: [Vec4; 3],
+        p: Params,
+    }
+
+    type TextureKey = ([TextureViewId; 4], [SamplerId; 4]);
+
+    /// One draw of the frame, in draw order.
+    struct Ready {
+        offset: u32,
+        textures: TextureKey,
+        mesh: AssetId<Mesh>,
+    }
+
+    #[derive(Resource, Default)]
+    struct Prepared {
+        /// Draw order kept across frames, as Bevy's retained sorted phase
+        /// keeps its items (the order of equal depths depends on it).
+        order: Vec<Entity>,
+        view: UniformBuffer<ViewUniform>,
+        draws: DynamicUniformBuffer<DrawUniform>,
+        group: Option<BindGroup>,
+        textures: HashMap<TextureKey, (BindGroup, bool)>,
+        list: Vec<Ready>,
+        msaa: Option<CachedTexture>,
+    }
+
+    #[derive(Resource)]
+    struct Pipeline {
+        layouts: [BindGroupLayoutDescriptor; 2],
+        id: CachedRenderPipelineId,
+    }
+
+    fn initialize(mut commands: Commands, cache: Res<PipelineCache>) {
+        let view = BindGroupLayoutDescriptor::new(
+            "osd overlay view",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::VERTEX_FRAGMENT,
+                (uniform_buffer::<ViewUniform>(false), uniform_buffer::<DrawUniform>(true)),
+            ),
+        );
+        let float = TextureSampleType::Float { filterable: true };
+        let textures = BindGroupLayoutDescriptor::new(
+            "osd overlay textures",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::FRAGMENT,
+                (
+                    texture_2d(float),
+                    sampler(SamplerBindingType::Filtering),
+                    texture_2d(float),
+                    sampler(SamplerBindingType::Filtering),
+                    texture_cube(float),
+                    sampler(SamplerBindingType::Filtering),
+                    texture_cube(float),
+                    sampler(SamplerBindingType::Filtering),
+                ),
+            ),
+        );
+        let id = cache.queue_render_pipeline(RenderPipelineDescriptor {
+            label: Some("osd overlay".into()),
+            layout: vec![view.clone(), textures.clone()],
+            vertex: VertexState {
+                shader: SHADER,
+                shader_defs: vec![],
+                entry_point: Some("vertex".into()),
+                buffers: vec![bevy::mesh::VertexBufferLayout::from_vertex_formats(
+                    VertexStepMode::Vertex,
+                    [VertexFormat::Float32x3, VertexFormat::Float32x3, VertexFormat::Float32x2],
+                )],
+            },
+            fragment: Some(FragmentState {
+                shader: SHADER,
+                entry_point: Some("fragment".into()),
+                targets: vec![Some(ColorTargetState {
+                    format: FORMAT,
+                    blend: Some(BlendState::ALPHA_BLENDING),
+                    write_mask: ColorWrites::ALL,
+                })],
+                ..default()
+            }),
+            primitive: PrimitiveState { cull_mode: None, ..default() },
+            multisample: MultisampleState { count: SAMPLES, ..default() },
+            ..default()
+        });
+        commands.insert_resource(Pipeline { layouts: [view, textures], id });
+    }
+
+    fn extract(
+        mut frame: ResMut<Frame>,
+        osd: Extract<Option<Res<Osd>>>,
+        draws: Extract<Query<(Entity, &OsdDraw, &GlobalTransform, &InheritedVisibility)>>,
+        materials: Extract<Res<Assets<OsdMaterial>>>,
+    ) {
+        frame.items.clear();
+        let Some(osd) = osd.as_ref() else {
+            frame.active = false;
+            frame.image = None;
+            return;
+        };
+        frame.active = osd.active;
+        frame.image = Some(osd.image.id());
+        frame.world_from_view = osd.view;
+        frame.clip_from_view = osd.projection.get_clip_from_view();
+        if !osd.active {
+            return;
+        }
+        for (entity, draw, global, visible) in &draws {
+            if !visible.get() {
+                continue;
+            }
+            let Some(m) = materials.get(&draw.material) else {
+                continue;
+            };
+            frame.items.push(Item {
+                entity,
+                mesh: draw.mesh.id(),
+                world_from_local: Affine3::from(global.affine()),
+                centre: draw.centre,
+                images: [m.diffuse.id(), m.glow.id(), m.soft.id(), m.sharp.id()],
+                params: m.params,
+            });
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare(
+        frame: Res<Frame>,
+        pipeline: Option<Res<Pipeline>>,
+        mut prepared: ResMut<Prepared>,
+        images: Res<RenderAssets<GpuImage>>,
+        meshes: Res<RenderAssets<RenderMesh>>,
+        allocator: Res<MeshAllocator>,
+        mut textures: ResMut<TextureCache>,
+        device: Res<RenderDevice>,
+        queue: Res<RenderQueue>,
+        cache: Res<PipelineCache>,
+    ) {
+        let p = &mut *prepared;
+        p.list.clear();
+        p.msaa = None;
+        let (Some(pipeline), Some(image), true) = (pipeline, frame.image, frame.active) else {
+            return;
+        };
+        let Some(target) = images.get(image) else {
+            return;
+        };
+        if SAMPLES > 1 {
+            let size = target.texture_descriptor.size;
+            p.msaa = Some(textures.get(
+                &device,
+                TextureDescriptor {
+                    label: Some("osd overlay msaa"),
+                    size: Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: SAMPLES,
+                    dimension: TextureDimension::D2,
+                    format: FORMAT,
+                    usage: TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                },
+            ));
+        }
+        // Drawable this frame: visible, mesh and all four images on the GPU
+        // (Bevy queues an item only once its mesh and material are prepared).
+        let mut ready: HashMap<Entity, (usize, [&GpuImage; 4], Vec3)> = HashMap::new();
+        for (i, item) in frame.items.iter().enumerate() {
+            let Some(mesh) = meshes.get(item.mesh) else {
+                continue;
+            };
+            if !matches!(mesh.buffer_info, RenderMeshBufferInfo::Indexed { .. })
+                || allocator.mesh_vertex_slice(&item.mesh).is_none()
+                || allocator.mesh_index_slice(&item.mesh).is_none()
+            {
+                continue;
+            }
+            let [Some(a), Some(b), Some(c), Some(d)] = item.images.map(|id| images.get(id)) else {
+                continue;
+            };
+            let local = item.centre.unwrap_or(mesh.aabb_center);
+            ready.insert(item.entity, (i, [a, b, c, d], item.world_from_local.transform_point3(local)));
+        }
+        let row = Mat4::from(frame.world_from_view.affine().inverse()).row(2);
+        let depth: HashMap<Entity, f32> = ready.iter().map(|(e, r)| (*e, row.dot(r.2.extend(1.0)) + 0.0)).collect();
+        retained_order(&mut p.order, &depth);
+
+        let world_from_view = frame.world_from_view.to_matrix();
+        p.view.set(ViewUniform {
+            clip_from_world: frame.clip_from_view * world_from_view.inverse(),
+            world_position: frame.world_from_view.translation(),
+        });
+        p.view.write_buffer(&device, &queue);
+        p.draws.clear();
+        for v in p.textures.values_mut() {
+            v.1 = false;
+        }
+        let texture_layout = cache.get_bind_group_layout(&pipeline.layouts[1]);
+        for e in &p.order {
+            let (i, [a, b, c, d], _) = ready[e];
+            let item = &frame.items[i];
+            let offset = p.draws.push(&DrawUniform {
+                world_from_local: item.world_from_local.to_transpose(),
+                p: item.params,
+            });
+            let key = (
+                [a, b, c, d].map(|g| g.texture_view.id()),
+                [a, b, c, d].map(|g| g.sampler.id()),
+            );
+            p.textures
+                .entry(key)
+                .or_insert_with(|| {
+                    let group = device.create_bind_group(
+                        "osd overlay textures",
+                        &texture_layout,
+                        &BindGroupEntries::sequential((
+                            &a.texture_view,
+                            &a.sampler,
+                            &b.texture_view,
+                            &b.sampler,
+                            &c.texture_view,
+                            &c.sampler,
+                            &d.texture_view,
+                            &d.sampler,
+                        )),
+                    );
+                    (group, true)
+                })
+                .1 = true;
+            p.list.push(Ready { offset, textures: key, mesh: item.mesh });
+        }
+        p.textures.retain(|_, v| v.1);
+        p.draws.write_buffer(&device, &queue);
+        p.group = match (p.view.binding(), p.draws.binding()) {
+            (Some(view), Some(draws)) => Some(device.create_bind_group(
+                "osd overlay view",
+                &cache.get_bind_group_layout(&pipeline.layouts[0]),
+                &BindGroupEntries::sequential((view, draws)),
+            )),
+            _ => None,
+        };
+    }
+
+    /// Bevy 0.19's retained blended phase order, kept from frame to frame:
+    /// items no longer drawn leave by swap-remove (in entity order), new ones
+    /// join at the end (in entity order), then a stable sort by view depth.
+    /// Equal depths therefore keep the order the phase had, as before.
+    fn retained_order(order: &mut Vec<Entity>, depth: &HashMap<Entity, f32>) {
+        let mut gone: Vec<Entity> = order.iter().copied().filter(|e| !depth.contains_key(e)).collect();
+        gone.sort_unstable();
+        for e in gone {
+            if let Some(k) = order.iter().position(|x| *x == e) {
+                order.swap_remove(k);
+            }
+        }
+        let kept: HashSet<Entity> = order.iter().copied().collect();
+        let mut new: Vec<Entity> = depth.keys().copied().filter(|e| !kept.contains(e)).collect();
+        new.sort_unstable();
+        order.extend(new);
+        order.sort_by_key(|e| FloatOrd(depth[e]));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw(
+        frame: Res<Frame>,
+        prepared: Res<Prepared>,
+        pipeline: Option<Res<Pipeline>>,
+        cache: Res<PipelineCache>,
+        images: Res<RenderAssets<GpuImage>>,
+        meshes: Res<RenderAssets<RenderMesh>>,
+        allocator: Res<MeshAllocator>,
         mut ctx: RenderContext,
     ) {
-        let entity = view.entity();
-        let (camera, extracted, target, depth) = view.into_inner();
-        let key = extracted.retained_view_entity;
-        if !*warned
-            && (opaque.get(&key).is_some_and(|p| !p.is_empty())
-                || mask.get(&key).is_some_and(|p| !p.is_empty()))
-        {
-            warn!("OSD camera has opaque or alpha-mask items, which its schedule does not draw");
-            *warned = true;
-        }
+        let (Some(pipeline), Some(image), true) = (pipeline, frame.image, frame.active) else {
+            return;
+        };
+        let Some(target) = images.get(image) else {
+            return;
+        };
+        let (view, resolve_target) = match &prepared.msaa {
+            Some(msaa) => (&msaa.default_view, Some(&*target.texture_view)),
+            None => (&target.texture_view, None),
+        };
+        // The pass always begins, so the image is cleared even when nothing
+        // is drawn (as the former camera's pass).
         let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("osd_pass"),
-            color_attachments: &[Some(target.get_color_attachment())],
-            depth_stencil_attachment: Some(depth.get_attachment(StoreOp::Store)),
+            label: Some("osd overlay"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target,
+                ops: Operations { load: LoadOp::Clear(LinearRgba::NONE.into()), store: StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        if let Some(viewport) = camera.viewport.as_ref() {
-            pass.set_camera_viewport(viewport);
+        let (Some(render_pipeline), Some(group)) = (cache.get_render_pipeline(pipeline.id), &prepared.group) else {
+            return;
+        };
+        pass.set_render_pipeline(render_pipeline);
+        for r in &prepared.list {
+            let (Some(mesh), Some(v), Some(i), Some((textures, _))) = (
+                meshes.get(r.mesh),
+                allocator.mesh_vertex_slice(&r.mesh),
+                allocator.mesh_index_slice(&r.mesh),
+                prepared.textures.get(&r.textures),
+            ) else {
+                continue;
+            };
+            let RenderMeshBufferInfo::Indexed { count, index_format } = mesh.buffer_info else {
+                continue;
+            };
+            pass.set_bind_group(0, group, &[r.offset]);
+            pass.set_bind_group(1, textures, &[]);
+            pass.set_vertex_buffer(0, v.buffer.slice(..));
+            pass.set_index_buffer(i.buffer.slice(..), index_format);
+            pass.draw_indexed(i.range.start..i.range.start + count, v.range.start as i32, 0..1);
         }
-        if let Some(phase) = transparent.get(&key)
-            && !phase.items.is_empty()
-            && let Err(err) = phase.render(&mut pass, world, entity)
-        {
-            error!("OSD transparent phase: {err:?}");
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn retained_order_keeps_ties_and_swap_removes() {
+            let e: Vec<Entity> = (1..=5).map(Entity::from_raw_u32).map(Option::unwrap).collect();
+            let mut order = Vec::new();
+            // Entity order is Bevy's `Ord` (by bits; the index is stored inverted, so for
+            // generation 0 a higher index comes first), as in Bevy's phase.
+            assert!(e[3] < e[2] && e[2] < e[1] && e[1] < e[0]);
+            // First frame: all new, joined in entity order, then sorted (ties stay in entity order).
+            let d = HashMap::from([(e[3], 1.0), (e[0], 1.0), (e[2], -2.0), (e[1], 1.0)]);
+            retained_order(&mut order, &d);
+            assert_eq!(order, [e[2], e[3], e[1], e[0]]);
+            // e[3] leaves: swap-remove moves the last (e[0]) into its slot, so the tie between
+            // e[0] and e[1] flips; e[4] joins at the end.
+            let d = HashMap::from([(e[0], 1.0), (e[2], -2.0), (e[1], 1.0), (e[4], 1.0)]);
+            retained_order(&mut order, &d);
+            assert_eq!(order, [e[2], e[0], e[1], e[4]]);
         }
     }
 }

@@ -4,7 +4,7 @@
 //! [D: update 0x6BF070, team path 0x6BD0B0, rival lookup 0x6BCE60, limits 0x6A80A0, anchor
 //! 0x6B0820].
 
-use crate::osd_scene::{Osd, OsdCamera};
+use crate::osd_scene::Osd;
 use bevy::prelude::*;
 
 /// The team-mate's tag group in `Osd/dial2.pssg`.
@@ -192,7 +192,6 @@ pub(crate) fn name_tags(
     rival: Option<Res<Rival>>,
     osd: Option<ResMut<Osd>>,
     viewer: Query<(&Transform, &Camera), With<crate::ViewerCamera>>,
-    osd_camera: Query<(&GlobalTransform, &Projection), With<OsdCamera>>,
     globals: Query<&GlobalTransform>,
     mut transforms: Query<&mut Transform, Without<crate::ViewerCamera>>,
     mut state: Local<TagState>,
@@ -234,11 +233,8 @@ pub(crate) fn name_tags(
             }
             let (view, camera) = viewer.single().ok()?;
             let at = ndc(view, camera.clip_from_view(), it + Vec3::Y * lift(d))?;
-            let (osd_view, projection) = osd_camera.single().ok()?;
-            let Projection::Perspective(p) = projection else {
-                return None;
-            };
-            let (origin, dir) = ray(osd_view, p.fov, p.aspect_ratio, at);
+            let p = osd.projection();
+            let (origin, dir) = ray(osd.view(), p.fov, p.aspect_ratio, at);
             // The tag's parent space (the OSD layout), from the root's global and local transforms.
             let local = transforms.get(root).ok()?;
             let parent = globals.get(root).ok()?.affine() * local.compute_affine().inverse();

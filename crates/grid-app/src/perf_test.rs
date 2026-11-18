@@ -367,7 +367,7 @@ fn apply(
         (With<Mesh3d>, Without<RenderLayers>),
     >,
     mut view: View,
-    mut osd: Query<&mut Camera, With<crate::osd_scene::OsdCamera>>,
+    osd: Option<ResMut<crate::osd_scene::Osd>>,
     mut visible: Query<&mut Visibility>,
     foliage: Query<Entity, With<crate::source_trees::Facing>>,
     named: Query<(Entity, &Name), With<Mesh3d>>,
@@ -476,8 +476,8 @@ fn apply(
             all_meshes.iter().len()
         );
     }
-    for mut camera in &mut osd {
-        camera.is_active = !s.hud;
+    if let Some(mut o) = osd {
+        o.set_active(!s.hud);
     }
     // The entities each switch hides.
     let mut want: Vec<Entity> = Vec::new();

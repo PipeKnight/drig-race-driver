@@ -808,9 +808,8 @@ pub fn minimap(
     mut state: Local<Minimap>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<crate::osd_scene::OsdMaterial>>,
-    looks: Query<(&Mesh3d, &MeshMaterial3d<crate::osd_scene::OsdMaterial>)>,
+    mut looks: Query<&mut crate::osd_scene::OsdDraw>,
     mut transforms: Query<&mut Transform>,
-    camera: Query<&GlobalTransform, With<crate::osd_scene::OsdCamera>>,
     globals: Query<&GlobalTransform>,
     stream: Option<Res<crate::mesh_stream::MeshStream>>,
 ) {
@@ -828,13 +827,13 @@ pub fn minimap(
         let radius = (bounds[3] - bounds[0]).min(bounds[4] - bounds[1]) / 2.;
         state.ring = Some((centre, radius));
         let ribbon = meshes.add(crate::osd_scene::mesh(&grid_formats::osd::Mesh::default()));
-        commands.entity(mask).remove::<Mesh3d>();
+        commands.entity(mask).remove::<crate::osd_scene::OsdDraw>();
         let entity = commands.spawn((
-            Mesh3d(ribbon.clone()),
-            MeshMaterial3d(materials.add(osd.colour_material(Vec3::splat(MAP_TRACK_RGB), MAP_TRACK_ALPHA))),
+            crate::osd_scene::OsdDraw::new(
+                ribbon.clone(),
+                materials.add(osd.colour_material(Vec3::splat(MAP_TRACK_RGB), MAP_TRACK_ALPHA)),
+            ),
             Transform::from_xyz(0., 0., 0.2),
-            bevy::camera::visibility::RenderLayers::layer(crate::osd_scene::LAYER),
-            bevy::camera::visibility::NoFrustumCulling,
             ChildOf(mask),
         )).id();
         state.ribbon = Some((entity, ribbon));
@@ -847,17 +846,10 @@ pub fn minimap(
         state.markers = vec![player.unwrap_or(Entity::PLACEHOLDER)];
         if let Some(o) = opponent {
             state.markers.push(o);
-            if let (Ok((mesh, material)), Ok(t)) = (looks.get(o), transforms.get(o)) {
+            if let (Ok(look), Ok(t)) = (looks.get(o), transforms.get(o)) {
                 for _ in 2..cars {
                     let e = commands
-                        .spawn((
-                            mesh.clone(),
-                            material.clone(),
-                            *t,
-                            bevy::camera::visibility::RenderLayers::layer(crate::osd_scene::LAYER),
-                            bevy::camera::visibility::NoFrustumCulling,
-                            ChildOf(mask),
-                        ))
+                        .spawn((look.clone(), *t, ChildOf(mask)))
                         .id();
                     state.markers.push(e);
                 }
@@ -874,15 +866,21 @@ pub fn minimap(
     if let Some((entity, handle)) = state.ribbon.clone() {
         let ribbon = map_ribbon(line.points(), line.is_open(), MAP_TRACK_WIDTH * view.zoom, cam, centre, radius);
         // The ribbon's asset is created at spawn, so no new handle comes back.
-        let _ = state.soup.update(crate::osd_scene::mesh(&ribbon), &handle, entity, &mut meshes, stream.as_deref());
+        let mesh = crate::osd_scene::mesh(&ribbon);
+        // The overlay sorts by the unpadded bounds centre, as the plain asset
+        // would be (the streamed asset carries padding vertices).
+        if let (Some(aabb), Ok(mut look)) = (bevy::camera::primitives::MeshAabb::compute_aabb(&mesh), looks.get_mut(entity)) {
+            look.set_centre(aabb.center.into());
+        }
+        let _ = state.soup.update(mesh, &handle, entity, &mut meshes, stream.as_deref());
     }
     // The markers blend at one saved depth, so where they overlap their
     // order was a sort tie that unrelated changes flipped. Each car now has
     // its own depth: the player's arrow in front, then the opponents in car
     // order (AUTHORED order).
-    let toward = match (camera.single(), globals.get(mask)) {
-        (Ok(camera), Ok(mask)) => {
-            let local = mask.affine().inverse().transform_point3(camera.translation());
+    let toward = match globals.get(mask) {
+        Ok(mask) => {
+            let local = mask.affine().inverse().transform_point3(osd.view().translation());
             if local.z >= state.depth { 1. } else { -1. }
         }
         _ => 1.,

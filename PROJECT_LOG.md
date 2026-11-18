@@ -176,6 +176,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F856](log/F0856.md) | 2026-11-18 | HUD drawn by an overlay pass in the frame's render graph; no OSD camera |
 | [F855](log/F0855.md) | 2026-11-18 | Archived worktree copies zipped into worktree-evidence |
 | [F854](log/F0854.md) | 2026-11-18 | Streamed minimap ribbon and crowd flash meshes: visibility no longer revisits every mesh each frame |
 | [F853](log/F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
@@ -235,7 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F795](log/F0795.md) | 2026-11-10 | Flashback count across career multi-race events |
 | [F794](log/F0794.md) | 2026-11-10 | Replay and Flashback round 5: automatic crash replay, Restart reload, bonus, TERMINAL flag, checkpoint heap |
 | [F793](log/F0793.md) | 2026-11-10 | Career team sum: an AI car without a team counts for the player (0x660E90) |
-| [F792](log/F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
