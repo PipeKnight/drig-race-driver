@@ -116,17 +116,24 @@ struct Packed {
 impl Packed {
     /// Equal words that end a run (fewer are stored with it).
     const GAP: usize = 4;
+    /// Words compared as one slice while skipping equal words.
+    const BLOCK: usize = 64;
 
     /// `v` as runs against `base`; `v` becomes the new base (stored whole)
     /// when there is none or more than a quarter of it differs.
-    fn pack(v: Vec<u32>, base: &mut Option<Arc<[u32]>>) -> Self {
+    fn pack(v: &[u32], base: &mut Option<Arc<[u32]>>) -> Self {
         if let Some(b) = base.as_ref() {
-            let differs = |i: usize| i >= b.len() || v[i] != b[i];
+            let same = v.len().min(b.len());
+            let differs = |i: usize| i >= same || v[i] != b[i];
             let (mut runs, mut words) = (Vec::new(), Vec::new());
             let mut i = 0;
             while i < v.len() {
                 if !differs(i) {
                     i += 1;
+                    // Most words are equal: skip them a block at a time.
+                    while i + Self::BLOCK <= same && v[i..i + Self::BLOCK] == b[i..i + Self::BLOCK] {
+                        i += Self::BLOCK;
+                    }
                     continue;
                 }
                 let mut end = i + 1;
@@ -145,10 +152,9 @@ impl Packed {
                 return Self { base: b.clone(), len: v.len(), runs, words };
             }
         }
-        let len = v.len();
         let b: Arc<[u32]> = v.into();
         *base = Some(b.clone());
-        Self { base: b, len, runs: Vec::new(), words: Vec::new() }
+        Self { base: b, len: v.len(), runs: Vec::new(), words: Vec::new() }
     }
 
     fn unpack(&self) -> Vec<u32> {
@@ -185,7 +191,75 @@ struct Field {
     yellow_flag: bool,
 }
 
+/// Per car (the player's runtime, then the shared world's cars).
+fn cars_mut(driving: &mut crate::Driving) -> impl Iterator<Item = &mut Runtime> {
+    std::iter::once(&mut driving.runtime)
+        .chain(driving.opponents.iter_mut().flat_map(|o| o.multi.cars.iter_mut()))
+}
+
+/// A car's vehicle words, deformation owner and solver rows.
+type Words = (Vec<u32>, Option<Vec<u32>>, Vec<grid_world::contact_rows::Row>);
+
+fn take_words(r: &mut Runtime) -> Words {
+    (
+        std::mem::take(&mut r.state.car.owner.vehicle),
+        r.deformation_registration.as_mut().map(|d| std::mem::take(&mut d.owner)),
+        std::mem::take(&mut r.state.world.manager.rows),
+    )
+}
+
+fn put_words(r: &mut Runtime, (vehicle, owner, rows): Words) {
+    r.state.car.owner.vehicle = vehicle;
+    if let (Some(d), Some(owner)) = (r.deformation_registration.as_mut(), owner) {
+        d.owner = owner;
+    }
+    r.state.world.manager.rows = rows;
+}
+
 impl Checkpoint {
+    /// A checkpoint of the live state: every car's vehicle words,
+    /// deformation owner and solver rows (most of a checkpoint) are moved
+    /// aside while the rest is copied, packed straight from the live words
+    /// against `bases` and moved back, so they are never copied whole.
+    fn take_live(
+        driving: &mut crate::Driving,
+        trial: Option<&crate::time_trial::Trial>,
+        damage: Option<&crate::damage_parts::DamageParts>,
+        drift: Option<&crate::drift_event::DriftEvent>,
+        bases: &mut Bases,
+    ) -> Self {
+        let words: Vec<Words> = cars_mut(driving).map(take_words).collect();
+        let mut c = Self::take(driving, trial, damage, drift, false);
+        c.packed = Self::pack_words(&words, bases);
+        for (r, w) in cars_mut(driving).zip(words) {
+            put_words(r, w);
+        }
+        c
+    }
+
+    fn pack_words(words: &[Words], bases: &mut Bases) -> Vec<[Option<Packed>; 3]> {
+        if bases.len() < words.len() {
+            bases.resize_with(words.len(), Default::default);
+        }
+        let car = |((vehicle, owner, rows), [vb, ob, rb]): (&Words, &mut [Option<Arc<[u32]>>; 3])| {
+            [
+                Some(Packed::pack(vehicle, vb)),
+                owner.as_ref().map(|o| Packed::pack(o, ob)),
+                Some(Packed::pack(rows.as_flattened(), rb)),
+            ]
+        };
+        // Each car packs against its own bases: the cars run on the compute
+        // pool (the scope returns them in spawn order).
+        match bevy::tasks::ComputeTaskPool::try_get() {
+            Some(pool) if words.len() > 1 => pool.scope(|scope| {
+                for job in words.iter().zip(bases.iter_mut()) {
+                    scope.spawn(async move { car(job) });
+                }
+            }),
+            _ => words.iter().zip(bases.iter_mut()).map(car).collect(),
+        }
+    }
+
     fn take(
         driving: &crate::Driving,
         trial: Option<&crate::time_trial::Trial>,
@@ -227,22 +301,8 @@ impl Checkpoint {
     fn pack(mut self, bases: &mut Bases) -> Self {
         let cars = std::iter::once(&mut self.runtime)
             .chain(self.opponents.iter_mut().flat_map(|f| f.multi.cars.iter_mut()));
-        let mut packed = Vec::new();
-        for (i, r) in cars.enumerate() {
-            if bases.len() <= i {
-                bases.resize_with(i + 1, Default::default);
-            }
-            let [vehicle, owner, rows] = &mut bases[i];
-            let solver = std::mem::take(&mut r.state.world.manager.rows).into_flattened();
-            packed.push([
-                Some(Packed::pack(std::mem::take(&mut r.state.car.owner.vehicle), vehicle)),
-                r.deformation_registration
-                    .as_mut()
-                    .map(|d| Packed::pack(std::mem::take(&mut d.owner), owner)),
-                Some(Packed::pack(solver, rows)),
-            ]);
-        }
-        self.packed = packed;
+        let words: Vec<Words> = cars.map(take_words).collect();
+        self.packed = Self::pack_words(&words, bases);
         self
     }
 
@@ -591,7 +651,7 @@ fn last(driving: &crate::Driving) -> Last {
 pub fn capture(
     mut flashback: ResMut<Flashback>,
     mut inputs: ResMut<Inputs>,
-    driving: Res<crate::Driving>,
+    mut driving: ResMut<crate::Driving>,
     trial: Option<Res<crate::time_trial::Trial>>,
     damage: Option<Res<crate::damage_parts::DamageParts>>,
     drift: Option<Res<crate::drift_event::DriftEvent>>,
@@ -625,14 +685,14 @@ pub fn capture(
     flashback.last = Some(last(&driving));
     if flashback.checkpoints.is_empty() || tick.is_multiple_of(CHECKPOINT_TICKS) {
         let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::Checkpoint);
-        let c = Checkpoint::take(
-            &driving,
+        // The live words are moved aside and back: not a change of the state.
+        let c = Checkpoint::take_live(
+            driving.bypass_change_detection(),
             trial.as_deref(),
             damage.as_deref(),
             drift.as_deref(),
-            false,
-        )
-        .pack(&mut flashback.bases);
+            &mut flashback.bases,
+        );
         // The first holds the shared copies of the packed words; the second
         // shows a packed one.
         if flashback.checkpoints.len() < 2 {
@@ -1047,7 +1107,7 @@ mod transition_tests {
     fn packed_words_unpack_exactly() {
         let mut base = None;
         let start: Vec<u32> = (0..1000).map(|i| i * 7).collect();
-        let full = Packed::pack(start.clone(), &mut base);
+        let full = Packed::pack(&start, &mut base);
         assert!(full.runs.is_empty() && full.unpack() == start);
         // A few changed words, one beyond the base, one shorter: runs.
         let mut v = start.clone();
@@ -1055,19 +1115,30 @@ mod transition_tests {
         v[5] = 2;
         v[900] = 3;
         v.push(4);
-        let p = Packed::pack(v.clone(), &mut base);
+        let p = Packed::pack(&v, &mut base);
         assert_eq!(p.runs, [(3, 3), (900, 1), (1000, 1)]);
         assert_eq!(p.unpack(), v);
         assert!(Arc::ptr_eq(&p.base, base.as_ref().unwrap()));
         let short = start[..10].to_vec();
-        assert_eq!(Packed::pack(short.clone(), &mut base).unpack(), short);
+        assert_eq!(Packed::pack(&short, &mut base).unpack(), short);
         // More than a quarter differs: stored whole as the new base.
         let other: Vec<u32> = (0..1000).map(|i| i * 3 + 1).collect();
-        let q = Packed::pack(other.clone(), &mut base);
+        let q = Packed::pack(&other, &mut base);
         assert!(q.runs.is_empty() && q.unpack() == other);
         assert!(Arc::ptr_eq(&q.base, base.as_ref().unwrap()));
         // Earlier packs keep their own base.
         assert_eq!(p.unpack(), v);
+        // Changes inside, at the edges of and after equal blocks.
+        let mut base = None;
+        let long: Vec<u32> = (0..1000).map(|i| i ^ 0x55).collect();
+        Packed::pack(&long, &mut base);
+        let mut w = long.clone();
+        for k in [0, 63, 64, 65, 127, 128, 500, 998, 999] {
+            w[k] += 1;
+        }
+        let r = Packed::pack(&w, &mut base);
+        assert_eq!(r.runs, [(0, 1), (63, 3), (127, 2), (500, 1), (998, 2)]);
+        assert_eq!(r.unpack(), w);
     }
 
     #[test]

@@ -2975,3 +2975,53 @@ frame_split_smoke uses the default present mode (AutoVsync, which resolves to
 Fifo). Some runs locked at exactly 60.0 fps on the 165 Hz monitor, with about
 9.5 ms outside the frame. The owner plays with `auto_no_vsync`; interactive
 A/B runs pass `-Extra "present_mode = auto_no_vsync"`.
+
+## Main thread: flashback checkpoints from the live words, packed in parallel (F844)
+
+Every 250 ticks (4 s) `flashback::capture` stores a checkpoint. Before, it
+cloned the whole state, including every car's vehicle words (33,792 words), its
+deformation owner and its solver rows (12,288 words), and then compared the
+copies with the previous base to keep only the runs that differ.
+
+Now (`crates/grid-app/src/flashback.rs`):
+- `Checkpoint::take_live` moves those three word blocks out of the live runtimes,
+  copies the rest, packs the words straight from the live blocks and moves them
+  back. `capture` reaches `Driving` through `bypass_change_detection`, because
+  the state ends up unchanged. The pause-menu path (`watch`) keeps the
+  copy-then-pack route.
+- `Packed::pack` takes a borrowed slice. It skips equal words 64 at a time with
+  a slice compare, and its runs are the same as before. A unit test covers
+  changes at block edges.
+- `pack_words` packs each car against its own bases on Bevy's compute pool, in
+  one scope. The scope returns the cars in spawn order. Without a pool (tests)
+  it packs them one after another.
+
+A probe (not committed) measured the serial pack per car:
+- vehicle words: 20–25 µs when equal, 45–70 µs once about 4,600 words differ in
+  about 735 runs;
+- solver rows: 5–10 µs;
+- owner: 17–25 µs, for the one car that has one.
+
+Both are memory-bound. With 12 cars that adds up to 0.4–0.8 ms. Copying the
+rest of the state costs 0.2–0.4 ms; the opponents' multi-car state is the
+largest part.
+
+**A/B.** Offscreen 1280×720 fixed-step Detroit derby, 1,500 ticks (7
+checkpoints), alternating pairs. Every pair started with no cargo or rustc
+running (`busy_procs=0`). A is F843 (`local/mt/base843.exe`).
+
+| Variant | Checkpoint mean, ms | Checkpoint max, ms |
+|---|---|---|
+| A: F843 | 0.97 / 1.38 / 1.04 | 1.72 / 1.80 / 1.44 |
+| B: serial pack from the live words | 0.69 / 0.75 / 0.71 | 0.86 / 0.88 / 0.98 |
+| B: same, cars packed in parallel | 0.48 / 0.38 / 0.50 | 0.66 / under 0.5 / 0.64 |
+
+- The serial row comes from an earlier batch of three pairs (`local/mt/buildck.txt`).
+  Its A runs measured 1.06 / 0.83 / 0.78 mean and 1.54 / 0.93 / 0.92 max.
+- The parallel row's batch is in `local/mt/buildpar.txt`.
+- perf_timing lists a stage's maximum only when it is over 0.5 ms. B2 of the
+  parallel batch lists none for Checkpoint, so its maximum was under 0.5 ms.
+- The rest of the frame differed between runs as much as between variants:
+  main 5.7–8.6 ms in both. Only the checkpoint stage is compared here.
+- The simulation is unchanged: the packed runs and the restored state are the
+  same, and the identity check is in prepush.
