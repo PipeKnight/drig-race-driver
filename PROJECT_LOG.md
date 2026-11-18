@@ -176,6 +176,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F853](log/F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
 | [F852](log/F0852.md) | 2026-11-18 | Own-car dents on the compute pool; drive_present, solver and visibility probes |
 | [F851](log/F0851.md) | 2026-11-18 | Worst fixed tick names its systems (permanent attribution) |
 | [F850](log/F0850.md) | 2026-11-18 | 1440p render breakdown: render thread bound, HUD view cost, pipeline-cache design (findings) |
@@ -235,7 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F792](log/F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |
 | [F791](log/F0791.md) | 2026-11-10 | Loading world: glyph instances grafted, screen panels left to their screens |
 | [F790](log/F0790.md) | 2026-11-10 | Career screen sounds and bars; window shots recheck |
-| [F789](log/F0789.md) | 2026-11-10 | Several shape behaviours of one prop break; Shibuya route_2 diagnosis |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

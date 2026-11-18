@@ -869,6 +869,7 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         render
             .add_systems(ExtractSchedule, extract_display_ids)
             .add_systems(Render, check_display.in_set(RenderSystems::Queue));
+        graph::install(render);
     }
     app.insert_resource(Installed)
         .init_resource::<crate::mesh_stream::MeshStream>()
@@ -988,6 +989,8 @@ fn spawn(
             Tonemapping::None,
             if cfg!(target_os = "android") { Msaa::Off } else { Msaa::Sample4 },
             RenderLayers::layer(LAYER),
+            bevy::render::camera::CameraRenderGraph::new(graph::OsdCore3d),
+            bevy::render::view::NoIndirectDrawing,
         ))
         .id();
     commands.spawn((
@@ -1579,5 +1582,94 @@ mod tests {
         // Starts at the box's left edge and fits its width.
         let right = m.positions.iter().map(|p| p[0]).fold(f32::MIN, f32::max);
         assert!(m.positions[0][0] < 0.5 && right < 105.04 + 2., "{right}");
+    }
+}
+
+/// The OSD camera's render schedule (F853). The HUD view draws only blended
+/// [`OsdMaterial`] meshes (no prepass, shadows, opaque items, tonemapping or
+/// post-processing), but `Core3d` runs some twenty systems per camera, each
+/// with its own command buffer: the empty prepass and opaque passes, the GPU
+/// marker nodes, and the indirect-parameter clear and build, which cover
+/// every view's batches and run again for the main camera. This schedule
+/// keeps the three steps that write the OSD image: the view's GPU mesh
+/// preprocessing, one pass that clears the target and draws the transparent
+/// phase (the clear `Core3d` does in its opaque pass), and Bevy's upscaling
+/// blit into the image. The camera draws directly (`NoIndirectDrawing`), so
+/// it needs no indirect parameters. Same pipelines, draws, order and
+/// attachments: the picture is unchanged.
+pub(crate) mod graph {
+    use bevy::app::SubApp;
+    use bevy::core_pipeline::core_3d::{AlphaMask3d, Opaque3d, Transparent3d};
+    use bevy::core_pipeline::upscaling::upscaling;
+    use bevy::ecs::schedule::{ScheduleBuildSettings, ScheduleLabel};
+    use bevy::pbr::{MeshInputUniform, MeshUniform, PreprocessPipelines, early_gpu_preprocess};
+    use bevy::prelude::*;
+    use bevy::render::batching::gpu_preprocessing::BatchedInstanceBuffers;
+    use bevy::render::camera::ExtractedCamera;
+    use bevy::render::render_phase::{ViewBinnedRenderPhases, ViewSortedRenderPhases};
+    use bevy::render::render_resource::{RenderPassDescriptor, StoreOp};
+    use bevy::render::renderer::{RenderContext, ViewQuery};
+    use bevy::render::view::{ExtractedView, ViewDepthTexture, ViewTarget};
+
+    #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash, Default)]
+    pub struct OsdCore3d;
+
+    pub(super) fn install(render: &mut SubApp) {
+        let mut schedule = Schedule::new(OsdCore3d);
+        schedule.set_build_settings(ScheduleBuildSettings { auto_insert_apply_deferred: false, ..default() });
+        render.add_schedule(schedule).add_systems(
+            OsdCore3d,
+            (
+                // Present only with GPU instance building (desktop Vulkan);
+                // otherwise the mesh uniforms are built on the CPU.
+                early_gpu_preprocess.run_if(
+                    resource_exists::<PreprocessPipelines>
+                        .and_then(resource_exists::<BatchedInstanceBuffers<MeshUniform, MeshInputUniform>>),
+                ),
+                pass,
+                upscaling,
+            )
+                .chain(),
+        );
+    }
+
+    /// `main_transparent_pass_3d`, but the pass always begins, so the first
+    /// attachment use clears the image even when nothing is drawn.
+    fn pass(
+        world: &World,
+        view: ViewQuery<(&ExtractedCamera, &ExtractedView, &ViewTarget, &ViewDepthTexture)>,
+        transparent: Res<ViewSortedRenderPhases<Transparent3d>>,
+        opaque: Res<ViewBinnedRenderPhases<Opaque3d>>,
+        mask: Res<ViewBinnedRenderPhases<AlphaMask3d>>,
+        mut warned: Local<bool>,
+        mut ctx: RenderContext,
+    ) {
+        let entity = view.entity();
+        let (camera, extracted, target, depth) = view.into_inner();
+        let key = extracted.retained_view_entity;
+        if !*warned
+            && (opaque.get(&key).is_some_and(|p| !p.is_empty())
+                || mask.get(&key).is_some_and(|p| !p.is_empty()))
+        {
+            warn!("OSD camera has opaque or alpha-mask items, which its schedule does not draw");
+            *warned = true;
+        }
+        let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("osd_pass"),
+            color_attachments: &[Some(target.get_color_attachment())],
+            depth_stencil_attachment: Some(depth.get_attachment(StoreOp::Store)),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        if let Some(viewport) = camera.viewport.as_ref() {
+            pass.set_camera_viewport(viewport);
+        }
+        if let Some(phase) = transparent.get(&key)
+            && !phase.items.is_empty()
+            && let Err(err) = phase.render(&mut pass, world, entity)
+        {
+            error!("OSD transparent phase: {err:?}");
+        }
     }
 }

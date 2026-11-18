@@ -2427,7 +2427,9 @@ Render world (the render thread, means per render frame, they sum to `render_ms`
 | `r_present` | the rest of the render set (present) |
 | `r_cleanup` | cleanup |
 
-`render_frames` counts render frames in the window.
+`render_frames` counts render frames in the window. `rworst` is the window's slowest render
+frame: its `render_ms`, then its eleven stages in the table's order, in ms, separated by `/`
+(F853), so a single hitch shows its stage even when the means hide it.
 
 GPU (timestamp queries, means per frame; needs `TIMESTAMP_QUERY`):
 
@@ -3362,3 +3364,75 @@ Visibility: mesh assets change in 599 of 600 frames (Donington; 1199 of 1200 in 
 Bevy's `calculate_bounds` never takes its unchanged fast path over 19,338 (9,484) `Mesh3d`
 entities. Marking static meshes `NoAutoAabb` could skip that, but which meshes are truly static
 needs an audit and matched images; deferred.
+
+## Post-lift worst frame and the OSD camera's own schedule (F853)
+
+### What the post-lift worst frame is
+
+F849 reported 74-86 ms "after the cover" frames, 37 of 38 render-led. `frame_split` now prints
+`rworst=`, the stages of each window's slowest render frame (see the field table above). In the
+window that holds the cover lift, those frames carry a 20 ms `r_cleanup`: the
+`pipeline_warmup` yield, which runs only while the black cover is up and a pipeline compiles
+(F848), plus 12-34 ms of first-use `r_encode`. So they are drawn under the cover; they mixed into
+the first post-lift window only because the one-second window straddled the lift.
+
+`fps_counter` now closes its window at the lift (the first frame `Warmup::ready()` holds) and
+prints that partial window with ` cover=tail`; every later window is play. Measured with
+`local/ab/rw.py` (Donington, `auto_no_vsync`, the PC shared with other sessions' builds):
+
+| series | runs | visible post-lift max per run, ms |
+|---|---|---|
+| before, native, lift window excluded | 8 | 27/30/37/23/36/25/33/24 |
+| after (cover tail split off), native | 8 | 24/46/33/46/46/29/27/31 |
+| before, 2560x1440 forced, build running beside | 8 | 17/48/50/510/35/30/43/199 |
+| after, 2560x1440 forced, build running beside | 8 | 27/39/41/38/36/43/22/66 |
+
+The covered tail windows themselves hold the 48-87 ms frames. No visible window reached 50 ms
+at native resolution; the slow visible frames' top stages are
+`present` or `encode` and vary by run, so there is no first-sight work left to move into loading.
+With a build running beside it, the two large visible stalls were outside our work: a
+469 ms swapchain `acquire` and a 187 ms `submit`; the 66 ms window was `meshes`/`bind`/`encode`
+in an Enhanced run while the other 7 runs stayed under 45 ms.
+
+### OSD camera schedule
+
+The HUD view (F850: up to 1.4-2.4 ms of render thread) ran Bevy's whole `Core3d` schedule. It
+now runs `osd_scene::graph::OsdCore3d`: the view's GPU mesh preprocessing, one pass that clears
+the target and draws the transparent phase, and the upscaling blit into the OSD image. The
+camera draws directly (`NoIndirectDrawing`). Dropped: the prepass, deferred, opaque and
+alpha-mask passes (empty), the indirect-parameter clear, unpack and build nodes, transmission,
+tonemapping and the other post-processing nodes, and the `frame_split` GPU markers for this view.
+The pass warns once if the OSD ever gets opaque or alpha-mask items, which it would not draw.
+
+Image: fixed-step captures (1280x720, autopilot), before (b) against after (a), and a repeat of
+after (a2) for noise:
+
+| case | after vs before | noise |
+|---|---|---|
+| Donington, baseline and Enhanced, ticks 600 and 1500 | 0 px (4 cases) | 0 px |
+| Spa, baseline and Enhanced, ticks 600 and 1500 | 0 px (4 cases) | 0-2 px |
+| Haruna touge, baseline and Enhanced, tick 900 | 0 px (2 cases) | 0 px |
+
+Drift battle captures are not repeatable (two identical runs differ in 99 % of the pixels), so
+they prove nothing either way; the drift OSD uses the same camera and material. The menus draw
+through `bevy_ui` on the viewer or display camera, whose schedule is unchanged; the OSD camera
+exists only in a race and renders only into its own image, which the crops above compare.
+
+Cost, Donington 2560x1440, both orders:
+
+| measurement | before | after |
+|---|---|---|
+| command buffers per submit (profile build) | 34 | 24 |
+| profile build: render ms / `r_encode` / fps (3 runs each, interleaved) | 12.31 / 6.11 / 77.6 | 11.77 / 5.52 / 81.8 |
+| release, baseline, A/B 1: render / `r_encode` / fps | 11.19 / 5.53 / 85.7 | 11.02 / 5.24 / 90.4 |
+| release, Enhanced, A/B 1 | 13.83 / 7.15 / 70.3 | 12.99 / 6.61 / 76.0 |
+| release, baseline, A/B 2 (build running beside) | 12.08 / 5.78 / 80.0 | 12.07 / 5.56 / 79.2 |
+| release, Enhanced, A/B 2 (build running beside) | 15.97 / 7.77 / 61.8 | 16.48 / 7.68 / 61.0 |
+
+`r_encode` fell by 0.1-0.6 ms in every comparison; total render time fell by 0-0.8 ms, inside
+this PC's noise (F850: 1 ms, 5 fps between identical runs). The schedule removes about a quarter
+of the HUD view's cost. The rest is per view and stays with any separate camera: the 82 blended
+draws' encode (about 0.34 ms), view preparation, specialization, batching and bind groups, and
+main-thread visibility. A 2D camera would still pay those. Cutting them needs a change to the
+picture or its timing (HUD drawn in the main view, or redrawn less often), which is the desktop
+look owner's decision.

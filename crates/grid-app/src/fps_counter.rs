@@ -68,7 +68,17 @@ impl Window {
         self.elapsed += dt;
         self.worst = self.worst.max(dt);
         self.times.push(dt * 1000.);
-        (self.elapsed >= 1.).then(|| {
+        (self.elapsed >= 1.).then(|| self.finish())
+    }
+
+    /// Ends the window early (the frames so far), as at the warm-up cover's
+    /// lift; `None` without frames.
+    pub fn flush(&mut self) -> Option<Stats> {
+        (self.frames > 0).then(|| self.finish())
+    }
+
+    fn finish(&mut self) -> Stats {
+        {
             let mut sorted = std::mem::take(&mut self.times);
             sorted.sort_by(f64::total_cmp);
             // Nearest rank: the smallest time with at least 99 % of the frames at or below it.
@@ -89,7 +99,7 @@ impl Window {
             sorted.clear();
             self.times = sorted;
             stats
-        })
+        }
     }
 }
 
@@ -158,7 +168,14 @@ fn update(
     monitors: Query<&Monitor>,
     scale: Option<Res<crate::render_scale::RenderScale>>,
     mut text: Query<(&mut Text, &mut Visibility), With<FpsText>>,
+    warmup: Option<Res<crate::pipeline_warmup::Warmup>>,
+    mut was_ready: Local<bool>,
 ) {
+    // The window ends when the warm-up cover lifts, so its covered frames
+    // (`cover=tail`) do not mix with the first visible ones.
+    let ready = warmup.is_some_and(|w| w.ready());
+    let lift = ready && !*was_ready;
+    *was_ready = ready;
     // F9 toggles the display (desktop); the log line follows it.
     if keys.is_some_and(|k| k.just_pressed(KeyCode::F9)) {
         counter.shown = !counter.shown;
@@ -206,7 +223,8 @@ fn update(
             refresh.join(",")
         );
     }
-    let Some(stats) = counter.window.push(time.delta_secs_f64()) else {
+    let pushed = counter.window.push(time.delta_secs_f64());
+    let Some(stats) = pushed.or_else(|| if lift { counter.window.flush() } else { None }) else {
         return;
     };
     let ticks = driving.map(|d| d.runtime.ticks);
@@ -226,7 +244,7 @@ fn update(
     // Where the frame's time went (frame_split.rs, docs/PERFORMANCE.md).
     let (split, detail) = crate::frame_split::window_report(stats.seconds);
     println!(
-        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} p99_ms={:.2} over10={} over16={} frames={} sim_ticks_per_s={rate}{res}{}{split} ft_hist={}",
+        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} p99_ms={:.2} over10={} over16={} frames={} sim_ticks_per_s={rate}{res}{}{split}{} ft_hist={}",
         stats.fps,
         stats.mean_ms,
         stats.worst_ms,
@@ -235,6 +253,7 @@ fn update(
         stats.over16,
         stats.frames,
         crate::perf_test::stats_suffix(),
+        if lift { " cover=tail" } else { "" },
         stats.hist
     );
     for line in detail {
@@ -284,6 +303,22 @@ pub fn install(app: &mut App, shown: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flush_ends_a_short_window_and_starts_a_fresh_one() {
+        let mut w = Window::default();
+        assert_eq!(w.flush(), None, "no frames, no line");
+        assert_eq!(w.push(0.05), None);
+        assert_eq!(w.push(0.01), None);
+        let s = w.flush().unwrap();
+        assert_eq!(s.frames, 2);
+        assert!((s.worst_ms - 50.).abs() < 1e-9);
+        assert!((s.seconds - 0.06).abs() < 1e-9);
+        assert_eq!(w, Window::default());
+        // The next window counts only later frames.
+        assert_eq!(w.push(0.01), None);
+        assert_eq!(w.flush().unwrap().frames, 1);
+    }
 
     #[test]
     fn one_second_windows_give_fps_mean_and_worst() {

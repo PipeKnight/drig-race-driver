@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F853](F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
 | [F852](F0852.md) | 2026-11-18 | Own-car dents on the compute pool; drive_present, solver and visibility probes |
 | [F851](F0851.md) | 2026-11-18 | Worst fixed tick names its systems (permanent attribution) |
 | [F850](F0850.md) | 2026-11-18 | 1440p render breakdown: render thread bound, HUD view cost, pipeline-cache design (findings) |

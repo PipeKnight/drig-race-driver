@@ -151,6 +151,9 @@ fn point<const I: usize>() {
             with_acc(|a| {
                 a.render_frames += 1;
                 a.last_render = done[11];
+                if done[11] > a.worst[11] {
+                    a.worst = done;
+                }
                 for (sum, v) in a.stages.iter_mut().zip(done) {
                     *sum += v;
                 }
@@ -825,6 +828,8 @@ struct Acc {
     extract: u64,
     render_frames: u32,
     stages: [u64; 12],
+    /// Stages of the window's slowest render frame (`rworst`).
+    worst: [u64; 12],
     count_frames: u32,
     counts: [u64; 6],
     mesh_up: u64,
@@ -888,7 +893,7 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
         for (name, sum) in STAGES.iter().zip(a.stages) {
             s += &format!(" {name}={:.2}", per(sum, a.render_frames));
         }
-        s += &format!(" render_frames={}", a.render_frames);
+        s += &format!(" render_frames={} rworst={}", a.render_frames, worst_field(&a.worst));
         if a.gpu_frames > 0 {
             let n = f64::from(a.gpu_frames);
             let total: f64 = a.gpu.iter().sum();
@@ -967,6 +972,16 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
         };
         (s, lines)
     })
+}
+
+/// The slowest render frame of a window: `render_ms` first, then the
+/// other stages in `STAGES` order, in ms, joined by `/`.
+fn worst_field(worst: &[u64; 12]) -> String {
+    std::iter::once(worst[11])
+        .chain(worst[..11].iter().copied())
+        .map(|v| format!("{:.1}", v as f64 * 1e-6))
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,6 +1192,8 @@ mod tests {
             a.main = 4_000_000;
             a.render_frames = 2;
             a.stages[11] = 10_000_000;
+            a.worst[11] = 7_000_000;
+            a.worst[5] = 5_500_000;
             a.mesh_up = 85;
             a.add_gpu(FrameTimes {
                 views: vec![ViewTimes {
@@ -1193,12 +1210,14 @@ mod tests {
         let (s, lines) = window_report(1.);
         assert!(s.contains(" main_ms=2.00 "), "{s}");
         assert!(s.contains(" render_ms=5.00 "), "{s}");
+        assert!(s.contains(" rworst=7.0/0.0/0.0/0.0/0.0/0.0/5.5/0.0/0.0/0.0/0.0/0.0 "), "{s}");
         assert!(s.contains(" gpu=on gpu_ms=15.00 g_pre=1.00 g_shadow=2.00"), "{s}");
         assert!(s.contains(" g_gap=1.00 g_frames=1 g_bad=0"), "{s}");
         assert!(s.contains(" mesh_up_s=85.0 "), "{s}");
         assert!(lines.is_empty());
         let (s, _) = window_report(1.);
         assert!(s.contains(" main_ms=0.00 ") && s.contains(" mesh_up_s=0.0 "), "{s}");
+        assert!(s.contains(" rworst=0.0/"), "{s}");
         // The per-view detail survives resets until it is due.
         for _ in 0..DETAIL_WINDOWS - 3 {
             assert!(window_report(1.).1.is_empty());
