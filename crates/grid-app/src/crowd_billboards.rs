@@ -1369,6 +1369,17 @@ struct FlashEvent {
     born: f64,
 }
 
+#[derive(Clone, Copy)]
+struct FlashCheckpoint {
+    seconds: f64,
+    next: f64,
+    random: u32,
+}
+
+const FLASH_FIRST_SECONDS: f64 = 0.1;
+const FLASH_INITIAL_RANDOM: u32 = 1;
+const FLASH_HISTORY_LIMIT: usize = 65_536;
+
 #[derive(Resource)]
 struct Flashes {
     segment: u64,
@@ -1376,6 +1387,7 @@ struct Flashes {
     last_live_time: f64,
     random: u32,
     history: VecDeque<FlashEvent>,
+    schedule: VecDeque<FlashCheckpoint>,
 }
 
 #[derive(Component)]
@@ -1390,10 +1402,28 @@ impl Flashes {
         first..last
     }
 
+    fn remember_schedule(&mut self, seconds: f64) {
+        if self.schedule.len() == FLASH_HISTORY_LIMIT {
+            self.schedule.pop_front();
+        }
+        self.schedule.push_back(FlashCheckpoint {
+            seconds,
+            next: self.next,
+            random: self.random,
+        });
+    }
+
     fn cut(&mut self, seconds: f64) {
         let retained = self.history.partition_point(|event| event.born <= seconds);
         self.history.truncate(retained);
-        self.next = seconds + 0.1;
+        let retained = self.schedule.partition_point(|step| step.seconds <= seconds);
+        self.schedule.truncate(retained);
+        (self.next, self.random) = self
+            .schedule
+            .back()
+            .map_or((FLASH_FIRST_SECONDS, FLASH_INITIAL_RANDOM), |step| {
+                (step.next, step.random)
+            });
     }
 }
 
@@ -1418,10 +1448,11 @@ fn install_flash(
     });
     commands.insert_resource(Flashes {
         segment: 0,
-        next: 0.1,
+        next: FLASH_FIRST_SECONDS,
         last_live_time: 0.,
-        random: 1,
+        random: FLASH_INITIAL_RANDOM,
         history: VecDeque::new(),
+        schedule: VecDeque::new(),
     });
     for index in 0..10 {
         commands.spawn((
@@ -1473,10 +1504,11 @@ fn update_flash(
     let now = clock.seconds;
     if flashes.segment != clock.segment {
         flashes.segment = clock.segment;
-        flashes.next = 0.1;
+        flashes.next = FLASH_FIRST_SECONDS;
         flashes.last_live_time = 0.;
-        flashes.random = 1;
+        flashes.random = FLASH_INITIAL_RANDOM;
         flashes.history.clear();
+        flashes.schedule.clear();
     }
     if !clock.replaying && now < flashes.last_live_time {
         // A Flashback cut abandons future effects along with future car state.
@@ -1513,7 +1545,7 @@ fn update_flash(
                 let row = &prepared.rows[index];
                 // Saved fallback homogeneous local position is (0, 1.7, 0, 1).
                 let position = row.position + Vec3::Y * 1.7;
-                if flashes.history.len() == 65_536 {
+                if flashes.history.len() == FLASH_HISTORY_LIMIT {
                     flashes.history.pop_front();
                 }
                 flashes.history.push_back(FlashEvent {
@@ -1526,6 +1558,9 @@ fn update_flash(
                 });
             }
         }
+        // Searching can consume random choices even when this attempt makes
+        // no flash. Flashback restores the scheduler at the selected time.
+        flashes.remember_schedule(now);
     }
 
     let active = flashes.visible_at(now);
@@ -1689,6 +1724,7 @@ mod tests {
             last_live_time: 1.4,
             random: 1,
             history: [event(1.0), event(1.1), event(1.4)].into(),
+            schedule: VecDeque::new(),
         };
         assert_eq!(flashes.visible_at(1.12), 0..2);
         assert_eq!(flashes.visible_at(1.41), 2..3);
@@ -1698,6 +1734,36 @@ mod tests {
         assert_eq!(flashes.history.len(), 2);
         assert!(flashes.visible_at(1.41).is_empty());
         assert_eq!(flashes.visible_at(1.12), 0..2);
+    }
+
+    #[test]
+    fn flashback_resumes_the_last_retained_attempt_even_if_it_emitted_nothing() {
+        let mut flashes = Flashes {
+            segment: 0,
+            next: FLASH_FIRST_SECONDS,
+            last_live_time: 0.,
+            random: FLASH_INITIAL_RANDOM,
+            history: VecDeque::new(),
+            schedule: VecDeque::new(),
+        };
+        for (now, interval) in [(0.1, 0.3), (0.4, 0.5), (0.9, 0.1)] {
+            flash_draw(&mut flashes.random, 21);
+            flashes.next = now + interval;
+            flashes.remember_schedule(now);
+        }
+        let retained = flashes.schedule[1];
+        assert_eq!(retained.seconds, 0.4);
+        let mut expected_random = retained.random;
+        let future_choice = flash_draw(&mut expected_random, 21);
+        flashes.cut(0.45);
+        assert!(flashes.history.is_empty());
+        assert_eq!(flashes.schedule.len(), 2);
+        assert_eq!(flashes.next, retained.next);
+        assert_eq!(flashes.random, retained.random);
+        assert_eq!(flash_draw(&mut flashes.random, 21), future_choice);
+        flashes.cut(0.05);
+        assert!(flashes.schedule.is_empty());
+        assert_eq!((flashes.next, flashes.random), (FLASH_FIRST_SECONDS, FLASH_INITIAL_RANDOM));
     }
 
     #[test]
