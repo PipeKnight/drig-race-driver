@@ -1793,7 +1793,7 @@ A bit-exact skip of parts no moved lattice node reaches does not help: from one 
 really changes. Measured with a temporary diagnostic and dropped.
 
 Change (`main.rs` `drive_present`, `car_batch.rs`, `static_batch.rs`; `GRID_DENT_FAST=0` restores
-the old path for comparisons):
+the old path for comparisons; since F852 the player's car also projects on the pool):
 
 - The dirty parts are projected on the compute pool (`project_dent`), the same bits as one by one,
   and written on the main thread.
@@ -3305,3 +3305,60 @@ the names prints `fixed_tick_name unavailable: build with --features profile` in
 
 Reading a spike: many faults with no slow system means paging or I/O outside the game's code;
 one system with most of `ms` names the stage.
+
+## drive_present, solver stages and visibility (F852)
+
+Where the main thread's driving presentation goes, measured with temporary sub-laps in
+`drive_present` and `body_damage::project` (not committed; the probe diff is kept locally).
+Release build, fixed step, `auto_no_vsync`, idle machine.
+
+Donington, windowed, per frame: deform check 10 µs, own-car parts 17.5, opponent cars 9.6,
+opponent dirty check 55.5, opponent parts 91.6, dents 25.8, camera 24.7, HUD text 23.4, window
+title 6.2. Nothing there is worth a change (the title, suspected earlier, is 6 µs).
+
+Demolition derby (12 cars, 1200 frames), where dents dominate:
+- Opponent dents: about 0.92–0.99 ms of wall time per frame on the compute pool, writes about
+  0.09 ms. The built-in counter: 256 updates, 60,792 parts projected, 59,296 meshes written.
+- Own car: 59 updates of 52 meshes, about 4 ms each, serial on the main thread (about 0.2 ms
+  per frame on average, but all of it in contact frames).
+- Per part (CPU): lattice displacements 2.34 s, mesh clone 0.64 s, smooth normals 1.0 s for
+  13.3 M vertices, about 300 ns per vertex in the game against 57 ns per point for the
+  displacements alone in an uncontended micro-benchmark: the pool is shared with Bevy's own
+  tasks.
+- One task per part instead of one chunk per thread: about 10 % less wall time (parts differ
+  widely in size, so the chunks were unbalanced).
+
+Tried and dropped: sampling the current and rest lattices together (they share the layout, so
+the cell of a point can be found once). Bit-identical, but 58.0 ns per point against 57.1: the
+interpolation, not the lookup, is the cost.
+
+Change (`main.rs` `drive_present`, `on_compute_pool`): the player's car projects its dents on the
+compute pool like the opponents, one task per part; both use the same helper, which keeps the
+part order, so the first refusal still refuses the field and the meshes have the bits of the
+serial path. Meshes are moved into the asset instead of cloned. `GRID_DENT_FAST=0` now also makes
+the own car serial. `drive_body_projection event=update` gains `ms=`, the wall time of the
+update on the main thread.
+
+Measured, same executable, derby, `GRID_DENT_FAST=0` against the default (two runs each, sum
+over the 59 updates; the worst single update in brackets):
+
+| own-car projection | serial | pool |
+| --- | --- | --- |
+| total ms | 250, 295 | 111, 114, 151 |
+| per update ms | 4.2–5.0 (8.4, 16.8) | 1.9–2.6 (5.9–8.6) |
+
+Opponent dents with one task per part: 1194–1492 ms against 1285–1541 ms for the HEAD build in
+the same pairs (alternating, within noise of each other; mean `main_ms` 17.95 against 18.17,
+also noise: the saving is about 0.1 ms per frame averaged, concentrated in contact frames).
+
+The derby's final frame differs between runs of one executable (base and fix alike, three
+different hashes in three base runs), so it cannot show identity here; the projection is the
+same pure function on the same inputs in the same order.
+
+Solver stages (perf_timing, mean per tick): VehicleStage 0.57 ms, CarPairs 0.14, BodyContacts
+0.135, Commit 0.18. No single stage is large enough to repay a restructuring now.
+
+Visibility: mesh assets change in 599 of 600 frames (Donington; 1199 of 1200 in the derby), so
+Bevy's `calculate_bounds` never takes its unchanged fast path over 19,338 (9,484) `Mesh3d`
+entities. Marking static meshes `NoAutoAabb` could skip that, but which meshes are truly static
+needs an audit and matched images; deferred.

@@ -783,6 +783,17 @@ const START_SEQUENCE_SECONDS: f64 = 4.0;
 /// Body dents of one opponent part, projected from that car's own field.
 #[derive(Component)]
 struct OpponentDeforming(DeformingPart);
+/// `project` over `inputs` on the compute pool, one task per input (better
+/// balanced than one chunk per thread: part sizes differ widely); the results
+/// keep the input order. Body dents of the player's car and of the opponents.
+fn on_compute_pool<T: Sync, R: Send + 'static>(inputs: &[T], project: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let project = &project;
+    bevy::tasks::ComputeTaskPool::get().scope(|scope| {
+        for input in inputs {
+            scope.spawn(async move { project(input) });
+        }
+    })
+}
 /// One opponent part's dents: its mesh and bounds, none when the field is
 /// refused (the part keeps its mesh).
 fn project_dent(
@@ -7418,6 +7429,9 @@ fn drive_present(
     let osd = menu
         .as_ref()
         .map_or_else(pause_menu::Options::default, |m| m.values);
+    // `GRID_DENT_FAST=0` projects the dents of every car one by one on this
+    // thread and writes every opponent part as before (comparisons).
+    let fast = *dent_fast.get_or_insert_with(|| std::env::var("GRID_DENT_FAST").map_or(true, |v| v != "0"));
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
             let owner = &driving.runtime.state.car.owner.vehicle;
@@ -7435,41 +7449,56 @@ fn drive_present(
             }
             // A refused field is not projected again until it changes.
             presentation.0 = Some(key);
-            let mut staged: Vec<(Handle<Mesh>, Mesh, Aabb)> = Vec::new();
-            let mut changed = 0;
+            let start = Instant::now();
+            let mut sources: Vec<(&Handle<Mesh>, &DeformingPart)> = Vec::new();
             for (_, _, source, handle, _) in &parts {
                 if let Some(source) = source {
-                    if meshes.get(&handle.0).is_none()
-                        || staged.iter().any(|(h, _, _)| h == &handle.0)
-                    {
+                    if meshes.get(&handle.0).is_none() || sources.iter().any(|(h, _)| *h == &handle.0) {
                         return Err("body damage mesh ownership differs");
                     }
-                    let mesh = body_damage::project(&source.source, source.raw_bind, &field)?;
-                    changed += usize::from(
-                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-                            != source.source.attribute(Mesh::ATTRIBUTE_POSITION),
-                    );
-                    let bounds = mesh.compute_aabb().ok_or("invalid projected body bounds")?;
-                    staged.push((handle.0.clone(), mesh, bounds));
+                    sources.push((&handle.0, source));
                 }
             }
-            // A part the change left as drawn keeps its mesh: rewriting it
-            // would upload it again.
-            for (handle, mesh, _) in &staged {
-                if meshes.get(handle).is_some_and(|m| body_damage::same_shape(m, mesh)) {
-                    continue;
-                }
-                *meshes.get_mut(handle).expect("staged owned mesh") = mesh.clone();
+            // The parts are projected on the compute pool, as the
+            // opponents' are: the same bits as one by one, without holding
+            // this thread for the whole car (about 4 ms in a derby contact).
+            let project = |&(_, source): &(&Handle<Mesh>, &DeformingPart)| {
+                let mesh = body_damage::project(&source.source, source.raw_bind, &field)?;
+                let moved = mesh.attribute(Mesh::ATTRIBUTE_POSITION) != source.source.attribute(Mesh::ATTRIBUTE_POSITION);
+                let bounds = mesh.compute_aabb().ok_or("invalid projected body bounds")?;
+                Ok::<_, &'static str>((mesh, bounds, moved))
+            };
+            let projected = if fast {
+                on_compute_pool(&sources, project)
+            } else {
+                sources.iter().map(project).collect()
+            };
+            // The first refusal in part order refuses the field.
+            let mut staged: Vec<(Handle<Mesh>, Mesh, Aabb)> = Vec::with_capacity(sources.len());
+            let mut changed = 0;
+            for ((handle, _), result) in sources.iter().zip(projected) {
+                let (mesh, bounds, moved) = result?;
+                changed += usize::from(moved);
+                staged.push(((*handle).clone(), mesh, bounds));
             }
+            let count = staged.len();
             for (_, _, _, handle, mut bounds) in &mut parts {
                 if let Some((_, _, next)) = staged.iter().find(|(h, _, _)| h == &handle.0) {
                     *bounds = *next;
                 }
             }
+            // A part the change left as drawn keeps its mesh: rewriting it
+            // would upload it again.
+            for (handle, mesh, _) in staged {
+                if meshes.get(&handle).is_some_and(|m| body_damage::same_shape(m, &mesh)) {
+                    continue;
+                }
+                *meshes.get_mut(&handle).expect("staged owned mesh") = mesh;
+            }
             log_line!(
-                "drive_body_projection event=update tick={} meshes={} changed_meshes={changed} policy=independent-current-minus-rest",
+                "drive_body_projection event=update tick={} meshes={count} changed_meshes={changed} policy=independent-current-minus-rest ms={:.3}",
                 driving.runtime.ticks,
-                staged.len()
+                start.elapsed().as_secs_f64() * 1e3
             );
             Ok(())
         })();
@@ -7528,10 +7557,7 @@ fn drive_present(
         // bits as one by one), and a projection equal to the mesh a part
         // has is not written: that would re-upload the mesh and rebuild its
         // car batch for nothing. A batched part's mesh is written for the
-        // main world only (car_batch::Demoted). `GRID_DENT_FAST=0` projects
-        // one by one on this thread and writes every part as before
-        // (comparisons).
-        let fast = *dent_fast.get_or_insert_with(|| std::env::var("GRID_DENT_FAST").map_or(true, |v| v != "0"));
+        // main world only (car_batch::Demoted).
         let opponent_keys = &mut presentation.1;
         opponent_keys.resize(opponents.multi.cars.len(), None);
         let mut dirty = Vec::new();
@@ -7577,16 +7603,7 @@ fn drive_present(
                 })
                 .collect();
             let results = if fast {
-                let pool = bevy::tasks::ComputeTaskPool::get();
-                let chunk = inputs.len().div_ceil(pool.thread_num().max(1)).max(1);
-                pool.scope(|scope| {
-                    for chunk in inputs.chunks(chunk) {
-                        scope.spawn(async move { chunk.iter().map(project_dent).collect::<Vec<_>>() });
-                    }
-                })
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
+                on_compute_pool(&inputs, project_dent)
             } else {
                 inputs.iter().map(project_dent).collect()
             };
