@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F855](F0855.md) | 2026-11-18 | Archived worktree copies zipped into worktree-evidence |
 | [F854](F0854.md) | 2026-11-18 | Streamed minimap ribbon and crowd flash meshes: visibility no longer revisits every mesh each frame |
 | [F853](F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
 | [F852](F0852.md) | 2026-11-18 | Own-car dents on the compute pool; drive_present, solver and visibility probes |
