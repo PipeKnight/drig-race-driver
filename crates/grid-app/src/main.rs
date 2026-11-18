@@ -114,6 +114,7 @@ mod pipeline_warmup;
 mod transition;
 mod frame_pacing;
 mod gpu_passes;
+mod fixed_ticks;
 mod frame_split;
 mod mesh_upload_probe;
 #[cfg(feature = "profile")]
@@ -5421,6 +5422,7 @@ pub(crate) fn race_app(
         gpu_passes::install(&mut app);
     }
     frame_split::install(&mut app);
+    fixed_ticks::install(&mut app, |world| world.get_resource::<Driving>().map(|d| d.runtime.ticks), BUILD_REVISION);
     mesh_upload_probe::install(&mut app);
     mesh_stream::install(&mut app);
     shadow_cull::install(&mut app);

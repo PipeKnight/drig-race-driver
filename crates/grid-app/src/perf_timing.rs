@@ -104,6 +104,6 @@ fn main_end(mut frames: Local<u32>, mut exits: MessageReader<AppExit>) {
     stop(&MAIN_STARTED, Stage::MainSchedule);
     *frames += 1;
     if (*frames).is_multiple_of(REPORT_FRAMES) || exits.read().next().is_some() {
-        println!("{} frames={}", perf::report(), *frames);
+        println!("{}{} frames={}", perf::report(), crate::fixed_ticks::report(), *frames);
     }
 }

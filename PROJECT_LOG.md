@@ -176,6 +176,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F851](log/F0851.md) | 2026-11-18 | Worst fixed tick names its systems (permanent attribution) |
 | [F850](log/F0850.md) | 2026-11-18 | 1440p render breakdown: render thread bound, HUD view cost, pipeline-cache design (findings) |
 | [F849](log/F0849.md) | 2026-11-18 | GO spike: single FixedUpdate tick not reproduced on a quiet PC |
 | [F848](log/F0848.md) | 2026-11-18 | Start hitch: blit pipelines pre-warmed, render thread yields to compiles under the cover |
@@ -235,7 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F790](log/F0790.md) | 2026-11-10 | Career screen sounds and bars; window shots recheck |
 | [F789](log/F0789.md) | 2026-11-10 | Several shape behaviours of one prop break; Shibuya route_2 diagnosis |
 | [F788](log/F0788.md) | 2026-11-10 | Popup overlay sounds; the race pause sound has no caller |
-| [F787](log/F0787.md) | 2026-11-10 | Front-end glyph grafting for the post-race screens (row 69) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -935,6 +935,7 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
                 slow.multi
             );
         }
+        s += &crate::fixed_ticks::window_suffix();
         let mut lines = Vec::new();
         a.detail_windows += 1;
         if a.detail_windows >= DETAIL_WINDOWS && !a.detail.is_empty() {

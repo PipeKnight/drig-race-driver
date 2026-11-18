@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F851](F0851.md) | 2026-11-18 | Worst fixed tick names its systems (permanent attribution) |
 | [F850](F0850.md) | 2026-11-18 | 1440p render breakdown: render thread bound, HUD view cost, pipeline-cache design (findings) |
 | [F849](F0849.md) | 2026-11-18 | GO spike: single FixedUpdate tick not reproduced on a quiet PC |
 | [F848](F0848.md) | 2026-11-18 | Start hitch: blit pipelines pre-warmed, render thread yields to compiles under the cover |

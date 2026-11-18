@@ -2406,6 +2406,7 @@ Main world (the app thread, means per frame over the window):
 
 - `main_ms`: `First` to `Last` of the main schedule, the whole update.
 - `fixed_ms`: the fixed-step loop inside it (simulation ticks).
+- `fixed_max_ms`: the slowest single fixed tick of the window (F851, "Worst fixed tick").
 - `outside_ms`: the rest of the frame: waiting for the render thread, extract, window events.
   `main_ms + outside_ms` equals `avg_ms`.
 - `extract_ms`: the extract step (runs on the main thread while the render world waits).
@@ -3251,3 +3252,56 @@ often changes what is shown. Nothing was changed.
 
 Noise: two identical Enhanced configurations interleaved differ by up to 1 ms render and 5 fps,
 so Enhanced A/Bs here need both orders.
+
+## Worst fixed tick (F851)
+
+Follow-up of F849: the single slow FixedUpdate tick after GO could not be attributed because
+`perf_timing worst_tick` covers only the WorldTick stage. `crates/grid-app/src/fixed_ticks.rs`
+now times every system of the fixed step, always, so the next slow tick names itself.
+
+How: when app setup ends (`Plugin::cleanup`, before any schedule is built), every system of
+`FixedMain` and of each schedule in `FixedMainScheduleOrder` (FixedFirst, FixedPreUpdate,
+FixedUpdate, FixedPostUpdate, FixedLast and any added later to that order) is replaced in the
+schedule graph by a wrapper. The wrapper delegates everything to the original system (name,
+type, flags, access, change ticks, sets, so ordering, run conditions and ambiguity checks are
+unchanged) and adds the wall time of its run and of its deferred commands to its slot. Bevy's
+`FixedMain` system (`run_fixed_main`, one call per tick) bounds the tick: it clears the slots,
+reads the process page-fault count before and after (Windows `K32GetProcessMemoryInfo`, Unix
+`getrusage`), and reads the race tick when the tick ends. Cost: two `Instant::now` and one
+atomic add per system run.
+
+Output:
+- At start: `fixed_ticks wrapped=N rev=<revision> systems=FixedMain:1,FixedFirst:n,...`, the
+  build revision (`GRID_BUILD_REVISION`, set by the release scripts; `unversioned` in ad-hoc
+  builds) and the system count of each fixed schedule.
+- `frame_stats`: `fixed_max_ms`, the slowest single tick of the window.
+- `fixed_tick_slow ms= rev= run= tick= faults= <schedule>/#<index>=ms ...` for every tick of
+  40 ms or more (at most 100 lines per run), with the 8 slowest systems. `run` counts fixed ticks
+  since start, `tick` is the race tick after the tick (`-` before a race), `faults` the page
+  faults during the tick (soft and hard). Systems of one schedule run in parallel, so their
+  times can overlap; time spent outside any wrapped system (Bevy's executor, systems added after
+  setup) is the difference between `ms` and the systems.
+- `perf_timing` (`GRID_PERF_TIMING`): `fixed_worst_ms`, `fixed_worst_rev`, `fixed_worst_run`,
+  `fixed_worst_tick`, `fixed_worst_faults` and `fixed_worst.<schedule>/#<index>=ms`, the run's
+  slowest tick.
+
+Names: systems are printed by their index in the schedule (the order they were added), because
+release builds have no system names: Bevy keeps them only with its `debug` feature, which
+grid-app enables only under `--features profile`. Turning it on for normal builds would
+recompile every Bevy crate and need a new shared seed, for a diagnostic alone (coordinator,
+2026-11-18). To name an index, build the same revision with the profile feature and run it with
+the same arguments and `GRID_FIXED_TICK_NAMES=1`:
+
+```
+cargo build --release -p grid-app --features profile
+GRID_FIXED_TICK_NAMES=1 target/release/grid-app <same arguments>
+```
+
+It prints the start line, then `fixed_tick_name <schedule>/#<index> <system path>` for every
+wrapped system, and exits before the window opens. Use the table only when its `systems=`
+counts equal those of the run being read: indices follow the order systems are added, so a
+different revision, or arguments that add or skip fixed systems, shift them. A build without
+the names prints `fixed_tick_name unavailable: build with --features profile` instead.
+
+Reading a spike: many faults with no slow system means paging or I/O outside the game's code;
+one system with most of `ms` names the stage.
