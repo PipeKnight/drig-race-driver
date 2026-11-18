@@ -176,6 +176,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F845](log/F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
 | [F844](log/F0844.md) | 2026-11-18 | Main thread: flashback checkpoints pack the live words on the compute pool |
 | [F843](log/F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
 | [F842](log/F0842.md) | 2026-11-17 | Prop breaks copy one switch per box, not every box |
@@ -235,7 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F784](log/F0784.md) | 2026-11-10 | 3D loading world, pause bloom, race-intro bars scoped |
 | [F783](log/F0783.md) | 2026-11-10 | Drift GP and Freestyle drift cars, scaled joined props, on_track chords and gate progress |
 | [F782](log/F0782.md) | 2026-11-10 | HUD: team-mate name tag; original post-race art research (rows 68, 69) |
-| [F781](log/F0781.md) | 2026-11-10 | Night level, tree sheet shadows, world clear colour |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

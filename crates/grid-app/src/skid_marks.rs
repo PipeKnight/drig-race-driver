@@ -368,6 +368,58 @@ impl Strip {
     }
 }
 
+/// The strip slots. Every mutable access marks its slot touched (there is
+/// no `DerefMut`), so the mesh write compares only the touched slots with
+/// the strips last written: an untouched slot still equals its written copy.
+struct Pool {
+    strips: Vec<Strip>,
+    touched: Vec<bool>,
+}
+
+impl Pool {
+    /// Empty slots, all touched.
+    fn new() -> Self {
+        Self { strips: vec![Strip::default(); STRIPS], touched: vec![true; STRIPS] }
+    }
+
+    /// Replace every slot (a replay checkpoint).
+    fn assign(&mut self, strips: &[Strip]) {
+        if self.strips.len() == strips.len() {
+            self.strips.clone_from_slice(strips);
+        } else {
+            self.strips = strips.to_vec();
+        }
+        self.touched = vec![true; self.strips.len()];
+    }
+
+    #[cfg(test)]
+    fn iter_mut(&mut self) -> std::slice::IterMut<'_, Strip> {
+        self.touched.fill(true);
+        self.strips.iter_mut()
+    }
+}
+
+impl std::ops::Deref for Pool {
+    type Target = [Strip];
+    fn deref(&self) -> &[Strip] {
+        &self.strips
+    }
+}
+
+impl std::ops::Index<usize> for Pool {
+    type Output = Strip;
+    fn index(&self, i: usize) -> &Strip {
+        &self.strips[i]
+    }
+}
+
+impl std::ops::IndexMut<usize> for Pool {
+    fn index_mut(&mut self, i: usize) -> &mut Strip {
+        self.touched[i] = true;
+        &mut self.strips[i]
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Head {
     strip: usize,
@@ -382,7 +434,7 @@ pub(crate) struct SkidMarks {
     phases: [[f32; 2]; STRIPS],
     /// Phase seeds before the first live ground sample of this segment.
     segment_start_phases: [[f32; 2]; STRIPS],
-    strips: Vec<Strip>,
+    strips: Pool,
     heads: Vec<[Option<Head>; 4]>,
     camera: Vec3,
     generation: u64,
@@ -433,14 +485,14 @@ impl SkidMarks {
     pub(crate) fn save(&self) -> Saved {
         Saved {
             phases: self.phases,
-            strips: self.strips.clone(),
+            strips: self.strips.to_vec(),
             heads: self.heads.clone(),
         }
     }
 
     pub(crate) fn restore(&mut self, saved: &Saved) {
         self.phases = saved.phases;
-        self.strips.clone_from(&saved.strips);
+        self.strips.assign(&saved.strips);
         self.heads.clone_from(&saved.heads);
         self.dirty = true;
     }
@@ -489,7 +541,7 @@ impl SkidMarks {
             profiles,slot_banks,
             phases: [[0.; 2]; STRIPS],
             segment_start_phases: [[0.; 2]; STRIPS],
-            strips: vec![Strip::default(); STRIPS],
+            strips: Pool::new(),
             heads: Vec::new(),
             camera: Vec3::ZERO,
             generation: 0,
@@ -509,7 +561,7 @@ impl SkidMarks {
     fn clear(&mut self) {
         // Keep slot phase history. Clearing all geometry on reset is still the
         // port policy; the source reset ends wheels rather than rebuilding pool.
-        self.strips = vec![Strip::default(); STRIPS];
+        self.strips = Pool::new();
         self.heads.clear();
         self.dirty = true;
     }
@@ -803,7 +855,11 @@ impl SkidMarks {
         {
             self.strips[far].retiring = true;
         }
-        for strip in self.strips.iter_mut().filter(|s| s.retiring) {
+        for i in 0..STRIPS {
+            if !self.strips[i].retiring {
+                continue;
+            }
+            let strip = &mut self.strips[i];
             while strip.fade < strip.points.len() && strip.points[strip.fade].diffuse_envelope <= 0. {
                 strip.fade += 1;
             }
@@ -840,26 +896,59 @@ impl SkidMarks {
     /// The four logical vertices [old-,old+,next-,next+] of quad `q`, with
     /// the payload checked once per quad (it was per vertex).
     fn quad_vertices(strip: &Strip, q: usize) -> [SkidVertex; 4] {
-        let Some(uv) = strip.segments.get(q) else {
-            // All four unused vertices coincide: no trailing positive-area quad.
-            let p = strip.points.last().map(|p| p.center)
-                .filter(|p| p.is_finite()).unwrap_or(Vec3::ZERO);
-            return [(p.to_array(), [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]); 4];
+        let corners = Self::quad_corners(strip, q);
+        let Some(uv) = strip.segments.get(q).filter(|uv| Self::quad_valid(strip, uv, q)) else {
+            return corners.map(|p| (p.to_array(), [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]));
         };
-        if !uv.finite_payload()
-            || !strip.points.get(q).is_some_and(Point::finite_payload)
-            || !strip.points.get(q + 1).is_some_and(Point::finite_payload)
-        {
-            return [([0.; 3], [0., 1., 0.], [0.; 2], [0.; 2], [0.; 4]); 4];
-        }
         std::array::from_fn(|edge| {
             let i = q + edge / 2;
             let p = &strip.points[i];
             let color = p.color_for_draw(strip.opacity_ramp(i), edge >= 2);
-            let sign = if edge.is_multiple_of(2) { -1. } else { 1. };
-            ((p.center + p.side * p.half_width * sign).to_array(), p.normal.to_array(),
-                uv.old[edge], uv.new[edge], color)
+            (corners[edge].to_array(), p.normal.to_array(), uv.old[edge], uv.new[edge], color)
         })
+    }
+
+    fn quad_valid(strip: &Strip, uv: &QuadUv, q: usize) -> bool {
+        uv.finite_payload()
+            && strip.points.get(q).is_some_and(Point::finite_payload)
+            && strip.points.get(q + 1).is_some_and(Point::finite_payload)
+    }
+
+    /// The positions of `quad_vertices`: an unused quad's four coincide at
+    /// the last point (no trailing positive-area quad), an invalid one's at
+    /// the origin.
+    fn quad_corners(strip: &Strip, q: usize) -> [Vec3; 4] {
+        let Some(uv) = strip.segments.get(q) else {
+            let p = strip.points.last().map(|p| p.center)
+                .filter(|p| p.is_finite()).unwrap_or(Vec3::ZERO);
+            return [p; 4];
+        };
+        if !Self::quad_valid(strip, uv, q) {
+            return [Vec3::ZERO; 4];
+        }
+        std::array::from_fn(|edge| {
+            let p = &strip.points[q + edge / 2];
+            let sign = if edge.is_multiple_of(2) { -1. } else { 1. };
+            p.center + p.side * p.half_width * sign
+        })
+    }
+
+    /// What quad `q`'s vertices and basis are made of, besides the strip's
+    /// bank and fade ramp (`quad_vertices`, `quad_basis`).
+    fn quad_inputs(strip: &Strip, q: usize) -> (Option<&QuadUv>, Option<&Point>, Option<&Point>, Option<&Point>) {
+        let uv = strip.segments.get(q);
+        (uv, strip.points.get(q), strip.points.get(q + 1), uv.map_or(strip.points.last(), |_| None))
+    }
+
+    /// The quads of `new` that differ from those of `old`, as one range.
+    fn changed_quads(old: &Strip, new: &Strip) -> Option<std::ops::Range<usize>> {
+        if old.bank != new.bank || old.linked != new.linked {
+            return Some(0..QUADS);
+        }
+        let differs = |q: usize| Self::quad_inputs(old, q) != Self::quad_inputs(new, q);
+        let first = (0..QUADS).find(|&q| differs(q))?;
+        let last = (first..QUADS).rev().find(|&q| differs(q)).unwrap_or(first);
+        Some(first..last + 1)
     }
 
     /// The existing index buffer reads [0,2,1,1,2,3]. Swapping the middle
@@ -870,8 +959,7 @@ impl SkidMarks {
     /// Bounds (min, max) of the strip's vertices that `sort_centre` encloses.
     fn strip_bounds(strip: &Strip) -> Option<(Vec3, Vec3)> {
         let quads = strip.points.len().checked_sub(1)?;
-        let mut corners = (0..quads)
-            .flat_map(|q| Self::quad_vertices(strip, q).map(|v| Vec3::from(v.0)));
+        let mut corners = (0..quads).flat_map(|q| Self::quad_corners(strip, q));
         let first = corners.next()?;
         Some(corners.fold((first, first), |(min, max), v| (min.min(v), max.max(v))))
     }
@@ -937,35 +1025,49 @@ impl SkidMarks {
     /// The packed vertex bytes of `streamed()`.
     #[cfg(test)]
     fn pack(&self, layout: &VertexLayout, bytes: &mut Vec<u8>) {
-        self.pack_strips(layout, 0..STRIPS, bytes);
+        self.pack_quads(layout, 0..STRIPS * QUADS, bytes);
     }
 
-    /// Runs of strips that differ from the ones last written, which become
-    /// the written ones (F592). All of them the first time.
+    /// Runs of quads (strip * QUADS + quad) that differ from the ones last
+    /// written, whose strips become the written ones (F592). All of them the
+    /// first time. Only the strips touched since are compared (`Pool`), and
+    /// of a changed strip only its quads from the first to the last changed
+    /// one are reported (a fading strip changes two).
     fn changes(&mut self) -> Vec<std::ops::Range<usize>> {
         let Some(written) = &mut self.written else {
-            self.written = Some(self.strips.clone());
-            return std::iter::once(0..STRIPS).collect();
+            self.written = Some(self.strips.to_vec());
+            self.strips.touched.fill(false);
+            return std::iter::once(0..STRIPS * QUADS).collect();
         };
         let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
-        for (i, (now, old)) in self.strips.iter().zip(written.iter_mut()).enumerate() {
+        for (i, old) in written.iter_mut().enumerate() {
+            let now = &self.strips.strips[i];
+            if !std::mem::take(&mut self.strips.touched[i]) {
+                #[cfg(test)]
+                // Debug output: NaN payloads compare unequal but print alike.
+                assert_eq!(format!("{now:?}"), format!("{old:?}"), "strip {i} changed without being touched");
+                continue;
+            }
             if now == old {
                 continue;
             }
+            let quads = Self::changed_quads(old, now);
             old.clone_from(now);
+            let Some(quads) = quads else { continue };
+            let run = i * QUADS + quads.start..i * QUADS + quads.end;
             match runs.last_mut() {
-                Some(run) if run.end == i => run.end = i + 1,
-                _ => runs.push(i..i + 1),
+                Some(last) if last.end == run.start => last.end = run.end,
+                _ => runs.push(run),
             }
         }
         runs
     }
 
-    /// The packed vertex bytes of the strip slots in `strips`.
-    fn pack_strips(
+    /// The packed vertex bytes of the quads (strip * QUADS + quad) in `quads`.
+    fn pack_quads(
         &self,
         layout: &VertexLayout,
-        strips: std::ops::Range<usize>,
+        quads: std::ops::Range<usize>,
         bytes: &mut Vec<u8>,
     ) {
         let at = |attribute| layout.offset(attribute).expect("skid mark attribute");
@@ -981,10 +1083,11 @@ impl SkidMarks {
             (at(BINORMAL_ATTRIBUTE), at(TANGENT_ATTRIBUTE))
         });
         let start = bytes.len();
-        bytes.resize(start + strips.len() * SLOT * layout.stride, 0);
+        bytes.resize(start + quads.len() * 4 * layout.stride, 0);
         let mut vertex = start;
-        for strip in &self.strips[strips] {
-            for q in 0..QUADS {
+        for g in quads {
+            let (strip, q) = (&self.strips[g / QUADS], g % QUADS);
+            {
                 let vertices = Self::quad_vertices(strip, q);
                 let basis = basis_offsets.map(|_| Self::quad_basis(strip, q));
                 for edge in Self::STREAM_ORDER {
@@ -1005,15 +1108,16 @@ impl SkidMarks {
         }
     }
 
-    /// `sort_centre` from per-strip bounds: those of the strips in `changed`
-    /// are recomputed, the rest kept from earlier writes (the strips that
-    /// `changes` did not report are the ones last bounded).
+    /// `sort_centre` from per-strip bounds: those of the strips with quads
+    /// in `changed` are recomputed, the rest kept from earlier writes (a
+    /// strip's bounds depend only on its quads, and `changes` reports every
+    /// quad that differs from the one last written).
     fn cached_sort_centre(&mut self, changed: &[std::ops::Range<usize>]) -> Vec3 {
         if self.bounds.len() != STRIPS {
             self.bounds = self.strips.iter().map(Self::strip_bounds).collect();
         } else {
             for run in changed {
-                for i in run.clone() {
+                for i in run.start / QUADS..run.end.div_ceil(QUADS) {
                     self.bounds[i] = Self::strip_bounds(&self.strips[i]);
                 }
             }
@@ -1181,9 +1285,9 @@ fn present(marks: Option<ResMut<SkidMarks>>, stream: Res<MeshStream>) {
         let layout = layout.clone();
         let runs = marks.changes();
         for run in &runs {
-            let first = (run.start * SLOT) as u32;
+            let first = (run.start * 4) as u32;
             stream.write_at(marks.mesh.id(), first, layout.stride, |bytes| {
-                marks.pack_strips(&layout, run.clone(), bytes)
+                marks.pack_quads(&layout, run.clone(), bytes)
             });
         }
         let centre = marks.cached_sort_centre(&runs);
@@ -1773,8 +1877,8 @@ mod tests {
         let flush = |marks: &mut SkidMarks, gpu: &mut Vec<u8>| {
             for run in marks.changes() {
                 let mut part = Vec::new();
-                marks.pack_strips(&layout, run.clone(), &mut part);
-                let at = run.start * SLOT * layout.stride;
+                marks.pack_quads(&layout, run.clone(), &mut part);
+                let at = run.start * 4 * layout.stride;
                 gpu.resize((at + part.len()).max(gpu.len()), 0);
                 gpu[at..at + part.len()].copy_from_slice(&part);
             }
@@ -2071,8 +2175,8 @@ mod tests {
             let runs = marks.changes();
             for run in &runs {
                 let mut part = Vec::new();
-                marks.pack_strips(&layout, run.clone(), &mut part);
-                let at = run.start * SLOT * layout.stride;
+                marks.pack_quads(&layout, run.clone(), &mut part);
+                let at = run.start * 4 * layout.stride;
                 if gpu.len() < at + part.len() {
                     gpu.resize(at + part.len(), 0);
                 }
@@ -2095,6 +2199,28 @@ mod tests {
             marks.maintain();
             apply(&mut marks, &mut gpu);
         }
+        // A replay checkpoint restored after more marks.
+        let saved = marks.save();
+        for step in 0..20 {
+            marks.advance(0, 1, &wheel(b"STDR", 3.0, 0., -20. - step as f32 * 0.2));
+            apply(&mut marks, &mut gpu);
+        }
+        marks.restore(&saved);
+        apply(&mut marks, &mut gpu);
+        // Short strips until the pool is full: steals, retiring and fading.
+        for step in 0..1500 {
+            let x = 100. + step as f32 * 0.3;
+            marks.advance(0, step % 4, &wheel(b"STDR", 3.0, 0., x));
+            if step % 3 == 2 {
+                marks.end(0, step % 4);
+            }
+            marks.maintain();
+            if step % 5 == 0 || step > 1400 {
+                apply(&mut marks, &mut gpu);
+            }
+        }
+        assert!(marks.strips.iter().filter(|s| s.retiring).count() > 0);
+        apply(&mut marks, &mut gpu);
         marks.clear();
         apply(&mut marks, &mut gpu);
     }

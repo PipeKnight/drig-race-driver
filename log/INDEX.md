@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F845](F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
 | [F844](F0844.md) | 2026-11-18 | Main thread: flashback checkpoints pack the live words on the compute pool |
 | [F843](F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
 | [F842](F0842.md) | 2026-11-17 | Prop breaks copy one switch per box, not every box |

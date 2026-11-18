@@ -3025,3 +3025,53 @@ running (`busy_procs=0`). A is F843 (`local/mt/base843.exe`).
   main 5.7–8.6 ms in both. Only the checkpoint stage is compared here.
 - The simulation is unchanged: the packed runs and the restored state are the
   same, and the identity check is in prepush.
+
+## Main thread: skid marks write only the changed quads (F845)
+
+### What was left
+
+After F843, skid present still cost 0.29–0.40 ms per frame late in the derby,
+although the mesh stream wrote only about 2 KB per frame. An instrumented build
+split a frame with changes like this:
+
+| Part | Cost |
+|---|---|
+| `changes()` | 190–200 µs |
+| packing the changed strips | 85–109 µs |
+| sort centre | 37–48 µs |
+| stream lock wait | about 1 µs |
+
+About 225–233 of the 240 strips were in use, and 28–37 changed per frame.
+`changes()` compared every strip with its written copy, point by point. A
+changed strip was then repacked whole (32 quads), although an advancing strip
+changes one or two quads and a fading strip two.
+
+### Fix
+
+- **Touched slots.** The strip slots are a `Pool`. It has no `DerefMut`, and `IndexMut` marks the slot touched, so every mutation goes through the tracking. `changes()` compares only the touched slots. In test builds it asserts that an untouched slot still equals its written copy.
+- **Changed quads.** Of a changed strip, `changes()` reports the quads from the first to the last that differ (`changed_quads`, over `quad_inputs`), or all 32 when the bank or `linked` changed. Runs are global quad indices: `pack_quads` packs them, and `present` writes them at `run.start * 4` vertices.
+- **Bounds.** Strip bounds use `quad_corners` (positions only) instead of the full vertices.
+
+The unit test `changed_strip_runs_rebuild_the_whole_buffer` covers advancing, ending, a checkpoint restore and a pool filled by 1,500 short strips (steals, retiring, fading). After every write it checks that the streamed bytes equal a whole repack and that the cached centre equals the full scan.
+
+### A/B
+
+The A/B used `local/mt/cost.ps1`: offscreen 1280x720, fixed step, the Detroit derby, 3,000 ticks, three alternating pairs.
+
+- A = F844, B = this change.
+- The pairs ran under the build lock on an idle machine: no cargo, rustc or grid-app before them, and `busy_procs=0` in every run.
+- Raw output: `local/mt/skq2.txt`.
+
+| ms per frame | A1 | B1 | A2 | B2 | A3 | B3 |
+|---|---|---|---|---|---|---|
+| skid present | 0.291 | 0.094 | 0.299 | 0.106 | 0.288 | 0.091 |
+| main | 5.255 | 5.857 | 6.305 | 5.956 | 5.667 | 5.814 |
+| MainSchedule | 5.172 | 5.715 | 6.089 | 5.816 | 5.577 | 5.659 |
+
+Skid present fell by 0.19–0.20 ms per frame in every pair. The main-thread mean varied between runs by more than that, so only the skid stage is compared.
+
+### Image
+
+The mesh is unchanged: after every write, the streamed bytes equal a whole repack.
+
+The final screenshots of these runs cannot check this. One executable gives two or three different final frames across runs. For example, hash 4a63f5bd… came from A in two runs and from B in one.
