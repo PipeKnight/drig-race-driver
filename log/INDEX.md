@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F858](F0858.md) | 2026-11-19 | Owner priority 2026-11-19: portable data, few files, in-app update, release/debug split |
 | [F857](F0857.md) | 2026-11-18 | Slow render frames by span: no render pass grows; main-world work at the same instant |
 | [F856](F0856.md) | 2026-11-18 | HUD drawn by an overlay pass in the frame's render graph; no OSD camera |
 | [F855](F0855.md) | 2026-11-18 | Archived worktree copies zipped into worktree-evidence |

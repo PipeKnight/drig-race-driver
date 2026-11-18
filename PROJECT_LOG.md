@@ -150,6 +150,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 ## Next actions
 
+- Owner priority (2026-11-19, high), after the FPS series: distribution rows 129-135 (portable data, few files, in-app update, release/debug split, one executable, CLI flags, Linux). F858.
 - On the owner's word, resume the paused children (F531): robustness row 90, then body sleeping
   and tyre walls; car-series gear clunk/backfire/whine/turbo; career rerun of event 13.
 - Manual lap and sound on speakers on playable e57f2fd391e2; the a11cddf7de27 APKs on the phone.
@@ -176,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F858](log/F0858.md) | 2026-11-19 | Owner priority 2026-11-19: portable data, few files, in-app update, release/debug split |
 | [F857](log/F0857.md) | 2026-11-18 | Slow render frames by span: no render pass grows; main-world work at the same instant |
 | [F856](log/F0856.md) | 2026-11-18 | HUD drawn by an overlay pass in the frame's render graph; no OSD camera |
 | [F855](log/F0855.md) | 2026-11-18 | Archived worktree copies zipped into worktree-evidence |
@@ -235,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F797](log/F0797.md) | 2026-11-10 | Replay sound and highlight monitors traced; engine sound replayed |
 | [F796](log/F0796.md) | 2026-11-10 | Damage parts, glass, lights and shards replayed; crash replay tested with a real wreck |
 | [F795](log/F0795.md) | 2026-11-10 | Flashback count across career multi-race events |
-| [F794](log/F0794.md) | 2026-11-10 | Replay and Flashback round 5: automatic crash replay, Restart reload, bonus, TERMINAL flag, checkpoint heap |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
