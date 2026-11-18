@@ -176,6 +176,8 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F847](log/F0847.md) | 2026-11-18 | Car transparent draws: no merge without a visible change; reflection overlays bound the gain |
+| [F846](log/F0846.md) | 2026-11-18 | Ground cover: stable billboard slots write only the changed instances |
 | [F845](log/F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
 | [F844](log/F0844.md) | 2026-11-18 | Main thread: flashback checkpoints pack the live words on the compute pool |
 | [F843](log/F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
@@ -234,8 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F786](log/F0786.md) | 2026-11-10 | Career rival tag writer |
 | [F785](log/F0785.md) | 2026-11-10 | HUD: front-end colour streams, drift ring shake and roll-up, rival name tag |
 | [F784](log/F0784.md) | 2026-11-10 | 3D loading world, pause bloom, race-intro bars scoped |
-| [F783](log/F0783.md) | 2026-11-10 | Drift GP and Freestyle drift cars, scaled joined props, on_track chords and gate progress |
-| [F782](log/F0782.md) | 2026-11-10 | HUD: team-mate name tag; original post-race art research (rows 68, 69) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -1579,7 +1579,8 @@ main thread 0.25 → 0.09 ms; `mesh_stream::upload` 0.78 → 0.59-0.77 ms, which
 regathers dominate. Phone [I]: about 0.4 ms less on the main thread.
 
 Left: ground cover writes all its billboards on each regather. Stable slots for the billboards
-would let it write only the ones that enter or leave; not done here.
+would let it write only the ones that enter or leave; done in F846 ("Ground cover: stable
+billboard slots (F846)").
 
 ## Grid start: GPU passes and opponent shadow bodies (F600)
 
@@ -2627,14 +2628,16 @@ Ranked plan (expected gain on the bound thread; all general, image-neutral, with
    extended material, shadow twins faced to the sun by a view uniform). Removes 90-230 MB/s of
    in-place writes: about 3 ms of render thread and 1.5 ms of main thread at Donington, 1.5 ms
    in the derby. Grass did the same in F580. Biggest single item.
-2. **Render-thread encode at Donington** (5-6 ms, about 360 transparent draw groups): merge the
+2. **Measured in F847, nothing merged** (see "Car transparent draws (F847)" below).
+   **Render-thread encode at Donington** (5-6 ms, about 360 transparent draw groups): merge the
    blended static track groups that share material and pipeline into fewer draws, check
    specialisation and bind-group churn in the transparent phase, sort once per frame.
 3. **Measured in F840, not kept**: without the poll the same maintenance runs inside
    `queue.submit` (see "Frame-split poll (F840)" below). **Frame-split overhead**: `gpu_begin` polls the device every frame while the counter is shown
    (about 1.1 ms in the profile build). Poll every few frames or read back on the submit
    callback; measure first whether wgpu only moves the same work elsewhere.
-4. **Ground-cover gathers** (`ground_detail`, 43 MB/s): blended cover is gathered on each 16 m
+4. **Done in F846** (see "Ground cover: stable billboard slots (F846)" below).
+   **Ground-cover gathers** (`ground_detail`, 43 MB/s): blended cover is gathered on each 16 m
    bucket change synchronously and the whole capacity buffer is written; stream only the
    changed range or keep static chunks.
 5. **Main thread** (7-8 ms in release): `drive_tick` (derby collisions, 5-7 ms bursts of
@@ -3075,3 +3078,101 @@ Skid present fell by 0.19–0.20 ms per frame in every pair. The main-thread mea
 The mesh is unchanged: after every write, the streamed bytes equal a whole repack.
 
 The final screenshots of these runs cannot check this. One executable gives two or three different final frames across runs. For example, hash 4a63f5bd… came from A in two runs and from B in one.
+
+## Car transparent draws (F847)
+
+Item 2 of the F837 plan: the Donington render thread spends 5-6 ms in `r_encode`, mostly in the
+Transparent3d phase. Goal: fewer draws or switches there with no visible change.
+
+Census (a diagnostic module, not committed), Donington race, native, 420 frames: 243.6
+transparent items and 238.6 draws per frame, 7.1 pipelines, 41.8 materials, 124 pipeline switches
+and 194 material switches per frame. Almost all of them are car parts:
+
+| kind | draws per frame |
+|---|---|
+| reflection overlays of opponent glass | 53.2 |
+| opponent glass panes | 53.2 |
+| overlays of player opaque parts | 40.0 |
+| overlays of batched opponent parts | 27.4 |
+| overlays of opponent wheels | 23.9 |
+| other blended parts | 10.0 |
+| player glass, and its overlays | 10.0 + 10.0 |
+| overlays of player wheels | 8.0 |
+| unclassified | 3.0 |
+
+Only 39.9 draws per frame share pipeline, material and mesh slab with their neighbour. No merge
+keeps the image:
+- each glass overlay is drawn right after its pane (sort bias 0.01). A merged draw of a car's
+  panes followed by a merged draw of their overlays draws pane 1, pane 2, overlay 1, overlay 2,
+  so a rear pane's reflection lands over the front pane;
+- opponent wheels rotate on their own transforms;
+- the opaque-part overlays of batched opponents are already merged with the batch;
+- the player car is never batched (G300).
+
+Upper bound: the same binary with `GRID_CAR_REFLECTIONS=static` against `off` (all of the
+~160 overlay draws gone), baseline MSAA, 4 idle-gated alternating pairs:
+
+| variant | fps | 1 % low | worst window | render ms | `r_encode` ms | GPU ms | main ms |
+|---|---|---|---|---|---|---|---|
+| static | 79.7 | 44.4 | 58.9 | 10.46 | 5.26 | 2.54 | 6.42 |
+| off | 79.8 | 44.4 | 59.0 | 9.03 | 4.08 | 2.40 | 6.47 |
+
+Paired (off minus static): `r_encode` -1.18 ms (every pair -0.9 to -1.6), render -1.43 ms, GPU
+-0.14 ms. So removing every overlay saves about 1.2 ms of encode and does not move the frame
+rate at this scene. A material sort of the ~99 opaque-part overlays (bias -1e6) would win part
+of that and needs `mesh_stream::resort` (item 5); the coordinator chose to skip it. Nothing was
+changed.
+
+## Ground cover: stable billboard slots (F846)
+
+Item 4 of the F837 plan. Before, each regather of the ground cover (`ground_detail`, every 16 m
+bucket change) packed every gathered billboard and wrote the whole capacity buffer, 4.7 MB at
+Donington (F592), 43-49 MB/s in a race (F837, F838).
+
+Change (`ground_detail.rs`): a slot table keeps which cover instance each billboard slot of the
+padded asset holds. A regather returns only the instance indices (on the compute pool as before);
+`apply` updates the table and builds, packs and writes (`MeshStream::write_at`) only the runs of
+slots that changed (runs closer than 8 slots are joined). Free slots get the padding billboard
+(limit 0, never drawn), as the asset's padding always had.
+- Masked and A2C cover (draw order does not matter): an instance that stays keeps its slot; a new
+  one takes the lowest free slot.
+- Blended cover (the default in Enhanced and with `anti_aliasing = 3`) keeps the gather's fixed
+  global order (bucket x, bucket z, index), which is its draw order. The new placement keeps every
+  instance that still sits after its predecessor in place and puts new instances in the slots
+  before the next kept one; a slot is written only when its instance changes. When the new order
+  does not fit, the gather is placed again centred in the capacity and written whole (also on
+  the first gather and when the asset grows).
+
+Unit tests: the unordered table writes only changed slots; the ordered one keeps the drawn
+order equal to the gather order through a 24-step diagonal drive over 7x7 buckets, rebuilds at
+most 8 times and writes 1,707 slots where whole writes would be 4,392 (39 %): each step east
+appends a column after the last one, which the slack of a centred layout holds about once.
+
+A/B: Donington race, native, 1280x800 window, `GRID_MESH_UPLOADS=0`, idle-gated alternating
+runs (0 busy starts); before = `cen.exe` (F841 c12f3e5a plus the census module, which only counts),
+after = the same plus this change. Baseline is the default MSAA profile (A2C cover); Enhanced is
+`--graphics enhanced` (blended cover). DLAA needs the `dlaa` feature build with the NVIDIA SDK
+and was not measured; it uses the same blended cover path as Enhanced, so the Enhanced rows stand
+for it.
+
+| mode | variant | runs | fps | 1 % low | worst window | main ms | render ms | GPU ms | `mesh_stream` KB/s |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline (MSAA, A2C) | before | 7 | 94.1 | 70.2 | 64.9 | 5.72 | 9.84 | 2.24 | 69,858 |
+| baseline (MSAA, A2C) | after | 7 | 96.3 | 65.6 | 41.5 | 5.52 | 9.70 | 2.38 | 17,180 |
+| Enhanced (blended) | before | 6 | 76.6 | 44.4 | 14.2 | 6.48 | 12.54 | 2.16 | 73,393 |
+| Enhanced (blended) | after | 6 | 74.8 | 44.4 | 8.7 | 6.72 | 13.05 | 2.07 | 40,788 |
+
+Paired per run (after minus before): baseline render -0.14 ms (+1.1 to -1.5), main -0.20, GPU
++0.14; Enhanced render +0.51 ms (+2.0 to -0.6), `r_prepare` +0.24, main +0.25. The streamed bytes
+fall by 75 % (baseline) and 44 % (Enhanced; the blended order forces more rewrites); the frame
+times move inside the run-to-run spread, so no frame-rate gain is claimed. The lower worst
+windows of the after runs are not the cover: in baseline run 1 every timer was slower (fixed
+3.7 ms, interference), and baseline run 2's 109 ms frame came at tick 128 during the countdown
+with the cars stopped (the start hitch, item 6). In Enhanced, the first pair (the first runs of
+the session) had one 1.5 s (before) and 1.9 s (after) frame in the 6th and 8th window, with
+`r_prepare` 50 and 92 ms in that window: pipelines created on first sight, in both variants (item
+6). The worst windows of the other five pairs are 61-69 fps before and 61-71 after.
+
+Image: fixed-step offscreen captures (1280x720, autopilot, ticks 900 and 1800, Donington and
+Spa, baseline and Enhanced), before against after: 0 pixels differ in all 8 pairs; two runs of
+the after binary differ in 0-2 pixels (noise). Unchanged. Crops in `local/ab/crops-cover/` (private).

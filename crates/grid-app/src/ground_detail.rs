@@ -279,12 +279,10 @@ struct Cover {
     distances: Distances,
 }
 
-/// A finished gather: the eye, the instances in draw order and, when they
-/// fit the capacity it was packed for, the vertex bytes.
+/// A finished gather: the eye and the instances in draw order.
 struct Gathered {
     eye: Vec3,
     indices: Vec<u32>,
-    bytes: Option<Vec<u8>>,
 }
 
 #[derive(Resource)]
@@ -303,6 +301,146 @@ pub(crate) struct GroundDetail {
     capacity: usize,
     layout: Option<VertexLayout>,
     pending: Option<Task<Gathered>>,
+    /// Billboard slots of order-free (masked or alpha-to-coverage) cover.
+    slots: Slots,
+}
+
+const FREE: u32 = u32::MAX;
+
+/// Stable billboard slots: an instance keeps its slot while gathers hold it,
+/// so a gather writes only the slots that changed instead of the whole
+/// capacity (F842). Free slots hold `PAD`, which is never drawn. Masked and
+/// alpha-to-coverage cover (depth tested) take any free slot
+/// ([`Slots::update`]); blended cover keeps the gather's draw order in the
+/// buffer ([`Slots::update_ordered`]).
+#[derive(Default)]
+struct Slots {
+    /// Slot -> instance, or `FREE`.
+    held: Vec<u32>,
+    /// Instance -> slot, or `FREE`.
+    slot_of: Vec<u32>,
+    /// Free slots; the lowest is taken first.
+    free: Vec<u32>,
+    /// Instances of the gather being applied.
+    wanted: Vec<bool>,
+}
+
+impl Slots {
+    /// Slots from `first` on hold `indices`, the rest of `capacity` is free.
+    fn reset(&mut self, indices: &[u32], first: usize, capacity: usize, instances: usize) {
+        self.slot_of.clear();
+        self.slot_of.resize(instances, FREE);
+        self.wanted.clear();
+        self.wanted.resize(instances, false);
+        self.held.clear();
+        self.held.resize(capacity, FREE);
+        self.held[first..first + indices.len()].copy_from_slice(indices);
+        for (slot, &i) in indices.iter().enumerate() {
+            self.slot_of[i as usize] = (first + slot) as u32;
+        }
+        self.free = (0..capacity as u32)
+            .rev()
+            .filter(|&s| self.held[s as usize] == FREE)
+            .collect();
+    }
+
+    /// Moves to the gather `indices` (which must fit the capacity) and returns
+    /// the changed slots as sorted runs; runs closer than `GAP` slots are joined.
+    fn update(&mut self, indices: &[u32]) -> Vec<std::ops::Range<u32>> {
+        for &i in indices {
+            self.wanted[i as usize] = true;
+        }
+        let mut dirty = Vec::new();
+        for (slot, held) in self.held.iter_mut().enumerate() {
+            if *held != FREE && !self.wanted[*held as usize] {
+                self.slot_of[*held as usize] = FREE;
+                *held = FREE;
+                self.free.push(slot as u32);
+                dirty.push(slot as u32);
+            }
+        }
+        // Lowest free slots first keeps the drawn range compact.
+        self.free.sort_unstable_by(|a, b| b.cmp(a));
+        for &i in indices {
+            self.wanted[i as usize] = false;
+            if self.slot_of[i as usize] != FREE {
+                continue;
+            }
+            let slot = self.free.pop().expect("gather fits the capacity");
+            self.held[slot as usize] = i;
+            self.slot_of[i as usize] = slot;
+            dirty.push(slot);
+        }
+        dirty.sort_unstable();
+        dirty.dedup();
+        runs(dirty)
+    }
+
+    /// Moves to the gather `indices`, keeping their order in the buffer (free
+    /// slots between them are not drawn), and returns the changed slots as
+    /// [`Slots::update`]; `None` (state unchanged) when they do not fit in
+    /// order. The gather's order is a fixed global order (buckets by x, then
+    /// z, see [`Cover::gather`]), so as the eye moves, instances leave and
+    /// arrive at the ends of each bucket column; a kept instance stays in its
+    /// slot when the arrivals before it fit in the free slots before it, and
+    /// arrivals are put just before the next kept instance, in the slots the
+    /// leavers there freed.
+    fn update_ordered(&mut self, indices: &[u32]) -> Option<Vec<std::ops::Range<u32>>> {
+        let capacity = self.held.len();
+        let mut next = vec![FREE; capacity];
+        let mut pending: Vec<u32> = Vec::new();
+        let mut at = 0;
+        for &i in indices {
+            let slot = self.slot_of[i as usize];
+            if slot != FREE && slot as usize >= at + pending.len() {
+                let first = slot as usize - pending.len();
+                next[first..slot as usize].copy_from_slice(&pending);
+                pending.clear();
+                next[slot as usize] = i;
+                at = slot as usize + 1;
+            } else {
+                pending.push(i);
+            }
+        }
+        if at + pending.len() > capacity {
+            return None;
+        }
+        next[at..at + pending.len()].copy_from_slice(&pending);
+        let mut dirty = Vec::new();
+        for (slot, (old, new)) in self.held.iter().zip(&next).enumerate() {
+            if old != new {
+                if *old != FREE {
+                    self.slot_of[*old as usize] = FREE;
+                }
+                dirty.push(slot as u32);
+            }
+        }
+        for &slot in &dirty {
+            let new = next[slot as usize];
+            if new != FREE {
+                self.slot_of[new as usize] = slot;
+            }
+        }
+        self.held = next;
+        self.free = (0..capacity as u32)
+            .rev()
+            .filter(|&s| self.held[s as usize] == FREE)
+            .collect();
+        Some(runs(dirty))
+    }
+}
+
+/// Sorted dirty slots as runs; runs closer than `GAP` slots are joined.
+fn runs(dirty: Vec<u32>) -> Vec<std::ops::Range<u32>> {
+    const GAP: u32 = 8;
+    let mut runs: Vec<std::ops::Range<u32>> = Vec::new();
+    for slot in dirty {
+        match runs.last_mut() {
+            Some(run) if slot <= run.end + GAP => run.end = slot + 1,
+            _ => runs.push(slot..slot + 1),
+        }
+    }
+    runs
 }
 
 struct Loaded {
@@ -441,6 +579,7 @@ fn start(
         capacity: 0,
         layout: None,
         pending: None,
+        slots: Slots::default(),
     });
 }
 
@@ -521,17 +660,11 @@ fn pack(billboards: &[Billboard], capacity: usize, layout: &VertexLayout, bytes:
 }
 
 impl Cover {
-    /// Gather at `eye` and pack the vertices for `capacity` billboards.
-    fn gathered(&self, eye: Vec3, capacity: usize, layout: Option<&VertexLayout>) -> Gathered {
+    /// Gather at `eye`.
+    fn gathered(&self, eye: Vec3) -> Gathered {
         let mut indices = Vec::new();
         self.gather(eye, MARGIN, &mut indices);
-        let bytes = layout.filter(|_| indices.len() <= capacity).map(|layout| {
-            let billboards: Vec<_> = indices.iter().map(|&i| self.billboard(i)).collect();
-            let mut bytes = Vec::new();
-            pack(&billboards, capacity, layout, &mut bytes);
-            bytes
-        });
-        Gathered { eye, indices, bytes }
+        Gathered { eye, indices }
     }
 
     fn billboard(&self, i: u32) -> Billboard {
@@ -582,20 +715,58 @@ impl Cover {
 const TRIANGLES: [u32; 6] = [0, 1, 2, 2, 1, 3];
 
 impl GroundDetail {
-    /// Puts a gather in the mesh: its bytes over the GPU allocation, or a new
-    /// asset when the cover outgrew its capacity (AUTHORED headroom, so the
-    /// asset is rarely replaced again).
+    /// Puts a gather in the mesh: only the billboard slots that changed are
+    /// written over the GPU allocation (F842), or a new asset when the cover
+    /// outgrew its capacity (AUTHORED headroom, so the asset is rarely replaced
+    /// again) or blended cover found no room in its order.
     fn apply(&mut self, done: Gathered, meshes: &mut Assets<Mesh>, stream: &MeshStream) {
-        match done.bytes {
-            Some(bytes) => stream.write(self.mesh.id(), |out| out.extend_from_slice(&bytes)),
-            None => {
-                let billboards: Vec<_> = done.indices.iter().map(|&i| self.cover.billboard(i)).collect();
+        let instances = self.cover.instances.len();
+        let runs = match self.layout {
+            Some(_) if done.indices.len() <= self.capacity => Some(if !self.blended {
+                self.slots.update(&done.indices)
+            } else if let Some(runs) = self.slots.update_ordered(&done.indices) {
+                runs
+            } else {
+                // No room in order: lay the gather out again over the whole
+                // allocation, centred so it can grow at both ends.
+                let first = (self.capacity - done.indices.len()) / 2;
+                self.slots
+                    .reset(&done.indices, first, self.capacity, instances);
+                std::iter::once(0..self.capacity as u32).collect()
+            }),
+            _ => None,
+        };
+        match (runs, self.layout.as_ref()) {
+            (Some(runs), Some(layout)) => {
+                for run in runs {
+                    let billboards: Vec<_> = self.slots.held[run.start as usize..run.end as usize]
+                        .iter()
+                        .map(|&i| {
+                            if i == FREE {
+                                PAD
+                            } else {
+                                self.cover.billboard(i)
+                            }
+                        })
+                        .collect();
+                    stream.write_at(self.mesh.id(), run.start * 4, layout.stride, |out| {
+                        pack(&billboards, billboards.len(), layout, out)
+                    });
+                }
+            }
+            _ => {
+                let billboards: Vec<_> = done
+                    .indices
+                    .iter()
+                    .map(|&i| self.cover.billboard(i))
+                    .collect();
                 self.capacity = (billboards.len() + billboards.len() / 4).max(1);
                 let asset = cover_mesh(&billboards, self.capacity);
                 self.layout = Some(VertexLayout::of(&asset));
                 if let Some(mut target) = meshes.get_mut(&self.mesh) {
                     *target = asset;
                 }
+                self.slots.reset(&done.indices, 0, self.capacity, instances);
             }
         }
         self.gathered = done.indices;
@@ -638,18 +809,16 @@ fn present(
     match moved {
         Some((distance, new_bucket)) if distance <= MARGIN && !(detail.blended && new_bucket) => {
             if detail.pending.is_none() && distance > MARGIN / 2. {
-                let (cover, capacity, layout) =
-                    (detail.cover.clone(), detail.capacity, detail.layout.clone());
-                detail.pending = Some(AsyncComputeTaskPool::get().spawn(async move {
-                    cover.gathered(eye, capacity, layout.as_ref())
-                }));
+                let cover = detail.cover.clone();
+                detail.pending =
+                    Some(AsyncComputeTaskPool::get().spawn(async move { cover.gathered(eye) }));
             }
         }
         // First frame, out of the gather's reach, or blended cover in a new
         // bucket: gather now.
         _ => {
             detail.pending = None;
-            let done = detail.cover.gathered(eye, detail.capacity, detail.layout.as_ref());
+            let done = detail.cover.gathered(eye);
             detail.apply(done, &mut meshes, &stream);
         }
     }
@@ -685,6 +854,92 @@ fn present(
 mod tests {
     use super::*;
     use grid_formats::ground_cover::Sprite;
+
+    #[test]
+    fn slots_keep_held_instances_and_write_only_changes() {
+        let mut slots = Slots::default();
+        slots.reset(&[10, 11, 12, 13], 0, 8, 40);
+        // 11 leaves, 20 and 21 arrive: 11's slot is reused first, then slot 4.
+        let runs = slots.update(&[13, 12, 10, 20, 21]);
+        assert_eq!(slots.held, [10, 20, 12, 13, 21, FREE, FREE, FREE]);
+        assert_eq!(runs, std::iter::once(1..5).collect::<Vec<_>>());
+        // The same gather again writes nothing.
+        assert!(slots.update(&[10, 12, 13, 20, 21]).is_empty());
+        // Far changes stay separate runs.
+        slots.reset(&(0..30).collect::<Vec<_>>(), 0, 40, 40);
+        let mut next: Vec<u32> = (1..29).collect();
+        next.push(35);
+        let runs = slots.update(&next);
+        assert_eq!(runs, [0..1, 29..30]);
+        assert_eq!(slots.held[0], 35);
+        assert_eq!(slots.held[29], FREE);
+        for (slot, &i) in slots.held.iter().enumerate() {
+            if i != FREE {
+                assert_eq!(slots.slot_of[i as usize], slot as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn ordered_slots_keep_the_gather_order_and_write_only_changes() {
+        // Instances in the global order of `Cover::gather`: bucket x, bucket z,
+        // then 3 per bucket; a gather takes the 7x7 buckets around the eye.
+        const SIDE: u32 = 40;
+        let gather = |cx: u32, cz: u32| -> Vec<u32> {
+            let mut out = Vec::new();
+            for x in cx - 3..=cx + 3 {
+                for z in cz - 3..=cz + 3 {
+                    out.extend((0..3).map(|k| (x * SIDE + z) * 3 + k));
+                }
+            }
+            out
+        };
+        let first = gather(10, 10);
+        let capacity = first.len() + first.len() / 4;
+        let mut slots = Slots::default();
+        slots.reset(&first, 0, capacity, (SIDE * SIDE * 3) as usize);
+        let (mut cx, mut cz, mut written, mut rebuilds) = (10, 10, 0, 0);
+        for step in 0..24 {
+            // Diagonal drive: north for two buckets, then east for one.
+            if step % 3 == 2 {
+                cx += 1
+            } else {
+                cz += 1
+            }
+            let indices = gather(cx, cz);
+            match slots.update_ordered(&indices) {
+                Some(runs) => {
+                    written += runs.iter().map(|run| run.len()).sum::<usize>();
+                }
+                None => {
+                    // As `GroundDetail::apply`: the whole allocation, centred.
+                    rebuilds += 1;
+                    written += capacity;
+                    let first = (capacity - indices.len()) / 2;
+                    slots.reset(&indices, first, capacity, (SIDE * SIDE * 3) as usize);
+                }
+            }
+            let drawn: Vec<u32> = slots.held.iter().copied().filter(|&i| i != FREE).collect();
+            assert_eq!(drawn, indices, "step {step}");
+            for (slot, &i) in slots.held.iter().enumerate() {
+                if i != FREE {
+                    assert_eq!(slots.slot_of[i as usize], slot as u32);
+                }
+            }
+            // The same gather again writes nothing.
+            assert_eq!(slots.update_ordered(&indices), Some(Vec::new()));
+        }
+        // A whole-buffer write per gather would be 24 * capacity slots. Each
+        // step east appends a column at the end, which the slack after a
+        // centred layout holds about once: east steps rewrite the buffer,
+        // north steps write a bucket per column (1707 of 4392 slots here).
+        assert!(rebuilds <= 8, "{rebuilds} rebuilds");
+        assert!(
+            written < 24 * capacity / 2,
+            "{written} of {} slots written",
+            24 * capacity
+        );
+    }
 
     #[test]
     fn actual_cover_material_uses_soft_alpha_for_native_dlaa_only() {

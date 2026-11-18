@@ -8,6 +8,8 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F847](F0847.md) | 2026-11-18 | Car transparent draws: no merge without a visible change; reflection overlays bound the gain |
+| [F846](F0846.md) | 2026-11-18 | Ground cover: stable billboard slots write only the changed instances |
 | [F845](F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
 | [F844](F0844.md) | 2026-11-18 | Main thread: flashback checkpoints pack the live words on the compute pool |
 | [F843](F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
