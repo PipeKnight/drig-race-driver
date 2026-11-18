@@ -176,6 +176,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F848](log/F0848.md) | 2026-11-18 | Start hitch: blit pipelines pre-warmed, render thread yields to compiles under the cover |
 | [F847](log/F0847.md) | 2026-11-18 | Car transparent draws: no merge without a visible change; reflection overlays bound the gain |
 | [F846](log/F0846.md) | 2026-11-18 | Ground cover: stable billboard slots write only the changed instances |
 | [F845](log/F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
@@ -235,7 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F787](log/F0787.md) | 2026-11-10 | Front-end glyph grafting for the post-race screens (row 69) |
 | [F786](log/F0786.md) | 2026-11-10 | Career rival tag writer |
 | [F785](log/F0785.md) | 2026-11-10 | HUD: front-end colour streams, drift ring shake and roll-up, rival name tag |
-| [F784](log/F0784.md) | 2026-11-10 | 3D loading world, pause bloom, race-intro bars scoped |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

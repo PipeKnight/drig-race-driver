@@ -109,6 +109,7 @@ mod graphics;
 mod graphics_benchmark;
 mod perf_test;
 mod perf_timing;
+mod blit_prewarm;
 mod pipeline_warmup;
 mod transition;
 mod frame_pacing;

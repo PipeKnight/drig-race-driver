@@ -113,6 +113,53 @@ Owner retest after F726 (prototype e66e1c24963c): "отдельные объек
   full-size replay).
 - After [V], F751: Washington and Spa build no pipeline after the warm-up (before: 3 each), with smoke on screen from the opponents' launch wheelspin.
 
+### 2.3 Blit pre-warm: a camera first seen under the cover (item 6)
+
+- [V] Profile builds with 1 s windows (`local/ab/hitchprof.ps1`, Donington race, `present_mode =
+  auto_no_vsync`): the worst start frame sat in the window with `pipeline_warmup phase=Restore` and
+  `water_probe capture=start`. One span covered it: Bevy's
+  `bevy_core_pipeline::upscaling::prepare_view_upscaling_pipelines`. Enhanced, cold driver cache:
+  82.6 ms/frame over 20 frames (1.65 s in one frame, frame max 1705 ms). Baseline, warm: 22.4
+  ms/frame over 40 frames (the 943 ms frame).
+- Cause: that system specializes a view's final blit (`BlitPipelineKey`: output format, blend,
+  compositing space) on the first frame the key is new, then calls `block_on_render_pipeline`. The
+  water probe's six faces (Rgba16Float image targets, spawned at Restore) are the first views with
+  that output format. Their blit compile was queued behind the ~40 pipelines the Restore phase
+  had just queued, and the render thread waited for all of them. A cold driver cache (first run of
+  a new executable, which is what the owner gets with every new prototype) makes each compile
+  slower.
+- Fix: `blit_prewarm.rs` (render world, `Queue` set) specializes the blit for every possible
+  target as soon as it exists, without waiting: every window surface view format and the view
+  format of every image with `RENDER_ATTACHMENT` usage. It queues the replace blend and, where the
+  adapter can blend the format, alpha blending, for the default compositing space and any space a
+  camera uses. Depth and integer formats are skipped. The face images are made at scene build, so
+  their blit compiles at loading. Specialization is cached by key, so the camera gets the same,
+  already compiled pipeline later and the block returns at once. The image does not change: it
+  uses the same pipeline, made earlier. This is shared for all tracks, cars, modes and image
+  cameras (water probe, car reflections, cockpit mirror, render scale, offscreen captures),
+  because the keys come from the targets that exist, not from a list. The first time it sees a
+  format it prints `blit_prewarm format=F keys=N`.
+- Test: `blit_prewarm::tests::colour_targets_get_replace_and_blend_keys_and_depth_or_integer_targets_none`.
+- Side effect found [V] (A/B `hy-*`, `local/ab/lift.py`; `pipeline_warmup phase=… ms=` now prints the
+  time since the warm-up started): without the block, the ~23 probe-view pipelines the Restore
+  phase queues (pbr opaque/blend variants for the Hdr, MSAA-off face views, their tonemapping and
+  post-processing) compile in the background while frames render, about 5x slower than inside the
+  blocked frame (the last one waited 56 frames, ~1 s, against 169 ms). The worst covered frame fell
+  from 0.7-1.4 s to 68-94 ms, but the cover lifted 0.3-1 s later. [I] The rendering frames compete
+  with the compile threads.
+- Compile yield: while the cover is up and the cache has waiting pipelines, the render thread
+  sleeps 20 ms after each frame (`Cleanup` set, after `count`; nothing is visible but the cover).
+  Restore-to-lift returns to the baseline's or below (baseline 1.8-1.9 s, Enhanced 2.6-3.0 s
+  against 3.1-3.3 s before), at a covered frame of 91-119 ms. 50 ms lifted no sooner and made the
+  covered frames slower. `GRID_WARMUP_YIELD_MS` sets the pause (0 = off), `GRID_BLIT_PREWARM=0`
+  skips the pre-warm (comparison runs). Test:
+  `pipeline_warmup::tests::render_thread_yields_only_under_the_cover_while_pipelines_compile`.
+- Result [V] (F848, same executable with both changes off vs on, warm): worst covered frame
+  baseline 87-692 → 87-89 ms, Enhanced 364-549 → 105-114 ms; cover time unchanged (5.3-5.7 s and
+  3.7-4.2 s); cold driver cache: 711/1292 ms → 92-113 ms. Play after the lift unchanged. Cover time
+  depends strongly on how warm the driver's per-executable shader cache is (2-3 s for an executable
+  run dozens of times, 5-10 s for a new one).
+
 ## 3. Evidence
 
 Private, `local/blink/`: traces `t60.log` (before), `t60-fix*.log` (after), captures `w-*`,

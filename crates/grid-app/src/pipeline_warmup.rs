@@ -14,6 +14,9 @@
 //! with the dither variant) and every shadow-level part a step-0 shadow proxy
 //! until it is quiet again; then all of that is undone and the cover lifts
 //! once the cache is quiet a third time. `GRID_PIPELINE_WARMUP=0` skips it.
+//! While the cover is up and pipelines compile, the render thread pauses
+//! [`YIELD_MS`] after each frame, which lets the background compiles run at
+//! full speed (the phase lines print `ms=` since the cover went up).
 //!
 //! Research: `GRID_PIPELINE_TRACE=1` prints each new pipeline (label and key
 //! defines), how many frames it waited and the frames that had any waiting;
@@ -34,6 +37,20 @@ use std::sync::Arc;
 const QUIET_FRAMES: u32 = 8;
 /// The cover lifts after this many frames even if pipelines keep coming.
 const MAX_FRAMES: u32 = 900;
+/// Milliseconds the render thread pauses after a covered frame while
+/// pipelines compile (`GRID_WARMUP_YIELD_MS`, 0 = off). Rendering under the
+/// cover slowed the background compiles about five times (item 6: the water
+/// probe's 23 view pipelines took ~60 frames, ~1 s, instead of the 0.17 s
+/// they took inside a blocked frame); 20 ms gave the compiles back their
+/// speed (50 ms did not lift sooner).
+const YIELD_MS: u64 = 20;
+
+/// The pause after a frame: only under the cover and while a pipeline is
+/// still compiling, so play and offscreen captures with synchronous
+/// compilation never wait.
+fn compile_yield(covered: bool, waiting: bool, ms: u64) -> Option<std::time::Duration> {
+    (covered && waiting && ms > 0).then(|| std::time::Duration::from_millis(ms))
+}
 
 fn env_on(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v == "1")
@@ -45,9 +62,9 @@ pub fn capture_async() -> bool {
 }
 
 /// The render world's pipeline cache as the main world sees it: waiting and
-/// total pipelines after the last rendered frame.
+/// total pipelines after the last rendered frame; [2] is 1 while the cover is up.
 #[derive(Resource, Clone, Default)]
-struct Counters(Arc<[AtomicUsize; 2]>);
+struct Counters(Arc<[AtomicUsize; 3]>);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Phase {
@@ -75,6 +92,8 @@ pub struct Warmup {
     /// Entities shown for the warm-up, with the visibility their own systems
     /// last gave them (restored at the end).
     shown: HashMap<Entity, Visibility>,
+    /// When the cover went up (`ms=` in the phase lines).
+    started: Option<std::time::Instant>,
 }
 
 impl Warmup {
@@ -108,11 +127,26 @@ impl Warmup {
 }
 
 pub fn install(app: &mut App) {
+    crate::blit_prewarm::install(app);
     let counters = Counters::default();
     let Some(render) = app.get_sub_app_mut(RenderApp) else {
         return;
     };
     render.insert_resource(counters.clone()).add_systems(Render, count.in_set(RenderSystems::Cleanup));
+    let yield_ms = std::env::var("GRID_WARMUP_YIELD_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(YIELD_MS);
+    if yield_ms > 0 {
+        render.add_systems(
+            Render,
+            (move |cache: Res<PipelineCache>, counters: Res<Counters>| {
+                let covered = counters.0[2].load(Ordering::Relaxed) == 1;
+                if let Some(pause) = compile_yield(covered, cache.waiting_pipelines().next().is_some(), yield_ms) {
+                    std::thread::sleep(pause);
+                }
+            })
+            .in_set(RenderSystems::Cleanup)
+            .after(count),
+        );
+    }
     if env_on("GRID_PIPELINE_TRACE") {
         let users = Users::default();
         render.insert_resource(users.clone()).add_systems(Render, trace.in_set(RenderSystems::Cleanup));
@@ -242,7 +276,15 @@ fn step(
     warm.frames += 1;
     if warm.phase != before {
         warm.quiet = 0;
-        println!("pipeline_warmup phase={:?} frame={} pipelines={total}", warm.phase, warm.frames);
+        let covered = !matches!(warm.phase, Phase::Scene | Phase::Done);
+        counters.0[2].store(usize::from(covered), Ordering::Relaxed);
+        let started = *warm.started.get_or_insert_with(std::time::Instant::now);
+        println!(
+            "pipeline_warmup phase={:?} frame={} pipelines={total} ms={}",
+            warm.phase,
+            warm.frames,
+            started.elapsed().as_millis()
+        );
     }
 }
 
@@ -456,6 +498,15 @@ const KEYS: [&str; 12] = ["DITHER", "PREPASS", "SHADOW", "MAY_DISCARD", "BLEND",
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn render_thread_yields_only_under_the_cover_while_pipelines_compile() {
+        let pause = std::time::Duration::from_millis(YIELD_MS);
+        assert_eq!(compile_yield(true, true, YIELD_MS), Some(pause));
+        assert_eq!(compile_yield(true, false, YIELD_MS), None, "nothing compiling");
+        assert_eq!(compile_yield(false, true, YIELD_MS), None, "cover lifted: play never waits");
+        assert_eq!(compile_yield(true, true, 0), None, "GRID_WARMUP_YIELD_MS=0");
+    }
 
     #[test]
     fn warm_up_draws_unculled_then_dithered_then_restores_and_lifts_the_cover() {
