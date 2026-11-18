@@ -750,6 +750,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G429](G0429.md) | 2026-11-18 | Close the bounded native DLAA coverage diagnostic |
 | [G428](G0428.md) | 2026-11-18 | Observe the original Shibuya postprocess and transfer |
 | [G427](G0427.md) | 2026-11-18 | Restore the spectator flash schedule after Flashback |
 | [G426](G0426.md) | 2026-11-17 | Measure per-sample native aerial shading across opposite curves |
