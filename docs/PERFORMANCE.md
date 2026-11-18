@@ -1335,7 +1335,6 @@ The graphics worktree now has a dedicated grass/rendering-performance agent, wit
 
 First candidate: [conservative grass bucket rejection](GRASS_RENDERING.md#g242-conservative-cpu-bucket-evaluation-23-october-2026), preserving the existing quality profile. Build/test and six paired timing runs completed: the candidate increased median CPU grass cost in all three pairs and was rejected. Production grass source is restored exactly; no FPS improvement is claimed. A second unapplied candidate shares immutable tree source arrays to reduce duplicate allocation, with no promised frame-time gain. Source forest sheets, shadow range/resolution, grass density and reflection update cadence are retained. More ambitious LOD/batching/per-view changes require separate source/visibility/temporal evidence and measured bottlenecks.
 
-
 ## Bounded tree-facing dependency census (G265, 24 October 2026)
 
 An opt-in `GRID_FACING_CENSUS=timing:N|keys:N` samples 1..3600 calls of tree-facing presentation. It retains every existing vertex expansion, stream copy and upload; no position cache, visibility reduction or quality change is implemented. With the variable absent, the census is disabled. Invalid values print an explicit disabled message. An exhausted budget is not evidence of a usable scene sample.
@@ -1346,13 +1345,11 @@ Reports at call240, multiples of600 and the final budget retain cumulative count
 
 The default path gains a Local lookup and query metadata; diagnostic key bookkeeping also costs CPU. Compare uninstrumented parent, instrumented Off, Timing and Keys with repeat controls before attributing timings. Existing shadow/reflection geometry must still be uploaded even when future keys repeat; first allocation and replacement cannot use unexpanded source positions. The current ordinary main-camera adaptation is also not original per-pass billboard parity. Initial compilation and rendered controls are recorded separately in G265; no performance improvement is claimed here.
 
-
 G265 validation passes 323 app tests and Clippy, followed by a fresh baseline-feature build. Eight common-profile static controls compare parent / Off / Timing / Keys / Keys / Timing / Off / parent. The shared fixture explicitly removes the old optional paint, lamp and glass pilots and uses unfiltered1280x800 with the same source lighting, covered trees, static probe and authored camera. It is a CPU fixture, not a replacement DLAA quality profile.
 
 All eight final decoded images match exactly. Actual later120-call counts give 577 spherical and three cylindrical instances per call, with100% potential equal-key eligibility and no invalid samples. Timing-only inclusive CPU work averages0.978/0.981ms; Keys averages1.044/1.038ms. Main wall interval means are16.961..17.008ms, not GPU timestamps or display FPS. These are observations of the unchanged work, not savings. Driving key reuse and an actual cache remain unverified.
 
 A preceding identical cohort also passed image neutrality, but its timing was rejected: a private PowerShell7 build-lock wrapper consumed CPU while mishandling a parsed DateTime queue record. Its original results remain intact. The confirmed loop was stopped, the standalone job completed using documented Windows PowerShell5, and the eight controls above were repeated afterwards. No shared build-lock tool or engine behavior was changed to repair that private setup. Exact source/executable pins, both cohorts and separate root admissions are retained privately in `local/graphics/facing-census01/`.
-
 
 ## Moving tree-facing key control (G268)
 
@@ -1363,7 +1360,6 @@ Reports240 and360 are bracketed by actual ticks497..498 and747..748. The sampled
 The stationary100% potential reuse from G265 therefore does not justify an exact-key cache for this moving interval. No cache or performance improvement is implemented. Future work should reduce expansion/upload work while preserving geometry, rather than quantizing keys or reducing quality without evidence. The controls are not a timing benchmark.
 
 The first Off renderer also completed successfully, but its private parser incorrectly expected the adjacent float32 reciprocal rather than the actual Duration-to-Bevy serialized timestep. That failure remains intact. A one-line exact-token correction passes23 CPU/read-only controls before the fresh pair above; no tolerance was introduced. Private provenance and both attempts remain in `local/graphics/facing-driving01/`.
-
 
 G270 separately checks a possible exact-input remap against the four actual Donington spherical sources. All844 complete centre.xyz/UV1.xy raw-float-bit tuples are distinct. Weighted577 placements require125,172 expansions per call, agreeing with the census. Centres repeat, but offsets distinguish the full inputs; placements also have different inverse transforms/scales. This remap would eliminate no expansion in this fixture, so it is not implemented. The existing survey/stream readers are reused and game bytes stay private. No new render, performance measurement or all-track claim follows.
 
@@ -1400,7 +1396,6 @@ population or performance gain is established. Cached source LOD distances exist
 but original shadow/environment LOD or exclusion policy remains unproven; see
 [per-view foliage](PER_VIEW_FOLIAGE.md). No quality or probe-cadence reduction is
 proposed.
-
 
 ## Current all-view foliage observer (G275, 24 October 2026)
 
@@ -3629,3 +3624,94 @@ and its own report adds main-thread frame spikes. Baseline's rare render spikes 
 Levers: smaller main-world peaks, or a task pool split so that render-graph tasks do not queue behind
 main-world `par_iter` work (an A/B, not yet run).
 
+## Per-frame mesh uploads during a race (F859)
+
+Question (mac-perf item 7): which senders still upload mesh or buffer data during a race, how
+many bytes per frame, and what render-thread prepare cost (`r_meshes`, `r_prepare`) they cause.
+Windowed 1280x800, native render height, `auto_no_vsync`, idle PC, autopilot; Donington
+(`settings/race.ini`) and the derby (`settings/demolition-derby.ini`). The upload probe is
+kept in `frame_split.rs`: `main_end` hands the frame's prepared meshes, their bytes and the
+streamed vertex bytes to the render frame that draws it, which splits `r_meshes`/`r_prepare`
+between frames with and without prepared meshes and reports `up_max_kb` and `stream_max_kb`;
+`mesh_upload_group` and `mesh_stream_group` lines name the senders by mesh label.
+
+Senders before (probe build, per second of race):
+
+| sender | path | Donington | derby |
+|---|---|---|---|
+| opponent dents (`opponent#_MPJRI`) | whole-mesh re-upload | 4 uploads, few KB | 78 uploads, 0.94 MB |
+| car batches (`car_batch/#/`, batch rebuilt when a member left) | whole-mesh re-upload | 0.2, 0.09 MB | 12, 2.0 MB |
+| largest single frame | | 500 KB | 1.3 MB |
+| crowd cells | stream (F854) | 9.1 MB | 6.9 MB |
+| tyre smoke (`Tyre_smoke_*`) | stream | 1.4 MB | 7.5-23 MB (varies with contact) |
+| skid marks | stream | 0.02 MB | 3.6 MB |
+| ground cover | stream | 1.3 MB | - |
+| car batch member moves | stream | 0.05 MB | 6.4 MB |
+
+The streamed senders write only changed vertex ranges through `MeshStream` (one
+`write_buffer` per run into the existing allocation) and cost nothing measurable in
+`r_meshes`; they stay as they are. The whole-mesh re-uploads did not: a frame that prepared
+meshes cost about 0.3 ms more `r_meshes` than one that did not, and in the derby these landed
+on single frames of up to 1.3 MB.
+
+Fix, through shared paths (no track or car lists):
+
+- `mesh_stream::replace(meshes, handle, new, stream, centre)`: when the new mesh has the
+  drawn mesh's structure (usage, attributes, vertex count, indices) and that mesh is
+  uploaded, it compares runs of 64 vertices and writes only the runs that differ over the
+  GPU buffer, then updates the asset with `get_mut_untracked` (no `Modified` event, so no
+  re-extraction, no repack and no F854 rescan). Otherwise it replaces the asset as before.
+  Either way it queues the sort centre of the new bounds, so a later stream never sorts by an
+  older one.
+- Dents (`write_dent`, the player's car and the opponents alike) use it; a batched part keeps
+  the existing path (main-world copy, its event dirties the batch, which streams).
+- `car_batch` rebuilds keep every member's vertex range and collapse members that left the
+  batch to zero-area triangles (a chunk with none left is hidden), so a member leaving no
+  longer changes the vertex count and the rebuild streams through the shared
+  `mesh_stream::stream_changed` instead of re-uploading the batch.
+- `car_reflection_overlay`: `follow_bounds` copies a dented part's `Aabb` to its overlay
+  (no change event refits it any more), and `follow` now also handles a removed
+  `RenderLayers`. Before, an overlay left the hidden car-batch layer only when its part's
+  mesh or material changed; a part leaving its batch (loose debris) removes the part's
+  layers, which is not a change, so the overlay stayed hidden until the next whole-mesh dent
+  write re-synced it by accident. Streaming removed that accident and showed the bug: derby
+  tick 1500 differed in 240 px (max 72) on loose debris. Diagnosis by marking `Mesh3d`
+  changed on chosen drawers: all drawers 2 px, auto-bounds drawers only 239 px, `NoAutoAabb`
+  drawers only 1 px; refitting or touching `Aabb` on all drawers 239-240 px; streaming the
+  whole mesh 239 px; full writes with the sort centre 0 px. Test
+  `an_overlay_leaves_the_hidden_layer_with_its_part`.
+
+After (fix build with the probe): whole-mesh uploads Donington 6.1 per s (18.8 KB/s, largest
+frame 37 KB), derby 11.9 per s (160 KB/s, largest frame 142 KB). What remains are
+opponent meshes whose structure changed (2-4 per s, the fallback of `replace`) and smoke
+buffers growing.
+
+Alternating A/B, 2 pairs, same probe in both builds (`frame_stats`, first 3 windows skipped):
+
+| run | scene | main_ms | render_ms | r_meshes | r_prepare | uploads/s | upload KB/s | largest frame KB |
+|---|---|---|---|---|---|---|---|---|
+| before 1 | Donington | 5.79 | 10.06 | 1.15 | 1.62 | 27.9 | 51.9 | 500 |
+| after 1 | Donington | 5.41 | 9.24 | 1.06 | 1.56 | 6.1 | 18.8 | 37 |
+| before 1 | derby | 6.57 | 8.62 | 1.11 | 1.39 | 264.7 | 4480 | 1300 |
+| after 1 | derby | 6.05 | 8.04 | 0.97 | 1.31 | 11.9 | 160.5 | 142 |
+| before 2 | Donington | 5.57 | 8.89 | 1.05 | 1.46 | 24.1 | - | 500 |
+| after 2 | Donington | 4.59 | 8.39 | 0.91 | 1.34 | 5.8 | - | 37 |
+| before 2 | derby | 6.01 | 7.91 | 1.02 | 1.29 | 266.4 | 4586 | 1300 |
+| after 2 | derby | 4.37 | 6.37 | 0.69 | 1.04 | 11.9 | 160.4 | 142 |
+
+Streamed vertex bytes are unchanged in kind: 12-15 MB/s on Donington and 44-55 MB/s in the
+derby, largest frame 1.5-4 MB, all as ranged writes into existing buffers.
+
+Warm-up: the first run of a new executable path spends 180-200 frames compiling pipelines
+(the driver's shader cache is keyed per path); later runs 53-79. A/B runs therefore copy each
+executable once and discard the first run.
+
+Images: offscreen frames (1280x720, `--render-fixed-step`) of the race and the derby at
+ticks 600 and 1500, the pre-change build against the fix: race 600 identical, race 1500 and
+derby 600 2 px by 1 level, derby 1500 293 px by up to 30 on one damaged opponent at the wall
+(local/mt/up/img/cmp-bf4-at0.png). A control build of HEAD with only the overlay change
+gives the fix's image there (1 px by 1 level), and both builds repeat themselves (0 and
+2 px): the difference is the overlay change drawing that car's reflection on parts that had
+left their batch, which HEAD left on the hidden layer. The streaming changes alone match the
+pre-change frames except where they removed the accidental re-sync (the 240 px on debris
+above, gone with the overlay change).

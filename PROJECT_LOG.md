@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F859](log/F0859.md) | 2026-11-19 | Per-frame mesh uploads: dents and car batches stream changed vertices; reflection overlays follow a part leaving its batch |
 | [F858](log/F0858.md) | 2026-11-19 | Owner priority 2026-11-19: portable data, few files, in-app update, release/debug split |
 | [F857](log/F0857.md) | 2026-11-18 | Slow render frames by span: no render pass grows; main-world work at the same instant |
 | [F856](log/F0856.md) | 2026-11-18 | HUD drawn by an overlay pass in the frame's render graph; no OSD camera |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F798](log/F0798.md) | 2026-11-10 | Career team livery on the race cars |
 | [F797](log/F0797.md) | 2026-11-10 | Replay sound and highlight monitors traced; engine sound replayed |
 | [F796](log/F0796.md) | 2026-11-10 | Damage parts, glass, lights and shards replayed; crash replay tested with a real wreck |
-| [F795](log/F0795.md) | 2026-11-10 | Flashback count across career multi-race events |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

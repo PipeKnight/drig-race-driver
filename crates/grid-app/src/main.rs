@@ -794,6 +794,41 @@ fn on_compute_pool<T: Sync, R: Send + 'static>(inputs: &[T], project: impl Fn(&T
         }
     })
 }
+/// Writes a dented part's projection, for the player's car and the
+/// opponents alike. A batched part (`hidden`) is drawn by its batch: its own
+/// mesh stays in the main world until it leaves (car_batch::Demoted), and its
+/// change event makes the batch stream the moved vertices. Any other part
+/// streams its moved vertices over its own GPU buffer (mesh_stream::replace)
+/// instead of being prepared and uploaded whole. `fast` false (comparisons)
+/// replaces every mesh as before.
+#[allow(clippy::too_many_arguments)]
+fn write_dent(
+    meshes: &mut Assets<Mesh>,
+    handle: &Handle<Mesh>,
+    mut mesh: Mesh,
+    entity: Entity,
+    hidden: bool,
+    demoted: Option<&mut car_batch::Demoted>,
+    stream: Option<&mesh_stream::MeshStream>,
+    bounds: Aabb,
+    fast: bool,
+) {
+    if fast && hidden && let Some(demoted) = demoted {
+        mesh.asset_usage = RenderAssetUsages::MAIN_WORLD;
+        demoted.0.insert(entity, handle.id());
+    } else if fast {
+        mesh_stream::replace(meshes, handle, mesh, stream, bounds.center.into());
+        return;
+    }
+    // A later stream of the mesh sorts by this write's centre (replace).
+    if let Some(stream) = stream {
+        stream.mesh_sort_centre(handle.id(), bounds.center.into());
+    }
+    if let Some(mut target) = meshes.get_mut(handle) {
+        *target = mesh;
+    }
+}
+
 /// One opponent part's dents: its mesh and bounds, none when the field is
 /// refused (the part keeps its mesh).
 fn project_dent(
@@ -7374,6 +7409,8 @@ fn drive_present(
             Option<&DeformingPart>,
             &Mesh3d,
             &mut Aabb,
+            Entity,
+            Option<&bevy::camera::visibility::RenderLayers>,
         ),
         Without<ViewerCamera>,
     >,
@@ -7404,11 +7441,12 @@ fn drive_present(
         Option<ResMut<camera::Cameras>>,
     ),
     mut refused: Local<Option<&'static str>>,
-    (mut dent_fast, mut dent_counts, mut demoted, mut shots): (
+    (mut dent_fast, mut dent_counts, mut demoted, mut shots, stream): (
         Local<Option<bool>>,
         Local<[u64; 4]>,
         Option<ResMut<car_batch::Demoted>>,
         Local<ShownShots>,
+        Option<Res<mesh_stream::MeshStream>>,
     ),
     render_clock: (
         Option<Res<Time<Fixed>>>,
@@ -7451,7 +7489,7 @@ fn drive_present(
             presentation.0 = Some(key);
             let start = Instant::now();
             let mut sources: Vec<(&Handle<Mesh>, &DeformingPart)> = Vec::new();
-            for (_, _, source, handle, _) in &parts {
+            for (_, _, source, handle, ..) in &parts {
                 if let Some(source) = source {
                     if meshes.get(&handle.0).is_none() || sources.iter().any(|(h, _)| *h == &handle.0) {
                         return Err("body damage mesh ownership differs");
@@ -7482,18 +7520,23 @@ fn drive_present(
                 staged.push(((*handle).clone(), mesh, bounds));
             }
             let count = staged.len();
-            for (_, _, _, handle, mut bounds) in &mut parts {
+            let mut owners = Vec::with_capacity(count);
+            for (_, _, _, handle, mut bounds, entity, layers) in &mut parts {
                 if let Some((_, _, next)) = staged.iter().find(|(h, _, _)| h == &handle.0) {
                     *bounds = *next;
+                    owners.push((handle.0.id(), entity, car_batch::hidden(layers)));
                 }
             }
             // A part the change left as drawn keeps its mesh: rewriting it
             // would upload it again.
-            for (handle, mesh, _) in staged {
+            for (handle, mesh, next) in staged {
                 if meshes.get(&handle).is_some_and(|m| body_damage::same_shape(m, &mesh)) {
                     continue;
                 }
-                *meshes.get_mut(&handle).expect("staged owned mesh") = mesh;
+                let Some(&(_, entity, hidden)) = owners.iter().find(|(id, ..)| *id == handle.id()) else {
+                    continue;
+                };
+                write_dent(&mut meshes, &handle, mesh, entity, hidden, demoted.as_deref_mut(), stream.as_deref(), next, fast);
             }
             log_line!(
                 "drive_body_projection event=update tick={} meshes={count} changed_meshes={changed} policy=independent-current-minus-rest ms={:.3}",
@@ -7531,7 +7574,7 @@ fn drive_present(
         0.
     };
     let wheels = wheel_presentation::wheels(&driving.runtime, remainder).map(wheel_motion);
-    for (part, mut transform, _, _, _) in &mut parts {
+    for (part, mut transform, ..) in &mut parts {
         let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
         *transform = Transform::from_matrix(pose * motion * part.rest);
     }
@@ -7610,26 +7653,19 @@ fn drive_present(
             dent_counts[1] += inputs.len() as u64;
             drop(inputs);
             for (entity, projected) in results {
-                let Some((mut mesh, next)) = projected else { continue };
+                let Some((mesh, next)) = projected else { continue };
                 let Ok((_, _, _, _, handle, mut bounds, _, layers)) = opponent_parts.get_mut(entity) else {
                     continue;
                 };
                 if fast && meshes.get(&handle.0).is_some_and(|m| body_damage::same_shape(m, &mesh)) {
                     continue;
                 }
-                // A batched part is drawn by its batch: its own mesh stays
-                // in the main world until it leaves (car_batch::Demoted).
-                if fast
-                    && car_batch::hidden(layers)
-                    && let Some(demoted) = demoted.as_mut()
-                {
-                    mesh.asset_usage = RenderAssetUsages::MAIN_WORLD;
-                    demoted.0.insert(entity, handle.0.id());
-                }
-                if let Some(mut target) = meshes.get_mut(&handle.0) {
+                if meshes.contains(&handle.0) {
                     dent_counts[2] += 1;
-                    *target = mesh;
                     *bounds = next;
+                    let hidden = car_batch::hidden(layers);
+                    let handle = handle.0.clone();
+                    write_dent(&mut meshes, &handle, mesh, entity, hidden, demoted.as_deref_mut(), stream.as_deref(), next, fast);
                 }
             }
             dent_counts[0] += start.elapsed().as_micros() as u64;

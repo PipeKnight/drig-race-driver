@@ -126,10 +126,16 @@ pub fn stages(points: &[Option<u64>; POINTS]) -> Option<[u64; 12]> {
 struct RenderFrame {
     start: Option<Instant>,
     points: [Option<u64>; POINTS],
+    uploads: [u64; 3],
 }
+/// Uploads of the last main frame (meshes prepared, their bytes, streamed
+/// vertex bytes), taken by the render frame that draws it.
+static FRAME_UPLOADS: Mutex<[u64; 3]> = Mutex::new([0; 3]);
+
 static RENDER_FRAME: Mutex<RenderFrame> = Mutex::new(RenderFrame {
     start: None,
     points: [None; POINTS],
+    uploads: [0; 3],
 });
 
 fn point<const I: usize>() {
@@ -138,6 +144,7 @@ fn point<const I: usize>() {
     if I == P::Start as usize {
         f.start = Some(now);
         f.points = [None; POINTS];
+        f.uploads = std::mem::take(&mut *FRAME_UPLOADS.lock().unwrap_or_else(|e| e.into_inner()));
     }
     let Some(start) = f.start else {
         return;
@@ -145,6 +152,7 @@ fn point<const I: usize>() {
     f.points[I] = Some(ns(start, now));
     if I == P::End as usize {
         let done = stages(&f.points);
+        let uploads = f.uploads;
         f.start = None;
         drop(f);
         if let Some(done) = done {
@@ -153,7 +161,14 @@ fn point<const I: usize>() {
                 a.last_render = done[11];
                 if done[11] > a.worst[11] {
                     a.worst = done;
+                    a.worst_uploads = uploads;
                 }
+                let split = &mut a.upload_split[usize::from(uploads[0] > 0)];
+                split.0 += 1;
+                split.1 += done[0];
+                split.2 += done[5];
+                a.upload_max = a.upload_max.max(uploads[1]);
+                a.stream_max = a.stream_max.max(uploads[2]);
                 for (sum, v) in a.stages.iter_mut().zip(done) {
                     *sum += v;
                 }
@@ -337,6 +352,7 @@ fn main_end(
     let queued = crate::mesh_stream::queued_bytes();
     let streamed = queued.saturating_sub(std::mem::replace(&mut *streamed_before, queued));
     let now = Instant::now();
+    *FRAME_UPLOADS.lock().unwrap_or_else(|e| e.into_inner()) = [mesh.0, mesh.1, streamed];
     let mut c = MAIN_CLOCK.lock().unwrap_or_else(|e| e.into_inner());
     let main = c.begin.take().map_or(0, |b| ns(b, now));
     let frame = c.last_end.map(|end| ns(end, now));
@@ -830,6 +846,14 @@ struct Acc {
     stages: [u64; 12],
     /// Stages of the window's slowest render frame (`rworst`).
     worst: [u64; 12],
+    /// Uploads drawn by that frame (`rworst_up`: meshes/KB/streamed KB).
+    worst_uploads: [u64; 3],
+    /// Render frames without and with prepared meshes: (frames, r_meshes,
+    /// r_prepare) sums (`r_meshes_up`, `r_meshes_noup`).
+    upload_split: [(u32, u64, u64); 2],
+    /// Largest mesh and streamed bytes of one frame (`up_max_kb`, `stream_max_kb`).
+    upload_max: u64,
+    stream_max: u64,
     count_frames: u32,
     counts: [u64; 6],
     mesh_up: u64,
@@ -894,6 +918,21 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
             s += &format!(" {name}={:.2}", per(sum, a.render_frames));
         }
         s += &format!(" render_frames={} rworst={}", a.render_frames, worst_field(&a.worst));
+        let [clean, dirty] = a.upload_split;
+        let w = a.worst_uploads;
+        s += &format!(
+            " rworst_up={}/{:.0}/{:.0} r_meshes_up={:.2} r_prepare_up={:.2} up_frames={} r_meshes_noup={:.2} r_prepare_noup={:.2} up_max_kb={:.0} stream_max_kb={:.0}",
+            w[0],
+            w[1] as f64 / 1024.,
+            w[2] as f64 / 1024.,
+            per(dirty.1, dirty.0),
+            per(dirty.2, dirty.0),
+            dirty.0,
+            per(clean.1, clean.0),
+            per(clean.2, clean.0),
+            a.upload_max as f64 / 1024.,
+            a.stream_max as f64 / 1024.,
+        );
         if a.gpu_frames > 0 {
             let n = f64::from(a.gpu_frames);
             let total: f64 = a.gpu.iter().sum();

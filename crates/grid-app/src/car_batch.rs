@@ -45,7 +45,7 @@ use bevy::{
         visibility::{NoAutoAabb, RenderLayers, VisibilityRange, VisibilitySystems},
     },
     light::NotShadowCaster,
-    mesh::{MeshVertexAttributeId, PrimitiveTopology, VertexFormat},
+    mesh::{MeshVertexAttributeId, PrimitiveTopology, VertexAttributeValues, VertexFormat},
     prelude::*,
     transform::TransformSystems,
 };
@@ -885,9 +885,12 @@ fn drawn_soon(group: &Group, shown: &[u8], posed: &[u8], fading: bool) -> bool {
         || fading
 }
 
-/// The group's batched parts in batches of at most [`MAX_VERTICES`], in
-/// spawn order; unused batches are hidden. New batches of a level the car
-/// does not show start on the hidden layer.
+/// The group's parts in batches of at most [`MAX_VERTICES`], in spawn
+/// order; unused batches are hidden. A part out of its batch keeps its
+/// vertices there, collapsed ([`collapse`]), so a part leaving or rejoining
+/// changes no batch's layout and streams only its own vertices instead of
+/// uploading the whole batch again. A batch with no part in it is hidden.
+/// New batches of a level the car does not show start on the hidden layer.
 /// Returns the number of batches streamed in place.
 fn rebuild(
     commands: &mut Commands,
@@ -900,13 +903,16 @@ fn rebuild(
 ) -> u64 {
     let mut streamed = 0;
     let mut chunks: Vec<Vec<Part<StandardMaterial>>> = Vec::new();
+    let mut kept: Vec<Vec<bool>> = Vec::new();
     let mut count = MAX_VERTICES;
-    for member in group.members.iter().filter(|m| m.batched) {
+    for member in &group.members {
         if count + member.vertices > MAX_VERTICES {
             chunks.push(Vec::new());
+            kept.push(Vec::new());
             count = 0;
         }
         count += member.vertices;
+        kept.last_mut().expect("chunk").push(member.batched);
         chunks.last_mut().expect("chunk").push(Part {
             entity: member.entity,
             material: group.material.clone(),
@@ -916,17 +922,23 @@ fn rebuild(
             vertices: member.vertices,
         });
     }
-    for (i, chunk) in chunks.iter().enumerate() {
-        let (mesh, _, _) = build(chunk, meshes, Vec3::ZERO, &group.layout);
+    for (i, (chunk, kept)) in chunks.iter().zip(&kept).enumerate() {
+        let (mut mesh, _, _) = build(chunk, meshes, Vec3::ZERO, &group.layout);
+        let parts: Vec<usize> = chunk.iter().map(|p| p.vertices).collect();
+        collapse(&mut mesh, &parts, kept);
+        let used = if kept.contains(&true) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
         let bounds = mesh.compute_aabb().unwrap_or_default();
         match group.batches.get(i).and_then(|&e| batches.get_mut(e).ok()) {
             Some((_, mut visibility, handle, mut aabb)) => {
                 // Dents move vertices, not the batch's structure: the changed
                 // parts' vertices are written over the batch's buffer and the
                 // asset is kept current without being prepared again.
-                let parts: Vec<usize> = chunk.iter().map(|p| p.vertices).collect();
                 let written = stream.zip(meshes.get(&handle.0)).and_then(|(stream, old)| {
-                    stream_changed(old, &mesh, &parts, handle.0.id(), stream)
+                    crate::mesh_stream::stream_changed(old, &mesh, &parts, handle.0.id(), stream)
                 });
                 if written.is_some() {
                     streamed += 1;
@@ -937,7 +949,7 @@ fn rebuild(
                     *target = mesh;
                 }
                 *aabb = bounds;
-                visibility.set_if_neq(Visibility::Inherited);
+                visibility.set_if_neq(used);
             }
             None => {
                 let mut entity = commands.spawn((
@@ -948,6 +960,7 @@ fn rebuild(
                     bounds,
                     Batch { car: group.car },
                     NoAutoAabb,
+                    used,
                 ));
                 if group.shadow_body {
                     entity.insert(NotShadowCaster);
@@ -968,52 +981,23 @@ fn rebuild(
     streamed
 }
 
-/// Streams the vertices of the parts (`parts`: vertex counts in order) that
-/// differ between the drawn batch `old` and its rebuild `new`, when both have
-/// the same structure (attributes, vertex count, indices) and are uploaded.
-/// `None`: the structure changed, so the asset must be replaced.
-fn stream_changed(
-    old: &Mesh,
-    new: &Mesh,
-    parts: &[usize],
-    id: AssetId<Mesh>,
-    stream: &crate::mesh_stream::MeshStream,
-) -> Option<usize> {
-    let attributes = |m: &Mesh| m.attributes().map(|(a, _)| (a.id, a.format)).collect::<Vec<_>>();
-    if !crate::frame_split::uploaded(old)
-        || old.asset_usage != new.asset_usage
-        || old.count_vertices() != new.count_vertices()
-        || parts.iter().sum::<usize>() != new.count_vertices()
-        || attributes(old) != attributes(new)
-        || old.indices() != new.indices()
-    {
-        return None;
-    }
-    let stride = crate::mesh_stream::VertexLayout::of(new).stride;
-    let mut written = 0;
-    let mut first = 0;
-    let mut run: Option<std::ops::Range<usize>> = None;
-    let mut flush = |run: std::ops::Range<usize>| {
-        written += run.len();
-        stream.write_at(id, run.start as u32, stride, |bytes| {
-            crate::mesh_stream::pack_vertices(new, run.clone(), bytes);
-        });
+/// Moves each vertex of a part out of its batch (`kept` false) onto the
+/// part's first vertex: its triangles have no area and draw nothing, and the
+/// batch keeps the same vertices and indices. `parts`: vertices per part.
+fn collapse(mesh: &mut Mesh, parts: &[usize], kept: &[bool]) {
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return;
     };
-    for &count in parts {
-        let range = first..first + count;
-        first += count;
-        if crate::mesh_stream::same_vertices(old, new, range.clone()) {
-            if let Some(done) = run.take() {
-                flush(done);
-            }
-        } else {
-            run = Some(run.map_or(range.clone(), |r| r.start..range.end));
+    let mut first = 0;
+    for (&count, &kept) in parts.iter().zip(kept) {
+        if !kept && count > 0 {
+            let at = positions[first];
+            positions[first..first + count].fill(at);
         }
+        first += count;
     }
-    if let Some(done) = run {
-        flush(done);
-    }
-    Some(written)
 }
 
 fn in_place(matrix: Mat4, expected: Mat4) -> bool {
@@ -1033,6 +1017,7 @@ mod tests {
 
     #[test]
     fn a_dent_streams_only_the_changed_parts_vertices() {
+        use crate::mesh_stream::stream_changed;
         use bevy::{asset::RenderAssetUsages, mesh::Indices};
         let mesh = |dent: f32, indices: Vec<u16>| {
             let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
@@ -1060,6 +1045,32 @@ mod tests {
         assert_eq!(quiet.queued(id), None);
         let other = mesh(-0.25, vec![0, 2, 1, 4, 5, 6, 8, 9, 10]);
         assert_eq!(stream_changed(&old, &other, &[4, 4, 4], id, &stream), None);
+    }
+
+    #[test]
+    fn a_part_leaving_its_batch_streams_only_its_own_vertices() {
+        use crate::mesh_stream::stream_changed;
+        use bevy::{asset::RenderAssetUsages, mesh::Indices};
+        let mut whole = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let p: Vec<[f32; 3]> = (0..12).map(|i| [i as f32, (i * i) as f32, 1.]).collect();
+        whole.insert_attribute(Mesh::ATTRIBUTE_POSITION, p);
+        whole.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 1., 0.]; 12]);
+        whole.insert_indices(Indices::U16(vec![0, 1, 2, 4, 5, 6, 8, 9, 10]));
+        let mut left = whole.clone();
+        collapse(&mut left, &[4, 4, 4], &[true, false, true]);
+        // The middle part's triangle has no area; the others are untouched.
+        let Some(VertexAttributeValues::Float32x3(moved)) = left.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions");
+        };
+        assert!(moved[4..8].iter().all(|v| *v == [4., 16., 1.]));
+        assert_eq!(moved[8], [8., 64., 1.]);
+        let stream = crate::mesh_stream::MeshStream::default();
+        let id = AssetId::<Mesh>::default();
+        assert_eq!(stream_changed(&whole, &left, &[4, 4, 4], id, &stream), Some(4));
+        let stride = crate::mesh_stream::VertexLayout::of(&left).stride;
+        let packed = left.create_packed_vertex_buffer_data();
+        assert_eq!(stream.queued(id).as_deref(), Some(&packed[4 * stride..8 * stride]));
     }
 
     #[test]

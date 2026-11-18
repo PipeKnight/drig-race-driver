@@ -495,9 +495,29 @@ pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .init_resource::<Reflective>()
         .add_systems(
             PostUpdate,
-            follow.before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+            (
+                follow,
+                follow_bounds.after(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
+            )
+                .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
         );
     Ok(())
+}
+
+/// The overlay draws its part's mesh in the part's frame, so it takes the
+/// part's bounds: a dented part's vertices stream without a change event
+/// (mesh_stream::replace), which would leave Bevy's bounds of the overlay at
+/// the undented mesh.
+#[allow(clippy::type_complexity)]
+fn follow_bounds(
+    parts: Query<(&bevy::camera::primitives::Aabb, &HasOverlay), (Changed<bevy::camera::primitives::Aabb>, Without<OverlayOf>)>,
+    mut overlays: Query<&mut bevy::camera::primitives::Aabb, With<OverlayOf>>,
+) {
+    for (bounds, has) in &parts {
+        if let Ok(mut overlay) = overlays.get_mut(has.0) {
+            overlay.set_if_neq(*bounds);
+        }
+    }
 }
 
 /// The cube the overlays sample: the dynamic cube of a probe level or the
@@ -512,15 +532,8 @@ fn follow(
     mut commands: Commands,
     reflective: Res<Reflective>,
     cube: Option<Res<Environment>>,
-    parts: Query<
-        (
-            Entity,
-            &MeshMaterial3d<StandardMaterial>,
-            &Mesh3d,
-            Option<&RenderLayers>,
-            Option<&HasOverlay>,
-            Option<&crate::damage_parts::Original>,
-        ),
+    changed: Query<
+        Entity,
         (
             Without<OverlayOf>,
             Or<(
@@ -530,14 +543,34 @@ fn follow(
             )>,
         ),
     >,
+    mut unlayered: RemovedComponents<RenderLayers>,
+    parts: Query<
+        (
+            Entity,
+            &MeshMaterial3d<StandardMaterial>,
+            &Mesh3d,
+            Option<&RenderLayers>,
+            Option<&HasOverlay>,
+            Option<&crate::damage_parts::Original>,
+        ),
+        Without<OverlayOf>,
+    >,
     mut standard: ResMut<Assets<StandardMaterial>>,
     mut overlays: ResMut<Assets<Overlay>>,
     mut cache: Local<HashMap<AssetId<StandardMaterial>, Handle<Overlay>>>,
 ) {
+    // A part whose layers were removed (car_batch drawing it on its own
+    // again) is back on the default layer: a removal is not a change, and
+    // the overlay would stay on the hidden layer until the part's mesh or
+    // material next changed.
+    let mut todo: Vec<Entity> = changed.iter().collect();
+    todo.extend(unlayered.read());
+    todo.sort_unstable();
+    todo.dedup();
     let Some(cube) = cube else {
         return;
     };
-    for (entity, material, mesh, layers, existing, original) in &parts {
+    for (entity, material, mesh, layers, existing, original) in parts.iter_many(&todo) {
         // A cracked pane's material is a copy of its intact one with the
         // crack map (damage_parts).
         let source = original.map_or(material.id(), |o| o.0.id());
@@ -644,6 +677,63 @@ mod tests {
         // sorts before it (Bevy draws ascending view-space z + bias).
         assert!(opaque + 1.0 < pane && masked + 1.0 < pane);
         assert!(pane > 0.);
+    }
+
+    #[test]
+    fn an_overlay_leaves_the_hidden_layer_with_its_part() {
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Overlay>>()
+            .init_resource::<Reflective>()
+            .add_systems(Update, follow);
+        let cube = app.world_mut().resource_mut::<Assets<Image>>().add(Image::default());
+        app.insert_resource(Environment(cube));
+        let material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        let controls = Controls {
+            colour: Vec3::splat(0.5),
+            power: 2.,
+            min: 0.2,
+            max: 0.8,
+            paint: Some(1.),
+            floors: Vec2::ZERO,
+            lighting: None,
+        };
+        let response = Response { controls, glass: false, mask: None };
+        app.world_mut().resource_mut::<Reflective>().0.insert(material.id(), response);
+        let hidden = crate::car_batch::hidden_layer();
+        let part = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), MeshMaterial3d(material), hidden.clone()))
+            .id();
+        app.update();
+        let child = app.world().get::<HasOverlay>(part).unwrap().0;
+        assert_eq!(app.world().get::<RenderLayers>(child), Some(&hidden));
+        // car_batch draws the part on its own again (a piece knocked off).
+        app.world_mut().entity_mut(part).remove::<RenderLayers>();
+        app.update();
+        assert_eq!(app.world().get::<RenderLayers>(child), Some(&RenderLayers::default()));
+    }
+
+    #[test]
+    fn an_overlay_takes_its_dented_parts_bounds() {
+        use bevy::camera::primitives::Aabb;
+        let mut app = App::new();
+        app.add_systems(Update, follow_bounds);
+        let child = app.world_mut().spawn((OverlayOf, Aabb::from_min_max(Vec3::ZERO, Vec3::ONE))).id();
+        let part = app
+            .world_mut()
+            .spawn((HasOverlay(child), Aabb::from_min_max(Vec3::ZERO, Vec3::ONE)))
+            .id();
+        app.update();
+        // A streamed dent changes only the part's bounds (mesh_stream::replace).
+        let dented = Aabb::from_min_max(Vec3::new(0., -0.25, 0.), Vec3::ONE);
+        *app.world_mut().get_mut::<Aabb>(part).unwrap() = dented;
+        app.update();
+        assert_eq!(app.world().get::<Aabb>(child), Some(&dented));
     }
 
     #[test]

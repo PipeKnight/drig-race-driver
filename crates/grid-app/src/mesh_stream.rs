@@ -62,6 +62,9 @@ struct Writes {
     meshes: Vec<Write>,
     /// Local-space transparent sort centres by main-world entity.
     centres: Vec<(Entity, Vec3)>,
+    /// Local-space transparent sort centres by mesh asset, for every entity
+    /// that draws it without its own entry.
+    mesh_centres: Vec<(AssetId<Mesh>, Vec3)>,
 }
 
 impl Writes {
@@ -69,6 +72,7 @@ impl Writes {
         self.bytes.clear();
         self.meshes.clear();
         self.centres.clear();
+        self.mesh_centres.clear();
     }
 }
 
@@ -151,11 +155,29 @@ impl MeshStream {
         writes.centres.push((entity, centre));
     }
 
+    /// Sort every entity that draws `mesh` (and has no [`Self::sort_centre`]
+    /// of its own) as if the asset had just been replaced: a part and the
+    /// reflection overlay drawing the same mesh (car_reflection_overlay)
+    /// keep one centre. Every later write of the asset must send it again.
+    pub(crate) fn mesh_sort_centre(&self, mesh: AssetId<Mesh>, centre: Vec3) {
+        let mut writes = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        writes.mesh_centres.push((mesh, centre));
+    }
+
     /// Sort centre queued for `entity` since the last extraction (tests).
     #[cfg(test)]
     pub(crate) fn queued_centre(&self, entity: Entity) -> Option<Vec3> {
         let writes = self.0.lock().unwrap_or_else(|e| e.into_inner());
         let (_, centre) = writes.centres.iter().rev().find(|(e, _)| *e == entity)?;
+        Some(*centre)
+    }
+
+    /// Sort centre queued for every entity drawing `mesh` since the last
+    /// extraction (tests).
+    #[cfg(test)]
+    pub(crate) fn queued_mesh_centre(&self, mesh: AssetId<Mesh>) -> Option<Vec3> {
+        let writes = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, centre) = writes.mesh_centres.iter().rev().find(|(m, _)| *m == mesh)?;
         Some(*centre)
     }
 
@@ -244,8 +266,10 @@ fn resort(
     meshes: Res<RenderAssets<RenderMesh>>,
     buffers: Option<Res<BatchedInstanceBuffers<MeshUniform, MeshInputUniform>>>,
     mut known: Local<HashMap<Entity, Vec3>>,
+    mut known_meshes: Local<HashMap<AssetId<Mesh>, Vec3>>,
 ) {
     known.extend(writes.0.centres.iter().copied());
+    known_meshes.extend(writes.0.mesh_centres.iter().copied());
     for phase in phases.values_mut() {
         for ((_, main), item) in phase.items.iter_mut() {
             let TransparentSortingInfo3d::Sorted { mesh_center, .. } = &mut item.sorting_info else {
@@ -254,9 +278,10 @@ fn resort(
             let Some(data) = instances.render_mesh_queue_data(*main) else {
                 continue;
             };
-            let local = match known.get(&main.id()) {
+            let asset = data.mesh_asset_id();
+            let local = match known.get(&main.id()).or_else(|| known_meshes.get(&asset)) {
                 Some(local) => *local,
-                None => match meshes.get(data.mesh_asset_id()) {
+                None => match meshes.get(asset) {
                     Some(mesh) => mesh.aabb_center,
                     None => continue,
                 },
@@ -322,6 +347,96 @@ pub(crate) fn same_vertices(a: &Mesh, b: &Mesh, range: Range<usize>) -> bool {
         let span = range.start * size..range.end * size;
         x.get_bytes().get(span.clone()) == y.get_bytes().get(span)
     })
+}
+
+/// Streams the vertices of the parts (`parts`: vertex counts in order) that
+/// differ between the drawn batch `old` and its rebuild `new`, when both have
+/// the same structure (attributes, vertex count, indices) and are uploaded.
+/// `None`: the structure changed, so the asset must be replaced.
+pub(crate) fn stream_changed(
+    old: &Mesh,
+    new: &Mesh,
+    parts: &[usize],
+    id: AssetId<Mesh>,
+    stream: &MeshStream,
+) -> Option<usize> {
+    let attributes = |m: &Mesh| m.attributes().map(|(a, _)| (a.id, a.format)).collect::<Vec<_>>();
+    if !crate::frame_split::uploaded(old)
+        || old.asset_usage != new.asset_usage
+        || old.count_vertices() != new.count_vertices()
+        || parts.iter().sum::<usize>() != new.count_vertices()
+        || attributes(old) != attributes(new)
+        || old.indices() != new.indices()
+    {
+        return None;
+    }
+    let stride = VertexLayout::of(new).stride;
+    let mut written = 0;
+    let mut first = 0;
+    let mut run: Option<std::ops::Range<usize>> = None;
+    let mut flush = |run: std::ops::Range<usize>| {
+        written += run.len();
+        stream.write_at(id, run.start as u32, stride, |bytes| {
+            pack_vertices(new, run.clone(), bytes);
+        });
+    };
+    for &count in parts {
+        let range = first..first + count;
+        first += count;
+        if same_vertices(old, new, range.clone()) {
+            if let Some(done) = run.take() {
+                flush(done);
+            }
+        } else {
+            run = Some(run.map_or(range.clone(), |r| r.start..range.end));
+        }
+    }
+    if let Some(done) = run {
+        flush(done);
+    }
+    Some(written)
+}
+
+/// Vertices compared and written together by [`replace`]: a dent moves a few
+/// hundred of a part's thousands.
+const RUN: usize = 64;
+
+/// Makes `new` the mesh of `handle`, for a mesh whose vertices change but
+/// whose structure seldom does (a dented body part). When `new` has the drawn
+/// mesh's structure (usage, attributes, vertex count, indices) and that mesh
+/// is uploaded, only the runs of [`RUN`] vertices that differ are written
+/// over its GPU buffer, and the asset is updated without a change event: the
+/// render world neither clones, reallocates nor repacks the whole mesh, and
+/// Bevy does not revisit every mesh entity that frame (F854). Otherwise the
+/// asset is replaced. Either way `centre` (the local centre of `new`'s
+/// bounds) becomes the transparent sort centre of every entity drawing the
+/// mesh, so a later stream never reuses an older one. Nothing that needs the
+/// change event may draw the mesh (a batch built from it watches its events),
+/// and the caller keeps the `Aabb` of every entity drawing it current (a
+/// reflection overlay follows its part's). Returns whether it streamed.
+pub(crate) fn replace(
+    meshes: &mut Assets<Mesh>,
+    handle: &Handle<Mesh>,
+    new: Mesh,
+    stream: Option<&MeshStream>,
+    centre: Vec3,
+) -> bool {
+    let runs = |n: usize| (0..n.div_ceil(RUN)).map(move |k| RUN.min(n - k * RUN));
+    let streamed = stream.zip(meshes.get(handle)).is_some_and(|(stream, old)| {
+        let parts: Vec<usize> = runs(new.count_vertices()).collect();
+        stream_changed(old, &new, &parts, handle.id(), stream).is_some()
+    });
+    if let Some(stream) = stream {
+        stream.mesh_sort_centre(handle.id(), centre);
+    }
+    if streamed {
+        if let Some(target) = meshes.get_mut_untracked(handle) {
+            *target = new;
+        }
+    } else if let Some(mut target) = meshes.get_mut(handle) {
+        *target = new;
+    }
+    streamed
 }
 
 /// Little-endian f32 components at `at` (wgpu vertex data).
@@ -541,6 +656,48 @@ fn pad_vertices(mesh: &mut Mesh, count: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_streams_only_the_moved_runs_of_a_same_structure_mesh() {
+        let n = 3 * RUN + 10;
+        let mesh = |dent: f32, flip: bool| {
+            let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            let p: Vec<[f32; 3]> = (0..n)
+                .map(|i| [i as f32, if (RUN + 5..RUN + 9).contains(&i) { dent } else { 0. }, 1.])
+                .collect();
+            m.insert_attribute(Mesh::ATTRIBUTE_POSITION, p);
+            m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 1., 0.]; n]);
+            let mut indices: Vec<u32> = (0..n as u32 - 1).collect();
+            if flip {
+                indices.swap(0, 1);
+            }
+            m.insert_indices(Indices::U32(indices));
+            m
+        };
+        let mut meshes = Assets::<Mesh>::default();
+        let handle = meshes.add(mesh(0., false));
+        let stream = MeshStream::default();
+        // One run of RUN vertices moved: only it is queued, at its place.
+        let dented = mesh(-0.25, false);
+        let packed = dented.create_packed_vertex_buffer_data();
+        let stride = VertexLayout::of(&dented).stride;
+        assert!(replace(&mut meshes, &handle, dented.clone(), Some(&stream), Vec3::ONE));
+        assert_eq!(stream.queued(handle.id()).as_deref(), Some(&packed[RUN * stride..2 * RUN * stride]));
+        // Every entity drawing the mesh (a part and its reflection overlay)
+        // sorts by the new centre.
+        assert_eq!(stream.queued_mesh_centre(handle.id()), Some(Vec3::ONE));
+        let kept = meshes.get(&handle).expect("mesh");
+        assert_eq!(kept.attribute(Mesh::ATTRIBUTE_POSITION), dented.attribute(Mesh::ATTRIBUTE_POSITION));
+        // Another structure (or no stream): the asset is replaced.
+        let quiet = MeshStream::default();
+        assert!(!replace(&mut meshes, &handle, mesh(-0.5, true), Some(&quiet), Vec3::Y));
+        assert_eq!(quiet.queued(handle.id()), None);
+        // A replaced asset sets the centre too, so a later stream of it never
+        // sorts by an older one.
+        assert_eq!(quiet.queued_mesh_centre(handle.id()), Some(Vec3::Y));
+        assert_eq!(meshes.get(&handle).expect("mesh").indices(), mesh(0., true).indices());
+        assert!(!replace(&mut meshes, &handle, mesh(0., true), None, Vec3::ONE));
+    }
 
     #[test]
     fn streamed_quads_equal_the_padded_asset() {
