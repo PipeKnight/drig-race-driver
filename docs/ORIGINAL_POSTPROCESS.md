@@ -431,8 +431,8 @@ menu. The standard launchers keep the authored display settings. A zero motion
 shutter selects FinalMergeNoBlur. A positive shutter selects CheapFinalMerge
 and keeps Bevy motion samples. The camera retains float headroom to the
 source final merge. Original MainColourTarget selects an 8- or 10-bit integer
-path by capability; native sRGB state and original optical blur sampling
-remain open.
+path by capability. The Shibuya trace below verifies one native sRGB path.
+Original optical blur sampling remains open.
 
 The source renderer selects integer format 0x0C or 0x12 in 0x605CB0.
 The format names indexed at 0xBB0F40 from table 0xD47338 identify those
@@ -494,3 +494,33 @@ ordering dependency, all six active authored frames matched across repeats.
 Track-grade repeats matched in both measured arms. The resumed views
 confirmed that the Balance pass had no active component or draw. Different
 resumed camera hashes prevented exact image comparison in that phase.
+
+
+### Original Shibuya frame on the D3D9 device
+
+The ordinary Hachiko Drift Circuit race exercised this path on a
+windowed 1280×1024 pure D3D9 device. The game rendered the scene to a
+multisampled surface and resolved it into A2B10G10R10. The same resolved
+texture fed the first MainDS pass and Swig motion blur. MainDS built
+8-bit A8R8G8B8 luminance inputs. Swig wrote another A2B10G10R10 texture.
+The actual CheapFinalMerge draw sampled that Swig output, the eighth-size
+A8R8G8B8 BloomMerge output and the quarter-size softening texture. The
+final target was the 8-bit swap chain. This race used CheapFinalMerge.
+The trace also contains the created FinalMergeNoBlur program.
+
+The call stream reaches the selected successful Present from device
+creation without an sRGB sampler or write-state setter, a state block or
+a device reset. The [Direct3D 9 defaults](https://learn.microsoft.com/en-us/windows/win32/direct3d9/gamma)
+therefore keep both fixed-function conversions off in this capture.
+CheapFinalMerge writes its computed graded value directly. Fifteen of
+its scalar and colour register components match the saved exterior
+parameters read through the port, including the vignette colour and
+premultiplied tint.
+
+The scene itself contains authored emissive, track and vehicle shader
+families. The sampled opaque programs use submitted texture codes in
+their lighting expressions without a generic RGB transfer at the end.
+This describes the observed D3D9 path. The relationship between those
+source material codes and the port's linear scene, fullscreen output,
+other weather or camera states, and visual parity still need matched
+evidence. This record does not change the display presets. See [G428](../log/G0428.md).
