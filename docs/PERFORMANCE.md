@@ -3215,3 +3215,39 @@ Next: either a permanent, cheap record of the worst FixedUpdate tick (its tick n
 of each fixed stage, the page-fault delta) in the normal `frame_split`/`perf_timing` output, so
 the next occurrence names its stage; or an overnight series of the probe build while other
 sessions build, to test the contention explanation.
+
+## 1440p render breakdown (F850)
+
+Donington race, 2560x1440 native window, `present_mode = auto_no_vsync`, F848 executable, idle
+PC. The render thread sets the frame; the GPU does not:
+
+| mode, resolution | fps | main ms | render ms | `r_encode` | `r_prepare` | `r_meshes` | `r_submit` | GPU ms |
+|---|---|---|---|---|---|---|---|---|
+| baseline 1440p | 87.6 | 6.08 | 11.23 | 5.21 | 1.65 | 1.20 | 0.91 | 4.51 |
+| baseline 800p | 85.0 | 6.54 | 11.26 | 5.59 | 1.70 | 1.24 | 0.75 | 2.59 |
+| Enhanced 1440p | 62.6 | 8.07 | 15.81 | 7.65 | 2.22 | 1.54 | 1.54 | 4.74 |
+| Enhanced 800p | 68.1 | 7.57 | 14.25 | 7.39 | 2.10 | 1.45 | 1.01 | 2.22 |
+
+Two 3D views render every frame: the main camera and the OSD camera (`osd_scene.rs`, the
+dashboard and dial HUD drawn into a window-sized MSAA-4 image, 82 blended draws). The upper bound
+of the HUD view, `GRID_PERF_TEST=hud` (OSD camera off, HUD hidden), 4 runs per variant in both
+orders, play after the cover:
+
+| variant | fps | 1 % low | worst window | main ms | render ms | `r_encode` | GPU ms |
+|---|---|---|---|---|---|---|---|
+| baseline, HUD on | 87.8 | 58.0 | 58.7 | 5.88 | 10.98 | 5.24 | 4.54 |
+| baseline, HUD off | 99.5 | 65.6 | 67.9 | 5.64 | 9.62 | 4.27 | 4.35 |
+| Enhanced, HUD on | 67.3 | 44.4 | 46.0 | 7.13 | 14.38 | 7.09 | 4.33 |
+| Enhanced, HUD off | 80.1 | 58.0 | 59.1 | 6.15 | 11.98 | 5.38 | 4.31 |
+
+The HUD view costs 1.4-2.4 ms of render thread, but in many small pieces (profile build, span
+diff): 13 extra command buffers per frame; transparent pass encode about 0.34 ms; then Bevy's
+per-camera nodes at 0.02-0.07 ms each (empty opaque pass, upscaling, five GPU-preprocess and
+indirect-parameter nodes); our five GPU-marker nodes while the counter is shown; 0.12 ms more
+submit; 0.15 ms of main-thread visibility. Bevy 0.19 runs the indirect-parameter clear and build
+nodes once per camera although they cover all batches. No cut of that size keeps the image: light
+clustering off for the OSD camera saves about 0.03 ms; drawing the HUD in the main view or less
+often changes what is shown. Nothing was changed.
+
+Noise: two identical Enhanced configurations interleaved differ by up to 1 ms render and 5 fps,
+so Enhanced A/Bs here need both orders.

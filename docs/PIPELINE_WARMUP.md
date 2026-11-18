@@ -160,6 +160,24 @@ Owner retest after F726 (prototype e66e1c24963c): "отдельные объек
   depends strongly on how warm the driver's per-executable shader cache is (2-3 s for an executable
   run dozens of times, 5-10 s for a new one).
 
+### 2.4 Persistent pipeline cache: design only (F850)
+
+Not implemented; the coordinator kept Bevy unpatched, the owner can decide later. It would bring a
+new executable's cover time toward the warm 2-3 s; it does not change the frame rate.
+- Hook: Bevy 0.19.1 creates every pipeline with `cache: None` (`render_resource/pipeline_cache.rs`,
+  line 565 render, line 623 compute) and has no setting for it. A patched `bevy_render` would hold
+  one process-wide `wgpu::PipelineCache` and pass it at those two sites.
+- Support (wgpu 29.0.4): `Features::PIPELINE_CACHE` exists only on Vulkan (Windows, Linux,
+  Android Vulkan). Metal's `create_pipeline_cache` does nothing (macOS keeps its own shader
+  cache); DX12 and GLES do not implement it. Bevy requests all adapter features by default
+  (`renderer/mod.rs:301`), so the feature is on where it exists.
+- Validation: wgpu checks the header (magic, ABI, backend, adapter key, driver cache UUID).
+  Outdated, corrupt or truncated data with `fallback: true` yields an empty cache, but a device
+  mismatch is an error, so the file name carries `wgpu::util::pipeline_cache_key(adapter_info)`.
+  wgpu has no payload checksum: store our own hash and length, write to a temporary file and rename.
+- Cost: a `[patch.crates-io]` section, a seed refresh, an Android seed rebuild and a full-tier
+  prepush for every Bevy update.
+
 ## 3. Evidence
 
 Private, `local/blink/`: traces `t60.log` (before), `t60-fix*.log` (after), captures `w-*`,
