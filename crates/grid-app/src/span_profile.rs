@@ -10,6 +10,18 @@
 //! profile_span rank=1 excl_ms_per_frame=4.2 incl_ms_per_frame=4.2 calls_per_frame=1.0 name=system: name="bevy_render::..."
 //! ```
 //!
+//! Slow render frames: every render-app update (`sub app: name=RenderApp`)
+//! of at least [`slow_ms`] logs its spans by exclusive time, from all
+//! threads while that update ran, beside the window's mean per render frame:
+//!
+//! ```text
+//! profile_slow render_ms=24.1 rank=1 excl_ms=9.3 mean_ms=1.2 name=...
+//! profile_render_mean frames=612 rank=1 excl_ms=1.2 name=...
+//! ```
+//!
+//! Main-world spans that overlap the render update (pipelined rendering)
+//! are included; their names tell them apart.
+//!
 //! Independently authored diagnostics; only time is read, so the simulation
 //! is unaffected. Not in the normal build: span instrumentation costs time.
 use bevy::log::tracing::field::{Field, Visit};
@@ -20,6 +32,7 @@ use bevy::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -63,6 +76,38 @@ fn top_work() -> usize {
     })
 }
 
+/// Render frames at or above this many ms list their spans:
+/// `GRID_PROFILE_SLOW_MS`, default 20.
+fn slow_ms() -> f64 {
+    static MS: OnceLock<f64> = OnceLock::new();
+    *MS.get_or_init(|| std::env::var("GRID_PROFILE_SLOW_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(20.))
+}
+
+/// Spans listed per slow frame.
+const TOP_SLOW: usize = 25;
+/// Slow frames listed per window.
+const MAX_SLOW: usize = 12;
+
+/// The render app's update span (pipelined rendering's render thread).
+fn render_key() -> u32 {
+    static KEY: OnceLock<u32> = OnceLock::new();
+    *KEY.get_or_init(|| intern("sub app: name=RenderApp".to_owned()))
+}
+
+/// A render-app update is running.
+static RENDER_OPEN: AtomicBool = AtomicBool::new(false);
+
+#[derive(Default)]
+struct RenderFrames {
+    /// Per key: exclusive ns over the window's render frames.
+    sum: HashMap<u32, u64>,
+    frames: u64,
+    /// Render ms and exclusive ns per key of the slow frames.
+    slow: Vec<(f64, Vec<(u32, u64)>)>,
+}
+
+static RENDER: Mutex<Option<RenderFrames>> = Mutex::new(None);
+
 /// Interned span name ("name: fields").
 struct Key(u32);
 
@@ -71,6 +116,8 @@ struct ThreadStats {
     name: String,
     /// Per key: inclusive ns, exclusive ns, calls.
     spans: HashMap<u32, [u64; 3]>,
+    /// Exclusive ns per key during the current render-app update.
+    frame: HashMap<u32, u64>,
 }
 
 static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -129,6 +176,9 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for SpanProfile {
         let Some(key) = ctx.span(id).and_then(|s| s.extensions().get::<Key>().map(|k| k.0)) else {
             return;
         };
+        if key == render_key() {
+            RENDER_OPEN.store(true, Ordering::Relaxed);
+        }
         STACK.with(|s| s.borrow_mut().push((id.into_u64(), key, Instant::now(), 0)));
     }
 
@@ -153,9 +203,46 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for SpanProfile {
                 entry[0] += duration;
                 entry[1] += duration.saturating_sub(children);
                 entry[2] += 1;
+                if RENDER_OPEN.load(Ordering::Relaxed) && key != render_key() {
+                    *stats.frame.entry(key).or_default() += duration.saturating_sub(children);
+                }
             });
+            if key == render_key() {
+                RENDER_OPEN.store(false, Ordering::Relaxed);
+                end_render_frame(duration);
+            }
         });
     }
+}
+
+/// Collects every thread's spans of the render update that just ended.
+fn end_render_frame(duration: u64) {
+    let mut frame: HashMap<u32, u64> = HashMap::new();
+    for thread in THREADS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        let mut stats = thread.lock().unwrap_or_else(|e| e.into_inner());
+        for (key, ns) in stats.frame.drain() {
+            *frame.entry(key).or_default() += ns;
+        }
+    }
+    let mut render = RENDER.lock().unwrap_or_else(|e| e.into_inner());
+    let render = render.get_or_insert_with(Default::default);
+    render.frames += 1;
+    for (&key, &ns) in &frame {
+        *render.sum.entry(key).or_default() += ns;
+    }
+    let ms = duration as f64 / 1e6;
+    if ms >= slow_ms() && render.slow.len() < MAX_SLOW {
+        let mut top: Vec<_> = frame.into_iter().collect();
+        top.sort_by_key(|e| std::cmp::Reverse(e.1));
+        top.truncate(TOP_SLOW);
+        render.slow.push((ms, top));
+    }
+}
+
+/// A span name cut for one log line.
+fn short(name: &str) -> String {
+    let name = name.strip_prefix("system: name=").unwrap_or(name).trim_matches('"');
+    name.chars().take(140).collect()
 }
 
 pub fn install(app: &mut App) {
@@ -230,6 +317,30 @@ fn report(time: Res<Time<Real>>, mut elapsed: Local<f32>) {
             ms(v[0]),
             v[2] as f64 / frames,
             name(*key)
+        );
+    }
+    let render = RENDER.lock().unwrap_or_else(|e| e.into_inner()).take().unwrap_or_default();
+    let mean = |key: u32| render.sum.get(&key).copied().unwrap_or(0) as f64 / 1e6 / render.frames.max(1) as f64;
+    for (ms, top) in &render.slow {
+        for (rank, (key, ns)) in top.iter().enumerate() {
+            log_line!(
+                "profile_slow render_ms={ms:.2} rank={} excl_ms={:.3} mean_ms={:.3} name={}",
+                rank + 1,
+                *ns as f64 / 1e6,
+                mean(*key),
+                short(name(*key))
+            );
+        }
+    }
+    let mut means: Vec<_> = render.sum.keys().copied().collect();
+    means.sort_by(|a, b| mean(*b).total_cmp(&mean(*a)));
+    for (rank, key) in means.iter().take(TOP_SLOW).enumerate() {
+        log_line!(
+            "profile_render_mean frames={} rank={} excl_ms={:.3} name={}",
+            render.frames,
+            rank + 1,
+            mean(*key),
+            short(name(*key))
         );
     }
     let mut wrappers = wrappers;

@@ -3587,3 +3587,45 @@ The slow windows spread over the whole run (windows 0-17), not over one track se
 dominates in both modes, so frame pacing settings (present mode, frame latency) can at most
 address the present/acquire minority; the next step is to find which pass or phase grows in
 those frames.
+
+## Slow render frames by span (F857)
+
+F856 bucketed the post-lift frames of 20 ms or more by their dominant `rworst` stage, and encode came first
+(61 % baseline, 87 % Enhanced at 1280x800). To find which pass grows, `span_profile` (feature `profile`) now
+logs every render-app update of `GRID_PROFILE_SLOW_MS` (default 20) or more. It logs that update's spans by
+exclusive time, from every thread while the update ran, beside the window's mean per render frame:
+
+```text
+profile_slow render_ms=21.80 rank=1 excl_ms=8.8 mean_ms=5.9 name=schedule: name=Render
+profile_render_mean frames=58 rank=1 excl_ms=5.9 name=schedule: name=Render
+```
+
+Main-world spans that overlap the render update (pipelined rendering) are included and recognised by name.
+
+Donington, native 1280x800, `auto_no_vsync`, 3000 ticks, 1 s windows, 2 runs per mode, windows after the
+cover lift:
+
+| mode | windows | render updates of 20 ms or more | what grew |
+|---|---|---|---|
+| baseline | 96 | 1 (51 ms) | `present_frames` 37.7 ms (mean 0.9) |
+| Enhanced | 94 | 11 (20.1-22.6 ms) | Render schedule wait outside any span +1.7 to +11.6 ms (8 of 11); main-world peaks in the same instant (7 of 11): `drive_tick` +2.2 to +4.2 ms, `drive_present` +2.7 to +2.9, `ground_detail::present` +2.8, once `propagate_parent_transforms` +12.4 (mean 0.2); present +7.9 once; render-graph passes at most +1.4 ms |
+
+In the F856 release runs at 1280x800, the windows with a slow render frame are busier on the main thread for
+the whole second:
+
+| mode | windows | main ms | fixed ms | render mean ms |
+|---|---|---|---|---|
+| baseline, slow render frame | 6 | 8.1 | 2.4 | 13.3 |
+| baseline, other | 73 | 5.5 | 1.2 | 9.5 |
+| Enhanced, slow render frame | 25 | 8.0 | 2.3 | 14.8 |
+| Enhanced, other | 50 | 6.4 | 1.6 | 12.2 |
+
+Verdict: no render pass or phase grows. The render thread waits for its tasks while the main world's work
+(fixed-step driving, presentation, transform propagation) peaks in the same instant. `encode` is wall-clock
+time over render-graph systems that run on Bevy's task pools, shared with the main world, so contention for
+those threads shows up there. This is an interpretation from 11 profiled updates and the window correlation.
+The profile build makes render spikes rarer (11 per 94 windows against 25 per 75 in the release Enhanced runs),
+and its own report adds main-thread frame spikes. Baseline's rare render spikes include the driver's present.
+Levers: smaller main-world peaks, or a task pool split so that render-graph tasks do not queue behind
+main-world `par_iter` work (an A/B, not yet run).
+
