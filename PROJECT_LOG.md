@@ -176,6 +176,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F854](log/F0854.md) | 2026-11-18 | Streamed minimap ribbon and crowd flash meshes: visibility no longer revisits every mesh each frame |
 | [F853](log/F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
 | [F852](log/F0852.md) | 2026-11-18 | Own-car dents on the compute pool; drive_present, solver and visibility probes |
 | [F851](log/F0851.md) | 2026-11-18 | Worst fixed tick names its systems (permanent attribution) |
@@ -235,7 +236,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F793](log/F0793.md) | 2026-11-10 | Career team sum: an AI car without a team counts for the player (0x660E90) |
 | [F792](log/F0792.md) | 2026-11-10 | Career season leaderboards: model, save and Rankings pages |
 | [F791](log/F0791.md) | 2026-11-10 | Loading world: glyph instances grafted, screen panels left to their screens |
-| [F790](log/F0790.md) | 2026-11-10 | Career screen sounds and bars; window shots recheck |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

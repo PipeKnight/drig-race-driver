@@ -3363,7 +3363,7 @@ Solver stages (perf_timing, mean per tick): VehicleStage 0.57 ms, CarPairs 0.14,
 Visibility: mesh assets change in 599 of 600 frames (Donington; 1199 of 1200 in the derby), so
 Bevy's `calculate_bounds` never takes its unchanged fast path over 19,338 (9,484) `Mesh3d`
 entities. Marking static meshes `NoAutoAabb` could skip that, but which meshes are truly static
-needs an audit and matched images; deferred.
+needs an audit and matched images; deferred. F854 found the cause and removed it.
 
 ## Post-lift worst frame and the OSD camera's own schedule (F853)
 
@@ -3436,3 +3436,73 @@ draws' encode (about 0.34 ms), view preparation, specialization, batching and bi
 main-thread visibility. A 2D camera would still pay those. Cutting them needs a change to the
 picture or its timing (HUD drawn in the main view, or redrawn less often), which is the desktop
 look owner's decision.
+
+## Mesh changes and visibility each frame (F854)
+
+Question: what do Bevy's `calculate_bounds` and the visibility systems cost per frame, and why
+do meshes count as changed in every frame (F852)? Windowed 1280x800, native render height,
+`auto_no_vsync`, idle PC, autopilot; Donington (`settings/race.ini`, 19,275 `Mesh3d`) and the
+derby (`settings/demolition-derby.ini`, 9,484). A temporary probe (not committed) timed the
+PostUpdate systems and named the mesh assets that sent `AssetEvent::Modified` each frame.
+
+Cost before (mean per frame, two runs each):
+
+| system | Donington | derby |
+|---|---|---|
+| `mark_3d_meshes_as_changed_if_their_assets_changed` | 0.26 ms | 0.13-0.15 ms |
+| `calculate_bounds` | 0.12-0.13 ms | 0.10-0.11 ms |
+| `check_visibility` (CPU) | 0.23-0.25 ms | 0.18-0.19 ms |
+| directional light visibility | 0.26-0.27 ms | 0.18-0.20 ms |
+| PostUpdate wall | 4.09-4.12 ms | 3.42-3.72 ms |
+
+This is over the 0.3 ms threshold. A `Modified` event on any one mesh in a frame makes Bevy
+revisit every `Mesh3d` entity: the mark system and `calculate_bounds` (`AssetChanged<Mesh3d>`)
+scan all of them, and so do the per-material specialization checks. Every frame was dirty
+(900 of 900 Donington, 2100 of 2100 derby). Sources, by mesh label:
+
+- the minimap ribbon: replaced its asset (`*mesh = ...`) every frame;
+- the crowd camera flashes: a new view-facing mesh per active card per frame;
+- the crowd cells: `get_mut` when the set of omitted card rows changed, because the index
+  count followed the visible card count;
+- opponent dents and tyre smoke: real geometry changes (kept).
+
+Freezing only the ribbon (probe switch) left 722 of 1200 Donington frames dirty
+(PostUpdate 3.77 ms dirty against 3.42 ms clean), mostly flashes (578) and cells (213).
+
+Fix, in the shared streaming path (`mesh_stream.rs`), with no list of tracks:
+
+- `SoupMesh`, for a mesh rebuilt every frame: it de-indexes the triangles
+  (`duplicate_vertices`), pads them to a capacity with zero-area triangles and writes the
+  vertices through `MeshStream` over the GPU allocation, so the asset never changes. It
+  replaces the asset only when the capacity grows (+25 %) or the attributes change. It queues
+  the sort centre Bevy took from the replaced asset (`compute_aabb` of the unpadded mesh). The
+  entity's bounds do not follow, so the users carry `NoFrustumCulling` (the minimap ribbon
+  and the flash cards already did).
+- The minimap ribbon and the crowd flash cards use it.
+- Crowd cells pad their batch to the cell's full card count with zero quads, so the index
+  buffer never changes and the vertices stream; they carry `NoAutoAabb` with their spawn
+  bounds, which hold for every card direction.
+
+After (fix build with the probe):
+
+- Dirty frames: Donington 64 of 1800 and 63 of 1200 (opponent dents and tyre smoke); derby
+  289 of 1200 and 302 of 1800 (opponent dents).
+- Mark system 9-19 us Donington, 28-34 us derby; `calculate_bounds` 64-85 us and 80-82 us.
+
+Alternating A/B, 3 pairs, same probe in both builds:
+
+| pair | Donington PostUpdate before / after | derby PostUpdate before / after | Donington main_ms | derby main_ms |
+|---|---|---|---|---|
+| 1 | 4.57 / 3.39 ms | 3.21 / 2.63 ms | 9.33 / 6.86 | 6.73 / 5.80 |
+| 2 | 3.58 / 3.12 ms | 2.63 / 2.53 ms | 6.73 / 6.14 | 5.23 / 5.21 |
+| 3 | 3.39 / 3.16 ms | 2.53 / 2.43 ms | 6.36 / 6.42 | 5.14 / 4.95 |
+
+PostUpdate was lower in every pair: Donington by 0.23-1.18 ms (median 0.46), derby by
+0.10-0.58 ms (median 0.10). main_ms moves with it in five of six pairs; pair 1 includes
+warm-up noise. `check_visibility` and light visibility still run every frame; they do not
+depend on mesh changes.
+
+Images: matched offscreen frames (1280x720, `--render-fixed-step`, autopilot) of the race and
+the derby at ticks 600 and 1500, HEAD against the fix, with a second fix run as noise. Three
+pairs are identical; derby 1500 differs in 1 pixel by 1 level, as does its noise pair. A
+bottom-left crop shows the minimap ribbon drawn the same in both (local/mt/vis/img).

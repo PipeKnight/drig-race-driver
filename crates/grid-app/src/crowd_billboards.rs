@@ -813,6 +813,9 @@ fn spawn(
             MeshMaterial3d(handles[material].clone()),
             Transform::IDENTITY,
             Aabb::from_min_max(min, max),
+            // These bounds hold for every card direction; the streamed
+            // vertices never update the asset's own (F854).
+            bevy::camera::visibility::NoAutoAabb,
             NotShadowCaster,
             CardCell {
                 material,
@@ -1295,7 +1298,7 @@ fn update_cards(
         if visible.is_empty() {
             *visibility = Visibility::Hidden;
         } else {
-            let Ok(batch) = make_batch(
+            let Ok(mut batch) = make_batch(
                 &prepared,
                 &visible,
                 &prepared.specs[cell.material],
@@ -1304,15 +1307,19 @@ fn update_cards(
             ) else {
                 continue;
             };
+            // Cards a live body replaces become zero-area padding, so the
+            // asset keeps one card per row and its vertices are streamed:
+            // a replaced or modified asset makes Bevy revisit every mesh
+            // entity that frame (F854).
+            pad_cards(&mut batch, cell.rows.len());
             *visibility = Visibility::Inherited;
             // The cards face the camera, so their corners change with every
             // move of the eye. Same cards: their bytes go over the mesh's GPU
             // allocation (mesh_stream), as replacing the asset would upload
-            // and repack the whole mesh every frame. Other cards: a new asset.
-            let same = !topology_changed
-                && meshes
-                    .get(&mesh.0)
-                    .is_some_and(|m| m.count_vertices() == batch.p.len());
+            // and repack the whole mesh every frame.
+            let same = meshes
+                .get(&mesh.0)
+                .is_some_and(|m| m.count_vertices() == batch.p.len());
             match (same, stream.as_deref()) {
                 (true, Some(stream)) => {
                     let layout = meshes.get(&mesh.0).map(super::mesh_stream::VertexLayout::of);
@@ -1324,8 +1331,8 @@ fn update_cards(
                     if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
                         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, batch.p);
                         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, batch.n);
-                        if topology_changed || !same {
-                            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv);
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv);
+                        if !same {
                             mesh.insert_indices(Indices::U32(batch.indices));
                         }
                     }
@@ -1335,6 +1342,20 @@ fn update_cards(
         cell.omitted = omitted;
         cell.last_frame = frame;
         cell.last_eye = eye;
+    }
+}
+
+/// Pads `batch` to `cards` cards with zero-area cards at the origin, which
+/// draw nothing, in the cards' own index pattern.
+fn pad_cards(batch: &mut Batch, cards: usize) {
+    while batch.p.len() < cards * 4 {
+        let first = batch.p.len() as u32;
+        batch.p.extend([[0.; 3]; 4]);
+        batch.n.extend([[0., 1., 0.]; 4]);
+        batch.uv.extend([[0.; 2]; 4]);
+        batch
+            .indices
+            .extend([first, first + 1, first + 2, first + 3, first + 2, first + 1]);
     }
 }
 
@@ -1390,8 +1411,10 @@ struct Flashes {
     schedule: VecDeque<FlashCheckpoint>,
 }
 
+/// A flash card's slot and its streamed quad, which changes every frame it
+/// shows (F854).
 #[derive(Component)]
-struct FlashCard(usize);
+struct FlashCard(usize, super::mesh_stream::SoupMesh);
 
 impl Flashes {
     fn visible_at(&self, seconds: f64) -> std::ops::Range<usize> {
@@ -1457,7 +1480,7 @@ fn install_flash(
     for index in 0..10 {
         commands.spawn((
             Name::new("crowd/source-camera-flash"),
-            FlashCard(index),
+            FlashCard(index, default()),
             Mesh3d(default()),
             MeshMaterial3d(handle.clone()),
             // The pulse owns a tiny changing view-facing mesh.
@@ -1491,10 +1514,11 @@ fn update_flash(
     mut flashes: Option<ResMut<Flashes>>,
     view: Single<(&Transform, &Projection), With<super::ViewerCamera>>,
     mut cards: Query<
-        (&FlashCard, &mut Transform, &mut Visibility, &mut Mesh3d),
+        (Entity, &mut FlashCard, &mut Transform, &mut Visibility, &mut Mesh3d),
         Without<super::ViewerCamera>,
     >,
     mut meshes: ResMut<Assets<Mesh>>,
+    stream: Option<Res<super::mesh_stream::MeshStream>>,
 ) {
     let Some(flashes) = flashes.as_deref_mut() else {
         return;
@@ -1564,7 +1588,7 @@ fn update_flash(
     }
 
     let active = flashes.visible_at(now);
-    for (card, mut transform, mut visibility, mut handle) in &mut cards {
+    for (entity, mut card, mut transform, mut visibility, mut handle) in &mut cards {
         *visibility = Visibility::Hidden;
         let index = active.start + card.0;
         if index >= active.end {
@@ -1577,10 +1601,11 @@ fn update_flash(
         if let Ok((mesh, center)) =
             super::flash_preview::event_mesh(event.anchor, eye.to_array(), phase)
         {
-            if let Some(mut existing) = meshes.get_mut(&handle.0) {
-                *existing = mesh;
-            } else {
-                handle.0 = meshes.add(mesh);
+            if let Some(added) =
+                card.1
+                    .update(mesh, &handle.0, entity, &mut meshes, stream.as_deref())
+            {
+                handle.0 = added;
             }
             transform.translation = center;
             *visibility = Visibility::Visible;

@@ -274,7 +274,7 @@ fn resort(
 
 /// Byte layout of a mesh's packed vertex buffer: attributes interleaved per
 /// vertex in attribute-id order, as `Mesh::write_packed_vertex_buffer_data`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct VertexLayout {
     pub stride: usize,
     offsets: Vec<(MeshVertexAttributeId, usize)>,
@@ -439,6 +439,105 @@ fn pack_quads(quads: &[Quad], capacity: usize, layout: &VertexLayout, bytes: &mu
     }
 }
 
+/// A mesh rebuilt every frame with a varying number of triangles (the
+/// minimap's route ribbon, a crowd camera flash). Replacing its asset each
+/// frame sends an `AssetEvent::Modified`, and any such event makes Bevy's
+/// `mark_3d_meshes_as_changed_if_their_assets_changed`, `calculate_bounds`
+/// and every material's specialization check visit all mesh entities that
+/// frame (F854). The asset instead holds the triangles unindexed, padded with
+/// zero-area triangles to a capacity, and later frames stream their vertices
+/// over it; it is replaced only when the triangles outgrow it or the
+/// attribute set changes. The entity's own bounds are not kept up to date,
+/// so it must not be frustum culled (`NoFrustumCulling`).
+#[derive(Default)]
+pub(crate) struct SoupMesh {
+    /// Vertices the asset holds (a multiple of 3).
+    capacity: usize,
+    layout: Option<VertexLayout>,
+    asset: Option<AssetId<Mesh>>,
+}
+
+impl SoupMesh {
+    /// Shows the triangle list `mesh` through `handle` on `entity`, sorted
+    /// as the plain asset would be. Returns a new handle when `handle` has no
+    /// asset yet. Without a stream the padded asset is replaced every time.
+    pub(crate) fn update(
+        &mut self,
+        mut mesh: Mesh,
+        handle: &Handle<Mesh>,
+        entity: Entity,
+        meshes: &mut Assets<Mesh>,
+        stream: Option<&MeshStream>,
+    ) -> Option<Handle<Mesh>> {
+        use bevy::camera::primitives::MeshAabb;
+        let centre = mesh.compute_aabb().map_or(Vec3::ZERO, |aabb| aabb.center.into());
+        // Same triangles in the same order, each with its own vertices.
+        mesh.duplicate_vertices();
+        let count = mesh.count_vertices();
+        let layout = VertexLayout::of(&mesh);
+        let fits = count <= self.capacity
+            && self.layout.as_ref() == Some(&layout)
+            && self.asset == Some(handle.id())
+            && meshes.contains(handle);
+        let added = match stream {
+            Some(stream) if fits => {
+                stream.write(handle.id(), |bytes| {
+                    let start = bytes.len();
+                    pack_vertices(&mesh, 0..count, bytes);
+                    bytes.resize(start + self.capacity * layout.stride, 0);
+                });
+                None
+            }
+            _ => {
+                if !fits {
+                    // AUTHORED headroom, so the asset is rarely replaced again.
+                    self.capacity = (count + count / 4).max(3).next_multiple_of(3);
+                }
+                if !pad_vertices(&mut mesh, self.capacity) {
+                    // An attribute format padding does not cover: plain asset.
+                    self.capacity = 0;
+                }
+                mesh.insert_indices(Indices::U32((0..mesh.count_vertices() as u32).collect()));
+                self.layout = Some(layout);
+                if meshes.contains(handle) {
+                    if let Some(mut target) = meshes.get_mut(handle) {
+                        *target = mesh;
+                    }
+                    self.asset = Some(handle.id());
+                    None
+                } else {
+                    let added = meshes.add(mesh);
+                    self.asset = Some(added.id());
+                    Some(added)
+                }
+            }
+        };
+        if let Some(stream) = stream {
+            stream.sort_centre(entity, centre);
+        }
+        added
+    }
+}
+
+/// Extends every attribute of `mesh` with zero vertices up to `count`, as
+/// zero bytes in the packed buffer. False for a format it does not cover.
+fn pad_vertices(mesh: &mut Mesh, count: usize) -> bool {
+    use bevy::mesh::VertexAttributeValues as V;
+    mesh.attributes_mut().all(|(_, values)| {
+        match values {
+            V::Float32(v) => v.resize(count, 0.),
+            V::Float32x2(v) => v.resize(count, [0.; 2]),
+            V::Float32x3(v) => v.resize(count, [0.; 3]),
+            V::Float32x4(v) => v.resize(count, [0.; 4]),
+            V::Uint32(v) => v.resize(count, 0),
+            V::Uint32x4(v) => v.resize(count, [0; 4]),
+            V::Unorm8x4(v) => v.resize(count, [0; 4]),
+            _ => return false,
+        }
+        true
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,5 +633,49 @@ mod tests {
         }
         assert_eq!(bytes, mesh.create_packed_vertex_buffer_data());
         assert_eq!(layout.offset(Mesh::ATTRIBUTE_UV_1), None);
+    }
+
+    #[test]
+    fn soup_mesh_streams_the_same_triangles_and_sort_centre() {
+        use bevy::camera::primitives::MeshAabb;
+        let fan = |n: usize, z: f32| {
+            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all());
+            let positions: Vec<[f32; 3]> =
+                (0..n).map(|k| [k as f32, (k * k) as f32 * 0.5, z]).collect();
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0f32, 0., 1.]; n]);
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.25f32, 0.5]; n]);
+            let indices = (1..n as u16 - 1).flat_map(|k| [0, k, k + 1]).collect();
+            mesh.insert_indices(Indices::U16(indices));
+            mesh
+        };
+        let mut meshes = Assets::<Mesh>::default();
+        let stream = MeshStream::default();
+        let entity = Entity::from_raw_u32(3).unwrap();
+        let mut soup = SoupMesh::default();
+        // No asset yet: one is added, padded to the capacity.
+        let handle = soup
+            .update(fan(6, -2.), &Handle::default(), entity, &mut meshes, Some(&stream))
+            .expect("added");
+        let asset = meshes.get(&handle).unwrap();
+        // Four triangles, 12 vertices, 15 with the headroom.
+        assert_eq!(asset.count_vertices(), 15);
+        let mut plain = fan(6, -2.);
+        let centre = Vec3::from(plain.compute_aabb().unwrap().center);
+        assert_eq!(stream.queued_centre(entity), Some(centre));
+        plain.duplicate_vertices();
+        let bytes = plain.create_packed_vertex_buffer_data();
+        assert_eq!(asset.create_packed_vertex_buffer_data()[..bytes.len()], bytes[..]);
+        // Fewer triangles: streamed over the same asset, the rest zero.
+        assert!(soup.update(fan(4, -3.), &handle, entity, &mut meshes, Some(&stream)).is_none());
+        let mut fewer = fan(4, -3.);
+        fewer.duplicate_vertices();
+        let mut expected = fewer.create_packed_vertex_buffer_data();
+        expected.resize(15 * VertexLayout::of(&fewer).stride, 0);
+        assert_eq!(stream.queued(handle.id()), Some(expected));
+        assert_eq!(meshes.get(&handle).unwrap().count_vertices(), 15);
+        // More than the capacity: the asset is replaced.
+        soup.update(fan(9, -1.), &handle, entity, &mut meshes, Some(&stream));
+        assert_eq!(meshes.get(&handle).unwrap().count_vertices(), 27);
     }
 }

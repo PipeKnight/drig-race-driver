@@ -780,7 +780,9 @@ pub struct Minimap {
     markers: Vec<Entity>,
     /// The mask's centre and ring radius in its local space.
     ring: Option<(Vec2, f32)>,
-    ribbon: Option<Handle<Mesh>>,
+    ribbon: Option<(Entity, Handle<Mesh>)>,
+    /// The ribbon's streamed asset: it changes every frame (F854).
+    soup: crate::mesh_stream::SoupMesh,
     /// The markers' saved depth in the mask's space.
     depth: f32,
     /// The opponent marker's saved scale.
@@ -810,6 +812,7 @@ pub fn minimap(
     mut transforms: Query<&mut Transform>,
     camera: Query<&GlobalTransform, With<crate::osd_scene::OsdCamera>>,
     globals: Query<&GlobalTransform>,
+    stream: Option<Res<crate::mesh_stream::MeshStream>>,
 ) {
     let (Some(osd), Some(line)) = (osd, &driving.reset_line) else {
         return;
@@ -825,16 +828,16 @@ pub fn minimap(
         let radius = (bounds[3] - bounds[0]).min(bounds[4] - bounds[1]) / 2.;
         state.ring = Some((centre, radius));
         let ribbon = meshes.add(crate::osd_scene::mesh(&grid_formats::osd::Mesh::default()));
-        state.ribbon = Some(ribbon.clone());
         commands.entity(mask).remove::<Mesh3d>();
-        commands.spawn((
-            Mesh3d(ribbon),
+        let entity = commands.spawn((
+            Mesh3d(ribbon.clone()),
             MeshMaterial3d(materials.add(osd.colour_material(Vec3::splat(MAP_TRACK_RGB), MAP_TRACK_ALPHA))),
             Transform::from_xyz(0., 0., 0.2),
             bevy::camera::visibility::RenderLayers::layer(crate::osd_scene::LAYER),
             bevy::camera::visibility::NoFrustumCulling,
             ChildOf(mask),
-        ));
+        )).id();
+        state.ribbon = Some((entity, ribbon));
         let player = osd.entity("player");
         let opponent = osd.entity("opponent");
         if let Some(Ok(t)) = opponent.or(player).map(|e| transforms.get(e)) {
@@ -868,9 +871,10 @@ pub fn minimap(
     let Some(cam) = view.camera(Vec3::new(player[12], player[13], player[14]), Vec3::new(player[8], 0., player[10])) else {
         return;
     };
-    if let Some(mut mesh) = state.ribbon.as_ref().and_then(|h| meshes.get_mut(h)) {
+    if let Some((entity, handle)) = state.ribbon.clone() {
         let ribbon = map_ribbon(line.points(), line.is_open(), MAP_TRACK_WIDTH * view.zoom, cam, centre, radius);
-        *mesh = crate::osd_scene::mesh(&ribbon);
+        // The ribbon's asset is created at spawn, so no new handle comes back.
+        let _ = state.soup.update(crate::osd_scene::mesh(&ribbon), &handle, entity, &mut meshes, stream.as_deref());
     }
     // The markers blend at one saved depth, so where they overlap their
     // order was a sort tie that unrelated changes flipped. Each car now has
