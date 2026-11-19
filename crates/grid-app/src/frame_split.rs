@@ -381,6 +381,48 @@ struct Slow {
     ticks: u64,
     /// Frames that ran two or more fixed ticks (catch-up).
     multi: u32,
+    /// Main-world laps of these frames (`slow*_laps`, `tick*_laps`).
+    laps: [u64; lap::N],
+}
+
+/// Mean milliseconds of a nanosecond sum over `n` frames.
+fn per(sum: u64, n: u32) -> f64 {
+    sum as f64 * 1e-6 / f64::from(n.max(1))
+}
+
+impl Slow {
+    /// One frame: `t` = frame, main, fixed, outside and render ns.
+    fn add(&mut self, t: [u64; 5], ticks: u32, laps: &[u64; lap::N]) {
+        let [frame, main, fixed, outside, render] = t;
+        self.frames += 1;
+        self.frame += frame;
+        self.main += main;
+        self.fixed += fixed;
+        self.outside += outside;
+        self.render += render;
+        self.ticks += u64::from(ticks);
+        self.multi += u32::from(ticks >= 2);
+        for (s, v) in self.laps.iter_mut().zip(laps) {
+            *s += v;
+        }
+    }
+
+    /// `{p}_frames= {p}_ms= ... {p}_laps=` of `frame_stats`.
+    fn report(&self, p: &str) -> String {
+        let n = self.frames;
+        let laps: Vec<String> = self.laps.iter().map(|&x| format!("{:.1}", per(x, n))).collect();
+        format!(
+            " {p}_frames={n} {p}_ms={:.2} {p}_main={:.2} {p}_fixed={:.2} {p}_outside={:.2} {p}_render={:.2} {p}_ticks={:.2} {p}_multi={} {p}_laps={}",
+            per(self.frame, n),
+            per(self.main, n),
+            per(self.fixed, n),
+            per(self.outside, n),
+            per(self.render, n),
+            self.ticks as f64 / f64::from(n.max(1)),
+            self.multi,
+            laps.join("/")
+        )
+    }
 }
 
 fn main_begin() {
@@ -488,18 +530,13 @@ fn main_end(
     drop(c);
     with_acc(|a| {
         if let Some(frame) = frame {
+            let t = [frame, main, fixed, outside, a.last_render];
             for (slow, limit) in a.slow.iter_mut().zip(SLOW_MS) {
                 if frame > limit * 1_000_000 {
-                    slow.frames += 1;
-                    slow.frame += frame;
-                    slow.main += main;
-                    slow.fixed += fixed;
-                    slow.outside += outside;
-                    slow.render += a.last_render;
-                    slow.ticks += u64::from(ticks);
-                    slow.multi += u32::from(ticks >= 2);
+                    slow.add(t, ticks, &laps);
                 }
             }
+            a.ticked[usize::from(ticks > 0)].add(t, ticks, &laps);
         }
         a.main_frames += 1;
         a.main += main;
@@ -1017,6 +1054,8 @@ struct Acc {
     /// render_ms of the last finished render frame (kept across resets).
     last_render: u64,
     slow: [Slow; 2],
+    /// Main frames without and with a fixed tick (`tick0_*`, `tick1_*`).
+    ticked: [Slow; 2],
     /// Per-view detail over `DETAIL_WINDOWS` windows (kept across resets).
     detail: BTreeMap<(isize, u32), ViewAcc>,
     detail_windows: u32,
@@ -1052,7 +1091,6 @@ impl Acc {
 pub fn window_report(seconds: f64) -> (String, Vec<String>) {
     let gpu_possible = SHOWN.load(Ordering::Relaxed);
     with_acc(|a| {
-        let per = |sum: u64, n: u32| sum as f64 * 1e-6 / f64::from(n.max(1));
         let mut s = format!(
             " main_ms={:.2} fixed_ms={:.2} outside_ms={:.2} extract_ms={:.2}",
             per(a.main, a.main_frames),
@@ -1136,17 +1174,10 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
             a.image_bytes as f64 / 1024. / secs,
         );
         for (slow, limit) in a.slow.iter().zip(SLOW_MS) {
-            let n = slow.frames;
-            s += &format!(
-                " slow{limit}_frames={n} slow{limit}_ms={:.2} slow{limit}_main={:.2} slow{limit}_fixed={:.2} slow{limit}_outside={:.2} slow{limit}_render={:.2} slow{limit}_ticks={:.2} slow{limit}_multi={}",
-                per(slow.frame, n),
-                per(slow.main, n),
-                per(slow.fixed, n),
-                per(slow.outside, n),
-                per(slow.render, n),
-                slow.ticks as f64 / f64::from(n.max(1)),
-                slow.multi
-            );
+            s += &slow.report(&format!("slow{limit}"));
+        }
+        for (t, ticked) in a.ticked.iter().enumerate() {
+            s += &ticked.report(&format!("tick{t}"));
         }
         s += &crate::fixed_ticks::window_suffix();
         let mut lines = Vec::new();

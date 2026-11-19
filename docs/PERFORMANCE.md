@@ -1593,7 +1593,8 @@ Tool: `gpu_passes` (on in the profile build, or `GRID_GPU_PASSES=1`) logs per re
 time from timestamp queries, with primitives and shader invocations where the device has pipeline
 statistics (the Adreno 740 has both), and the triangles each view submits by owner from the
 visibility lists (`view_triangles`). Bevy does not time its shadow passes; their triangles show
-their size.
+their size. Since F863 each line also carries `cpu_ms`, the render thread's time inside the
+pass span (Bevy's `elapsed_cpu`), which is the pass's share of `r_encode`.
 
 PC, desktop phone view (mobile preset, 1539x720), Donington, 12 cars, frozen at tick 1 [O]:
 
@@ -2908,6 +2909,11 @@ time inside the frame), outside, render, fixed ticks per slow frame, and how
 many ran more than one tick. perf_timing gains `RaceUpdate` (the race
 update after the runtime tick in drive_tick).
 
+Since F863 the slow-frame fields also carry `slow10_laps` and `slow14_laps`: the main laps (`dt dp
+dpo dpn gd gdg tp cb out mt`, the order of `lap_*`) averaged over those frames, slash-separated. The
+window also splits all its frames by fixed ticks: `tick0_*` holds frames without a FixedMain tick
+and `tick1_*` frames with one or more, with the same fields as `slow10_*`.
+
 ### A/B
 
 `local/mt/buildsk.ps1` (under the build lock; release tests of the changed
@@ -3973,3 +3979,85 @@ So the remaining average gap is render-thread encoding and preparation, in Enhan
 (about 4 to 5 ms of `r_encode` against a 10 ms budget). The 1 % low gap is a tail of frames of
 14.5 to 16.5 ms, plus derby Enhanced frames of 20 ms or more. This matrix does not say which part of the
 frame makes that tail.
+
+### The 1 % low tail was background load (F863)
+
+Task: find what the derby's slowest 1 % of frames (14.5 to 16.5 ms in the matrix above) wait on.
+
+Instrumented runs: release exe `local/ab/tl.exe` 279d33041788cb8a (f06cdeb2 plus the tick split
+and slow-frame laps), derby 1280 baseline x2 and Donington 1280 baseline, 3000 ticks, under the
+build lock (`local/ab/tl.ps1`, `tl.py`). Means over the windows after GO:
+
+| Run | fps | frames | share | frame ms | main | fixed | outside | render | top laps (ms) |
+|---|---|---|---|---|---|---|---|---|---|
+| derby 1 | 149.3 | no tick | 58 % | 5.39 | 2.72 | 0 | 2.68 | 6.21 | cb 1.36, tp 0.79 |
+| | | tick | 42 % | 8.51 | 4.67 | 1.73 | 3.84 | 6.18 | dt 1.47 (mt 1.33), cb 1.50, tp 1.00 |
+| | | over 10 ms | 4.6 % | 11.59 | 7.64 | 2.55 | 3.95 | 6.68 | cb 2.48, dt 2.28 (mt 2.11), tp 1.86, dp 1.32 (dpn 1.09) |
+| | | over 14 ms | 0.2 % | 15.18 | 10.38 | 2.92 | 4.81 | 7.98 | cb 3.63, tp 2.91, dt 2.66, dp 2.41 (dpn 2.19) |
+| Donington | 124.9 | no tick | 50 % | 7.07 | 3.21 | 0 | 3.85 | 7.68 | cb 1.70, tp 0.87 |
+| | | tick | 50 % | 8.94 | 4.38 | 1.16 | 4.56 | 7.42 | cb 1.72, tp 1.06, dt 0.90 |
+| | | over 14 ms | 0.1 % | 16.21 | 8.26 | 1.85 | 7.96 | 9.57 | cb 2.85, dp 2.05 (dpn 1.95), tp 1.80 |
+
+Derby run 2 matches run 1 within 0.05 ms in the tick rows.
+
+Observations:
+
+- On this run the derby 1280 baseline 1 % low was about 103 fps (bucket 9.5 ms), not the matrix's
+  65.6 and 67.8. Frames of 14 ms or more were 0.2 to 0.3 %.
+- A re-run of the matrix's own B binary (`local/ab/mB.exe` 36a366fcd480361c), 3 pairs alternating
+  with tl.exe (`local/ab/tr.ps1`): mB 1 % low about 103 fps in all 3 runs, tl 103 to 108. The
+  instrumentation costs nothing visible.
+- The slow frames are main-thread frames with a fixed tick. All main laps inflate together (cb, tp,
+  dt, dp roughly double), which points to a slower CPU in those frames rather than one stage. The
+  one stage that grows more than the rest is `dpn`, the opponents' dent update in drive_present
+  (0.13 ms on average, 1.1 ms over 10 ms, 2.2 ms over 14 ms). The render thread stays at 6.7 to
+  8.0 ms in those frames. No surface acquire, present, pipeline compile or periodic job shows in them.
+
+Idle re-measure of the B matrix: the same binary mB.exe, 8 cells x 2 runs, under the build lock,
+logging the CPU seconds of every other process (`local/ab/mi.ps1`). A run where a process other than
+Explorer used more than 5 s of CPU was rerun once. `local/ab/mi.py` compares it with the matrix
+(`local/ab/mi.out`):
+
+| Cell | Phase | fps matrix → idle | 1 % low matrix → idle | ≥20 ms % matrix → idle |
+|---|---|---|---|---|
+| derby 1280 baseline | start | 136.7 → 153.9 | 65.6 → 93.0 | 0.15 → 0.00 |
+| derby 1280 baseline | mid | 122.1 → 145.0 | 67.8 → 108.1 | 0.01 → 0.00 |
+| derby 1280 Enhanced | start | 103.5 → 126.5 | 63.5 → 85.1 | 0.00 → 0.00 |
+| derby 1280 Enhanced | mid | 85.6 → 101.7 | 44.4 → 70.2 | 1.69 → 0.02 |
+| derby 2560 baseline | start | 129.2 → 135.5 | 61.5 → 67.8 | 0.17 → 0.43 |
+| derby 2560 baseline | mid | 117.4 → 133.2 | 63.5 → 78.4 | 0.14 → 0.00 |
+| derby 2560 Enhanced | start | 113.6 → 117.5 | 75.5 → 72.7 | 0.00 → 0.00 |
+| derby 2560 Enhanced | mid | 91.7 → **97.0** | 56.3 → 70.2 | 0.69 → 0.02 |
+| Donington 1280 baseline | start | 99.8 → 124.6 | 61.5 → 102.6 | 0.17 → 0.03 |
+| Donington 1280 baseline | mid | 112.6 → 125.0 | 70.2 → 102.6 | 0.10 → 0.01 |
+| Donington 1280 Enhanced | start | 84.2 → **98.3** | 54.8 → 85.1 | 0.67 → 0.00 |
+| Donington 1280 Enhanced | mid | 87.6 → **98.5** | 58.0 → 85.1 | 0.32 → 0.00 |
+| Donington 2560 baseline | start | 110.1 → 107.9 | 88.9 → 75.5 | 0.00 → 0.03 |
+| Donington 2560 baseline | mid | 111.8 → 111.6 | 93.0 → 93.0 | 0.00 → 0.00 |
+| Donington 2560 Enhanced | start | 88.6 → **88.0** | 72.7 → 72.7 | 0.00 → 0.00 |
+| Donington 2560 Enhanced | mid | 89.0 → **87.2** | 78.4 → 67.8 | 0.00 → 0.04 |
+
+- The matrix ran 10:57 to 11:29 under the build lock, but the lock covers only cargo and timing
+  scripts. In one rejected idle run the ChatGPT and Codex desktop apps used 8 to 16 s of CPU, and in
+  derby 2560 baseline run 1 Claude processes used about 10 s (that run gave 119.7 fps against 152.5
+  and the 137.8 ms worst frame). The exact load during the matrix is unknown.
+- Cells that ran fastest gained most: 1280 cells gained 12 to 25 fps and 30 to 44 points of 1 % low,
+  while Donington 2560 did not change. Interpretation: high-fps cells leave more idle CPU per frame,
+  and another process takes it.
+- Still below 100 fps on the idle PC: Donington Enhanced at both resolutions (87 to 99 fps) and
+  derby 2560 Enhanced mid (97.0). Still below 80 for the 1 % low: the derby's 2560 cells and
+  1280 Enhanced mid (68 to 78), Donington 2560 baseline start (75.5) and Donington 2560 Enhanced (68
+  and 73). Per run, the 2560 lows vary from 66 to 103.
+- All of those cells are render-CPU bound (render minus acquire and present 7.5 to 10.3 ms, against
+  main 3.9 to 4.9 ms). `r_encode` is the top stage (2.4 to 5.0 ms), then `r_prepare` (0.9 to 1.8 ms)
+  and `r_submit` (1.0 to 1.6 ms at 2560 Enhanced).
+- Donington 1280 baseline against 2560 baseline on the idle PC: render 7.57 against 8.76 ms at the
+  start. The matrix's "1280 renders slower" was part of the background load.
+
+So the tail was not code. The remaining 1 % low gap at 2560 and in Enhanced is the render thread's
+average time (`r_encode`, `r_prepare`); the derby's tick frames with opponent dents add a smaller
+main-thread tail (`dpn`, drive_present).
+
+Timing rule from this: before a timing batch, check that no desktop app outside the build lock is
+busy, and log the other processes' CPU seconds per run (as `mi.ps1` does) so that a loaded run can
+be found and rerun.

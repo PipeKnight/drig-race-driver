@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! gpu_window version=1 seconds=10.0 frames=283 timestamps=true
-//! gpu_pass rank=1 gpu_ms=6.10 primitives=812345 vertices=1201234 fragments=2101234 name=main_opaque_pass_3d
+//! gpu_pass rank=1 gpu_ms=6.10 primitives=812345 vertices=1201234 fragments=2101234 cpu_ms=1.20 name=main_opaque_pass_3d
 //! ```
 //!
 //! A pass every camera runs (the reflection faces' `main_opaque_pass_3d`
@@ -45,15 +45,17 @@ static TRIANGLES: Mutex<Option<HashMap<AssetId<Mesh>, u32>>> = Mutex::new(None);
 /// shader invocations; sums and frames counted.
 #[derive(Default)]
 struct Pass {
-    sums: [f64; 4],
-    frames: [u32; 4],
+    sums: [f64; 5],
+    frames: [u32; 5],
 }
 
-const FIELDS: [&str; 4] = [
+const FIELDS: [&str; 5] = [
     "elapsed_gpu",
     "clipper_primitives_out",
     "vertex_shader_invocations",
     "fragment_shader_invocations",
+    // Render-thread time inside the pass span: command encoding (`r_encode`).
+    "elapsed_cpu",
 ];
 
 /// On in the profile build, or with `GRID_GPU_PASSES=1`.
@@ -255,12 +257,13 @@ fn report(
     ranked.sort_by(|a, b| mean(b.1, 0).total_cmp(&mean(a.1, 0)));
     for (rank, (name, p)) in ranked.iter().enumerate() {
         log_line!(
-            "gpu_pass rank={} gpu_ms={:.3} primitives={:.0} vertices={:.0} fragments={:.0} name={name}",
+            "gpu_pass rank={} gpu_ms={:.3} primitives={:.0} vertices={:.0} fragments={:.0} cpu_ms={:.3} name={name}",
             rank + 1,
             mean(p, 0),
             mean(p, 1),
             mean(p, 2),
-            mean(p, 3)
+            mean(p, 3),
+            mean(p, 4)
         );
     }
 }
