@@ -4312,3 +4312,118 @@ background load. Phones lose the same per-draw work on slower cores.
 Startup gains more. Bevy's renderer creation (first log line to `AdapterInfo`) took 520 to 840 ms
 with DX12 enumerated and takes 55 to 90 ms without it. With the 170 to 330 ms probe, startup is
 300 to 450 ms faster on this PC.
+
+## r_prepare by system (F869)
+
+19 November 2026, Claude Code, coordinator task after F862/F863: render CPU is the limiter in
+every failing cell, and `r_prepare` costs 0.9-2.0 ms per frame. Split it by system, then fix the
+largest shared-path costs, outside mac-perf's encode and pass-recording code. Evidence: this
+worktree's `local/prep/` (scripts, stdout logs, image diffs).
+
+### Split
+
+A temporary probe (not committed) wrapped the render world's `Prepare` sets in timers. Release
+build, 1280x800 Enhanced, `auto_no_vsync`, autopilot, 45 s, means over the run (ms per frame):
+
+| cell | `write` (instance and uniform buffers) | `bind` (bind groups) | `flush` | `resources` | `r_prepare` | fps | other CPU s |
+|---|---|---|---|---|---|---|---|
+| derby | 1.13 | 0.89 | 0.19 | 0.24 | 1.62 | 106 | 14.5 |
+| Donington | 0.80 | 0.74 | 0.44 | 0.24 | 1.59 | 93.5 | 15.8 |
+
+The sets overlap in time (Bevy runs them on several threads), so they add up to more than
+`r_prepare`. Phase census (`views`, mesh draws per phase): derby opaque 21, alpha 9, shadow 48
+(3 views); Donington opaque 71, alpha 12, shadow 87.
+
+### By system
+
+Profile build (`--features profile`, recipe below), last 15 s window, exclusive ms per frame:
+
+| system | derby | Donington |
+|---|---|---|
+| `prepare_preprocess_bind_groups` (Bevy) | 0.69 | 0.57 |
+| `write_binned_instance_buffers` Opaque3d + prepass + Shadow (Bevy) | 0.89 | 0.68 |
+| `write_batched_instance_buffers` (Bevy) | 0.10 | 0.29 |
+| `prepare_generated_environment_map_bind_groups` (Bevy) | 0.28 | 0.27 |
+| `mesh_stream::upload` (grid-app) | 0.23 | 0.41 |
+| `mesh_stream::resort` (grid-app) | 0.08 | 0.26 |
+| `osd_scene::overlay::prepare` (grid-app, mac-perf) | 0.13 | 0.14 |
+| `prepare_mesh_bind_groups` (Bevy) | 0.11 | 0.10 |
+
+Spans add their own cost, so these are relative sizes, not release times. `car_batch::refresh`
+(0.18-0.24 ms) also shows in the window but runs in the main world's `PostUpdate`, not in
+`r_prepare`.
+
+The largest items are inside Bevy 0.19.1. `prepare_preprocess_bind_groups` rebuilds the GPU
+preprocessing bind groups for every view and phase, plus one for unpacking each batch set,
+every frame. The `write_*_instance_buffers` systems write the instance buffers per phase. Both
+grow with views x phases x batch sets. Reducing them needs a Bevy patch (caching the bind
+groups while the buffers are unchanged) or fewer batch sets (bindless materials, which is
+mac-perf's area). Left for the coordinator to decide.
+
+### Streamed mesh writes
+
+`mesh_stream::upload` is the grid-app item. Writers: crowd billboards, ground detail, skid marks,
+dents, source trees, OSD scene. Per frame (500-frame means, temporary statistics):
+
+| cell | writes | KB | target buffers | contiguous runs |
+|---|---|---|---|---|
+| derby | 56-65 | 369-616 | 2.7-2.9 | 52-59 |
+| Donington | 49-77 | 333-585 | 1.5-2.5 | 47-75 |
+
+Contiguous runs are about as many as writes, so merging adjacent writes would not help. The cost
+is per call: in wgpu-core 29.0.4 every `Queue::write_buffer` creates its own staging buffer
+(`StagingBuffer::new` -> `create_buffer`), maps it and records a copy.
+
+### Tried: one staging buffer per frame (not kept)
+
+`upload` wrote every mesh range into one host-visible `MAP_WRITE | COPY_SRC` buffer created
+mapped, then recorded one `copy_buffer_to_buffer` per range into an encoder pushed to Bevy's
+`PendingCommandBuffers`, which is submitted before the frame's passes. Frames with unaligned or
+overlapping ranges fell back to queue writes. `GRID_STREAM_STAGING=0` kept the queue writes for
+A/B on one exe (sha256 prefix 8DDDDD38085E649F, `local/prep/stage.ps1`).
+
+Images, offscreen 1280x720 Enhanced, queue writes against staging: race 600/1500 and derby 600
+0 px, derby 1500 2 px by 1 level (the known derby noise, F864/F865).
+
+Timing, 2 alternating pairs per cell, 45 s, `auto_no_vsync`, under the build lock (means, ms):
+
+| cell | `r_prepare` queue | `r_prepare` staged | fps queue | fps staged | other CPU s |
+|---|---|---|---|---|---|
+| derby 1280 | 1.617 | 1.621 | 105.8 | 88.3 | 8-60 |
+| Donington 1280 | 1.650 | 1.673 | 74.2 | 72.4 | 14-63 |
+| derby 2560 | 1.633 | 1.665 | 101.0 | 101.4 | 18-25 |
+| Donington 2560 | 1.711 | 1.669 | 86.5 | 73.7 | 19-25 |
+
+`r_prepare` moves by -0.04 to +0.03 ms, both signs, within run-to-run noise. The fps columns are
+not usable: single runs fell to 60-74 fps on both sides (pacing or background load: other
+processes used up to 63 CPU s per run), and the quieter 2560 derby pairs agree within 1 fps.
+In a release build the per-call staging cost is too small to show in `r_prepare`; the profile
+build's 0.23-0.41 ms for `upload` was mostly span overhead and the copies themselves. The change
+was dropped; `mesh_stream` is unchanged.
+
+### What remains
+
+All of the large `r_prepare` items are Bevy's own per-view, per-phase and per-batch-set work
+(preprocess bind groups, instance buffer writes, the generated environment map bind groups).
+Options, for the coordinator:
+- patch Bevy 0.19.1 to keep the preprocess and environment-map bind groups while their buffers
+  and views are unchanged (a `[patch]` of bevy_pbr; a seed refresh);
+- fewer batch sets through bindless materials, which is mac-perf's area (F865 did this for the
+  car reflection overlay).
+
+### Profiling build recipe
+
+The profile feature turns on Bevy's `debug` and `trace` features, so it rebuilds every Bevy crate.
+To keep the normal release cache warm, build into a separate build dir seeded from the shared
+seed, and into a separate target dir:
+
+```
+robocopy C:\cargo-build\seed\release C:\cargo-build\prof-<name>\release /E /MT:8
+$env:CARGO_BUILD_BUILD_DIR = 'C:/cargo-build/prof-<name>'
+tools\build_lock.ps1 cargo build --release -p grid-app --features profile --target-dir local\prep\tgtp
+$env:GRID_PROFILE_SECONDS = '15'   # profile_span tables every 15 s
+```
+
+Here it took 714 s at the default job count, and the build dir grew to about 3.4 GB. Delete the
+build dir afterwards (docs/DISK_USAGE.md). To read spans for the render world, take the
+`profile_span` lines of the last window (they follow `rank=1`).

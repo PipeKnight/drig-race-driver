@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F869](F0869.md) | 2026-11-19 | Render prepare: r_prepare split by system; one staging buffer per frame for streamed meshes gains nothing |
 | [F868](F0868.md) | 2026-11-19 | Render encode: drop wgpu indirect-call validation where DX12 cannot be chosen |
 | [F867](F0867.md) | 2026-11-19 | Owner roadmap order after the FPS series |
 | [F866](F0866.md) | 2026-11-19 | Future rows: rain, official DLC, cut content (owner request) |
