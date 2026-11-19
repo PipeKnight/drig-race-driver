@@ -3788,6 +3788,11 @@ The F857 hypothesis is only partly confirmed:
   baseline only.
 - Moving our own jobs to the async pool (b) and the dent fast path (d) are within noise.
 
+Follow-up, c6 against c8 on F861 (acc2ba15), 4 alternating pairs per cell under the build lock. Paired fps, c6
+minus c8, was +4.6, +0.4, +0.5 and +0.5 for 1280 baseline and Enhanced and 2560 baseline and Enhanced. Each
+mean rests on one outlier pair, and the other pairs change sign. The 1 % low is worse with c6 at 1280 Enhanced
+(72.7 against 75.5). The cap stays at 8.
+
 ## Main-world peaks (F861)
 
 F857 found main-world peaks in the same instant as slow render frames: `drive_tick` +2-4 ms,
