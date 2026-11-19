@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F866](F0866.md) | 2026-11-19 | Future rows: rain, official DLC, cut content (owner request) |
 | [F865](F0865.md) | 2026-11-19 | Render encode: bindless car reflection overlay merges transparent draws |
 | [F864](F0864.md) | 2026-11-19 | Contact dents: fixed lattice probes per part |
 | [F863](F0863.md) | 2026-11-19 | Render tail: the F862 1 % lows were background load; tick-frame and per-pass CPU split |

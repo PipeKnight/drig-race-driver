@@ -129,6 +129,9 @@ scale of 86400 s / limit.
     `wiper_enable="0"`. The windscreen dust layer stays enabled.
 - So **every shipped race is dry, and there are no wet surfaces in play** [D data; I: no other path
   enables rain]. This matches the retail game, which has no weather option.
+- **The rain visuals are not shipped** [D, F866]: `rainfall.pssg` and `windscreen_fx.pssg`, named by
+  `weather_dataset.xml`, are absent from the Steam install. Enabling rain therefore needs authored
+  effects (FIDELITY_BACKLOG row 136).
 
 ## 3. The port
 
