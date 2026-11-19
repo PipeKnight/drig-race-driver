@@ -14,6 +14,14 @@ pub struct Grid<'a> {
 pub struct Sampler<'a> {
     grid: Grid<'a>,
 }
+/// A point located in a layout ([`Sampler::locate`]).
+#[derive(Clone, Copy)]
+pub struct Location {
+    point: [f32; 4],
+    clamped: [f32; 4],
+    cell: [usize; 3],
+    fraction: [f32; 3],
+}
 
 impl Grid<'_> {
     pub fn prepare(&self) -> Result<Sampler<'_>, Error> {
@@ -37,7 +45,10 @@ impl Grid<'_> {
     }
 }
 impl Sampler<'_> {
-    pub fn sample(&self, point: [f32; 4]) -> Result<[f32; 4], Error> {
+    /// Where `point` samples: the work of [`Self::sample`] that depends on
+    /// the layout alone (dimensions, spacing, minimum), so it holds for every
+    /// lattice of that layout; [`Self::sample_at`] finishes it.
+    pub fn locate(&self, point: [f32; 4]) -> Result<Location, Error> {
         if point.iter().any(|v| !v.is_finite()) {
             return Err(Error("invalid deformation grid input"));
         }
@@ -69,6 +80,18 @@ impl Sampler<'_> {
         }
         let cell = scaled.map(|v| v as usize);
         let fraction: [f32; 3] = std::array::from_fn(|i| scaled[i] - cell[i] as f32);
+        Ok(Location { point, clamped, cell, fraction })
+    }
+    pub fn sample(&self, point: [f32; 4]) -> Result<[f32; 4], Error> {
+        self.sample_at(&self.locate(point)?)
+    }
+    /// [`Self::sample`] of a point this layout located.
+    pub fn sample_at(&self, location: &Location) -> Result<[f32; 4], Error> {
+        let Location { point, clamped, cell, fraction } = *location;
+        if cell.iter().zip(self.grid.dimensions).any(|(&c, d)| c + 1 >= d) {
+            return Err(Error("deformation cell outside bounded grid"));
+        }
+        let grid = &self.grid;
         let node = |x, y, z| grid.positions[x + grid.dimensions[0] * (y + grid.dimensions[1] * z)];
         let blend = |a: [f32; 4], b: [f32; 4], t: f32| -> [f32; 4] {
             std::array::from_fn(|i| t * (b[i] - a[i]) + a[i])

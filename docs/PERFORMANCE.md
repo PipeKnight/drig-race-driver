@@ -3822,7 +3822,7 @@ Laps: `dt` drive_tick, `dp` drive_present, `dpo`/`dpn` own and opponent dents in
 | peak | cause | change |
 |---|---|---|
 | drive_tick | (1) about five stdout lines per simulation tick (`drive_sample` and its siblings), each one synchronous file write on the main thread, because the launchers and the smoke tools redirect stdout to a file: 0.3-0.8 ms per frame on average, single writes up to 7 ms. The 42-110 ms single stalls of the first probe batch were inside drive_tick at those writes (interpretation; they did not recur, and that batch may have overlapped other timing runs). (2) The opponents' simulation (`multi.tick`, already scope-parallel): 0.6-0.8 ms mean in the derby on an idle PC, up to 4 ms. | (1) fixed; (2) real simulation work, unchanged (identity) |
-| drive_present | contact dents (`dpn`/`dpo`, 3-4 ms in single frames): the deformation solve runs only when a contact changes a part and is already on the compute pool | unchanged |
+| drive_present | contact dents (`dpn`/`dpo`, 3-4 ms in single frames): the deformation solve runs only when a contact changes a part and is already on the compute pool | F864 (section below): the projection keeps each part's fixed lattice data, up to 2.5 ms |
 | ground_detail::present | Enhanced only: blended (soft alpha) cover gathered again at once on the main thread on every 16 m bucket crossing (`gdg` up to 6 ms), because F580 kept its draw order by bucket | fixed |
 | propagate_parent_transforms | 1,400-2,350 changed `GlobalTransform`s per frame, almost all from real motion (cars, wheels, driver joints, camera). The peaks of 15-49 ms (both builds, all scenes, beside most remaining slow render frames) changed 1,440-2,245, the same as ordinary frames, and `calculate_bounds` stretches with them: the PostUpdate transform/bounds work waits for task-pool threads, not a hierarchy dirtied in full (interpretation; the task-pool split is mac-perf's A/B) | no fix; the interior driver poses its 76 joints while hidden, a small extra left in place (the view switch reads `shown` after the pose) |
 
@@ -3880,7 +3880,7 @@ noise (one spike more or less). The worst frames of the Enhanced Donington fix r
 remaining spikes are the transform/bounds waits above, which both builds have (beside the four
 spikes of that row: `tp` 20.2 ms, `cb` 28.9 ms). The derby's remaining drive_tick frames over 2 ms
 are the opponents' `multi.tick` (0.6-0.8 ms mean, up to 4 ms). Contact dents (`dpn`, up to 3-4 ms)
-are unchanged.
+are unchanged here (F864, section below).
 
 Images: offscreen frames (1280x720, `--render-fixed-step`), the probe build against the fix, race and
 derby, baseline and Enhanced, ticks 600 and 1500: Enhanced (blended cover) 0 px in all four; baseline
@@ -4061,3 +4061,73 @@ main-thread tail (`dpn`, drive_present).
 Timing rule from this: before a timing batch, check that no desktop app outside the build lock is
 busy, and log the other processes' CPU seconds per run (as `mi.ps1` does) so that a loaded run can
 be found and rerun.
+
+## Contact dents (F864)
+
+`dpn` (the opponents' dents) and `dpo` (the player's) project each body part of a car through its
+deformation lattice when a contact changes the lattice. Both already ran on the compute pool and the
+main thread waits for all parts, so the cost was the parts' work itself: 3-4 ms in single frames,
+mostly in the derby.
+
+What a field update changes: in the ignored test `deformation_dents_have_the_bits_of_whole_projections`
+(Lacetti, 1500 ticks against the barriers, 81 parts, 24 field updates) every update moved 334 of the
+360 lattice nodes (median, p90 and maximum alike). A dent spreads over the whole lattice, so
+re-projecting only the vertices near moved nodes saves nothing; a first version that did this cost
+2.83 ms per update against 2.22 ms for whole projections and was dropped.
+
+What it does now (`body_damage::Dents`, one per part):
+
+- Where a vertex lies in the lattice (clamped point, cell, fraction) depends only on the layout
+  (dimensions, spacing, minimum), and its rest-lattice sample also on the rest nodes; both are fixed
+  per car. `body_deformation::Field::probes` keeps them once per part
+  (`deformation_grid::Sampler::locate`), so each field samples only the current lattice
+  (`Sampler::sample_at`, the second half of the former `sample`, same arithmetic). A field with
+  another layout rebuilds them.
+- Normals are summed as Bevy 0.19.1's `compute_smooth_normals` sums them (per triangle in index
+  order: angle weights, the triangle normal, then the three sums; `try_normalize`), on the part's
+  positions, without the mesh copy and attribute round trip of the old path.
+- A part whose drawn mesh already shows the projection gets no new mesh (the old path built one and
+  then compared).
+- Meshes this does not cover (not an indexed triangle list, or precomputed bounds) and refused layouts
+  take the whole projection, which is unchanged.
+
+`GRID_DENT_FAST=0` still selects the old serial path, for A/B comparisons in the same executable.
+
+Exactness: the unit tests `probed_displacements_have_the_bits_of_sampled_ones` (grid-tools) and
+`dents_have_the_bits_of_a_whole_projection` (grid-app: a bent sheet with degenerate triangles, 60
+fields with resets, an inactive field and a refused one) compare positions, normals, indices, bounds
+and the moved flag bit for bit with `project`. The real-car test does the same for all 81 parts at all
+24 updates: all exact. It prints per update: whole projections 2.29 ms mean (max 2.79), the new path
+1.15 ms mean (max 2.07), both serial on one thread.
+
+Images: offscreen frames (1280x720, `--render-fixed-step`, baseline), `GRID_DENT_FAST=0` against the
+default in one build: race 600 and 1500 and derby 600 0 px; derby 1500 2 px by 1 level.
+
+Timing (one run each, 3000 ticks, 1280x800, no vsync, under the build lock; laps
+mean/max/frames over 2 ms):
+
+| scene | build | dp | dpn | dpo | fps | 1% low |
+|---|---|---|---|---|---|---|
+| derby | F861 default (2 runs) | 0.17/3.1/97 | 0.05/3.0/53 | 0.01/1.1/0 | - | - |
+| derby | F864, `GRID_DENT_FAST=0` (serial) | 0.38/16.4/275 | 0.25/16.3/257 | 0.02/2.4/56 | 143.0 | 54.8 |
+| derby | F864 | 0.16/2.6/17 | 0.04/2.4/8 | 0.01/0.9/0 | 149.4 | 108.1 |
+| race | F861 default (2 runs) | 0.14/3.3/25 | 0.01/3.2/21 | - | - | - |
+| race | F864, `GRID_DENT_FAST=0` (serial) | 0.15/14.8/21 | 0.03/14.6/21 | - | 124.8 | 102.6 |
+| race | F864 | 0.12/2.7/5 | 0.01/2.5/5 | - | 124.0 | 102.6 |
+
+Against the F861 default (pool, whole projections; another build and two runs, so a rough
+comparison) the largest dent frame went from 3.0 to 2.4 ms (derby) and 3.2 to 2.5 ms (race), and dent
+frames over 2 ms from 53 to 8 and 21 to 5. The spike is smaller, not gone: a large contact still
+projects every part in the frame it happens.
+
+The opponents' dents (`dpn`, the main tail that F863 found in frames over 14 ms on an idle PC: 2.2 ms
+there) take this path too. A tail batch after the rebase onto F863 (derby 1280 baseline, alternating,
+2 runs each) gave the fix `dpn` 1.67 and 1.82 ms in its frames over 14 ms (23 and 22 frames), and frames
+with `dpn` over 2 ms 58/51 -> 12/15. The PC was loaded (other processes 85-110 CPU s per run; the fix's
+largest `dpn` frames reached 9-10 ms, against 2.4 in the quieter batch above), and the base executable
+ran at 98-104 fps with a quarter of its frames over 14 ms waiting outside the main world, so this batch
+has no valid tail reference. An idle-PC before/after remains to be done.
+
+Not done: projecting on the pool in the background and applying the result a frame later would remove
+the wait, but it shows each dent one frame late and breaks the matched fixed-tick image check; spreading
+a contact over frames has the same cost. Both remain options if the remaining 2.5 ms matters.

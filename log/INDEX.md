@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F864](F0864.md) | 2026-11-19 | Contact dents: fixed lattice probes per part |
 | [F863](F0863.md) | 2026-11-19 | Render tail: the F862 1 % lows were background load; tick-frame and per-pass CPU split |
 | [F862](F0862.md) | 2026-11-19 | Performance status matrix after the F837-F861 series: render-CPU bound in every cell |
 | [F861](F0861.md) | 2026-11-19 | Main-world peaks: stdout writer thread, blended cover gathers async |

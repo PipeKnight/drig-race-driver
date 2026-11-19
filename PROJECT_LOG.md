@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F864](log/F0864.md) | 2026-11-19 | Contact dents: fixed lattice probes per part |
 | [F863](log/F0863.md) | 2026-11-19 | Render tail: the F862 1 % lows were background load; tick-frame and per-pass CPU split |
 | [F862](log/F0862.md) | 2026-11-19 | Performance status matrix after the F837-F861 series: render-CPU bound in every cell |
 | [F861](log/F0861.md) | 2026-11-19 | Main-world peaks: stdout writer thread, blended cover gathers async |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F803](log/F0803.md) | 2026-11-10 | Tyre, whine and collision sound replayed |
 | [F802](log/F0802.md) | 2026-11-10 | Car reflections: the original's material tuning and SpecularValues floors |
 | [F801](log/F0801.md) | 2026-11-10 | Car reflections: the track's static map by default |
-| [F800](log/F0800.md) | 2026-11-10 | cargo td for every package through the build lock |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

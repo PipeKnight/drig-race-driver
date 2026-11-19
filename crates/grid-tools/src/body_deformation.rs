@@ -1,6 +1,10 @@
 //! Independent visual displacement policy over the verified source grid.
 //! No original graphical shader, detached-part or renderer equivalence claim.
-use grid_world::{Error, deformation_grid::Grid, vehicle_publication::VEHICLE_WORDS};
+use grid_world::{
+    Error,
+    deformation_grid::{Grid, Location},
+    vehicle_publication::VEHICLE_WORDS,
+};
 pub struct Field {
     dimensions: [usize; 3],
     spacing: f32,
@@ -8,6 +12,11 @@ pub struct Field {
     current: Vec<[f32; 4]>,
     rest: Vec<[f32; 4]>,
     active: bool,
+}
+/// Points located in one car's deformation layout ([`Field::probes`]).
+pub struct Probes {
+    layout: Vec<u32>,
+    located: Vec<(Location, [f32; 4])>,
 }
 impl Field {
     pub fn read(owner: &[u32]) -> Result<Self, Error> {
@@ -105,6 +114,65 @@ impl Field {
                     && owner[(0x4890 + i * 80) / 4..][..4] == key[rest..rest + 4]
             })
     }
+    /// The words that set where points sample and what the rest lattice
+    /// gives there: the layout and the rest nodes, fixed per car.
+    fn layout(&self) -> Vec<u32> {
+        self.dimensions
+            .into_iter()
+            .map(|d| d as u32)
+            .chain([self.spacing.to_bits()])
+            .chain(self.minimum.map(f32::to_bits))
+            .chain(self.rest.iter().flatten().map(|v| v.to_bits()))
+            .collect()
+    }
+    /// The part of [`Self::displacements`] of `points` that the layout and
+    /// the rest lattice set (where each point samples and its rest sample),
+    /// for every field of the same car ([`Self::displacements_at`]). Fails
+    /// where `displacements` would for a point, whatever the current nodes.
+    pub fn probes(&self, points: &[[f32; 4]]) -> Result<Probes, Error> {
+        if points.len() > 1_000_000 || points.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(Error("invalid visual deformation queries"));
+        }
+        let rest_grid = self.grid(true);
+        let rest = rest_grid.prepare()?;
+        let located = points
+            .iter()
+            .map(|&p| {
+                let at = rest.locate(p)?;
+                Ok((at, rest.sample_at(&at)?))
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(Probes { layout: self.layout(), located })
+    }
+    /// Whether `probes` were made for this field's layout and rest lattice.
+    pub fn fits(&self, probes: &Probes) -> bool {
+        probes.layout == self.layout()
+    }
+    /// [`Self::displacements`] of the points `probes` were made for, with
+    /// the same bits: only the current lattice is sampled.
+    pub fn displacements_at(&self, probes: &Probes) -> Result<Vec<[f32; 3]>, Error> {
+        if !self.fits(probes) {
+            return Err(Error("deformation probes of another layout"));
+        }
+        if !self.active {
+            return Ok(vec![[0.; 3]; probes.located.len()]);
+        }
+        let current_grid = self.grid(false);
+        let current = current_grid.prepare()?;
+        probes
+            .located
+            .iter()
+            .map(|(at, b)| {
+                let a = current.sample_at(at)?;
+                let delta = std::array::from_fn(|i| a[i] - b[i]);
+                if delta.iter().any(|v| !v.is_finite()) {
+                    Err(Error("nonfinite visual deformation displacement"))
+                } else {
+                    Ok(delta)
+                }
+            })
+            .collect()
+    }
     /// Delta relative to the pristine source lattice avoids baseline rounding
     /// shifts and cumulative mesh drift. XYZ are the chosen visual policy.
     pub fn displacements(&self, points: &[[f32; 4]]) -> Result<Vec<[f32; 3]>, Error> {
@@ -152,6 +220,35 @@ mod tests {
             }
         }
         owner
+    }
+
+    #[test]
+    fn probed_displacements_have_the_bits_of_sampled_ones() {
+        let mut owner = owner();
+        let points: Vec<[f32; 4]> = (0..40)
+            .map(|i| {
+                let f = i as f32;
+                [f * 0.07 - 0.9, (f * 0.37).sin() * 2., f * 0.031, 1.]
+            })
+            .collect();
+        let probes = Field::read(&owner).unwrap().probes(&points).unwrap();
+        for step in 0..6 {
+            for i in 0..12 {
+                owner[(0x4880 + i * 80) / 4 + step % 3] ^= (step * 7 + i) as u32 & 0xff;
+            }
+            owner[0xc7ac / 4] = u32::from(step != 4) << 8;
+            let field = Field::read(&owner).unwrap();
+            assert!(field.fits(&probes));
+            let bits = |d: Vec<[f32; 3]>| d.iter().map(|v| v.map(f32::to_bits)).collect::<Vec<_>>();
+            assert_eq!(
+                bits(field.displacements_at(&probes).unwrap()),
+                bits(field.displacements(&points).unwrap())
+            );
+        }
+        // Another rest lattice is another layout.
+        owner[0x4890 / 4] ^= 1;
+        assert!(!Field::read(&owner).unwrap().fits(&probes));
+        assert!(Field::read(&owner).unwrap().displacements_at(&probes).is_err());
     }
 
     #[test]

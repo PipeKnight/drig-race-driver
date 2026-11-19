@@ -747,6 +747,8 @@ struct MovingPart {
 struct DeformingPart {
     source: Mesh,
     raw_bind: Mat4,
+    /// The fixed data of its projections (F864).
+    dents: body_damage::Dents,
 }
 /// The deformation keys drive_present last projected: the player's, then
 /// each opponent's (cleared when a replay hands the meshes back).
@@ -6137,6 +6139,7 @@ fn setup(
                     entity.insert(DeformingPart {
                         source: source.clone(),
                         raw_bind: model.inverse() * matrix,
+                        dents: Default::default(),
                     });
                 }
             }
@@ -6237,6 +6240,7 @@ fn setup(
                         opponent.insert(OpponentDeforming(DeformingPart {
                             source: source.clone(),
                             raw_bind: model.inverse() * matrix,
+                            dents: Default::default(),
                         }));
                     }
                 }
@@ -6336,6 +6340,7 @@ fn setup(
                         entity.insert(OpponentDeforming(DeformingPart {
                             source: part.mesh.clone(),
                             raw_bind: model_offset(runtime).inverse() * matrix,
+                            dents: Default::default(),
                         }));
                     }
                 }
@@ -7526,11 +7531,19 @@ fn drive_present(
             // The parts are projected on the compute pool, as the
             // opponents' are: the same bits as one by one, without holding
             // this thread for the whole car (about 4 ms in a derby contact).
-            let project = |&(_, source): &(&Handle<Mesh>, &DeformingPart)| {
+            // A part keeps where its points sample the lattice (F864), so a
+            // field samples only the current nodes; its projection is none
+            // when its mesh already shows it.
+            let drawn: &Assets<Mesh> = &meshes;
+            let project = |&(handle, source): &(&Handle<Mesh>, &DeformingPart)| {
+                if fast {
+                    return source.dents.project(&source.source, source.raw_bind, &field, drawn.get(handle));
+                }
                 let mesh = body_damage::project(&source.source, source.raw_bind, &field)?;
                 let moved = mesh.attribute(Mesh::ATTRIBUTE_POSITION) != source.source.attribute(Mesh::ATTRIBUTE_POSITION);
                 let bounds = mesh.compute_aabb().ok_or("invalid projected body bounds")?;
-                Ok::<_, &'static str>((mesh, bounds, moved))
+                let mesh = (!drawn.get(handle).is_some_and(|m| body_damage::same_shape(m, &mesh))).then_some(mesh);
+                Ok::<_, &'static str>(body_damage::Projection { mesh, bounds, moved })
             };
             let projected = if fast {
                 on_compute_pool(&sources, project)
@@ -7538,10 +7551,10 @@ fn drive_present(
                 sources.iter().map(project).collect()
             };
             // The first refusal in part order refuses the field.
-            let mut staged: Vec<(Handle<Mesh>, Mesh, Aabb)> = Vec::with_capacity(sources.len());
+            let mut staged: Vec<(Handle<Mesh>, Option<Mesh>, Aabb)> = Vec::with_capacity(sources.len());
             let mut changed = 0;
             for ((handle, _), result) in sources.iter().zip(projected) {
-                let (mesh, bounds, moved) = result?;
+                let body_damage::Projection { mesh, bounds, moved } = result?;
                 changed += usize::from(moved);
                 staged.push(((*handle).clone(), mesh, bounds));
             }
@@ -7556,9 +7569,9 @@ fn drive_present(
             // A part the change left as drawn keeps its mesh: rewriting it
             // would upload it again.
             for (handle, mesh, next) in staged {
-                if meshes.get(&handle).is_some_and(|m| body_damage::same_shape(m, &mesh)) {
+                let Some(mesh) = mesh else {
                     continue;
-                }
+                };
                 let Some(&(_, entity, hidden)) = owners.iter().find(|(id, ..)| *id == handle.id()) else {
                     continue;
                 };
@@ -7665,28 +7678,39 @@ fn drive_present(
         if !jobs.is_empty() {
             let start = Instant::now();
             let _lap = frame_split::Lap::new(frame_split::lap::OPPONENT_DENTS);
-            let inputs: Vec<(Entity, &DeformingPart, &grid_tools::body_deformation::Field)> = jobs
+            let drawn: &Assets<Mesh> = &meshes;
+            let inputs: Vec<(Entity, &DeformingPart, &grid_tools::body_deformation::Field, Option<&Mesh>)> = jobs
                 .iter()
                 .filter_map(|&(entity, field)| match opponent_parts.get(entity) {
-                    Ok((_, _, _, Some(OpponentDeforming(source)), ..)) => Some((entity, source, &dirty[field].1)),
+                    Ok((_, _, _, Some(OpponentDeforming(source)), handle, ..)) => {
+                        Some((entity, source, &dirty[field].1, drawn.get(&handle.0)))
+                    }
                     _ => None,
                 })
                 .collect();
-            let results = if fast {
-                on_compute_pool(&inputs, project_dent)
+            // Projected from each part's fixed data (F864); none when its
+            // mesh already shows the projection.
+            let results: Vec<(Entity, Option<(Option<Mesh>, Aabb)>)> = if fast {
+                on_compute_pool(&inputs, |&(entity, source, field, drawn)| {
+                    let projected = source.dents.project(&source.source, source.raw_bind, field, drawn);
+                    (entity, projected.ok().map(|p| (p.mesh, p.bounds)))
+                })
             } else {
-                inputs.iter().map(project_dent).collect()
+                inputs
+                    .iter()
+                    .map(|&(entity, source, field, _)| {
+                        let (entity, projected) = project_dent(&(entity, source, field));
+                        (entity, projected.map(|(mesh, bounds)| (Some(mesh), bounds)))
+                    })
+                    .collect()
             };
             dent_counts[1] += inputs.len() as u64;
             drop(inputs);
             for (entity, projected) in results {
-                let Some((mesh, next)) = projected else { continue };
+                let Some((Some(mesh), next)) = projected else { continue };
                 let Ok((_, _, _, _, handle, mut bounds, _, layers)) = opponent_parts.get_mut(entity) else {
                     continue;
                 };
-                if fast && meshes.get(&handle.0).is_some_and(|m| body_damage::same_shape(m, &mesh)) {
-                    continue;
-                }
                 if meshes.contains(&handle.0) {
                     dent_counts[2] += 1;
                     *bounds = next;
@@ -8609,6 +8633,124 @@ mod driving_tests {
         let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
         exercise_keyboard_recovery(Some(&table), true);
     }
+    /// F864: each field's dents projected from a part's fixed data have the bits
+    /// of a whole projection, for every body part of a car that hits the
+    /// barriers; prints both costs and how much of the lattice each update
+    /// moves.
+    #[test]
+    #[ignore = "requires purchased sources and private body/deformation inputs"]
+    fn deformation_dents_have_the_bits_of_whole_projections() {
+        use std::time::Instant;
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let read_env = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let mut geometry = runtime
+            .prepare_body_geometry(root, &read_env("GRID_CONTACT_DIRECTIONS"))
+            .unwrap();
+        runtime.enable_deformation(root, &mut geometry).unwrap();
+        let (limit, bulk) =
+            grid_tools::deformation_parameters::read(&read_env("GRID_DEFORMATION_PARAMETERS"))
+                .unwrap();
+        runtime.register_deformation_callbacks(limit, bulk, 1).unwrap();
+        runtime.body_events = Some(
+            grid_tools::body_impact_parameters::read(&read_env("GRID_BODY_EVENT_PARAMETERS"))
+                .unwrap(),
+        );
+        let car = load(root, &Route::default(), &CarModel::default(), "LOD0_", false, false)
+            .unwrap();
+        let selected: Vec<_> = car
+            .parts
+            .iter()
+            .filter(|p| p.wheel.is_none() && p.material != "Aerials")
+            .collect();
+        let dents: Vec<body_damage::Dents> = selected.iter().map(|_| Default::default()).collect();
+        let mut shown: Vec<Mesh> = selected.iter().map(|p| p.mesh.clone()).collect();
+        let bits = |mesh: &Mesh, attribute| {
+            let Some(bevy::mesh::VertexAttributeValues::Float32x3(v)) = mesh.attribute(attribute)
+            else {
+                panic!()
+            };
+            v.iter().map(|p| p.map(f32::to_bits)).collect::<Vec<_>>()
+        };
+        let mut last: Option<grid_tools::body_deformation::Field> = None;
+        let (mut updates, mut dented, mut written) = (0, 0, 0);
+        let (mut whole_ms, mut step_ms, mut whole_max, mut step_max) = (0f64, 0f64, 0f64, 0f64);
+        let mut moved_nodes = Vec::new();
+        for _ in 0..1500 {
+            runtime
+                .tick_with_deforming_body_geometry(
+                    grid_tools::source_vehicle::Controls {
+                        throttle: 1.,
+                        steering: 0.25,
+                        ..Default::default()
+                    },
+                    &mut geometry,
+                )
+                .unwrap();
+            let field =
+                grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle)
+                    .unwrap();
+            if last.as_ref().is_some_and(|l| l.key() == field.key()) {
+                continue;
+            }
+            if let Some(last) = &last {
+                let (a, b) = (last.current().0, field.current().0);
+                moved_nodes.push(a.iter().zip(b).filter(|(a, b)| a != b).count());
+            }
+            let (mut whole_update, mut step_update) = (0f64, 0f64);
+            for ((part, dents), shown) in selected.iter().zip(&dents).zip(&mut shown) {
+                // The whole path as drive_present ran it: project, bounds,
+                // and the compare with the drawn mesh.
+                let s0 = Instant::now();
+                let whole = body_damage::project(&part.mesh, part.matrices[0], &field).unwrap();
+                let bounds = whole.compute_aabb().unwrap();
+                let same = body_damage::same_shape(shown, &whole);
+                let s1 = Instant::now();
+                let step = dents
+                    .project(&part.mesh, part.matrices[0], &field, Some(shown))
+                    .unwrap();
+                let s2 = Instant::now();
+                whole_update += (s1 - s0).as_secs_f64() * 1e3;
+                step_update += (s2 - s1).as_secs_f64() * 1e3;
+                assert_eq!(step.bounds, bounds);
+                assert_eq!(
+                    step.moved,
+                    whole.attribute(Mesh::ATTRIBUTE_POSITION)
+                        != part.mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                );
+                assert_eq!(step.mesh.is_none(), same);
+                if let Some(mesh) = step.mesh {
+                    assert_eq!(bits(&mesh, Mesh::ATTRIBUTE_POSITION), bits(&whole, Mesh::ATTRIBUTE_POSITION));
+                    assert_eq!(bits(&mesh, Mesh::ATTRIBUTE_NORMAL), bits(&whole, Mesh::ATTRIBUTE_NORMAL));
+                    assert_eq!(mesh.indices(), whole.indices());
+                    *shown = mesh;
+                    written += 1;
+                }
+                dented += usize::from(step.moved);
+            }
+            updates += 1;
+            whole_ms += whole_update;
+            step_ms += step_update;
+            whole_max = whole_max.max(whole_update);
+            step_max = step_max.max(step_update);
+            last = Some(field);
+        }
+        moved_nodes.sort_unstable();
+        let nodes = last.unwrap().current().0.len();
+        eprintln!(
+            "DENTS parts={} updates={updates} dented_parts={dented} written={written}              whole_ms_mean={:.3} max={whole_max:.3} step_ms_mean={:.3} max={step_max:.3}              moved_nodes median={} p90={} max={} of {nodes}",
+            selected.len(),
+            whole_ms / updates as f64,
+            step_ms / updates as f64,
+            moved_nodes[moved_nodes.len() / 2],
+            moved_nodes[moved_nodes.len() * 9 / 10],
+            moved_nodes.last().unwrap(),
+        );
+        assert!(updates > 10 && dented > 0 && written > 0);
+    }
+
     #[test]
     #[ignore = "requires purchased sources and private body/deformation inputs"]
     fn deformation_wheel_presentation_keeps_pivots_and_reset() {
@@ -8759,6 +8901,7 @@ mod driving_tests {
                             } else {
                                 *bind
                             },
+                            dents: Default::default(),
                         },
                     ))
                     .id(),
