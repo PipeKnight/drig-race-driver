@@ -13,30 +13,55 @@
     shadows::fetch_directional_shadow,
 }
 
-// EnvironmentColour (rgb), FresnelPower.
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> environment: vec4<f32>;
-// FresnelMin, FresnelMax, 1 when the part's own alpha scales the weight
-// (glass), unused.
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var<uniform> fresnel: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var cube: texture_cube<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var cube_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var base: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(5) var base_sampler: sampler;
+#import bevy_pbr::mesh_bindings::mesh
+#import bevy_render::bindless::{bindless_samplers_filtering, bindless_textures_2d, bindless_textures_cube}
+
+// Overlay's constants (OverlayUniform).
+struct OverlayConstants {
+    // EnvironmentColour (rgb), FresnelPower.
+    environment: vec4<f32>,
+    // FresnelMin, FresnelMax, 1 when the part's own alpha scales the weight
+    // (glass), unused.
+    fresnel: vec4<f32>,
+    // The paint program's gates: 1 when they apply, OcclusionMapScale, and the
+    // SpecularValues z and w floors added to the occlusion and the shadow.
+    paint: vec4<f32>,
+    // A tuned material's sun terms: SpecularValues x (highlight power) and y
+    // (strength), MetallicSpecularValues x (tint power) and y (tint scale).
+    sun_terms: vec4<f32>,
+    // MetallicSpecularValues z (falloff), the program (0 none, 1 paint, 2
+    // window glass), the car's dirtLevel (0 at the start of a race), unused.
+    sun_program: vec4<f32>,
+    // GhostCarValues: x scales the output alpha, z sets how far the glass
+    // reflection and highlight raise the pane's alpha, w floors the sun's
+    // shadow.
+    ghost: vec4<f32>,
+}
+
+#ifdef BINDLESS
+// The bindless index table: one row per overlay, in binding order.
+struct OverlayIndices {
+    constants: u32,
+    cube: u32,
+    cube_sampler: u32,
+    base: u32,
+    base_sampler: u32,
+    // The car's packed paint map (main_m1, linear); white when absent.
+    mask: u32,
+    mask_sampler: u32,
+}
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<storage> overlay_indices: array<OverlayIndices>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var<storage> overlay_constants: array<OverlayConstants>;
+#else
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> overlay_constants: OverlayConstants;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var cube: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var cube_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var base: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var base_sampler: sampler;
 // The car's packed paint map (main_m1, linear); white when absent.
-@group(#{MATERIAL_BIND_GROUP}) @binding(6) var mask: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(7) var mask_sampler: sampler;
-// The paint program's gates: 1 when they apply, OcclusionMapScale, and the
-// SpecularValues z and w floors added to the occlusion and the shadow.
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var<uniform> paint: vec4<f32>;
-// A tuned material's sun terms: SpecularValues x (highlight power) and y
-// (strength), MetallicSpecularValues x (tint power) and y (tint scale).
-@group(#{MATERIAL_BIND_GROUP}) @binding(9) var<uniform> sun_terms: vec4<f32>;
-// MetallicSpecularValues z (falloff), the program (0 none, 1 paint, 2 window
-// glass), the car's dirtLevel (0 at the start of a race), unused.
-@group(#{MATERIAL_BIND_GROUP}) @binding(10) var<uniform> sun_program: vec4<f32>;
-// GhostCarValues: x scales the output alpha, z sets how far the glass
-// reflection and highlight raise the pane's alpha, w floors the sun's shadow.
-@group(#{MATERIAL_BIND_GROUP}) @binding(11) var<uniform> ghost: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var mask: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var mask_sampler: sampler;
+#endif
 
 const PI: f32 = 3.141592653589793;
 
@@ -68,6 +93,19 @@ fn sun_shadow(in: VertexOutput, n: vec3<f32>) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+#ifdef BINDLESS
+    let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
+    let ix = overlay_indices[slot];
+    let k = overlay_constants[ix.constants];
+#else
+    let k = overlay_constants;
+#endif
+    let environment = k.environment;
+    let fresnel = k.fresnel;
+    let paint = k.paint;
+    let sun_terms = k.sun_terms;
+    let sun_program = k.sun_program;
+    let ghost = k.ghost;
     var n = normalize(in.world_normal);
     if !front {
         n = -n;
@@ -79,7 +117,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
     let t = 1.0 / (1.0 + pow(max(environment.w, 1e-4), 20.0 * c - 10.0));
     var weight = mix(fresnel.x, fresnel.y, t);
 #ifdef VERTEX_UVS_A
+#ifdef BINDLESS
+    let texel = textureSample(bindless_textures_2d[ix.base], bindless_samplers_filtering[ix.base_sampler], in.uv);
+#else
     let texel = textureSample(base, base_sampler, in.uv);
+#endif
 #else
     let texel = vec4(1.0);
 #endif
@@ -99,14 +141,22 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
     // crack map and keeps the interpolated normal and the Fresnel weight.
     let r = reflect(-v, n);
     // Bevy's environment sampling flips Z (car_reflections::direction).
+#ifdef BINDLESS
+    var env = textureSampleLevel(bindless_textures_cube[ix.cube], bindless_samplers_filtering[ix.cube_sampler], vec3(r.xy, -r.z), 0.0).rgb * environment.rgb;
+#else
     var env = textureSampleLevel(cube, cube_sampler, vec3(r.xy, -r.z), 0.0).rgb * environment.rgb;
+#endif
     let program = sun_program.y;
     var m1 = vec4(1.0);
     var shadow = 1.0;
     if paint.x > 0.0 || program > 0.0 {
 #ifdef VERTEX_UVS_A
         if paint.x > 0.0 {
+#ifdef BINDLESS
+            m1 = textureSample(bindless_textures_2d[ix.mask], bindless_samplers_filtering[ix.mask_sampler], in.uv);
+#else
             m1 = textureSample(mask, mask_sampler, in.uv);
+#endif
         }
 #endif
         // The glass program lights a back face as unshadowed.

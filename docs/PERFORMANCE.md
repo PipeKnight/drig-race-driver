@@ -3127,6 +3127,10 @@ rate at this scene. A material sort of the ~99 opaque-part overlays (bias -1e6) 
 of that and needs `mesh_stream::resort` (item 5); the coordinator chose to skip it. Nothing was
 changed.
 
+F865 later merged neighbouring overlays of different parts without reordering them: a bindless
+overlay material shares one bind group, so the batcher no longer needs the same material (see
+"Transparent draws: bindless car reflection overlay (F865)").
+
 ## Ground cover: stable billboard slots (F846)
 
 Item 4 of the F837 plan. Before, each regather of the ground cover (`ground_detail`, every 16 m
@@ -4131,3 +4135,99 @@ has no valid tail reference. An idle-PC before/after remains to be done.
 Not done: projecting on the pool in the background and applying the result a frame later would remove
 the wait, but it shows each dent one frame late and breaks the matched fixed-tick image check; spreading
 a contact over frames has the same cost. Both remain options if the remaining 2.5 ms matters.
+
+## Transparent draws: bindless car reflection overlay (F865)
+
+Part 2 of the F862 follow-up: `r_encode` (2.5 to 5.7 ms) is the top render-thread stage in every
+cell below the goal. Goal: lower its cost per frame through a shared path, with no visible change.
+
+### What `r_encode` holds
+
+`frame_split` now splits `r_encode` by camera schedule and counts the sorted transparent phase
+after batching (fields in `frame_stats`, all render thread, Donington 1280 baseline, one run):
+
+- `enc=pos:3d:order:runs:lead/prepass+shadows/opaque/transparent/post` (ms): `0.83/0.20/0.08/0.19/0.05`.
+  The markers are the times at which each camera schedule reaches a pass, not the encode itself.
+- `enc_tail` 2.31 ms: from the last marker to the submit. `enc_cbs` 21: command buffers pending
+  at the submit. In wgpu 29.0.4 a render pass only records commands; the real encoding of every
+  pass (per-draw validation, tracker merges, the Vulkan command recording) runs in
+  `CommandEncoder::finish` (wgpu-core `command/mod.rs`, `encode_commands`). That is outside
+  Bevy's pass spans (`elapsed_cpu`, F863) but inside `r_encode`, so the tail holds the per-draw
+  cost of every pass. In earlier runs of this work it grew with sorted and shadow draws, while
+  the opaque multi-draws stayed cheap.
+- `t_draws`, `t_items`, `t_pipe_sw`, `t_mat_sw`, `t_pipes`, `t_mats`: draws, phase items,
+  pipeline and material switches between consecutive draws, distinct pipelines and materials.
+  Every item is queued with `batch_range` 0..1; a batch set's first item gets the set's whole
+  instance range and `render_range` skips that many items. A draw is an item at that walk's
+  position (an earlier count of "items with a non-empty range" counted items, not draws).
+
+Observations:
+- `r_encode` does not depend on resolution: Donington 1280 and 2560 baseline both 3.84 ms on the
+  idle PC. The matrix's "Donington encodes slower at 1280" was background load (F863). No LOD or
+  culling choice depends on the resolution here.
+- Before this change the transparent phase drew 97 draws per frame in the derby and 232 at
+  Donington (1280 baseline), almost one draw per item: neighbouring overlays had different
+  materials (each part has its own base texture and mask), so the batcher split them.
+- A grouping probe (`GRID_OVERLAY_GROUP`, not committed, it reorders the overlays and so changes
+  the image) cut the derby to 38 draws (`r_encode` -0.11 ms) and Donington to 175 (-0.15 ms):
+  about 2 to 3 µs of encode per removed draw.
+
+### The change
+
+`CarReflectionOverlay` is a bindless material (`#[bindless]`). With binding arrays, all overlay
+materials share one bind group, and a draw finds its textures through the slot in the mesh
+uniform (`material_and_lightmap_bind_group_slot`). Bevy's batch-set merge needs the same pipeline,
+draw function, material bind group, mesh slabs and lightmap slab, but no longer the same material
+asset, so consecutive overlays of different parts merge into one multi-draw. The phase order is
+unchanged, so the image is unchanged.
+
+Pitfall found on the way: the constants must be `#[data(0, OverlayUniform, binding_array(10))]`.
+In bindless mode `#[uniform(.., binding_array(..))]` binds an array of uniform buffers
+(`binding_array<T>`), while the shader read one storage array; the first build drew wrong
+overlays on 8 to 28 % of the pixels. `data` is one storage buffer `array<T>`. Without bindless
+support both forms bind one uniform, and the shader takes its `#else` path with the six separate
+texture and sampler bindings.
+
+`GRID_NO_BINDLESS=1` (texture_upload.rs `render_creation`) disables the binding-array features at
+device creation, so the fallback path can be checked on a PC whose GPU has them.
+
+### Image check
+
+Fixed-step frames, 1280x720, the HEAD binary against the change, plus a second run of the change
+as the noise baseline (`local/ab/crops-bl.ps1`), Donington 600, derby 1500, baseline and
+Enhanced, touge 900:
+
+| case | bindless vs HEAD | fallback (`GRID_NO_BINDLESS=1`) vs HEAD | noise |
+|---|---|---|---|
+| base-don-600 | 0 px | 0 px | 0 px |
+| enh-don-600 | 0 px | 0 px | 0 px |
+| base-derby-1500 | 1 px, max delta 1 | 0 px | 2 px, max delta 1 |
+| enh-derby-1500 | 0 px | 0 px | 0 px |
+| base-touge-900 | 0 px | 29.8 % | 0 px |
+
+The touge fallback difference is not the overlay: without binding arrays Bevy's clustered decals
+are unusable, so `night_lights` reports `cookie_decals=false` and the headlight cookies change.
+That already happens on any GPU without binding arrays; the overlay's own fallback is identical
+in the other four cases.
+
+### Timing
+
+`local/ab/ab-bl.ps1`, 3 alternating pairs of HEAD (og) and the change (bl), 1280 baseline, under
+the build lock, means of the runs:
+
+| cell | fps | render ms | `r_encode` ms | `r_prepare` ms | `t_draws` | `t_pipe_sw` |
+|---|---|---|---|---|---|---|
+| derby, og → bl | 134.9 → 136.5 | 6.92 → 6.80 | 2.95 → 2.78 | 1.19 → 1.21 | 97.1 → 11.2 | 9.2 → 9.3 |
+| Donington, og → bl | 109.1 → 112.0 | 8.67 → 8.43 | 4.05 → 3.91 | 1.46 → 1.46 | 231.6 → 145.8 | 143.7 → 143.6 |
+
+Per pair, `r_encode` -0.16/-0.17/-0.18 ms (derby) and -0.19/-0.11/-0.12 ms (Donington), fps
++1.4 to +4.7; every pair has the same sign. About 2 µs per removed draw, as the probe predicted.
+
+### What remains
+
+- Donington's 146 draws are mostly glass pane and its overlay, alternating by design (sort bias
+  0.01, F847): two pipelines, 143 pipeline switches per frame. A merge would reorder them.
+- `enc_tail` (the `finish` encoding) is most of `r_encode`. Next: split it by pass (shadow views,
+  prepass, transparent), for example by draw counts per phase, before changing more draws.
+- Every run, including HEAD, logs two `bevy_render::slab_allocator` "Use-after-free" errors. They
+  predate this change and are not explained yet.

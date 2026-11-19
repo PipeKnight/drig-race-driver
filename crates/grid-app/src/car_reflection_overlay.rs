@@ -51,7 +51,7 @@ use bevy::{
     prelude::*,
     render::render_resource::{
         AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, CompareFunction,
-        RenderPipelineDescriptor, SpecializedMeshPipelineError,
+        RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
     },
     shader::ShaderRef,
 };
@@ -378,35 +378,62 @@ impl Masks {
     }
 }
 
+/// Bindless (shared material bind group): consecutive overlay draws of
+/// different parts merge into one multi-draw when their mesh slabs match, so
+/// the transparent phase keeps its order and the encoder records far fewer
+/// draws (docs/PERFORMANCE.md, F865). The constants are `data`, one storage
+/// array as the shader declares it; bindless `uniform` would bind an array of
+/// buffers instead. Without bindless support the same fields bind as one
+/// uniform and six texture/sampler bindings.
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+#[data(0, OverlayUniform, binding_array(10))]
+#[bindless]
 pub struct Overlay {
-    #[uniform(0)]
     environment: Vec4,
-    #[uniform(1)]
     fresnel: Vec4,
-    #[texture(2, dimension = "cube")]
-    #[sampler(3)]
+    #[texture(1, dimension = "cube")]
+    #[sampler(2)]
     cube: Handle<Image>,
-    #[texture(4)]
-    #[sampler(5)]
+    #[texture(3)]
+    #[sampler(4)]
     base: Option<Handle<Image>>,
-    #[texture(6)]
-    #[sampler(7)]
+    #[texture(5)]
+    #[sampler(6)]
     mask: Option<Handle<Image>>,
-    #[uniform(8)]
     paint: Vec4,
     /// `SpecularValues` x, y and `MetallicSpecularValues` x, y.
-    #[uniform(9)]
     sun_terms: Vec4,
     /// The metallic falloff, the program (0 none, 1 paint, 2 glass) and
     /// the dirt level.
-    #[uniform(10)]
     sun_program: Vec4,
     /// `GhostCarValues`.
-    #[uniform(11)]
     ghost: Vec4,
     /// The transparent phase's sort bias (`Material::depth_bias`).
     bias: f32,
+}
+
+/// [`Overlay`]'s constants as the shader reads them.
+#[derive(Clone, Copy, Debug, ShaderType)]
+pub struct OverlayUniform {
+    environment: Vec4,
+    fresnel: Vec4,
+    paint: Vec4,
+    sun_terms: Vec4,
+    sun_program: Vec4,
+    ghost: Vec4,
+}
+
+impl From<&Overlay> for OverlayUniform {
+    fn from(o: &Overlay) -> Self {
+        Self {
+            environment: o.environment,
+            fresnel: o.fresnel,
+            paint: o.paint,
+            sun_terms: o.sun_terms,
+            sun_program: o.sun_program,
+            ghost: o.ghost,
+        }
+    }
 }
 
 impl Material for Overlay {

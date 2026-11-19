@@ -59,12 +59,22 @@ fn choose(bc: bool, etc2: bool, forced: Option<&str>) -> (u8, &'static str) {
 /// The renderer's device settings. A forced `texture_fallback` also leaves
 /// `TEXTURE_COMPRESSION_BC` off the device, so a desktop GPU rejects every BC
 /// texture as a Mali or Xclipse phone does (F603: the OSD's 48 BC3 textures
-/// were only caught on a friend's Mali-G77).
+/// were only caught on a friend's Mali-G77). `GRID_NO_BINDLESS=1` leaves the
+/// binding-array features off, so every bindless material (the car reflection
+/// overlay, F865) takes its non-bindless bind group and shader path, as on a
+/// GPU without descriptor indexing.
 pub(crate) fn render_creation() -> bevy::render::settings::RenderCreation {
     let forced = crate::settings::diagnostics().texture_fallback.is_some();
+    let no_bindless = std::env::var("GRID_NO_BINDLESS").is_ok_and(|v| v == "1");
+    let mut disabled = WgpuFeatures::empty();
+    disabled.set(WgpuFeatures::TEXTURE_COMPRESSION_BC, forced);
+    disabled.set(
+        WgpuFeatures::TEXTURE_BINDING_ARRAY | WgpuFeatures::BUFFER_BINDING_ARRAY,
+        no_bindless,
+    );
     bevy::render::settings::RenderCreation::Automatic(Box::new(
         bevy::render::settings::WgpuSettings {
-            disabled_features: forced.then_some(WgpuFeatures::TEXTURE_COMPRESSION_BC),
+            disabled_features: (!disabled.is_empty()).then_some(disabled),
             ..default()
         },
     ))

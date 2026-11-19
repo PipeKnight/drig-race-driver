@@ -35,7 +35,8 @@ use bevy::render::render_resource::{
     BufferDescriptor, BufferUsages, ComputePassDescriptor, MapMode, PollType,
 };
 use bevy::render::renderer::{
-    RenderAdapterInfo, RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue,
+    PendingCommandBuffers, RenderAdapterInfo, RenderContext, RenderDevice, RenderGraph,
+    RenderGraphSystems, RenderQueue,
     ViewQuery,
 };
 use bevy::render::view::window::prepare_windows;
@@ -260,6 +261,11 @@ fn point<const I: usize>() {
         return;
     };
     f.points[I] = Some(ns(start, now));
+    if I == P::Graph as usize {
+        enc_begin(now);
+    } else if I == P::GraphSubmit as usize {
+        enc_end(now);
+    }
     if I == P::End as usize {
         let done = stages(&f.points);
         let uploads = f.uploads;
@@ -337,6 +343,58 @@ fn count_phases(
     with_acc(|a| {
         a.count_frames += 1;
         for (sum, v) in a.counts.iter_mut().zip(counts) {
+            *sum += v;
+        }
+    });
+}
+
+/// State changes of the sorted transparent phase after batching (`t_*` in
+/// `frame_stats`): draws, switches of pipeline and material asset between
+/// consecutive draws, phase items, and the distinct pipelines and materials
+/// (docs/PERFORMANCE.md, F865).
+fn count_transparent(
+    transparent: Option<Res<ViewSortedRenderPhases<Transparent3d>>>,
+    materials: Option<Res<bevy::pbr::RenderMaterialInstances>>,
+) {
+    let Some(transparent) = transparent else {
+        return;
+    };
+    let mut t = [0u64; 6];
+    let mut pipes = std::collections::HashSet::new();
+    let mut mats = std::collections::HashSet::new();
+    for phase in transparent.values() {
+        let mut last = None;
+        // Every item is queued with batch_range 0..1; a batch set's first item
+        // gets the set's whole instance range, and the render loop
+        // (SortedRenderPhase::render_range) skips that many items. So a draw is
+        // an item at the walk's position, not any item with a non-empty range.
+        let mut next = 0;
+        for (index, item) in phase.items.iter().map(|(_, i)| i).enumerate() {
+            let mat = materials
+                .as_ref()
+                .and_then(|m| m.instances.get(&item.entity.1))
+                .map(|m| m.asset_id);
+            t[2] += 1;
+            if index == next && !item.batch_range.is_empty() {
+                next += item.batch_range.len();
+                t[0] += 1;
+                if let Some((p, m)) = last {
+                    t[1] += u64::from(p != item.pipeline);
+                    t[3] += u64::from(m != mat);
+                }
+                last = Some((item.pipeline, mat));
+            } else if index == next {
+                next += 1;
+            }
+            pipes.insert(item.pipeline);
+            mats.insert(mat);
+        }
+    }
+    t[4] = pipes.len() as u64;
+    t[5] = mats.len() as u64;
+    with_acc(|a| {
+        a.t_frames += 1;
+        for (sum, v) in a.t_counts.iter_mut().zip(t) {
             *sum += v;
         }
     });
@@ -919,15 +977,91 @@ fn write_marker(gpu: &FrameGpu, ctx: &mut RenderContext, mark: Mark) {
         });
 }
 
+/// CPU side of the view markers: when each camera schedule reached each
+/// marker, between the `r_encode` points (`enc_*` in `frame_stats`).
+struct EncFrame {
+    graph: Option<Instant>,
+    marks: Vec<(u8, isize, Instant)>,
+}
+
+static ENC: Mutex<EncFrame> = Mutex::new(EncFrame {
+    graph: None,
+    marks: Vec::new(),
+});
+
+/// One camera schedule run in `r_encode`: `lead` (from the previous camera's
+/// last marker, or from the graph start, to this camera's first marker: it
+/// holds the previous schedule's encoder finishes), then the marker
+/// intervals (3D: prepass+shadows, opaque, transparent, post; 2D: ui, upscale).
+const ENC_SEGS: usize = 5;
+
+fn enc_begin(now: Instant) {
+    let mut e = ENC.lock().unwrap_or_else(|e| e.into_inner());
+    e.graph = Some(now);
+    e.marks.clear();
+}
+
+fn enc_end(now: Instant) {
+    let mut e = ENC.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(graph) = e.graph.take() else {
+        return;
+    };
+    let marks = std::mem::take(&mut e.marks);
+    drop(e);
+    let mut cams: Vec<((u8, u8, isize), [u64; ENC_SEGS])> = Vec::new();
+    let mut prev = graph;
+    for &(k, order, at) in &marks {
+        if k == K_C3_START || k == K_C2_START {
+            let three = u8::from(k == K_C3_START);
+            let mut seg = [0; ENC_SEGS];
+            seg[0] = ns(prev, at);
+            cams.push(((cams.len() as u8, three, order), seg));
+        } else if let Some((_, seg)) = cams.last_mut() {
+            let i = match k {
+                K_C3_MAIN | K_C2_UPSCALE => 1,
+                K_C3_TRANSPARENT | K_C2_END => 2,
+                K_C3_POST => 3,
+                _ => 4,
+            };
+            seg[i] += ns(prev, at);
+        }
+        prev = at;
+    }
+    let tail = ns(prev, now);
+    with_acc(|a| {
+        a.enc_frames += 1;
+        a.enc_tail += tail;
+        for (key, seg) in cams {
+            let s = a.enc.entry(key).or_default();
+            s.0 += 1;
+            for (sum, v) in s.1.iter_mut().zip(seg) {
+                *sum += v;
+            }
+        }
+    });
+}
+
+fn count_buffers(pending: Res<PendingCommandBuffers>) {
+    let n = pending.len() as u64;
+    with_acc(|a| a.enc_buffers += n);
+}
+
 fn view_marker<const K: u8>(
     view: ViewQuery<(Entity, &ExtractedCamera)>,
     gpu: Option<Res<FrameGpu>>,
     mut ctx: RenderContext,
 ) {
+    let now = Instant::now();
+    let (entity, camera) = view.into_inner();
+    {
+        let mut e = ENC.lock().unwrap_or_else(|e| e.into_inner());
+        if e.graph.is_some() {
+            e.marks.push((K, camera.order, now));
+        }
+    }
     let Some(gpu) = gpu else {
         return;
     };
-    let (entity, camera) = view.into_inner();
     let mark = Mark {
         kind: kind(K),
         order: camera.order,
@@ -1017,6 +1151,16 @@ struct Acc {
     extract: u64,
     render_frames: u32,
     stages: [u64; 12],
+    /// Camera schedules in `r_encode` by (position in the frame, 3D, order):
+    /// runs and [`ENC_SEGS`] sums; frames, the tail after the last marker
+    /// and command buffers pending at submit (`enc_*`).
+    enc: BTreeMap<(u8, u8, isize), (u32, [u64; ENC_SEGS])>,
+    enc_frames: u32,
+    enc_tail: u64,
+    enc_buffers: u64,
+    /// [`count_transparent`] sums and frames.
+    t_counts: [u64; 6],
+    t_frames: u32,
     /// Stages of the window's slowest render frame (`rworst`).
     worst: [u64; 12],
     /// Uploads drawn by that frame (`rworst_up`: meshes/KB/streamed KB).
@@ -1107,6 +1251,30 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
             worst_field(&a.worst),
             a.slow_render
         );
+        if a.enc_frames > 0 {
+            let cams: Vec<String> = a
+                .enc
+                .iter()
+                .map(|(&(pos, three, order), &(runs, seg))| {
+                    let ms: Vec<String> =
+                        seg.iter().map(|&v| format!("{:.2}", per(v, a.enc_frames))).collect();
+                    let kind = if three == 1 { "3d" } else { "2d" };
+                    format!("{pos}:{kind}:{order}:{runs}:{}", ms.join("/"))
+                })
+                .collect();
+            s += &format!(
+                " enc_tail={:.2} enc_cbs={:.1} enc={}",
+                per(a.enc_tail, a.enc_frames),
+                a.enc_buffers as f64 / f64::from(a.enc_frames),
+                cams.join(",")
+            );
+        }
+        if a.t_frames > 0 {
+            let names = ["t_draws", "t_pipe_sw", "t_items", "t_mat_sw", "t_pipes", "t_mats"];
+            for (name, sum) in names.iter().zip(a.t_counts) {
+                s += &format!(" {name}={:.0}", sum as f64 / f64::from(a.t_frames));
+            }
+        }
         let [clean, dirty] = a.upload_split;
         let w = a.worst_uploads;
         s += &format!(
@@ -1285,7 +1453,10 @@ pub fn install(app: &mut App) {
             point::<{ P::Bind as usize }>
                 .after(S::PrepareResourcesFlush)
                 .before(S::PrepareBindGroups),
-            point::<{ P::Graph as usize }>.after(S::Prepare).before(S::Render),
+            (count_transparent, point::<{ P::Graph as usize }>)
+                .chain()
+                .after(S::Prepare)
+                .before(S::Render),
             point::<{ P::Clean as usize }>.after(S::Render).before(S::Cleanup),
             point::<{ P::End as usize }>.after(S::PostCleanup),
         ),
@@ -1293,8 +1464,10 @@ pub fn install(app: &mut App) {
     render.add_systems(
         RenderGraph,
         (
-            point::<{ P::GraphSubmit as usize }>
+            (point::<{ P::GraphSubmit as usize }>, count_buffers)
+                .chain()
                 .after(RenderGraphSystems::Render)
+                .after(gpu_resolve)
                 .before(RenderGraphSystems::Submit),
             point::<{ P::GraphFinish as usize }>.after(RenderGraphSystems::Finish),
         ),
