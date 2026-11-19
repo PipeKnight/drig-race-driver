@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F860](log/F0860.md) | 2026-11-19 | Compute pool capped at 8 threads: +1.4 to +2.8 fps; slow render frames rare when the PC is idle |
 | [F859](log/F0859.md) | 2026-11-19 | Per-frame mesh uploads: dents and car batches stream changed vertices; reflection overlays follow a part leaving its batch |
 | [F858](log/F0858.md) | 2026-11-19 | Owner priority 2026-11-19: portable data, few files, in-app update, release/debug split |
 | [F857](log/F0857.md) | 2026-11-18 | Slow render frames by span: no render pass grows; main-world work at the same instant |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F799](log/F0799.md) | 2026-11-10 | Team livery checked on a race car |
 | [F798](log/F0798.md) | 2026-11-10 | Career team livery on the race cars |
 | [F797](log/F0797.md) | 2026-11-10 | Replay sound and highlight monitors traced; engine sound replayed |
-| [F796](log/F0796.md) | 2026-11-10 | Damage parts, glass, lights and shards replayed; crash replay tested with a real wreck |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

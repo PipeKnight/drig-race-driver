@@ -158,6 +158,7 @@ fn point<const I: usize>() {
         if let Some(done) = done {
             with_acc(|a| {
                 a.render_frames += 1;
+                a.slow_render += u32::from(done[11] >= SLOW_RENDER_NS);
                 a.last_render = done[11];
                 if done[11] > a.worst[11] {
                     a.worst = done;
@@ -835,6 +836,10 @@ struct ViewAcc {
     cascades: Vec<f64>,
 }
 
+/// A render frame this long or longer counts in `rslow20` (F860: the rate of
+/// slow render frames per window, not only the slowest one).
+const SLOW_RENDER_NS: u64 = 20_000_000;
+
 #[derive(Default)]
 struct Acc {
     main_frames: u32,
@@ -854,6 +859,8 @@ struct Acc {
     /// Largest mesh and streamed bytes of one frame (`up_max_kb`, `stream_max_kb`).
     upload_max: u64,
     stream_max: u64,
+    /// Render frames of [`SLOW_RENDER_NS`] or more (`rslow20`).
+    slow_render: u32,
     count_frames: u32,
     counts: [u64; 6],
     mesh_up: u64,
@@ -917,7 +924,12 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
         for (name, sum) in STAGES.iter().zip(a.stages) {
             s += &format!(" {name}={:.2}", per(sum, a.render_frames));
         }
-        s += &format!(" render_frames={} rworst={}", a.render_frames, worst_field(&a.worst));
+        s += &format!(
+            " render_frames={} rworst={} rslow20={}",
+            a.render_frames,
+            worst_field(&a.worst),
+            a.slow_render
+        );
         let [clean, dirty] = a.upload_split;
         let w = a.worst_uploads;
         s += &format!(
@@ -1233,6 +1245,7 @@ mod tests {
             a.stages[11] = 10_000_000;
             a.worst[11] = 7_000_000;
             a.worst[5] = 5_500_000;
+            a.slow_render = 1;
             a.mesh_up = 85;
             a.add_gpu(FrameTimes {
                 views: vec![ViewTimes {
@@ -1249,14 +1262,14 @@ mod tests {
         let (s, lines) = window_report(1.);
         assert!(s.contains(" main_ms=2.00 "), "{s}");
         assert!(s.contains(" render_ms=5.00 "), "{s}");
-        assert!(s.contains(" rworst=7.0/0.0/0.0/0.0/0.0/0.0/5.5/0.0/0.0/0.0/0.0/0.0 "), "{s}");
+        assert!(s.contains(" rworst=7.0/0.0/0.0/0.0/0.0/0.0/5.5/0.0/0.0/0.0/0.0/0.0 rslow20=1 "), "{s}");
         assert!(s.contains(" gpu=on gpu_ms=15.00 g_pre=1.00 g_shadow=2.00"), "{s}");
         assert!(s.contains(" g_gap=1.00 g_frames=1 g_bad=0"), "{s}");
         assert!(s.contains(" mesh_up_s=85.0 "), "{s}");
         assert!(lines.is_empty());
         let (s, _) = window_report(1.);
         assert!(s.contains(" main_ms=0.00 ") && s.contains(" mesh_up_s=0.0 "), "{s}");
-        assert!(s.contains(" rworst=0.0/"), "{s}");
+        assert!(s.contains(" rworst=0.0/") && s.contains(" rslow20=0 "), "{s}");
         // The per-view detail survives resets until it is due.
         for _ in 0..DETAIL_WINDOWS - 3 {
             assert!(window_report(1.).1.is_empty());

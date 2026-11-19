@@ -91,17 +91,37 @@ pub fn bevy_compute_threads(cores: usize) -> usize {
     remaining.max(1)
 }
 
+/// The most compute threads on any platform (F860). The main and render
+/// executors share this pool; on a 20-thread PC 8 threads gave +1.4 to
+/// +2.8 fps over Bevy's 12 in every clean paired run (lower main and
+/// render time), and 18 were slower. Machines with 16 or fewer logical
+/// cores (phones, most Macs) keep their count.
+pub const MAX_COMPUTE_THREADS: usize = 8;
+
+/// The compute pool's thread count for `cores` logical cores: Bevy's split,
+/// or [`compute_threads`] with the preset, both at most
+/// [`MAX_COMPUTE_THREADS`].
+pub fn pool_threads(cores: usize, preset: bool) -> usize {
+    let threads = if preset { compute_threads(cores) } else { bevy_compute_threads(cores) };
+    threads.min(MAX_COMPUTE_THREADS)
+}
+
 /// Creates Bevy's compute pool before the app does (its task pool plugin
 /// keeps a pool that exists), with [`COMPUTE_STACK`]. Called first thing in
-/// `main`. Bevy's thread count, or with the preset, or on the desktop with
-/// `GRID_COMPUTE_SPLIT=preset` (F573 measurement), [`compute_threads`].
+/// `main`. [`pool_threads`]; the preset split applies with the preset, or on
+/// the desktop with `GRID_COMPUTE_SPLIT=preset` (F573 measurement).
 pub fn init_threads() {
     let requested = std::env::var("GRID_COMPUTE_SPLIT").is_ok_and(|v| v == "preset");
     let split = enabled() || requested;
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    let threads = if split { compute_threads(cores) } else { bevy_compute_threads(cores) };
+    let mut threads = pool_threads(cores, split);
+    // `GRID_COMPUTE_THREADS=N` sets the count outright (F860 measurement).
+    let forced = std::env::var("GRID_COMPUTE_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n >= 1);
+    if let Some(n) = forced {
+        threads = n;
+    }
     init_compute_pool(threads);
-    if split {
+    if split || forced.is_some() || threads != bevy_compute_threads(cores) {
         log_line!("mobile_threads version=1 cores={cores} compute={threads}");
     }
 }
@@ -143,6 +163,17 @@ mod tests {
         assert_eq!(bevy_compute_threads(8), 4);
         assert_eq!(bevy_compute_threads(20), 12);
         assert_eq!(bevy_compute_threads(32), 24);
+    }
+
+    #[test]
+    fn pool_threads_cap_both_splits_at_eight() {
+        assert_eq!(pool_threads(8, false), 4);
+        assert_eq!(pool_threads(16, false), 8);
+        assert_eq!(pool_threads(20, false), 8);
+        assert_eq!(pool_threads(32, false), 8);
+        assert_eq!(pool_threads(8, true), 6);
+        assert_eq!(pool_threads(10, true), 8);
+        assert_eq!(pool_threads(20, true), 8);
     }
 
     #[test]

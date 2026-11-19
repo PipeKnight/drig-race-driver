@@ -1171,7 +1171,7 @@ every run: the benchmark is paced at 60 Hz.)
   gain is 0–3 %, which is within run-to-run noise.
 - The simulation is unchanged: every derby run logged the same 6 breaks at the same ticks. The
   parallel paths are index-ordered (F568).
-- Decision: Bevy's split stays the desktop default. The preset split stays on Android (and with
+- Decision (F573; F860 later capped both splits at 8 threads): Bevy's split stays the desktop default. The preset split stays on Android (and with
   `GRID_MOBILE_PRESET=1`, which now also applies it on the desktop).
 
 ## Dormant pieces (F574)
@@ -3715,3 +3715,75 @@ gives the fix's image there (1 px by 1 level), and both builds repeat themselves
 left their batch, which HEAD left on the hidden layer. The streaming changes alone match the
 pre-change frames except where they removed the accidental re-sync (the 240 px on debris
 above, gone with the overlay change).
+
+## Compute pool size and slow render frames (F860)
+
+Task (coordinator, after F857): test whether the render executor waits for compute-pool threads busy
+with main-world work. Release build local/ab/tp.exe caca6a1e9fe18505 (main after F857, plus the switches
+below), Donington native, auto_no_vsync, 3000 ticks, 1 s `frame_split` windows after the cover lift,
+baseline (b) and Enhanced (e), both variant orders × 2. New window field `rslow20`: render frames of
+20 ms or more. Drivers: local/ab/tp.ps1, tq.ps1 and tprerun.ps1; summaries by local/ab/tp.py (per variant)
+and tppair.py (paired against variant a in the same order block).
+
+Variants, one switch each:
+
+- a: current main (Bevy's split; 12 compute threads on this 20-thread PC);
+- b: `GRID_DENT_POOL=async` (our `on_compute_pool` jobs on the async compute pool; switch removed again);
+- c4, c6, c8, c10, c18: `GRID_COMPUTE_THREADS=N`;
+- d: `GRID_DENT_FAST=0`.
+
+The PC: i7-12700, 8 P-cores with HT plus 4 E-cores.
+
+### Clean runs
+
+These ran under the build lock or in windows with no other timing or build. Each delta is the mean of
+4 pairs, as fps against a, with the sign of every pair.
+
+| res | mode | c4 | c6 | c8 | c10 | c18 | b | d |
+|---|---|---|---|---|---|---|---|---|
+| 1280x800 | b | +2.1 (3 of 4 +) | +4.5 (4 +) | +2.8 (4 +) | +1.3 (4 +) | | | |
+| 1280x800 | e | +1.5 (4 +) | +2.0 (4 +) | +1.4 (4 +) | +0.4 (3 of 3 ≥ 0) | | | |
+| 2560x1440 | b | | | +1.8 (4 +) | | −3.1 (4 −) | −0.3 | −1.1 |
+| 2560x1440 | e | | | +2.0 (4 +) | | −1.0 (3 −) | +0.2 | −0.1 |
+
+- Absolute fps for a: 116.1 baseline and 91.4 Enhanced at 1280; 114.2 and 87.7 at 2560.
+- With c8, main and render time both fall, by 0.26 to 0.32 ms and 0.12 to 0.24 ms per window.
+- Slow render frames are rare in clean runs for every variant: 0 to 0.022 per window. One exception:
+  18 threads raise them at 2560 Enhanced, 0.097 per window against 0.011.
+- 1 % low (histogram buckets) is equal or better with c6 and c8.
+- One run (1280 r1, c10, Enhanced) ended in a wgpu `DeviceLost` at 04:05. It is the only one in 488
+  `frame-split-smoke` runs and is left out of the table.
+
+### Runs under background load
+
+The 1280 tp blocks ran from 23:59 to 02:10. They took 25 to 50 minutes per block of 10 runs, against
+about 10 minutes for a clean block, and variant a's fps was 15 % lower (98.5 and 76.0), so other
+sessions' builds ran beside them. There, c8 gave:
+
+- baseline: +7.2 fps and fewer slow render frames, 0.031 per window against 0.164;
+- Enhanced: +6.2 fps, with slow render frames unchanged (0.63 and 0.61 per window).
+
+The F856 release runs had 25 slow render frames in 75 Enhanced windows, so they may also have run
+under such load. Contaminated blocks of the other A/Bs (02:15–02:23 and 02:52–03:10) were rerun under
+the build lock; the tables above use the reruns.
+
+### Decision
+
+`mobile::MAX_COMPUTE_THREADS = 8` caps the compute pool on every platform, for Bevy's split and for the
+preset split alike (`mobile::pool_threads`).
+
+- On this PC the pool drops from 12 threads to 8.
+- Machines with 16 or fewer logical cores keep their count: phones under the preset (8 cores give 6) and
+  Macs up to M4 Max. Larger machines also get 8.
+- c6 was a little faster at 1280 but was not measured at 2560, so the cap is the count measured at both
+  resolutions.
+- Bevy's IO and async pools keep their own counts.
+- `parallel::map` is index-ordered, so the simulation is unchanged.
+- Image check: 10 matched fixed-step cases, 8 threads against the old default (local/ab/crops-tp). 9 are identical; one has a single pixel off by 1 of 255.
+
+The F857 hypothesis is only partly confirmed:
+
+- Fewer compute threads cut main and render time.
+- In clean runs slow render frames are too rare to show a cut. Under background load the cut showed in
+  baseline only.
+- Moving our own jobs to the async pool (b) and the dent fast path (d) are within noise.

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F860](F0860.md) | 2026-11-19 | Compute pool capped at 8 threads: +1.4 to +2.8 fps; slow render frames rare when the PC is idle |
 | [F859](F0859.md) | 2026-11-19 | Per-frame mesh uploads: dents and car batches stream changed vertices; reflection overlays follow a part leaving its batch |
 | [F858](F0858.md) | 2026-11-19 | Owner priority 2026-11-19: portable data, few files, in-app update, release/debug split |
 | [F857](F0857.md) | 2026-11-18 | Slow render frames by span: no render pass grows; main-world work at the same instant |
