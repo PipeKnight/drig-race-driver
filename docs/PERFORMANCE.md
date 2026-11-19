@@ -4427,3 +4427,78 @@ $env:GRID_PROFILE_SECONDS = '15'   # profile_span tables every 15 s
 Here it took 714 s at the default job count, and the build dir grew to about 3.4 GB. Delete the
 build dir afterwards (docs/DISK_USAGE.md). To read spans for the render world, take the
 `profile_span` lines of the last window (they follow `rank=1`).
+
+
+## Bevy bind-group cache for preprocess and environment maps (F873)
+
+19 November 2026, Claude Code, coordinator decision after F869: patch Bevy 0.19.1 so that
+`prepare_preprocess_bind_groups` and `prepare_generated_environment_map_bind_groups` (0.69 /
+0.57 and 0.28 / 0.27 ms per frame in the F869 profile, derby / Donington) keep their bind groups
+while every input is unchanged. Result: the cache never hits, the frame gets slower, and the patch
+is **not** merged. Evidence: this worktree's `local/prep/` (`bgc.ps1`, `bg-*`, `rate-*`,
+`img-bgc-*`, and the full patch as `f870-bevy-patch.diff`).
+
+### What was tried
+
+- `bevy_pbr` 0.19.1 vendored under `third_party/bevy_pbr` (crate sha256 `244ae7d6...a23d6`,
+  git `b56fc29d`) through `[patch.crates-io]`; only `bevy_pbr` and its dependents rebuild.
+- A small cache in `bevy_pbr::render`: the key is the layout id plus, per entry, the buffer id with
+  offset and size, the sampler id or the texture-view id. A bind group is reused only when every
+  entry is identical, so a reallocated buffer, a resized target or a new view gives a new bind
+  group. Entries not used for two frames are dropped (two generations). The environment-map path
+  keys on the probe entity and its input texture views. `GRID_BEVY_BIND_GROUP_CACHE=0` turns it off.
+- Tests (GPU, `#[ignore]`d like the other adapter tests): one checks that identical inputs give
+  the same bind group and that a new texture view, a reallocated buffer or a different size gives a
+  new one; one switches the environment map of a camera twice (as between tracks) and checks the
+  generator bind groups change each time and stay put between switches. With the cache off the
+  second test fails at the "unchanged inputs" step, as designed.
+- Images: derby and race at 600 and 1500 ticks, cache off against on and parent (F869) against on:
+  0 px different in all 8 diffs.
+
+### Timing
+
+Release, Enhanced, `auto_no_vsync`, autopilot, 45 s, 2 alternating pairs per cell under the build
+lock, other processes 6-10 CPU s per run (the PC was not idle). Means, ms per frame, cache off ->
+on; exe `610FC32F796F1025`:
+
+| cell | `r_prepare` | `bind` set | `r_submit` | render_ms | fps |
+|---|---|---|---|---|---|
+| derby 1280 | 1.496 -> 1.515 | 0.88 -> 1.21 | 0.974 -> 0.767 | 8.51 -> 8.67 | 114.8 -> 113.0 |
+| Donington 1280 | 1.551 -> 1.556 | 0.80 -> 1.05 | 0.619 -> 0.542 | 9.66 -> 9.82 | 99.0 -> 97.4 |
+| derby 2560 | 1.508 -> 1.517 | 0.89 -> 1.19 | 1.339 -> 1.190 | 8.67 -> 8.82 | 112.4 -> 111.0 |
+| Donington 2560 | 1.586 -> 1.573 | 0.80 -> 1.05 | 1.354 -> 1.204 | 10.12 -> 10.29 | 94.7 -> 93.2 |
+
+`r_prepare` is unchanged, the `bind` set costs 0.25-0.33 ms more, and render_ms is about 0.15 ms
+worse; fps is lower in every pair. Below the 0.3 ms gain threshold in every cell, so dropped.
+
+### Why it cannot hit
+
+A temporary counter in the cache (30 s, 1280): derby 0 hits in 417k bind groups created by frame
+2400; Donington 0 hits in 300k by frame 1200. Bevy builds about 160-260 of these bind groups per
+frame, and every frame at least one input is a new `wgpu::Buffer`. Miss reasons over 1200 derby
+frames (166k misses):
+
+| bind group, changed entries | misses |
+|---|---|
+| bin unpacking, b2 (work-item buffer): new buffer, same size | 94.6k |
+| bin unpacking, b0 offset + b2 new buffer, same size | 16.5k |
+| bin unpacking, b2 new buffer, resized | 15.9k |
+| bin unpacking, b0 offset + b2 resized | 7.6k |
+| frustum culling, b5-b8 (indirect parameters) resized | 7.2k |
+| reset indirect batch sets, b0 resized | 6.0k |
+| build indirect parameters, b1-b4 resized | 6.0k |
+
+So the inputs themselves are reallocated each frame, mostly at the same size: the work-item and
+indirect-parameter buffers in `bevy_render::batching::gpu_preprocessing`. An input-keyed cache in
+`bevy_pbr` only adds the key cost and keeps two generations of bind groups alive.
+
+### Lead
+
+A real gain needs `bevy_render` to keep those buffers across frames (reuse at the same capacity
+instead of a new `wgpu::Buffer`); after that the existing Bevy code may already reuse much less
+work, and a bind-group cache would start to hit. Unconfirmed: which call reallocates. Candidates
+read in `gpu_preprocessing.rs`: `clear_indirect_parameters_buffers` (clears the phase buffers each
+frame), `write_indirect_parameters_buffers` (`write_buffer` may reallocate), and
+`RawBufferVec::reserve`, which reallocates when `changed` is set (for example by `set_label` with a
+different label) even at the same capacity. That is a `bevy_render` patch, outside this task's
+approved scope.

@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F873](log/F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |
 | [F872](log/F0872.md) | 2026-11-19 | Owner request: HDR monitor output and settings |
 | [F871](log/F0871.md) | 2026-11-19 | Owner approves the further settings list for row 140 |
 | [F870](log/F0870.md) | 2026-11-19 | Owner request: bloom and white-balance settings, more settings to choose |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F812](log/F0812.md) | 2026-11-10 | Loading camera noise rotation |
 | [F811](log/F0811.md) | 2026-11-10 | Pause Restart darkening; pause tone map blocked on row 77 |
 | [F810](log/F0810.md) | 2026-11-10 | Results screen in the front-end art (row 69): fe3d materials, pause_root camera, row driver, DXT3 textures |
-| [F809](log/F0809.md) | 2026-11-10 | GRID World garage scene and livery 3D preview: static research |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
