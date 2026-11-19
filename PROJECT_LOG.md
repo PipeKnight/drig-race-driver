@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F867](log/F0867.md) | 2026-11-19 | Owner roadmap order after the FPS series |
 | [F866](log/F0866.md) | 2026-11-19 | Future rows: rain, official DLC, cut content (owner request) |
 | [F865](log/F0865.md) | 2026-11-19 | Render encode: bindless car reflection overlay merges transparent draws |
 | [F864](log/F0864.md) | 2026-11-19 | Contact dents: fixed lattice probes per part |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F806](log/F0806.md) | 2026-11-10 | Reset lines: Haruna final boundaries disqualify; tall fence plates are not raised boxes |
 | [F805](log/F0805.md) | 2026-11-10 | Recovery obstruction toggle decrements on the toggle tick (0x78EE70) |
 | [F804](log/F0804.md) | 2026-11-10 | Pieces with several shapes break (compound bodies, B11520) |
-| [F803](log/F0803.md) | 2026-11-10 | Tyre, whine and collision sound replayed |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
