@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F868](F0868.md) | 2026-11-19 | Render encode: drop wgpu indirect-call validation where DX12 cannot be chosen |
 | [F867](F0867.md) | 2026-11-19 | Owner roadmap order after the FPS series |
 | [F866](F0866.md) | 2026-11-19 | Future rows: rain, official DLC, cut content (owner request) |
 | [F865](F0865.md) | 2026-11-19 | Render encode: bindless car reflection overlay merges transparent draws |

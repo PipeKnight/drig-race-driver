@@ -4231,3 +4231,84 @@ Per pair, `r_encode` -0.16/-0.17/-0.18 ms (derby) and -0.19/-0.11/-0.12 ms (Doni
   prepass, transparent), for example by draw counts per phase, before changing more draws.
 - Every run, including HEAD, logs two `bevy_render::slab_allocator` "Use-after-free" errors. They
   predate this change and are not explained yet.
+
+## Encode: indirect-call validation only where DX12 can be chosen (F868)
+
+Part of the F865 follow-up on `enc_tail`, the `CommandEncoder::finish` encoding of every pass.
+
+### Split of the tail by pass
+
+`frame_split` now also counts the prepass phases (`d_pre`, `d_pre_alpha`) and the bindless
+material slabs (`bl_slabs`, `bl_res`: slabs and resources of all bindless material allocators).
+Donington and derby 1280 baseline, one run each:
+
+| scene | `d_opaque` | `d_alpha` | `d_shadow` | `d_transp` | `d_pre` | `shadow_views` | `bl_slabs` | `bl_res` |
+|---|---|---|---|---|---|---|---|---|
+| Donington | 37 | 6 | 72 | 307 | 0 | 3 | 2 | 565 |
+| derby | 164 | 4 | 49 | 145 | 0 | 3 | 2 | 315 |
+
+The prepass draws nothing in either scene, so its share of the tail is zero. The shadow views hold
+50 to 80 draws.
+
+A sampling profile of the encode (`tools/sample_profile.py --busy --filter wgpu_core`, Donington,
+inclusive shares of wgpu_core samples) shows where the tail goes: `encode_render_pass` 31.8 %,
+`flush_bindings_helper` 16.7 %, `register_init_action` 14.2 % (self 9.0 %, with
+`TextureInitTracker::check_action` 4.8 %), `queue_write_buffer` 17 %,
+`TextureUsageScope::merge_single` self 3.1 %. In wgpu-core 29.0.4, `set_bind_group` merges the
+group's whole resource set into the pass scope. The next draw's flush then re-registers every
+texture of every group from the changed index up. A switch into a bind group with many textures
+(a bindless slab) therefore costs time in proportion to its texture count. This is the next lead,
+not part of this change.
+
+### The change
+
+Bevy 0.19.1 (`bevy_render` settings.rs, `WgpuSettings::default`) keeps wgpu's
+`InstanceFlags::VALIDATION_INDIRECT_CALL` in release builds whenever DX12 is among the backends.
+The D3D12 backend needs it for `num_workgroups`, `first_vertex` and `first_instance` of indirect
+draws. `Backends::all()` always contains DX12, also on Android and Linux. With the flag, wgpu adds
+a validation compute pass and tracks every indirect draw in `finish`; Bevy draws with indirect
+multi-draws.
+
+`texture_upload.rs` `drop_unreachable_dx12` (called from `render_creation`) removes DX12 and the
+flag when wgpu would never pick a DX12 adapter:
+- Off Windows DX12 does not exist, so it is removed without a probe.
+- On Windows, wgpu-core's `request_adapter` lists the Vulkan adapters before the DX12 ones and
+  stable-sorts all of them by device type for the power preference. A Vulkan adapter of the
+  top-ranked type therefore wins whatever DX12 offers: discrete for `HighPerformance` (Bevy's
+  default), integrated for `LowPower`, any for `None`. The probe enumerates only Vulkan; a full
+  Vulkan and DX12 probe took 665 ms, most of it the DX12 enumeration.
+- If no such Vulkan adapter exists (no Vulkan driver, or Vulkan only on the weaker GPU), DX12 and
+  the flag stay, and the log says so.
+- Debug builds, `WGPU_BACKEND`, `WGPU_ADAPTER_NAME` and `WGPU_VALIDATION_INDIRECT_CALL` keep
+  Bevy's behaviour.
+
+The log line is `render backends: DX12 left out (top-ranked Vulkan adapter), probe N ms`. On this
+PC the chosen adapter is the same RTX 4070 on Vulkan as before.
+
+### Image check
+
+Fixed-step frames, 1280x720, `local/ab/crops-bl.ps1`, HEAD-equivalent (`local/ab/iv.exe`) against
+the change (`local/ab/dx.exe`), plus a second run of the change as the noise baseline: Donington
+600 and derby 1500 in baseline and Enhanced, and touge 900. Every case differs by 0 or 1 px at max
+delta 1, the same as the noise runs (`local/ab/crops-dx`).
+
+### Timing
+
+Three alternating pairs, 1280 baseline, under the build lock (`local/ab/ab-iv.ps1` with the
+environment variable, `local/ab/ab-dx.ps1` with the build; evidence
+`local/frame-split-smoke/ab-iv-*` and `ab-dx-*`):
+
+| run | scene | `r_encode` ms | pairs | `enc_tail` ms |
+|---|---|---|---|---|
+| flag on/off by env | derby | 2.56 → 2.52 | -0.03/-0.04/-0.07 | 1.26 → 1.21 |
+| flag on/off by env | Donington | 3.72 → 3.58 | -0.23/-0.07/-0.10 | 2.28 → 2.19 |
+| HEAD vs build | derby | 2.78 → 2.77 | +0.04/-0.10/+0.04 | 1.34 → 1.32 |
+| HEAD vs build | Donington | 3.89 → 3.87 | +0.16/-0.17/-0.05 | 2.35 → 2.30 |
+
+The gain on this desktop is small: about 0.03 to 0.1 ms of `r_encode`, near the run-to-run noise.
+The build runs were noisier than the environment runs: one Donington pair of each kind ran under
+background load. Phones lose the same per-draw work on slower cores.
+
+Startup gains more. Bevy's renderer creation (first log line to `AdapterInfo`) took 520 to 840 ms
+with DX12 enumerated and takes 55 to 90 ms without it. With the 170 to 330 ms probe, startup is
+300 to 450 ms faster on this PC.

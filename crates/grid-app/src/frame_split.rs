@@ -25,6 +25,7 @@ use bevy::camera::visibility::{CascadesVisibleEntities, VisibleEntities};
 use bevy::core_pipeline::core_3d::{
     AlphaMask3d, Opaque3d, Transparent3d, main_opaque_pass_3d, main_transparent_pass_3d,
 };
+use bevy::core_pipeline::prepass::{AlphaMask3dPrepass, Opaque3dPrepass};
 use bevy::core_pipeline::schedule::{camera_driver, Core2d, Core2dSystems, Core3d, Core3dSystems};
 use bevy::core_pipeline::upscaling::upscaling;
 use bevy::pbr::{Shadow, clear_indirect_parameters_metadata};
@@ -321,9 +322,15 @@ fn binned_groups<B: BinnedPhaseItem>(phases: &ViewBinnedRenderPhases<B>) -> u64 
 }
 
 /// Names of the per-frame phase counts.
-pub const COUNTS: [&str; 6] = [
-    "d_opaque", "d_alpha", "d_shadow", "d_transp", "d_ui", "shadow_views",
+pub const COUNTS: [&str; 10] = [
+    "d_opaque", "d_alpha", "d_shadow", "d_transp", "d_ui", "shadow_views", "d_pre", "d_pre_alpha", "bl_slabs", "bl_res",
 ];
+
+/// The prepass phases (opaque and alpha mask).
+type PrepassPhases<'w> = (
+    Option<Res<'w, ViewBinnedRenderPhases<Opaque3dPrepass>>>,
+    Option<Res<'w, ViewBinnedRenderPhases<AlphaMask3dPrepass>>>,
+);
 
 fn count_phases(
     opaque: Option<Res<ViewBinnedRenderPhases<Opaque3d>>>,
@@ -331,6 +338,8 @@ fn count_phases(
     shadow: Option<Res<ViewBinnedRenderPhases<Shadow>>>,
     transparent: Option<Res<ViewSortedRenderPhases<Transparent3d>>>,
     ui: Option<Res<ViewSortedRenderPhases<TransparentUi>>>,
+    prepass: PrepassPhases,
+    allocators: Option<Res<bevy::pbr::MaterialBindGroupAllocators>>,
 ) {
     let counts = [
         opaque.map_or(0, |p| binned_groups(&p)),
@@ -339,6 +348,10 @@ fn count_phases(
         transparent.map_or(0, |p| p.values().map(|s| s.items.len() as u64).sum()),
         ui.map_or(0, |p| p.values().map(|s| s.items.len() as u64).sum()),
         shadow.map_or(0, |p| p.len() as u64),
+        prepass.0.map_or(0, |p| binned_groups(&p)),
+        prepass.1.map_or(0, |p| binned_groups(&p)),
+        allocators.as_ref().map_or(0, |a| a.values().map(|m| m.slab_count() as u64).sum()),
+        allocators.map_or(0, |a| a.values().map(|m| m.allocations()).sum()),
     ];
     with_acc(|a| {
         a.count_frames += 1;
@@ -1182,7 +1195,7 @@ struct Acc {
     rslow_laps: [u64; lap::N],
     rslow_n: u32,
     count_frames: u32,
-    counts: [u64; 6],
+    counts: [u64; COUNTS.len()],
     mesh_up: u64,
     mesh_bytes: u64,
     stream_bytes: u64,

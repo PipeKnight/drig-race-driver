@@ -72,12 +72,83 @@ pub(crate) fn render_creation() -> bevy::render::settings::RenderCreation {
         WgpuFeatures::TEXTURE_BINDING_ARRAY | WgpuFeatures::BUFFER_BINDING_ARRAY,
         no_bindless,
     );
-    bevy::render::settings::RenderCreation::Automatic(Box::new(
-        bevy::render::settings::WgpuSettings {
-            disabled_features: (!disabled.is_empty()).then_some(disabled),
-            ..default()
-        },
-    ))
+    let mut settings = bevy::render::settings::WgpuSettings {
+        disabled_features: (!disabled.is_empty()).then_some(disabled),
+        ..default()
+    };
+    drop_unreachable_dx12(&mut settings);
+    bevy::render::settings::RenderCreation::Automatic(Box::new(settings))
+}
+
+/// Leaves DX12 out of the backends when wgpu would not choose a DX12 adapter
+/// anyway, so release builds lose wgpu's `VALIDATION_INDIRECT_CALL` (F868).
+/// Bevy keeps that flag whenever DX12 is among the backends, because the
+/// D3D12 backend needs it for its draw built-ins; `Backends::all()` always
+/// contains DX12, even on Android. The flag adds a validation compute pass
+/// per command buffer and per-draw tracking of every indirect draw to
+/// `CommandEncoder::finish` (docs/PERFORMANCE.md, F868).
+///
+/// The chosen adapter stays the same: DX12 exists only on Windows, and there
+/// wgpu sorts the adapters of all backends by device type with a stable sort
+/// and lists Vulkan before DX12, so a Vulkan adapter of the best-ranked type
+/// can never lose to a DX12 one. The probe enumerates only Vulkan (DX12
+/// enumeration is what makes a full probe slow) and drops DX12 only when such
+/// an adapter exists. `WGPU_BACKEND`, `WGPU_ADAPTER_NAME` and
+/// `WGPU_VALIDATION_INDIRECT_CALL` keep Bevy's behaviour, and debug builds
+/// keep the validation.
+fn drop_unreachable_dx12(settings: &mut bevy::render::settings::WgpuSettings) {
+    use wgpu::{Backends, InstanceFlags};
+    let Some(backends) = settings.backends else {
+        return;
+    };
+    let env_set = |name| std::env::var_os(name).is_some();
+    if cfg!(debug_assertions)
+        || !backends.contains(Backends::DX12)
+        || env_set("WGPU_BACKEND")
+        || env_set("WGPU_ADAPTER_NAME")
+        || env_set("WGPU_VALIDATION_INDIRECT_CALL")
+    {
+        return;
+    }
+    let started = std::time::Instant::now();
+    if cfg!(windows) && !vulkan_cannot_lose(&vulkan_adapter_types(), settings.power_preference) {
+        println!("render backends: no top-ranked Vulkan adapter, DX12 and indirect-call validation kept");
+        return;
+    }
+    settings.backends = Some(backends - Backends::DX12);
+    settings
+        .instance_flags
+        .remove(InstanceFlags::VALIDATION_INDIRECT_CALL);
+    if cfg!(windows) {
+        println!(
+            "render backends: DX12 left out (top-ranked Vulkan adapter), probe {:.0} ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
+/// Device types of this machine's Vulkan adapters.
+fn vulkan_adapter_types() -> Vec<wgpu::DeviceType> {
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    desc.backends = wgpu::Backends::VULKAN;
+    let instance = wgpu::Instance::new(desc);
+    bevy::tasks::block_on(instance.enumerate_adapters(wgpu::Backends::VULKAN))
+        .iter()
+        .map(|a| a.get_info().device_type)
+        .collect()
+}
+
+/// wgpu-core `Instance::request_adapter` without a surface lists Vulkan
+/// adapters before DX12 ones and stable-sorts them by device type for the
+/// power preference (no sort for `None`); the first one wins. A Vulkan adapter
+/// of the type ranked first therefore wins whatever DX12 offers.
+fn vulkan_cannot_lose(vulkan: &[wgpu::DeviceType], power: wgpu::PowerPreference) -> bool {
+    use wgpu::{DeviceType, PowerPreference};
+    match power {
+        PowerPreference::None => !vulkan.is_empty(),
+        PowerPreference::HighPerformance => vulkan.contains(&DeviceType::DiscreteGpu),
+        PowerPreference::LowPower => vulkan.contains(&DeviceType::IntegratedGpu),
+    }
 }
 
 /// Chooses the upload path before any Startup system creates images.
@@ -469,6 +540,19 @@ fn alpha_block(bytes: &[u8; 8]) -> [u8; 16] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dx12_is_dropped_only_when_vulkan_would_win() {
+        use wgpu::{DeviceType::*, PowerPreference::*};
+        assert!(vulkan_cannot_lose(&[IntegratedGpu, DiscreteGpu], HighPerformance));
+        // Vulkan only on the integrated GPU: a discrete DX12 adapter could win.
+        assert!(!vulkan_cannot_lose(&[IntegratedGpu], HighPerformance));
+        assert!(vulkan_cannot_lose(&[IntegratedGpu], LowPower));
+        assert!(!vulkan_cannot_lose(&[DiscreteGpu], LowPower));
+        assert!(vulkan_cannot_lose(&[Cpu], None));
+        assert!(!vulkan_cannot_lose(&[], None));
+        assert!(!vulkan_cannot_lose(&[], HighPerformance));
+    }
 
     #[test]
     fn linear_normal_upload_and_rgba_fallback_preserve_mips_and_colour_space() {
