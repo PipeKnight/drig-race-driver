@@ -1,3 +1,30 @@
+// Stdout lines go through log_out's background writer (F861), so the
+// per-tick diagnostics no longer wait for the file stdout is redirected to.
+// Defined first, so every module below uses them: `println!` and
+// `log_line!` queue a line (a failed write is dropped, never a panic),
+// `eprintln!` writes the queued lines before its own.
+macro_rules! println {
+    () => {
+        $crate::log_out::line(format_args!(""))
+    };
+    ($($arg:tt)*) => {
+        $crate::log_out::line(format_args!($($arg)*))
+    };
+}
+macro_rules! eprintln {
+    ($($arg:tt)*) => {{
+        $crate::log_out::flush();
+        ::std::eprintln!($($arg)*)
+    }};
+}
+/// One stdout log line for the per-tick paths.
+macro_rules! log_line {
+    ($($arg:tt)*) => {{
+        let _lap = crate::frame_split::Lap::new(crate::frame_split::lap::STDOUT);
+        $crate::log_out::line(format_args!($($arg)*))
+    }};
+}
+mod log_out;
 mod object_materials;
 mod water;
 mod water_probe;
@@ -23,14 +50,6 @@ mod flash_preview;
 // Source reference viewer and serial driving prototype. A plain comment, not
 // `//!`: src/lib.rs includes this file for the Android library (P9).
 
-/// One stdout log line for the per-tick paths. Unlike `println!`, a failed
-/// write (closed pipe, full disk) is dropped instead of panicking.
-macro_rules! log_line {
-    ($($arg:tt)*) => {{
-        use std::io::Write as _;
-        let _ = writeln!(std::io::stdout().lock(), $($arg)*);
-    }};
-}
 
 #[cfg(target_os = "android")]
 mod android;
@@ -1783,6 +1802,8 @@ fn shared_source_material_scene(settings: &graphics::Settings, scene: EnhancedMa
 }
 #[bevy_main]
 fn main() {
+    // Queued stdout lines are written when main returns.
+    let _flush = log_out::FlushOnDrop;
     #[cfg(target_os = "android")]
     android::init();
     // Mobile preset: more compute threads, before Bevy creates its pools.
@@ -1799,14 +1820,14 @@ fn main() {
     #[cfg(target_os = "android")]
     let args = event_menu::android_args();
     if let Err(error)=native_smoke::validate_entry_args(&args) {
-        eprintln!("grid-app: {error}");std::process::exit(1);
+        eprintln!("grid-app: {error}");crate::log_out::exit(1);
     }
     // Isolated sample probe branches before menu/settings/game-root discovery.
     #[cfg(not(target_os = "android"))]
     if args.iter().any(|arg| arg == "--coverage-sample-probe") {
         if let Err(error) = coverage_probe_entry::run(&args) {
             eprintln!("grid-app coverage probe: {error}");
-            std::process::exit(1);
+            crate::log_out::exit(1);
         }
         return;
     }
@@ -1821,10 +1842,10 @@ fn main() {
             front_end_host::run(&args[1..])
         };
         match result {
-            Ok(code) => std::process::exit(code),
+            Ok(code) => crate::log_out::exit(code),
             Err(error) => {
                 eprintln!("grid-app: {error}");
-                std::process::exit(1);
+                crate::log_out::exit(1);
             }
         }
     }
@@ -1833,18 +1854,18 @@ fn main() {
     if args.first().is_some_and(|a| a == "--speech-files") {
         if let Err(error) = speech_sound::list_files(&args[1..]) {
             eprintln!("grid-app: {error}");
-            std::process::exit(1);
+            crate::log_out::exit(1);
         }
-        std::process::exit(0);
+        crate::log_out::exit(0);
     }
     // `--career`: the career screen and its races (career_screen.rs).
     #[cfg(not(target_os = "android"))]
     if args.first().is_some_and(|a| a == "--career") {
         match career_screen::supervise(&args[1..]) {
-            Ok(code) => std::process::exit(code),
+            Ok(code) => crate::log_out::exit(code),
             Err(error) => {
                 eprintln!("grid-app: {error}");
-                std::process::exit(1);
+                crate::log_out::exit(1);
             }
         }
     }
@@ -1853,10 +1874,10 @@ fn main() {
     #[cfg(not(target_os = "android"))]
     if args.first().is_some_and(|a| a == "--menu-routes") {
         match event_menu::list_routes(&args[1..]) {
-            Ok(()) => std::process::exit(0),
+            Ok(()) => crate::log_out::exit(0),
             Err(error) => {
                 eprintln!("grid-app: {error}");
-                std::process::exit(1);
+                crate::log_out::exit(1);
             }
         }
     }
@@ -1874,10 +1895,10 @@ fn main() {
         #[cfg(not(target_os = "android"))]
         if result.is_ok() && event_menu::MENU_AFTER.load(std::sync::atomic::Ordering::Relaxed) {
             match event_menu::menu_after(&menu_flags) {
-                Ok(code) => std::process::exit(code),
+                Ok(code) => crate::log_out::exit(code),
                 Err(error) => {
                     eprintln!("grid-app: {error}");
-                    std::process::exit(1);
+                    crate::log_out::exit(1);
                 }
             }
         }
@@ -1892,7 +1913,7 @@ fn main() {
             android::fatal(&format!("grid-app: {error}"));
             std::thread::sleep(Duration::from_millis(500));
         }
-        std::process::exit(1);
+        crate::log_out::exit(1);
     }
 }
 /// The game folder: `[game] root` / `--game-root`, else on Android the data
@@ -2313,7 +2334,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             event_menu::MENU_AFTER.store(true, std::sync::atomic::Ordering::Relaxed);
             return Ok(());
         }
-        std::process::exit(event_menu::BACK_TO_MENU);
+        crate::log_out::exit(event_menu::BACK_TO_MENU);
     }
     if !matches!(exit, AppExit::Success) {
         return Err("renderer exited with an error".into());
@@ -6686,6 +6707,7 @@ fn drive_tick(
     cine: Option<Res<cine::Cine>>,
 ) {
     let _tick_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DriveTick);
+    let _lap = frame_split::Lap::new(frame_split::lap::DRIVE_TICK);
     driving.keep_previous_poses();
     // One queued gear edge per fixed tick, dropped when the tick does not run.
     let shift = shifts.pop();
@@ -6926,7 +6948,9 @@ fn drive_tick(
         }
         drop(ai_timer);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
+        let multi_lap = frame_split::Lap::new(frame_split::lap::MULTI);
         let result = opponents.multi.tick(&all);
+        drop(multi_lap);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
         if result.is_ok() {
             // The player's own records: the report follows the player's
@@ -7460,6 +7484,7 @@ fn drive_present(
         Option<ResMut<frame_pacing::Drawn>>,
     ),
 ) {
+    let _lap = frame_split::Lap::new(frame_split::lap::DRIVE_PRESENT);
     let (fixed, graphics, menu, race_hud, drift, mut headlight_context, mut source_projector_context, real, mut drawn) = render_clock;
     headlight_pilot::begin(&mut headlight_context);
     source_projector_request::begin(&mut source_projector_context);
@@ -7488,6 +7513,7 @@ fn drive_present(
             // A refused field is not projected again until it changes.
             presentation.0 = Some(key);
             let start = Instant::now();
+            let _lap = frame_split::Lap::new(frame_split::lap::OWN_DENTS);
             let mut sources: Vec<(&Handle<Mesh>, &DeformingPart)> = Vec::new();
             for (_, _, source, handle, ..) in &parts {
                 if let Some(source) = source {
@@ -7638,6 +7664,7 @@ fn drive_present(
         }
         if !jobs.is_empty() {
             let start = Instant::now();
+            let _lap = frame_split::Lap::new(frame_split::lap::OPPONENT_DENTS);
             let inputs: Vec<(Entity, &DeformingPart, &grid_tools::body_deformation::Field)> = jobs
                 .iter()
                 .filter_map(|&(entity, field)| match opponent_parts.get(entity) {

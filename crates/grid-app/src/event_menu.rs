@@ -1331,7 +1331,7 @@ impl Catalog {
 /// after Continue (Android: restarts into the race), 0 after Back.
 pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     match screen_app(args, false)?.run() {
-        AppExit::Error(code) => std::process::exit(i32::from(code.get())),
+        AppExit::Error(code) => crate::log_out::exit(i32::from(code.get())),
         AppExit::Success => Ok(()),
     }
 }

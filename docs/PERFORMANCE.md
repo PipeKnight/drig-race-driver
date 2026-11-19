@@ -3787,3 +3787,98 @@ The F857 hypothesis is only partly confirmed:
 - In clean runs slow render frames are too rare to show a cut. Under background load the cut showed in
   baseline only.
 - Moving our own jobs to the async pool (b) and the dent fast path (d) are within noise.
+
+## Main-world peaks (F861)
+
+F857 found main-world peaks in the same instant as slow render frames: `drive_tick` +2-4 ms,
+`drive_present` about +2.8 ms, `ground_detail::present` about +2.8 ms and once
+`propagate_parent_transforms` +12.4 ms. To find what makes them, `frame_split.rs` now times
+named main-world work per main frame (laps; `Lap::new(lap::X)` charges the time until it drops)
+and reports them per window in `frame_stats`:
+
+- `lap_<name>=mean/max/over2ms`: mean ms per main frame, the largest, frames over 2 ms;
+- `rslow_laps=n:...`: the largest laps of the main frames beside the window's render frames of
+  20 ms or more (the main frames after the one drawn, up to the running one);
+- `transform_burst`: with a transform propagation of 3 ms or more, the changed `Transform` and
+  `GlobalTransform` counts by hierarchy root.
+
+Laps: `dt` drive_tick, `dp` drive_present, `dpo`/`dpn` own and opponent dents inside it, `gd`
+`ground_detail::present`, `gdg` its gathers, `tp` transform propagation, `cb` visibility bounds,
+`out` stdout lines from the drive paths, `mt` the opponents' `multi.tick` inside drive_tick.
+
+### What makes each peak
+
+| peak | cause | change |
+|---|---|---|
+| drive_tick | (1) about five stdout lines per simulation tick (`drive_sample` and its siblings), each one synchronous file write on the main thread, because the launchers and the smoke tools redirect stdout to a file: 0.3-0.8 ms per frame on average, single writes up to 7 ms. The 42-110 ms single stalls of the first probe batch were inside drive_tick at those writes (interpretation; they did not recur, and that batch may have overlapped other timing runs). (2) The opponents' simulation (`multi.tick`, already scope-parallel): 0.6-0.8 ms mean in the derby on an idle PC, up to 4 ms. | (1) fixed; (2) real simulation work, unchanged (identity) |
+| drive_present | contact dents (`dpn`/`dpo`, 3-4 ms in single frames): the deformation solve runs only when a contact changes a part and is already on the compute pool | unchanged |
+| ground_detail::present | Enhanced only: blended (soft alpha) cover gathered again at once on the main thread on every 16 m bucket crossing (`gdg` up to 6 ms), because F580 kept its draw order by bucket | fixed |
+| propagate_parent_transforms | 1,400-2,350 changed `GlobalTransform`s per frame, almost all from real motion (cars, wheels, driver joints, camera). The peaks of 15-49 ms (both builds, all scenes, beside most remaining slow render frames) changed 1,440-2,245, the same as ordinary frames, and `calculate_bounds` stretches with them: the PostUpdate transform/bounds work waits for task-pool threads, not a hierarchy dirtied in full (interpretation; the task-pool split is mac-perf's A/B) | no fix; the interior driver poses its 76 joints while hidden, a small extra left in place (the view switch reads `shown` after the pose) |
+
+### Fixes
+
+- `log_out.rs`: `println!`, `log_line!` and `eprintln!` in grid-app append to one queue in call
+  order; a background thread named `stdout` writes it in one write per wake-up. `eprintln!`
+  writes the queue first, so a merged log keeps its order; `log_out::exit` (every
+  `process::exit` in grid-app), the end of `main` and the panic hook write the rest; past 4 MiB
+  queued the caller writes it itself. Lines from other crates and Bevy's log are written directly
+  and may land a few ms earlier relative to queued lines. Tests:
+  `every_line_reaches_the_sink_in_order`, `a_full_queue_is_written_by_the_caller`.
+- `ground_detail.rs`: blended cover takes the async gather path of masked cover. The gather walks
+  the buckets in one global order (x, then z) whatever the eye, `Slots::update_ordered` keeps it,
+  and the shader collapses billboards beyond their distance, so a gather made up to `MARGIN`
+  (6 m) away draws the same quads in the same order (and gives the same sort centre) as one made
+  at once in the new bucket. Test `an_older_gather_draws_what_a_new_one_draws_in_the_same_order`
+  (400 eyes, 3 steps each, over 100 bucket crossings).
+
+### Before and after
+
+Donington (`settings/race.ini`) and the derby (`settings/demolition-derby.ini`), windowed 1280x800,
+native render height, `auto_no_vsync`, 3000 ticks, baseline (b) and Enhanced (e); the probe build
+(`p`, the lap probe on F859) and the fix build (`f`, the same probe) alternate per run, 2 runs each,
+under the build lock with no other game or build running (`local/ab/run.ps1`, `mw.py ab3`). Windows
+after the cover lift; spike rate is render frames of 20 ms or more per window; 1 % low from the
+0.5 ms frame-time histogram.
+
+| scene | mode | build | windows | spikes per window | fps | 1 % low | worst frames ms |
+|---|---|---|---|---|---|---|---|
+| Donington | b | before | 95 | 0.032 | 108.9 | 72.7 | 32/28/26/20/18 |
+| Donington | b | after | 95 | 0.010 | 109.4 | 75.5 | 26/17/17/17/17 |
+| Donington | e | before | 93 | 0.032 | 94.3 | 78.4 | 38/33/21/16/15 |
+| Donington | e | after | 93 | 0.043 | 95.2 | 81.6 | 41/41/39/36/32 |
+| derby | b | before | 96 | 0.042 | 144.1 | 93.0 | 35/32/29/21/16 |
+| derby | b | after | 96 | 0.031 | 145.6 | 102.6 | 32/26/22/15/15 |
+| derby | e | before | 94 | 0.043 | 108.7 | 78.4 | 30/26/23/21/18 |
+| derby | e | after | 94 | 0.011 | 108.8 | 78.4 | 27/23/19/17/15 |
+
+Main-world laps, mean ms per frame / largest / main frames over 2 ms (same runs):
+
+| scene | mode | build | drive_tick | stdout | ground gather | transform propagation |
+|---|---|---|---|---|---|---|
+| Donington | b | before | 1.04/5.6/1832 | 0.42/4.4/10 | 0.02/0.6/0 | 1.11/3.3/128 |
+| Donington | b | after | 0.61/3.0/29 | 0.01/0.2/0 | 0.02/0.5/0 | 1.15/15.2/145 |
+| Donington | e | before | 1.09/5.8/319 | 0.45/4.3/10 | 0.11/4.0/27 | 1.08/27.9/35 |
+| Donington | e | after | 0.63/2.9/7 | 0.02/0.1/0 | 0.09/2.2/2 | 1.11/30.5/49 |
+| derby | b | before | 0.89/6.4/3590 | 0.26/4.8/13 | - | 0.94/27.0/310 |
+| derby | b | after | 0.64/4.2/1173 | 0.01/0.1/0 | - | 0.94/3.8/297 |
+| derby | e | before | 1.20/6.1/3506 | 0.34/4.8/10 | - | 1.02/20.1/323 |
+| derby | e | after | 0.88/4.0/1113 | 0.01/0.1/0 | - | 1.02/17.7/318 |
+
+Over all eight pairs the spikes went from 14 to 9 in 378 windows each; single counts per row are
+noise (one spike more or less). The worst frames of the Enhanced Donington fix runs and most of the
+remaining spikes are the transform/bounds waits above, which both builds have (beside the four
+spikes of that row: `tp` 20.2 ms, `cb` 28.9 ms). The derby's remaining drive_tick frames over 2 ms
+are the opponents' `multi.tick` (0.6-0.8 ms mean, up to 4 ms). Contact dents (`dpn`, up to 3-4 ms)
+are unchanged.
+
+Images: offscreen frames (1280x720, `--render-fixed-step`), the probe build against the fix, race and
+derby, baseline and Enhanced, ticks 600 and 1500: Enhanced (blended cover) 0 px in all four; baseline
+race 600 1 px, race 1500 3 px, derby 1500 2 px, all by 1 level; derby 600 0 px.
+
+Measurement notes: two earlier batches overlapped another session's timing runs (its executable has
+another name, so the wait for other game processes missed it) and are discarded; timing batches now
+run under the build lock. In those batches the probe build also showed single render stalls of 85 and
+499 ms with no main-world lap peak.
+
+These batches ran before the compute pool cap of F860 (section above), which addresses the task-pool
+contention behind the propagation and bounds peaks.

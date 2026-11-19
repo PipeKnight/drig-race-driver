@@ -3226,7 +3226,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(Update, (update, present, livery_carousel).chain())
         .run();
     match exit {
-        AppExit::Error(code) => std::process::exit(i32::from(code.get())),
+        AppExit::Error(code) => crate::log_out::exit(i32::from(code.get())),
         AppExit::Success => Ok(()),
     }
 }

@@ -43,7 +43,7 @@ use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use bevy::ui_render::{TransparentUi, ui_pass};
 use std::any::TypeId;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -127,6 +127,8 @@ struct RenderFrame {
     start: Option<Instant>,
     points: [Option<u64>; POINTS],
     uploads: [u64; 3],
+    /// Main frames finished when this render frame started (the frame it draws).
+    main: u64,
 }
 /// Uploads of the last main frame (meshes prepared, their bytes, streamed
 /// vertex bytes), taken by the render frame that draws it.
@@ -136,7 +138,114 @@ static RENDER_FRAME: Mutex<RenderFrame> = Mutex::new(RenderFrame {
     start: None,
     points: [None; POINTS],
     uploads: [0; 3],
+    main: 0,
 });
+
+/// Main-world laps: wall time of named main-world work in one main frame
+/// (`lap_*`, `rworst_laps` and `rslow_laps` in `frame_stats`). The work
+/// charges itself ([`Lap`]); `main_end` closes the frame.
+pub mod lap {
+    pub const DRIVE_TICK: usize = 0;
+    pub const DRIVE_PRESENT: usize = 1;
+    pub const OWN_DENTS: usize = 2;
+    pub const OPPONENT_DENTS: usize = 3;
+    pub const GROUND: usize = 4;
+    pub const GROUND_GATHER: usize = 5;
+    pub const PROPAGATE: usize = 6;
+    pub const BOUNDS: usize = 7;
+    pub const STDOUT: usize = 8;
+    pub const MULTI: usize = 9;
+    pub const N: usize = 10;
+    pub const NAMES: [&str; N] = ["dt", "dp", "dpo", "dpn", "gd", "gdg", "tp", "cb", "out", "mt"];
+}
+static LAPS: [AtomicU64; lap::N] = [const { AtomicU64::new(0) }; lap::N];
+/// Finished main frames and the laps of the last four, for the render frame
+/// that ran beside them.
+static MAIN_LAPS: Mutex<(u64, [[u64; lap::N]; 4])> = Mutex::new((0, [[0; lap::N]; 4]));
+static LAP_BEGIN: Mutex<[Option<Instant>; lap::N]> = Mutex::new([None; lap::N]);
+/// Main-frame laps of `frame_stats` over 2 ms (`lap_*` third field).
+const LAP_OVER_NS: u64 = 2_000_000;
+
+/// Charges the time until it drops to one lap.
+pub struct Lap(usize, Instant);
+impl Lap {
+    pub fn new(lap: usize) -> Self {
+        Self(lap, Instant::now())
+    }
+}
+impl Drop for Lap {
+    fn drop(&mut self) {
+        LAPS[self.0].fetch_add(ns(self.1, Instant::now()), Ordering::Relaxed);
+    }
+}
+
+fn lap_begin<const L: usize>() {
+    LAP_BEGIN.lock().unwrap_or_else(|e| e.into_inner())[L] = Some(Instant::now());
+}
+
+fn lap_end<const L: usize>() {
+    if let Some(begin) = LAP_BEGIN.lock().unwrap_or_else(|e| e.into_inner())[L].take() {
+        LAPS[L].fetch_add(ns(begin, Instant::now()), Ordering::Relaxed);
+    }
+}
+
+/// The largest laps of the main frames after `drawn` (the frame a render
+/// frame draws) up to the running one: the work beside that render frame.
+fn laps_beside(drawn: u64) -> [u64; lap::N] {
+    let (done, ring) = *MAIN_LAPS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut out: [u64; lap::N] = std::array::from_fn(|i| LAPS[i].load(Ordering::Relaxed));
+    for n in (drawn + 1)..=done {
+        if done - n < 4 {
+            for (o, v) in out.iter_mut().zip(ring[(n % 4) as usize]) {
+                *o = (*o).max(v);
+            }
+        }
+    }
+    out
+}
+
+/// With a transform propagation of 3 ms or more, logs what changed, by
+/// hierarchy root (`transform_burst`).
+fn transform_burst(
+    global: Query<Entity, Changed<GlobalTransform>>,
+    local: Query<Entity, Changed<Transform>>,
+    added: Query<(), Added<GlobalTransform>>,
+    parents: Query<&ChildOf>,
+    names: Query<&Name>,
+) {
+    let ms = LAPS[lap::PROPAGATE].load(Ordering::Relaxed) as f64 * 1e-6;
+    if ms < 3. {
+        return;
+    }
+    let root = |mut e: Entity| {
+        while let Ok(p) = parents.get(e) {
+            e = p.parent();
+        }
+        e
+    };
+    let top = |it: &mut dyn Iterator<Item = Entity>| {
+        let mut by: std::collections::HashMap<Entity, u32> = Default::default();
+        let mut n = 0;
+        for e in it {
+            *by.entry(root(e)).or_default() += 1;
+            n += 1;
+        }
+        let mut v: Vec<_> = by.into_iter().collect();
+        v.sort_by_key(|&(e, c)| (std::cmp::Reverse(c), e));
+        let s: Vec<String> = v
+            .iter()
+            .take(4)
+            .map(|(e, c)| format!("{c}@{}", names.get(*e).map_or_else(|_| format!("{e}"), |n| n.as_str().replace(' ', "_"))))
+            .collect();
+        (n, s.join(","))
+    };
+    let (g, gs) = top(&mut global.iter());
+    let (l, ls) = top(&mut local.iter());
+    println!(
+        "transform_burst ms={ms:.2} global_changed={g} added={} transform_changed={l} global_roots={gs} transform_roots={ls}",
+        added.iter().count()
+    );
+}
 
 fn point<const I: usize>() {
     let now = Instant::now();
@@ -145,6 +254,7 @@ fn point<const I: usize>() {
         f.start = Some(now);
         f.points = [None; POINTS];
         f.uploads = std::mem::take(&mut *FRAME_UPLOADS.lock().unwrap_or_else(|e| e.into_inner()));
+        f.main = MAIN_LAPS.lock().unwrap_or_else(|e| e.into_inner()).0;
     }
     let Some(start) = f.start else {
         return;
@@ -153,9 +263,11 @@ fn point<const I: usize>() {
     if I == P::End as usize {
         let done = stages(&f.points);
         let uploads = f.uploads;
+        let drawn = f.main;
         f.start = None;
         drop(f);
         if let Some(done) = done {
+            let laps = laps_beside(drawn);
             with_acc(|a| {
                 a.render_frames += 1;
                 a.slow_render += u32::from(done[11] >= SLOW_RENDER_NS);
@@ -163,6 +275,13 @@ fn point<const I: usize>() {
                 if done[11] > a.worst[11] {
                     a.worst = done;
                     a.worst_uploads = uploads;
+                    a.worst_laps = laps;
+                }
+                if done[11] >= 20_000_000 {
+                    a.rslow_n += 1;
+                    for (s, v) in a.rslow_laps.iter_mut().zip(laps) {
+                        *s += v;
+                    }
                 }
                 let split = &mut a.upload_split[usize::from(uploads[0] > 0)];
                 split.0 += 1;
@@ -352,6 +471,13 @@ fn main_end(
     // Vertex bytes written in place (mesh_stream), not counted as uploads.
     let queued = crate::mesh_stream::queued_bytes();
     let streamed = queued.saturating_sub(std::mem::replace(&mut *streamed_before, queued));
+    let laps: [u64; lap::N] = std::array::from_fn(|i| LAPS[i].swap(0, Ordering::Relaxed));
+    {
+        let mut m = MAIN_LAPS.lock().unwrap_or_else(|e| e.into_inner());
+        m.0 += 1;
+        let at = (m.0 % 4) as usize;
+        m.1[at] = laps;
+    }
     let now = Instant::now();
     *FRAME_UPLOADS.lock().unwrap_or_else(|e| e.into_inner()) = [mesh.0, mesh.1, streamed];
     let mut c = MAIN_CLOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -377,6 +503,11 @@ fn main_end(
         }
         a.main_frames += 1;
         a.main += main;
+        for (i, v) in laps.into_iter().enumerate() {
+            a.laps[i] += v;
+            a.lap_max[i] = a.lap_max[i].max(v);
+            a.lap_over[i] += u32::from(v > LAP_OVER_NS);
+        }
         a.mesh_up += mesh.0;
         a.mesh_bytes += mesh.1;
         a.stream_bytes += streamed;
@@ -861,6 +992,14 @@ struct Acc {
     stream_max: u64,
     /// Render frames of [`SLOW_RENDER_NS`] or more (`rslow20`).
     slow_render: u32,
+    /// Main-world laps: sums, largest and frames over 2 ms (`lap_*`).
+    laps: [u64; lap::N],
+    lap_max: [u64; lap::N],
+    lap_over: [u32; lap::N],
+    /// Laps beside the slowest render frame, and summed beside render frames of 20 ms or more.
+    worst_laps: [u64; lap::N],
+    rslow_laps: [u64; lap::N],
+    rslow_n: u32,
     count_frames: u32,
     counts: [u64; 6],
     mesh_up: u64,
@@ -944,6 +1083,24 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
             per(clean.2, clean.0),
             a.upload_max as f64 / 1024.,
             a.stream_max as f64 / 1024.,
+        );
+        for i in 0..lap::N {
+            s += &format!(
+                " lap_{}={:.2}/{:.1}/{}",
+                lap::NAMES[i],
+                per(a.laps[i], a.main_frames),
+                a.lap_max[i] as f64 * 1e-6,
+                a.lap_over[i]
+            );
+        }
+        let ms = |v: &[u64; lap::N], n: u32| -> String {
+            v.iter().map(|&x| format!("{:.1}", per(x, n))).collect::<Vec<_>>().join("/")
+        };
+        s += &format!(
+            " rworst_laps={} rslow_laps={}:{}",
+            ms(&a.worst_laps, 1),
+            a.rslow_n,
+            ms(&a.rslow_laps, a.rslow_n)
         );
         if a.gpu_frames > 0 {
             let n = f64::from(a.gpu_frames);
@@ -1038,9 +1195,22 @@ fn worst_field(worst: &[u64; 12]) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn install(app: &mut App) {
+    use bevy::camera::visibility::VisibilitySystems;
+    use bevy::transform::TransformSystems;
     app.add_systems(First, main_begin)
         .add_systems(FixedFirst, fixed_tick)
         .add_systems(Last, main_end)
+        .add_systems(
+            PostUpdate,
+            (
+                lap_begin::<{ lap::PROPAGATE }>.before(TransformSystems::Propagate),
+                (lap_end::<{ lap::PROPAGATE }>, transform_burst)
+                    .chain()
+                    .after(TransformSystems::Propagate),
+                lap_begin::<{ lap::BOUNDS }>.before(VisibilitySystems::CalculateBounds),
+                lap_end::<{ lap::BOUNDS }>.after(VisibilitySystems::CalculateBounds),
+            ),
+        )
         .add_systems(
             RunFixedMainLoop,
             (

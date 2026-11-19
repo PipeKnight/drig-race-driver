@@ -74,7 +74,7 @@ impl Plugin for FixedTicksPlugin {
             for line in wrapped.name_lines(self.revision, names_available()) {
                 println!("{line}");
             }
-            std::process::exit(0);
+            crate::log_out::exit(0);
         }
     }
 }

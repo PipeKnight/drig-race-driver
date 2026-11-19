@@ -37,8 +37,11 @@ const TURN_COS: f32 = 0.9998;
 /// The vertex shader faces and fades the billboards (F580). The CPU gathers
 /// every instance within its draw distance plus this margin; a gather stays
 /// valid until the camera moved this far. The next one starts on the async
-/// compute pool after half of it. Blended cover also gathers again, at once,
-/// in a new bucket (the bucket order sets its draw order, as before).
+/// compute pool after half of it. Blended cover takes the same path: the
+/// gather walks the buckets in one global order (x, then z) whatever the eye,
+/// and `Slots::update_ordered` keeps it, so the draw order is the same as
+/// for a gather made at once in a new bucket (F861; F580 gathered blended
+/// cover again at once there, a 2-5 ms main-thread peak).
 const MARGIN: f32 = 6.;
 
 const SHADER: Handle<Shader> = uuid_handle!("a9b2b0e1-4de3-4237-a7bb-c3488244f121");
@@ -787,6 +790,7 @@ fn present(
     stream: Res<MeshStream>,
 ) {
     let Some(mut detail) = detail else { return };
+    let _lap = super::frame_split::Lap::new(super::frame_split::lap::GROUND);
     let Ok(camera) = camera.single() else { return };
     let eye = camera.translation;
     let forward = camera.forward().as_vec3();
@@ -800,23 +804,22 @@ fn present(
     detail.last = Some((eye, forward));
     let start = std::time::Instant::now();
     let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
-    let bucket = |p: Vec3| ((p.x / BUCKET).floor() as i32, (p.z / BUCKET).floor() as i32);
     if let Some(done) = detail.pending.as_mut().and_then(|task| block_on(poll_once(task))) {
+        let _lap = super::frame_split::Lap::new(super::frame_split::lap::GROUND_GATHER);
         detail.pending = None;
         detail.apply(done, &mut meshes, &stream);
     }
-    let moved = detail.gathered_at.map(|at| (at.distance(eye), bucket(at) != bucket(eye)));
-    match moved {
-        Some((distance, new_bucket)) if distance <= MARGIN && !(detail.blended && new_bucket) => {
+    match detail.gathered_at.map(|at| at.distance(eye)) {
+        Some(distance) if distance <= MARGIN => {
             if detail.pending.is_none() && distance > MARGIN / 2. {
                 let cover = detail.cover.clone();
                 detail.pending =
                     Some(AsyncComputeTaskPool::get().spawn(async move { cover.gathered(eye) }));
             }
         }
-        // First frame, out of the gather's reach, or blended cover in a new
-        // bucket: gather now.
+        // First frame or out of the gather's reach: gather now.
         _ => {
+            let _lap = super::frame_split::Lap::new(super::frame_split::lap::GROUND_GATHER);
             detail.pending = None;
             let done = detail.cover.gathered(eye);
             detail.apply(done, &mut meshes, &stream);
@@ -854,6 +857,59 @@ fn present(
 mod tests {
     use super::*;
     use grid_formats::ground_cover::Sprite;
+
+    /// What blended cover draws (the instances within their distance, in
+    /// buffer order) is the same from a gather made up to `MARGIN` away as
+    /// from one made at the eye, across bucket edges: so it needs no gather
+    /// at once in a new bucket (F861).
+    #[test]
+    fn an_older_gather_draws_what_a_new_one_draws_in_the_same_order() {
+        let mut instances = Vec::new();
+        for x in -60i32..60 {
+            for z in -60..60 {
+                instances.push(Instance {
+                    position: Vec3::new(x as f32 * 1.7 + 0.3, 0., z as f32 * 1.3 - 0.2),
+                    normal: Vec3::Y,
+                    sprite: 0,
+                    subset: ((x * 7 + z * 3).rem_euclid(4)) as u8,
+                    mirror: false,
+                    width: 1.,
+                    height: 1.,
+                });
+            }
+        }
+        let mut buckets: HashMap<(i32, i32), Vec<u32>> = HashMap::new();
+        for (i, g) in instances.iter().enumerate() {
+            let key = ((g.position.x / BUCKET).floor() as i32, (g.position.z / BUCKET).floor() as i32);
+            buckets.entry(key).or_default().push(i as u32);
+        }
+        let cover = Cover {
+            instances,
+            quads: Vec::new(),
+            buckets,
+            distances: grid_formats::ground_cover::Distances { lods: [40., 25., 14., 9.], fade_start: 0.7 },
+        };
+        let drawn = |gather: &[u32], eye: Vec3| -> Vec<u32> {
+            (gather.iter().copied())
+                .filter(|&i| {
+                    let g = &cover.instances[i as usize];
+                    g.position.distance(eye) < cover.distances.lods[g.subset as usize]
+                })
+                .collect()
+        };
+        let mut crossings = 0;
+        for k in 0..400 {
+            let at = Vec3::new((k as f32 * 0.37).sin() * 30., 0., (k as f32 * 0.21).cos() * 30.);
+            let older = cover.gathered(at).indices;
+            for step in [Vec3::new(5.9, 0., 0.), Vec3::new(-4.1, 0., 4.2), Vec3::new(0.3, 0., -5.99)] {
+                let eye = at + step;
+                crossings += usize::from((at.x / BUCKET).floor() != (eye.x / BUCKET).floor()
+                    || (at.z / BUCKET).floor() != (eye.z / BUCKET).floor());
+                assert_eq!(drawn(&older, eye), drawn(&cover.gathered(eye).indices, eye), "{at} -> {eye}");
+            }
+        }
+        assert!(crossings > 100, "{crossings} bucket crossings");
+    }
 
     #[test]
     fn slots_keep_held_instances_and_write_only_changes() {
