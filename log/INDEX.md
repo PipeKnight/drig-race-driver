@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F874](F0874.md) | 2026-11-19 | Render prepare: Bevy bind-group cache over two frames hits 72-77 % but r_prepare does not shrink; route closed |
 | [F873](F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |
 | [F872](F0872.md) | 2026-11-19 | Owner request: HDR monitor output and settings |
 | [F871](F0871.md) | 2026-11-19 | Owner approves the further settings list for row 140 |

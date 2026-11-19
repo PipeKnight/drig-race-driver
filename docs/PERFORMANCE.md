@@ -4502,3 +4502,64 @@ frame), `write_indirect_parameters_buffers` (`write_buffer` may reallocate), and
 `RawBufferVec::reserve`, which reallocates when `changed` is set (for example by `set_label` with a
 different label) even at the same capacity. That is a `bevy_render` patch, outside this task's
 approved scope.
+
+
+## Bevy bind-group cache over two frames (F874)
+
+19 November 2026, Claude Code, coordinator follow-up to F873: find which `bevy_render` call
+reallocates the preprocessing buffers every frame, keep them across frames, and measure retention
+alone and retention plus the F873 bind-group cache. Result: nothing reallocates; the cache now
+hits, but `r_prepare` does not get shorter, so the Bevy-patch route is closed. Evidence: this
+worktree's `local/prep/` (`bgc2.ps1`, `b2-*`, `img-bgc2-*`, `rate-*`, and the patch as
+`f874-bevy-patch.diff`).
+
+### Probe: no reallocation, two buffer sets
+
+None of the three suspects reallocates at a steady size. `RawBufferVec`, `UninitBufferVec` and
+`PartialBufferVec` only create a buffer when the capacity grows (or the label changes), and
+`clear_indirect_parameters_buffers` only clears the CPU side. The new buffer each frame comes from
+`collect_buffers_for_phase`: it swaps the per-phase `PhaseBatchedInstanceBuffers` and
+`PhaseIndirectParametersBuffers` with the global tables every frame, so two retained sets of
+work-item and indirect-parameter buffers take turns. Bevy already retains them, so a retention
+patch has nothing to add: "retention alone" is the upstream path.
+
+The F873 cache dropped entries unused for one frame, so it evicted set A just before set A came
+back. With a three-frame window (probe, 30 s, 1280): derby 255k hits and 100k created by frame
+1800 (72 %), Donington 131k hits and 39k created by frame 600 (77 %). The largest remaining miss
+is the bin-unpacking bind group's binding 0 (the `bin unpacking metadata` uniform), whose offset
+changes with the batch-set order: 60.7k of the derby misses (25.6k on Donington). Not chased
+further. The shipped variant keeps entries for two frames, the least that covers the swap; a unit
+test checks a bind group that returns every other frame still hits.
+
+### Correctness and images
+
+GPU tests passed (`bind_group_cache` with the swap case, `environment_map_switch`). Cache off
+against on, same exe (`45A06BC6A5492E91`), race and derby at 600 and 1500 ticks: 0 px in all four.
+The comparison against F869's parent captures is no longer valid (14-20 % of pixels differ for
+both sides, because origin/main changed the look after F869), so it is not counted.
+
+### Timing
+
+Release, Enhanced, `auto_no_vsync`, autopilot, 45 s, 2 alternating pairs per cell under the build
+lock. The PC was busy: other processes used 29-130 CPU s per run (mac-perf's A/B ran before and
+other sessions were active), against 6-10 in F873. Means, ms per frame, cache off -> on:
+
+| cell | `r_prepare` | `r_bind` | render_ms | fps |
+|---|---|---|---|---|
+| derby 1280 | 1.776 -> 1.741 | 1.08 -> 0.83 | 10.11 -> 9.68 | 96.3 -> 82.7 |
+| Donington 1280 | 2.003 -> 2.092 | 1.06 -> 0.97 | 12.49 -> 12.81 | 75.4 -> 76.2 |
+| derby 2560 | 1.686 -> 1.697 | 0.99 -> 0.76 | 9.59 -> 9.29 | 102.1 -> 104.7 |
+| Donington 2560 | 1.779 -> 1.796 | 0.92 -> 0.78 | 11.18 -> 11.19 | 85.6 -> 85.5 |
+
+(One derby 1280 "on" run dropped to 69 fps under load; its render_ms was still lower.) The cache
+saves 0.10-0.25 ms of `r_bind` in every cell, but `r_prepare` moves -0.04 to +0.09 ms: the bind
+systems run in parallel with the write systems, so the frame waits for the writes
+(`write_binned_instance_buffers`, 0.7-0.9 ms in F869) either way. render_ms and fps follow the
+load, not the variant. Below the 0.3 ms threshold in both cells, so not merged, and the
+Bevy-patch route for bind groups is closed.
+
+### Next
+
+The `r_prepare` critical path is the `write` set. `write_binned_instance_buffers` (opaque,
+prepass and shadow phases) is the next item; its cost scales with batch sets and draws, which
+mac-perf's car-glass material change may cut.

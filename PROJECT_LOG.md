@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F874](log/F0874.md) | 2026-11-19 | Render prepare: Bevy bind-group cache over two frames hits 72-77 % but r_prepare does not shrink; route closed |
 | [F873](log/F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |
 | [F872](log/F0872.md) | 2026-11-19 | Owner request: HDR monitor output and settings |
 | [F871](log/F0871.md) | 2026-11-19 | Owner approves the further settings list for row 140 |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F813](log/F0813.md) | 2026-11-10 | Loading world cube reflection |
 | [F812](log/F0812.md) | 2026-11-10 | Loading camera noise rotation |
 | [F811](log/F0811.md) | 2026-11-10 | Pause Restart darkening; pause tone map blocked on row 77 |
-| [F810](log/F0810.md) | 2026-11-10 | Results screen in the front-end art (row 69): fe3d materials, pause_root camera, row driver, DXT3 textures |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
