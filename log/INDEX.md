@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F862](F0862.md) | 2026-11-19 | Performance status matrix after the F837-F861 series: render-CPU bound in every cell |
 | [F861](F0861.md) | 2026-11-19 | Main-world peaks: stdout writer thread, blended cover gathers async |
 | [F860](F0860.md) | 2026-11-19 | Compute pool capped at 8 threads: +1.4 to +2.8 fps; slow render frames rare when the PC is idle |
 | [F859](F0859.md) | 2026-11-19 | Per-frame mesh uploads: dents and car batches stream changed vertices; reflection overlays follow a part leaving its batch |

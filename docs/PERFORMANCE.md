@@ -3887,3 +3887,89 @@ run under the build lock. In those batches the probe build also showed single re
 
 These batches ran before the compute pool cap of F860 (section above), which addresses the task-pool
 contention behind the propagation and bounds peaks.
+
+## Status matrix against the 100 fps goal (F862)
+
+The owner's goal is 100 fps or more in every mode up to 2560x1440. This matrix compares the start
+of the series (A = 7dfed11e, before F837, `local/ab/mA.exe` 086e8281b9e45c8a) with the current code
+(B = acc2ba15, identical code to origin/main e01185a3, `local/ab/mB.exe` 36a366fcd480361c).
+
+Setup:
+
+- tracks and resolutions: the derby (`settings/demolition-derby.ini`, 12 cars) and Donington
+  (`settings/race.ini`), windowed 1280x800 and 2560x1440, native render height;
+- modes: baseline and Enhanced, `auto_no_vsync`, 3000 ticks;
+- runs: 2 alternating pairs per cell (pair 1 A then B, pair 2 B then A), 32 runs in all, under the
+  build lock (`local/ab/mxall.ps1`, `mx.ps1`, `mx.py`);
+- windows: the 1-s `frame_stats` windows after the loading cover, dropping the first one after the
+  lift and those after the simulation stops;
+- phases: lights out is the countdown's `remaining=GO` event (tick 304 in the derby, 240 at
+  Donington). "Start" holds the windows ending in the 15 s after it (ticks GO to GO+900). Countdown
+  windows are dropped. "Mid" holds the rest, about 30 s. At these resolutions the cover lifts at
+  ticks 64 to 192, before GO, so the whole start is visible.
+
+A lacks `ft_hist` and the render stage fields; F837 and later entries added them. A's 1 % low and
+slow-frame rate are therefore n/a. The worst 1-s window and the worst frame (`max_ms`) compare
+both builds. Main, render and GPU times are frame-weighted means.
+
+| Cell | Phase | fps A → B | 1 % low B | worst window fps A → B | worst frame ms A → B | main ms A → B | render ms A → B | GPU ms A → B | ≥20 ms % B |
+|---|---|---|---|---|---|---|---|---|---|
+| derby 1280 baseline | start | 87.1 → 136.7 | 65.6 | 43.6 → 84.3 | 43.6 → 21.9 | 8.04 → 4.64 | 10.08 → 6.48 | 2.33 → 2.08 | 0.15 |
+| derby 1280 baseline | mid | 88.5 → 122.1 | 67.8 | 50.7 → 82.4 | 36.9 → 23.6 | 6.89 → 4.38 | 10.49 → 7.64 | 2.55 → 2.29 | 0.01 |
+| derby 1280 Enhanced | start | 74.1 → 103.5 | 63.5 | 54.5 → 76.8 | 27.8 → 19.5 | 8.45 → 5.41 | 12.44 → 9.02 | 2.16 → 2.06 | 0.00 |
+| derby 1280 Enhanced | mid | 66.5 → **85.6** | 44.4 | 38.6 → 51.4 | 47.7 → 43.5 | 7.79 → 5.06 | 14.26 → 11.14 | 2.43 → 2.31 | 1.69 |
+| derby 2560 baseline | start | 93.6 → 129.2 | 61.5 | 47.1 → 78.5 | 42.3 → 30.3 | 7.35 → 4.82 | 9.47 → 6.94 | 5.03 → 4.75 | 0.17 |
+| derby 2560 baseline | mid | 93.9 → 117.4 | 63.5 | 54.6 → 69.3 | 65.8 → 50.1 | 6.45 → 4.54 | 9.87 → 7.96 | 5.82 → 5.59 | 0.14 |
+| derby 2560 Enhanced | start | 81.8 → 113.6 | 75.5 | 54.9 → 82.4 | 44.3 → 17.1 | 7.15 → 4.54 | 11.35 → 8.28 | 4.67 → 4.53 | 0.00 |
+| derby 2560 Enhanced | mid | 73.5 → **91.7** | 56.3 | 49.8 → 61.8 | 45.2 → 44.9 | 6.75 → 4.44 | 12.92 → 10.41 | 5.16 → 5.07 | 0.69 |
+| Donington 1280 baseline | start | 66.7 → **99.8** | 61.5 | 59.0 → 81.4 | 58.0 → 34.3 | 8.18 → 4.95 | 13.98 → 9.44 | 2.10 → 2.30 | 0.17 |
+| Donington 1280 baseline | mid | 70.1 → 112.6 | 70.2 | 55.0 → 74.1 | 45.9 → 27.3 | 7.49 → 4.29 | 13.34 → 8.37 | 2.36 → 2.40 | 0.10 |
+| Donington 1280 Enhanced | start | 54.4 → **84.2** | 54.8 | 42.3 → 72.4 | 49.7 → 25.8 | 9.65 → 5.35 | 17.28 → 11.33 | 2.05 → 1.88 | 0.67 |
+| Donington 1280 Enhanced | mid | 58.5 → **87.6** | 58.0 | 51.8 → 72.4 | 49.6 → 47.9 | 8.88 → 5.26 | 16.12 → 10.89 | 2.10 → 1.92 | 0.32 |
+| Donington 2560 baseline | start | 71.2 → 110.1 | 88.9 | 63.8 → 99.0 | 45.4 → 13.3 | 7.35 → 4.23 | 13.11 → 8.58 | 4.13 → 4.10 | 0.00 |
+| Donington 2560 baseline | mid | 68.5 → 111.8 | 93.0 | 60.2 → 95.9 | 32.7 → 17.3 | 7.60 → 4.13 | 13.64 → 8.46 | 4.23 → 4.23 | 0.00 |
+| Donington 2560 Enhanced | start | 61.1 → **88.6** | 72.7 | 52.1 → 84.1 | 49.6 → 17.2 | 8.07 → 4.63 | 15.42 → 10.80 | 4.19 → 4.12 | 0.00 |
+| Donington 2560 Enhanced | mid | 60.1 → **89.0** | 78.4 | 54.4 → 82.0 | 49.9 → 14.4 | 8.40 → 4.77 | 15.69 → 10.76 | 4.27 → 4.23 | 0.00 |
+
+B's fps per run (start | mid):
+
+| Cell | baseline | Enhanced |
+|---|---|---|
+| derby 1280 | 126.9/145.7 \| 116.0/128.4 | 91.7/108.6 \| 87.0/84.1 |
+| derby 2560 | 136.8/121.5 \| 113.2/121.5 | 117.4/109.8 \| 92.6/90.8 |
+| Donington 1280 | 95.9/104.0 \| 108.4/116.8 | 84.0/84.5 \| 83.5/91.7 |
+| Donington 2560 | 107.0/113.2 \| 110.4/113.1 | 88.9/88.3 \| 89.5/88.4 |
+
+Observations:
+
+- A to B: fps rose by 25 to 63 % in every cell. Main time fell by 30 to 46 % and render time by 19 to
+  38 %. The GPU time did not change (within 0.25 ms).
+- The derby varies from run to run by up to 19 fps, because the crashes differ. Donington varies
+  by up to 9 fps.
+- Below 100 fps (bold): every Enhanced cell except the derby's start, and Donington 1280 baseline
+  at the start (99.8).
+- 1 % low below 80: 14 of 16 cells, all except Donington 2560 baseline (88.9 and 93.0). In the
+  derby the 1 % low sits at 61 to 68 even at 117 to 137 fps. Its slowest 1 % of frames take 14.5 to
+  16.5 ms. Frames of 20 ms or more stay at 0.17 % or fewer in baseline. In Enhanced they reach 0.67 %
+  (Donington 1280 start), 0.69 % (derby 2560 mid) and 1.69 % (derby 1280 mid).
+- Only Donington 2560 baseline meets both limits.
+- At the same settings, Donington 1280 baseline renders slower than 2560 (render 9.44 against
+  8.58 ms at the start). F860 saw the same direction, but it was not investigated here.
+
+Bottleneck of the cells below a limit: render-CPU in every one. The render thread's busy time minus
+surface acquire and present is the largest of the three times (5.7 to 10.8 ms). Main runs 4.3 to
+5.4 ms and the GPU 1.9 to 5.6 ms.
+
+- Render top stages: `r_encode` first everywhere (2.5 to 4.4 ms baseline, 3.3 to 5.7 ms Enhanced).
+  Next come `r_prepare` (0.9 to 2.0 ms), then `r_meshes` (about 1 ms), `r_submit` (1.4 to 1.6 ms at
+  2560 Enhanced) or `r_bind` (1.1 ms, derby 1280 Enhanced mid).
+- GPU top passes: `g_opaque` (1.4 ms at 1280, 3.5 to 4.0 ms at 2560 in the derby), `g_pre` in
+  Enhanced (0.9 to 1.1 ms at 1280, 1.5 to 1.8 ms at 2560), `g_post` at 2560 Enhanced (0.7 ms).
+- Main laps (F861), from the top: `cb` visibility bounds 1.6 to 2.1 ms, `tp` transform propagation
+  1.0 to 1.3 ms, `dt` drive_tick 0.6 to 1.3 ms, of which `mt`, the opponents' tick, takes 0.5 to
+  1.2 ms.
+
+So the remaining average gap is render-thread encoding and preparation, in Enhanced most of all
+(about 4 to 5 ms of `r_encode` against a 10 ms budget). The 1 % low gap is a tail of frames of
+14.5 to 16.5 ms, plus derby Enhanced frames of 20 ms or more. This matrix does not say which part of the
+frame makes that tail.
