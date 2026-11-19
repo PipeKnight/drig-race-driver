@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F871](log/F0871.md) | 2026-11-19 | Owner approves the further settings list for row 140 |
 | [F870](log/F0870.md) | 2026-11-19 | Owner request: bloom and white-balance settings, more settings to choose |
 | [F869](log/F0869.md) | 2026-11-19 | Render prepare: r_prepare split by system; one staging buffer per frame for streamed meshes gains nothing |
 | [F868](log/F0868.md) | 2026-11-19 | Render encode: drop wgpu indirect-call validation where DX12 cannot be chosen |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F810](log/F0810.md) | 2026-11-10 | Results screen in the front-end art (row 69): fe3d materials, pause_root camera, row driver, DXT3 textures |
 | [F809](log/F0809.md) | 2026-11-10 | GRID World garage scene and livery 3D preview: static research |
 | [F808](log/F0808.md) | 2026-11-10 | Sponsor designer: slots, replace, remove, swap, best-sponsor fill |
-| [F807](log/F0807.md) | 2026-11-10 | Livery designer carousels: clamp, dead end, Randomise |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
