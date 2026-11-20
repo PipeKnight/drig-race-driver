@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F883](log/F0883.md) | 2026-11-20 | FPS series summary: A 7dfed11e against B 7d21951e, 16 cell-phases |
 | [F882](log/F0882.md) | 2026-11-20 | Hidden batched opponent parts: not posing them saves no measurable main-thread time |
 | [F881](log/F0881.md) | 2026-11-20 | Pane copies gated on StandardMaterial bindless; DX12 vs Vulkan A/B |
 | [F880](log/F0880.md) | 2026-11-20 | PrepareMeshes: per-car moving entities counted; merging rigid followers cannot reach the bar |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F822](log/F0822.md) | 2026-11-10 | Results screens slide in and out |
 | [F821](log/F0821.md) | 2026-11-11 | Loading stat panel and particle emitter evidence |
 | [F820](log/F0820.md) | 2026-11-10 | Front-end camera stick spring |
-| [F819](log/F0819.md) | 2026-11-10 | Loading reflection box space (static evidence) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
