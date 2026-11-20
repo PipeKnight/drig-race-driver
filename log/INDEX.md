@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F884](F0884.md) | 2026-11-20 | Spikes after the countdown in derby and Donington Enhanced: no lazy work, steady-load tails (classifier) |
 | [F883](F0883.md) | 2026-11-20 | FPS series summary: A 7dfed11e against B 7d21951e, 16 cell-phases |
 | [F882](F0882.md) | 2026-11-20 | Hidden batched opponent parts: not posing them saves no measurable main-thread time |
 | [F881](F0881.md) | 2026-11-20 | Pane copies gated on StandardMaterial bindless; DX12 vs Vulkan A/B |

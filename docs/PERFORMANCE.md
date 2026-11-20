@@ -5011,3 +5011,51 @@ autopilot, 45 s runs, the first 12 `frame_stats` windows skipped, alternating pa
 
 Ceiling: the saving is below the run-to-run noise (about 0.2 ms), far from 0.3 ms of main-thread
 time, with no 1 % low gain. Route closed without a patch; batched parts keep being posed.
+
+## Spikes after the countdown (F884)
+
+Question (after F883): what makes single frames slower than 12 ms after GO in derby and Donington Enhanced,
+and is any of it lazy work (pipeline compiles, uploads, buffer growth) that a pre-warm or spreading could remove?
+Data: F883's B runs (current code, 3 runs per cell, 1280x800 and 2560x1440, `local/frame-split-smoke/fps-*-enh-b-*`
+in the mac-perf worktree), one release run per cell with `GRID_PIPELINE_TRACE=1`, and one profile build run per
+cell with `GRID_PROFILE_SLOW_MS=12`. `tools/frame_spikes.py` classifies the windows.
+
+Observations:
+- Pipelines: with the trace, no pipeline is created after both GO and warm-up Done, in either cell (derby 205,
+  Donington 207 pipelines in total, all earlier). The warm-up runs during the countdown. In all 12 B runs it ends
+  before GO (Donington about 35 log lines after "3", derby at about "3"). In the slower trace run of derby it
+  ended after GO, so the countdown does not wait for it.
+- Uploads: no texture upload after GO+3 s in any of the 12 B runs. About 480 mesh uploads per derby run and
+  1280 per Donington run after GO+3 s (dents and part changes, about 8-20 per second). The worst render frame of a
+  slow window carries a dirty mesh upload in 7 of 91 slow derby windows and 14 of 180 Donington ones.
+- Slow windows (`max_ms` > 12) after GO+3 windows, B runs (`py -I tools/frame_spikes.py`):
+
+| cell | windows | slow | render-gated | main-gated | worst render frame dominated by |
+|---|---|---|---|---|---|
+| derby 1280 Enhanced | 185 | 31 | 18 | 13 (all GO+4..17) | r_encode 30, r_meshes 1 |
+| derby 2560 Enhanced | 185 | 60 | 50 | 10 (7 GO+4..17) | r_encode 59, r_present 1 |
+| Donington 1280 Enhanced | 190 | 89 | 89 | 0 | r_encode 89 |
+| Donington 2560 Enhanced | 190 | 91 | 91 | 0 | r_encode 89, r_present 2 |
+
+  Render-gated: the worst render-thread frame (`rworst`) is within 1.5 ms of `max_ms`. In those frames
+  r_encode takes 5.5-8 ms against about 4.4-4.9 ms on average; r_meshes, r_bind and r_prepare stay at 1-2 ms each.
+- Main-gated (derby only, mostly the collision phase GO+4..17 s): every slow main frame runs one physics tick
+  (`slow10_ticks` 1.00; on average 55 % of frames do). Their mean split: main 7.4-7.8 ms, of which fixed 2.5-2.6
+  (drive tick 2.1-2.3, opponents 2.0-2.2 inside it), drive_present 1.0-1.1, opponent dents 0.8-0.9, propagation
+  1.9-2.0, and the bounds lap 2.6-2.7. The bounds lap starts at a system ordered only before
+  `CalculateBounds`, so it can include other PostUpdate work, propagation among it.
+- The 19.7 ms frame (derby 1280 B-1, GO+35 windows) is the moment the pack comes into view (vis 1413 to 2195,
+  opaque draws 32 to 128, transparent 153 to 291). The same moment in the other five derby Enhanced B runs costs
+  11.6-13.4 ms. In B-1, r_meshes (3.8 ms), r_bind (3.7) and r_encode (7.6) all ran slow in the same frame, with no
+  dirty upload and no new pipeline. It did not repeat, so no one-off first-sight cost is shown.
+- Profile build: its own 5-s report causes present stalls of 25-45 ms and queue_submit bursts after it, and in
+  derby its slower warm-up ran past GO (`pipeline_warmup` yields 20 ms per frame while covered). Its slow-frame
+  lists are not used for conclusions.
+
+Interpretation: after the countdown there is no lazy work left to pre-warm. The frames over 12 ms are the tails of
+steady load: in Donington entirely the render thread's encode; in derby mostly the encode, plus main-thread
+frames that combine a physics tick with dense collisions (drive_present, opponent dents, propagation). The bar (no
+frame over 12 ms) cannot be reached from the main-thread side. The candidate there is spreading opponent dent
+projection over the frames without a tick: at most about 0.9 ms in 23 of 91 slow derby windows. It would delay
+some dents by a frame, which changes the damage presentation, so it is left for a decision rather than made here.
+No source changed.
