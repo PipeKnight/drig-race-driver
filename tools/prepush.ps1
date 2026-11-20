@@ -14,8 +14,8 @@ untracked) and runs the checks of the highest tier any file needs. Windows Power
 Tiers (each also runs the ones above it):
   docs       no cargo. git diff --check (conflict markers fail), relative Markdown links on added
              lines must point at existing files (links into local/ are not checked), changed
-             .ps1 files must parse, changed .py files must parse, and tools/log_entry.py check
-             when that tool exists.
+             .ps1 files must parse, changed .py files must parse, tools/log_entry.py check
+             when that tool exists, and no text file under third_party/ may contain CR (F877).
   crate      the changed leaf crates only: their release tests with --include-ignored, and
              release Clippy -D warnings for them; for grid-app also the render smoke (one
              offscreen frame of the release grid-app, F714).
@@ -463,6 +463,19 @@ function Invoke-Sanity([string]$Log) {
             $tokens = $null; $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
             foreach ($e in @($errors)) { $problems.Add("$($c.Path):$($e.Extent.StartLineNumber): $($e.Message)") }
+        }
+    }
+    # Vendored crates keep their upstream LF bytes (.gitattributes third_party/** -text). A CRLF
+    # copy of a .wgsl file changes how Bevy's shader preprocessor reads #ifdef lines and so the
+    # rendered image (F877). Every text file there is checked, changed or not; files with a NUL
+    # byte are binary (textures) and may contain CR.
+    $vendored = @(Invoke-Git ls-files --cached --others --exclude-standard -- third_party)
+    foreach ($p in $vendored) {
+        $file = Join-Path $repo $p
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
+        $bytes = [System.IO.File]::ReadAllBytes($file)
+        if ([Array]::IndexOf($bytes, [byte]13) -ge 0 -and [Array]::IndexOf($bytes, [byte]0) -lt 0) {
+            $problems.Add("${p}: CR line endings in a vendored file; re-check out third_party (F877)")
         }
     }
     $python = Get-Python

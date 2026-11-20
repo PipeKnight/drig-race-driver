@@ -4747,3 +4747,94 @@ is the lamp materials no longer being re-prepared every frame; this was a cost b
 Image: matched fixed-step frames (`--render-fixed-step`, 1280x720, Donington and Spa 600 ticks, derby 1500,
 touge 900; baseline and Enhanced) are identical to the build before the change: 0 differing pixels in all seven
 cases, the same as the noise runs.
+
+## Bind-group cache re-timed on top of F875 (F877)
+
+20 November 2026, Claude Code, coordinator follow-up to F875: re-time the F874 bind-group cache
+(vendored `bevy_pbr`) now that F875 has shortened Bevy's write set, against the same 0.3 ms
+`r_prepare` bar, with the two-frame test and image diffs. Result: the cache does not clear the bar.
+It is not pushed. Evidence: this worktree's `local/prep/` (`bgc3.ps1`, `w-*`, `img-bgc3-*`,
+`f874-on-f875/`).
+
+### What `r_prepare` and `r_bind` measure
+
+`frame_split` (grid-app) puts the `r_prepare` marker pair around Bevy's `Prepare` sets up to
+`PrepareResourcesFlush`. `r_bind` is the `PrepareBindGroups` set that follows. The cache works
+only inside `r_bind` (`prepare_preprocess_bind_groups`, the generated environment-map bind
+groups), so `r_prepare` cannot move.
+
+### Timing
+
+Release, Enhanced, `auto_no_vsync`, autopilot, 45 s, 2 alternating pairs per cell on one exe
+(`GRID_BEVY_BIND_GROUP_CACHE=0` as "off"), under the build lock. Means, ms per frame, off -> on:
+
+| cell | `r_prepare` | `r_bind` | render_ms | fps |
+|---|---|---|---|---|
+| derby 1280x800 | 0.667 -> 0.657 | 0.919 -> 0.643 (-0.28) | 7.56 -> 7.16 | 126.0 -> 132.4 |
+| Donington 1280x800 | 0.956 -> 0.934 | 0.856 -> 0.648 (-0.21) | 9.32 -> 8.89 | 102.6 -> 107.1 |
+
+One Donington "off" run was disturbed (other processes 18 CPU s, 98.9 fps); the quiet pair alone
+gives `r_bind` 0.817 -> 0.647 and render_ms 8.97 -> 8.87. An earlier build of the same code, with
+CRLF shader copies (below), gave the same picture at both sizes: `r_prepare` -0.02 to +0.005,
+`r_bind` -0.17 to -0.26, render_ms -0.10 to -0.34 (derby 2560x1440 0.926 -> 0.662 `r_bind`,
+Donington 2560x1440 0.819 -> 0.650).
+
+`r_prepare` does not move, and `r_bind` gains 0.17-0.28 ms, so the cache misses the 0.3 ms bar
+also when `r_bind` is counted. The patch is kept out of the tree, in `local/prep/f874-on-f875/`
+(the patched `bevy_pbr` files, the diff against the registry source, the Cargo diff and the two
+tests), ready if the bar changes. It needs a seed refresh when it lands.
+
+### Correctness
+
+- Tests pass (release, GPU): `bind_group_cache` (a cached bind group only for identical inputs;
+  a hit on every other frame, because Bevy swaps two buffer sets; dropped after two unused
+  frames), `environment_map_switch` and F875's `bin_buffer_upload`.
+- Images, race and derby at ticks 600 and 1500 (exe `C2F34BAE7FB08BF8`), cache on against off
+  and against clean main (`f21ad01f`, exe `007072c88ee94156`): 0 px in race 600, race 1500 and
+  derby 1500 in both comparisons; derby 600 172 px by at most 2 levels in both (the same count
+  against off and against main, consistent with the known derby noise, F864/F865).
+
+### CRLF in vendored crates
+
+The first build of this test rendered 14-20 % of pixels differently from clean main, in both
+the cache's on and off states (max delta 78-110: softer, lighter shadows). Cause: with
+`core.autocrlf=true`, `git apply` and fresh checkouts write the vendored text files with CRLF,
+and Bevy's shader preprocessor then handles the `.wgsl` `#ifdef` lines differently. The registry
+files are LF. `.gitattributes` now has `third_party/** -text`, so git keeps the upstream bytes in
+every checkout. Checked on 20 November: the vendored `bevy_render` shaders are byte-identical to the registry
+in every checkout (main has no `third_party/` yet). Only `third_party/README.md` holds CRLF in
+the `mac-perf` and `tmp-seed` worktrees; those two need the one-time re-checkout
+(`third_party/README.md`). Prepush's sanity step now fails on any text file under `third_party/`
+that contains CR (binary files, with a NUL byte, are skipped); it flagged a test file and
+`mac-perf`'s README, and passes this worktree.
+
+### Next r_prepare item
+
+Profile build of F875 (`--features profile`, 1280x800, last window, `local/prep/sprof-f876.txt`;
+profile times are inflated, so only their ranking counts). No single system left inside
+`r_prepare` clearly exceeds 0.3 ms in derby. The largest items:
+
+- `write_batched_instance_buffers`: 0.11 ms (derby) / 0.33 ms (Donington) inclusive, almost all
+  of it in `write_current_input_buffers` (0.08 / 0.27). This uploads the per-mesh input uniforms
+  (`InstanceInputUniformBuffer`, an `AtomicSparseBufferVec`). Bevy already tracks dirty pages
+  there. It scatters only the changed pages through a compute pass, and falls back to a full
+  upload when more than 15 % of the pages changed (`sparse_buffer_vec.rs`). The cost grows with
+  the number of mesh instances, Donington against derby. So the open question is which instances
+  are rewritten each frame although they did not change, and whether that pushes the buffer past
+  the 15 % full-upload threshold.
+- `mesh_stream::upload` 0.19 / 0.27: the F869 staging attempt was already dropped.
+- `osd_scene::overlay::prepare` 0.12 / 0.14: mac-perf's area.
+- `write_indirect_parameters_buffers` 0.11 (derby), `write_mesh_culling_data_buffer` 0.10
+  (Donington). `prepare_clusters`, `prepare_lights`, `prepare_skins` and the atmosphere/SSAO bind
+  groups are 0.06-0.09 each.
+
+Outside `r_prepare` but larger: `prepare_preprocess_bind_groups` 0.69 / 0.60 and the
+environment-map bind groups 0.26 / 0.28 (`r_bind`, the F874 cache above), and in
+`PrepareMeshes` (before the `r_prepare` marker) `prepared_mesh_producer` 0.31 / 0.46 and
+`collect_meshes_for_gpu_building` 0.15 / 0.29.
+
+Next item: `write_current_input_buffers`. Step one is a probe that counts dirty pages, total
+pages and full against sparse uploads per frame in derby and Donington. If static instances
+mark their pages dirty, mark only the instances that changed, in the vendored `bevy_render`
+(the F875 pattern). Its whole release cost is likely below 0.3 ms in derby, so it may clear the
+bar only on the larger tracks.

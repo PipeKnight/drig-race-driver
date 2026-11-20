@@ -3,3 +3,7 @@
 
 # Committed import assets (docs/ANDROID.md "Importing the game data"): stable bytes.
 android/app/src/main/assets/grid-import/* text eol=lf
+
+# Vendored upstream crates (third_party/README.md): keep the upstream bytes; a CRLF
+# checkout breaks the shader preprocessor's #ifdef lines (F877).
+third_party/** -text

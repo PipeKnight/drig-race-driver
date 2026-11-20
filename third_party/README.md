@@ -7,6 +7,14 @@ Each folder keeps its upstream licence files. Every changed line is marked with 
 `// DRIG patch (F-number)` comment (`# DRIG patch` in `Cargo.toml`), so a Bevy upgrade can
 re-apply or drop the patch: `grep -rn "DRIG patch" third_party`.
 
+Files here keep the upstream bytes, LF line endings included: `.gitattributes` marks
+`third_party/** -text`, and prepush's sanity step fails on a text file here that contains CR.
+A CRLF `.wgsl` copy changes how Bevy's shader preprocessor reads `#ifdef` lines, and so the image
+(F877). A checkout made before that attribute may still hold CRLF files; re-check it out with
+`Remove-Item -Recurse third_party; git checkout -- third_party`. Copy new vendored crates from the
+registry source (`~/.cargo/registry/src/`), not through `git apply`, which writes CRLF under
+`core.autocrlf=true`.
+
 ## bevy_render 0.19.1
 
 - Upstream: crates.io `bevy_render` 0.19.1, crate sha256
