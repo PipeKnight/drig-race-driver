@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F880](log/F0880.md) | 2026-11-20 | PrepareMeshes: per-car moving entities counted; merging rigid followers cannot reach the bar |
 | [F879](log/F0879.md) | 2026-11-20 | Render prepare: instance input upload probe; full upload is real car motion, cannot reach the bar |
 | [F878](log/F0878.md) | 2026-11-20 | Git hooks: pre-commit and commit-msg checks for every commit |
 | [F877](log/F0877.md) | 2026-11-20 | Bind-group cache re-timed on F875: misses the bar; vendored crates kept LF |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F819](log/F0819.md) | 2026-11-10 | Loading reflection box space (static evidence) |
 | [F818](log/F0818.md) | 2026-11-11 | Car dust, scratch and damage gates and GhostCarValues |
 | [F817](log/F0817.md) | 2026-11-10 | Tyre walls with a static back row break; lift_sunk skips bodies that do not collide with fixed geometry |
-| [F816](log/F0816.md) | 2026-11-10 | Livery designer 3D pill carousel on fe3d |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

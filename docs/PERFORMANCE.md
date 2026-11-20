@@ -4868,3 +4868,48 @@ the profile build, so removing it entirely stays below the 0.3 ms `r_prepare` ba
 upload (by grouping moving instances into adjacent slots, or by a different threshold) keeps
 part of that cost. It is a steady per-frame copy, not a spike, so no clear 1 % low gain is
 expected. Route closed without a patch.
+
+### Moving car entities per frame (F880)
+
+`PrepareMeshes` (`prepared_mesh_producer` 0.31 / 0.46 ms and `collect_meshes_for_gpu_building`
+0.15 / 0.29 ms in derby / Donington, profile build) prepares every visible mesh whose transform
+or mesh changed. A temporary probe (`GRID_INPUT_PROBE`, not pushed) counted the meshes whose
+`GlobalTransform` or `Mesh3d` changed in each frame, grouped by role and `ViewVisibility`. Release
+build of F879, 1280x800 Enhanced, `auto_no_vsync`, autopilot (its camera does not show the whole
+player car), means per frame over 300-frame windows, start and mid-race.
+
+| role | must move on its own? | Donington visible | Donington hidden | derby visible |
+|---|---|---|---|---|
+| player parts (`MovingPart`, not batched in this view) | no, rigid on the body (a loose panel moves) | 82 | 24-30 | 52-58 |
+| player reflection overlays (children of parts) | follow their part | 58 | - | 33 |
+| player wheels | yes | 16 | - | not counted |
+| car batches (one per car and material) | moves with the car | 42-73 | 8-14 | 20-51, and 10-26 batch overlays |
+| opponent LOD0 parts in batches (layer 30) | no; still posed each frame | - | 510-560 | - |
+| their overlays (layer 30) | follow their part | - | 240-275 | - |
+| opponent loose LOD0 parts / wheels | wheels yes, parts no | 4-11 / 4-16 | up to 18 / 39 | up to 108 wheels |
+| LOD2-5 loose bodies (wheels, blended glass) | glass no, wheels yes | 20-60 bodies, 15-80 wheels | 4-5 | up to 30 wheels |
+| overlays of opponent parts and LOD parts | follow their part | 54-130 | - | 8-100 |
+| opponent shadow bodies (sun only) | moves with the car | 11 | - | - |
+| drivers (`driver/car{n}` children) | follow the car | (in other) | 117-123 | 20-40 |
+| **total** | | **410-720** | **1,400-1,450** | **250-460** |
+
+- Hidden meshes do not reach `PrepareMeshes`: `extract_meshes_for_gpu_building` returns early
+  for meshes that no view sees. The batched LOD0 parts, their overlays and the hidden drivers
+  (about 900 per frame) cost only main-world time (posing, transform propagation, the extract
+  change query).
+- Hidden LOD variants are already handled: a level the car does not show is `Unposed` and does
+  not move. Its batches report only a mesh change when the car's field deforms.
+- Cost per instance: F584 moved about 800 moving instances per frame off the views (the batched
+  parts and their overlays) and saved 0.63 ms of `prepared_mesh_producer` plus about 0.1 ms of
+  `collect_meshes_for_gpu_building`. That is about 1 µs per moving visible instance (profile
+  build). The 0.3 ms bar therefore needs about 300 fewer moving visible instances per frame in
+  Donington.
+- Candidates, all rigid followers: the player's loose parts and their overlays (140, only in views
+  that hide part of the player car; the whole-car views batch them already), the overlays of
+  opponent parts (54-130, many on wheels, which must keep turning), and the loose LOD glass
+  bodies (20-60, blended: merging them changes the order in which one car's transparent panes
+  blend, so the result is not a 0 px change). Even all of them together are 215-330, and the 0 px
+  subset (a per-view player batch, about 120) is about 0.12 ms.
+
+Ceiling: no merge of rigid followers reaches 0.3 ms of render-world prepare time with a 0 px
+picture, and a steady 0.1-0.2 ms copy gives no clear 1 % low gain. Route closed without a patch.
