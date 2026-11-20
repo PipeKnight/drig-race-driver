@@ -4,6 +4,8 @@ members = ["crates/grid-formats", "crates/grid-world", "crates/grid-tools", "cra
 # or `--workspace` (docs/TOOLCHAIN.md, "Build and test cost").
 default-members = ["crates/grid-formats", "crates/grid-world", "crates/grid-tools", "crates/grid-app"]
 resolver = "3"
+# Vendored, patched upstream crates (third_party/README.md); not workspace members.
+exclude = ["third_party"]
 
 [workspace.package]
 edition = "2024"
@@ -25,3 +27,8 @@ debug = false
 inherits = "release"
 overflow-checks = true
 debug-assertions = true
+
+# DRIG patch (F875): bevy_render 0.19.1 uploads a batch set's bin buffers only
+# when they changed (third_party/README.md).
+[patch.crates-io]
+bevy_render = { path = "third_party/bevy_render" }

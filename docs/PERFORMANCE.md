@@ -4563,3 +4563,110 @@ Bevy-patch route for bind groups is closed.
 The `r_prepare` critical path is the `write` set. `write_binned_instance_buffers` (opaque,
 prepass and shadow phases) is the next item; its cost scales with batch sets and draws, which
 mac-perf's car-glass material change may cut.
+
+## Bin buffers: upload only changed batch sets (F875)
+
+20 November 2026, Claude Code, coordinator follow-up to F874: split `write_binned_instance_buffers`
+(0.7-0.9 ms of `r_prepare` in F869) by what it scales with, name the general lever, and measure it.
+Result: almost all of it is per-batch-set upload overhead for data that did not change. A patched
+`bevy_render` that uploads only changed batch sets cuts `r_prepare` by 0.60-1.23 ms in every cell
+with identical images. Evidence: this worktree's `local/prep/` (`wbib-derby/`, `wbib-don/` probe
+logs, `wbib.ps1`, `w-*`, `img-wbib-*`, `wbib-test/`).
+
+### Probe: what the cost scales with
+
+`write_binned_instance_buffers` (`bevy_render` `batching/gpu_preprocessing.rs`) walks every view
+and every binned phase, and for every multidrawable batch set calls `RawBufferVec::write_buffer` on
+two buffers: the batch set's instance list (`render_binned_mesh_instance_buffer`) and its bin to
+indirect-parameters map (`bin_index_to_indirect_parameters_offset_buffer`). Bevy keeps the bins
+across frames, so these buffers only change when an entity enters or leaves a bin or a bin is
+created or removed. A temporary probe (release, Enhanced, 1280, autopilot, 30 s) counted per frame
+the batch sets, their instances and bytes, how many changed since the last upload, and the time:
+
+| phase (views) | derby sets | changed | upload µs | Donington sets | changed | upload µs |
+|---|---|---|---|---|---|---|
+| Opaque3d (1) | 160.9 | 2.10 | 525 | 53.0 | 0.87 | 191 |
+| Opaque3dPrepass (1) | 160.9 | 2.10 | 495 | 53.0 | 0.87 | 172 |
+| Shadow (3 cascades) | 60.9 | 2.10 | 202 | 75.7 | 2.68 | 240 |
+| AlphaMask3d (1) | 10.1 | 1.10 | 38 | 11.6 | 2.19 | 45 |
+| AlphaMask3dPrepass (1) | 10.1 | 1.10 | 37 | 11.6 | 2.19 | 43 |
+| total | 403 | 8.5 | 1296 | 205 | 8.8 | 690 |
+
+Deferred phases are empty. Each upload costs 1.5-1.9 µs whatever its size (4-12 KB per phase in
+total; instance count and record size do not matter at this scale), so the cost is the number of
+batch sets times views times phases. 98 % of the derby uploads and 96 % of the Donington ones
+carried the same bytes as the frame before (alpha-mask sets change more often: 81-89 % unchanged).
+The opaque and prepass phases upload the same batch sets twice, and each shadow cascade once more.
+
+The general lever is therefore "skip unchanged batch sets", not a smaller record or fewer shadow
+views: it removes the opaque, prepass and shadow repeats together and works for every track and car.
+
+### Change: a dirty flag per batch set (vendored bevy_render)
+
+`bevy_render` 0.19.1 is vendored in `third_party/bevy_render` and used through `[patch.crates-io]`
+(`third_party/README.md` lists the upstream checksum and commit, and the upgrade rule). Every
+changed line carries a `DRIG patch (F875)` marker.
+
+- `RenderMultidrawableBatchSetGpuBuffers` gets `needs_upload`, true when the batch set is created.
+  The only four places that change its two buffers set it: `insert` and `remove` (an entity enters
+  or leaves a bin), `allocate_indirect_parameters` (a new bin) and `remove_bin_if_empty` (a bin goes
+  and the last bin moves into its slot).
+- `write_binned_instance_buffers` uploads a batch set only while the flag is set or a buffer has no
+  GPU allocation yet, then clears it. A GPU buffer is created or grown only inside that upload, so
+  growth is always uploaded; the CPU side grows only in `insert` and `allocate_indirect_parameters`,
+  which set the flag. The shaders only read both buffers (`unpack_bins.wgsl`, `var<storage>`), so
+  the GPU copy stays valid between frames.
+- No double-buffer gap: `collect_buffers_for_phase` (F874) swaps only `PhaseBatchedInstanceBuffers`
+  and the phase indirect-parameter buffers. The batch-set buffers live in the per-view
+  `BinnedRenderPhase`, one GPU buffer each, so an upload in frame N is still there in frame N+1.
+- Views: a view that appears (resize, shadow cascade or light added) gets a new phase whose batch
+  sets start with the flag set; a removed view drops its phase. An emptied batch set is removed and
+  comes back as a new one, flagged.
+- `GRID_WBIB_ALWAYS_UPLOAD=1` restores the upstream behaviour (upload every batch set each frame).
+  It stays in the build as a fallback if a stale bin is ever suspected, and for A/B checks.
+
+### Correctness
+
+- Test `crates/grid-app/tests/bin_buffer_upload.rs` (GPU, ignored by default, runs in prepush's full
+  tier): a headless Bevy app renders lit, shadowed meshes in several bins and batch sets, then
+  despawns entities (a bin empties), spawns one with a new mesh (a new bin), swaps materials (an
+  entity moves to another batch set, as mac-perf's car-glass proxy materials do), hides and shows
+  entities, swaps a mesh, and switches the shadow maps off and on (the shadow views go and come
+  back). Each change lands on one frame; the two following frames and a later one must equal a
+  fresh app's render of the same scene (0 px differing), and the change must be visible.
+  Two steps only insert, with nothing else in the batch set changing: a spawn into an existing bin,
+  and showing a hidden entity. Materials can share one bindless batch set, so a step that also
+  removes something sets the flag anyway and would hide a missing `insert` flag. Result: passes
+  (release, RTX 4070, Vulkan). Sensitivity check: with the flag removed from `insert`, the test
+  fails at "show a hidden entity, change frame + 1: 583 pixels differ" (the spawn step still passed
+  there, so a spawn also reaches another flagged path; not chased). Logs: `local/prep/wbib-test/`.
+- Images, same exe (`D6AFB7F25FCD70F3`), switch on against off, race and derby at ticks 600 and
+  1500: 0 px differing, max delta 0 in all four. Against clean main (`ecca9792`): also 0 px in all
+  four.
+
+### Timing
+
+Release, Enhanced, `auto_no_vsync`, autopilot, 45 s, 2 alternating pairs per cell on one exe
+(`GRID_WBIB_ALWAYS_UPLOAD=1` as "off"), under the build lock. Means, ms per frame, off -> on:
+
+| cell | `r_prepare` | render_ms |
+|---|---|---|
+| derby 1280x800 | 1.494 -> 0.657 (-0.84) | 8.48 -> 7.49 |
+| Donington 1280x800 | 1.572 -> 0.977 (-0.60) | 9.90 -> 9.67 |
+| derby 2560x1440 | 1.908 -> 0.678 (-1.23) | 11.11 -> 8.18 |
+| Donington 2560x1440 | 1.947 -> 1.201 (-0.75) | 12.71 -> 11.69 |
+
+Every run of a cell is on the same side of its pair (derby 1280: 1.491-1.497 off, 0.654-0.661 on).
+At 1280 the gain is close to the probe's upload time on Donington (0.69 ms) and below it on derby
+(1.30 ms), because `r_prepare` measures the critical path of the prepare systems, not their CPU
+sum. fps is not comparable at 2560: the PC was busy (other processes 33-130 CPU s per
+run), and both derby "on" runs sat at exactly 60.0 fps. `r_prepare` is the criterion; it passes the
+0.3 ms bar in every cell.
+
+### Next
+
+`r_prepare` is now 0.66 ms on derby and 0.98-1.20 ms on Donington. The F874 bind-group cache
+(`local/prep/f874-bevy-patch.diff`) saved 0.10-0.25 ms of `r_bind`, which ran in parallel with the
+write set; with the write set this much shorter, the bind systems may now be the critical path, so
+it is worth re-timing on top of this change. The shared build seed must be refreshed after this
+push (`tools/build_seed.ps1`), because the patched `bevy_render` replaces the registry crate.
