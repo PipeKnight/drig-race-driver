@@ -95,6 +95,8 @@ Research notes for each subsystem live in [docs/](docs/). The current state is [
 
 Forks, bug reports and pull requests are welcome. Most of the code is written by AI coding agents; their working rules are in [AGENTS.md](AGENTS.md). Never commit original game files, extracted assets or memory dumps.
 
+After cloning, install the git hooks once: `py -I tools/hooks/install.py` (or `python3 tools/hooks/install.py`). On every commit they refuse game files, binaries, large files, conflict markers, broken Markdown links and scripts that do not parse ([docs/TOOLCHAIN.md](docs/TOOLCHAIN.md), "Git hooks").
+
 ## Legal
 
 DRIG is an independent project. It is not affiliated with, endorsed by or connected to Codemasters or Electronic Arts. "Race Driver: GRID" and related names are trademarks of their respective owners. You need your own copy of the original game to play.

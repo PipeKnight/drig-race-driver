@@ -45,6 +45,56 @@ target/release/grid-opponent-race "$ROOT" CD01 BP01 --route tracks/usa/detroit/r
 `tools/prepush.ps1` (full tier) runs these four and compares them with `tools/identity.tsv`.
 A commit that changes an identity on purpose updates that file and names the change in its log entry.
 
+## Git hooks (F878)
+
+Owner request, 2026-11-20: every commit gets the cheap checks automatically, so a contributor who
+never runs `tools/prepush.ps1` still cannot commit the common mistakes. Install once per clone:
+
+```
+py -I tools/hooks/install.py                 # git config core.hooksPath .githooks
+py -I tools/hooks/install.py --uninstall     # remove it
+py -I tools/hooks/test_hooks.py              # self-test: one scratch commit per rule
+```
+
+`core.hooksPath` lives in the clone's shared config, so all worktrees of the clone use the hooks of
+their own checked-out `.githooks/`. A branch from before F878 has no `.githooks/` and runs no hooks
+until it is rebased. Git never installs hooks by itself, so a fresh clone needs the install step
+(README "Contributing").
+
+`.githooks/pre-commit` and `.githooks/commit-msg` are POSIX sh wrappers (kept LF by
+`.gitattributes`). They find Python 3 (`GRID_PYTHON`, `py -3`, `python3`, `python`) and run
+`tools/hooks/check_commit.py`, standard library only, so the same hooks work on Windows (Git
+for Windows' sh), macOS and Linux. The script reads the staged content, not the working tree. It
+refuses a commit on:
+
+- a leftover conflict marker in a staged line;
+- CR in a text file under `third_party/` (F877; binary files with a NUL byte are skipped);
+- a file under `local/` (only possible with `git add -f`), an original game file type (`.pssg`,
+  `.raw`, `.jpk`, `.wip`, `.wim`, `.cqtc`, `.bik` and the other types of the Steam install), a
+  binary (`.exe`, `.dll`, `.pdb`, `.apk`, `.rdc`, `.dmp`, ...) or any file over 5 MiB (the largest
+  tracked file is 3 MiB);
+- a staged `.py` file that does not parse, or a `.ps1` file that does not parse (Windows only;
+  elsewhere a note);
+- a relative Markdown link on an added line whose target does not exist (links into `local/` are
+  skipped), the same rule as prepush;
+- `tools/log_entry.py check --no-fetch` failing, when the commit touches `log/` or
+  `PROJECT_LOG.md` (fix with `check --fix`);
+- (commit-msg) an AI attribution line: `Co-Authored-By:` naming an AI tool, or "Generated
+  with/by" Claude, Codex, Copilot or ChatGPT. Plain "AI" is allowed: it means the opponent
+  drivers in this project.
+
+Not in the hooks, by design: `cargo fmt` (the tree is not rustfmt-clean: `cargo fmt --all
+--check` reported 4203 differing hunks on 2026-11-20, and a formatting pass would touch most files
+at once), tests and Clippy (minutes; they stay in prepush), and commit identity (contributors
+commit under their own names; sessions follow AGENTS.md). Trailing whitespace is not a failure,
+as in prepush. The hooks run on `git commit` and `git commit --amend`, where they see only the
+change against the amended commit. `git rebase` replays commits without them. Do not bypass them
+with `--no-verify`. If a rule is wrong for a real case, change `check_commit.py` and its
+self-test in the same commit.
+
+Measured on 2026-11-20 (this PC): the self-test makes 18 commits in about 21 s, about 1.2 s per
+commit including the git calls. Most of that is Python start-up and PowerShell for `.ps1` files.
+
 ## Pre-push tiers, build lock and release (F534)
 
 The full pre-push gate (release tests with `--include-ignored`, workspace Clippy, the identity

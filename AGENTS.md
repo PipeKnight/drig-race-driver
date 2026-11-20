@@ -27,6 +27,7 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 ## Sessions and commits
 
 - Commit as the owner: `git -c user.name='Evgeniy Lupashin' -c user.email=34810566+PipeKnight@users.noreply.github.com commit ...`. No `Co-Authored-By`, "Generated with" or other AI trailers. History was rewritten on 2026-10-21; never merge or push anything with pre-rewrite ancestry.
+- Git hooks (owner, 20 November 2026): every commit runs `.githooks/` (`tools/hooks/check_commit.py`; installed per clone with `py -I tools/hooks/install.py`). Never bypass them with `--no-verify`. If a hook refuses, fix the cause; if a rule is wrong, fix the rule and its self-test (docs/TOOLCHAIN.md "Git hooks").
 - Hand-off notes live in the session's own worktree, `local/handoff/<session-name>.md`. Child sessions cannot write to the main checkout, so do not copy them there.
 - Long runs (builds, soaks, captures): start them in the background, continue useful independent work in the active response, and process their actual results without ending the response merely because a job is running (owner instruction, 30 October 2026). Preserve source freezes and the machine-wide build lock; do not duplicate jobs or repeatedly report unchanged status.
 

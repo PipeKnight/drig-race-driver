@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F878](F0878.md) | 2026-11-20 | Git hooks: pre-commit and commit-msg checks for every commit |
 | [F877](F0877.md) | 2026-11-20 | Bind-group cache re-timed on F875: misses the bar; vendored crates kept LF |
 | [F876](F0876.md) | 2026-11-20 | Car-glass pane proxy material and lamp write guard |
 | [F875](F0875.md) | 2026-11-20 | Render prepare: bin buffers uploaded only for changed batch sets (bevy_render patch); r_prepare -0.60 to -1.23 ms |

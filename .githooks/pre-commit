@@ -1,0 +1,12 @@
+#!/bin/sh
+# DRIG git hook (pre-commit): runs tools/hooks/check_commit.py pre-commit (docs/TOOLCHAIN.md "Git hooks").
+# Installed by tools/hooks/install.py (core.hooksPath = .githooks).
+top=$(git rev-parse --show-toplevel) || exit 1
+for py in "$GRID_PYTHON" "py -3" python3 python; do
+    [ -n "$py" ] || continue
+    if $py -c "import sys" >/dev/null 2>&1; then
+        exec $py -I "$top/tools/hooks/check_commit.py" pre-commit "$@"
+    fi
+done
+echo "pre-commit hook: no Python 3 found (set GRID_PYTHON); commit refused" >&2
+exit 1

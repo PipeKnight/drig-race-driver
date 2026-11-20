@@ -46,7 +46,7 @@ Decision table, first matching row wins; a path no row names is full:
   tools/**                                                 docs, unless Rust code (not a comment) names the
                                                            file (then workspace); tools/identity.tsv
                                                            is full
-  docs/**, log/**, *.md, LICENSE, .gitignore, .gitattributes, *.cmd (launchers), android/**
+  docs/**, log/**, *.md, LICENSE, .gitignore, .gitattributes, .githooks/**, *.cmd (launchers), android/**
                                                            docs (launchers: build gate smoke;
                                                            android/: build an APK yourself)
 
@@ -232,7 +232,7 @@ function Get-Class([string]$Path) {
     }
     if ($p -like 'android/*') { return New-Class 0 '' 'Android project files: no cargo check covers them; build an APK (tools\build_android.ps1)' }
     if ($p -like '*.cmd') { return New-Class 0 '' 'launcher: covered by the build gate smoke runs, not here' }
-    if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like '*.md' -or $p -in @('LICENSE', '.gitignore', '.gitattributes')) {
+    if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like '.githooks/*' -or $p -like '*.md' -or $p -in @('LICENSE', '.gitignore', '.gitattributes')) {
         return New-Class 0 '' 'documentation' }
     return New-Class 3 '' 'path not in the decision table'
 }
@@ -315,7 +315,7 @@ $CacheRoot = 'C:\cargo-build\prepush-cache'
 function Test-KeyPath([string]$p, [hashtable]$NamedTools) {
     if ($p -like 'crates/*' -or $p -like 'settings/*' -or $p -eq 'android/app/src/main/assets/grid-import/settings.ini') { return $true }
     if ($p -like 'tools/*') { return ($p -eq 'tools/identity.tsv' -or $NamedTools.ContainsKey($p)) }
-    if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like 'android/*' -or $p -like '*.md' -or $p -like '*.cmd' -or $p -in @('LICENSE', '.gitignore')) { return $false }
+    if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like '.githooks/*' -or $p -like 'android/*' -or $p -like '*.md' -or $p -like '*.cmd' -or $p -in @('LICENSE', '.gitignore')) { return $false }
     return $true
 }
 function Get-CodeKey {
