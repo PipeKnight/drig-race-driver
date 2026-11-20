@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F879](F0879.md) | 2026-11-20 | Render prepare: instance input upload probe; full upload is real car motion, cannot reach the bar |
 | [F878](F0878.md) | 2026-11-20 | Git hooks: pre-commit and commit-msg checks for every commit |
 | [F877](F0877.md) | 2026-11-20 | Bind-group cache re-timed on F875: misses the bar; vendored crates kept LF |
 | [F876](F0876.md) | 2026-11-20 | Car-glass pane proxy material and lamp write guard |

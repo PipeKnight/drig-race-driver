@@ -4838,3 +4838,33 @@ pages and full against sparse uploads per frame in derby and Donington. If stati
 mark their pages dirty, mark only the instances that changed, in the vendored `bevy_render`
 (the F875 pattern). Its whole release cost is likely below 0.3 ms in derby, so it may clear the
 bar only on the larger tracks.
+
+### Instance input upload probe (F879)
+
+Temporary probe (not committed; patch kept in `local/prep/sparse-probe/`): counters in
+`AtomicSparseBufferVec::write_buffers` and a `Last` system that counts the mesh entities whose
+extraction inputs changed. Release build of F877, 1280x800 Enhanced, `auto_no_vsync`, autopilot,
+45-70 s, means per frame over 300-frame windows, start and mid-race:
+
+| cell | meshes | entries / pages (256 each) | dirty pages | upload path | transform changed | of them visible | rewritten unchanged |
+|---|---|---|---|---|---|---|---|
+| derby | 9,200-9,400 | 7,163 / 28 | 24.6-28.0 | full, 300/300 | 1,245-1,510 | 190-500 | 0.3-15 |
+| Donington | 19,000-20,300 | 28,252 / 111 | 41.6-57.2 (max 63) | full, 300/300 | 1,800-2,180 | 380-720 | 0.4-89 |
+
+- Every frame crosses Bevy's 15 % sparse threshold, so the whole buffer is uploaded each frame.
+  The resize path (`full_resize`) fires only at start-up.
+- The changes are real motion: almost no transform is rewritten to the value it had in the
+  previous frame (`GlobalTransform` against `PreviousGlobalTransform`, which Bevy copies in
+  `PreUpdate`). There is no F876-style writer of static meshes.
+- Extraction skips meshes that are not visible, so only the visible moving meshes reach the
+  buffer. All of them are car parts: the player car (68 derby, 98 Donington entities),
+  opponent cars and their LOD bodies, car batches, driver meshes and opponent shadow bodies.
+  Track, crowd and sky contribute 1-3 each.
+- The 200-700 moving instances are scattered over about half the pages, because their slots
+  come from Bevy's free list in spawn and visibility order.
+
+Ceiling: the whole `write_current_input_buffers` costs 0.08 ms (derby) / 0.27 ms (Donington) in
+the profile build, so removing it entirely stays below the 0.3 ms `r_prepare` bar, and a sparse
+upload (by grouping moving instances into adjacent slots, or by a different threshold) keeps
+part of that cost. It is a steady per-frame copy, not a spike, so no clear 1 % low gain is
+expected. Route closed without a patch.
