@@ -17,6 +17,13 @@
 //! copy once the copy is prepared, and back at the source when the part
 //! stops being a pane. The copy runs the same StandardMaterial shader, which
 //! ignores the extension's placeholder binding, so the picture is the same.
+//!
+//! Copies are made only where StandardMaterial is bindless. Elsewhere there is
+//! no slab to re-bind, and Bevy's `ExtendedMaterial` would mix
+//! StandardMaterial's non-bindless layout with this extension's bindless one:
+//! the extension has no samplers, so it passes the sampler binding-array limit
+//! that StandardMaterial fails (DX12 here: 2048 elements), and creating the
+//! copy's bind group fails validation (F881).
 
 use bevy::{
     asset::{AssetEventSystems, UntypedAssetId},
@@ -31,6 +38,7 @@ use bevy::{
         Extract, ExtractSchedule, RenderApp,
         camera::{DirtySpecializationSystems, DirtySpecializations},
         render_resource::{AsBindGroup, ShaderType},
+        renderer::RenderDevice,
         sync_world::{MainEntity, MainEntityHashSet},
     },
 };
@@ -77,6 +85,7 @@ pub(crate) fn install(app: &mut App) {
             PostUpdate,
             (assign, follow)
                 .chain()
+                .run_if(pane_bindless)
                 .after(crate::car_reflection_overlay::Systems)
                 .after(AssetEventSystems),
         );
@@ -112,12 +121,32 @@ fn copy_of(
 /// Give each blended part with an overlay its copy; take it back when the
 /// part loses the overlay or its material stops blending.
 #[allow(clippy::type_complexity)]
+/// Whether pane copies run on this device: only where StandardMaterial itself
+/// is bindless (Bevy's own condition) and the extension is too, so the two
+/// halves of [`Pane`] never disagree (see the module notes).
+pub(crate) fn copies_enabled(device: &RenderDevice) -> bool {
+    <StandardMaterial as AsBindGroup>::bindless_supported(device)
+        && <PaneSlab as AsBindGroup>::bindless_supported(device)
+}
+
+/// Run condition over [`copies_enabled`]; logged once.
+fn pane_bindless(device: Option<Res<RenderDevice>>, mut known: Local<Option<bool>>) -> bool {
+    if let Some(on) = *known {
+        return on;
+    }
+    let Some(device) = device else { return false };
+    let on = copies_enabled(&device);
+    println!("pane_slab version=1 enabled={on}");
+    *known = Some(on);
+    on
+}
+
+/// Overlaid parts whose material changed or that just got an overlay.
+type Reassigned = (With<HasOverlay>, Or<(Changed<MeshMaterial3d<StandardMaterial>>, Added<HasOverlay>)>);
+
 fn assign(
     mut commands: Commands,
-    changed: Query<
-        (Entity, &MeshMaterial3d<StandardMaterial>, Option<&PaneDraw>),
-        (With<HasOverlay>, Or<(Changed<MeshMaterial3d<StandardMaterial>>, Added<HasOverlay>)>),
-    >,
+    changed: Query<(Entity, &MeshMaterial3d<StandardMaterial>, Option<&PaneDraw>), Reassigned>,
     mut lost: RemovedComponents<HasOverlay>,
     drawn: Query<(), (With<PaneDraw>, Without<HasOverlay>)>,
     materials: Res<Assets<StandardMaterial>>,
@@ -220,6 +249,68 @@ fn redirect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A real device of the first adapter of `backends`, with `drop` removed
+    /// from the adapter's features; None when there is no such adapter.
+    fn device(backends: wgpu::Backends, limit: impl FnOnce(&mut wgpu::Limits)) -> Option<RenderDevice> {
+        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+        desc.backends = backends;
+        let instance = wgpu::Instance::new(desc);
+        let Some(adapter) = bevy::tasks::block_on(instance.enumerate_adapters(backends)).into_iter().next() else {
+            println!("{backends:?}: no adapter, skipped");
+            return None;
+        };
+        let mut required_limits = adapter.limits();
+        limit(&mut required_limits);
+        // Experimental features need an unsafe opt-in; the bindless checks do not use them.
+        let descriptor = wgpu::DeviceDescriptor {
+            required_features: adapter.features() - wgpu::Features::all_experimental_mask(),
+            required_limits,
+            ..Default::default()
+        };
+        match bevy::tasks::block_on(adapter.request_device(&descriptor)) {
+            Ok((device, _queue)) => Some(RenderDevice::from(device)),
+            Err(error) => {
+                println!("{backends:?}: no device ({error}), skipped");
+                None
+            }
+        }
+    }
+
+    /// The gate is StandardMaterial's bindless condition on real devices. The
+    /// data-only extension has no samplers, so it passes the sampler-array limit
+    /// that StandardMaterial needs: a device below that limit (DX12 here) must
+    /// get no copies. Skips the devices this machine does not have.
+    #[test]
+    fn copies_run_only_where_standard_material_is_bindless() {
+        let full = device(wgpu::Backends::VULKAN, |_| ());
+        let few_samplers =
+            device(wgpu::Backends::VULKAN, |limits| limits.max_binding_array_sampler_elements_per_shader_stage = 1);
+        let dx12 = device(wgpu::Backends::DX12, |_| ());
+        let mut seen = 0;
+        for (name, device) in [("vulkan", &full), ("vulkan-few-sampler-arrays", &few_samplers), ("dx12", &dx12)] {
+            let Some(device) = device else { continue };
+            seen += 1;
+            let base = <StandardMaterial as AsBindGroup>::bindless_supported(device);
+            let on = copies_enabled(device);
+            let (features, limits) = (device.features(), device.limits());
+            println!(
+                "{name}: standard_bindless={base} extension_bindless={} copies={on} texture_arrays={} buffer_arrays={} storage_buffers={} sampler_array_elements={}",
+                <PaneSlab as AsBindGroup>::bindless_supported(device),
+                features.contains(wgpu::Features::TEXTURE_BINDING_ARRAY),
+                features.contains(wgpu::Features::BUFFER_BINDING_ARRAY),
+                limits.max_storage_buffers_per_shader_stage,
+                limits.max_binding_array_sampler_elements_per_shader_stage,
+            );
+            assert_eq!(on, base, "{name}: the gate is StandardMaterial's condition");
+        }
+        if let Some(device) = &few_samplers {
+            assert!(<PaneSlab as AsBindGroup>::bindless_supported(device), "the extension alone stays bindless");
+            assert!(!<StandardMaterial as AsBindGroup>::bindless_supported(device));
+            assert!(!copies_enabled(device), "base non-bindless: no copies");
+        }
+        println!("devices checked: {seen}");
+    }
 
     fn app() -> App {
         let mut app = App::new();

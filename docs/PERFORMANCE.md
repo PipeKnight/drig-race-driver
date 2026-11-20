@@ -4913,3 +4913,62 @@ player car), means per frame over 300-frame windows, start and mid-race.
 
 Ceiling: no merge of rigid followers reaches 0.3 ms of render-world prepare time with a 0 px
 picture, and a steady 0.1-0.2 ms copy gives no clear 1 % low gain. Route closed without a patch.
+
+## DX12 against Vulkan, and the pane copies on non-bindless devices (F881)
+
+Measured on one build, RTX 4070 (Vulkan default, DX12 driver 32.0.16.2101), `WGPU_BACKEND=dx12` against the
+default, 1280x800, 3000 ticks, 3 alternating pairs per cell under the build lock (`local/ab/ab-dx12.ps1`).
+
+F876 broke DX12: there StandardMaterial is not bindless, because the device allows 2048 sampler binding-array
+elements per stage, fewer than StandardMaterial's samplers times its slot count (Bevy's derive checks texture
+binding arrays, storage buffers and that limit; StandardMaterial has no buffer binding arrays, so DX12's missing
+`BUFFER_BINDING_ARRAY` is not the reason). The data-only `PaneSlab` extension has no samplers, so it passes and
+counts itself bindless. Bevy's
+`ExtendedMaterial` lets each half decide on its own unless the whole material is non-bindless, so the copy's
+layout had 15 entries and its bind group 14, and wgpu validation stopped Donington at once (observation: the derby ran
+without a validation error; why it escaped was not established). The copies now run only where
+`StandardMaterial::bindless_supported(device) && PaneSlab::bindless_supported(device)`, decided once from the
+render device (`pane_slab version=1 enabled=...` in the log). The same condition as Bevy's, so the base and the
+extension cannot disagree on any device. Without copies the panes draw as before F876. The other
+`ExtendedMaterial`s in grid-app (crowd preview, foundation backing and front, ground detail, light shafts,
+ornament LOD, paint environment, sidewall filter, skid marks) declare no `#[bindless]` and are non-bindless as
+a whole; `car_reflection_overlay` is a plain bindless material. None has the mismatch.
+
+Before the fix (clean machine; Donington DX12 quit at once, so derby only):
+
+| derby | Vulkan | DX12 |
+|---|---:|---:|
+| fps | 157.64 | 48.67 |
+| 1 % low | 123.93 | 31.76 |
+| GPU ms | 2.29 | 6.15 |
+| render ms | 5.79 | 26.96 |
+| r_encode ms | 2.31 | 5.44 |
+| material switches | 10.1 | 203.0 |
+| draws | 11.2 | 204.1 |
+| d_shadow | 49 | 439 |
+
+After the fix (the owner was running a game in the background, so absolute numbers are low; every pair moved the
+same way):
+
+| Metric | derby Vulkan | derby DX12 | Donington Vulkan | Donington DX12 |
+|---|---:|---:|---:|---:|
+| fps | 123.98 | 38.17 | 99.81 | 24.33 |
+| 1 % low | 80.17 | 25.91 | 79.08 | 16.47 |
+| GPU ms | 2.52 | 4.00 | 1.99 | 3.84 |
+| render ms | 7.38 | 31.60 | 9.47 | 46.41 |
+| r_encode ms | 3.25 | 5.92 | 4.74 | 6.73 |
+| material switches | 10.1 | 218.7 | 146.4 | 252.4 |
+| d_shadow | 49 | 478 | 79 | 857 |
+
+Verdict: DX12 is 3 to 4 times slower in every cell; the Vulkan default stays. Timestamp queries work on DX12.
+The cause is the same as on non-bindless phones: StandardMaterial non-bindless means one bind group per
+material, so batches break (material switches 10 -> 219 in the derby, shadow draws 49 -> 478) and
+the render thread spends 4 to 5 times longer preparing and encoding.
+
+Not measured: matched DX12 crops. Offscreen render captures on DX12 time out (`render capture timed out` after
+the 120 s budget, 8 of 8 crops and the prepush render-smoke frame, before and after the fix, with no validation
+error and `pane_slab enabled=false`); two crop runs also logged `slab_allocator: Use-after-free: attempted to
+copy element data for an unallocated key`. So a DX12 render-smoke step cannot join the prepush gate yet; the
+non-bindless decision is covered by the unit test `copies_run_only_where_standard_material_is_bindless`
+(real Vulkan, Vulkan with the sampler binding-array limit lowered to 1, and DX12 devices; it skips devices a
+machine lacks; here all three: Vulkan copies on, the other two off with the extension alone still bindless).
