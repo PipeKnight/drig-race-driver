@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F882](F0882.md) | 2026-11-20 | Hidden batched opponent parts: not posing them saves no measurable main-thread time |
 | [F881](F0881.md) | 2026-11-20 | Pane copies gated on StandardMaterial bindless; DX12 vs Vulkan A/B |
 | [F880](F0880.md) | 2026-11-20 | PrepareMeshes: per-car moving entities counted; merging rigid followers cannot reach the bar |
 | [F879](F0879.md) | 2026-11-20 | Render prepare: instance input upload probe; full upload is real car motion, cannot reach the bar |

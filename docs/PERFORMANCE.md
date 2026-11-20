@@ -4972,3 +4972,42 @@ copy element data for an unallocated key`. So a DX12 render-smoke step cannot jo
 non-bindless decision is covered by the unit test `copies_run_only_where_standard_material_is_bindless`
 (real Vulkan, Vulkan with the sampler binding-array limit lowered to 1, and DX12 devices; it skips devices a
 machine lacks; here all three: Vulkan copies on, the other two off with the extension alone still bindless).
+
+## Posing hidden batched opponent parts (F882)
+
+F880 found about 900 hidden movers per frame. Most are opponent LOD0 parts on the batch layer
+(30) and their overlays. `drive_present` writes every opponent part's `Transform` each frame
+(`pose * motion * rest`), only so that `car_batch::refresh` can check that the part still sits
+at its rest place. That costs posing, transform propagation and the extract change scan, all
+main-world time. F876 profile spans (profile build, summed over threads, Donington / derby):
+the extract change scan 0.243 / 0.149 ms, `mark_dirty_trees` 0.087 / 0.091, the changed-transform
+query 0.109 / 0.084, root propagation 0.085 / 0.052, `drive_present` 0.128 / 0.117. Only the part
+of each span that the batched parts cause would go away.
+
+Probe (temporary, not pushed): `GRID_POSE_BATCHED=0` skipped the pose write for parts on layer
+30 except the anchor part of each car. `car_batch::refresh` then treated such a part as placed
+while its `Transform` was unchanged, because only damage (a swung or detached part, a lost wheel)
+writes it. One release exe (sha256 745F9D4748F8EA40), 1280x800 Enhanced, `auto_no_vsync`,
+autopilot, 45 s runs, the first 12 `frame_stats` windows skipped, alternating pairs.
+
+| run | fps | p99 ms | main_ms | extract_ms | lap_dp | lap_tp |
+|---|---|---|---|---|---|---|
+| derby pose 1 | 56.8 | 39.9 | 12.88 | 0.744 | 0.661 | 2.050 |
+| derby skip 1 | 79.0 | 18.9 | 7.00 | 0.639 | 0.393 | 1.471 |
+| derby pose 2 | 78.9 | 18.6 | 7.00 | 0.641 | 0.388 | 1.515 |
+| derby skip 2 | 77.5 | 19.8 | 7.08 | 0.630 | 0.400 | 1.470 |
+| Donington pose 1 | 76.9 | 17.2 | 6.52 | 0.684 | 0.202 | 1.435 |
+| Donington skip 1 | 75.9 | 17.6 | 6.78 | 0.698 | 0.203 | 1.474 |
+| Donington pose 2 | 74.3 | 18.1 | 6.83 | 0.710 | 0.210 | 1.513 |
+| Donington skip 2 | 74.4 | 18.5 | 6.91 | 0.723 | 0.212 | 1.483 |
+
+- The first derby run was slow throughout (machine noise; every stage doubled), so derby is
+  compared on the other three: pose 7.00 ms against skip 7.04 ms of main thread.
+- Donington: pose 6.68 ms against skip 6.85 ms (means of two). `lap_dp`, `lap_tp` and
+  `extract_ms` do not move. Batches stayed whole (2,166-2,167 of 2,167 parts batched).
+- Caveat: the unchanged `lap_dp` and `lap_tp` could also mean that the skip did little. The probe
+  did not count changed transforms, so the size of the removed work is inferred from F876, not
+  measured here.
+
+Ceiling: the saving is below the run-to-run noise (about 0.2 ms), far from 0.3 ms of main-thread
+time, with no 1 % low gain. Route closed without a patch; batched parts keep being posed.
