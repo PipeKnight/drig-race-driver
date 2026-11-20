@@ -496,7 +496,11 @@ pub struct OverlayOf;
 
 /// The part's overlay entity.
 #[derive(Component)]
-struct HasOverlay(Entity);
+pub(crate) struct HasOverlay(pub(crate) Entity);
+
+/// The overlay systems: later readers of [`HasOverlay`] run after them.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct Systems;
 
 /// A part whose overlay draws its program's sun terms keeps only its diffuse
 /// lighting: no specular F0 (direct or environment) and no clear coat.
@@ -526,6 +530,7 @@ pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
                 follow,
                 follow_bounds.after(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
             )
+                .in_set(Systems)
                 .before(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
         );
     Ok(())

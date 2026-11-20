@@ -4670,3 +4670,80 @@ run), and both derby "on" runs sat at exactly 60.0 fps. `r_prepare` is the crite
 write set; with the write set this much shorter, the bind systems may now be the critical path, so
 it is worth re-timing on top of this change. The shared build seed must be refreshed after this
 push (`tools/build_seed.ps1`), because the patched `bevy_render` replaces the registry crate.
+
+## Car-glass panes off the bindless slab (F876)
+
+What costs: in the transparent pass each blended car pane (window, head and rear light glass with a reflection
+overlay) sorts next to its overlay, so the pass binds the StandardMaterial slab and the overlay slab in turn for
+every pane. wgpu's `CommandEncoder::finish` walks every resource of each bound group (usage-scope merge and
+texture init actions), so each switch back to the StandardMaterial slab costs in proportion to that slab:
+about 505 resources in Donington (t_mat_sw about 145 switches per frame), 270 in the derby, 424 in touge
+(`bl_std`; the overlay slab is 60, 45 and 17, `bl_ovl`).
+
+Rejected: a smaller StandardMaterial slab for everything. A diagnostic `GRID_STD_SLAB_LIMIT` replaced the
+StandardMaterial allocator with `BindlessSlabResourceLimit::Custom(n)`. Single runs, 1280x800 baseline,
+3000 ticks, order default, 64, 128, 256:
+
+| Cell | Metric | default | 64 | 128 | 256 |
+|---|---|---:|---:|---:|---:|
+| Donington | fps | 123.70 | 121.96 | 121.50 | 125.00 |
+| Donington | enc_tail ms | 2.22 | 1.67 | 1.82 | 1.96 |
+| Donington | r_prepare ms | 1.33 | 1.60 | 1.53 | 1.40 |
+| Donington | d_shadow | 80 | 128 | 113 | 93 |
+| Donington | slabs | 2 | 11 | 6 | 4 |
+| derby | fps | 151.77 | 145.26 | 145.97 | 148.52 |
+| derby | t_draws | 11.2 | 49 | 42 | 29 |
+| derby | enc_tail ms | 1.16 | 1.30 | 1.30 | 1.25 |
+| touge | fps | 146.35 | 136.34 | 142.04 | 143.44 |
+| touge | d_shadow | 70 | 115 | 91 | 80 |
+
+The encoder tail shrinks only where panes alternate (Donington), and the split slabs break the opaque and
+shadow batches everywhere: more draws, more prepare time, lower fps in the derby and touge. The diagnostic was
+removed.
+
+Accepted: the pane copies (`pane_slab.rs`, shared path for every car and track). Each blended car part with a
+reflection overlay keeps its `MeshMaterial3d<StandardMaterial>`; a `PaneDraw` names a copy of its material
+(`ExtendedMaterial<StandardMaterial, PaneSlab>`, an empty bindless extension) that follows every change of the
+source in the same frame. The render world points the part's material instance at the prepared copy. All copies
+share one small bindless slab, so the pass switches between two small slabs instead of the full StandardMaterial
+slab and the overlay slab. The copy runs the same StandardMaterial shader; the extension's binding is unused.
+
+First attempt rejected: a non-bindless copy per pane. Donington +9.09 fps (`enc_tail` -0.65 ms), derby +1.60,
+touge -8.67 (`d_shadow` 70.0 -> 83.8: each copy has its own bind group, so the panes no longer batch in the
+shadow passes).
+
+Lamps and the copies. With the bindless copies touge lost about 20 fps (`r_bind` 0.6 -> 1.6 ms). A temporary
+counter showed about 46 pane copies re-made per frame in touge (15 in a whole Donington run): the lamp projector
+(`lamp_signals::runtime::project`) darkened every owned lamp material and lit it again each frame, and assigned
+the same material handle through `Mut`. Each write marks the material modified and re-prepares it on the GPU, and
+the handle write marks the part changed so it is re-extracted and re-specialized. In touge the lamp receivers are
+blended glass, so their copies were re-prepared too. Now the projector computes each owned material's final
+emission and writes it only when it changes, writes a lamp's bank image only when it changes, and assigns the
+handle only when it differs. After that, touge re-made 16 copies in a whole run and redirected 67 instances.
+
+Alternating pairs, pane copies off vs on (both with the lamp guard), same build, 1280x800 baseline, native render,
+3000 ticks, `present_mode = auto_no_vsync`, a run with another process over 5 CPU s rerun once (ab-pn5):
+
+| Cell | Metric | off | on | delta | pairs |
+|---|---|---:|---:|---:|---|
+| Donington | fps | 121.55 | 123.96 | +2.41 | -10.98, +9.41, +8.80 |
+| Donington | 1 % low fps | 103.14 | 102.88 | -0.26 | -14.29, +6.89, +6.61 |
+| Donington | r_encode ms | 3.62 | 3.20 | -0.42 | -0.01, -0.63, -0.61 |
+| Donington | enc_tail ms | 2.20 | 1.67 | -0.53 | -0.33, -0.64, -0.62 |
+| derby | fps | 147.94 | 149.84 | +1.90 | +6.10, -0.15, -0.25 |
+| derby | r_encode ms | 2.49 | 2.41 | -0.08 | -0.22, +0.00, -0.02 |
+| touge | fps | 156.86 | 157.54 | +0.68 | +1.09, +0.98, -0.03 |
+| touge | 1 % low fps | 132.81 | 133.59 | +0.78 | +0.36, +1.97, +0.00 |
+| touge | enc_tail ms | 1.29 | 1.15 | -0.14 | -0.14, -0.14, -0.14 |
+
+Donington pair 1 is invalid: a rustc build ran during the "on" run and its rerun. The earlier clean run
+(ab-pn4, same pane code) gave Donington +7.45 fps (+7.45, +7.53, +7.38), 1 % low +3.04, `enc_tail` -0.63 ms.
+GPU time is unchanged in every cell (within 0.01 ms).
+
+The lamp guard alone, not paired: between ab-pn4 and ab-pn5 the "off" fps rose 140.4 -> 147.9 in the derby,
+113.9 -> 121.6 in Donington and 133.0 -> 156.9 in touge. The touge gain beyond the common shift (about 16 fps)
+is the lamp materials no longer being re-prepared every frame; this was a cost before the pane copies too.
+
+Image: matched fixed-step frames (`--render-fixed-step`, 1280x720, Donington and Spa 600 ticks, derby 1500,
+touge 900; baseline and Enhanced) are identical to the build before the change: 0 differing pixels in all seven
+cases, the same as the noise runs.

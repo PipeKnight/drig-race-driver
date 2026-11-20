@@ -145,13 +145,17 @@ impl Families {
         let source = self.canonical.get(&current.id()).unwrap_or(current).clone();
         let key = (bank.clone(), source.id());
         if let Some(handle) = self.owned.get(&key) {
-            let Some(mut material) = materials.get_mut(handle) else {
+            let Some(material) = materials.get(handle) else {
                 return Ok(None);
             };
-            if let Some(image) = image {
+            // project() sets the emission (dark unless lit) once per frame;
+            // here only a changed bank image is written.
+            if let Some(image) = image
+                && material.emissive_texture.as_ref() != Some(image)
+                && let Some(mut material) = materials.get_mut(handle)
+            {
                 material.emissive_texture = Some(image.clone());
             }
-            material.emissive = LinearRgba::BLACK;
             return Ok(Some(handle.clone()));
         }
         let Some(mut material) = materials.get(&source).cloned() else {
@@ -184,16 +188,28 @@ pub(crate) type Receivers<'w, 's> = Query<
         Option<&'static crate::damage_parts::Original>,
     ),
 >;
+/// Writes a lamp's emission only when it changes: every `get_mut` marks the
+/// material modified and re-prepares it (and its car-glass pane copy,
+/// pane_slab.rs) on the GPU, which an unchanged lamp should not cost.
+fn set_emissive(
+    materials: &mut Assets<StandardMaterial>,
+    handle: &Handle<StandardMaterial>,
+    emissive: LinearRgba,
+) {
+    if materials.get(handle).is_some_and(|m| m.emissive != emissive)
+        && let Some(mut m) = materials.get_mut(handle)
+    {
+        m.emissive = emissive;
+    }
+}
 fn dark_owned(
     entity: Entity,
     handle: &Handle<StandardMaterial>,
     owners: &Owners,
     materials: &mut Assets<StandardMaterial>,
 ) {
-    if owners.0.get(&handle.id()) == Some(&entity)
-        && let Some(mut m) = materials.get_mut(handle)
-    {
-        m.emissive = LinearRgba::BLACK;
+    if owners.0.get(&handle.id()) == Some(&entity) {
+        set_emissive(materials, handle, LinearRgba::BLACK);
     }
 }
 #[derive(bevy::ecs::system::SystemParam)]
@@ -248,93 +264,113 @@ pub(crate) fn project(
     mut registries: Registries,
 ) {
     for (entity, receiver, mut material, families, original) in &mut parts {
-        dark_owned(entity, &material.0, &registries.owners, &mut materials);
-        if original.is_some_and(|o| {
-            registries
-                .owners
-                .0
-                .get(&o.0.id())
-                .is_some_and(|owner| *owner != entity)
-        }) {
-            continue;
-        }
-        // Preserve keyed optics from the exact intact source used by overlay follow.
-        // A damage clone need not have its own response row; Original identifies it.
-        let reflection_source = original.map_or(&material.0, |o| &o.0);
-        let reflection_source = families
-            .as_ref()
-            .and_then(|f| f.canonical.get(&reflection_source.id()))
-            .unwrap_or(reflection_source)
-            .id();
-        let response = registries
-            .reflective
-            .as_deref()
-            .and_then(|r| r.0.get(&reflection_source))
-            .cloned();
-        let image = atlas.0.get(&receiver.bank);
-        let mut fresh = Families::default();
-        // ALWAYS adopt before readiness. An unowned cracked material can inherit
-        // emission from the current lit owned material via DamageParts::present.
-        // Mutating that shared cracked source to dark is forbidden.
-        let fresh = match families {
-            Some(mut f) => {
-                let Ok(Some(handle)) = f.resolve(
-                    entity,
-                    &material.0,
-                    &receiver.bank,
-                    image,
-                    &mut materials,
-                    &mut registries.owners,
-                ) else {
-                    continue;
-                };
-                material.0 = handle;
-                None
+        // Each owned material gets its final emission once: every write marks
+        // it modified and re-prepares it (and its car-glass pane copy,
+        // pane_slab.rs) on the GPU, so a steady lamp must not be darkened and
+        // lit again in the same frame.
+        let start = material.0.clone();
+        let lit = 'part: {
+            if original.is_some_and(|o| {
+                registries
+                    .owners
+                    .0
+                    .get(&o.0.id())
+                    .is_some_and(|owner| *owner != entity)
+            }) {
+                break 'part None;
             }
-            None => {
-                let Ok(Some(handle)) = fresh.resolve(
-                    entity,
-                    &material.0,
-                    &receiver.bank,
-                    image,
-                    &mut materials,
-                    &mut registries.owners,
-                ) else {
-                    continue;
-                };
-                material.0 = handle;
-                Some(fresh)
-            }
-        };
-        // The clone's material fields alone do not preserve this ID-keyed registry.
-        // Refresh cached aliases too, including pending image/activation states.
-        if let Some(ref mut reflective) = registries.reflective {
-            // follow() reads Original when damaged. Refresh that alias too if
-            // it is OUR intact handle; never rewrite a shared/foreign source.
-            let intact = original
-                .filter(|o| registries.owners.0.get(&o.0.id()) == Some(&entity))
-                .map(|o| o.0.id());
-            for target in [Some(material.0.id()), intact].into_iter().flatten() {
-                if let Some(response) = &response {
-                    reflective.0.insert(target, response.clone());
-                } else {
-                    reflective.0.remove(&target);
+            // Preserve keyed optics from the exact intact source used by overlay follow.
+            // A damage clone need not have its own response row; Original identifies it.
+            let reflection_source = original.map_or(&material.0, |o| &o.0);
+            let reflection_source = families
+                .as_ref()
+                .and_then(|f| f.canonical.get(&reflection_source.id()))
+                .unwrap_or(reflection_source)
+                .id();
+            let response = registries
+                .reflective
+                .as_deref()
+                .and_then(|r| r.0.get(&reflection_source))
+                .cloned();
+            let image = atlas.0.get(&receiver.bank);
+            let mut fresh = Families::default();
+            // ALWAYS adopt before readiness. An unowned cracked material can inherit
+            // emission from the current lit owned material via DamageParts::present.
+            // Mutating that shared cracked source to dark is forbidden.
+            let fresh = match families {
+                Some(mut f) => {
+                    let Ok(Some(handle)) = f.resolve(
+                        entity,
+                        &material.0,
+                        &receiver.bank,
+                        image,
+                        &mut materials,
+                        &mut registries.owners,
+                    ) else {
+                        break 'part None;
+                    };
+                    // A same-handle write would mark the part changed and re-extract
+                    // and re-specialize it every frame.
+                    if material.0 != handle {
+                        material.0 = handle;
+                    }
+                    None
+                }
+                None => {
+                    let Ok(Some(handle)) = fresh.resolve(
+                        entity,
+                        &material.0,
+                        &receiver.bank,
+                        image,
+                        &mut materials,
+                        &mut registries.owners,
+                    ) else {
+                        break 'part None;
+                    };
+                    // A same-handle write would mark the part changed and re-extract
+                    // and re-specialize it every frame.
+                    if material.0 != handle {
+                        material.0 = handle;
+                    }
+                    Some(fresh)
+                }
+            };
+            // The clone's material fields alone do not preserve this ID-keyed registry.
+            // Refresh cached aliases too, including pending image/activation states.
+            if let Some(ref mut reflective) = registries.reflective {
+                // follow() reads Original when damaged. Refresh that alias too if
+                // it is OUR intact handle; never rewrite a shared/foreign source.
+                let intact = original
+                    .filter(|o| registries.owners.0.get(&o.0.id()) == Some(&entity))
+                    .map(|o| o.0.id());
+                for target in [Some(material.0.id()), intact].into_iter().flatten() {
+                    if let Some(response) = &response {
+                        reflective.0.insert(target, response.clone());
+                    } else {
+                        reflective.0.remove(&target);
+                    }
                 }
             }
-        }
-        // resolve() neutralizes only our owned handle even when activation or
-        // atlas is missing. There is no source/shared/Original material write.
-        if image.is_some()
-            && let Some(level) = state.value(receiver.slot, receiver.role)
-        {
-            let broken = damage.smashed(receiver);
-            let e = signed(level, receiver.reachable, broken).emission();
-            if let Some(mut m) = materials.get_mut(&material.0) {
-                m.emissive = LinearRgba::rgb(e, e, e);
+            // resolve() neutralizes only our owned handle even when activation or
+            // atlas is missing. There is no source/shared/Original material write.
+            if let Some(f) = fresh {
+                commands.entity(entity).insert(f);
             }
+            image
+                .is_some()
+                .then(|| state.value(receiver.slot, receiver.role))
+                .flatten()
+                .map(|level| {
+                    let broken = damage.smashed(receiver);
+                    signed(level, receiver.reachable, broken).emission()
+                })
+        };
+        if material.0 != start {
+            dark_owned(entity, &start, &registries.owners, &mut materials);
         }
-        if let Some(f) = fresh {
-            commands.entity(entity).insert(f);
+        match lit {
+            Some(e) => set_emissive(&mut materials, &material.0, LinearRgba::rgb(e, e, e)),
+            None => dark_owned(entity, &material.0, &registries.owners, &mut materials),
         }
     }
 }

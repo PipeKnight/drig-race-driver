@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F876](log/F0876.md) | 2026-11-20 | Car-glass pane proxy material and lamp write guard |
 | [F875](log/F0875.md) | 2026-11-20 | Render prepare: bin buffers uploaded only for changed batch sets (bevy_render patch); r_prepare -0.60 to -1.23 ms |
 | [F874](log/F0874.md) | 2026-11-19 | Render prepare: Bevy bind-group cache over two frames hits 72-77 % but r_prepare does not shrink; route closed |
 | [F873](log/F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F815](log/F0815.md) | 2026-11-10 | Car sun terms and glass shadow floor from materials.xml (row 100) |
 | [F814](log/F0814.md) | 2026-11-10 | Race OSD lap-time stacker re-flow and offline layouts (Le Mans time left, best-lap popup) |
 | [F813](log/F0813.md) | 2026-11-10 | Loading world cube reflection |
-| [F812](log/F0812.md) | 2026-11-10 | Loading camera noise rotation |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

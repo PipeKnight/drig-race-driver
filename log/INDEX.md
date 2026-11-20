@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F876](F0876.md) | 2026-11-20 | Car-glass pane proxy material and lamp write guard |
 | [F875](F0875.md) | 2026-11-20 | Render prepare: bin buffers uploaded only for changed batch sets (bevy_render patch); r_prepare -0.60 to -1.23 ms |
 | [F874](F0874.md) | 2026-11-19 | Render prepare: Bevy bind-group cache over two frames hits 72-77 % but r_prepare does not shrink; route closed |
 | [F873](F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |

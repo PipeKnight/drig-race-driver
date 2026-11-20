@@ -77,6 +77,7 @@ mod collision_sound;
 mod crowd_sound;
 mod car_materials;
 mod car_reflection_overlay;
+mod pane_slab;
 mod car_reflections;
 mod lamp_materials;
 mod lamp_signals;
@@ -5473,6 +5474,7 @@ pub(crate) fn race_app(
     car_reflections::install(&mut app, car_reflections_level, &root, &route);
     if car_reflections_level != car_reflections::Level::Off {
         car_reflection_overlay::install(&mut app)?;
+        pane_slab::install(&mut app);
     }
     if graphics.paint_environment > 0. {
         paint_environment::install(&mut app)?;

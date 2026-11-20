@@ -322,8 +322,9 @@ fn binned_groups<B: BinnedPhaseItem>(phases: &ViewBinnedRenderPhases<B>) -> u64 
 }
 
 /// Names of the per-frame phase counts.
-pub const COUNTS: [&str; 10] = [
+pub const COUNTS: [&str; 12] = [
     "d_opaque", "d_alpha", "d_shadow", "d_transp", "d_ui", "shadow_views", "d_pre", "d_pre_alpha", "bl_slabs", "bl_res",
+    "bl_std", "bl_ovl",
 ];
 
 /// The prepass phases (opaque and alpha mask).
@@ -331,6 +332,11 @@ type PrepassPhases<'w> = (
     Option<Res<'w, ViewBinnedRenderPhases<Opaque3dPrepass>>>,
     Option<Res<'w, ViewBinnedRenderPhases<AlphaMask3dPrepass>>>,
 );
+
+/// Bindless resources held by the slabs of one material type.
+fn resources_of<M: 'static>(allocators: &bevy::pbr::MaterialBindGroupAllocators) -> u64 {
+    allocators.get(&std::any::TypeId::of::<M>()).map_or(0, |m| m.allocations())
+}
 
 fn count_phases(
     opaque: Option<Res<ViewBinnedRenderPhases<Opaque3d>>>,
@@ -351,7 +357,9 @@ fn count_phases(
         prepass.0.map_or(0, |p| binned_groups(&p)),
         prepass.1.map_or(0, |p| binned_groups(&p)),
         allocators.as_ref().map_or(0, |a| a.values().map(|m| m.slab_count() as u64).sum()),
-        allocators.map_or(0, |a| a.values().map(|m| m.allocations()).sum()),
+        allocators.as_ref().map_or(0, |a| a.values().map(|m| m.allocations()).sum()),
+        allocators.as_ref().map_or(0, |a| resources_of::<StandardMaterial>(a)),
+        allocators.map_or(0, |a| resources_of::<crate::car_reflection_overlay::Overlay>(&a)),
     ];
     with_acc(|a| {
         a.count_frames += 1;
