@@ -133,13 +133,21 @@ pub fn scaled_size(physical: UVec2, height: RenderHeight) -> Option<UVec2> {
 ///
 /// Each step down is a probe (F571): [`PROBE_SECONDS`] later the frame must
 /// have gained at least [`GPU_SHARE`] of what a frame bound only by the
-/// pixel count would gain. Otherwise the rows were not what made it late
-/// (the phone's race, F571: 41 -> 36 ms from 720 to 480 rows while the CPU
-/// work holds it near 26 ms), so the height returns to the ceiling and
-/// stays there for [`HOLD_SECONDS`] before the next probe. A frame that got
-/// slower by more than the expected gain says the scene changed, not that the
-/// pixels do not matter (F642: −46 ms against 2 ms as smoke thickened): the
-/// probe is inconclusive and the lower height stays.
+/// pixel count would gain, but never more than the frame was late: a
+/// display synchronised to its refresh shows no frame faster than
+/// [`TARGET_MS`], and a step whose frames are no longer late stays (F885: a
+/// MacBook's frames sat at the refresh period). Otherwise the rows were not
+/// what made it late (the phone's race, F571: 41 -> 36 ms from 720 to 480
+/// rows while the CPU work holds it near 26 ms), so the height returns to
+/// where the probe started (the ceiling on the first probe; heights above it
+/// were left by probes that worked, F885) and stays there for
+/// [`HOLD_SECONDS`] before the next probe. The hold is checked: if the height
+/// it holds runs late and slower than the probed height by more than the
+/// probe's whole pixel gain, the rows do matter after all; the height returns
+/// to the probed one, the held height is blocked and probing resumes (F885).
+/// A frame that got slower by more than the expected gain says the scene
+/// changed, not that the pixels do not matter (F642: −46 ms against 2 ms as
+/// smoke thickened): the probe is inconclusive and the lower height stays.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dynamic {
     pub floor: u32,
@@ -161,8 +169,12 @@ pub struct Dynamic {
     /// The last step down under test: rows before and after, recent frame
     /// time before.
     probe: Option<(u32, u32, f32)>,
-    /// Seconds left at the ceiling after a step that did not help.
+    /// Seconds left at the probe's start height after a step that did not
+    /// help.
     held: f32,
+    /// During a hold: the probed height, its recent frame time and the
+    /// probe's expected gain, ms (F885).
+    verify: Option<(u32, f32, f32)>,
     /// Consecutive late frames (the smoothed time has settled).
     late_frames: u32,
     /// The last probe's gain and the gain of a pixel-bound frame, ms (log).
@@ -195,7 +207,14 @@ const CPU_REPORT_SECONDS: f32 = 10.;
 pub const PROBE_SECONDS: f32 = 1.;
 /// A step must gain this share of a pixel-bound frame's gain to stay.
 pub const GPU_SHARE: f32 = 0.5;
-/// Seconds at the ceiling after a step that did not help.
+/// Near the refresh period: a display synchronised to it shows most frames
+/// at [`TARGET_MS`] and the rest a period later, so a mean below this
+/// measures the share of missed refreshes, which does not follow the pixel
+/// count (F885: a MacBook at 19.8 and 18.5 ms). A step from such frames
+/// that gains at least [`NEAR_SHARE`] of the pixel gain is inconclusive.
+pub const NEAR_MS: f32 = 1.25 * TARGET_MS;
+pub const NEAR_SHARE: f32 = 0.25;
+/// Seconds at the probe's start height after a step that did not help.
 pub const HOLD_SECONDS: f32 = 60.;
 /// A step down waits for this many late frames, so that a sudden load is
 /// probed against a settled frame time (88 % of the change).
@@ -225,6 +244,7 @@ impl Dynamic {
             blocked: None,
             probe: None,
             held: 0.,
+            verify: None,
             late_frames: 0,
             gain: (0., 0.),
         }
@@ -255,9 +275,10 @@ impl Dynamic {
     }
 
     /// One frame of `frame_ms` with `work_ms` of simulation; returns the
-    /// reason when `rows` changed (`ineffective`: back to the ceiling after a
-    /// probe), or `cpu_bound` every [`CPU_REPORT_SECONDS`] of late frames it
-    /// held (for the log; `rows` unchanged).
+    /// reason when `rows` changed (`ineffective`: back to where a probe
+    /// started; `verify_late`: a hold ran late, back to the probed height),
+    /// or `cpu_bound` every [`CPU_REPORT_SECONDS`] of late frames it held
+    /// (for the log; `rows` unchanged).
     pub fn update(&mut self, frame_ms: f32, work_ms: f32, ceiling: u32) -> Option<&'static str> {
         if !(0. ..HITCH_MS).contains(&frame_ms) {
             return None;
@@ -277,6 +298,7 @@ impl Dynamic {
             self.rows = ceiling;
             self.since_change = 0.;
             self.probe = None;
+            self.verify = None;
             return Some("ceiling");
         }
         if self.warm < WARM_SECONDS {
@@ -288,17 +310,44 @@ impl Dynamic {
             }
             self.probe = None;
             let pixels = (to as f32 / from as f32).powi(2);
-            self.gain = (before - self.recent_ms, before * (1. - pixels));
+            // A synchronised display shows no frame below its period: the
+            // step can gain at most how late the frame was.
+            let expected = (before * (1. - pixels)).min((before - TARGET_MS).max(0.));
+            self.gain = (before - self.recent_ms, expected);
             // Slower by more than the step could gain: inconclusive, it stays.
-            let inconclusive = self.gain.0 < -self.gain.1;
-            if !inconclusive && self.gain.0 < GPU_SHARE * self.gain.1 {
-                self.rows = ceiling;
+            // So does a faster step from frames just above the refresh period:
+            // their mean counts missed refreshes, not the work (F885).
+            let inconclusive = self.gain.0 < -self.gain.1
+                || (before <= NEAR_MS && self.gain.0 >= NEAR_SHARE * self.gain.1);
+            let on_time = self.recent_ms <= LATE_MS;
+            if !inconclusive && !on_time && self.gain.0 < GPU_SHARE * self.gain.1 {
+                self.rows = from.min(ceiling);
                 self.blocked = None;
                 self.held = HOLD_SECONDS;
+                self.verify = Some((to, self.recent_ms, expected));
                 self.since_change = 0.;
                 self.good_for = 0.;
                 return Some("ineffective");
             }
+        }
+        if self.held == 0. {
+            self.verify = None;
+        }
+        if let Some((to, to_ms, expected)) = self.verify
+            && self.since_change >= PROBE_SECONDS
+            && self.recent_ms > LATE_MS
+            && self.recent_ms - to_ms > expected
+            && to < self.rows
+        {
+            // The held height runs later than the probed one by more than the
+            // probe's whole pixel gain: the rows matter, so do not hold here.
+            self.blocked = Some((self.rows, BLOCK_SECONDS));
+            self.rows = to;
+            self.held = 0.;
+            self.verify = None;
+            self.since_change = 0.;
+            self.good_for = 0.;
+            return Some("verify_late");
         }
         let late = self.frame_ms > LATE_MS;
         self.late_frames = if late { self.late_frames + 1 } else { 0 };
@@ -607,13 +656,13 @@ fn adjust_height(mut scale: ResMut<RenderScale>, mut work: ResMut<Work>, time: R
     };
     if d.set_range(floor, ceiling) {
         println!(
-            "render_dynamic version=3 event=range floor={floor} ceiling={ceiling} scale_factor={scale_factor}"
+            "render_dynamic version=4 event=range floor={floor} ceiling={ceiling} scale_factor={scale_factor}"
         );
     }
     let from = d.rows;
     if let Some(reason) = d.update(time.delta_secs() * 1000., work_ms, ceiling) {
         println!(
-            "render_dynamic version=3 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} probe_gain_ms={:.2} pixel_gain_ms={:.2} floor={} ceiling={ceiling}",
+            "render_dynamic version=4 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} probe_gain_ms={:.2} pixel_gain_ms={:.2} floor={} ceiling={ceiling}",
             d.rows, d.frame_ms, d.work_ms, d.gain.0, d.gain.1, d.floor
         );
     }
@@ -624,7 +673,7 @@ pub fn install(app: &mut App, height: RenderHeight) {
     let dynamic = auto_dynamic(height);
     if let Some(d) = &dynamic {
         println!(
-            "render_dynamic version=3 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}..{MAX_DOWN_SHARE}/{DOWN_SECONDS}s hidpi_ceiling={HIDPI_CEILING_ROWS} hitch_ms={HITCH_MS} up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS} probe_s={PROBE_SECONDS} gpu_share={GPU_SHARE} hold_s={HOLD_SECONDS}",
+            "render_dynamic version=4 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}..{MAX_DOWN_SHARE}/{DOWN_SECONDS}s hidpi_ceiling={HIDPI_CEILING_ROWS} hitch_ms={HITCH_MS} up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS} probe_s={PROBE_SECONDS} gpu_share={GPU_SHARE} near_ms={NEAR_MS:.1}..{NEAR_SHARE} hold_s={HOLD_SECONDS}",
             d.floor, d.rows
         );
     }
@@ -878,6 +927,87 @@ mod tests {
         // The next step, to the floor, gained what the pixels promised.
         assert_eq!(d.rows, 480, "{reasons:?}");
         assert!(d.gain.0 > GPU_SHARE * d.gain.1, "{:?}", d.gain);
+    }
+
+    /// The owner's MacBook M4 (F885, build f8b67a22): frames at the refresh
+    /// period's edge. 25-33 ms at 1440 rows, 19.8 at 1056, 18.5 at 984,
+    /// 17.5 below. The probe 1056 -> 984 gained 1.27 ms against 2.61 and
+    /// went back to the 1440 ceiling for 60 s of 30-44 fps.
+    fn mac_frame(rows: u32, n: u32) -> f32 {
+        match rows {
+            1300.. => if n.is_multiple_of(2) { 25. } else { 33. },
+            1057..1300 => 21.,
+            1056 => 19.8,
+            984..1056 => 18.5,
+            _ => 17.5,
+        }
+    }
+
+    /// Feeds `seconds` of [`mac_frame`]; returns each change and the seconds
+    /// spent late at 1440 rows.
+    fn run_mac(d: &mut Dynamic, seconds: f32) -> (Vec<(&'static str, u32)>, f32) {
+        let (mut seen, mut late_at_top, mut t, mut n) = (Vec::new(), 0., 0., 0);
+        while t < seconds * 1000. {
+            let ms = mac_frame(d.rows, n);
+            (t, n) = (t + ms, n + 1);
+            if d.rows == 1440 && d.frame_ms > LATE_MS {
+                late_at_top += ms / 1000.;
+            }
+            if let Some(reason) = d.update(ms, 4.5, 1440) {
+                seen.push((reason, d.rows));
+            }
+        }
+        (seen, late_at_top)
+    }
+
+    /// The Mac's probe again, from the state it was judged in: frames just
+    /// above the refresh period are not judged, so the step stays; and if a
+    /// hold does put the height back where frames run late, it comes down
+    /// within seconds instead of holding there.
+    #[test]
+    fn dynamic_height_does_not_hold_where_frames_run_late() {
+        let mut d = Dynamic::new(0, 0);
+        d.set_range(720, 1440);
+        run_mac(&mut d, 3.);
+        // The probe 1056 -> 984 from 19.8 ms frames, judged a second later.
+        d.rows = 984;
+        d.recent_ms = 19.8;
+        d.frame_ms = 19.8;
+        d.probe = Some((1056, 984, 19.8));
+        d.since_change = 0.;
+        let (judged, _) = run_mac(&mut d, 1.1);
+        assert!((d.gain.0 - 1.27).abs() < 0.05 && (d.gain.1 - 2.61).abs() < 0.05, "{:?}", d.gain);
+        assert!(judged.is_empty(), "{judged:?}");
+        assert_eq!(d.rows, 984);
+        let (seen, late_at_top) = run_mac(&mut d, 60.);
+        assert!(seen.iter().all(|(r, _)| *r != "ineffective"), "{seen:?}");
+        assert_eq!(late_at_top, 0., "{seen:?}");
+        assert!(d.rows <= 984, "{seen:?}");
+
+        // The hold the old controller took: back at 1440 after the probe of
+        // 984 at 17.5 ms. 1440 runs 25-33 ms, more than the probe's whole
+        // gain slower: back to 984 within a few seconds, 1440 blocked.
+        let mut d = Dynamic::new(0, 0);
+        d.set_range(720, 1440);
+        run_mac(&mut d, 3.);
+        d.rows = 1440;
+        d.recent_ms = 17.5;
+        d.frame_ms = 17.5;
+        d.held = HOLD_SECONDS;
+        d.verify = Some((984, 17.5, 2.61));
+        d.since_change = 0.;
+        let (seen, late_at_top) = run_mac(&mut d, 60.);
+        assert_eq!(seen.first(), Some(&("verify_late", 984)), "{seen:?}");
+        assert!(late_at_top < 2., "{late_at_top} s late at 1440: {seen:?}");
+        assert_eq!(d.held, 0.);
+        assert!(d.rows <= 984, "{seen:?}");
+
+        // A whole race from the ceiling never sits late at 1440.
+        let mut d = Dynamic::new(0, 0);
+        d.set_range(720, 1440);
+        let (seen, late_at_top) = run_mac(&mut d, 120.);
+        assert!(late_at_top < 4., "{late_at_top} s late at 1440: {seen:?}");
+        assert!(seen.iter().all(|(r, _)| *r != "ineffective"), "{seen:?}");
     }
 
     #[test]

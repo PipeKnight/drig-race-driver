@@ -1145,6 +1145,41 @@ Detroit Derby, F640) showed three faults with dense tyre smoke:
 - Not verified on a Mac: unit tests only (`dynamic_height_hidpi_range`,
   `dynamic_height_steps_by_the_frame_time`, `dynamic_height_keeps_a_step_when_the_scene_gets_slower`).
 
+**Frames at the refresh period (F885):** the owner's MacBook M4 log (build f8b67a22, 2523 × 1440
+ceiling) showed the controller holding the worst height for the whole race:
+- Observed: the probe from 1056 to 984 rows measured `probe_gain_ms=1.27` against
+  `pixel_gain_ms=2.61`. The frames there were 19.8 and 18.5 ms, just above `LATE_MS` 18 and the
+  16.7 ms refresh period. 1.27 < `GPU_SHARE` × 2.61, so the probe was `ineffective`: the height went
+  to the 1440 ceiling and held for 60 s. For the rest of the race the Mac ran 2523 × 1440 at
+  30–44 fps (acquire 20–28 ms, render 22–33 ms, main 4–5 ms, r_encode about 2.5 ms), and the hold
+  allowed no step down.
+- Interpretation: with a display synchronised to its refresh, a frame is shown at 16.7 ms or a
+  period later. A mean of 18–20 ms counts the share of missed refreshes, which does not follow the
+  pixel count, so the probe measured vsync, not the GPU. The ineffective rule (made for the phone's
+  CPU-bound race, F571) then sent the height to a ceiling it had already left for good reason.
+- Changes (`render_dynamic version=4`; the install line adds `near_ms`):
+  - (b) The expected gain is at most how late the frame was (`before − TARGET_MS`): no frame is
+    shown faster than the refresh. A step whose frames are no longer late (≤ `LATE_MS`) stays. A
+    step from frames below `NEAR_MS` = 1.25 × 16.7 ms that gains at least `NEAR_SHARE` (a quarter)
+    of the expected gain is inconclusive: it stays and later steps continue. The Mac's probe
+    (1.27 against 2.61) now keeps 984 rows.
+  - (a) An ineffective probe returns to the height where the probe started, not to the ceiling.
+    Earlier probes that worked are why the heights above it were left. On the first probe this is
+    the ceiling, as before (F571).
+  - (c) The hold is checked. A second after the return, and for as long as the hold lasts: if the
+    held height runs late and is slower than the probed height by more than the probe's whole
+    expected gain, the rows do matter. The height goes back to the probed one (`reason=verify_late`),
+    the held height is blocked for 15 s, and the hold ends. A late frame alone does not end a hold:
+    the phone's CPU-bound race is late at every height and still holds at 720 (F571).
+- Test `dynamic_height_does_not_hold_where_frames_run_late` replays the Mac: the probe state
+  1056 → 984 at 19.8/18.5 ms keeps 984 (gain 1.27 against 2.61, no `ineffective`). The old hold at
+  1440 (probe of 984 at 17.5 ms) with 25–33 ms frames comes back to 984 at `verify_late` with under
+  2 s late at 1440. A 120 s race from the ceiling spends under 4 s late at 1440, warm-up included.
+  The F571 test (`dynamic_height_returns_when_a_step_does_not_help`) and the F642 tests pass
+  unchanged.
+- Not verified on a Mac: unit tests only. The controller still sees only the frame time and the
+  fixed-step work. The render thread's acquire wait is not an input.
+
 ### Compute threads on the desktop (F573)
 
 `mobile::compute_threads` (cores − 2, at least 4) against Bevy's default split (compute gets 12 of
