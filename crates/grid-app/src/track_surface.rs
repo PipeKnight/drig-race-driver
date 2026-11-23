@@ -17,6 +17,7 @@ use bevy::{
             UnpreparedBindGroup, VertexFormat,
         },
         renderer::RenderDevice,
+        storage::ShaderBuffer,
     },
     shader::{ShaderDefVal, ShaderRef},
 };
@@ -74,9 +75,12 @@ const GROUPS: [(&[u8], bool); 6] = [
 const SHADER: Handle<Shader> = uuid_handle!("ef412ff6-5acc-4977-bdb9-d5f314970b66");
 const BASIS_SHADER: Handle<Shader> = uuid_handle!("81c59e94-1394-4d97-9544-e05baf815837");
 const NORMAL_BINDING: u32 = 109;
+const AO_TEXTURE_BINDING: u32 = 111;
+const AO_BUFFER_BINDING: u32 = 112;
+const AO_DEF: &str = "GRID_TRACK_DYNAMIC_AO";
 const NORMAL_DEF: &str = "GRID_TRACK_SOURCE_NORMAL";
 
-fn normal_layout_supported(device: &RenderDevice) -> bool {
+fn fragment_textures_supported(device: &RenderDevice, optional: u32) -> bool {
     let limits = device.limits();
     let standard_textures: u32 = StandardMaterial::bind_group_layout_entries(device, true)
         .iter()
@@ -86,14 +90,26 @@ fn normal_layout_supported(device: &RenderDevice) -> bool {
         })
         .map(|entry| entry.count.map_or(1, std::num::NonZeroU32::get))
         .sum();
-    // Bevy 0.19.1's maximum safe view texture count, plus four existing
-    // Surface textures and the normal. The normal uses the first sampler.
+    // The four material textures and Bevy's view textures are bound even
+    // when the optional source normal or vehicle AO are disabled.
     const VIEW_TEXTURE_BUDGET: u32 = 10;
+    limits.max_sampled_textures_per_shader_stage >= standard_textures + VIEW_TEXTURE_BUDGET + 4 + optional
+}
+
+fn normal_layout_supported(device: &RenderDevice) -> bool {
+    let limits = device.limits();
     limits.max_bindings_per_bind_group > NORMAL_BINDING
-        && limits.max_sampled_textures_per_shader_stage >= standard_textures + VIEW_TEXTURE_BUDGET + 5
+        && fragment_textures_supported(device, 1)
         && limits.max_vertex_attributes >= 10
         && limits.max_inter_stage_shader_variables >= 12
         && limits.max_vertex_buffer_array_stride >= 80
+}
+
+fn dynamic_ao_layout_supported(device: &RenderDevice) -> bool {
+    let limits = device.limits();
+    limits.max_bindings_per_bind_group > AO_BUFFER_BINDING
+        && limits.max_storage_buffers_per_shader_stage >= 8
+        && fragment_textures_supported(device, 2)
 }
 pub(crate) type SurfaceMaterial = ExtendedMaterial<StandardMaterial, Surface>;
 
@@ -130,6 +146,10 @@ pub(crate) struct SurfaceBindings {
     skids: Handle<Image>,
     #[texture(109, visibility(fragment))]
     normal: Option<Handle<Image>>,
+    #[texture(111, dimension = "2d_array", visibility(fragment))]
+    dynamic_ao_atlas: Option<Handle<Image>>,
+    #[storage(112, read_only, visibility(fragment))]
+    dynamic_ao_volumes: Handle<ShaderBuffer>,
     // AsBindGroup packs fields at binding 108 in declaration order. Keep
     // SurfaceUniforms in track_surface.wgsl in sync. Separate buffers here can
     // exhaust the Metal vertex-stage slots, even though only the fragment
@@ -168,13 +188,13 @@ pub(crate) struct SurfaceBindings {
 }
 
 impl AsBindGroup for Surface {
-    type Data = bool;
+    type Data = (bool, bool);
     type Param = <SurfaceBindings as AsBindGroup>::Param;
 
     fn label() -> &'static str { "Surface" }
 
     fn bind_group_data(&self) -> Self::Data {
-        self.bindings.normal.is_some()
+        (self.bindings.normal.is_some(), self.bindings.dynamic_ao_atlas.is_some())
     }
 
     fn unprepared_bind_group(
@@ -190,6 +210,9 @@ impl AsBindGroup for Surface {
         if !normal_layout_supported(device) {
             bindings.bindings.0.retain(|(slot, _)| *slot != NORMAL_BINDING);
         }
+        if !dynamic_ao_layout_supported(device) {
+            bindings.bindings.0.retain(|(slot, _)| !matches!(*slot, AO_TEXTURE_BINDING | AO_BUFFER_BINDING));
+        }
         Ok(bindings)
     }
 
@@ -200,6 +223,9 @@ impl AsBindGroup for Surface {
         let mut entries = SurfaceBindings::bind_group_layout_entries(device, force_no_bindless);
         if !normal_layout_supported(device) {
             entries.retain(|entry| entry.binding != NORMAL_BINDING);
+        }
+        if !dynamic_ao_layout_supported(device) {
+            entries.retain(|entry| !matches!(entry.binding, AO_TEXTURE_BINDING | AO_BUFFER_BINDING));
         }
         entries
     }
@@ -251,6 +277,7 @@ pub(crate) fn trial_fixture() -> SurfaceMaterial {
 pub(crate) fn trial_fixture_with_strength(strength: f32) -> SurfaceMaterial {
     SurfaceMaterial {base: StandardMaterial::default(),extension: Surface { bindings: SurfaceBindings {
         first: default(),second: default(),macro_map: default(),skids:default(),normal:None,
+        dynamic_ao_atlas:None,dynamic_ao_volumes:default(),
         scales:Vec4::ZERO,controls:Vec4::ZERO,skid_colour:Vec4::ZERO,skid_colour2:Vec4::ZERO,
         dry_ground:Vec4::ZERO,sampling:Vec4::ZERO,rgb_filter:Vec4::ZERO,phong:Vec4::ZERO,
         phong_light:Vec4::new(3.,2.,1.,strength),phong_direction:Vec4::new(0.2,0.8,0.1,0.),
@@ -282,9 +309,12 @@ impl MaterialExtension for Surface {
             descriptor.vertex.shader_defs.iter()
                 .any(|value| matches!(value, ShaderDefVal::Bool(key, true) if key == name))
         };
+        if fragment.shader == SHADER && key.bind_group_data.1 && !def("PREPASS_PIPELINE") {
+            fragment.shader_defs.push(AO_DEF.into());
+        }
         // Default depth, shadow, normal and motion prepasses use their stock
         // fragment handle. The deferred color pass keeps its prepass IO.
-        if !key.bind_group_data
+        if !key.bind_group_data.0
             || fragment.shader != SHADER
             || (def("PREPASS_PIPELINE") && !def("DEFERRED_PREPASS"))
             || ["SKINNED", "MORPH_TARGETS", "VERTEX_TANGENTS", "MESHLET_MESH_MATERIAL_PASS"]
@@ -813,6 +843,8 @@ pub(crate) fn attach(
     mut commands: Commands,
     source: Res<Source>,
     settings: Res<super::graphics::Settings>,
+    dynamic_ao: Option<Res<super::ground_ao::GroundAo>>,
+    mut ao_buffers: ResMut<Assets<ShaderBuffer>>,
     query: Query<(
         Entity,
         &Name,
@@ -881,6 +913,12 @@ pub(crate) fn attach(
     }
     let mut basis_draws = 0;
     let mut basis_fallbacks = 0;
+    let dynamic_ao = dynamic_ao.as_deref()
+        .filter(|_| render_device.as_deref().is_some_and(dynamic_ao_layout_supported));
+    let ao_buffer = dynamic_ao.map_or_else(
+        || ao_buffers.add(ShaderBuffer::with_size(super::ground_ao::BUFFER_BYTES, RenderAssetUsages::RENDER_WORLD)),
+        |ao| ao.buffer.clone(),
+    );
     let mut handles = BTreeMap::new();
     let mut attached = 0;
     let mut mismatched = 0;
@@ -932,6 +970,9 @@ pub(crate) fn attach(
                     .clone();
                 // The extension composes albedo explicitly; never tint by mask colors.
                 base.base_color_texture = None;
+                if dynamic_ao.is_some() {
+                    base.opaque_render_method = bevy::material::OpaqueRendererMethod::Forward;
+                }
                 if let Some(roughness) = roughness {
                     base.perceptual_roughness = roughness;
                     roughness_materials += 1;
@@ -941,6 +982,8 @@ pub(crate) fn attach(
                     base,
                     extension: Surface { bindings: SurfaceBindings {
                         normal: normal_map.cloned(),
+                        dynamic_ao_atlas: dynamic_ao.map(|ao| ao.atlas.clone()),
+                        dynamic_ao_volumes: ao_buffer.clone(),
                         first: textures[&d.textures[0]].clone(),
                         second: textures[&d.textures[1]].clone(),
                         macro_map: textures[&d.textures[2]].clone(),

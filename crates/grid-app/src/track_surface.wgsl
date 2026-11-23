@@ -34,6 +34,47 @@ struct SurfaceUniforms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(109) var source_normal: texture_2d<f32>;
 #endif
 
+fn to_display(c: vec3<f32>) -> vec3<f32> {
+    let rgb = max(c, vec3(0.0));
+    return select(1.055 * pow(rgb, vec3(1.0 / 2.4)) - 0.055, rgb * 12.92, rgb <= vec3(0.0031308));
+}
+
+fn to_linear(c: vec3<f32>) -> vec3<f32> {
+    return select(pow(max((c + 0.055) / 1.055, vec3(0.0)), vec3(2.4)), c / 12.92, c <= vec3(0.04045));
+}
+
+#ifdef GRID_TRACK_DYNAMIC_AO
+struct VehicleAoVolume {
+    u: vec4<f32>,
+    v: vec4<f32>,
+    height: vec4<f32>,
+    controls: vec4<f32>,
+}
+@group(#{MATERIAL_BIND_GROUP}) @binding(111) var dynamic_ao_atlas: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var<storage, read> dynamic_ao_volumes: array<VehicleAoVolume, 20>;
+
+fn vehicle_ao(world_position: vec4<f32>) -> f32 {
+    var result = 1.0;
+    let inset = 0.5 / vec2<f32>(textureDimensions(dynamic_ao_atlas));
+    for (var i = 0u; i < 20u; i += 1u) {
+        let volume = dynamic_ao_volumes[i];
+        if volume.controls.y > 0.0 {
+            let uvh = vec3(dot(volume.u, world_position), dot(volume.v, world_position),
+                dot(volume.height, world_position));
+            if all(uvh >= vec3(0.0)) && all(uvh <= vec3(1.0)) {
+                let uv = clamp(uvh.xy, inset, 1.0 - inset);
+                let atlas = textureSampleLevel(dynamic_ao_atlas, first_sampler, uv,
+                    i32(volume.controls.x), 0.0).r;
+                let falloff = smoothstep(0.0, 1.0, abs(uvh.z * 2.0 - 1.0));
+                let shaped = mix(pow(atlas, 1.0 + 5.0 * falloff), 1.0, falloff * falloff);
+                result *= mix(1.0, shaped, volume.controls.y);
+            }
+        }
+    }
+    return result;
+}
+#endif
+
 // Independently authored dry response confined to the audited ground band.
 // Source RGB/alpha, road/line texels and the existing layer blend are preserved.
 fn ground_weight(code: f32, uv: vec2<f32>) -> f32 {
@@ -192,6 +233,11 @@ fn fragment(
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr);
     out.color = vec4(out.color.rgb + specular, out.color.a);
+#ifdef GRID_TRACK_DYNAMIC_AO
+    // Apply the authored contact mask in display space before distance fog.
+    let contact = vehicle_ao(pbr.world_position);
+    out.color = vec4(to_linear(to_display(out.color.rgb) * contact), out.color.a);
+#endif
     out.color = main_pass_post_lighting_processing(pbr, out.color);
     return out;
 #endif

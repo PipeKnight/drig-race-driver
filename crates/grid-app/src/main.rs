@@ -126,6 +126,7 @@ mod free_look;
 mod hud_sound;
 mod geometry_ray;
 mod graphics;
+mod ground_ao;
 mod graphics_benchmark;
 mod perf_test;
 mod perf_timing;
@@ -5587,6 +5588,12 @@ pub(crate) fn race_app(
     // land.pssg and its layered infield on every preset too (ground cover
     // lies on it, F699).
     if graphics.layered_track && track && !collision {
+        if !matches!(graphics.reflection_mode, 1 | 2)
+            && ground_ao::enabled()
+            && let Some(anchor) = anchor
+        {
+            ground_ao::install(&mut app, &root, &route, &field, anchor)?;
+        }
         let land = graphics.source_land;
         track_surface::install(&mut app, &root, &route, land, surface_rgb_override.as_deref())?;
     }
