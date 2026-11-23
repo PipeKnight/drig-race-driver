@@ -5515,6 +5515,9 @@ pub(crate) fn race_app(
     perf_timing::install(&mut app);
     asset_counts::install(&mut app);
     pipeline_warmup::install(&mut app);
+    if interactive {
+        pipeline_warmup::StartHold::install(&mut app);
+    }
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
     if gpu_passes::enabled() {
@@ -6740,6 +6743,9 @@ fn drive_tick(
     // The player's inputs for Flashback (logged, or given back when ticks run again).
     mut inputs: Option<ResMut<flashback::Inputs>>,
     cine: Option<Res<cine::Cine>>,
+    // Window runs: the race starts once the pipeline warm-up is done.
+    mut start_hold: Option<ResMut<pipeline_warmup::StartHold>>,
+    warmup: Option<Res<pipeline_warmup::Warmup>>,
 ) {
     let _tick_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DriveTick);
     let _lap = frame_split::Lap::new(frame_split::lap::DRIVE_TICK);
@@ -6751,6 +6757,12 @@ fn drive_tick(
         || driving
             .scripted_ticks
             .is_some_and(|n| driving.runtime.ticks >= n)
+    {
+        return;
+    }
+    if start_hold
+        .as_mut()
+        .is_some_and(|h| h.hold(driving.runtime.ticks == 0, warmup.as_ref().is_none_or(|w| w.ready())))
     {
         return;
     }

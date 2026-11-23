@@ -58,6 +58,13 @@ process; Android relaunches the activity). From the first frame with a viewer ca
 The main world reads the render world's cache through a shared counter (`count` in
 `RenderSystems::Cleanup`). `GRID_PIPELINE_WARMUP=0` skips the warm-up (comparison runs).
 
+In window runs the race start waits for the warm-up: the first drive tick, and with it the
+countdown, runs only once the phase is Done (`StartHold`, F889, at most 1800 fixed steps), so a slow PC
+never compiles warm-up pipelines after GO. Before, the countdown started at once and its first
+seconds passed under the cover; in a slow derby trace run the warm-up ended after GO (F884). One
+line `drive_start_hold event=released held_steps=N reason=warmup_done|limit|ticking` is logged.
+`GRID_START_AFTER_WARMUP=0` starts at once as before. Headless and offscreen runs never hold.
+
 Not covered: car levels hidden through `car_batch::hidden_layer()` and their demoted meshes (the
 levels the other cars show at the start share their materials and layouts), and meshes spawned
 after the warm-up.

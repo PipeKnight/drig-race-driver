@@ -61,6 +61,52 @@ pub fn capture_async() -> bool {
     env_on("GRID_CAPTURE_ASYNC_PIPELINES")
 }
 
+/// Fixed steps the race start waits for the warm-up at most (30 s at 60 Hz).
+const START_HOLD_LIMIT: u32 = 1800;
+
+/// Window runs: the first drive tick, and with it the countdown, waits until
+/// the warm-up is done, so a slow PC never compiles the warm-up's pipelines
+/// after GO (F884: in a slow run the warm-up ended after GO). The ticks
+/// themselves are the same, only their start moves; the countdown is no
+/// longer partly behind the cover. `GRID_START_AFTER_WARMUP=0` starts at
+/// once as before. Offscreen captures and headless runs never hold (F889).
+#[derive(Resource, Default)]
+pub struct StartHold {
+    held: u32,
+    released: bool,
+}
+
+impl StartHold {
+    /// Installed with the warm-up, for window runs.
+    pub fn install(app: &mut App) {
+        if app.world().contains_resource::<Warmup>()
+            && std::env::var("GRID_START_AFTER_WARMUP").map_or(true, |v| v != "0")
+        {
+            app.init_resource::<StartHold>();
+        }
+    }
+
+    /// Whether this fixed step skips its drive tick: only before the first
+    /// tick, while the warm-up runs, and for at most [`START_HOLD_LIMIT`]
+    /// steps. Once a tick has run it never holds again (restarts included).
+    pub fn hold(&mut self, first_tick: bool, ready: bool) -> bool {
+        if self.released {
+            return false;
+        }
+        if !first_tick || ready || self.held >= START_HOLD_LIMIT {
+            self.released = true;
+            println!(
+                "drive_start_hold version=1 event=released held_steps={} reason={}",
+                self.held,
+                if !first_tick { "ticking" } else if ready { "warmup_done" } else { "limit" }
+            );
+            return false;
+        }
+        self.held += 1;
+        true
+    }
+}
+
 /// The render world's pipeline cache as the main world sees it: waiting and
 /// total pipelines after the last rendered frame; [2] is 1 while the cover is up.
 #[derive(Resource, Clone, Default)]
@@ -506,6 +552,22 @@ mod tests {
         assert_eq!(compile_yield(true, false, YIELD_MS), None, "nothing compiling");
         assert_eq!(compile_yield(false, true, YIELD_MS), None, "cover lifted: play never waits");
         assert_eq!(compile_yield(true, true, 0), None, "GRID_WARMUP_YIELD_MS=0");
+    }
+
+    #[test]
+    fn race_start_waits_for_the_warm_up_then_never_holds_again() {
+        let mut hold = StartHold::default();
+        assert!(hold.hold(true, false), "first tick, warm-up running: wait");
+        assert!(hold.hold(true, false));
+        assert!(!hold.hold(true, true), "warm-up done: start");
+        assert!(!hold.hold(true, false), "released for good (a restart does not hold)");
+        let mut hold = StartHold::default();
+        assert!(!hold.hold(false, false), "ticks already ran: never hold");
+        let mut hold = StartHold::default();
+        for _ in 0..START_HOLD_LIMIT {
+            assert!(hold.hold(true, false));
+        }
+        assert!(!hold.hold(true, false), "a warm-up that never ends starts after the limit");
     }
 
     #[test]
