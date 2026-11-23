@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F887](log/F0887.md) | 2026-11-23 | Derby collision frames: opponent tick and propagation are not the gate; opponent dents leave tick frames |
 | [F886](log/F0886.md) | 2026-11-23 | Transparent phase: bind groups merged once per render pass in vendored wgpu-core |
 | [F885](log/F0885.md) | 2026-11-23 | Dynamic resolution: no ineffective jump from vsync-quantized frames, holds verified (Mac M4) |
 | [F884](log/F0884.md) | 2026-11-20 | Spikes after the countdown in derby and Donington Enhanced: no lazy work, steady-load tails (classifier) |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F826](log/F0826.md) | 2026-11-11 | Post-race stats screen in the front-end art |
 | [F825](log/F0825.md) | 2026-11-11 | Results and drift screens: the pill strip in the front-end art |
 | [F824](log/F0824.md) | 2026-11-11 | Shared front-end reflection cube helper |
-| [F823](log/F0823.md) | 2026-11-10 | Drift scoreboard in the front-end art |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

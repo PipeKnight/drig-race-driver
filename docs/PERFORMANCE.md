@@ -5180,3 +5180,29 @@ the build lock). One clean pair so far (2026-11-20):
 The Donington 1280 Enhanced pair ran while another program loaded the GPU (dirty), so it is not used. Verdict for
 now: about 0.6 ms off the render thread, under the 0.7 ms target, and the worst window still misses 100 fps. More
 pairs are pending, and the next candidates are the remaining per-switch tracker insert and command-buffer count.
+
+## Derby collision frames: what gates the main thread (F887)
+
+Question (after F884): can the opponents' physics tick run in parallel, and why does transform propagation cost
+2 ms in the main-gated derby frames of the collision phase? Bar: those main frames at or under 6 ms.
+
+- Opponent tick: per-car integration already runs through `grid_tools::parallel::map` (VehicleStage 0.59 ms of
+  a 2.34 ms windowed collision tick). The rest is ordered collision resolution: WorldAdvance 0.66, of which the
+  serial island solver takes 0.59; then Commit 0.32, Continuous 0.26 and CarPairs 0.21. There is no cheap
+  bit-identical gain.
+- Propagation: Bevy 0.19.1 already takes its parallel path, and `StaticTransformOptimizations` is on by default.
+  Its own work is about 0.2 ms: marking 0.05, propagation 0.06-0.09 and sync 0.07, for about 1050 changed
+  `Transform`s per frame. The "tp" lap of frame_split begins at a system ordered only before
+  `TransformSystems::Propagate`, so it runs from the start of PostUpdate. Marking waits for the `car_batch` chain,
+  which ends at 0.95 ms (1.44 ms in slow frames). That chain waits for `AssetEventSystems`, which end at 0.66 /
+  1.07 ms. The 2 ms is a serial chain of conflicting systems before propagation, mostly batch rebuilds of
+  dented parts. The "cb" lap has the same issue. A serial replacement for Bevy's `mark_dirty_trees` gave the same
+  bits and no measurable gain, so it was dropped.
+- Opponent dents leave tick frames: `DentSpread` in `drive_present`. A frame that ran a physics tick leaves a
+  changed opponent field to the next frame, at most one frame later. The player's dents and all simulation
+  state are unchanged. `GRID_DENT_SPREAD=0` projects at once.
+  - In the slow main-gated frames, the opponent-dent lap drops from 0.6-1.0 to 0.3 ms.
+  - At the window level, two alternating A/Bs disagree: 7 to 5 main-gated windows in one, 18 to 29 in the
+    other. The second ran under outside load, and its drive tick, which the spread cannot touch, rose too.
+  - The 6 ms bar is not reached: the main-gated slow frames take 7.1-9.0 ms.
+  - Offscreen fixed-step derby frames differ in at most 2 pixels by 1 level.

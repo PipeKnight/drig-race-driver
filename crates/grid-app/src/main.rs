@@ -755,6 +755,34 @@ struct DeformingPart {
 /// each opponent's (cleared when a replay hands the meshes back).
 #[derive(Resource, Default)]
 struct DeformationPresentation(Option<Vec<u32>>, Vec<Option<Vec<u32>>>);
+/// Opponent dents leave the frames that run a physics tick (F887): such a
+/// frame already carries the tick, so a changed opponent field is projected
+/// in the next frame, which usually runs none. Never more than one frame
+/// late: a frame after a deferring one projects whether it ticked or not.
+/// Only the drawn meshes of the opponents wait; the simulation's damage and
+/// the player's dents are as before. `GRID_DENT_SPREAD=0` projects at once.
+#[derive(Default)]
+struct DentSpread {
+    enabled: Option<bool>,
+    ticks: u64,
+    /// The last frame left a changed field for this one.
+    deferred: bool,
+}
+
+impl DentSpread {
+    /// Whether this frame defers opponent dents; `ticks` is the run's fixed
+    /// tick count, so a change since the last frame means a tick ran.
+    fn defer(&mut self, ticks: u64) -> bool {
+        let enabled = *self
+            .enabled
+            .get_or_insert_with(|| std::env::var("GRID_DENT_SPREAD").map_or(true, |v| v != "0"));
+        let ticked = std::mem::replace(&mut self.ticks, ticks) != ticks;
+        let defer = enabled && ticked && !self.deferred;
+        // Reset here: a frame without opponents (or one that projects) leaves nothing waiting.
+        self.deferred = false;
+        defer
+    }
+}
 /// Start-light board of the route's track (`start_lights.xml`). The emissive
 /// texture is swapped per stage; `stage` 0 is the idle board.
 #[derive(Resource)]
@@ -7472,12 +7500,13 @@ fn drive_present(
         Option<ResMut<camera::Cameras>>,
     ),
     mut refused: Local<Option<&'static str>>,
-    (mut dent_fast, mut dent_counts, mut demoted, mut shots, stream): (
+    (mut dent_fast, mut dent_counts, mut demoted, mut shots, stream, mut dent_spread): (
         Local<Option<bool>>,
         Local<[u64; 4]>,
         Option<ResMut<car_batch::Demoted>>,
         Local<ShownShots>,
         Option<Res<mesh_stream::MeshStream>>,
+        Local<DentSpread>,
     ),
     render_clock: (
         Option<Res<Time<Fixed>>>,
@@ -7502,6 +7531,7 @@ fn drive_present(
     // `GRID_DENT_FAST=0` projects the dents of every car one by one on this
     // thread and writes every opponent part as before (comparisons).
     let fast = *dent_fast.get_or_insert_with(|| std::env::var("GRID_DENT_FAST").map_or(true, |v| v != "0"));
+    let defer_opponent_dents = dent_spread.defer(driving.runtime.ticks);
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
             let owner = &driving.runtime.state.car.owner.vehicle;
@@ -7645,6 +7675,7 @@ fn drive_present(
         let opponent_keys = &mut presentation.1;
         opponent_keys.resize(opponents.multi.cars.len(), None);
         let mut dirty = Vec::new();
+        let mut deferred = false;
         for (car, runtime) in opponents.multi.cars.iter().enumerate().skip(1) {
             if !runtime.deformation_enabled {
                 continue;
@@ -7656,6 +7687,11 @@ fn drive_present(
             {
                 continue;
             }
+            // Its key stays: the next frame finds the change again and shows it.
+            if defer_opponent_dents {
+                deferred = true;
+                continue;
+            }
             if let Ok(field) = grid_tools::body_deformation::Field::read(owner)
                 && opponent_keys[car].as_ref() != Some(&field.key())
             {
@@ -7663,6 +7699,7 @@ fn drive_present(
                 dirty.push((car, field));
             }
         }
+        dent_spread.deferred = deferred;
         let mut jobs = Vec::new();
         for (entity, part, mut transform, deforming, _, _, unposed, _) in &mut opponent_parts {
             let (pose, wheels) = &cars[part.car];
@@ -8222,6 +8259,21 @@ fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGrou
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+
+    #[test]
+    fn opponent_dents_leave_tick_frames_by_at_most_one_frame() {
+        let mut spread = DentSpread { enabled: Some(true), ..Default::default() };
+        assert!(!spread.defer(0), "no tick ran");
+        assert!(spread.defer(1), "a tick ran: wait");
+        spread.deferred = true;
+        assert!(!spread.defer(1), "next frame, no tick: show");
+        assert!(spread.defer(2), "tick, nothing waiting: wait");
+        spread.deferred = true;
+        assert!(!spread.defer(3), "tick again, but a change waited a frame: show now");
+        assert!(spread.defer(4), "a tick after a frame that waited for nothing: wait");
+        let mut off = DentSpread { enabled: Some(false), ..Default::default() };
+        assert!(!off.defer(1), "GRID_DENT_SPREAD=0");
+    }
 
     #[test]
     fn cars_are_drawn_between_their_last_two_ticks() {
