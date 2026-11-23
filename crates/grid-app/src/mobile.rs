@@ -137,12 +137,35 @@ fn init_compute_pool(threads: usize) {
 }
 
 /// The tests' compute pool: the thread count an App's executor would
-/// create (`TaskPool::default`, every core) with [`COMPUTE_STACK`]. Called
-/// before each test App; the first pool of the process stays.
-#[cfg(test)]
-pub fn init_test_pool() {
+/// create (`TaskPool::default`, every core) with [`COMPUTE_STACK`].
+///
+/// The first pool of a process stays, and Bevy's multi-threaded executor
+/// creates `TaskPool::default` (threads "TaskPool (N)", the std default
+/// 2 MiB stacks) when a schedule runs before any pool exists. Calling this
+/// before each test App left the race to whichever parallel test reached
+/// the pool first: about 90 test Apps did not call it, and when one of them
+/// won, nested `drive_tick`s overflowed a 2 MiB "TaskPool (N)" thread in
+/// about two full gates in three (F632, F886). So the test binaries create
+/// the pool once at process start, before libtest runs any test, through
+/// [`INIT_TEST_POOL`].
+#[cfg(all(test, any(windows, target_os = "linux", target_os = "android", target_vendor = "apple")))]
+extern "C" fn init_test_pool() {
+    // Only `available_parallelism` and the pool's own thread spawns run
+    // before `main`; nothing here touches `thread::current` on this thread,
+    // which the runtime sets up in `main` (it aborts if code before main
+    // already created it).
     init_compute_pool(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get));
 }
+
+/// Runs [`init_test_pool`] at process start in test binaries: the C runtime
+/// initializer table on Windows, `.init_array` on Linux and Android,
+/// `__mod_init_func` on Apple targets.
+#[cfg(all(test, any(windows, target_os = "linux", target_os = "android", target_vendor = "apple")))]
+#[used]
+#[cfg_attr(windows, unsafe(link_section = ".CRT$XCU"))]
+#[cfg_attr(any(target_os = "linux", target_os = "android"), unsafe(link_section = ".init_array"))]
+#[cfg_attr(target_vendor = "apple", unsafe(link_section = "__DATA,__mod_init_func"))]
+static INIT_TEST_POOL: extern "C" fn() = init_test_pool;
 
 pub fn install(_app: &mut App) {
     if !enabled() {
@@ -183,6 +206,19 @@ mod tests {
         assert_eq!(compute_threads(4), 4);
         assert_eq!(compute_threads(2), 2);
         assert_eq!(compute_threads(1), 1);
+    }
+
+    #[test]
+    fn test_apps_get_the_large_stack_compute_pool_before_any_test() {
+        // `get` panics when no pool exists yet: the initializer made it
+        // before libtest ran this or any other test. A task the pool's
+        // workers run (block_on does not run the pool's queue here) is on a
+        // thread of `init_compute_pool`'s builder, not Bevy's
+        // `TaskPool::default` "TaskPool (N)" threads with 2 MiB stacks.
+        let pool = bevy::tasks::ComputeTaskPool::get();
+        let name = bevy::tasks::block_on(pool.spawn(async { std::thread::current().name().unwrap_or_default().to_owned() }));
+        assert!(name.starts_with("Compute Task Pool ("), "compute task ran on {name:?}");
+        assert_eq!(pool.thread_num(), std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get));
     }
 
     #[test]

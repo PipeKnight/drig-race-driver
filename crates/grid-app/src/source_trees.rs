@@ -542,7 +542,6 @@ mod tests {
         let facing = FacingSource::from_mesh("trees/sheet/test", &mesh)
             .unwrap()
             .placed(Mat4::IDENTITY);
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(Assets::<Mesh>::default())
             .insert_resource(replay)

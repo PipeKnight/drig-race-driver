@@ -8444,7 +8444,6 @@ mod driving_tests {
         }
         let mut fixed = Time::<Fixed>::from_seconds(0.016);
         fixed.accumulate_overstep(Duration::from_secs_f32(0.008));
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(Assets::<Mesh>::default())
             .insert_resource(fixed)
@@ -8923,7 +8922,6 @@ mod driving_tests {
             ));
         }
         assert_eq!(entries.len(), 2);
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.insert_resource(assets)
             .init_resource::<DeformationPresentation>()
@@ -9038,7 +9036,6 @@ mod driving_tests {
                 .unwrap();
         runtime.enable_lap_timing(Path::new(&root)).unwrap();
         let initial = runtime.pose();
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_message::<AppExit>()
             .insert_resource(ButtonInput::<KeyCode>::default())
@@ -9275,7 +9272,6 @@ mod driving_tests {
                 .register_deformation_callbacks(limit, bulk, 1)
                 .unwrap();
         }
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_message::<AppExit>()
             .insert_resource(ButtonInput::<KeyCode>::default())
@@ -9602,7 +9598,6 @@ mod driving_tests {
         let location = grid_tools::ambience_audio::location(root, &route).unwrap().unwrap();
         let play = grid_tools::ambience_audio::AutoPlay::load(root, &location).unwrap().unwrap();
         let step = Duration::from_secs_f64(f64::from(DELTA));
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))
@@ -9888,7 +9883,6 @@ mod driving_tests {
         trial.state = State::new(1, f64::from(DELTA), start.seconds).unwrap();
         let mix = Some(std::sync::Arc::new(grid_tools::audio_mix::Table::load(root).unwrap()));
         let step = Duration::from_secs_f64(f64::from(DELTA));
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))
@@ -10038,7 +10032,6 @@ mod driving_tests {
             grid_tools::audio_mix::Table::load(root).unwrap(),
         ));
         let step = Duration::from_secs_f64(f64::from(DELTA));
-        crate::mobile::init_test_pool();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))

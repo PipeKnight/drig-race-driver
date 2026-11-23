@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F890](log/F0890.md) | 2026-11-23 | grid-app test compute pool created at process start (TaskPool stack overflow root cause) |
 | [F889](log/F0889.md) | 2026-11-23 | Race countdown waits for the pipeline warm-up |
 | [F888](log/F0888.md) | 2026-11-23 | Build lock hold limit and step timeouts |
 | [F887](log/F0887.md) | 2026-11-23 | Derby collision frames: opponent tick and propagation are not the gate; opponent dents leave tick frames |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F833](log/F0833.md) | 2026-11-12 | Prepare GPLv3 licensing change for future DRIG versions |
 | [F832](log/F0832.md) | 2026-11-12 | Discover installed DRIG resources for private macOS rebuilds |
 | [F827](log/F0827.md) | 2026-11-11 | Playable 62992f28d9ec with F826 and APKs |
-| [F826](log/F0826.md) | 2026-11-11 | Post-race stats screen in the front-end art |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

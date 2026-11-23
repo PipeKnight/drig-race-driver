@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F890](F0890.md) | 2026-11-23 | grid-app test compute pool created at process start (TaskPool stack overflow root cause) |
 | [F889](F0889.md) | 2026-11-23 | Race countdown waits for the pipeline warm-up |
 | [F888](F0888.md) | 2026-11-23 | Build lock hold limit and step timeouts |
 | [F887](F0887.md) | 2026-11-23 | Derby collision frames: opponent tick and propagation are not the gate; opponent dents leave tick frames |

@@ -141,7 +141,6 @@ pub(crate) fn race_app_on(route: grid_tools::route::Route, models: &[&str], laps
         crate::START_SEQUENCE_SECONDS,
     )
     .unwrap();
-    crate::mobile::init_test_pool();
     let mut app = App::new();
     app.add_message::<AppExit>()
         .insert_resource(ButtonInput::<KeyCode>::default())
