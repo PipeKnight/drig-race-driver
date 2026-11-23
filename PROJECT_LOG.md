@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F888](log/F0888.md) | 2026-11-23 | Build lock hold limit and step timeouts |
 | [F887](log/F0887.md) | 2026-11-23 | Derby collision frames: opponent tick and propagation are not the gate; opponent dents leave tick frames |
 | [F886](log/F0886.md) | 2026-11-23 | Transparent phase: bind groups merged once per render pass in vendored wgpu-core |
 | [F885](log/F0885.md) | 2026-11-23 | Dynamic resolution: no ineffective jump from vsync-quantized frames, holds verified (Mac M4) |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F827](log/F0827.md) | 2026-11-11 | Playable 62992f28d9ec with F826 and APKs |
 | [F826](log/F0826.md) | 2026-11-11 | Post-race stats screen in the front-end art |
 | [F825](log/F0825.md) | 2026-11-11 | Results and drift screens: the pill strip in the front-end art |
-| [F824](log/F0824.md) | 2026-11-11 | Shared front-end reflection cube helper |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

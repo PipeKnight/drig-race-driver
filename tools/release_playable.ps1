@@ -294,7 +294,7 @@ if (-not $NoApk) {
                 # The lock is taken here, not only in build_android.ps1: the worktree's copy of that
                 # script is origin/main's, which may predate the lock. A child that knows the lock
                 # sees GRID_BUILD_LOCK and runs under this one.
-                $lock = Enter-BuildLock -Purpose "release_playable APK $($v.Suffix)"
+                $lock = Enter-BuildLock -Purpose "release_playable APK $($v.Suffix)" -HoldMinutes 55  # 2 x 1617 s, the longest APK build
                 try { $code = Invoke-Script $log (Join-Path $wt 'tools\build_android.ps1') "-BundleData -Event $($v.Event) -Characteristics `"$characteristics`" -GameRoot `"$GameRoot`" $($v.Args)" $wt }
                 finally { Exit-BuildLock $lock }
                 if ($code -ne 0) { throw "release: build_android $($v.Args) failed ($code); see $log" }

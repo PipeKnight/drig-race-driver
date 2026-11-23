@@ -75,6 +75,17 @@ tier and steps, toolchain and private inputs, runs only sanity and names the run
 (typically after a rebase onto docs/log-only commits or after log_entry.py check --fix). -NoCache
 runs everything. Details: Get-CodeKey below and docs/TOOLCHAIN.md "Pre-push tiers".
 
+Time limits (docs/TOOLCHAIN.md "Build lock"): every step but
+sanity has a deadline of about twice its longest passing run in 225 gates (2026-11-23), at least
+10 min: clippy 20 (162 s; a cold build dir checks every dependency), build-grid-app 40 (868 s;
+an unseeded release build 1607 s), build-race-soak 10 (268 s), identity 10 (88 s), render-smoke 5
+(44 s), crate tests 40 (1127 s), test-workspace 45 (1258 s), soak-quick 10 (233 s). A locked
+step's deadline is capped by the gate's hold limit (-HoldMinutes; crate 65 = 2 x 1925 s, workspace
+and full 55 = 2 x 1636 s), counted from the lock's acquisition. A step that reaches its deadline is
+stopped with its whole process tree, orphaned test binaries included (Invoke-BuildLockProcess),
+fails as TIMEOUT with exit 124, quotes libtest's "has been running for over 60 seconds" lines and
+the last 15 log lines, and the gate gives the lock back.
+
 Logs: -Out (default local\prepush\<time>), one file per step plus summary.md. Exit code 0 when
 every check passed (or sanity passed and the cached pass covers the rest).
 #>
@@ -95,7 +106,10 @@ param(
     # Run the remaining steps after a failure (default: stop at the first one).
     [switch]$KeepGoing,
     # Run the cargo steps even when the pass cache has a pass for the same code key.
-    [switch]$NoCache
+    [switch]$NoCache,
+    # Hold limit of the gate's build lock in minutes (default by tier: crate 65, workspace and
+    # full 55; "Time limits" below).
+    [double]$HoldMinutes = 0
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'build_lock.ps1')
@@ -272,35 +286,37 @@ $characteristics = Join-Path $PrivateDir 'ai-driver-characteristics.tsv'
 # with Lock run under one hold of the build lock (taken at the first, released before the first
 # step without it), so a gate does not queue again between its own steps.
 $steps = New-Object System.Collections.Generic.List[object]
-function Add-Step([string]$Name, [string]$Kind, [string]$Command, [bool]$Lock = $true) { $steps.Add([pscustomobject]@{ Name = $Name; Kind = $Kind; Command = $Command; Lock = $Lock }) }
+# Minutes: the step's time limit ("Time limits" above); 0 = none (sanity runs in this process).
+function Add-Step([string]$Name, [string]$Kind, [string]$Command, [bool]$Lock = $true, [double]$Minutes = 0) { $steps.Add([pscustomobject]@{ Name = $Name; Kind = $Kind; Command = $Command; Lock = $Lock; Minutes = $Minutes }) }
 Add-Step 'sanity' 'sanity' 'diff --check, Markdown links, script parse, log tool' $false
 if ($tier -eq 1) {
-    Add-Step 'clippy-crates' 'cargo' ("clippy --release " + (($crates | ForEach-Object { "-p $_" }) -join ' ') + ' --all-targets -- -D warnings')
+    Add-Step 'clippy-crates' 'cargo' ("clippy --release " + (($crates | ForEach-Object { "-p $_" }) -join ' ') + ' --all-targets -- -D warnings') $true 20
     foreach ($c in $crates) {
         switch ($c) {
-            'grid-app' { Add-Step 'test-grid-app' 'cargo' 'test --release -p grid-app --no-fail-fast -- --include-ignored' }
-            'grid-tools' { Add-Step 'test-grid-tools-bins' 'cargo' 'test --release -p grid-tools --bins --no-fail-fast -- --include-ignored' }
-            'grid-formats' { Add-Step 'test-grid-formats' 'cargo' 'test --release -p grid-formats --lib --test * --no-fail-fast -- --include-ignored' }
+            'grid-app' { Add-Step 'test-grid-app' 'cargo' 'test --release -p grid-app --no-fail-fast -- --include-ignored' $true 40 }
+            'grid-tools' { Add-Step 'test-grid-tools-bins' 'cargo' 'test --release -p grid-tools --bins --no-fail-fast -- --include-ignored' $true 40 }
+            'grid-formats' { Add-Step 'test-grid-formats' 'cargo' 'test --release -p grid-formats --lib --test * --no-fail-fast -- --include-ignored' $true 40 }
         }
     }
 }
-if ($tier -ge 2) { Add-Step 'clippy-workspace' 'cargo' 'clippy --release --workspace --all-targets -- -D warnings' }
+if ($tier -ge 2) { Add-Step 'clippy-workspace' 'cargo' 'clippy --release --workspace --all-targets -- -D warnings' $true 20 }
 # No test draws through the GPU, so a wgpu validation error in grid-app's renderer (F710's skinned
 # layout without a skin bind group, F714) passed every tier. One offscreen frame of Washington
 # route 0 with the Donington scene objects, looking at skinned armco (10-60 s; the start view has
 # no skinned mesh in frame and passed the faulty F710 build).
 $renderArgs = '--route tracks/usa/washington/route_0 --scene donington --camera 214,2.4,874 --look-at 223,1.0,893'
 if ($tier -ge 2 -or $crates -contains 'grid-app') {
-    Add-Step 'build-grid-app' 'cargo' 'build --release -p grid-app --bin grid-app'
-    Add-Step 'render-smoke' 'render' "grid-app $renderArgs --render"
+    Add-Step 'build-grid-app' 'cargo' 'build --release -p grid-app --bin grid-app' $true 40
+    Add-Step 'render-smoke' 'render' "grid-app $renderArgs --render" $true 5
 }
 if ($tier -ge 3) {
-    Add-Step 'build-race-soak' 'cargo' 'build --release -p grid-tools --bin grid-opponent-race --bin grid-soak'
-    Add-Step 'identity' 'identity' 'grid-opponent-race solo, 12-car, 12-car DF+AI vs tools/identity.tsv'
+    Add-Step 'build-race-soak' 'cargo' 'build --release -p grid-tools --bin grid-opponent-race --bin grid-soak' $true 10
+    Add-Step 'identity' 'identity' 'grid-opponent-race solo, 12-car, 12-car DF+AI vs tools/identity.tsv' $true 10
 }
-if ($tier -ge 2) { Add-Step 'test-workspace' 'cargo' 'test --workspace --release --lib --test * --bin grid-app --no-fail-fast -- --include-ignored' }
+if ($tier -ge 2) { Add-Step 'test-workspace' 'cargo' 'test --workspace --release --lib --test * --bin grid-app --no-fail-fast -- --include-ignored' $true 45 }
 # grid-soak quick builds nothing and runs for minutes: outside the lock.
-if ($tier -ge 3) { Add-Step 'soak-quick' 'soak' 'grid-soak quick' $false }
+if ($tier -ge 3) { Add-Step 'soak-quick' 'soak' 'grid-soak quick' $false 10 }
+if ($HoldMinutes -le 0) { $HoldMinutes = if ($tier -eq 1) { 65 } else { 55 } }
 
 # ---- pass cache --------------------------------------------------------------------------------
 # A gate that passed records the key of everything its cargo steps depend on; a later run with the
@@ -398,12 +414,16 @@ function Get-TargetDir {
     return $script:targetDir
 }
 
-# cmd.exe does the redirection (PowerShell 5.1 turns redirected native stderr into errors). The
-# line goes through an environment variable: PowerShell 5.1 breaks a native argument with inner
-# quoted paths that contain spaces ("C:\Program Files (x86)\...").
+# cmd.exe does the redirection (PowerShell 5.1 turns redirected native stderr into errors), through
+# Invoke-BuildLockCmdLine: the line runs until the current step's deadline ($stepDeadline, set by
+# the main loop); at the deadline its whole process tree is killed, $stepTimedOut is set and the
+# exit code is 124.
+$stepDeadline = $null; $stepTimedOut = $false; $stepKilled = @()
 function Invoke-CmdLine([string]$Line) {
-    $env:GRID_CMDLINE = $Line
-    try { & $env:ComSpec /d /c '%GRID_CMDLINE%'; return $LASTEXITCODE } finally { Remove-Item Env:\GRID_CMDLINE -ErrorAction SilentlyContinue }
+    if ($script:stepTimedOut) { return 124 }
+    $r = Invoke-BuildLockCmdLine $Line $script:stepDeadline
+    if ($r.TimedOut) { $script:stepTimedOut = $true; $script:stepKilled = @($r.Killed) }
+    return $r.ExitCode
 }
 function Invoke-Logged([string]$Log, [string]$Exe, [string]$Arguments) {
     return Invoke-CmdLine "`"$Exe`" $Arguments > `"$Log`" 2>&1"
@@ -521,6 +541,7 @@ function Invoke-Identity([string]$Log) {
         $stdout = Join-Path $Out "identity-$name.txt"
         $t0 = Get-Date
         $code = Invoke-CmdLine "`"$race`" `"$($private.GRID_GAME_ROOT)`" `"$($private.GRID_CONTACT_DIRECTIONS)`" `"$($private.GRID_BODY_EVENT_PARAMETERS)`" $raceArgs > `"$stdout`" 2> `"$stdout.stderr`""
+        if ($script:stepTimedOut) { $failed++; $lines.Add("identity $name no exit before the step deadline"); break }
         $hash = (Get-FileHash -LiteralPath $stdout -Algorithm SHA256).Hash.ToLowerInvariant()
         $status = if ($code -ne 0) { "exit $code" } elseif ($hash -eq $expected) { 'unchanged' } else { "CHANGED (tools/identity.tsv has $expected)" }
         if ($status -ne 'unchanged') { $failed++ }
@@ -535,21 +556,16 @@ function Invoke-Identity([string]$Log) {
 }
 
 # One offscreen frame (F714). Fails on a non-zero exit, a caught rendering error (Bevy logs wgpu
-# validation errors so) or no picture after 5 minutes.
+# validation errors so) or no picture before the step deadline (5 minutes).
 function Invoke-RenderSmoke([string]$Log) {
     $app = Join-Path (Get-TargetDir) 'release\grid-app.exe'
     $png = Join-Path $Out 'render-smoke.png'
     Remove-Item -LiteralPath $png -ErrorAction SilentlyContinue
-    $env:GRID_CMDLINE = "`"$app`" --game-root `"$($private.GRID_GAME_ROOT)`" $renderArgs --render `"$png`" > `"$Log`" 2>&1"
-    try { $proc = Start-Process -FilePath $env:ComSpec -ArgumentList '/d /c %GRID_CMDLINE%' -NoNewWindow -PassThru; $null = $proc.Handle }
-    finally { Remove-Item Env:\GRID_CMDLINE -ErrorAction SilentlyContinue }
-    if (-not $proc.WaitForExit(300000)) {
-        Get-CimInstance Win32_Process -Filter "ParentProcessId=$($proc.Id)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        Add-Content -LiteralPath $Log -Value 'render-smoke: no exit after 5 minutes'
-        return 1
+    $code = Invoke-CmdLine "`"$app`" --game-root `"$($private.GRID_GAME_ROOT)`" $renderArgs --render `"$png`" > `"$Log`" 2>&1"
+    if ($script:stepTimedOut) {
+        Add-Content -LiteralPath $Log -Value 'render-smoke: no exit before the step deadline'
+        return $code
     }
-    $code = $proc.ExitCode
     $errors = @(Select-String -LiteralPath $Log -SimpleMatch 'Caught rendering error').Count
     $picture = Test-Path -LiteralPath $png
     Add-Content -LiteralPath $Log -Value "render-smoke: exit $code, caught rendering errors $errors, picture $picture"
@@ -563,6 +579,7 @@ $cargo = (Get-Command cargo).Source
 $failedAny = $false
 $n = 0
 $gateLock = $null
+$timeoutReport = $null
 $cachedNote = if ($cached) { "cached: tier $($cached.tier) passed with the same code key at $($cached.finished_local), run $($cached.out)" } else { $null }
 try {
 foreach ($s in $steps) {
@@ -573,8 +590,15 @@ foreach ($s in $steps) {
     $t0 = Get-Date; $waited = 0; $code = 1
     if ($gateLock -and -not $s.Lock) { Exit-BuildLock $gateLock; $gateLock = $null }
     if ($s.Lock -and -not $gateLock) {
-        $gateLock = Enter-BuildLock -Purpose "prepush $($TierNames[$tier]) ($(@($steps | Where-Object { $_.Lock } | ForEach-Object { $_.Name }) -join ', '))"
+        $gateLock = Enter-BuildLock -Purpose "prepush $($TierNames[$tier]) ($(@($steps | Where-Object { $_.Lock } | ForEach-Object { $_.Name }) -join ', '))" -HoldMinutes $HoldMinutes
         $waited = [int]($gateLock.Acquired - $t0).TotalSeconds
+    }
+    # The step's clock starts after the lock wait; a locked step ends by the gate's deadline.
+    $stepTimedOut = $false; $stepKilled = @()
+    $stepDeadline = if ($s.Minutes -gt 0) { (Get-Date).AddMinutes($s.Minutes) } else { $null }
+    $limitNote = "step limit $($s.Minutes) min"
+    if ($s.Lock -and $gateLock -and $gateLock.Deadline -and $stepDeadline -and $gateLock.Deadline -lt $stepDeadline) {
+        $stepDeadline = $gateLock.Deadline; $limitNote = "the gate's hold limit of $HoldMinutes min"
     }
     Write-Host "prepush: $($s.Name) ..."
     switch ($s.Kind) {
@@ -590,8 +614,16 @@ foreach ($s in $steps) {
         }
     }
     $secs = [int]((Get-Date) - $t0).TotalSeconds
-    $status = if ($code -eq 0) { 'pass' } else { 'FAIL' }
-    if ($code -ne 0) {
+    $status = if ($stepTimedOut) { 'TIMEOUT' } elseif ($code -eq 0) { 'pass' } else { 'FAIL' }
+    if ($stepTimedOut) {
+        $failedAny = $true
+        $verdict = "prepush: $($s.Name) TIMEOUT after $secs s ($limitNote); killed $($stepKilled.Count) process(es): $($stepKilled -join ' ')"
+        Write-Host $verdict
+        $hang = @(Get-BuildLockHangReport $log 15)
+        foreach ($l in $hang) { Write-Host "    $l" }
+        $timeoutReport = @($verdict) + $hang
+        Write-BuildLockTimeoutLine ("prepush: pid {0} in {1}: step {2} reached its deadline after {3} s ({4}); killed {5} process(es): {6}" -f $PID, $repo, $s.Name, $secs, $limitNote, $stepKilled.Count, ($stepKilled -join ' '))
+    } elseif ($code -ne 0) {
         $failedAny = $true
         Write-Host "prepush: $($s.Name) FAILED (exit $code); last lines of $log"
         if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 30 | ForEach-Object { Write-Host "    $_" } }
@@ -651,6 +683,7 @@ if ($cachedNote) {
 $md.Add('')
 $md.Add('| step | status | seconds | lock wait |'); $md.Add('|---|---|---|---|')
 foreach ($r in $results) { $md.Add("| $($r.Name) | $($r.Status) | $($r.Seconds) | $($r.Waited) |") }
+if ($timeoutReport) { $md.Add(''); $md.Add('Timeout:'); $md.Add('```'); foreach ($l in $timeoutReport) { $md.Add($l) }; $md.Add('```') }
 $md.Add(''); $md.Add('Changed paths:'); foreach ($c in $classes) { $md.Add("- $($TierNames[$c.Tier]) ``$($c.Path)`` ($($c.Reason))") }
 $md | Set-Content -LiteralPath (Join-Path $Out 'summary.md') -Encoding utf8
 Write-Host "prepush: $(if ($failedAny) { 'FAILED' } elseif ($cached) { 'passed (sanity; cargo steps by the cached pass)' } else { 'passed' }), tier $($TierNames[$tier]), $total s; logs in $Out"

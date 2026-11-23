@@ -18,6 +18,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [build_gate.ps1](build_gate.ps1) | Build gate (docs/TOOLCHAIN.md "Build gate"): end-to-end checks of the real app before a rebuild of the PC playable, the portable copy or the APKs. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [build_gate_nightly.ps1](build_gate_nightly.ps1) | Nightly long soak of the real app (docs/TOOLCHAIN.md "Build gate", part 4). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [build_lock.ps1](build_lock.ps1) | One cargo build at a time across every checkout on this PC (docs/TOOLCHAIN.md, "Build lock"). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
+| [build_lock_test.ps1](build_lock_test.ps1) | Self-test of the build lock's hold limit (tools\build_lock.ps1) against a private lock root; prints one verdict line. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [build_macos.py](build_macos.py) | Build the native macOS game and package a code-only DRIG.app (docs/MACOS.md). | [MACOS](../docs/MACOS.md) |
 | [build_seed.ps1](build_seed.ps1) | Build a new cargo build-dir seed beside C:\cargo-build\seed and swap it in. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [dedup_hardlinks.py](dedup_hardlinks.py) | Replace byte-identical files under a directory with NTFS hard links. | [DISK_USAGE](../docs/DISK_USAGE.md) |
@@ -35,7 +36,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [split_project_log.py](split_project_log.py) | Split the old single-file PROJECT_LOG.md into one file per entry under log/. |  |
 | [tests/test_rebuild_macos.py](tests/test_rebuild_macos.py) | Exercise rebuild isolation and cleanup with real Git repos and a simulated compiler. |  |
 | [time_build.ps1](time_build.ps1) | Time one build or test command and record the machine load while it runs. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
-| [update_prototype.ps1](update_prototype.ps1) | (no header comment) | [PROJECT_RELOCATION_PLAN](../docs/PROJECT_RELOCATION_PLAN.md) |
+| [update_prototype.ps1](update_prototype.ps1) | (no header comment) | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 
 ## Android
 

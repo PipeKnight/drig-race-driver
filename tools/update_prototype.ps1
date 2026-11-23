@@ -98,7 +98,7 @@ try {
         & $env:ComSpec /d /s /c "`"`"$taskCargo`" $taskArguments > `"$taskLog`" 2>&1`""
         return $LASTEXITCODE
     }
-    $taskLock=Enter-BuildLock -Purpose 'update_prototype'
+    $taskLock=Enter-BuildLock -Purpose 'update_prototype' -HoldMinutes 60  # 2 x 1797 s, the longest prototype step of a release
     if((Invoke-TaskCargo (Join-Path $taskEvidence 'source-tests.txt') 'test -p grid-tools --lib --release --offline source_driving -- --ignored') -ne 0){throw "Source driving checks failed; see $taskEvidence"}
     if((Invoke-TaskCargo (Join-Path $taskEvidence 'app-tests.txt') 'test -p grid-app --release --offline -- --ignored') -ne 0){throw "App checks failed; see $taskEvidence"}
     if($taskDlaa){

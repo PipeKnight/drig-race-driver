@@ -243,15 +243,66 @@ build_android.ps1 around cargo ndk and Gradle, release_playable.ps1 around each 
 build_gate.ps1 for the perf phase (so locked builds wait instead of disturbing the CPU timing;
 after `-PerfWaitMinutes` perf runs without it and a case over budget is `noisy`). A child script
 under a holder (GRID_BUILD_LOCK = the holder's pid) runs without queueing behind it. Builds
-started outside the lock are not stopped; the holder prints how many cargo/rustc processes run
-outside it. build_seed.ps1 does not take it (its 2-h build would block every session).
+started outside the lock are not stopped; the holder lists the cargo/rustc processes and the
+grid-app.exe, grid.exe, cargo test binaries (`name-<16 hex>.exe`) and apitrace processes that
+run outside it. build_seed.ps1 does not take it (its 2-h build would block every session).
 
-Ad-hoc builds through the lock (the exit code is the command's):
+Ad-hoc builds through the lock (the exit code is the command's, 124 after a timeout):
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_lock.ps1 cargo build --release -p grid-app
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_lock.ps1 -HoldMinutes 240 cargo run --release -p grid-tools --bin grid-soak -- long
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_lock.ps1 -Status
 ```
+
+**Hold limit (F888, 2026-11-23).** One prepush full
+gate held the lock for more than 172 min because a grid-app GPU test hung, and every session
+queued behind it; a leftover `grid_app-<hash>.exe` also kept a timing script's open-ended wait
+busy. Every hold now has a limit (`-HoldMinutes`, on the wrapper and on `Enter-BuildLock`; 0 or
+less is refused, there is no unlimited hold):
+
+- At acquisition the holder joins a named Windows job object, so every process it starts, and
+  their children after the parent exits (cargo's test binaries), are members. A detached watchdog
+  (`build_lock.ps1 -Watchdog`, not a job member) waits until the deadline plus `-GraceSeconds`
+  (default 120). If the same holder (pid, its start time, the acquisition time) still holds the
+  lock then, it kills the job's members, the holder's descendants and the processes started after
+  the acquisition from the checkout's target or build dir (also the holder itself), appends a line
+  to `timeouts.log` in the lock root and so frees the lock.
+- Cooperative holders stop first. The wrapper and prepush run their commands through
+  `Invoke-BuildLockProcess`, which kills the command's job members at the deadline and returns
+  124; the wrapper prints `build_lock: TIMEOUT … exit 124` and logs the hold to `timeouts.log`.
+- `Exit-BuildLock` stops the watchdog, kills leftover cargo test binaries of the job (and names
+  any other survivor) and appends the hold (purpose, checkout, minutes, limit) to `holds.log`,
+  the data for future limits.
+- `-Status` prints the held time and the limit and marks a holder past its deadline as
+  `OVER LIMIT` with the watchdog's state.
+- A nested holder (GRID_BUILD_LOCK set by a live ancestor) runs under the ancestor's limit.
+- `GRID_BUILD_LOCK_ROOT` moves the lock root, for tests only.
+
+Limits, about twice the longest passing run of each kind (225 prepush `summary.md` files in four
+checkouts and 334 pass-cache records, read 2026-11-23; lock holds exclude queue waits):
+
+| Holder | Longest passing hold | Limit |
+|---|---|---|
+| wrapper default (ad-hoc cargo) | unseeded release build 1607 s | 55 min |
+| prepush crate tier | 1925 s (n = 57, median 397 s) | 65 min |
+| prepush workspace / full tier | 1636 s (full n = 13, median 1310 s) | 55 min |
+| update_prototype.ps1 | 1797 s (n = 65) | 60 min |
+| build_android.ps1, release_playable.ps1 APK | 1617 s (n = 58) | 55 min |
+| build_gate.ps1 perf phase | 437 s | 15 min |
+
+prepush also gives every step but sanity its own deadline (at least 10 min, capped by the gate's
+hold): clippy 20 min (162 s), build-grid-app 40 (868 s), build-race-soak 10 (268 s), identity 10
+(88 s), render-smoke 5 (44 s), crate tests 40 (1127 s), test-workspace 45 (1258 s), soak-quick 10
+(233 s). A step at its deadline fails as TIMEOUT (exit 124): the verdict names the step, quotes
+libtest's "has been running for over 60 seconds" lines and the last 15 log lines, writes them to
+`summary.md` and `timeouts.log`, and the gate gives the lock back. Long jobs (soaks, captures)
+pass an explicit larger `-HoldMinutes`.
+
+`tools/build_lock_test.ps1` checks all of this against a temporary lock root (never the real one)
+and prints one verdict line: wrapper timeout with an orphaned grandchild (no survivors, exit 124,
+a `timeouts.log` line, lock free), a normal command, a nested holder, the watchdog of a holder
+that ignores its limit (`-Status` shows OVER LIMIT first), and a prepush-like step timeout.
 
 ### Release (coordinator)
 

@@ -72,7 +72,7 @@ if (-not $SkipPerf) {
     # ends; builds started outside it are waited for below. After -PerfWaitMinutes perf runs
     # without the lock and a case over budget is "noisy".
     $perfLock = $null
-    try { $perfLock = Enter-BuildLock -Purpose 'build_gate perf' -TimeoutMinutes $PerfWaitMinutes }
+    try { $perfLock = Enter-BuildLock -Purpose 'build_gate perf' -TimeoutMinutes $PerfWaitMinutes -HoldMinutes 15 }  # hold limit 2 x 437 s, the longest perf phase
     catch { Write-Host "gate_perf_wait $($_.Exception.Message); perf runs without the build lock" }
     $waitUntil = (Get-Date).AddMinutes($PerfWaitMinutes)
     while ((Get-GateCompilers) -and (Get-Date) -lt $waitUntil) {

@@ -128,7 +128,7 @@ try {
     if (Test-Path -LiteralPath $jni) { Remove-Item -LiteralPath $jni -Recurse -Force }
     $started = Get-Date
     # One build at a time on this PC (tools/build_lock.ps1): cargo ndk and Gradle under one lock.
-    $lock = Enter-BuildLock -Purpose $(if ($Clippy) { 'build_android -Clippy' } elseif ($Profile) { 'build_android -Profile' } else { 'build_android' })
+    $lock = Enter-BuildLock -Purpose $(if ($Clippy) { 'build_android -Clippy' } elseif ($Profile) { 'build_android -Profile' } else { 'build_android' }) -HoldMinutes 55  # 2 x 1617 s, the longest APK build (2026-11-23)
     # Without the seed a build dir compiles Bevy for aarch64 once per variant,
     # about 15 min each (docs/TOOLCHAIN.md, "Build and test cost").
     if (-not $NoSeed) {
