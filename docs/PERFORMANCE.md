@@ -5206,3 +5206,69 @@ Question (after F884): can the opponents' physics tick run in parallel, and why 
     other. The second ran under outside load, and its drive tick, which the spread cannot touch, rose too.
   - The 6 ms bar is not reached: the main-gated slow frames take 7.1-9.0 ms.
   - Offscreen fixed-step derby frames differ in at most 2 pixels by 1 level.
+
+## Derby collision frames: the DentSpread rerun and patched car batches (F891)
+
+Coordinator's order after F887: rerun its A/B under the build lock, then make the `car_batch` rebuild of dented
+groups cheaper without changing parts, damage or detachment (owner rule of 20 November), then look at what
+holds `AssetEventSystems` if that is the next largest item. Bar: main-gated collision frames at or under 6 ms.
+
+- **DentSpread rerun: no gain at frame level.** Windowed derby, Enhanced 1280x800, 45 s per run, 4 alternating
+  pairs inside one build-lock hold (local/tick/ab3.ps1; rev ecffc8b6 plus this work, exe C3A0FE2967EFD995).
+  Outside the lock before the runs: nothing, or 2-3 cargo/rustc processes before b-2, a-3 and p0-1; CPU busy
+  7-28 %.
+
+  | Arm | Slow windows | Main-gated | Render-gated | Main ms (slow main frames) | fixed | tp | cb |
+  |---|---|---|---|---|---|---|---|
+  | `GRID_DENT_SPREAD=0` | 88 of 113 | 59 | 29 | 6.35 | 2.36 | 1.4 | 2.0 |
+  | spread on | 100 of 123 | 39 | 61 | 6.31 | 2.39 | 1.4 | 2.0 |
+
+  The main-gated frames cost the same; fewer windows are main-gated but more are render-gated, and there are
+  more slow windows in all. The spread stays as F887 left it; whether to keep it is the coordinator's call.
+- **Patched batches** (`car_batch::patch`). A dented group no longer rebuilds its batches from all members.
+  The batch keeps where each member's vertices start (`Built.slots`) and rewrites only members that changed
+  since the last build (a `Modified` mesh, or a member joining or leaving the batch). Members that left the
+  batch are rewritten as collapsed vertices, as `collapse` makes them. It writes only the bytes that differ,
+  merges the batch bounds from the per-member boxes, and streams only the changed byte runs when the batch is
+  uploaded through `mesh_stream`. Any change of shape (layout, vertex count, members, batches) takes the full
+  rebuild. `static_batch::place` is the shared vertex placement of `build` and `patch`. Parts stay separate
+  entities; damage and detachment are untouched. `GRID_BATCH_PATCH=0` forces full rebuilds; the `car_batch`
+  line counts `patched=`.
+  - Unit test `a_patched_batch_matches_a_full_rebuild`: after a dent and after a part comes loose, the patched
+    batch has the bytes, indices and bounds of a full rebuild, streamed or written to the asset, and only the
+    changed member's bytes are queued.
+  - Offscreen fixed-step derby at 1280x720, `GRID_BATCH_PATCH` off and on: ticks 1500 and 2400 are
+    bit-identical (0 differing pixels). At tick 2400 the same 2117 rebuilds take 366.1 ms without and 277.8 ms
+    with patching (1842 patched), 24 % less.
+  - Windowed, 3 alternating pairs with the spread on: about 0.10 ms per rebuild without and 0.068 ms with
+    patching; every dent rebuild was patched (rebuilds minus patched = the 275 first builds). At frame 3600
+    rebuilds cost about 0.072 and 0.05 ms per frame. At frame level the pairs give 11 and 8 main-gated windows
+    (main 8.03 and 9.36 ms), too few to compare; render-gated windows dominate (61 and 70).
+  - Why only a third: a dent re-projects nearly every part of the car, so most members are stale anyway. What
+    remains is `place` per vertex. The rest of `refresh` (about 0.16 ms per frame) now costs more than the
+    rebuilds.
+- **What holds `AssetEventSystems`** (temporary probe, not committed: gates timed from the start of PostUpdate,
+  windowed derby, 45 s runs). `car_batch::refresh` runs after `AssetEventSystems`, and that set waits for the
+  UI chain: `widget::text_system` is ordered `.before(AssetEventSystems)` and sits in `UiSystems::PostLayout`,
+  at the end of Bevy's chained PostUpdate sets (`CameraUpdateSystems`, `UiSystems::Prepare` after
+  `AnimationSystems`, `Propagate`, `Content`, `Layout`, `PostLayout`). Average ms from PostUpdate start, slow
+  frames in brackets: camera 0.11, `AnimationSystems` 0.46 (0.88), `UiSystems::Prepare` 0.49 (0.91), text 0.65
+  (1.07), `AssetEventSystems` 0.70 (1.13), `car_batch` done 1.00 (1.48), transforms propagated 1.26 (1.72).
+  Image asset events are almost none; mesh events are 13-22 per frame.
+  - Bevy's `AnimationPlugin` (the game uses no Bevy animation or glTF) holds `AnimationSystems` until about
+    0.4 ms. Dropping it moves that gate to 0.05-0.09 ms but `UiSystems::Prepare` only by 0.01-0.1 ms, because
+    `render_scale`'s `(apply, ui_on_window)`, ordered before `Prepare`, also ends at about 0.38 ms. Two A/Bs
+    of 3 pairs (exe 0520877126E6FB55 A first, CB2C076726C82276 B first; nothing outside the lock, CPU busy
+    6-26 %): with A first the arms gave 43 and 5 main-gated windows, with B first 1 and 1. The first gap
+    followed the run order, not the plugin, so `AnimationPlugin` stays.
+  - `render_scale::apply` alone ends at 0.37-0.58 ms, with `AnimationSystems` (0.38-0.60). It returns early on
+    nearly every frame, so it too waits for something that runs from about 0.1 to 0.37 ms. Its auto sync points
+    are not that something: with `chain_ignore_deferred`/`before_ignore_deferred` (exe CFBF251CDF8F7CF5, A
+    first, nothing outside the lock, CPU busy 7-17 %) every gate moved by under 0.03 ms. The probe cannot name
+    the holder. A `trace` build (full Bevy rebuild, about 28 min) would, but the most it could win is about
+    0.27 ms of PostUpdate delay before `car_batch`, so it is left for the coordinator to decide.
+  - Frame-level counts across these A/Bs moved with run order and machine state, not the variant: A first gave
+    43/5 and 55/17 main-gated windows, B first 1/1. When an arm is mostly main-gated, its main frame averages
+    5.8-5.9 ms.
+- Next: the main-gated collision frames now average 5.9-6.4 ms. `refresh` outside the rebuilds (about
+  0.16 ms per frame) is the largest item left in `car_batch`.

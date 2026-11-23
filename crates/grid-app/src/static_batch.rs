@@ -318,42 +318,11 @@ pub(crate) fn build<M: Asset>(
     let mut base = 0u32;
     for part in parts {
         let source = meshes.get(&part.mesh).expect("batched source mesh");
-        let m3 = Mat3::from_mat4(part.matrix);
-        let normal = m3.inverse().transpose();
-        let sign = m3.determinant().signum();
-        for ((id, _), out) in layout.iter().zip(&mut values) {
-            let attribute = source
-                .attributes()
-                .find(|(a, _)| a.id == *id)
-                .map(|(_, v)| v)
-                .expect("batched layout");
-            match (out, attribute) {
-                (VertexAttributeValues::Float32x3(out), VertexAttributeValues::Float32x3(v)) => {
-                    if *id == Mesh::ATTRIBUTE_POSITION.id {
-                        out.extend(v.iter().map(|p| {
-                            (part.matrix.transform_point3(Vec3::from(*p)) - origin).to_array()
-                        }));
-                    } else if *id == Mesh::ATTRIBUTE_NORMAL.id {
-                        out.extend(v.iter().map(|n| {
-                            (normal * Vec3::from(*n)).normalize_or_zero().to_array()
-                        }));
-                    } else {
-                        out.extend_from_slice(v);
-                    }
-                }
-                (VertexAttributeValues::Float32x4(out), VertexAttributeValues::Float32x4(v)) => {
-                    if *id == Mesh::ATTRIBUTE_TANGENT.id {
-                        out.extend(v.iter().map(|t| {
-                            let xyz = (m3 * Vec3::new(t[0], t[1], t[2])).normalize_or_zero();
-                            [xyz.x, xyz.y, xyz.z, t[3] * sign]
-                        }));
-                    } else {
-                        out.extend_from_slice(v);
-                    }
-                }
-                (VertexAttributeValues::Float32x2(out), VertexAttributeValues::Float32x2(v)) => {
-                    out.extend_from_slice(v);
-                }
+        for (out, placed) in values.iter_mut().zip(place(part.matrix, source, origin, layout)) {
+            match (out, placed) {
+                (VertexAttributeValues::Float32x3(out), VertexAttributeValues::Float32x3(v)) => out.extend(v),
+                (VertexAttributeValues::Float32x4(out), VertexAttributeValues::Float32x4(v)) => out.extend(v),
+                (VertexAttributeValues::Float32x2(out), VertexAttributeValues::Float32x2(v)) => out.extend(v),
                 _ => unreachable!("layout checked by merge"),
             }
         }
@@ -372,6 +341,54 @@ pub(crate) fn build<M: Asset>(
     let indices = Indices::U16(indices.into_iter().map(|i| i as u16).collect());
     mesh.insert_indices(indices.clone());
     (mesh, indices, ranges)
+}
+
+/// One part's vertices as [`build`] places them, one value list per `layout`
+/// attribute (car_batch patches a dented part's vertices with it).
+pub(crate) fn place(
+    matrix: Mat4,
+    source: &Mesh,
+    origin: Vec3,
+    layout: &[(MeshVertexAttributeId, VertexFormat)],
+) -> Vec<VertexAttributeValues> {
+    let m3 = Mat3::from_mat4(matrix);
+    let normal = m3.inverse().transpose();
+    let sign = m3.determinant().signum();
+    layout
+        .iter()
+        .map(|(id, _)| {
+            let attribute = source
+                .attributes()
+                .find(|(a, _)| a.id == *id)
+                .map(|(_, v)| v)
+                .expect("batched layout");
+            match attribute {
+                VertexAttributeValues::Float32x3(v) if *id == Mesh::ATTRIBUTE_POSITION.id => {
+                    VertexAttributeValues::Float32x3(
+                        v.iter()
+                            .map(|p| (matrix.transform_point3(Vec3::from(*p)) - origin).to_array())
+                            .collect(),
+                    )
+                }
+                VertexAttributeValues::Float32x3(v) if *id == Mesh::ATTRIBUTE_NORMAL.id => {
+                    VertexAttributeValues::Float32x3(
+                        v.iter().map(|n| (normal * Vec3::from(*n)).normalize_or_zero().to_array()).collect(),
+                    )
+                }
+                VertexAttributeValues::Float32x4(v) if *id == Mesh::ATTRIBUTE_TANGENT.id => {
+                    VertexAttributeValues::Float32x4(
+                        v.iter()
+                            .map(|t| {
+                                let xyz = (m3 * Vec3::new(t[0], t[1], t[2])).normalize_or_zero();
+                                [xyz.x, xyz.y, xyz.z, t[3] * sign]
+                            })
+                            .collect(),
+                    )
+                }
+                other => other.clone(),
+            }
+        })
+        .collect()
 }
 
 const ATTRIBUTE_BY_ID: [bevy::mesh::MeshVertexAttribute; 8] = [

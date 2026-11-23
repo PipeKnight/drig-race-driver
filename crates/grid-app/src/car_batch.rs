@@ -179,6 +179,25 @@ struct Member {
     alive: bool,
     /// Consecutive frames in place.
     stable: u32,
+    /// Its vertices in the batch may differ from a rebuild's: its mesh
+    /// changed, or it left or joined the batch since the last rebuild.
+    stale: bool,
+}
+
+/// Where the last full rebuild put a group's members: per member its batch,
+/// first vertex and the bounds of its vertices there. A rebuild for changed
+/// members rewrites only theirs ([`patch`]).
+struct Built {
+    slots: Vec<Slot>,
+    batches: usize,
+}
+
+#[derive(Clone, Copy)]
+struct Slot {
+    batch: usize,
+    first: usize,
+    min: Vec3,
+    max: Vec3,
 }
 
 struct Group {
@@ -190,6 +209,8 @@ struct Group {
     members: Vec<Member>,
     batches: Vec<Entity>,
     dirty: bool,
+    /// The layout of the last full rebuild; `None` until the first.
+    built: Option<Built>,
     /// The car casts with its [`ShadowBody`]: parts and batches cast none.
     shadow_body: bool,
     /// Level of detail: 0, or a low level 2..5.
@@ -220,6 +241,8 @@ struct CarBatches {
     refresh_ns: u64,
     frames: u64,
     rebuilds: u64,
+    /// Rebuilds that rewrote only their changed members ([`patch`]).
+    patched: u64,
     /// Batches written in place (only their changed parts' vertices).
     streamed: u64,
     /// Rebuilds for a deformed member mesh only, and the time of all.
@@ -511,14 +534,17 @@ fn refresh(
                     commands.entity(batch).despawn();
                 }
                 group.members.clear();
+                group.built = None;
                 continue;
             }
             stats[1] += group.members.iter().filter(|m| m.batched).count();
             // A deformed member rebuilds once the car is placed again.
-            group.dirty |= group
-                .members
-                .iter()
-                .any(|m| m.batched && modified.contains(&m.mesh.id()));
+            for member in &mut group.members {
+                if modified.contains(&member.mesh.id()) {
+                    member.stale = true;
+                    group.dirty |= member.batched;
+                }
+            }
             continue;
         }
         let mut reshaped = false;
@@ -529,6 +555,8 @@ fn refresh(
                 0
             };
             let batched = member.placed && (member.batched || member.stable >= REJOIN_FRAMES);
+            let deformed = modified.contains(&member.mesh.id());
+            member.stale |= deformed || batched != member.batched;
             if batched != member.batched {
                 member.batched = batched;
                 group.dirty = true;
@@ -548,7 +576,7 @@ fn refresh(
                             .remove::<(RenderLayers, NotShadowCaster)>();
                     }
                 }
-            } else if batched && modified.contains(&member.mesh.id()) {
+            } else if batched && deformed {
                 reshaped |= !group.dirty;
                 group.dirty = true;
             }
@@ -562,7 +590,10 @@ fn refresh(
             state.reshaped += u64::from(reshaped);
             let start = std::time::Instant::now();
             let shown = state.shown.get(group.slot).copied().unwrap_or(0) == group.level;
-            state.streamed += rebuild(&mut commands, group, pose, shown, &mut meshes, &mut batches, stream.as_deref());
+            let (streamed, patched) =
+                rebuild(&mut commands, group, pose, shown, &mut meshes, &mut batches, stream.as_deref());
+            state.streamed += streamed;
+            state.patched += u64::from(patched);
             state.rebuild_ns += start.elapsed().as_nanos() as u64;
         }
         // Batches of a level the car does not show keep their pose; a level
@@ -609,7 +640,7 @@ fn refresh(
     if state.frames == 1 || state.frames.is_multiple_of(REPORT_FRAMES) {
         let spawned: usize = state.groups.iter().map(|g| g.batches.len()).sum();
         println!(
-            "car_batch version=2 frame={} cars={} groups={} parts={} batched={} batches={spawned} extras={} rebuilds={} streamed={} reshaped={} rebuild_ms={:.1} refresh_ms={:.1} level_changes={} level_car_frames={:?}",
+            "car_batch version=2 frame={} cars={} groups={} parts={} batched={} batches={spawned} extras={} rebuilds={} patched={} streamed={} reshaped={} rebuild_ms={:.1} refresh_ms={:.1} level_changes={} level_car_frames={:?}",
             state.frames,
             state.anchors.len(),
             state.groups.len(),
@@ -617,6 +648,7 @@ fn refresh(
             stats[1],
             state.extras.len(),
             state.rebuilds,
+            state.patched,
             state.streamed,
             state.reshaped,
             state.rebuild_ns as f64 / 1e6,
@@ -717,6 +749,7 @@ fn register(
             placed: false,
             alive: true,
             stable: REJOIN_FRAMES,
+            stale: false,
         };
         let found = groups.iter().position(|g| {
             g.car == car && g.level == level && g.material == material.0 && g.layout == layout
@@ -747,6 +780,7 @@ fn register(
                     members: vec![member],
                     batches: Vec::new(),
                     dirty: true,
+                    built: None,
                     shadow_body,
                     level,
                 });
@@ -891,7 +925,9 @@ fn drawn_soon(group: &Group, shown: &[u8], posed: &[u8], fading: bool) -> bool {
 /// changes no batch's layout and streams only its own vertices instead of
 /// uploading the whole batch again. A batch with no part in it is hidden.
 /// New batches of a level the car does not show start on the hidden layer.
-/// Returns the number of batches streamed in place.
+/// When the batches stand as the last full rebuild left them, only the
+/// changed members' vertices are rewritten ([`patch`]), to the same bytes.
+/// Returns the number of batches streamed in place and whether it patched.
 fn rebuild(
     commands: &mut Commands,
     group: &mut Group,
@@ -900,8 +936,17 @@ fn rebuild(
     meshes: &mut Assets<Mesh>,
     batches: &mut Query<(&mut Transform, &mut Visibility, &Mesh3d, &mut Aabb), With<Batch>>,
     stream: Option<&crate::mesh_stream::MeshStream>,
-) -> u64 {
+) -> (u64, bool) {
+    if patch_enabled()
+        && let Some(streamed) = patch(group, meshes, batches, stream)
+    {
+        for member in &mut group.members {
+            member.stale = false;
+        }
+        return (streamed, true);
+    }
     let mut streamed = 0;
+    let mut slots = Vec::with_capacity(group.members.len());
     let mut chunks: Vec<Vec<Part<StandardMaterial>>> = Vec::new();
     let mut kept: Vec<Vec<bool>> = Vec::new();
     let mut count = MAX_VERTICES;
@@ -926,6 +971,14 @@ fn rebuild(
         let (mut mesh, _, _) = build(chunk, meshes, Vec3::ZERO, &group.layout);
         let parts: Vec<usize> = chunk.iter().map(|p| p.vertices).collect();
         collapse(&mut mesh, &parts, kept);
+        if let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            let mut first = 0;
+            for &count in &parts {
+                let (min, max) = bounds(&positions[first..first + count]);
+                slots.push(Slot { batch: i, first, min, max });
+                first += count;
+            }
+        }
         let used = if kept.contains(&true) {
             Visibility::Inherited
         } else {
@@ -978,7 +1031,168 @@ fn rebuild(
             visibility.set_if_neq(Visibility::Hidden);
         }
     }
-    streamed
+    group.built = (slots.len() == group.members.len()).then_some(Built { slots, batches: chunks.len() });
+    for member in &mut group.members {
+        member.stale = false;
+    }
+    (streamed, false)
+}
+
+/// Whether a rebuild may rewrite only its changed members (`GRID_BATCH_PATCH=0`
+/// rebuilds every batch whole, for comparisons).
+fn patch_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("GRID_BATCH_PATCH").map_or(true, |v| v != "0"))
+}
+
+/// Smallest and largest corner of `positions` (as `Aabb::enclosing`); no
+/// positions give an empty box (min above max) that merges as nothing.
+fn bounds(positions: &[[f32; 3]]) -> (Vec3, Vec3) {
+    positions
+        .iter()
+        .map(|p| Vec3::from(*p))
+        .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), v| (min.min(v), max.max(v)))
+}
+
+/// A rebuild that rewrites only the stale members' vertices, and every
+/// member out of its batch (a part off the batch may have been dented
+/// without an event, mesh_stream::replace), with the same bytes as the full
+/// path of [`rebuild`]: the same placement (`static_batch::place`), collapse
+/// and bounds. A dent moves vertices and keeps the part's topology, so the
+/// batches keep their indices. Vertices that differ are streamed in place
+/// when the batch is uploaded, else the asset is changed. `None` (nothing
+/// written): the group changed shape since its last full rebuild (a member
+/// added, a batch or a source mesh not as built), so it rebuilds whole.
+fn patch(
+    group: &mut Group,
+    meshes: &mut Assets<Mesh>,
+    batches: &mut Query<(&mut Transform, &mut Visibility, &Mesh3d, &mut Aabb), With<Batch>>,
+    stream: Option<&crate::mesh_stream::MeshStream>,
+) -> Option<u64> {
+    let built = group.built.as_mut()?;
+    if built.slots.len() != group.members.len() || group.batches.len() < built.batches {
+        return None;
+    }
+    let position = group.layout.iter().position(|(id, _)| *id == Mesh::ATTRIBUTE_POSITION.id)?;
+    let mut handles = Vec::with_capacity(built.batches);
+    for (i, &entity) in group.batches[..built.batches].iter().enumerate() {
+        let handle = batches.get(entity).ok()?.2.0.clone();
+        let size: usize = built
+            .slots
+            .iter()
+            .zip(&group.members)
+            .filter(|(s, _)| s.batch == i)
+            .map(|(_, m)| m.vertices)
+            .sum();
+        if meshes.get(&handle).is_none_or(|m| m.try_attributes().is_err() || m.count_vertices() != size) {
+            return None;
+        }
+        handles.push(handle);
+    }
+    // Placed first: the sources are read before a batch is written.
+    let mut writes = Vec::new();
+    for (m, member) in group.members.iter().enumerate() {
+        if !member.stale && member.batched {
+            continue;
+        }
+        let source = meshes.get(&member.mesh)?;
+        if source.count_vertices() != member.vertices {
+            return None;
+        }
+        let mut values = crate::static_batch::place(member.rest, source, Vec3::ZERO, &group.layout);
+        if !member.batched
+            && let VertexAttributeValues::Float32x3(positions) = &mut values[position]
+            && let Some(&at) = positions.first()
+        {
+            positions.fill(at);
+        }
+        writes.push((m, values));
+    }
+    let mut streamed = 0;
+    for (i, handle) in handles.iter().enumerate() {
+        let streaming = stream.filter(|_| meshes.get(handle).is_some_and(crate::frame_split::uploaded));
+        let target = if streaming.is_some() {
+            meshes.get_mut_untracked(handle)?
+        } else {
+            meshes.get_mut(handle)?.into_inner()
+        };
+        let mut changed: Vec<std::ops::Range<usize>> = Vec::new();
+        for (m, values) in &writes {
+            if built.slots[*m].batch != i {
+                continue;
+            }
+            let slot = &mut built.slots[*m];
+            let count = group.members[*m].vertices;
+            let mut differs = false;
+            for ((id, _), new) in group.layout.iter().zip(values) {
+                let Some(old) = target.attribute_mut(*id) else {
+                    continue;
+                };
+                differs |= write_range(old, new, slot.first, count);
+            }
+            if differs {
+                if let VertexAttributeValues::Float32x3(positions) = &values[position] {
+                    (slot.min, slot.max) = bounds(positions);
+                }
+                changed.push(slot.first..slot.first + count);
+            }
+        }
+        let members = built.slots.iter().zip(&group.members).filter(|(s, _)| s.batch == i);
+        let used = if members.clone().any(|(_, m)| m.batched) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        let (min, max) = members.fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(min, max), (s, _)| {
+            (min.min(s.min), max.max(s.max))
+        });
+        // As `compute_aabb().unwrap_or_default()` of the whole batch.
+        let bounds = if min.cmple(max).all() { Aabb::from_min_max(min, max) } else { Aabb::default() };
+        if let Ok((_, mut visibility, _, mut aabb)) = batches.get_mut(group.batches[i]) {
+            *aabb = bounds;
+            visibility.set_if_neq(used);
+        }
+        let Some(stream) = streaming else { continue };
+        if changed.is_empty() {
+            continue;
+        }
+        changed.sort_by_key(|r| r.start);
+        let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
+        for range in changed {
+            match runs.last_mut() {
+                Some(last) if last.end == range.start => last.end = range.end,
+                _ => runs.push(range),
+            }
+        }
+        let target = meshes.get(handle)?;
+        let stride = crate::mesh_stream::VertexLayout::of(target).stride;
+        for run in runs {
+            stream.write_at(handle.id(), run.start as u32, stride, |bytes| {
+                crate::mesh_stream::pack_vertices(target, run.clone(), bytes);
+            });
+        }
+        streamed += 1;
+    }
+    Some(streamed)
+}
+
+/// Writes `new` over vertices `first..first + count` of `old` where their
+/// bytes differ; returns whether they did.
+fn write_range(old: &mut VertexAttributeValues, new: &VertexAttributeValues, first: usize, count: usize) -> bool {
+    fn put<const N: usize>(old: &mut [[f32; N]], new: &[[f32; N]]) -> bool {
+        let same = old.iter().flatten().map(|x| x.to_bits()).eq(new.iter().flatten().map(|x| x.to_bits()));
+        if !same {
+            old.copy_from_slice(new);
+        }
+        !same
+    }
+    let span = first..first + count;
+    match (old, new) {
+        (VertexAttributeValues::Float32x2(o), VertexAttributeValues::Float32x2(n)) => put(&mut o[span], n),
+        (VertexAttributeValues::Float32x3(o), VertexAttributeValues::Float32x3(n)) => put(&mut o[span], n),
+        (VertexAttributeValues::Float32x4(o), VertexAttributeValues::Float32x4(n)) => put(&mut o[span], n),
+        _ => unreachable!("layout checked by register"),
+    }
 }
 
 /// Moves each vertex of a part out of its batch (`kept` false) onto the
@@ -1073,6 +1287,129 @@ mod tests {
         assert_eq!(stream.queued(id).as_deref(), Some(&packed[4 * stride..8 * stride]));
     }
 
+    /// A dent and a part leaving rewrite only their members' vertices, to the
+    /// bytes and bounds of a full rebuild, streamed or written to the asset.
+    #[test]
+    fn a_patched_batch_matches_a_full_rebuild() {
+        use bevy::{asset::RenderAssetUsages, mesh::Indices};
+        let part_mesh = |k: f32| {
+            Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+                .with_inserted_attribute(
+                    Mesh::ATTRIBUTE_POSITION,
+                    vec![[0., 0., 0.], [1., 0., k], [0., k, 1.], [1., 1., 1.]],
+                )
+                .with_inserted_attribute(
+                    Mesh::ATTRIBUTE_NORMAL,
+                    vec![[0., 1., 0.], [0., 0.6, 0.8], [1., 0., 0.], [0., 0., 1.]],
+                )
+                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0., 0.], [1., 0.], [0., 1.], [k, 1.]])
+                .with_inserted_indices(Indices::U16(vec![0, 2, 1, 1, 2, 3]))
+        };
+        // The batch as a full rebuild of the current sources makes it.
+        let expected = |app: &App| {
+            let group = &app.world().resource::<CarBatches>().groups[0];
+            let chunk: Vec<Part<StandardMaterial>> = group
+                .members
+                .iter()
+                .map(|m| Part {
+                    entity: m.entity,
+                    material: group.material.clone(),
+                    intact: false,
+                    mesh: m.mesh.clone(),
+                    matrix: m.rest,
+                    vertices: m.vertices,
+                })
+                .collect();
+            let (mut mesh, _, _) = build(&chunk, app.world().resource::<Assets<Mesh>>(), Vec3::ZERO, &group.layout);
+            let kept: Vec<bool> = group.members.iter().map(|m| m.batched).collect();
+            collapse(&mut mesh, &[4, 4, 4], &kept);
+            mesh
+        };
+        let check = |app: &App, member: usize, streamed: bool| {
+            let want = expected(app);
+            let state = app.world().resource::<CarBatches>();
+            let batch = state.groups[0].batches[0];
+            let handle = &app.world().get::<Mesh3d>(batch).unwrap().0;
+            let got = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
+            for ((a, x), (b, y)) in want.attributes().zip(got.attributes()) {
+                assert_eq!(a.id, b.id);
+                assert_eq!(x.get_bytes(), y.get_bytes(), "{:?}", a.name);
+            }
+            assert_eq!(want.indices(), got.indices());
+            let (aabb, bounds) = (app.world().get::<Aabb>(batch).unwrap(), want.compute_aabb().unwrap());
+            assert_eq!((aabb.center, aabb.half_extents), (bounds.center, bounds.half_extents));
+            if streamed {
+                // Only the changed member's vertices were written.
+                let stream = app.world().resource::<crate::mesh_stream::MeshStream>();
+                let stride = crate::mesh_stream::VertexLayout::of(got).stride;
+                let packed = got.create_packed_vertex_buffer_data();
+                assert_eq!(
+                    stream.queued(handle.id()).as_deref(),
+                    Some(&packed[4 * member * stride..4 * (member + 1) * stride])
+                );
+            }
+        };
+        for streamed in [false, true] {
+            let mut app = App::new();
+            app.init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<StandardMaterial>>()
+                .init_resource::<CarBatches>()
+                .add_message::<AssetEvent<Mesh>>()
+                .add_systems(PostUpdate, refresh);
+            if streamed {
+                app.init_resource::<crate::mesh_stream::MeshStream>();
+            }
+            let material = app
+                .world_mut()
+                .resource_mut::<Assets<StandardMaterial>>()
+                .add(StandardMaterial::default());
+            for k in 0..3 {
+                let mesh = app.world_mut().resource_mut::<Assets<Mesh>>().add(part_mesh(k as f32 + 1.));
+                let rest = Mat4::from_rotation_translation(
+                    Quat::from_rotation_y(0.3 * k as f32),
+                    Vec3::new(k as f32 * 2., 0.1, 0.),
+                );
+                app.world_mut().spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_matrix(rest),
+                    Visibility::Inherited,
+                    Aabb::from_min_max(Vec3::ZERO, Vec3::ONE),
+                    crate::OpponentPart { car: 1, rest, wheel: None, lost_with_wheel: false },
+                ));
+            }
+            // Registers, builds whole, stays.
+            for _ in 0..3 {
+                app.update();
+            }
+            let (anchor, members) = {
+                let state = app.world().resource::<CarBatches>();
+                assert_eq!((state.rebuilds, state.patched), (1, 0));
+                let group = &state.groups[0];
+                assert!(group.members.iter().all(|m| m.batched));
+                let members: Vec<(Entity, Handle<Mesh>)> =
+                    group.members.iter().map(|m| (m.entity, m.mesh.clone())).collect();
+                (state.anchors[0].1, members)
+            };
+            check(&app, 0, false);
+            // A dent: only that member is rewritten.
+            let dented = (anchor + 1) % 3;
+            *app.world_mut().resource_mut::<Assets<Mesh>>().get_mut(&members[dented].1).unwrap() = part_mesh(2.5);
+            app.world_mut().write_message(AssetEvent::<Mesh>::Modified { id: members[dented].1.id() });
+            app.update();
+            assert_eq!(app.world().resource::<CarBatches>().patched, 1);
+            check(&app, dented, streamed);
+            // A part comes loose: its vertices collapse; the bounds shrink.
+            let loose = (anchor + 2) % 3;
+            app.world_mut().get_mut::<Transform>(members[loose].0).unwrap().translation.y += 1.;
+            app.update();
+            let state = app.world().resource::<CarBatches>();
+            assert_eq!((state.rebuilds, state.patched), (3, 2));
+            assert!(!state.groups[0].members[loose].batched);
+            check(&app, loose, streamed);
+        }
+    }
+
     #[test]
     fn a_hidden_level_keeps_its_batches_until_it_is_posed() {
         let group = |level, built| Group {
@@ -1083,6 +1420,7 @@ mod tests {
             members: Vec::new(),
             batches: if built { vec![Entity::PLACEHOLDER] } else { Vec::new() },
             dirty: true,
+            built: None,
             shadow_body: false,
             level,
         };
