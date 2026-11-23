@@ -291,6 +291,16 @@ pub fn sun_level(lighting: &grid_formats::track_environment::Lighting, gamma: bo
     Some(peak / sun_reference(sun, gamma))
 }
 
+/// Direct-light colour relative to the sun's brightest channel. Its
+/// magnitude already controls the light's illuminance via `sun_level`.
+pub(crate) fn relative_sun_colour(rgb: [f32; 3]) -> Option<[f32; 3]> {
+    if rgb.iter().any(|channel| !(0. ..=32.).contains(channel)) {
+        return None;
+    }
+    let peak = rgb.into_iter().fold(0_f32, f32::max);
+    Some(if peak > 0. { rgb.map(|channel| channel / peak) } else { rgb })
+}
+
 /// lighting.xml's `backlight_backcolour` / `backlight_ambientcolour`, scaled
 /// against [`sun_reference`] = the baseline sun's 18,000 lux.
 /// AUTHORED: as Bevy lights, `ambient + back / 2` is a uniform ambient and
@@ -546,9 +556,19 @@ impl Settings {
         ImageSampler::Descriptor(sampler)
     }
 
+    /// Match the direction of direct lighting and cast shadows to the route.
+    /// Keep an earlier explicit selection.
+    pub fn apply_route_sun_direction(&mut self, lighting: &grid_formats::track_environment::Lighting) {
+        if self.saved_sun.is_none()
+            && let Some([height_degrees, rotation_degrees]) = lighting.sun()
+            && [height_degrees, rotation_degrees].iter().all(|angle| (-36_000. ..=36_000.).contains(angle))
+        {
+            self.saved_sun = Some(grid_formats::track_lighting::Sun { height_degrees, rotation_degrees });
+        }
+    }
+
     pub fn sun_transform(&self) -> Transform {
-        // Saved only for track scenes: --sun source (enhanced) or the
-        // baseline's lighting.xml direction.
+        // Saved angles belong to the selected route or the explicit source mode.
         if let Some(sun) = self.saved_sun {
             return source_sun_transform(sun);
         }
@@ -957,6 +977,35 @@ mod graphics_settings_tests {
         }
     }
     #[test]
+    fn route_sun_direction_uses_valid_day_and_dim_angles_and_keeps_an_explicit_direction() {
+        let mut source = grid_formats::track_environment::Lighting::default();
+        let mut settings = Settings::default();
+        settings.apply_route_sun_direction(&source);
+        assert!(settings.saved_sun.is_none());
+
+        for (level, height, rotation) in [(1., 144.9, 163.6), (0.24, 93.6, 177.7)] {
+            source.params.insert("heightangle".into(), format!("{height}"));
+            source.params.insert("rotationangle".into(), format!("{rotation}"));
+            settings.sun_level = level;
+            settings.saved_sun = None;
+            settings.apply_route_sun_direction(&source);
+            let selected = settings.saved_sun.unwrap();
+            assert_eq!(selected.height_degrees, height);
+            assert_eq!(selected.rotation_degrees, rotation);
+            assert_eq!(settings.sun_level, level);
+
+            source.params.insert("heightangle".into(), "42.0".into());
+            settings.apply_route_sun_direction(&source);
+            assert_eq!(settings.saved_sun, Some(selected));
+        }
+
+        settings.saved_sun = None;
+        source.params.insert("heightangle".into(), "1e10".into());
+        settings.apply_route_sun_direction(&source);
+        assert!(settings.saved_sun.is_none());
+    }
+
+    #[test]
     fn source_sun_emits_away_from_the_light_and_handles_vertical_poles() {
         let mut settings = Settings {
             preset: Preset::Enhanced,
@@ -991,6 +1040,25 @@ mod graphics_settings_tests {
         assert_eq!(settings.sun_illuminance(), lux);
         settings.preset = Preset::Baseline;
         assert_eq!(settings.sun_colour(), Color::WHITE);
+    }
+    #[test]
+    fn source_sun_keeps_hue_separate_from_illuminance() {
+        for (raw, expected) in [
+            ([3., 1.5, 0.75], [1., 0.5, 0.25]),
+            ([0.125, 0.0625, 0.03125], [1., 0.5, 0.25]),
+            ([0.; 3], [0.; 3]),
+        ] {
+            let colour = relative_sun_colour(raw).unwrap();
+            assert_eq!(colour, expected);
+            let peak = raw.into_iter().fold(0_f32, f32::max);
+            let reference = sun_reference(raw, false);
+            for (channel, source) in colour.into_iter().zip(raw) {
+                assert!((channel * (peak / reference) - source / reference).abs() < 1e-6);
+            }
+        }
+        for invalid in [[f32::NAN, 0., 0.], [-0.125, 0.5, 1.], [33., 1., 0.]] {
+            assert_eq!(relative_sun_colour(invalid), None);
+        }
     }
     #[test]
     fn shadow_distance_reaches_requested_bound_and_rejects_invalid_limits() {

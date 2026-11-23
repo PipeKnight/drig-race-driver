@@ -225,13 +225,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
         // GhostCarValues.z; thin panes (alpha < 0.22) are faded by 4.5 alpha.
         // The part below already holds a·lit + (1 - a)·background; keep
         // restores the background's share 1 - alpha. The lit share differs
-        // by at most 0.25 (1 - a) (AUTHORED: one premultiplied blend).
+        // by at most 0.25 (1 - a) on the translucent part of the pane.
         let a = texel.a;
         let raised = mix(a, 1.0, weight * ghost.z);
         let lifted = saturate(saturate(4.5 * a) * (raised + raise));
         let pane = mix(raised, lifted, ghost.z) * ghost.x;
         colour = pane * (env * weight + glint);
-        keep = clamp((1.0 - pane) / max(1.0 - a, 1e-3), 0.0, 1.0);
+        let transmission = 1.0 - a;
+        let normalizer = 1e-3;
+        let background_keep = clamp((1.0 - pane) / max(transmission, normalizer), 0.0, 1.0);
+        // As transmission reaches zero, retain the lit artwork on the
+        // opaque part of the pane with the source Fresnel weight.
+        keep = saturate(background_keep + (1.0 - weight) * (1.0 - saturate(transmission / normalizer)));
     }
     let alpha = 1.0 - keep;
     var pbr = pbr_input_new();

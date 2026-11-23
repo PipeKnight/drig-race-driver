@@ -86,6 +86,10 @@ struct Admission {
     decals: bool,
 }
 
+pub(crate) fn shader_extensions_ready(world: &World) -> bool {
+    world.get_resource::<Admission>().is_none_or(|state| state.shader || state.refused)
+}
+
 /// What `install` needs from the scene setup.
 pub(crate) struct Setup {
     pub mode: Mode,

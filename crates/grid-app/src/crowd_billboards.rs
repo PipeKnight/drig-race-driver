@@ -286,7 +286,10 @@ fn atlas_from_tree(tree: &pssg::Tree<'_>) -> AnyResult<(Vec<u8>, Vec<u8>)> {
     {
         return Err("unsupported/mismatched billboard atlas formats".into());
     }
-    Ok((diffuse.validated_dds().0, tint.validated_dds().0))
+    Ok((
+        super::texture_upload::crowd_billboard_dds(diffuse),
+        super::texture_upload::crowd_billboard_dds(tint),
+    ))
 }
 #[cfg(test)]
 fn prepare(root: &Path, route: &Route) -> AnyResult<Prepared> {

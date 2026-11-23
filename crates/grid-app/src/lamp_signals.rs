@@ -7,6 +7,7 @@ use std::{
 };
 pub(crate) mod runtime;
 pub(crate) mod audit;
+mod display;
 use runtime::State;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
@@ -182,8 +183,9 @@ pub(crate) fn upload(
     }
     Atlas(atlas)
 }
-pub(crate) fn install(app: &mut App) -> Result<(),String> {
+pub(crate) fn install(app: &mut App, track_grade: bool) -> Result<(),String> {
     audit::install(app)?;
+    display::install(app, track_grade);
     app.init_resource::<State>()
         .init_resource::<runtime::Owners>()
         .add_systems(

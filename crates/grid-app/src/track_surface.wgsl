@@ -189,8 +189,12 @@ fn fragment(
     let skid_b_uv = vec2(-in.uv_b.x * surface.scales.z, in.uv_b.y * surface.scales.y) + surface.controls.x;
     let skid_a = textureSampleBias(skids, skid_sampler, skid_a_uv, mip_bias).r * in.color.a * 2.0 * surface.controls.y;
     let skid_b = textureSampleBias(skids, skid_sampler, skid_b_uv, mip_bias).r * in.color.a * surface.controls.y;
-    albedo = mix(albedo, surface.skid_colour.rgb, skid_a);
-    albedo = mix(albedo, surface.skid_colour2.rgb, skid_b);
+    if surface.controls.y > 0.0 {
+        // The saved skid colours are display codes. Blend in their colour
+        // space, then return linear albedo to the lighting path.
+        let marked = mix(to_display(albedo), surface.skid_colour.rgb, skid_a);
+        albedo = to_linear(mix(marked, surface.skid_colour2.rgb, skid_b));
+    }
     pbr.material.base_color = vec4(albedo, 1.0);
     // Source diffuse alpha weights its Phong lobe. This optional adaptation
     // weights Bevy's dielectric base F0 without changing roughness or opacity.

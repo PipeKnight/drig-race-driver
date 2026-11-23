@@ -297,10 +297,11 @@ fn shadow_proxies(
             Option<&Aabb>,
             Has<NotShadowCaster>,
             Option<&crate::source_trees::ShadowTwin>,
+            Option<&MeshTag>,
         ),
         With<RenderLayers>,
     >,
-    mut tags: Query<&mut MeshTag>,
+    mut tags: Query<&mut MeshTag, Without<OrnamentLevel>>,
     standard: Res<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<ShadowMaterial>>,
     mut commands: Commands,
@@ -309,7 +310,7 @@ fn shadow_proxies(
     let state = &mut *state;
     // Pipeline warm-up: every shadow-level part casts through a step-0 proxy.
     let warming = warm.is_some_and(|w| w.proxies());
-    for (part, level, mesh, material, transform, aabb, shadowless, twin) in &parts {
+    for (part, level, mesh, material, transform, aabb, shadowless, twin, tag) in &parts {
         let fade = lods.fades[level.instance as usize];
         let casts = !shadowless || state.proxies.contains_key(&part);
         let step = match fade.presence() {
@@ -319,6 +320,8 @@ fn shadow_proxies(
             _ if warming && casts => Some(0),
             _ => None,
         };
+        let source_flags = tag.map_or(0, |tag| tag.0 & crate::object_materials::OPAQUE_CSM_TAG);
+        let step = step.map(|step| step | source_flags);
         match (step, state.proxies.get(&part).copied()) {
             (Some(tag), Some((proxy, _))) => {
                 if let Ok(mut current) = tags.get_mut(proxy) {

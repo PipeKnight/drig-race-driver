@@ -277,6 +277,7 @@ struct Car {
     decal_materials: std::collections::BTreeSet<String>,
     object_glass_materials: std::collections::BTreeSet<String>,
     object_two_sided_materials: std::collections::BTreeSet<String>,
+    object_opaque_csm_materials: std::collections::BTreeSet<String>,
     /// Object materials whose original adds an emissive map (object_materials::emissive_materials).
     object_emissive_materials: BTreeMap<String, object_materials::Emissive>,
     /// `EmissiveTime` when the route loads (object_materials::emissive_time).
@@ -1195,6 +1196,7 @@ fn load_package(
         decal_materials,
         object_glass_materials: Default::default(),
         object_two_sided_materials: Default::default(),
+        object_opaque_csm_materials: Default::default(),
         object_emissive_materials: Default::default(),
         emissive_time: 0.,
         center: (bounds.0 + bounds.1) * 0.5,
@@ -1424,6 +1426,7 @@ fn append_objects(
     };
     car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
     car.object_two_sided_materials.extend(object_materials::two_sided_materials(&tree)?);
+    car.object_opaque_csm_materials.extend(object_materials::opaque_csm_materials(&tree)?);
     // A shader table the constants reader rejects keeps the objects drawn
     // without their maps, and says so.
     match object_materials::emissive_materials(&tree) {
@@ -2032,6 +2035,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         decal_materials: Default::default(),
         object_glass_materials: Default::default(),
         object_two_sided_materials: Default::default(),
+        object_opaque_csm_materials: Default::default(),
         object_emissive_materials: Default::default(),
         emissive_time: 0.,
         center: (bounds.0 + bounds.1) * 0.5,
@@ -3293,7 +3297,7 @@ pub(crate) fn race_app(
                     "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
                 );
                 println!(
-                    "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
+                    "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: authored direction, route direction, or route direction with saved colour ratios. Enhanced track scenes use the route direction by default."
                 );
                 println!(
                     "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined|fresnel: static reference or bounded rendered driving experiment. base-mip-control|base-mip-zero: bounded native1920-DLAA Don0 Lacetti with current window sorting; explicit base-mip-zero also admits ordinary Window driving in that same context. Changes base RGBA filtering, including filtered border/crack alpha; default off, no automatic bias change."
@@ -3899,13 +3903,15 @@ pub(crate) fn race_app(
         }
         // The route's own lighting file where it has one (Haruna's night
         // routes), as the sky and water read it.
-        let file = grid_tools::environment::Environment::for_route(&root, &route)?.lighting_file;
-        let bytes = read(&root.join(file))?;
+        let environment = grid_tools::environment::Environment::for_route(&root, &route)?;
+        let bytes = read(&root.join(&environment.lighting_file))?;
         let sun = grid_formats::track_lighting::read_sun(&bytes)?;
         println!("source_sun angles={sun:?} direction_to_light={:?} mapping=source-basis radiometry=authored", sun.direction_to_light());
         graphics.saved_sun = Some(sun);
         if graphics.source_sun_colour {
-            let rgb = grid_formats::track_lighting::read_sun_colour(&bytes)?;
+            let rgb = environment.lighting.rgb("backlight_suncolour")
+                .and_then(graphics::relative_sun_colour)
+                .ok_or("source sun colour absent or outside supported range")?;
             println!("source_sun_colour normalized_rgb={rgb:?} radiometry=authored colour_space=assumed-linear");
             graphics.saved_sun_colour = Some(rgb);
         }
@@ -3955,13 +3961,25 @@ pub(crate) fn race_app(
                 environment.lighting.rgb("backlight_suncolour").map_or(0., |sun| graphics::sun_reference(sun, false)));
         }
     }
-    if graphics.enhanced() && track && !collision && !headless {
+    if graphics.enhanced() && (track || drive) && !collision && !headless {
         let environment = grid_tools::environment::Environment::for_route(&root, &route)?;
-        let mode = environment.mode();
-        if mode == grid_tools::time_of_day::Mode::ForcedNight {
-            graphics.sun_level = graphics::sun_level(&environment.lighting, false).unwrap_or(1.);
+        // The lighting preset can be dark even when the route has no
+        // time-of-day controller or forced headlight projectors.
+        graphics.sun_level = graphics::sun_level(&environment.lighting, false).unwrap_or(1.);
+        if !sun_authored {
+            graphics.apply_route_sun_direction(&environment.lighting);
         }
-        if mode != grid_tools::time_of_day::Mode::None {
+        println!(
+            "enhanced_sun_level level={:.4} illuminance={:.1} source={}",
+            graphics.sun_level,
+            graphics.sun_illuminance() * graphics.sun_level,
+            environment.lighting_file,
+        );
+        if !graphics.source_sun && let Some(sun) = graphics.saved_sun {
+            println!("enhanced_route_sun direction_to_light={:?} source={}",
+                sun.direction_to_light(), environment.lighting_file);
+        }
+        if environment.mode() != grid_tools::time_of_day::Mode::None {
             graphics.emissive_unit = graphics::light_unit(&environment.lighting, graphics.sun_illuminance(), false);
         }
     }
@@ -5481,7 +5499,7 @@ pub(crate) fn race_app(
         match lamp_signals::prepare(&root, &car, field.car_model.len().max(1)) {
             Ok(prepared) => {
                 app.insert_resource(prepared);
-                lamp_signals::install(&mut app)?;
+                lamp_signals::install(&mut app, graphics.track_grade)?;
             }
             Err(error) if graphics.lamp_signals == lamp_signals::Mode::Authored => {
                 eprintln!("lamp_signals authored source unavailable: {error}; using scene materials");
@@ -5529,6 +5547,9 @@ pub(crate) fn race_app(
     mesh_upload_probe::install(&mut app);
     mesh_stream::install(&mut app);
     shadow_cull::install(&mut app);
+    if track && !headless {
+        app.add_systems(Update, object_materials::patch_csm_coverage);
+    }
     light_clusters::install(&mut app, graphics.reflection_mode == 3);
     if shadow_layout::enabled() && graphics.shadow_quality.map_size().is_some() {
         shadow_layout::install(&mut app, graphics.shadow_quality);
@@ -5843,6 +5864,7 @@ fn setup(
     let decal_materials = car.decal_materials.clone();
     let object_glass_materials = car.object_glass_materials.clone();
     let object_two_sided_materials = car.object_two_sided_materials.clone();
+    let object_opaque_csm_materials = car.object_opaque_csm_materials.clone();
     // GRID_OBJECT_EMISSIVE=off leaves the maps out (matched before/after review).
     let object_emissive_materials = if std::env::var("GRID_OBJECT_EMISSIVE").as_deref() == Ok("off") {
         Default::default()
@@ -6121,6 +6143,9 @@ fn setup(
             }
             if track && let Some(entity) = &mut entity {
                 entity.insert(track_surface::SourcePart(part.material.clone()));
+                if object_opaque_csm_materials.contains(&part.material) {
+                    entity.insert(bevy::mesh::MeshTag(object_materials::OPAQUE_CSM_TAG));
+                }
             }
             #[cfg(feature = "dlaa")]
             if native_glazing
@@ -8565,6 +8590,7 @@ mod driving_tests {
                         decal_materials: Default::default(),
                         object_glass_materials: Default::default(),
                         object_two_sided_materials: Default::default(),
+                        object_opaque_csm_materials: Default::default(),
                         object_emissive_materials: Default::default(),
                         emissive_time: 0.,
                         center: car.center,

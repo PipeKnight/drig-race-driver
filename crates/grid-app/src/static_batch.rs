@@ -20,7 +20,7 @@ use bevy::{
         visibility::{NoAutoAabb, RenderLayers, VisibilityClass, VisibilityRange, VisibilitySystems},
     },
     light::NotShadowCaster,
-    mesh::{Indices, MeshVertexAttributeId, PrimitiveTopology, VertexAttributeValues, VertexFormat},
+    mesh::{Indices, MeshTag, MeshVertexAttributeId, PrimitiveTopology, VertexAttributeValues, VertexFormat},
     prelude::*,
 };
 use std::collections::HashMap;
@@ -103,6 +103,7 @@ struct Key {
     layout: Vec<(MeshVertexAttributeId, VertexFormat)>,
     intact: bool,
     cell: (i32, i32),
+    mesh_tag: Option<u32>,
 }
 
 pub(crate) struct Part<M: Asset> {
@@ -117,7 +118,7 @@ pub(crate) struct Part<M: Asset> {
 #[allow(clippy::type_complexity)]
 fn merge<M: Material>(
     mut commands: Commands,
-    parts: Query<(Entity, &Name, &Mesh3d, &MeshMaterial3d<M>, &Transform, &Visibility), Plain>,
+    parts: Query<(Entity, &Name, &Mesh3d, &MeshMaterial3d<M>, &Transform, &Visibility, Option<&MeshTag>), Plain>,
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Option<Res<Assets<M>>>,
 ) {
@@ -127,7 +128,7 @@ fn merge<M: Material>(
     let cell_m = cell_metres();
     let mut groups: HashMap<Key, Vec<Part<M>>> = HashMap::new();
     let (mut blended, mut unsupported) = (0, 0);
-    for (entity, name, mesh, material, transform, visibility) in &parts {
+    for (entity, name, mesh, material, transform, visibility, tag) in &parts {
         let name = name.as_str();
         if name.starts_with(PIECE) || *visibility != Visibility::Inherited {
             continue;
@@ -174,6 +175,7 @@ fn merge<M: Material>(
                 layout,
                 intact,
                 cell,
+                mesh_tag: tag.map(|tag| tag.0),
             })
             .or_default()
             .push(Part {
@@ -219,6 +221,7 @@ fn merge<M: Material>(
                                 material: key.material,
                                 layout: key.layout.clone(),
                                 intact: false,
+                                mesh_tag: key.mesh_tag,
                                 cell: (key.cell.0.div_euclid(COARSE), key.cell.1.div_euclid(COARSE)),
                             })
                             .or_default()
@@ -248,7 +251,7 @@ fn merge<M: Material>(
                 stats[4] += count;
                 let shown = vec![true; parts.len()];
                 let bounds = mesh.compute_aabb().unwrap_or_default();
-                commands.spawn((
+                let mut batch = commands.spawn((
                     Name::new(format!("static_batch/{}/{}_{}", if key.intact { "intact" } else { "track" }, key.cell.0, key.cell.1)),
                     Mesh3d(meshes.add(mesh)),
                     MeshMaterial3d(chunk[0].material.clone()),
@@ -258,6 +261,9 @@ fn merge<M: Material>(
                     bounds,
                     NoAutoAabb,
                 ));
+                if let Some(tag) = key.mesh_tag {
+                    batch.insert(MeshTag(tag));
+                }
                 for part in chunk {
                     if part.intact {
                         commands

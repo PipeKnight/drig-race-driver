@@ -790,6 +790,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G433](G0433.md) | 2026-11-23 | Deliver verified shared graphics corrections |
 | [G432](G0432.md) | 2026-11-23 | Apply authored vehicle contact occlusion to the road |
 | [G431](G0431.md) | 2026-11-18 | Read the original Shibuya outputs before and after Type2 |
 | [G430](G0430.md) | 2026-11-18 | Measure Type2 highlight clipping on matched day and night captures |

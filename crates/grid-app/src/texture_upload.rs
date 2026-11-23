@@ -165,6 +165,85 @@ pub(crate) fn configure(device: Res<RenderDevice>) {
     }
 }
 
+/// The original crowd loader retains the complete BC-block prefix of these
+/// rectangular atlases. Their declared full mip chains have a trailing payload
+/// that is larger than the tightly packed chain would be.
+pub(crate) fn crowd_billboard_dds(texture: &grid_formats::texture::Texture<'_>) -> Vec<u8> {
+    use grid_formats::texture::Format::{Bc1, Bc3};
+
+    let (base, levels) = texture.validated_dds();
+    if levels > 1
+        || !matches!(texture.format, Bc1 | Bc3)
+        || texture.width == texture.height
+        || !texture.width.is_power_of_two()
+        || !texture.height.is_power_of_two()
+        || texture.declared_mip_levels != texture.width.max(texture.height).ilog2()
+    {
+        return base;
+    }
+
+    let mut width = texture.width / 2;
+    let mut height = texture.height / 2;
+    let mut mip_levels = 0;
+    let mut used = 0;
+    while width.min(height) >= 4 {
+        used += texture.format.level_size(width, height);
+        mip_levels += 1;
+        width /= 2;
+        height /= 2;
+    }
+    if mip_levels == 0 || texture.remaining_data.len() <= used {
+        return base;
+    }
+
+    grid_formats::texture::Texture {
+        declared_mip_levels: mip_levels,
+        remaining_data: &texture.remaining_data[..used],
+        ..*texture
+    }
+    .validated_dds()
+    .0
+}
+
+#[test]
+fn rectangular_crowd_atlas_retains_only_the_authored_bc_prefix() {
+    use grid_formats::texture::{Format, Texture};
+
+    for (width, height, format, expected_levels, surplus) in [
+        (512, 256, Format::Bc3, 7, 1056),
+        (512, 256, Format::Bc1, 7, 528),
+    ] {
+        let base_bytes = format.level_size(width, height);
+        let tail_bytes = (1..expected_levels)
+            .map(|i| format.level_size(width >> i, height >> i))
+            .sum::<usize>();
+        let base_blocks = vec![0x12; base_bytes];
+        let mut remaining = vec![0x5a; tail_bytes + surplus];
+        remaining[tail_bytes - 1] = 0x23;
+        remaining[tail_bytes..].fill(0xcd);
+        let texture = Texture {
+            id: b"crowd.tga",
+            width,
+            height,
+            format,
+            declared_mip_levels: width.ilog2(),
+            base_blocks: &base_blocks,
+            remaining_data: &remaining,
+        };
+        assert_eq!(texture.validated_dds().1, 1);
+
+        let dds = crowd_billboard_dds(&texture);
+        assert_eq!(u32::from_le_bytes(dds[28..32].try_into().unwrap()), expected_levels);
+        assert_eq!(&dds[128 + base_bytes..], &remaining[..tail_bytes]);
+
+        let incomplete = Texture {
+            remaining_data: &remaining[..tail_bytes - 1],
+            ..texture
+        };
+        assert_eq!(crowd_billboard_dds(&incomplete), incomplete.base_dds());
+    }
+}
+
 /// The sRGB image of one validated DDS (BC1, BC3 or BGRA8, with mips).
 pub(crate) fn image(
     dds: &[u8],

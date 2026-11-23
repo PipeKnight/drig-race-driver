@@ -463,6 +463,7 @@ mod tests {
             decal_materials: Default::default(),
             object_glass_materials: Default::default(),
             object_two_sided_materials: Default::default(),
+            object_opaque_csm_materials: Default::default(),
             object_emissive_materials: Default::default(),
             emissive_time: 0.,
             center: bevy::prelude::Vec3::ZERO,

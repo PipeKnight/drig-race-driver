@@ -2,9 +2,91 @@
 //! Other object families retain existing cutouts.
 //! glass_simple colour uses SRC_ALPHA/ONE_MINUS_SRC_ALPHA with alpha test off.
 //! Bevy PBR depth/separate-alpha remain adaptations, not original pass parity.
-use bevy::prelude::*;
+use bevy::{prelude::*, shader::{ShaderImport, Source}};
 use grid_formats::pssg;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Mesh tag for source objects whose colour/depth tests alpha but whose
+/// directional shadow pass uses the unmasked csm_depth_opaque.psh.main.
+pub(crate) const OPAQUE_CSM_TAG: u32 = 1 << 31;
+
+fn opaque_csm_group(group: &[u8]) -> bool {
+    let Some(group) = group.strip_prefix(b"#").and_then(|group| group.strip_suffix(b".fx")) else {
+        return false;
+    };
+    let base = [b"_instanced".as_slice(), b"_scenery", b"_skin"]
+        .into_iter()
+        .find_map(|suffix| group.strip_suffix(suffix))
+        .unwrap_or(group);
+    matches!(
+        base,
+        b"object_animated_emissive"
+            | b"object_animated_ripple"
+            | b"object_barrier"
+            | b"object_catseyes"
+            | b"object_emissive_ao"
+            | b"object_emissive_ripple"
+            | b"object_lod"
+            | b"object_lod_emissive"
+            | b"object_projected"
+            | b"object_projected_emissive"
+            | b"object_ripple_no_specular"
+            | b"object_scrolling"
+            | b"object_simple"
+            | b"object_simple_ao"
+            | b"object_simple_dxt5nm"
+            | b"object_simple_dxt5nm_ao"
+            | b"object_simple_emissive"
+            | b"object_simple_night_emissive"
+    )
+}
+
+pub(crate) fn opaque_csm_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeSet<String>> {
+    let mut materials = BTreeSet::new();
+    for i in 0..tree.nodes.len() {
+        if tree.name(i) == b"SHADERINSTANCE" && opaque_csm_group(tree.string(i, b"shaderGroup")?) {
+            let id = String::from_utf8_lossy(tree.string(i, b"id")?);
+            materials.insert(format!("objects/{id}"));
+        }
+    }
+    Ok(materials)
+}
+
+/// Keep the authored camera/depth coverage while allowing the sun's
+/// orthographic depth pass to use the source solid shadow silhouette.
+/// Scene cameras are perspective and the orthographic UI carries no meshes.
+pub(crate) fn patch_csm_coverage(mut shaders: ResMut<Assets<Shader>>, mut done: Local<bool>) {
+    if *done { return; }
+    let Some(id) = shaders.iter().find_map(|(id, shader)| {
+        matches!(&shader.import_path, ShaderImport::Custom(path) if path == "bevy_pbr::pbr_prepass_functions")
+            .then_some(id)
+    }) else { return; };
+    *done = true;
+    let mut shader = shaders.get_mut(id).expect("selected shader still loaded");
+    let Source::Wgsl(source) = &shader.source else {
+        eprintln!("object_csm_coverage patched=false reason=not-wgsl");
+        return;
+    };
+    let function = "fn prepass_alpha_discard(in: VertexOutput) {";
+    if source.matches(function).count() != 1 {
+        eprintln!("object_csm_coverage patched=false reason=unexpected-bevy-shader");
+        return;
+    }
+    let body = format!(
+        r#"{function}
+#ifdef MAY_DISCARD
+#ifdef VIEW_PROJECTION_ORTHOGRAPHIC
+#ifndef NORMAL_PREPASS_OR_DEFERRED_PREPASS
+#ifndef MOTION_VECTOR_PREPASS
+    if (mesh[in.instance_index].tag & {OPAQUE_CSM_TAG}u) != 0u {{ return; }}
+#endif
+#endif
+#endif
+#endif"#
+    );
+    shader.source = Source::Wgsl(source.replacen(function, &body, 1).into());
+    println!("object_csm_coverage patched=true scope=sun-orthographic-depth");
+}
 
 pub(crate) fn glass_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTreeSet<String>> {
     let mut result = BTreeSet::new();
@@ -199,6 +281,28 @@ pub(crate) fn update_night_emissive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_solid_shadow_does_not_include_cutout_meshes_or_glass() {
+        for group in [
+            b"#object_simple.fx".as_slice(),
+            b"#object_simple_ao_instanced.fx",
+            b"#object_simple_emissive_scenery.fx",
+            b"#object_lod.fx",
+        ] {
+            assert!(opaque_csm_group(group));
+        }
+        for group in [
+            b"#object_simple_mesh.fx".as_slice(),
+            b"#object_simple_mesh_instanced.fx",
+            b"#object_simple_mesh_skin.fx",
+            b"#object_animated_instanced.fx",
+            b"#glass_simple.fx",
+            b"#clothFront.fx",
+        ] {
+            assert!(!opaque_csm_group(group));
+        }
+    }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn shibuya_big_screens_add_their_emissive_map() {

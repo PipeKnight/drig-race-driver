@@ -195,11 +195,15 @@ fn set_emissive(
     materials: &mut Assets<StandardMaterial>,
     handle: &Handle<StandardMaterial>,
     emissive: LinearRgba,
+    exposure_weight: f32,
 ) {
-    if materials.get(handle).is_some_and(|m| m.emissive != emissive)
+    if materials.get(handle).is_some_and(|m| {
+        m.emissive != emissive || m.emissive_exposure_weight != exposure_weight
+    })
         && let Some(mut m) = materials.get_mut(handle)
     {
         m.emissive = emissive;
+        m.emissive_exposure_weight = exposure_weight;
     }
 }
 fn dark_owned(
@@ -209,12 +213,13 @@ fn dark_owned(
     materials: &mut Assets<StandardMaterial>,
 ) {
     if owners.0.get(&handle.id()) == Some(&entity) {
-        set_emissive(materials, handle, LinearRgba::BLACK);
+        set_emissive(materials, handle, LinearRgba::BLACK, 0.);
     }
 }
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct Registries<'w> {
     owners: ResMut<'w, Owners>,
+    display: Option<Res<'w, super::display::DisplayLamp>>,
     reflective: Option<ResMut<'w, crate::car_reflection_overlay::Reflective>>,
 }
 #[derive(bevy::ecs::system::SystemParam)]
@@ -263,6 +268,7 @@ pub(crate) fn project(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut registries: Registries,
 ) {
+    let source_display = registries.display.as_ref().is_some_and(|state| state.ready);
     for (entity, receiver, mut material, families, original) in &mut parts {
         // Each owned material gets its final emission once: every write marks
         // it modified and re-prepares it (and its car-glass pane copy,
@@ -369,7 +375,10 @@ pub(crate) fn project(
             dark_owned(entity, &start, &registries.owners, &mut materials);
         }
         match lit {
-            Some(e) => set_emissive(&mut materials, &material.0, LinearRgba::rgb(e, e, e)),
+            Some(e) => {
+                let weight = if source_display && e > 0. { super::display::DISPLAY_SIGNAL } else { 0. };
+                set_emissive(&mut materials, &material.0, LinearRgba::rgb(e, e, e), weight);
+            }
             None => dark_owned(entity, &material.0, &registries.owners, &mut materials),
         }
     }

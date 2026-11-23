@@ -508,8 +508,8 @@ fn prepare_legacy(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared>
         selected_actor_row: None,
         rows,
         specs,
-        diffuse: d.validated_dds().0,
-        tint: m.validated_dds().0,
+        diffuse: super::texture_upload::crowd_billboard_dds(d),
+        tint: super::texture_upload::crowd_billboard_dds(m),
         total: catalogue.total_instances,
     })
 }
