@@ -22,7 +22,7 @@ use std::path::Path;
 const SHADER: Handle<Shader> = uuid_handle!("90c5b5ee-1eb2-4cec-8499-b83994cc6df2");
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-struct SkyMaterial {
+pub(crate) struct SkyMaterial {
     #[texture(0)]
     #[sampler(1)]
     first: Handle<Image>,

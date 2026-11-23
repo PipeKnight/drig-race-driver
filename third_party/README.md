@@ -49,3 +49,40 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
   otherwise copy the new release here and re-apply the marked changes, checking that no new
   code path changes the two buffers without setting the flag. After any change here, the
   coordinator refreshes the shared build seed (`tools/build_seed.ps1`).
+
+## wgpu-core 29.0.4
+
+- Upstream: crates.io `wgpu-core` 29.0.4, crate sha256
+  `2f519832254e56965a9940c4af57dcb75f702b6f6fa4a0b172f685395843a4d7` (the `Cargo.lock`
+  checksum), git commit `e99f5305ded96ff7006f0714d043a7f735bd45c2` of gfx-rs/wgpu, path `wgpu-core`
+  (`.cargo_vcs_info.json`). Licence: MIT or Apache-2.0 (`LICENSE.MIT`, `LICENSE.APACHE`).
+- Copied unchanged from the registry source, then patched (F886):
+  - `src/command/pass.rs`: `PassState` gets `bind_dedupe: Option<BindDedupe>`, two sets of bind
+    group addresses (`Arc::as_ptr`). `set_bind_group` merges a bind group's buffer and texture usage
+    states into the pass's usage scope only the first time the pass sets that group, and
+    `flush_bindings_helper` registers its buffer and texture memory init actions only the first time
+    the pass flushes it. The raw `set_bind_group` still runs on every flush, and the bind group
+    is still added to the command buffer's tracker on every set.
+  - `src/command/render.rs`: render passes start with `BindDedupe::for_render_pass()`.
+  - `src/command/compute.rs`: compute passes start with `None` (unchanged path; they merge per
+    dispatch).
+- Why: when a render pass alternates two bind groups, upstream redoes both steps on every switch,
+  one tracker merge and one init-action check per resource. A bindless material slab holds 60-100+
+  textures, and DRIG's transparent phase alternates each car pane with its reflection overlay
+  (about 140 switches per frame in Donington), so the encode on the render thread paid this many
+  thousand times per frame. Re-merging the same states changes nothing (the union is idempotent, and
+  a conflict would already have failed the first merge), and re-registering the same init actions
+  only appends duplicates, which are filtered again at submit; the discard list cannot gain entries
+  inside a pass. The pass's tracker holds each bound group's `Arc` until the command buffer is done,
+  so an address is not reused within the pass. Measured gain: F886, docs/PERFORMANCE.md.
+- `GRID_WGPU_BIND_DEDUPE=0` restores the upstream path, kept as a fallback and for A/B timing and
+  image checks.
+- Test: `crates/grid-app/tests/bind_dedupe.rs` renders overlapping alpha-blended quads whose
+  transparent sort alternates two material types (pipeline and bind group switch on every draw),
+  textured with images the GPU first sees in that frame, once with the dedupe and once with
+  `GRID_WGPU_BIND_DEDUPE=0` (two child processes), and requires identical frames. It needs a GPU and
+  runs in prepush's full tier.
+- Upgrading wgpu: drop the patch if upstream stops re-merging and re-registering a bind group already
+  used in the pass; otherwise copy the new release here and re-apply the marked changes
+  (`grep -rn "DRIG patch" third_party/wgpu-core`). After any change here, the coordinator refreshes
+  the shared build seed (`tools/build_seed.ps1`).

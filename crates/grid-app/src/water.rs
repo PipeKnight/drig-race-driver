@@ -18,7 +18,7 @@ use grid_tools::route::Route;
 use std::{collections::BTreeMap, path::Path};
 
 const SHADER: Handle<Shader> = uuid_handle!("3f0e4c52-8a7b-4d61-9b1e-6c2d5a7f9e13");
-type WaterMaterial = ExtendedMaterial<StandardMaterial, Water>;
+pub(crate) type WaterMaterial = ExtendedMaterial<StandardMaterial, Water>;
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct Water {

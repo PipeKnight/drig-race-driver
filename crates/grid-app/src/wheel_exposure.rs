@@ -11,7 +11,7 @@ use bevy::{
 };
 
 const SHADER: Handle<Shader> = uuid_handle!("87b97081-7ef3-469a-a9dd-fdaee93b1749");
-type HullMaterial = ExtendedMaterial<StandardMaterial, Exposure>;
+pub(crate) type HullMaterial = ExtendedMaterial<StandardMaterial, Exposure>;
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct Exposure {
     #[uniform(100)]

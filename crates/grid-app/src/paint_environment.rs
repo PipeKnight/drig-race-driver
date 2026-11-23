@@ -10,7 +10,7 @@ use bevy::{
 use std::collections::HashMap;
 
 const SHADER: Handle<Shader> = uuid_handle!("e5c3fc7a-25d5-42f6-9182-bfab9aeb0c20");
-type Paint = ExtendedMaterial<StandardMaterial, EnvironmentLayer>;
+pub(crate) type Paint = ExtendedMaterial<StandardMaterial, EnvironmentLayer>;
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct EnvironmentLayer {

@@ -17,7 +17,7 @@ use grid_tools::route::Route;
 use std::{collections::BTreeMap, path::Path};
 
 const SHADER: Handle<Shader> = uuid_handle!("8c41d2e7-5b93-4f0a-a6d8-2e7b19c4f650");
-type ShaftMaterial = ExtendedMaterial<StandardMaterial, Shaft>;
+pub(crate) type ShaftMaterial = ExtendedMaterial<StandardMaterial, Shaft>;
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct Shaft {

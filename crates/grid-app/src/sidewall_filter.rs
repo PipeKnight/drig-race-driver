@@ -7,7 +7,7 @@ use bevy::{
     shader::ShaderRef,
 };
 const SHADER: Handle<Shader> = uuid_handle!("41b1a37f-69f0-40c4-a79d-b70a8a2411a0");
-type SidewallMaterial = ExtendedMaterial<StandardMaterial, Filter>;
+pub(crate) type SidewallMaterial = ExtendedMaterial<StandardMaterial, Filter>;
 #[derive(Component)]
 pub struct Sidewall {
     pub car: usize,

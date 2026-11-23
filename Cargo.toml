@@ -32,3 +32,6 @@ debug-assertions = true
 # when they changed (third_party/README.md).
 [patch.crates-io]
 bevy_render = { path = "third_party/bevy_render" }
+# DRIG patch (F886): wgpu-core 29.0.4 merges and init-checks a bind group once per
+# render pass (third_party/README.md).
+wgpu-core = { path = "third_party/wgpu-core" }

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F886](F0886.md) | 2026-11-23 | Transparent phase: bind groups merged once per render pass in vendored wgpu-core |
 | [F885](F0885.md) | 2026-11-23 | Dynamic resolution: no ineffective jump from vsync-quantized frames, holds verified (Mac M4) |
 | [F884](F0884.md) | 2026-11-20 | Spikes after the countdown in derby and Donington Enhanced: no lazy work, steady-load tails (classifier) |
 | [F883](F0883.md) | 2026-11-20 | FPS series summary: A 7dfed11e against B 7d21951e, 16 cell-phases |

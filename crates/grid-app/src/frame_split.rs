@@ -421,6 +421,125 @@ fn count_transparent(
     });
 }
 
+/// Short name of a material type for [`dump_transparent`].
+fn material_name(t: TypeId) -> &'static str {
+    use crate::*;
+    let names: [(TypeId, &str); 16] = [
+        (TypeId::of::<StandardMaterial>(), "std"),
+        (TypeId::of::<car_reflection_overlay::Overlay>(), "overlay"),
+        (TypeId::of::<pane_slab::Pane>(), "pane"),
+        (TypeId::of::<window_response::Window>(), "window"),
+        (TypeId::of::<tyre_smoke::SmokeMaterial>(), "smoke"),
+        (TypeId::of::<skid_marks::SkidMaterial>(), "skid"),
+        (TypeId::of::<tree_cards::CardMaterial>(), "card"),
+        (TypeId::of::<crowd_preview::CrowdMaterial>(), "crowd"),
+        (TypeId::of::<track_surface::SurfaceMaterial>(), "surface"),
+        (TypeId::of::<light_shafts::ShaftMaterial>(), "shaft"),
+        (TypeId::of::<water::WaterMaterial>(), "water"),
+        (TypeId::of::<wheel_exposure::HullMaterial>(), "hull"),
+        (TypeId::of::<paint_environment::Paint>(), "paint"),
+        (TypeId::of::<sidewall_filter::SidewallMaterial>(), "sidewall"),
+        (TypeId::of::<foundation_backing::RawMaterial>(), "raw"),
+        (TypeId::of::<sky::SkyMaterial>(), "sky"),
+    ];
+    names.iter().find(|(id, _)| *id == t).map_or("other", |(_, n)| n)
+}
+
+#[derive(Default)]
+struct TrnDump {
+    frames: u64,
+    draws: BTreeMap<&'static str, u64>,
+    items: BTreeMap<&'static str, u64>,
+    // pipeline, material bind group (type and slab), vertex buffer, index buffer, draw function
+    switches: [u64; 5],
+    pairs: BTreeMap<(&'static str, &'static str), u64>,
+}
+
+static TRN_DUMP: Mutex<Option<TrnDump>> = Mutex::new(None);
+
+/// `GRID_TRN_DUMP=1` (diagnostic, F886): every 300 render frames a
+/// `trn_dump` line with the sorted transparent phase's draws and items by
+/// material type, the state switches between consecutive draws (pipeline,
+/// material bind group = type and slab, vertex buffer, index buffer, draw
+/// function) and the most common material-type transitions.
+fn dump_transparent(
+    transparent: Option<Res<ViewSortedRenderPhases<Transparent3d>>>,
+    materials: Option<Res<bevy::pbr::RenderMaterialInstances>>,
+    bindings: Option<Res<bevy::pbr::RenderMaterialBindings>>,
+    meshes: Option<Res<bevy::pbr::RenderMeshInstances>>,
+    allocator: Option<Res<bevy::render::mesh::allocator::MeshAllocator>>,
+) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("GRID_TRN_DUMP").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    let (Some(transparent), Some(materials)) = (transparent, materials) else {
+        return;
+    };
+    let mut guard = TRN_DUMP.lock().unwrap();
+    let d = guard.get_or_insert_with(TrnDump::default);
+    d.frames += 1;
+    for phase in transparent.values() {
+        let mut last: Option<(_, _, _, _, _, &'static str)> = None;
+        let mut next = 0;
+        for (index, item) in phase.items.iter().map(|(_, i)| i).enumerate() {
+            let asset = materials.instances.get(&item.entity.1).map(|m| m.asset_id);
+            let name = asset.map_or("none", |a| material_name(a.type_id()));
+            *d.items.entry(name).or_default() += 1;
+            if index != next {
+                continue;
+            }
+            next += item.batch_range.len().max(1);
+            if item.batch_range.is_empty() {
+                continue;
+            }
+            *d.draws.entry(name).or_default() += 1;
+            let group = asset
+                .and_then(|a| bindings.as_ref().and_then(|b| b.get(&a)))
+                .map(|b| b.group.0);
+            let mesh = meshes.as_ref().and_then(|m| m.mesh_asset_id(item.entity.1));
+            let vb = mesh
+                .and_then(|m| allocator.as_ref().and_then(|a| a.mesh_vertex_slice(&m)))
+                .map(|s| s.buffer.id());
+            let ib = mesh
+                .and_then(|m| allocator.as_ref().and_then(|a| a.mesh_index_slice(&m)))
+                .map(|s| s.buffer.id());
+            let key = (item.pipeline, (asset.map(|a| a.type_id()), group), vb, ib, item.draw_function, name);
+            if let Some(l) = last {
+                d.switches[0] += u64::from(l.0 != key.0);
+                d.switches[1] += u64::from(l.1 != key.1);
+                d.switches[2] += u64::from(l.2 != key.2);
+                d.switches[3] += u64::from(l.3 != key.3);
+                d.switches[4] += u64::from(l.4 != key.4);
+                if l.5 != name {
+                    *d.pairs.entry((l.5, name)).or_default() += 1;
+                }
+            }
+            last = Some(key);
+        }
+    }
+    if d.frames >= 300 {
+        let f = d.frames as f64;
+        let per = |m: &BTreeMap<&str, u64>| {
+            m.iter().map(|(k, v)| format!("{k}:{:.1}", *v as f64 / f)).collect::<Vec<_>>().join(",")
+        };
+        let mut pairs: Vec<_> = d.pairs.iter().collect();
+        pairs.sort_by(|a, b| b.1.cmp(a.1));
+        let pairs = pairs
+            .iter()
+            .take(10)
+            .map(|((a, b), v)| format!("{a}>{b}:{:.1}", **v as f64 / f))
+            .collect::<Vec<_>>()
+            .join(",");
+        let s = d.switches.map(|v| v as f64 / f);
+        println!(
+            "trn_dump frames={} draws={} items={} sw_pipe={:.1} sw_matgroup={:.1} sw_vb={:.1} sw_ib={:.1} sw_drawfn={:.1} pairs={pairs}",
+            d.frames, per(&d.draws), per(&d.items), s[0], s[1], s[2], s[3], s[4]
+        );
+        *d = TrnDump::default();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main world.
 
@@ -1474,7 +1593,7 @@ pub fn install(app: &mut App) {
             point::<{ P::Bind as usize }>
                 .after(S::PrepareResourcesFlush)
                 .before(S::PrepareBindGroups),
-            (count_transparent, point::<{ P::Graph as usize }>)
+            (count_transparent, dump_transparent, point::<{ P::Graph as usize }>)
                 .chain()
                 .after(S::Prepare)
                 .before(S::Render),

@@ -5094,3 +5094,89 @@ frame over 12 ms) cannot be reached from the main-thread side. The candidate the
 projection over the frames without a tick: at most about 0.9 ms in 23 of 91 slow derby windows. It would delay
 some dents by a frame, which changes the damage presentation, so it is left for a decision rather than made here.
 No source changed.
+
+## Transparent phase in Donington, and bind groups merged once per render pass (F886)
+
+Target from the coordinator: at least 0.7 ms off the render thread in Donington 2560x1440 Enhanced, where
+`r_encode` is 4.2-4.9 ms, so that every 1-s window clears 100 fps.
+
+### What the transparent draws are
+
+`GRID_TRN_DUMP=1` (diagnostic in `crates/grid-app/src/frame_split.rs`) classifies the sorted `Transparent3d`
+items of the main camera by their material asset type and counts the state switches the draw loop makes. It prints
+one `trn_dump` line every 300 render frames. Donington race start, 2560x1440 native, three 300-frame windows each
+(`local/ab/trn.ps1`):
+
+| per frame | base | Enhanced |
+|---|---|---|
+| draws | 109-136 | 125-152 |
+| car-glass panes (`ExtendedMaterial<Standard, PaneSlab>`, F876) | 51-64 | 59-72 |
+| reflection overlays (`car_reflection_overlay::Overlay`) | 52-65 | 60-73 |
+| other StandardMaterial (track alpha, decals) | 3.6-4.9 | 3.7-4.3 |
+| sky, skid marks, other | 1, 1, 0.3-0.5 | 1, 1, 1.4-1.6 |
+| sorted items (overlay items / draws) | 136-174 overlay items | 163-195 overlay items |
+| smoke items (no draw: no particles at start) | 5 | 5 |
+| pipeline switches | 109-133 | 125-150 |
+| material bind-group switches | 107-133 | 125-149 |
+| vertex / index buffer switches | 6.6-7.3 / 2.7-3.6 | 7.9-9.2 / 3.2-5.3 |
+| draw-function switches | 0 | 0 |
+
+Transitions `pane>overlay` and `overlay>pane` make about 97 % of all switches. Each overlay lies on its pane, so
+the back-to-front distance sort puts each pair next to each other; the two materials have different pipelines and
+different bindless slabs, so every draw changes both. Batching by material would change the blend order of the
+glass (F865 rejected a grouping for that reason), and merging the meshes would merge car parts, which the owner
+excludes (damage and detachable parts stay). The draws themselves are already few; the cost is per switch.
+
+### What Enhanced adds
+
+From the F883 table and the F877-F882 splits, Enhanced adds about 2.6 ms of render thread in Donington 2560:
+`r_encode` +1.3 (the tail of the encode, after the main passes: bloom, atmosphere, TAA, SSAO, motion vectors,
++0.9; the lead marker +0.2; prepass +0.1; post +0.1), `r_submit` +0.6 (about ten more command buffers), `r_bind`
++0.4, `r_prepare` +0.14, `r_meshes` +0.13. The transparent phase has the same shape in both modes.
+
+### Where a switch costs: wgpu-core
+
+wgpu-core 29.0.4, `command/pass.rs`. Each `set_bind_group` in a render pass merges the bind group's whole resource
+list into the pass's usage scope (`merge_bind_group`: one state merge per buffer and texture view), and the
+following `flush_bindings_helper` registers the bind group's buffer and texture memory-init actions again (an
+`RwLock` read, `check_action` and a `retain` over the discards per texture range). A bindless material slab holds
+60-100+ resources, so each pane/overlay switch repeats that work over every texture of the slab, although nothing
+can change inside one pass: the usage scope already holds the merge, and the init actions are already registered.
+
+### The fix
+
+`third_party/wgpu-core` (vendored 29.0.4, `[patch.crates-io]`): a render pass remembers which bind groups it has
+merged and init-checked (`BindDedupe`, keyed by the bind group's `Arc` address, which the pass keeps alive) and
+does both only the first time. The raw `set_bind_group`, the tracker insert and the validation stay on every call.
+Compute passes keep the upstream path. `GRID_WGPU_BIND_DEDUPE=0` restores the upstream path for the process. It is
+general: it applies to every render pass, track, car and material, and changes neither draws nor order.
+
+### Correctness
+
+Image check (`local/ab/crops-dd.ps1`, one exe, fixed-step frames at 2560x1440): Donington and Spa, baseline and
+Enhanced, ticks 600 and 1500, and Haruna touge baseline and Enhanced at tick 900. In each case, before
+(`GRID_WGPU_BIND_DEDUPE=0`) is compared with after (dedupe on), and a second after run gives the noise baseline.
+Nine of the ten cases differ by 0 px. Base Spa 600 differed by 1 px (max delta 23 at 1032,645). A second
+dedupe-off run of that case matches the dedupe-on images exactly, and it differs from the first off run at that
+same pixel, so the pixel was run-to-run noise in the first off run. Result: 0 px in all ten cases. The glass blend
+order cannot change, because the patch changes neither the draws nor their order.
+
+Test: `crates/grid-app/tests/bind_dedupe.rs` (ignored by default, needs a GPU; prepush full tier runs it with
+`--include-ignored`). A headless Bevy app draws twelve overlapping alpha-blended quads that alternate
+`StandardMaterial` and an `ExtendedMaterial`, so every transparent draw switches pipeline and material bind group.
+The quads use textures first seen in that frame, and the scene has a shadowed light. The test renders in two child
+processes, dedupe on and off, and requires the first two frames and frame 8 to be identical. Passed (5.1 s).
+
+### Timing
+
+`local/ab/dd-ab.ps1` (one exe, SHA-256 prefix 60F8CCE742CC; `GRID_WGPU_BIND_DEDUPE=0` as A, dedupe on as B;
+Donington race, 4200 ticks, frame-split smoke windows after GO + 2 s; each pair waits for a quiet machine, under
+the build lock). One clean pair so far (2026-11-20):
+
+| cell | fps A / B | render ms A / B | r_encode | encode tail | r_submit | p99 ms | worst 1-s window | windows < 100 fps |
+|---|---|---|---|---|---|---|---|---|
+| don-2560-enh | 94.9 / 100.7 | 9.93 / 9.34 (-0.59) | 4.39 / 3.93 | 2.59 / 2.19 | 1.20 / 1.22 | 13.49 / 11.52 | 83.2 / 86.9 fps | 58/64 / 26/64 |
+
+The Donington 1280 Enhanced pair ran while another program loaded the GPU (dirty), so it is not used. Verdict for
+now: about 0.6 ms off the render thread, under the 0.7 ms target, and the worst window still misses 100 fps. More
+pairs are pending, and the next candidates are the remaining per-switch tracker insert and command-buffer count.
