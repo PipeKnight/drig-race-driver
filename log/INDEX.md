@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F892](F0892.md) | 2026-11-23 | wgpu-core: bind-group tracker insert once per render pass; empty internal command buffers skipped (no gain, not kept) |
 | [F891](F0891.md) | 2026-11-23 | Derby collision frames: patched car batches, DentSpread rerun, what holds AssetEventSystems |
 | [F890](F0890.md) | 2026-11-23 | grid-app test compute pool created at process start (TaskPool stack overflow root cause) |
 | [F889](F0889.md) | 2026-11-23 | Race countdown waits for the pipeline warm-up |

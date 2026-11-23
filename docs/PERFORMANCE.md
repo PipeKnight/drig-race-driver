@@ -5170,16 +5170,24 @@ processes, dedupe on and off, and requires the first two frames and frame 8 to b
 ### Timing
 
 `local/ab/dd-ab.ps1` (one exe, SHA-256 prefix 60F8CCE742CC; `GRID_WGPU_BIND_DEDUPE=0` as A, dedupe on as B;
-Donington race, 4200 ticks, frame-split smoke windows after GO + 2 s; each pair waits for a quiet machine, under
-the build lock). One clean pair so far (2026-11-20):
+Donington race and the demolition derby, 4200 ticks, frame-split smoke windows after GO + 2 s, under the build lock).
+Each pair waits up to 20 min for a quiet machine and then runs anyway, with the load recorded (F892: an unlimited wait
+hung the first batch). Three pairs per cell, 2026-11-20 to 2026-11-23; the machine was busy with other sessions'
+grid-app runs and GPU load for most of the batch:
 
-| cell | fps A / B | render ms A / B | r_encode | encode tail | r_submit | p99 ms | worst 1-s window | windows < 100 fps |
-|---|---|---|---|---|---|---|---|---|
-| don-2560-enh | 94.9 / 100.7 | 9.93 / 9.34 (-0.59) | 4.39 / 3.93 | 2.59 / 2.19 | 1.20 / 1.22 | 13.49 / 11.52 | 83.2 / 86.9 fps | 58/64 / 26/64 |
+| cell | pairs | fps A / B | render ms A / B (B-A per pair) | r_encode A / B | encode tail A / B | r_submit A / B | p99 ms A / B | worst 1-s window A / B | windows < 100 fps A / B |
+|---|---|---|---|---|---|---|---|---|---|
+| don-2560-enh | 3 clean | 94.8 / 102.6 | 9.52 / 9.18 (-0.59 -0.60 +0.16) | 4.31 / 3.93 | 2.56 / 2.22 | 1.15 / 1.23 | 13.21 / 11.50 | 59.4 / 82.6 | 122/192 / 65/192 |
+| don-1280-enh | 3 (1 dirty) | 103.3 / 104.7 | 8.75 / 9.04 (+0.04 -0.18 +1.00) | 4.44 / 4.42 | 2.47 / 2.24 | 0.60 / 0.61 | 12.79 / 11.82 | 55.0 / 72.1 | 33/193 / 54/194 |
+| don-2560-base | 3 (3 dirty) | 123.5 / 108.0 | 7.54 / 7.62 (+0.42 +1.03 -1.21) | 3.28 / 3.09 | 1.79 / 1.53 | 0.61 / 0.57 | 9.88 / 14.10 | 92.2 / 57.9 | 9/191 / 67/191 |
+| derby-2560-enh | 3 (1 dirty) | 93.8 / 83.5 | 8.80 / 10.51 (+0.06 +6.19 -1.10) | 4.02 / 4.40 | 2.32 / 2.46 | 1.08 / 1.09 | 15.61 / 18.77 | 55.7 / 47.4 | 91/187 / 134/189 |
 
-The Donington 1280 Enhanced pair ran while another program loaded the GPU (dirty), so it is not used. Verdict for
-now: about 0.6 ms off the render thread, under the 0.7 ms target, and the worst window still misses 100 fps. More
-pairs are pending, and the next candidates are the remaining per-switch tracker insert and command-buffer count.
+Only the target cell is clean: render -0.34 ms on average (two pairs -0.6, one +0.16), encode tail -0.34 ms,
+r_encode -0.38 ms, and windows under 100 fps 122 -> 65 of 192. In the dirty cells `render_ms` and the fps columns
+follow the load (one derby pair +6.2 ms) and say nothing about the patch; the encode tail, which only the
+transparent phase and the later passes feed, still falls by 0.14-0.34 ms in both Donington cells. Verdict: about
+0.35-0.6 ms off the render thread in Donington 2560 Enhanced, under the 0.7 ms target; the worst window still misses
+100 fps. Follow-up: F892 (the remaining per-switch tracker insert and empty internal command buffers).
 
 ## Derby collision frames: what gates the main thread (F887)
 
@@ -5272,3 +5280,86 @@ holds `AssetEventSystems` if that is the next largest item. Bar: main-gated coll
     5.8-5.9 ms.
 - Next: the main-gated collision frames now average 5.9-6.4 ms. `refresh` outside the rebuilds (about
   0.16 ms per frame) is the largest item left in `car_batch`.
+
+## Tracker insert once per pass, and empty internal command buffers (F892)
+
+Follow-up to F886: the two remaining per-frame costs it named in wgpu-core 29.0.4 (vendored in `third_party/wgpu-core`).
+The first is kept; the second was measured, gave nothing, and was not kept.
+
+### Tracker insert once per pass (kept)
+
+After F886 a render pass still called `tracker.bind_groups.insert_single` on every `set_bind_group`. That pushes the
+bind group's `Arc` onto a list, so a bind group set 70 times in one pass appears 70 times, and at submission wgpu-core
+checks every entry and all the resources it references for destruction. `command/pass.rs` now pushes a bind group
+only the first time the pass merges it (the F886 `BindDedupe` set). The raw `set_bind_group`, the device check and
+the dynamic-offset validation still run on every call; compute passes keep the upstream path.
+`GRID_WGPU_BIND_DEDUPE=0` restores upstream for both F886 and this change. It applies to every render pass, track,
+car and material, and changes neither draws nor order.
+
+### Empty internal command buffers (measured, not kept)
+
+wgpu-core records two kinds of internal command buffers. Before every render pass it opens a "(wgpu internal)
+Pre Pass" buffer for discard fix-ups, query resets, indirect-draw validation and the barriers into the pass's usage
+scope. At every `submit` it opens a "(wgpu internal) Transit" buffer per command buffer for memory initialisation
+and the barriers from the device tracker. Upstream opens and submits both even when they record nothing.
+
+The experiment computed the barriers first and opened the buffers only when there was something to record:
+`command/render.rs` for the pre-pass, and `device/queue.rs` for the transit. For the transit, `command/memory_init.rs`
+was split into a gather phase and a record phase, and the device trackers were locked before the buffer was opened.
+The barrier sets were the same as upstream. A switch, `GRID_WGPU_SKIP_EMPTY_TRANSIT=0`, restored upstream, and a
+counter, `GRID_WGPU_CB_STATS=1`, reported the effect. The patch is kept in `local/ab/f892-full.patch`.
+
+Donington race, 2560x1440 Enhanced, windowed (`local/ab/fss.ps1`, 2400 ticks, three counter lines each):
+
+| per 300 submits | skip off (upstream) | skip on |
+|---|---|---|
+| command buffers submitted | 22826-22950 | 20100 |
+| pre-pass buffers opened / skipped | 4888-4950 / 0 | 3300 / 1650 |
+| transit buffers opened / skipped | 4800 / 0 | 3600 / 1200 |
+
+With the skip, about 67 raw command buffers were submitted per submit instead of 76.5 (-12 %). A third of the pre-pass
+buffers and a quarter of the transit buffers were empty. The time did not change, however: in three clean pairs
+(table below), render changed by -0.05, -0.01 and -0.04 ms, and `r_submit` went from 1.23 to 1.21 ms. On this driver
+(Vulkan, NVIDIA), an empty command buffer costs next to nothing. The change would add a different tracker lock order
+and about 300 patched lines for no measured gain, so it was taken out. The image check below covered it as well.
+
+### Correctness
+
+Image check as F886 (`local/ab/crops-dd.ps1 -OffEnv ...`, one exe `local/ab/tx.exe`, fixed-step frames at 2560x1440,
+the same ten cases: Donington and Spa baseline and Enhanced at ticks 600 and 1500, Haruna touge baseline and Enhanced at
+tick 900), twice: before = `GRID_WGPU_SKIP_EMPTY_TRANSIT=0` (transit skip off), and before = `GRID_WGPU_BIND_DEDUPE=0`
+(F886 dedupe and the tracker change off), using the exe with both patches. Each case also has a second after run as the noise baseline.
+
+- Transit skip: 0 px in nine cases; base Spa 600 had 1 px (delta 23 at 1032,645), the same pixel as in F886.
+- Dedupe and tracker: 0 px in nine cases; Enhanced touge 900 had 5 px with delta 1 (bbox 49,622-1491,825).
+- Rerun of both cases with two before and two after runs (`local/ab/tx-check2.ps1`): base Spa 600 is 0 px in every
+  pair. In Enhanced touge 900 the first before run equals the after runs, and the second before run differs from both
+  by the same 5 px, so the upstream path varies by itself from run to run there; the patched runs were identical.
+
+Result: 0 px in all ten cases for both switches. The noise baseline (after against a second after run) was 0 px
+everywhere. The test `crates/grid-app/tests/bind_dedupe.rs` (F886) still covers the dedupe and tracker change.
+
+### Timing
+
+`local/ab/dd-ab.ps1`, Donington race 2560x1440 Enhanced, 4200 ticks, one exe with both patches
+(`local/ab/tx.exe`, 3DC4D03A4ACC), three pairs per switch on a quiet machine, 2026-11-24:
+
+| A (off) against B (on) | fps A / B | render ms A / B (B-A per pair) | r_encode A / B | encode tail A / B | r_submit A / B | p99 ms A / B | worst 1-s window A / B | windows < 100 fps A / B |
+|---|---|---|---|---|---|---|---|---|
+| `GRID_WGPU_BIND_DEDUPE` (F886 + F892 tracker) | 100.7 / 106.2 | 9.36 / 8.85 (-0.53 -0.47 -0.52) | 4.19 / 3.77 | 2.55 / 2.16 | 1.23 / 1.20 | 11.28 / 10.68 | 83.5 / 97.1 | 86/193 / 18/192 |
+| `GRID_WGPU_SKIP_EMPTY_TRANSIT` (experiment) | 105.0 / 105.4 | 8.96 / 8.92 (-0.05 -0.01 -0.04) | 3.82 / 3.81 | 2.20 / 2.19 | 1.23 / 1.21 | 10.80 / 10.77 | 94.7 / 95.7 | 26/193 / 30/193 |
+
+The first set of three skip pairs (2026-11-23) ran while another game (dirt3) and GPU load were present, with one
+pair off by +15 ms, so it is not used.
+
+Dedupe plus the tracker change: -0.51 ms render, all three pairs agree. The F886 dedupe alone gave -0.34 ms on
+average (-0.59, -0.60, +0.16), measured on other days, so the tracker share cannot be separated cleanly. It lies
+between 0 and about 0.2 ms. Verdict:
+- 0.5 ms off the render thread in Donington 2560 Enhanced, under the 0.7 ms target.
+- Windows under 100 fps: 86 -> 18 of 193.
+- The worst 1-s window is 97.1 fps, still under 100.
+- The next lead is lock contention inside wgpu on the render thread, from the F886 profile:
+  - the Vulkan `create_bind_group` mutex, 5.6 %;
+  - `create_buffer`, 2.6 + 1.4 %;
+  - the pending-writes mutex, 2.1 + 1.5 %;
+  - the `device_create_bind_group` RwLock, about 5 %.

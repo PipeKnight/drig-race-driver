@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F892](log/F0892.md) | 2026-11-23 | wgpu-core: bind-group tracker insert once per render pass; empty internal command buffers skipped (no gain, not kept) |
 | [F891](log/F0891.md) | 2026-11-23 | Derby collision frames: patched car batches, DentSpread rerun, what holds AssetEventSystems |
 | [F890](log/F0890.md) | 2026-11-23 | grid-app test compute pool created at process start (TaskPool stack overflow root cause) |
 | [F889](log/F0889.md) | 2026-11-23 | Race countdown waits for the pipeline warm-up |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F835](log/F0835.md) | 2026-11-16 | Fence through smoke: scaled 3D image shown opaque |
 | [F834](log/F0834.md) | 2026-11-16 | Owner review 2026-11-16: Mac performance, accidental session, fence through smoke |
 | [F833](log/F0833.md) | 2026-11-12 | Prepare GPLv3 licensing change for future DRIG versions |
-| [F832](log/F0832.md) | 2026-11-12 | Discover installed DRIG resources for private macOS rebuilds |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

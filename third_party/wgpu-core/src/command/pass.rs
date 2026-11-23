@@ -132,21 +132,30 @@ where
     state.dynamic_offset_count += num_dynamic_offsets;
 
     if let Some(bind_group) = bind_group {
+        // DRIG patch (F886): skip the merge when this pass already merged this bind group.
+        let first_merge = state
+            .bind_dedupe
+            .as_mut()
+            .is_none_or(|d| d.merged.insert(Arc::as_ptr(&bind_group) as usize));
         // Add the bind group to the tracker. This is done for both compute and
         // render passes, and is used to fail submission of the command buffer if
         // any resource in any of the bind groups has been destroyed, whether or
         // not the bind group is actually used by the pipeline.
-        let bind_group = state.base.tracker.bind_groups.insert_single(bind_group);
+        // DRIG patch (F892): a bind group this pass already merged is already in the tracker (the
+        // first set inserted it), so it is not pushed again; submission checks every entry and all
+        // the resources it references, so each repeated entry repeated that whole check.
+        let repeated;
+        let bind_group = if first_merge {
+            state.base.tracker.bind_groups.insert_single(bind_group)
+        } else {
+            repeated = bind_group;
+            &repeated
+        };
 
         bind_group.same_device(device)?;
 
         bind_group.validate_dynamic_bindings(index, &state.temp_offsets)?;
 
-        // DRIG patch (F886): skip the merge when this pass already merged this bind group.
-        let first_merge = state
-            .bind_dedupe
-            .as_mut()
-            .is_none_or(|d| d.merged.insert(Arc::as_ptr(bind_group) as usize));
         if merge_bind_groups && first_merge {
             // Merge the bind group's resources into the tracker. We only do this
             // for render passes. For compute passes it is done per dispatch in
