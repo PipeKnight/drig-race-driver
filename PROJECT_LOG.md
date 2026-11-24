@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F897](log/F0897.md) | 2026-11-24 | Bundled APKs: stale event file lists, automatic stage check in build_android |
 | [F896](log/F0896.md) | 2026-11-24 | Profile APK f4e8d4123be7 for the main-thread phone measurement |
 | [F895](log/F0895.md) | 2026-11-24 | Goal matrix after F893/F894, and unfocused frames in frame_stats |
 | [F894](log/F0894.md) | 2026-11-24 | Derby collision frames: car_batch refresh outside rebuilds |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F840](log/F0840.md) | 2026-11-17 | Frame-split gpu_begin poll: removing it only moves the work into submit |
 | [F839](log/F0839.md) | 2026-11-17 | Main thread: parallel continuous sweeps, unchanged-damage skips, burst diagnostics |
 | [F838](log/F0838.md) | 2026-11-17 | Tree billboards faced on the GPU: a compute pass writes the mesh slabs |
-| [F837](log/F0837.md) | 2026-11-17 | Mesh uploads per frame: crowd cards, car batches and part meshes stream in place |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
