@@ -80,7 +80,10 @@ checkout:
 tools/package_linux.sh --version 0.1.0 --out OUT --tools TOOLCACHE
 ```
 
-The script builds `cargo build --release --locked -p grid-app`. It fetches the pinned
+The script builds the player build, `cargo build --release --locked -p grid-app
+--no-default-features` (no developer tooling, row 132; `--cargo-args` replaces the feature
+arguments), with `GRID_BUILD_REVISION` set so `drig --version` prints
+`DRIG <ver> (revision <12 hex>)`, plus `-dirty` for a test package from a changed checkout. It fetches the pinned
 appimagetool 1.9.1 and AppImage type2-runtime 20251108 from their official GitHub releases into
 the tool cache, and checks their SHA-256 on every use. Tar entries are sorted with fixed owner and
 mtime (the commit time), and gzip carries no name or time. Ends with a `VERDICT` line.
@@ -101,6 +104,9 @@ NVIDIA drivers on a real Linux machine. The F-entry that added this document has
 | The same from a case-sensitive ext4 copy of the install, under `strace` | 300 ticks, same final pose; 4 missing paths, all absent in any casing (optional files), 0 case-only misses |
 | The same race from the AppImage (FUSE) | 300 ticks |
 | Packages | tar listing and `build.json` as specified, `min_glibc` 2.35 |
+| v0.1.0 candidate files (player build of e4e5b0c9): `--version`, `--help` (tarball, AppImage with FUSE, AppImage extract-and-run) | `DRIG 0.1.0 (revision e4e5b0c9b99e)`, rc 0, no developer flags |
+| v0.1.0 candidate files: the race above without `--data-dir` (tarball and AppImage with FUSE) | 300 ticks; `DRIG-data` created next to `drig` and next to the `.AppImage` |
+| v0.1.0 release files (with the `--game-root` fix): menu start with only `--game-root PATH`, and `--list-tracks --game-root PATH`, no Steam library present | F907 has the results |
 
 Not tested:
 - real GPUs and their drivers, frame rate, X11 versus Wayland differences on real desktops
@@ -109,6 +115,8 @@ Not tested:
 - gamepads, wheels and force feedback;
 - glibc older than 2.39 at run time, other distributions, Steam Deck;
 - other tracks and cars on case-sensitive storage (Android has long read the same data through
-  the same lookups);
-- the AppImage data folder next to the `.AppImage`: the test binaries predate row 129, so they
-  used `~/.local/share/grid-reassembly` (or `--data-dir`).
+  the same lookups).
+
+The game folder can also be set as `[game] root = PATH` in the data folder's `settings.ini`
+(docs/SETTINGS.md); `--game-root` overrides it. The player build ignores the `GRID_GAME_ROOT`
+variable, like every `GRID_*` variable (F906).

@@ -1307,24 +1307,40 @@ pub fn window_preferences(args: &[String], dir: &Path) -> (Option<WindowMode>, O
     (settings.window, settings.window_resolution)
 }
 
+/// `--data-dir DIR` (the last one wins), else [`default_data_dir`].
+fn data_dir_flag(args: &[String]) -> PathBuf {
+    args.windows(2)
+        .rfind(|w| w[0] == "--data-dir")
+        .map(|w| PathBuf::from(&w[1]))
+        .unwrap_or_else(default_data_dir)
+}
+
+/// The player flags that set settings (player.rs) over the settings files:
+/// `--fullscreen`, `--windowed`, `--resolution`, `--render-height` and
+/// `--quality` as `[video]` keys, and `--game-root` (the last one wins) as
+/// `[game] root`. Every start that builds from [`load`] (menu, career,
+/// loading screen, `--list-tracks`) gets them; v0.1.0 applied `--game-root`
+/// only on the developer path. Returns the `[video]` override text.
+fn apply_player_flags(settings: &mut Settings, args: &[String], dir: &Path) -> Result<String, String> {
+    let overrides = crate::player::overrides(args);
+    if !overrides.is_empty() {
+        settings.apply(&overrides, dir).map_err(|e| format!("command line: {e}"))?;
+    }
+    if let Some(w) = args.windows(2).rfind(|w| w[0] == "--game-root") {
+        settings.root = Some(PathBuf::from(&w[1]));
+    }
+    Ok(overrides)
+}
+
 /// Reads the data dir and selected settings files, then returns merged settings.
 pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
-    let value = |flag: &str| -> Vec<String> {
-        args.windows(2)
-            .filter(|w| w[0] == flag)
-            .map(|w| w[1].clone())
-            .collect()
-    };
-    let dir = value("--data-dir")
-        .pop()
-        .map(PathBuf::from)
-        .unwrap_or_else(default_data_dir);
+    let dir = data_dir_flag(args);
     let files = profile_files(args, &dir);
     if args
         .last()
-        .is_some_and(|a| a == "--settings" || a == "--data-dir")
+        .is_some_and(|a| a == "--settings" || a == "--data-dir" || a == "--game-root")
     {
-        return Err("--settings and --data-dir need a path".into());
+        return Err("--settings, --data-dir and --game-root need a path".into());
     }
     let mut settings = Settings::new();
     for file in &files {
@@ -1341,13 +1357,9 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
             .map_err(|e| format!("settings file {}: {e}", file.display()))?;
         println!("settings_file path={}", file.display());
     }
-    // The player flags (`--fullscreen`, `--resolution`, `--render-height`,
-    // `--quality`) override the files for this run (player.rs).
-    let overrides = crate::player::overrides(args);
+    // The player flags override the files for this run.
+    let overrides = apply_player_flags(&mut settings, args, &dir)?;
     if !overrides.is_empty() {
-        settings
-            .apply(&overrides, &dir)
-            .map_err(|e| format!("command line: {e}"))?;
         println!("settings_override {}", overrides.lines().skip(1).collect::<Vec<_>>().join(", "));
     }
     if settings.ignored_diagnostics > 0 {
@@ -1887,5 +1899,89 @@ mod shared_display_preferences_tests {
         let mut saved=Settings::default(); saved.apply(&std::fs::read_to_string(&file).unwrap(),&dir).unwrap();
         assert_eq!(saved.tone_map,profile.tone_map); assert_eq!(saved.post_saturation,profile.post_saturation);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod player_flag_tests {
+    //! One test per player flag that sets settings (player.rs `--help`),
+    //! through the helpers [`load`] uses; `load` itself sets the process-wide
+    //! data dir, so the tests do not call it.
+    use super::*;
+
+    fn args(text: &str) -> Vec<String> {
+        text.split_whitespace().map(String::from).collect()
+    }
+
+    /// Settings from a settings file, then the flags, as `load` applies them.
+    fn with_flags(file: &str, flags: &str) -> Settings {
+        let mut s = Settings::new();
+        s.apply(file, Path::new(".")).unwrap();
+        apply_player_flags(&mut s, &args(flags), Path::new(".")).unwrap();
+        s
+    }
+
+    #[test]
+    fn game_root_flag_overrides_the_settings_file() {
+        let file = "[game]
+root = /from-file
+";
+        assert_eq!(with_flags(file, "--fullscreen --track x").root, Some(PathBuf::from("/from-file")));
+        assert_eq!(with_flags(file, "--game-root /a --track x").root, Some(PathBuf::from("/a")));
+        assert_eq!(with_flags(file, "--game-root /a --game-root /b").root, Some(PathBuf::from("/b")));
+    }
+
+    #[test]
+    fn data_dir_flag_chooses_the_data_dir() {
+        assert_eq!(data_dir_flag(&args("--data-dir /d --career")), PathBuf::from("/d"));
+        assert_eq!(data_dir_flag(&args("--data-dir /d --data-dir /e")), PathBuf::from("/e"));
+        assert_eq!(data_dir_flag(&args("--career")), default_data_dir());
+    }
+
+    #[test]
+    fn fullscreen_flag_overrides_the_settings_file() {
+        let s = with_flags("[video]
+window = windowed
+", "--fullscreen");
+        assert_eq!(s.window, Some(WindowMode::Fullscreen));
+    }
+
+    #[test]
+    fn windowed_flag_overrides_the_settings_file() {
+        let s = with_flags("[video]
+window = fullscreen
+", "--windowed");
+        assert_eq!(s.window, Some(WindowMode::Windowed));
+    }
+
+    #[test]
+    fn resolution_flag_overrides_the_settings_file() {
+        let s = with_flags("[video]
+resolution = 1280x720
+", "--resolution 1920x1080");
+        assert_eq!(s.window_resolution, Some((1920, 1080)));
+    }
+
+    #[test]
+    fn render_height_flag_overrides_the_settings_file() {
+        let s = with_flags("[video]
+render_height = 1080
+", "--render-height 720");
+        assert_eq!(s.video_render_height(), crate::render_scale::RenderHeight::parse("720").unwrap());
+    }
+
+    #[test]
+    fn quality_flag_overrides_the_settings_file() {
+        let s = with_flags("[video]
+shadows = high
+", "--quality low");
+        assert_eq!(s.shadows, Some(crate::shadow_layout::Quality::parse("low").unwrap()));
+    }
+
+    #[test]
+    fn a_bad_flag_value_is_a_command_line_error() {
+        let mut s = Settings::new();
+        let error = apply_player_flags(&mut s, &args("--quality extreme"), Path::new(".")).unwrap_err();
+        assert!(error.starts_with("command line:"), "{error}");
     }
 }

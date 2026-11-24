@@ -180,6 +180,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F907](log/F0907.md) | 2026-11-24 | Linux v0.1.0 packages from e4e5b0c9; --game-root fix for player starts |
 | [F906](log/F0906.md) | 2026-11-24 | DRIG v0.1.0 Windows player build: portable DRIG-data, dev-tools feature, player flags, exe release |
 | [F905](log/F0905.md) | 2026-11-24 | Atmosphere and SSAO bind groups through the bind-group cache |
 | [F904](log/F0904.md) | 2026-11-24 | Backlog: DualSense haptics row 146, release check note in row 131, no-zip release rule |
@@ -239,7 +240,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F850](log/F0850.md) | 2026-11-18 | 1440p render breakdown: render thread bound, HUD view cost, pipeline-cache design (findings) |
 | [F849](log/F0849.md) | 2026-11-18 | GO spike: single FixedUpdate tick not reproduced on a quiet PC |
 | [F848](log/F0848.md) | 2026-11-18 | Start hitch: blit pipelines pre-warmed, render thread yields to compiles under the cover |
-| [F847](log/F0847.md) | 2026-11-18 | Car transparent draws: no merge without a visible change; reflection overlays bound the gain |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

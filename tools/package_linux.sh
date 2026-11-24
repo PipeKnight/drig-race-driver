@@ -22,7 +22,8 @@ RUNTIME_VERSION=20251108
 RUNTIME_URL=https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
 RUNTIME_SHA256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 
-version=""; out=""; tools=""; build=1; allow_dirty=0; cargo_args=""
+# Player build by default (row 132): without the dev-tools feature, as tools/package_desktop.ps1.
+version=""; out=""; tools=""; build=1; allow_dirty=0; cargo_args="--no-default-features"
 while [ $# -gt 0 ]; do
     case "$1" in
         --version) version=$2; shift 2 ;;
@@ -78,6 +79,9 @@ cp "$appimagetool" "$work/appimagetool"
 chmod +x "$work/appimagetool"
 
 if [ "$build" = 1 ]; then
+    # The `--version` line: DRIG <ver> (revision <12 hex>[-dirty]), as tools/package_desktop.ps1.
+    GRID_BUILD_REVISION="${revision:0:12}$([ "$dirty" = true ] && echo -dirty || true)"
+    export GRID_BUILD_REVISION
     # shellcheck disable=SC2086
     cargo build --release --locked -p grid-app --bin grid-app $cargo_args
 fi

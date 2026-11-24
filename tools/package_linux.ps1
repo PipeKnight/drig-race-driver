@@ -5,7 +5,8 @@
 # 1. checks out exactly -Commit (default HEAD) from this repository's object store into
 #    ~/drig-build on the WSL ext4 filesystem (a shallow clean checkout, never /mnt/c);
 # 2. runs tools/package_linux.sh of that commit there, under the machine-wide build lock:
-#    cargo build --release --locked -p grid-app, then the tar.gz, the AppImage and SHA256SUMS.txt;
+#    cargo build --release --locked -p grid-app plus -CargoArgs (default --no-default-features, the
+#    player build), then the tar.gz, the AppImage and SHA256SUMS.txt;
 # 3. the pinned appimagetool and AppImage runtime are cached (hash-checked) in the main
 #    checkout's ignored local/tools/appimage/, the packages go to local/release/v<Version>/.
 # The packages contain only our code and licences, never game files.
@@ -15,7 +16,9 @@ param(
     [string]$Version = '0.1.0',
     [string]$Distro = 'Ubuntu-24.04',
     [string]$Out = '',
-    [int]$HoldMinutes = 120
+    [int]$HoldMinutes = 120,
+    # The player build (backlog row 132): no developer tooling, as the Windows release.
+    [string]$CargoArgs = '--no-default-features'
 )
 $ErrorActionPreference = 'Stop'
 
@@ -37,6 +40,7 @@ New-Item -ItemType Directory -Force $Out, $tools | Out-Null
 $gitDir = ConvertTo-WslPath $common
 $outWsl = ConvertTo-WslPath $Out
 $toolsWsl = ConvertTo-WslPath $tools
+if ($CargoArgs -match "'") { throw "-CargoArgs must not contain a single quote" }
 foreach ($p in @($gitDir, $outWsl, $toolsWsl)) {
     if ($p -match "['\s]") { throw "path with a quote or space is not supported: $p" }
 }
@@ -51,7 +55,7 @@ $lines = @(
     "git checkout -q --force $sha",
     'git clean -fdq',
     "test `"`$(git rev-parse HEAD)`" = $sha",
-    "bash tools/package_linux.sh --version '$Version' --out '$outWsl' --tools '$toolsWsl'"
+    "bash tools/package_linux.sh --version '$Version' --out '$outWsl' --tools '$toolsWsl' --cargo-args '$CargoArgs'"
 )
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "drig-package-linux-$PID.sh"
 [System.IO.File]::WriteAllText($tmp, ($lines -join "`n") + "`n", (New-Object System.Text.UTF8Encoding $false))
