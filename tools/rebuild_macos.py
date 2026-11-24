@@ -97,8 +97,9 @@ def rust_commands(channel):
 
 def build(args, runner):
     game = None if args.code_only else game_folder(args.game_root)
-    ref = "refs/codex/macos-rebuild/main"
-    runner.run(["git", "fetch", "--no-tags", "origin", f"+refs/heads/main:{ref}"])
+    ref = "refs/codex/macos-rebuild/release" if args.release_tag else "refs/codex/macos-rebuild/main"
+    branch = f"refs/tags/{args.release_tag}" if args.release_tag else "refs/heads/main"
+    runner.run(["git", "fetch", "--no-tags", "origin", f"+{branch}:{ref}"])
     revision = output(["git", "rev-parse", f"{ref}^{{commit}}"])
     toolchain = output(["git", "show", f"{revision}:rust-toolchain.toml"])
     channel = re.search(r'^\s*channel\s*=\s*"([^"]+)"', toolchain, re.M)
@@ -110,7 +111,7 @@ def build(args, runner):
     free = shutil.disk_usage(ROOT).free
     if free < required:
         raise RuntimeError(f"Недостаточно места: свободно {free / GIB:.1f} GiB, нужно примерно {required / GIB:.1f} GiB.")
-    print(f"\nСвежая main: {revision}\nMac: {host}\nФайлы GRID: {game or 'не включаются'}", flush=True)
+    print(f"\n{args.release_tag or 'Свежая main'}: {revision}\nMac: {host}\nФайлы GRID: {game or 'не включаются'}", flush=True)
     if args.dry_run:
         print("Проверка плана завершена. Компиляция и упаковка не запускались.")
         return
@@ -121,6 +122,8 @@ def build(args, runner):
     target = ROOT / "local/macos-build-cache/target" if args.keep_cache else work / "target"
     stage = work / "stage"
     name = f"{'DRIG' if args.code_only else 'GRID'}-macos-{platform.machine()}-{revision[:8]}.dmg"
+    if args.release_tag:
+        name = f"DRIG-{args.release_tag}-macos-{platform.machine()}.dmg"
     dmg = destination / name
     destination.mkdir(parents=True)
     manifest = {"source_revision": revision, "rust_channel": channel.group(1), "target": host,
@@ -134,13 +137,21 @@ def build(args, runner):
             # A separate detached clone, not a checkout/reset/stash of the user's branch.
             job.run(["git", "clone", "--shared", "--no-checkout", "--local", ROOT, source])
             job.run(["git", "checkout", "--detach", revision], cwd=source)
-            env = dict(os.environ, CARGO_TARGET_DIR=str(target), GRID_BUILD_REVISION=revision)
+            env = dict(os.environ, CARGO_TARGET_DIR=str(target), GRID_BUILD_REVISION=revision[:12] if args.code_only else revision)
             env["CARGO_BUILD_BUILD_DIR"] = str(target / "build")
             env.pop("CARGO_BUILD_TARGET", None)
-            job.run([*cargo, "build", "--locked", "--release", "--target", host,
-                     "-p", "grid-app", "--bin", "grid-app"], cwd=source, env=env)
+            compile_cmd = [*cargo, "build", "--locked", "--release", "--target", host,
+                           "-p", "grid-app", "--bin", "grid-app"]
+            if args.code_only:
+                compile_cmd.append("--no-default-features")
+            job.run(compile_cmd, cwd=source, env=env)
             binary = target / host / "release/grid-app"
             job.run([binary, "--help"], cwd=source, env=env)
+            if args.release_tag:
+                version = output([binary, "--version"], cwd=source)
+                expected = f"DRIG {args.release_tag[1:]} (revision {revision[:12]})"
+                if version != expected:
+                    raise RuntimeError(f"Ожидалась версия {expected}, получено: {version}")
             manifest["engine_sha256"] = checksum(binary)
             command = [sys.executable, "-I", ROOT / "tools/build_macos.py", "--no-build",
                        "--binary", binary, "--source-root", source,
@@ -171,11 +182,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game-root", type=Path, help="folder of your purchased Windows GRID 2008")
     parser.add_argument("--code-only", action="store_true", help="omit original game resources")
+    parser.add_argument("--release-tag", help="build a tagged player release (e.g. v0.1.0; requires --code-only)")
     parser.add_argument("--keep-cache", action="store_true", help="retain Cargo cache for faster future builds")
     parser.add_argument("--dry-run", action="store_true", help="fetch main and check the plan without building")
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("Запускай этот скрипт на Mac.")
+    if args.release_tag and (not args.code_only or not re.fullmatch(r"v\d+\.\d+\.\d+", args.release_tag)):
+        parser.error("--release-tag vX.Y.Z требует --code-only")
     if args.code_only and args.game_root:
         parser.error("--code-only и --game-root нельзя использовать вместе")
     for tool in ["git", "cargo", "rustc", "codesign", "hdiutil", "lipo"]:

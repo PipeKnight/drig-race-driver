@@ -182,6 +182,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F916](log/F0916.md) | 2026-11-24 | Keep macOS player packaging and portable race logs |
 | [F915](log/F0915.md) | 2026-11-24 | Xiaomi Performance test A/B: shadows and scene off gain nothing, fixed per-frame CPU overhead wins |
 | [F914](log/F0914.md) | 2026-11-24 | CI badge in the README |
 | [F913](log/F0913.md) | 2026-11-24 | GitHub Actions CI: Linux Clippy and data-free tests, Windows Clippy |
@@ -241,7 +242,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F859](log/F0859.md) | 2026-11-19 | Per-frame mesh uploads: dents and car batches stream changed vertices; reflection overlays follow a part leaving its batch |
 | [F858](log/F0858.md) | 2026-11-19 | Owner priority 2026-11-19: portable data, few files, in-app update, release/debug split |
 | [F857](log/F0857.md) | 2026-11-18 | Slow render frames by span: no render pass grows; main-world work at the same instant |
-| [F856](log/F0856.md) | 2026-11-18 | HUD drawn by an overlay pass in the frame's render graph; no OSD camera |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

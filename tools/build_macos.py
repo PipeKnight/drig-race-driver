@@ -17,35 +17,44 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Finder supplies no command line or useful working directory. Keep user data
 # and diagnostics outside the bundle, including in the menu's child processes.
-LAUNCHER = '''#!/bin/sh
+LAUNCHER = r'''#!/bin/sh
 set -eu
-macos_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-data_dir="${GRID_DATA_DIR:-$HOME/Library/Application Support/GRID Reassembly}"
-mkdir -p "$data_dir/playtest"
-log=$(mktemp "$data_dir/playtest/macos.XXXXXX")
-cd "$macos_dir/../Resources"
-interactive=false
-if [ "$#" -eq 0 ]; then interactive=true; set -- --menu; fi
-if [ -d "$macos_dir/../Resources/Grid" ]; then
-    # Menu screens read root from settings, while the race also accepts CLI root.
-    set -- "$@" --settings "$macos_dir/../Resources/portable.ini" --game-root "$macos_dir/../Resources/Grid"
-elif [ "$interactive" = true ]; then
+macos_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+engine="$macos_dir/grid-app"
+resources="$(dirname "$macos_dir")/Resources"
+cd "$resources"
+if [ "$#" -ne 0 ]; then
+    if [ -d "$resources/Grid" ]; then
+        exec "$engine" --game-root "$resources/Grid" "$@"
+    fi
+    exec "$engine" "$@"
+fi
+bundle_dir="$(dirname "$(dirname "$(dirname "$macos_dir")")")"
+data_dir="${GRID_DATA_DIR:-$bundle_dir/DRIG-data}"
+if [ -z "${GRID_DATA_DIR:-}" ] && ! (mkdir -p "$data_dir" && probe=$(mktemp "$data_dir/.drig-write-test.XXXXXX") && rm "$probe") 2>/dev/null; then
+    data_dir="$HOME/Library/Application Support/GRID Reassembly"
+    mkdir -p "$data_dir"
+fi
+mkdir -p "$data_dir"
+if [ -d "$resources/Grid" ]; then
+    game_root="$resources/Grid"
+else
     root_file="$data_dir/game-root.txt"
     game_root=""
     if [ -f "$root_file" ]; then IFS= read -r game_root < "$root_file" || true; fi
     if [ ! -f "$game_root/grid.exe" ] || [ ! -f "$game_root/cars/lac/lac.ned" ]; then
         game_root=$(/usr/bin/osascript -e 'POSIX path of (choose folder with prompt "Select your purchased Windows GRID 2008 folder (containing grid.exe and cars).")') || exit 0
         if [ ! -f "$game_root/grid.exe" ] || [ ! -f "$game_root/cars/lac/lac.ned" ]; then
-            /usr/bin/osascript -e 'display alert "GRID game files not found" message "Select the complete Windows GRID 2008 installation folder, containing grid.exe and cars. No game data is included with DRIG."'
+            /usr/bin/osascript -e 'display alert "GRID game files not found" message "Select the complete Windows GRID 2008 installation folder."'
             exit 1
         fi
-        printf '%s\\n' "$game_root" > "$root_file"
+        printf '%s\n' "$game_root" > "$root_file"
     fi
-    # Menus read the game location from settings rather than CLI flags.
-    printf '[game]\\nroot = %s\\n' "$game_root" > "$data_dir/game-location.ini"
-    set -- "$@" --settings "$data_dir/game-location.ini" --game-root "$game_root"
 fi
-exec "$macos_dir/grid-app" "$@" --data-dir "$data_dir" >"$log" 2>&1
+mkdir -p "$data_dir/playtest"
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+log=$(mktemp "$data_dir/playtest/drig-$stamp-@BUILD_REVISION@.XXXXXX")
+exec "$engine" --data-dir "$data_dir" --game-root "$game_root" >"$log" 2>&1
 '''
 
 
@@ -130,10 +139,10 @@ def main():
         for path in [game, *game.rglob("*")]:
             if not path.is_symlink():
                 path.chmod(0o755 if path.is_dir() else 0o644)
-        (contents / "Resources/portable.ini").write_text("[game]\nroot = Grid\n", encoding="utf-8")
     shutil.copy2(binary, macos / "grid-app")
     launcher = macos / "DRIG"
-    launcher.write_text(LAUNCHER, encoding="utf-8")
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source_root, text=True).strip()
+    launcher.write_text(LAUNCHER.replace("@BUILD_REVISION@", revision[:12]), encoding="utf-8")
     launcher.chmod(0o755)
     icon = ROOT / "crates/grid-app/assets/macos/DRIG.icns"
     if icon.is_file():
@@ -156,7 +165,6 @@ def main():
             **({"CFBundleIconFile": "DRIG.icns"} if icon.is_file() else {}),
             "NSHighResolutionCapable": True,
         }, out)
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source_root, text=True).strip()
     (contents / "Resources/build.json").write_text(json.dumps({
         "source_revision": revision, "architecture": platform.machine(),
         "bundled_game_data": bool(args.game_root),
