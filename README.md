@@ -1,5 +1,7 @@
 # DRIG: an open-source engine for Race Driver: GRID (2008)
 
+[![CI](https://github.com/PipeKnight/drig-race-driver/actions/workflows/ci.yml/badge.svg)](https://github.com/PipeKnight/drig-race-driver/actions/workflows/ci.yml)
+
 DRIG is a reimplementation of Codemasters' Race Driver: GRID (2008) in Rust with the [Bevy](https://bevyengine.org/) engine. The goal is a 1:1 recreation: the same handling, AI, damage, events and menus as the original game, running on a modern, open codebase.
 
 The repository contains **no game assets**. The engine reads tracks, cars, textures, sounds and game data from your own installed copy of GRID, the same way OpenMW uses Morrowind's data files or OpenRCT2 uses RollerCoaster Tycoon 2's.

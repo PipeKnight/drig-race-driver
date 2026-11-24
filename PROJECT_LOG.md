@@ -182,6 +182,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F914](log/F0914.md) | 2026-11-24 | CI badge in the README |
 | [F913](log/F0913.md) | 2026-11-24 | GitHub Actions CI: Linux Clippy and data-free tests, Windows Clippy |
 | [F912](log/F0912.md) | 2026-11-24 | Xiaomi profile APK 57c966e1: where the 38 ms phone frame goes |
 | [F911](log/F0911.md) | 2026-11-24 | README graphics line reworded; ROADMAP optional graphics entry |
@@ -241,7 +242,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F857](log/F0857.md) | 2026-11-18 | Slow render frames by span: no render pass grows; main-world work at the same instant |
 | [F856](log/F0856.md) | 2026-11-18 | HUD drawn by an overlay pass in the frame's render graph; no OSD camera |
 | [F855](log/F0855.md) | 2026-11-18 | Archived worktree copies zipped into worktree-evidence |
-| [F854](log/F0854.md) | 2026-11-18 | Streamed minimap ribbon and crowd flash meshes: visibility no longer revisits every mesh each frame |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
