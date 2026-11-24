@@ -181,6 +181,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F910](log/F0910.md) | 2026-11-24 | README for players: download, bug reports, roadmap file |
 | [F909](log/F0909.md) | 2026-11-24 | Release v0.1.0 published |
 | [F908](log/F0908.md) | 2026-11-24 | Linux v0.1.0 release packages from 1ed1b050 and their WSLg smoke |
 | [F907](log/F0907.md) | 2026-11-24 | Linux v0.1.0 packages from e4e5b0c9; --game-root fix for player starts |
@@ -240,7 +241,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F853](log/F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
 | [F852](log/F0852.md) | 2026-11-18 | Own-car dents on the compute pool; drive_present, solver and visibility probes |
 | [F851](log/F0851.md) | 2026-11-18 | Worst fixed tick names its systems (permanent attribution) |
-| [F850](log/F0850.md) | 2026-11-18 | 1440p render breakdown: render thread bound, HUD view cost, pipeline-cache design (findings) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

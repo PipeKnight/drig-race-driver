@@ -16,6 +16,27 @@ The physics engine and damage system have already been fully rebuilt from scratc
 
 (In this GIF, you can see some glitches with the shadows and trees. It was recorded on an early prototype, and these issues have since been resolved already)
 
+## Download and play
+
+Get the [latest release](https://github.com/PipeKnight/drig-race-driver/releases/latest) and download the file for your system:
+
+| System | File |
+| --- | --- |
+| Windows | `DRIG-vX-windows-x86_64.exe`: one program file, nothing to unpack |
+| Linux | `DRIG-vX-linux-x86_64.AppImage` (`chmod +x` it and run it; needs FUSE 2, or start it with `--appimage-extract-and-run`) or `DRIG-vX-linux-x86_64.tar.gz` (unpack it and run `drig`) |
+| macOS | the DMG, added to the release by the Mac build |
+
+No game data is included. You need your own installed copy of Race Driver: GRID (2008) for PC. DRIG looks for it in your Steam libraries. If your copy is somewhere else, start DRIG with `--game-root "D:\Games\GRID"` (any path), or set `root` under `[game]` in `DRIG-data/settings.ini`. `--help` lists every player option, and `--career` starts the career.
+
+Put the program in a folder you can write to. DRIG keeps your settings, records, replays and the log in a `DRIG-data` folder next to it. To update, replace the program file; `DRIG-data` stays.
+
+The builds are not signed by Microsoft or notarized by Apple, so the system may warn you the first time:
+
+- Windows SmartScreen: click "More info", then "Run anyway".
+- macOS Gatekeeper: if it refuses to open the app, open System Settings, Privacy & Security, and click "Open Anyway".
+
+Each release's notes list what was tested on each system. `SHA256SUMS.txt` in the release lets you check your download.
+
 ## Status
 
 Early and experimental, but you can already race. What works today:
@@ -25,23 +46,43 @@ Early and experimental, but you can already race. What works today:
 - **AI opponents** that follow the original racing lines, overtaking and drift logic.
 - **Damage.** Body contacts, collision damage, wheel detachment, mechanical and handling damage.
 - **Audio.** Engine, gear changes, tyres and collisions.
-- **Career.** Its research and a first port are in progress.
-- **Front end.** The pause menu, HUD, results screens and the options for sound, screen and wheel controls.
+- **Career.** GRID World with its events, fields, payouts, head-to-heads, driver offers, eBay Motors and the Le Mans selection events. Start it with `--career`; it is not in the main menu yet, and its window is fixed at 1280x800 for now.
+- **Front end.** The Race Day menu, pause menu, HUD, results screens and the options for sound, screen and wheel controls. Every screen fades through the loading screen into the next.
+- **Replays and Flashback.** Instant Replay with the race cameras and slow motion, and Flashback to rewind and jump back in. Some replay sounds are still missing.
+- **Records.** Time Trial records are saved.
+- **Graphics.** The original's lighting, shadows, post-processing, tyre marks, smoke and crowds are rebuilt, with differences that remain. Window or fullscreen, resolution, an automatic render scale that holds the frame rate, and shadow quality are settings and player options.
 - **Input.** Keyboard, gamepad and steering wheel.
+- **Portable releases.** One download with no installer; your data stays in `DRIG-data` next to the program.
 - **Android.** An experimental build with tilt and touch steering and gamepad support.
 
-Expect crashes, physics blow-ups, missing features and visual differences from the original. Fidelity work is tracked in [docs/FIDELITY_BACKLOG.md](docs/FIDELITY_BACKLOG.md).
+Expect crashes, physics blow-ups, missing features and visual differences from the original. Fidelity work is tracked in [docs/FIDELITY_BACKLOG.md](docs/FIDELITY_BACKLOG.md). What comes next, in order: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What you need
 
 - A legally purchased copy of **Race Driver: GRID** (2008) for PC, for example from Steam. The engine finds the Steam installation by itself.
-- Windows 10 or 11 with a reasonably modern GPU.
-- To build from source, Rust 1.99.0 (pinned in `rust-toolchain.toml`). The first build compiles Bevy and takes a while.
+- One of:
+  - Windows 10 or 11 with a reasonably modern GPU;
+  - Linux on x86_64 with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, SteamOS 3 or newer) and a working Vulkan driver. So far it was tested only in WSLg on Windows 11, not on native Linux hardware;
+  - macOS on Apple Silicon.
 
 ## Building and running
 
+### Players
+
+Download the release program and start it, as described in [Download and play](#download-and-play). You do not need Rust or any build tools.
+
+### Developers: building from source
+
+You need Rust 1.99.0 (pinned in `rust-toolchain.toml`). The first build compiles Bevy and takes a while.
+
 ```
 cargo build --release -p grid-app
+```
+
+This developer build includes the diagnostic tools (the `dev-tools` feature): `--help-dev` lists the developer options, and the `[diagnostics]` settings section is read ([settings](docs/SETTINGS.md), "Player build and developer build"). The release program is the player build, without them:
+
+```
+cargo build --release -p grid-app --no-default-features
 ```
 
 Then double-click **Play GRID.cmd** in the repository root and pick an event in the Race Day menu ([event menu](docs/EVENT_MENU.md)). The other `Play GRID *.cmd` launchers start one event directly, for example `Play GRID Le Mans 24 Hours.cmd` or `Play GRID Drift Battle.cmd`.
@@ -77,6 +118,16 @@ The Android build is experimental. It runs the same program on arm64 phones (And
 Native build and local `.app` packaging: `python3 -I tools/build_macos.py`.
 Compilation needs no original game files; playing requires your own Windows GRID
 2008 installation. See [docs/MACOS.md](docs/MACOS.md) for setup and validation limits.
+
+## Reporting bugs and testing
+
+Testers are welcome, on any system and any hardware. Play a few events and tell us what breaks, what feels different from the original and how fast it runs. Open an [issue](https://github.com/PipeKnight/drig-race-driver/issues) and attach:
+
+- `DRIG-data/drig.log`, and after a crash also `DRIG-data/drig.previous.log`;
+- your GPU, CPU, graphics driver version and resolution;
+- the event, track and car, and what you did just before the problem.
+
+For detailed diagnostics, build the developer version from source ([Developers](#developers-building-from-source)) and run it with `--help-dev` to see its options.
 
 ## How it is made
 
@@ -117,6 +168,8 @@ Original GRID game files are supplied separately by the player.
 
 When publishing binaries under GPLv3, provide the corresponding source for that exact build, including
 the scripts needed to build and install it, and retain the applicable third-party notices.
+
+Each release ships `DRIG-vX-LICENSES.txt` beside the programs, with the GPL and the notices of the third-party libraries and the font DRIG includes.
 
 ## Disclaimer
 
