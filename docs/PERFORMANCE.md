@@ -5489,3 +5489,34 @@ Donington 2560, Base → Enhanced, means over clean windows. The draw counts are
 - Enhanced also submits more command buffers per frame: `enc_cbs` 21 → 31.
 - `r_submit` grows with resolution as well. In Enhanced it is 0.62 ms at 1280 and 1.10 ms at 2560; in Base, 0.38 ms and 0.67 ms.
 - The extra render-thread time is therefore in the Enhanced passes' encoding and submission (post-processing and the larger shadow maps), not in scene draws. This is the next render-side lead.
+
+## Atmosphere and SSAO bind groups through the bind-group cache (F905)
+
+Task (coordinator, after F895): take the worst render-side cell of the goal matrix. The cells under 100 fps were don-2560-enh (98.3) and don-1280-enh (98.9), both render-gated, and the extra render time of Enhanced is in encoding, submission and bind-group creation ("Where Enhanced's render time goes" above).
+
+What Enhanced adds per frame. `enc_tail` (the last marker to the submit) holds wgpu's finish-time encoding of every pass of the one 3d camera; its +0.8 ms over Base comes from the passes Enhanced adds (motion-vector prepass, SSAO, the atmosphere LUTs and sky, the sky environment-map generation, 4096 shadow maps, Bloom), not from a single slow pass. The part that is not inherent is bind-group creation: the atmosphere (`prepare_atmosphere_bind_groups`: five groups), its environment probe (`prepare_atmosphere_probe_bind_groups`: one) and SSAO (`prepare_ssao_bind_groups`: four groups plus five new depth mip views) recreate all of them every frame over unchanged resources. Each creation and drop takes the same wgpu and Vulkan locks as the F893 preprocessing bind groups.
+
+Change (vendored `third_party/bevy_pbr`, third_party/README.md "bevy_pbr 0.19.1"):
+- the three systems create their bind groups through the F893 `BindGroupCache` (`CachingRenderDevice`);
+- SSAO keeps the five mip views of its preprocessed-depth texture while the texture id is unchanged; new views every frame would make every key new. Views of textures no camera uses any more are dropped in the same frame;
+- SSAO keeps its thickness uniform buffer while `constant_object_thickness` is unchanged. Upstream creates a new one every frame, so the SSAO bind group over it missed the cache every frame; the GPU test found this after the timing runs below, which were made without this part;
+- `GRID_BEVY_BIND_GROUP_CACHE=0` restores the upstream path for all of these, as for F893.
+The change is in Bevy's shared Enhanced path, so it applies to every track, car and view.
+
+Checks (exe `local/ab/bg.exe` ff7ba64cc8d8 without the thickness-buffer part, baseline `local/ab/mx2.exe` EC5412FC2F16 at f4e8d412):
+- Images (`local/ab/crops-dd.ps1 -Variants b,a,a2 -OffEnv GRID_BEVY_BIND_GROUP_CACHE`, Enhanced at 2560x1440: Donington 600 and 1500, Spa 600 and 1500, Haruna touge 900): 0 px after-vs-before, 0 px with the cache off, 0 px noise in all five. Rerun after the thickness-buffer part (exe `local/ab/bg2.exe` d7c19a8a6e7d): 0 px in all 15 comparisons.
+- GPU test `crates/grid-app/tests/atmosphere_ssao_bind_groups.rs`: passes (1 passed, 1.03 s): an Enhanced-like camera (HDR, atmosphere with its environment-map light, SSAO) keeps all ten bind groups over four unchanged frames, and resizing the target image gives three new SSAO texture bind groups that are then kept. With GRID_BEVY_BIND_GROUP_CACHE=0 it fails on the first unchanged frame, as intended. Its first run found the per-frame SSAO thickness buffer (fixed above). Bevy 0.19's camera_system does not react to a swapped RenderTarget component, only to window and image asset events, so the test resizes the image in place.
+
+Timing (`local/ab/dd-ab.ps1 -Exe local/ab/bg.exe -ExeA local/ab/mx2.exe -Tag bg -Only 'don-.*-enh'`, 4200 ticks, alternating pairs under the build lock; A = mx2, B = this change). The third pair was not run: the build lock was busy with other sessions' builds for most of two hours.
+
+| cell | pair | fps A / B | render ms A / B | r_bind ms A / B | enc_tail ms A / B |
+|---|---|---|---|---|---|
+| don-2560-enh | 1 | 108.3 / 115.3 | 8.67 / 8.14 | 0.66 / 0.61 | 2.33 / 2.24 |
+| don-2560-enh | 2 | 101.7 / 105.1 | 9.33 / 8.95 | 0.73 / 0.68 | 2.39 / 2.36 |
+| don-1280-enh | 1 | 60.0 / 109.1 | 8.19 / 8.59 | 0.74 / 0.70 | 2.18 / 2.30 |
+| don-1280-enh | 2 | 115.3 / 114.4 | 8.13 / 8.19 | 0.64 / 0.64 | 2.19 / 2.23 |
+
+Means over the last two thirds of the 1-s windows (`local/ab/fields.py bg`). Run A-1 at 1280 sat at 60 fps with main 4.95 ms and GPU 2.84 ms, an outside limit of the kind seen in F895, not a cost of either build.
+- r_bind fell in three of four pairs and stayed equal in one, about −0.04 ms. This is the direct effect, and it is small: about ten bind groups and five views per frame against the 160-260 groups of F893.
+- render_ms moved by −0.53, −0.38, +0.40 and +0.06 ms. The run-to-run noise (0.5-0.8 ms) is as large as the effect, so frame-level timing neither shows nor rules out a gain.
+- Verdict: kept under the owner's rule (a measured cost cut, 0 px, no behaviour change). It does not close the don-*-enh cells on its own; the remaining Enhanced cost is pass encoding and submission.

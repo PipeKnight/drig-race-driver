@@ -11,7 +11,7 @@ use bevy_ecs::{
     error::BevyError,
     query::With,
     resource::Resource,
-    system::{Commands, Query, Res, ResMut},
+    system::{Commands, Local, Query, Res, ResMut}, // DRIG patch (F905): Local
     world::{FromWorld, World},
 };
 use bevy_image::ToExtents;
@@ -29,6 +29,8 @@ use bevy_shader::Shader;
 use bevy_utils::default;
 
 use super::GpuAtmosphereSettings;
+// DRIG patch (F905)
+use crate::render::drig_bind_group_cache::{BindGroupCache, CachingRenderDevice};
 
 #[derive(Resource)]
 pub(crate) struct AtmosphereBindGroupLayouts {
@@ -594,7 +596,7 @@ pub(super) fn prepare_atmosphere_transforms(
 }
 
 #[derive(Component)]
-pub(crate) struct AtmosphereBindGroups {
+pub struct AtmosphereBindGroups { // DRIG patch (F905): pub for the bind-group test
     pub transmittance_lut: BindGroup,
     pub multiscattering_lut: BindGroup,
     pub sky_view_lut: BindGroup,
@@ -642,7 +644,15 @@ pub(super) fn prepare_atmosphere_bind_groups(
     medium_sampler: Res<ScatteringMediumSampler>,
     pipeline_cache: Res<PipelineCache>,
     mut commands: Commands,
+    // DRIG patch (F905): keep the bind groups while their resources are unchanged.
+    drig_cache: Local<BindGroupCache>,
 ) -> Result<(), BevyError> {
+    // DRIG patch (F905)
+    drig_cache.begin_frame();
+    let render_device = CachingRenderDevice {
+        device: &render_device,
+        cache: &drig_cache,
+    };
     if views.iter().len() == 0 {
         return Ok(());
     }

@@ -110,6 +110,17 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
     unchanged; Bevy never reuses these ids.
   - `src/render/mod.rs`: declares the module. `Cargo.toml`: `wgpu` dependency (the key holds wgpu
     handles).
+  - `src/atmosphere/resources.rs` and `src/atmosphere/environment.rs` (F905):
+    `prepare_atmosphere_bind_groups` and `prepare_atmosphere_probe_bind_groups` create their bind
+    groups (LUTs, sky, environment cubemap) through the cache instead of six new ones per frame.
+  - `src/ssao/mod.rs` (F905): `prepare_ssao_bind_groups` creates its four bind groups through
+    the cache and keeps the five depth mip views of an unchanged preprocessed-depth texture
+    (texture id compare; new views every frame would never hit the cache). Views of textures no
+    camera uses any more are dropped in the same frame. `prepare_ssao_textures` keeps the
+    read-only `thickness_buffer` while `constant_object_thickness` is unchanged; upstream wrote a
+    new one every frame, so the SSAO bind group over it never hit the cache.
+  - `src/atmosphere/mod.rs` (F905): re-exports `AtmosphereBindGroups` and
+    `AtmosphereProbeBindGroups`, made `pub` (were `pub(crate)`) so the test below can read them.
 - Why: Bevy recreated about 160-260 of these bind groups per frame (F873). Each creation and drop
   goes through wgpu's device and hub locks, the Vulkan descriptor-allocator mutex and the
   pending-writes path, which other render systems take at the same time (F886 profile: create_bind_group
@@ -119,9 +130,12 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
   and image checks.
 - Tests: `crates/grid-app/tests/bind_group_cache.rs` (a cached bind group only for an identical
   layout and resources; a reallocated buffer, another range, a new view or a new layout gives a
-  new one; a bind group returning every other frame still hits) and
+  new one; a bind group returning every other frame still hits),
   `crates/grid-app/tests/environment_map_switch.rs` (switching a camera's environment map, as
-  between tracks, changes the generator bind groups each time and keeps them between switches).
+  between tracks, changes the generator bind groups each time and keeps them between switches) and
+  `crates/grid-app/tests/atmosphere_ssao_bind_groups.rs` (an Enhanced-like camera keeps its
+  atmosphere, probe and SSAO bind groups over unchanged frames; a resized target gives new SSAO
+  texture bind groups, F905).
   They need a GPU and run in prepush's full tier.
 - Upgrading Bevy: drop the patch if upstream keeps these bind groups itself; otherwise copy the new
   release here and re-apply the marked changes (`grep -rn "DRIG patch" third_party/bevy_pbr`).

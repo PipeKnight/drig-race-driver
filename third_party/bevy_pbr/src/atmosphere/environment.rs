@@ -11,7 +11,7 @@ use bevy_ecs::{
     entity::Entity,
     query::{With, Without},
     resource::Resource,
-    system::{Commands, Query, Res, ResMut},
+    system::{Commands, Local, Query, Res, ResMut}, // DRIG patch (F905): Local
     template::FromTemplate,
 };
 use bevy_image::Image;
@@ -27,6 +27,8 @@ use bevy_render::{
 };
 use bevy_utils::default;
 use tracing::warn;
+// DRIG patch (F905)
+use crate::render::drig_bind_group_cache::{BindGroupCache, CachingRenderDevice};
 
 // Render world representation of an environment map light for the atmosphere
 #[derive(Component, ExtractComponent, Clone, FromTemplate)]
@@ -45,7 +47,7 @@ pub struct AtmosphereProbeTextures {
 }
 
 #[derive(Component)]
-pub(crate) struct AtmosphereProbeBindGroups {
+pub struct AtmosphereProbeBindGroups { // DRIG patch (F905): pub for the bind-group test
     pub environment: BindGroup,
 }
 
@@ -104,7 +106,15 @@ pub(super) fn prepare_atmosphere_probe_bind_groups(
     settings_uniforms: Res<ComponentUniforms<GpuAtmosphereSettings>>,
     pipeline_cache: Res<PipelineCache>,
     mut commands: Commands,
+    // DRIG patch (F905): keep the bind group while its resources are unchanged.
+    drig_cache: Local<BindGroupCache>,
 ) {
+    // DRIG patch (F905)
+    drig_cache.begin_frame();
+    let render_device = CachingRenderDevice {
+        device: &render_device,
+        cache: &drig_cache,
+    };
     for (entity, textures) in &probes {
         let environment = render_device.create_bind_group(
             "environment_bind_group",

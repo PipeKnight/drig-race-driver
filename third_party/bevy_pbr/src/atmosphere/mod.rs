@@ -79,6 +79,9 @@ use environment::{
     prepare_probe_textures, AtmosphereEnvironmentMap,
 };
 use node::{atmosphere_luts, render_sky};
+// DRIG patch (F905): the bind-group components, for the bind-group test
+pub use environment::AtmosphereProbeBindGroups;
+pub use resources::AtmosphereBindGroups;
 use resources::{
     prepare_atmosphere_transforms, prepare_atmosphere_uniforms, queue_render_sky_pipelines,
     AtmosphereTransforms, GpuAtmosphere, RenderSkyBindGroupLayouts,

@@ -11,7 +11,7 @@ use bevy_ecs::{
     reflect::ReflectComponent,
     resource::Resource,
     schedule::IntoScheduleConfigs,
-    system::{Commands, Query, Res, ResMut},
+    system::{Commands, Local, Query, Res, ResMut}, // DRIG patch (F905): Local
     world::{FromWorld, World},
 };
 use bevy_image::ToExtents;
@@ -38,6 +38,11 @@ use bevy_shader::{load_shader_library, Shader, ShaderDefVal};
 use bevy_utils::prelude::default;
 use core::mem;
 use tracing::{error, warn};
+
+// DRIG patch (F905)
+use crate::render::drig_bind_group_cache::{
+    bind_group_cache_enabled, BindGroupCache, CachingRenderDevice,
+};
 
 /// Plugin for screen space ambient occlusion.
 pub struct ScreenSpaceAmbientOcclusionPlugin;
@@ -518,7 +523,11 @@ fn prepare_ssao_textures(
     render_device: Res<RenderDevice>,
     pipelines: Res<SsaoPipelines>,
     views: Query<(Entity, &ExtractedCamera, &ScreenSpaceAmbientOcclusion)>,
+    mut drig_thickness: Local<Vec<(u32, Buffer)>>, // DRIG patch (F905)
 ) {
+    // DRIG patch (F905): keep the thickness buffer of an unchanged value, so the
+    // SSAO bind group over it can stay cached. It is a read-only uniform.
+    let mut drig_used_thickness = Vec::new();
     for (entity, camera, ssao_settings) in &views {
         let Some(physical_viewport_size) = camera.physical_viewport_size else {
             continue;
@@ -581,11 +590,22 @@ fn prepare_ssao_textures(
             },
         );
 
-        let thickness_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("thickness_buffer"),
-            contents: &ssao_settings.constant_object_thickness.to_le_bytes(),
-            usage: BufferUsages::UNIFORM,
+        // DRIG patch (F905): reuse the buffer of the same thickness bits.
+        let thickness_bits = ssao_settings.constant_object_thickness.to_bits();
+        let kept = bind_group_cache_enabled()
+            .then(|| drig_thickness.iter().find(|(bits, _)| *bits == thickness_bits))
+            .flatten()
+            .map(|(_, buffer)| buffer.clone());
+        let thickness_buffer = kept.unwrap_or_else(|| {
+            render_device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("thickness_buffer"),
+                contents: &ssao_settings.constant_object_thickness.to_le_bytes(),
+                usage: BufferUsages::UNIFORM,
+            })
         });
+        if !drig_used_thickness.iter().any(|(bits, _)| *bits == thickness_bits) {
+            drig_used_thickness.push((thickness_bits, thickness_buffer.clone()));
+        }
 
         commands
             .entity(entity)
@@ -597,6 +617,7 @@ fn prepare_ssao_textures(
                 thickness_buffer,
             });
     }
+    *drig_thickness = drig_used_thickness; // DRIG patch (F905)
 }
 
 /// A render world component that holds the cached pipeline id for Ssao.
@@ -648,7 +669,19 @@ fn prepare_ssao_bind_groups(
         &ScreenSpaceAmbientOcclusionResources,
         &ViewPrepassTextures,
     )>,
+    // DRIG patch (F905): keep the bind groups while their resources are
+    // unchanged, and the depth mip views while their texture is unchanged
+    // (new views every frame would miss the bind group cache).
+    drig_cache: Local<BindGroupCache>,
+    mut drig_mip_views: Local<Vec<(Texture, [TextureView; 5])>>,
 ) {
+    // DRIG patch (F905)
+    drig_cache.begin_frame();
+    let render_device = CachingRenderDevice {
+        device: &render_device,
+        cache: &drig_cache,
+    };
+    let mut drig_used_views = Vec::new();
     let (Some(view_uniforms), Some(globals_uniforms)) = (
         view_uniforms.uniforms.binding(),
         global_uniforms.buffer.binding(),
@@ -681,16 +714,27 @@ fn prepare_ssao_bind_groups(
                 })
         };
 
+        // DRIG patch (F905): reuse the mip views of an unchanged texture.
+        let texture = &ssao_resources.preprocessed_depth_texture.texture;
+        let mip_views = match drig_mip_views
+            .iter()
+            .find(|(t, _)| bind_group_cache_enabled() && t.id() == texture.id())
+        {
+            Some((_, views)) => views.clone(),
+            None => core::array::from_fn(|mip| create_depth_view(mip as u32)),
+        };
+        drig_used_views.push((texture.clone(), mip_views.clone()));
+
         let preprocess_depth_bind_group = render_device.create_bind_group(
             "ssao_preprocess_depth_bind_group",
             &pipeline_cache.get_bind_group_layout(&pipelines.preprocess_depth_bind_group_layout),
             &BindGroupEntries::sequential((
                 prepass_textures.depth_view().unwrap(),
-                &create_depth_view(0),
-                &create_depth_view(1),
-                &create_depth_view(2),
-                &create_depth_view(3),
-                &create_depth_view(4),
+                &mip_views[0],
+                &mip_views[1],
+                &mip_views[2],
+                &mip_views[3],
+                &mip_views[4],
             )),
         );
 
@@ -727,6 +771,8 @@ fn prepare_ssao_bind_groups(
             spatial_denoise_bind_group,
         });
     }
+    // DRIG patch (F905): drop the views of textures no view uses now.
+    *drig_mip_views = drig_used_views;
 }
 
 fn generate_hilbert_index_lut() -> [[u16; 64]; 64] {

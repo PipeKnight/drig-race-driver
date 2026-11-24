@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F905](log/F0905.md) | 2026-11-24 | Atmosphere and SSAO bind groups through the bind-group cache |
 | [F904](log/F0904.md) | 2026-11-24 | Backlog: DualSense haptics row 146, release check note in row 131, no-zip release rule |
 | [F903](log/F0903.md) | 2026-11-24 | Native Linux x86_64 build and packaging (row 135) |
 | [F902](log/F0902.md) | 2026-11-24 | Row 137: public builds never contain DLC or other original files |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F848](log/F0848.md) | 2026-11-18 | Start hitch: blit pipelines pre-warmed, render thread yields to compiles under the cover |
 | [F847](log/F0847.md) | 2026-11-18 | Car transparent draws: no merge without a visible change; reflection overlays bound the gain |
 | [F846](log/F0846.md) | 2026-11-18 | Ground cover: stable billboard slots write only the changed instances |
-| [F845](log/F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

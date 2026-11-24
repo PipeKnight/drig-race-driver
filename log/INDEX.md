@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F905](F0905.md) | 2026-11-24 | Atmosphere and SSAO bind groups through the bind-group cache |
 | [F904](F0904.md) | 2026-11-24 | Backlog: DualSense haptics row 146, release check note in row 131, no-zip release rule |
 | [F903](F0903.md) | 2026-11-24 | Native Linux x86_64 build and packaging (row 135) |
 | [F902](F0902.md) | 2026-11-24 | Row 137: public builds never contain DLC or other original files |
