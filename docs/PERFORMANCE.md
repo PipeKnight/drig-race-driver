@@ -5581,3 +5581,21 @@ Every window rendered at 1026 × 480, the Auto floor, apart from two windows at 
   - Not like for like: the field is Lacetti instead of BMW.
   - F600 (`gpu_passes`, pipeline statistics in every pass) and F836 (`frame_split`, while the counter is shown) were added after 26 October and both run here.
   - The desktop main-thread gains are 0.1-1 ms on a PC frame. They are too small to show against this.
+
+### Performance test A/B on the phone (F915)
+
+The owner switched Shadows off, and in a second run Whole scene off, on the same APK (logs in the main
+checkout's `local/android-logs/2026-11-24-xiaomi-perftest/`). Use `phone_profile_summary.py --by-perf-test` to split them; the output is in this worktree's `local/phone-f913/summary.txt`.
+Medians over 1 s race windows [O]:
+
+| state (run) | FPS min / median | main | render | gpu | g_opaque | r_encode |
+|---|---|---|---|---|---|---|
+| normal (224728) | 18.5 / 24.0 | 29.9 | 37.6 | 39.4 | 29.6 | 12.2 |
+| normal (224925, 9 windows) | 26.4 / 27.9 | 24.0 | 32.6 | 33.7 | 26.3 | 12.0 |
+| shadows off (225052) | 19.4 / 25.5 | 30.0 | 34.3 | 36.5 | 29.8 | 12.0 |
+| whole scene off (225310, Auto at 720 rows) | 18.3 / 24.8 | 36.0 | 30.4 | 28.1 | 21.8 | 11.8 |
+
+- Removing every track mesh cut the GPU and render times by 7-11 ms, and the FPS did not move. Main then became the largest component per window.
+- `main_ms + outside_ms` stays at 40-42 ms in every state.
+- The six compute threads each work 6-7 ms per frame (about 18 % busy) while the main thread waits about 30 ms inside its schedules.
+- [I] What gates the phone is a fixed CPU cost per frame, not scene work or GPU geometry. The likely causes are dependency chains of short systems that hop between pool threads, with wake-up latency at each hop, and possibly little cores. The next test is the single-threaded executor switch (F915).
