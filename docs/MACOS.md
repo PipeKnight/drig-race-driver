@@ -28,12 +28,17 @@ image. First compilation may take several minutes.
 python3 -I tools/rebuild_macos.py --dry-run
 python3 -I tools/rebuild_macos.py
 python3 -I tools/rebuild_macos.py --code-only
+python3 -I tools/rebuild_macos.py --code-only --release-tag v0.1.0
 python3 -I tools/rebuild_macos.py --game-root "/absolute/path/to/Grid"
 python3 -I tools/rebuild_macos.py --keep-cache
 ```
 
 `--dry-run` fetches and checks the current main/toolchain/resources/free space
-without compiling. `--code-only` omits original game data. `--keep-cache` retains
+without compiling. `--code-only` builds the player executable with
+`--no-default-features` and omits original game data. For a coordinated release,
+`--release-tag vX.Y.Z` fetches and builds that tag, checks the player version,
+and names the image `DRIG-vX.Y.Z-macos-<arch>.dmg`. Use the same tag as the
+other platforms. `--keep-cache` retains
 `local/macos-build-cache/target` to speed later builds; omit it for automatic
 cleanup. Both modes are local only. A lock prevents two instances of this
 rebuild script from compiling at the same time. If main pins a Rust version not
@@ -43,8 +48,8 @@ engine, project license and font license; `build.json` records the engine source
 
 The installed app is used when it contains the required GRID files. The script
 then falls back to `local/macos-portable/source/Grid.reference`,
-`local/macos-portable/source/Grid`, and the folder recorded in the app's
-`game-root.txt`. Use `--game-root` to override that search. If your private
+`local/macos-portable/source/Grid`, and the folder recorded in the legacy
+Application Support `game-root.txt`. Use `--game-root` to override that search. If your private
 `DRIG.app` is in another location, pass its `Contents/Resources/Grid` folder.
 
 ### Manual build
@@ -79,8 +84,8 @@ application icon when present; its generated source image is `DRIG.png` beside i
 
 For a public code-only app, the first ordinary launch asks for the user's own
 Windows GRID 2008 installation folder. Its location is saved as `game-root.txt`
-in the user data directory; `game-location.ini` supplies that location to the
-menu and race. Remove `game-root.txt` to select a different folder next time.
+in the user data directory. The launcher passes the selected folder to the player.
+Remove `game-root.txt` to select a different folder next time.
 Explicit command-line launches keep their arguments and do not open the picker.
 No original game files are copied into a code-only app.
 
@@ -108,11 +113,17 @@ Open the image and drag `DRIG.app` to Applications
 or another local folder, then double-click it. This is a private build containing
 proprietary game resources: do not upload the image or application to GitHub.
 
-Settings, saves, caches and launch logs remain in
-`~/Library/Application Support/GRID Reassembly/`; the app bundle stays read-only.
-For isolated diagnostics, `GRID_DATA_DIR` overrides that directory. With no
-arguments the launcher opens Race Day; explicit arguments allow bounded checks
-such as `--headless --drive --drive-ticks 1000`. `build.json` inside Resources
+Settings, saves and caches go in `DRIG-data` next to the app, or in
+`~/Library/Application Support/GRID Reassembly/` when the adjacent folder is
+not writable. Each Finder launch writes a separate file under `playtest/`,
+named `drig-<UTC timestamp>-<commit>.<unique suffix>`. With an app installed
+in Applications, look in `/Applications/DRIG-data/playtest/`. Earlier player
+builds used `drig.log` and `drig.previous.log` in the data directory.
+
+Copy older settings, records and replays from Application Support with the app
+closed, or pass `--data-dir` to choose the old location from the command line.
+Launches with explicit flags keep their console output. `GRID_DATA_DIR`
+overrides the data location for a no-argument launch. `build.json` inside Resources
 records the source revision, architecture and whether game data is embedded.
 
 The DMG contains the complete app and a shortcut to Applications. Its checksum
@@ -138,23 +149,11 @@ from it; it is not executed). Keep the files outside Git.
 For a first run, supply an absolute folder path:
 
 ```sh
-target/release/grid-app --menu --game-root "/absolute/path/to/Grid"
+target/release/grid-app --game-root "/absolute/path/to/Grid"
 ```
 
-For double-click launching, create
-`~/Library/Application Support/GRID Reassembly/settings.ini` containing:
-
-```ini
-[game]
-root = /absolute/path/to/Grid
-```
-
-Then open `target/release/DRIG.app`. The bundle opens Race Day and keeps settings,
-records and diagnostics in `~/Library/Application Support/GRID Reassembly/`.
-Each launch writes a separate `playtest/macos.*` log there. Its launcher fixes
-the working directory and passes an explicit data directory, so Finder and the
-menu's child processes use the same settings. The Steam installation finder
-also already searches `~/Library/Application Support/Steam` on macOS.
+The packaged app prompts for that folder on first launch. Its logs follow the
+`DRIG-data` and Application Support paths above.
 
 Until actual game files are available, a missing-installation error is expected;
 it is not evidence that a race or a graphics backend has been tested.

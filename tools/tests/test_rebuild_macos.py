@@ -21,6 +21,40 @@ def git(root, *args):
 
 
 class RebuildTests(unittest.TestCase):
+    def test_same_second_launches_keep_distinct_logs(self):
+        spec = importlib.util.spec_from_file_location(
+            "build_macos", Path(__file__).parents[1] / "build_macos.py")
+        packager = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(packager)
+        with tempfile.TemporaryDirectory(prefix="DRIG log test ") as directory:
+            root = Path(directory)
+            macos = root / "DRIG.app/Contents/MacOS"
+            macos.mkdir(parents=True)
+            (macos.parent / "Resources/Grid").mkdir(parents=True)
+            launcher = macos / "DRIG"
+            launcher.write_text(packager.LAUNCHER.replace("@BUILD_REVISION@", "1ed1b05002e4"))
+            clock = root / "date"
+            clock.write_text("#!/bin/sh\necho 20261125T000100Z\n")
+            clock.chmod(0o755)
+            engine = macos / "grid-app"
+            engine.write_text("#!/bin/sh\nprintf 'race output\\n'\n")
+            engine.chmod(0o755)
+            data = root / "DRIG-data"
+            data.mkdir()
+            previous = data / "drig.log"
+            previous.write_text("earlier session")
+
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"])
+            env.pop("GRID_DATA_DIR", None)
+            subprocess.run(["sh", launcher], env=env, check=True)
+            [first] = (data / "playtest").iterdir()
+            subprocess.run(["sh", launcher], env=env, check=True)
+            logs = list((data / "playtest").glob("drig-20261125T000100Z-1ed1b05002e4.*"))
+            self.assertEqual(len(logs), 2)
+            self.assertIn(first, logs)
+            self.assertTrue(all(p.read_text() == "race output\n" for p in logs))
+            self.assertEqual(previous.read_text(), "earlier session")
+
     def test_installed_resources_are_preferred_and_explicit_path_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -38,7 +72,7 @@ class RebuildTests(unittest.TestCase):
                 (installed / "grid.exe").unlink()
                 self.assertEqual(MOD.game_folder(), fallback.resolve())
 
-    def scenario(self, fail=False, keep_cache=False):
+    def scenario(self, fail=False, keep_cache=False, release_tag=None):
         with tempfile.TemporaryDirectory(prefix="GRID rebuild test ") as directory:
             root = Path(directory) / "working tree"
             root.mkdir()
@@ -47,6 +81,8 @@ class RebuildTests(unittest.TestCase):
             (root / "tracked.txt").write_text("remote main\n")
             git(root, "add", ".")
             git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fixture")
+            if release_tag:
+                git(root, "tag", release_tag)
             remote = Path(directory) / "remote.git"
             subprocess.run(["git", "clone", "--bare", str(root), str(remote)], check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -64,13 +100,14 @@ class RebuildTests(unittest.TestCase):
                 def run(self, args, cwd=None, env=None):
                     args = [str(x) for x in args]
                     if args[0] == "fixture-cargo":
+                        self_outer.assertIn("--no-default-features", args)
                         self_outer.assertEqual(git(cwd, "rev-parse", "HEAD"), revision)
                         self_outer.assertEqual((Path(cwd) / "tracked.txt").read_text(), "remote main\n")
                         if fail:
                             raise subprocess.CalledProcessError(9, args)
                         binary = Path(env["CARGO_TARGET_DIR"]) / "aarch64-apple-darwin/release/grid-app"
                         binary.parent.mkdir(parents=True)
-                        binary.write_text("#!/bin/sh\nexit 0\n")
+                        binary.write_text(f"#!/bin/sh\nprintf '%s\\n' 'DRIG 0.1.0 (revision {revision[:12]})'\n")
                         binary.chmod(0o755)
                     elif "--binary" in args:
                         stage = Path(args[args.index("--output-dir") + 1])
@@ -82,7 +119,7 @@ class RebuildTests(unittest.TestCase):
                         return super().run(args, cwd=cwd or root, env=env)
 
             self_outer = self
-            args = argparse.Namespace(code_only=True, game_root=None, dry_run=False, keep_cache=keep_cache)
+            args = argparse.Namespace(code_only=True, game_root=None, dry_run=False, release_tag=release_tag, keep_cache=keep_cache)
             with patch.object(MOD, "ROOT", root), patch.object(MOD, "Runner", CompilerFixture), \
                  patch.object(MOD, "rust_commands", return_value=(["fixture-cargo"], "aarch64-apple-darwin")):
                 if fail:
@@ -102,10 +139,15 @@ class RebuildTests(unittest.TestCase):
             self.assertFalse((manifests[0].parent / "work").exists())
             if not fail:
                 self.assertTrue((manifests[0].parent / result["dmg"]).is_file())
+                if release_tag:
+                    self.assertTrue(result["dmg"].startswith(f"DRIG-{release_tag}-macos-"))
                 self.assertEqual((root / "local/macos-build-cache/target").exists(), keep_cache)
 
     def test_success_preserves_dirty_checkout_and_cleans_temporary_build(self):
         self.scenario()
+
+    def test_tagged_player_build_names_image_after_release(self):
+        self.scenario(release_tag="v0.1.0")
 
     def test_failed_compile_preserves_checkout_and_previous_build(self):
         self.scenario(fail=True)
