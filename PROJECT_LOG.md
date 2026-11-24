@@ -121,9 +121,10 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - Earlier foundations are indexed in G379–G383 for DLAA hints, crowd readers, lamp ownership and source lighting.
 
 ### Android and platforms
-- Windows player build F906 (v0.1.0): one exe without the `dev-tools` feature, portable
+- v0.1.0 published 2026-11-24 (F909): GitHub Latest release, tag on 1ed1b050; Windows exe, Linux tar.gz and AppImage; the macOS DMG follows.
+  Windows player build F906: one exe without the `dev-tools` feature, portable
   `DRIG-data` beside the exe, player flags (`--help`, docs/SETTINGS.md section 6), exe, notices .txt and SHA256SUMS (no zip) from
-  `tools/package_desktop.ps1`. Open: career not in the menu, developer flags still parse, in-app update.
+  `tools/package_desktop.ps1`. Open: career not in the menu, career window preferences (row 147), developer flags still parse, in-app update.
 - macOS F577: native arm64 release build and code-only `DRIG.app` packaging pass
   on macOS 15.7.7, with no engine changes. CLI help and the menu's expected
   missing-installation exit pass; Finder launch, graphics, input, audio and
@@ -153,7 +154,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 ## Next actions
 
-- Distribution rows 129-135 (F858): v0.1.0 desktop player build F906; open: in-app update (131), career entry in the menu, Android single APK, the release/debug split in release_playable and the APK scripts (132).
+- Distribution rows 129-135 (F858): v0.1.0 published (F909); open: macOS DMG on the release, career window preferences (147), in-app update (131), career entry in the menu, Android single APK, the release/debug split in release_playable and the APK scripts (132).
 - On the owner's word, resume the paused children (F531): robustness row 90, then body sleeping
   and tyre walls; car-series gear clunk/backfire/whine/turbo; career rerun of event 13.
 - Manual lap and sound on speakers on playable e57f2fd391e2; the a11cddf7de27 APKs on the phone.
@@ -180,6 +181,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F909](log/F0909.md) | 2026-11-24 | Release v0.1.0 published |
 | [F908](log/F0908.md) | 2026-11-24 | Linux v0.1.0 release packages from 1ed1b050 and their WSLg smoke |
 | [F907](log/F0907.md) | 2026-11-24 | Linux v0.1.0 packages from e4e5b0c9; --game-root fix for player starts |
 | [F906](log/F0906.md) | 2026-11-24 | DRIG v0.1.0 Windows player build: portable DRIG-data, dev-tools feature, player flags, exe release |
@@ -239,7 +241,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F852](log/F0852.md) | 2026-11-18 | Own-car dents on the compute pool; drive_present, solver and visibility probes |
 | [F851](log/F0851.md) | 2026-11-18 | Worst fixed tick names its systems (permanent attribution) |
 | [F850](log/F0850.md) | 2026-11-18 | 1440p render breakdown: render thread bound, HUD view cost, pipeline-cache design (findings) |
-| [F849](log/F0849.md) | 2026-11-18 | GO spike: single FixedUpdate tick not reproduced on a quiet PC |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

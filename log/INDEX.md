@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F909](F0909.md) | 2026-11-24 | Release v0.1.0 published |
 | [F908](F0908.md) | 2026-11-24 | Linux v0.1.0 release packages from 1ed1b050 and their WSLg smoke |
 | [F907](F0907.md) | 2026-11-24 | Linux v0.1.0 packages from e4e5b0c9; --game-root fix for player starts |
 | [F906](F0906.md) | 2026-11-24 | DRIG v0.1.0 Windows player build: portable DRIG-data, dev-tools feature, player flags, exe release |
