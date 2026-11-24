@@ -122,6 +122,11 @@ What CI leaves out, and why:
   that needs the game or `local/` content must be `#[ignore = "requires ..."]`.
 - **`cargo fmt --check`.** The tree is not rustfmt-clean (2026-11-24: 4280 hunks in 273 files,
   see "Git hooks"); the step joins CI when a formatting pass has landed.
+- **Hardware comparisons of other vendors.** `sse_approx::tests::tables_match_this_cpu` compares
+  the Intel-measured RCPPS/RSQRTPS tables with the host instruction and so runs only on
+  GenuineIntel; the hosted runner's CPU gave a different RSQRTPS and failed runs #1 and #3 (F917).
+  The vendor-independent digest test checks the tables everywhere. The Linux job prints the
+  runner's CPU (`lscpu`) before the tests.
 - **Render smoke, identity check, `grid-soak quick`.** They need the game data (prepush and the
   build gate run them locally).
 - **Android, macOS, Linux packaging.** Built by the release tools, not by CI.
@@ -130,6 +135,11 @@ CI does not replace `tools/prepush.ps1`: it runs none of the asset tests or iden
 are where simulation regressions show. It catches a change that breaks the build, Clippy or a
 data-free test on Linux or Windows, including pull requests from contributors who do not own the
 game. `.github/**` takes prepush's docs tier: the workflow is no cargo input.
+
+Measured on GitHub (2026-11-24, cold cache): Linux job 21 min 16 s (run #1) and 22 min 18 s
+(run #3), of which about 17-18 min compile; Windows Clippy 6 min 0 s and 3 min 54 s. Both runs
+failed on the vendor test above, and rust-cache saves nothing after a failed job by default, so
+every run compiled cold; `cache-on-failure: true` now saves the cache of a failed main run too.
 
 Local equivalent of the Linux job (validated in WSL Ubuntu 24.04 in a fresh clone, so no `local/`
 and no `GRID_*` variables):

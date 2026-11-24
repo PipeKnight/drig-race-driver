@@ -582,12 +582,9 @@ pub(crate) const RSQRT_BASE: [u32; 2048] = [
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_arch = "x86_64")]
-    #[test]
-    fn tables_match_this_cpu() {
-        use std::arch::x86_64::{_mm_cvtss_f32, _mm_rcp_ps, _mm_rsqrt_ps, _mm_set1_ps};
-        // Every table cell at several exponents, both signs, plus a stride over all bit patterns.
-        // A different CPU vendor may legitimately differ; the tables describe the validation CPU.
+    /// Every table cell at several exponents, both signs, a stride over all bit patterns and the
+    /// special values.
+    fn inputs() -> Vec<u32> {
         let mut inputs: Vec<u32> = (0..=u32::MAX).step_by(4093).collect();
         for exponent in [1u32, 2, 60, 126, 127, 128, 129, 200, 253, 254] {
             for cell in 0..2048u32 {
@@ -606,7 +603,58 @@ mod tests {
             0xff80_0000,
             0x7fc0_0001,
         ]);
-        for bits in inputs {
+        inputs
+    }
+
+    /// FNV-1a-64 of the emulated outputs over `inputs()`, recorded on the validation CPU (Intel
+    /// Core i7-12700), where `tables_match_this_cpu` also passed. Runs on every CPU and
+    /// architecture: the emulation must give the same bits everywhere.
+    const REFERENCE_DIGEST: u64 = 0xa342_7e6e_b8f9_380a;
+
+    #[test]
+    fn emulation_matches_the_recorded_reference() {
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for bits in inputs() {
+            let value = f32::from_bits(bits);
+            for word in [bits, super::rcp(value).to_bits(), super::rsqrt(value).to_bits()] {
+                for byte in word.to_le_bytes() {
+                    hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+                }
+            }
+        }
+        assert_eq!(hash, REFERENCE_DIGEST, "digest {hash:#018x}");
+    }
+
+    /// Compares the emulation with this CPU's RCPPS/RSQRTPS. The tables describe Intel's
+    /// approximations (measured on the i7-12700); other vendors legitimately differ (the GitHub
+    /// runner returns rsqrt(0x008007fa) = 0x5efff800, the table 0x5efff000), so
+    /// the comparison runs only on GenuineIntel unless DRIG_SSE_HOST_CHECK=1 forces it (=0 skips
+    /// it everywhere).
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn tables_match_this_cpu() {
+        use std::arch::x86_64::{__cpuid, _mm_cvtss_f32, _mm_rcp_ps, _mm_rsqrt_ps, _mm_set1_ps};
+        #[allow(unused_unsafe)]
+        // CPUID leaf 0 is available on every x86_64 CPU.
+        let leaf = unsafe { __cpuid(0) };
+        let vendor: Vec<u8> = [leaf.ebx, leaf.edx, leaf.ecx]
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect();
+        let vendor = String::from_utf8_lossy(&vendor).into_owned();
+        let run = match std::env::var("DRIG_SSE_HOST_CHECK").as_deref() {
+            Ok("1") => true,
+            Ok("0") => false,
+            _ => vendor == "GenuineIntel",
+        };
+        if !run {
+            eprintln!(
+                "sse_approx: host comparison skipped on {vendor} (the tables describe Intel \
+                 RCPPS/RSQRTPS; DRIG_SSE_HOST_CHECK=1 forces it)"
+            );
+            return;
+        }
+        for bits in inputs() {
             let value = f32::from_bits(bits);
             // SSE2 is part of the x86_64 baseline.
             let (rcp, rsqrt) = unsafe {
@@ -618,12 +666,12 @@ mod tests {
             assert_eq!(
                 super::rcp(value).to_bits(),
                 rcp.to_bits(),
-                "rcp {bits:#010x}"
+                "rcp {bits:#010x} on {vendor}"
             );
             assert_eq!(
                 super::rsqrt(value).to_bits(),
                 rsqrt.to_bits(),
-                "rsqrt {bits:#010x}"
+                "rsqrt {bits:#010x} on {vendor}"
             );
         }
     }

@@ -45,8 +45,13 @@ jobs:
         with:
           # Only main writes the cache; pull requests reuse it (the 10 GB repository limit).
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # A failed test must not throw away the 18-minute compile.
+          cache-on-failure: true
       - name: Clippy (workspace, -D warnings)
         run: cargo clippy --release --workspace --all-targets -- -D warnings
+      # sse_approx's hardware comparison runs only on Intel CPUs (docs/TOOLCHAIN.md).
+      - name: Runner CPU
+        run: lscpu | grep -E 'Vendor ID|Model name'
       # `cargo t` (.cargo/config.toml): test --workspace --release --lib --test * --bin grid-app.
       - name: Tests without game data
         run: cargo t --no-fail-fast
@@ -65,5 +70,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - name: Clippy (workspace, -D warnings)
         run: cargo clippy --release --workspace --all-targets -- -D warnings

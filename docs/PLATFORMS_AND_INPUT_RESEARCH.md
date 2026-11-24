@@ -77,7 +77,8 @@ These instructions are vendor-specific approximations. ARM's FRSQRTE/FRECPE give
 
 **Checks** [V]:
 
-- Unit test `sse_approx::tests::tables_match_this_cpu` compares against the hardware at every table cell × 10 exponents × both signs, plus a 1-in-4093 stride over all bit patterns.
+- Unit test `sse_approx::tests::tables_match_this_cpu` compares against the hardware at every table cell × 10 exponents × both signs, plus a 1-in-4093 stride over all bit patterns. Since F917 it runs only on a GenuineIntel CPU (CPUID leaf 0), because the tables describe Intel's instructions: the GitHub-hosted Linux runner returned a different RSQRTPS for `0x008007fa` (`0x5eff_f800` instead of the table's `0x5eff_f000`, the lowest of the 12 significant bits, CI runs #1 and #3). Elsewhere it prints a skip line; `DRIG_SSE_HOST_CHECK=1` forces the comparison on any vendor, `=0` skips it.
+- Unit test `sse_approx::tests::emulation_matches_the_recorded_reference` runs on every CPU and architecture: an FNV-1a-64 over the same inputs and both emulated outputs, recorded on the i7-12700 where the hardware comparison passes. It catches a change to the tables or the emulation on machines that cannot compare with Intel hardware (AMD, ARM, CI).
 - `grid-opponent-race`, release build, comparing the hardware path (`target/release`) with the `--features soft-sse` path. Runs in `local/platforms/sse-approx/runs/`:
   - **Solo Donington AI, 1 car, 11,200 ticks:** laps 88.42029812185638 / 86.28228501935392 s. Output files are byte-identical (SHA-256 `124acff5…2d9a`), and equal to the reference values in docs/DRIVING_ASSISTS_RESEARCH.md.
   - **12 cars with deformation (DF01), 12,000-tick limit:** the race ended at tick 11,800 with 827 car contacts. Standings, classification and all 12 per-car FNV state hashes are byte-identical (SHA-256 `ad7986bf…d008`).
