@@ -10,3 +10,6 @@ third_party/** -text
 
 # Git hooks run under sh, also on Windows: a CR after #!/bin/sh breaks them.
 .githooks/* text eol=lf
+
+# Shell scripts also run from a Windows checkout in WSL (tools/package_linux.sh): no CR.
+*.sh text eol=lf

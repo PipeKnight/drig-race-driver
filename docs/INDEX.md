@@ -393,6 +393,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [FRONT_END_FLOW.md](FRONT_END_FLOW.md) Front-end flow: menu, loading, race, results — 9 November 2026, Claude Code.
 - [LAMP_REFLECTOR_RESEARCH.md](LAMP_REFLECTOR_RESEARCH.md) Lamp reflector material research — Initial19 October2026 static purchased-resource observations.
 - [LIGHT_SHAFTS.md](LIGHT_SHAFTS.md) Light shafts: the god-ray cards (row 107) — Owner's report (2026-11-02, Washington, screenshots 29-32, 35): long black "drops" in the air.
+- [LINUX.md](LINUX.md) Native Linux build — Builds the Rust engine for Linux x86_64 and packages it as a code-only `.tar.gz` and AppImage (backlog row 135).
 - [MUSIC_RESEARCH.md](MUSIC_RESEARCH.md) Race music: codec, stem manager and port sizing (research) — Static analysis of `local/compatibility/grid-unpacked.exe` (cache `local/re-cache`) and of the purchased …
 - [NATIVE_DLAA.md](NATIVE_DLAA.md) Optional native-resolution DLAA — 19 October2026.
 - [NIGHT_LIGHTS.md](NIGHT_LIGHTS.md) Night lights: street lights and car headlight beams — The original's NightLights pass lights every night route (forced-night routes such as Haruna 1/3/6/8/9, and Le Mans …

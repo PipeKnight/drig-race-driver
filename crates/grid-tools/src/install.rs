@@ -191,6 +191,13 @@ pub fn steam_roots() -> Vec<PathBuf> {
             out.push(home.join(".steam/steam"));
             out.push(home.join(".local/share/Steam"));
             out.push(home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"));
+            // The Windows Steam client run under Wine (Lutris, Bottles, plain wine):
+            // the game sits inside the prefix. Native Steam with Proton installs it in
+            // the ordinary library above; its compatdata prefix holds only saves.
+            let prefix = env("WINEPREFIX").unwrap_or_else(|| home.join(".wine"));
+            for programs in ["Program Files (x86)", "Program Files"] {
+                out.push(prefix.join("drive_c").join(programs).join("Steam"));
+            }
         }
     }
     out
