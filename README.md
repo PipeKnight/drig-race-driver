@@ -10,6 +10,12 @@ I also work on graphics improvement, testing technologies like DLSS/DLAA, RT etc
 
 <img width="820" height="370" alt="moving-bias-native01" src="https://github.com/user-attachments/assets/bec7f111-4d29-4e80-be70-c2d5ed45c4f9" />
 
+The physics engine and damage system have already been fully rebuilt from scratch:
+
+<img width="520" height="292" alt="row117-crash(1)" src="https://github.com/user-attachments/assets/a272a9d6-3f7d-4d05-bc9f-66a2a8e554a3" />
+
+(In this GIF, you can see some glitches with the shadows and trees. It was recorded on an early prototype, and these issues have since been resolved already)
+
 ## Status
 
 Early and experimental, but you can already race. What works today:
