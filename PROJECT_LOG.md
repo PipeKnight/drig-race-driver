@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F902](log/F0902.md) | 2026-11-24 | Row 137: public builds never contain DLC or other original files |
 | [F901](log/F0901.md) | 2026-11-24 | Content source policy: other-platform DLC, mods, March 2008 prototype |
 | [F900](log/F0900.md) | 2026-11-24 | Backlog: rain look, cut content findings, career maintained damage, tyre wall regrowth |
 | [F899](log/F0899.md) | 2026-11-24 | Backlog row 143: split grid-app main.rs into modules |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F845](log/F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
 | [F844](log/F0844.md) | 2026-11-18 | Main thread: flashback checkpoints pack the live words on the compute pool |
 | [F843](log/F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
-| [F842](log/F0842.md) | 2026-11-17 | Prop breaks copy one switch per box, not every box |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
