@@ -86,3 +86,43 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
   used in the pass; otherwise copy the new release here and re-apply the marked changes
   (`grep -rn "DRIG patch" third_party/wgpu-core`). After any change here, the coordinator refreshes
   the shared build seed (`tools/build_seed.ps1`).
+
+## bevy_pbr 0.19.1
+
+- Upstream: crates.io `bevy_pbr` 0.19.1, crate sha256
+  `244ae7d618b51a59c913c36b0564a295cd85ea91a5e777b542bb7bdb846a23d6` (the `Cargo.lock`
+  checksum), git commit `b56fc29d3016e641754765244b5ba3f9cc504671` of bevyengine/bevy, path
+  `crates/bevy_pbr` (`.cargo_vcs_info.json`). Licence: MIT or Apache-2.0 (`LICENSE-MIT`,
+  `LICENSE-APACHE`).
+- Copied unchanged from the registry source, then patched (designed in F874, landed in F893):
+  - `src/render/drig_bind_group_cache.rs` (new): `BindGroupCache`, keyed on the layout and, per
+    entry, the binding index and a clone of the bound buffer (with offset and size), sampler or
+    texture view. A clone keeps its resource alive, so a reallocated buffer, another range or a new
+    view always gives a new key, and a bind group is never handed out for other resources. Entries
+    not used in the last two frames are dropped (Bevy swaps two preprocessing buffer sets, so a
+    bind group returns every other frame). Binding arrays, acceleration structures and external
+    textures bypass the cache. `CachingRenderDevice` wraps `RenderDevice` for the callers.
+  - `src/render/gpu_preprocess.rs`: `prepare_preprocess_bind_groups` creates its bind groups
+    (bin unpacking, frustum culling, indirect parameters, reset of indirect batch sets) through
+    the cache.
+  - `src/light_probe/generate.rs`: `prepare_generated_environment_map_bind_groups` reuses a light
+    probe's bind groups while its input key (texture, view, sampler and layout ids, sizes) is
+    unchanged; Bevy never reuses these ids.
+  - `src/render/mod.rs`: declares the module. `Cargo.toml`: `wgpu` dependency (the key holds wgpu
+    handles).
+- Why: Bevy recreated about 160-260 of these bind groups per frame (F873). Each creation and drop
+  goes through wgpu's device and hub locks, the Vulkan descriptor-allocator mutex and the
+  pending-writes path, which other render systems take at the same time (F886 profile: create_bind_group
+  24.8 % of the wgpu samples, much of it spinning on those locks). The cache reuses 72-77 % of them
+  (F874). Measured gain: F893, docs/PERFORMANCE.md.
+- `GRID_BEVY_BIND_GROUP_CACHE=0` restores the upstream path, kept as a fallback and for A/B timing
+  and image checks.
+- Tests: `crates/grid-app/tests/bind_group_cache.rs` (a cached bind group only for an identical
+  layout and resources; a reallocated buffer, another range, a new view or a new layout gives a
+  new one; a bind group returning every other frame still hits) and
+  `crates/grid-app/tests/environment_map_switch.rs` (switching a camera's environment map, as
+  between tracks, changes the generator bind groups each time and keeps them between switches).
+  They need a GPU and run in prepush's full tier.
+- Upgrading Bevy: drop the patch if upstream keeps these bind groups itself; otherwise copy the new
+  release here and re-apply the marked changes (`grep -rn "DRIG patch" third_party/bevy_pbr`).
+  After any change here, the coordinator refreshes the shared build seed (`tools/build_seed.ps1`).

@@ -5363,3 +5363,30 @@ between 0 and about 0.2 ms. Verdict:
   - `create_buffer`, 2.6 + 1.4 %;
   - the pending-writes mutex, 2.1 + 1.5 %;
   - the `device_create_bind_group` RwLock, about 5 %.
+
+## Bevy bind-group cache against wgpu lock contention (F893)
+
+Task (coordinator, after F892): the F886 profile showed render-world threads waiting on short-held locks inside wgpu. Shares of the samples with wgpu_core in the stack: `create_bind_group` 24.8 %, parking_lot `lock_slow` 17.45 % and `lock_shared_slow` 11.4 % (spin phases, `ZwDelayExecution` under `SleepEx`), the Vulkan `create_bind_group` 8.7 %, `create_buffer` 6.9 %. Target: Donington 2560 Enhanced worst 1-s window at 100 fps or more (97.1 after F892), with a general fix and no change to the image.
+
+Cause and fix. The contended locks are taken mostly by bind-group creation and drop. Bevy 0.19.1 recreates about 160-260 GPU preprocessing bind groups per frame over buffers that rarely change (F873). Instead of tuning wgpu's locks, the fix stops the needless creations. The F874 `BindGroupCache` landed as a vendored `third_party/bevy_pbr` 0.19.1 with a `[patch]` in the workspace `Cargo.toml`. Provenance, patched files and the cache key are in third_party/README.md "bevy_pbr 0.19.1". The key holds clones of the bound resources, so a reallocated buffer, another range or a new view always gives a new bind group. Entries unused for two frames are dropped, because Bevy swaps two preprocessing buffer sets. `GRID_BEVY_BIND_GROUP_CACHE=0` restores upstream. The cache works for every track, car, view and graphics mode, since it sits in Bevy's shared preprocessing path.
+
+Checks (exe `local/ab/bgc.exe` D17B69835723, 2026-11-24):
+- `cargo check --release -p grid-app --tests`: no warnings. GPU tests `bind_group_cache`, `environment_map_switch` and `bin_buffer_upload` pass with the cache on. With the cache off, `bin_buffer_upload` hit its known readback timeout ("fewer than 1 readbacks within 40 frames", as in the F892 gate) on the upstream path.
+- Images (`local/ab/crops-dd.ps1 -OffEnv GRID_BEVY_BIND_GROUP_CACHE -Variants b,b2,a,a2`, the ten F886 cases at 2560x1440): 0 px after-vs-before and 0 px noise in every case.
+
+Timing (`local/ab/dd-ab.ps1 -Tag bgc -Only don-2560-enh -OffEnv GRID_BEVY_BIND_GROUP_CACHE`, 4200 ticks, 5 alternating pairs, each pair under the build lock; A = cache off, B = on):
+
+| pair | fps A / B | render ms A / B | r_bind ms A / B | worst window A / B | windows <100 A / B |
+|---|---|---|---|---|---|
+| 1 | 111.3 / 114.6 | 8.45 / 8.19 | 0.84 / 0.62 | 103.5 / 105.9 | 0/64 / 0/65 |
+| 2 | 102.8 / 110.0 | 9.25 / 8.54 | 0.92 / 0.67 | 75.5 / 94.6 | 24/64 / 6/65 |
+| 3 | 111.2 / 105.7 (B dirty) | 8.46 / 8.87 | 0.85 / 0.70 | 102.7 / 93.2 | 0/64 / 4/64 |
+| 4 | 102.4 / 113.6 | 9.18 / 8.26 | 0.92 / 0.64 | 92.7 / 106.6 | 21/64 / 0/64 |
+| 5 | 87.4 / 101.9 | 10.93 / 9.23 | 1.08 / 0.74 | 62.4 / 83.8 | 54/64 / 22/64 |
+| mean | 103.0 / 109.2 | 9.25 / 8.62 | | 62.4 / 83.8 (min) | 99/320 / 32/322 |
+
+- r_bind was lower in every pair (−0.22 to −0.34 ms), matching F877 (−0.17 to −0.28). This is the direct effect.
+- The machine was noisy. Other sessions loaded the GPU on and off, so runs that passed the quiet check still ranged from 87 to 115 fps. The mean frame-level gains (+6 % fps, −0.63 ms render) therefore include noise. The only dirty run (B-3, outside GPU 51 %) is the only pair where B lost.
+- The two quietest runs per side give the cleaner frame-level picture: fps 111.3/111.2 → 114.6/113.6 (+2.6 %), render about −0.25 ms, worst window 103.5/102.7 → 105.9/106.6.
+- Verdict: kept (coordinator's decision, with the numbers above). The 100 fps worst-window goal is met in quiet runs on both sides, so the F892 figure of 97.1 was probably affected by load as well. It is not proven under load: loaded runs dropped to 62-95 fps with either setting.
+- Cost: a vendored bevy_pbr with 22 "DRIG patch" markers, which must be re-applied on a Bevy upgrade (third_party/README.md), and a 3-line Cargo.lock change, so the shared build seed needs one refresh.
