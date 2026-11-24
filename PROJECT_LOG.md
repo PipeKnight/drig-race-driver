@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F904](log/F0904.md) | 2026-11-24 | Backlog: DualSense haptics row 146, release check note in row 131, no-zip release rule |
 | [F903](log/F0903.md) | 2026-11-24 | Native Linux x86_64 build and packaging (row 135) |
 | [F902](log/F0902.md) | 2026-11-24 | Row 137: public builds never contain DLC or other original files |
 | [F901](log/F0901.md) | 2026-11-24 | Content source policy: other-platform DLC, mods, March 2008 prototype |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F847](log/F0847.md) | 2026-11-18 | Car transparent draws: no merge without a visible change; reflection overlays bound the gain |
 | [F846](log/F0846.md) | 2026-11-18 | Ground cover: stable billboard slots write only the changed instances |
 | [F845](log/F0845.md) | 2026-11-18 | Main thread: skid marks write only the changed quads |
-| [F844](log/F0844.md) | 2026-11-18 | Main thread: flashback checkpoints pack the live words on the compute pool |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
