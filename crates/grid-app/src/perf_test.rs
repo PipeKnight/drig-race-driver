@@ -5,11 +5,15 @@
 //! (`perf_test=...`); with Auto cycle the switches step through [`CYCLE`]
 //! every [`CYCLE_SECONDS`], so a single run gives a whole table.
 //!
-//! Only visibility, shadow casting (`NotShadowCaster`), a camera and log lines change, never the
-//! simulation, and nothing is saved: every start is the normal game.
+//! Only visibility, shadow casting (`NotShadowCaster`), a camera, log lines and
+//! which executor runs the schedules change, never the simulation, and nothing
+//! is saved: every start is the normal game.
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::{RenderLayers, VisibilityRange};
 use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, NotShadowCaster};
+use bevy::ecs::schedule::{
+    InternedScheduleLabel, MultiThreadedExecutor, ScheduleLabel, SingleThreadedExecutor,
+};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -37,6 +41,11 @@ pub struct Switches {
     pub msaa_off: bool,
     /// The cockpit's rear-view mirror stops updating (head-cam only).
     pub mirror: bool,
+    /// The main world's update schedules ([`main_schedules`]) run on one
+    /// thread; parallel queries inside systems still use the compute pool (F915).
+    pub main_single: bool,
+    /// The render world's schedules ([`render_schedules`]) run on one thread.
+    pub render_single: bool,
 }
 
 impl Switches {
@@ -54,6 +63,8 @@ impl Switches {
         far_props: false,
         msaa_off: false,
         mirror: false,
+        main_single: false,
+        render_single: false,
     };
     pub const ALL_OFF: Self = Self {
         shadows: true,
@@ -87,6 +98,8 @@ impl Switches {
             (self.small_casters, "no_small_casters"),
             (self.far_props, "far_props"),
             (self.msaa_off, "msaa_off"),
+            (self.main_single, "main_single"),
+            (self.render_single, "render_single"),
         ] {
             if on {
                 cheaper.push(name.into());
@@ -106,8 +119,9 @@ impl Switches {
 /// Auto cycle order: the normal frame, each part alone, everything, the car
 /// alone, then the resolution and anti-aliasing variants (`mobile:`). With
 /// the mobile preset the normal frame is the preset's, so `render1080` is
-/// the phone's full resolution.
-pub const CYCLE: [Switches; 15] = {
+/// the phone's full resolution. The last variant runs both worlds'
+/// schedules on one thread.
+pub const CYCLE: [Switches; 16] = {
     const N: Switches = Switches::NORMAL;
     [
         N,
@@ -124,6 +138,7 @@ pub const CYCLE: [Switches; 15] = {
         Switches { render_rows: 1080, ..N },
         Switches { render_rows: 540, ..N },
         Switches { msaa_off: true, ..N },
+        Switches { main_single: true, render_single: true, ..N },
         N,
     ]
 };
@@ -179,6 +194,8 @@ pub fn install(app: &mut App) {
                 "far_props" => s.far_props = true,
                 "msaa_off" => s.msaa_off = true,
                 "mirror" => s.mirror = true,
+                "main_single" => s.main_single = true,
+                "render_single" => s.render_single = true,
                 rows if rows.starts_with("render") => {
                     s.render_rows = rows[6..].parse().unwrap_or(0);
                 }
@@ -187,8 +204,83 @@ pub fn install(app: &mut App) {
         }
     }
     app.insert_resource(test)
-        .add_systems(Last, (cycle, apply).chain())
+        .add_systems(Last, (cycle, apply, main_executors).chain())
         .add_systems(Last, churn);
+    if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
+        render.add_systems(bevy::render::ExtractSchedule, render_executors);
+    }
+}
+
+/// Main-world schedules `main_single` switches. Bevy gives each the
+/// multi-threaded executor; `Main`, `FixedMain` and `RunFixedMainLoop` are
+/// single-threaded already, and `Last`, where the switch runs, keeps its own.
+fn main_schedules() -> [InternedScheduleLabel; 9] {
+    [
+        First.intern(),
+        PreUpdate.intern(),
+        FixedFirst.intern(),
+        FixedPreUpdate.intern(),
+        FixedUpdate.intern(),
+        FixedPostUpdate.intern(),
+        FixedLast.intern(),
+        Update.intern(),
+        PostUpdate.intern(),
+    ]
+}
+
+/// Render-world schedules `render_single` switches (multi-threaded in Bevy;
+/// `ExtractSchedule`, where the switch runs, keeps its own executor).
+fn render_schedules() -> [InternedScheduleLabel; 4] {
+    [
+        bevy::render::Render.intern(),
+        bevy::render::renderer::RenderGraph.intern(),
+        bevy::core_pipeline::Core3d.intern(),
+        bevy::core_pipeline::Core2d.intern(),
+    ]
+}
+
+/// Gives each schedule in `labels` that exists the single- or the
+/// multi-threaded executor; returns how many it changed.
+fn set_executors(schedules: &mut Schedules, labels: &[InternedScheduleLabel], single: bool) -> usize {
+    let mut changed = 0;
+    for &label in labels {
+        if let Some(schedule) = schedules.get_mut(label) {
+            if single {
+                schedule.set_executor(SingleThreadedExecutor::new());
+            } else {
+                schedule.set_executor(MultiThreadedExecutor::new());
+            }
+            changed += 1;
+        }
+    }
+    changed
+}
+
+/// `main_single`: a running schedule is out of `Schedules`, so this runs in
+/// `Last` and changes the others for the next frame, only when the switch changes.
+fn main_executors(world: &mut World, mut applied: Local<bool>) {
+    let single = world.get_resource::<PerfTest>().is_some_and(|t| t.switches.main_single);
+    if single == *applied {
+        return;
+    }
+    *applied = single;
+    let changed = set_executors(&mut world.resource_mut::<Schedules>(), &main_schedules(), single);
+    log_line!("perf_test version=1 event=executor world=main single={single} schedules={changed}");
+}
+
+/// `render_single`: runs in the render world's `ExtractSchedule`, while its
+/// render schedules are idle, and reads the switch from the main world.
+fn render_executors(world: &mut World, mut applied: Local<bool>) {
+    let single = world
+        .get_resource::<bevy::render::MainWorld>()
+        .and_then(|main| main.get_resource::<PerfTest>())
+        .is_some_and(|t| t.switches.render_single);
+    if single == *applied {
+        return;
+    }
+    *applied = single;
+    let changed = set_executors(&mut world.resource_mut::<Schedules>(), &render_schedules(), single);
+    log_line!("perf_test version=1 event=executor world=render single={single} schedules={changed}");
 }
 
 /// Seconds per `asset_churn` line.
@@ -542,5 +634,43 @@ mod tests {
         );
         assert_eq!(CYCLE[0], Switches::default());
         assert_eq!(CYCLE[CYCLE.len() - 1], Switches::default());
+        assert_eq!(
+            Switches { main_single: true, render_single: true, ..Default::default() }.label(),
+            "mobile:main_single+render_single"
+        );
+    }
+
+    #[derive(Resource, Default)]
+    struct Count(u32);
+
+    fn counter(mut n: ResMut<Count>) {
+        n.0 += 1;
+    }
+
+    /// The switch swaps the executors of the main-world schedules and back,
+    /// and the systems keep running under either.
+    #[test]
+    fn main_single_swaps_executors_and_systems_keep_running() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Count>()
+            .add_systems(Update, counter)
+            .add_systems(PostUpdate, counter)
+            .init_resource::<PerfTest>()
+            .add_systems(Last, main_executors);
+        app.update();
+        assert_eq!(app.world().resource::<Count>().0, 2);
+        app.world_mut().resource_mut::<PerfTest>().switches.main_single = true;
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Count>().0, 6);
+        app.world_mut().resource_mut::<PerfTest>().switches.main_single = false;
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Count>().0, 10);
+        let mut schedules = Schedules::default();
+        schedules.insert(Schedule::new(Update));
+        assert_eq!(set_executors(&mut schedules, &main_schedules(), true), 1);
+        assert_eq!(set_executors(&mut schedules, &render_schedules(), true), 0);
     }
 }

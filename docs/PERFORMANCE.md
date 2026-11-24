@@ -573,6 +573,8 @@ normal game. Until F553 the panel had only 5 row texts, so the last three rows (
 | HUD | race HUD parts and the damage panel hidden, the OSD scene's camera inactive (touch zones stay) |
 | Sample logging | the periodic `drive_sample`/`drive_*_sample` "tick" reports skipped (events such as pause, reset and exit stay) |
 | Whole scene | Off: every mesh except the player's car hidden (prop pieces that their own system shows again may stay) |
+| Game systems in parallel | Off: the main world's First, PreUpdate, Fixed*, Update and PostUpdate schedules use Bevy's single-threaded executor (`main_single`); parallel queries inside a system still use the compute pool |
+| Render systems in parallel | Off: the render world's Render, RenderGraph, Core3d and Core2d schedules use the single-threaded executor (`render_single`) |
 
 - Every `frame_stats` line ends with `perf_test=normal` or `perf_test=off:shadows+hud…` once
   the screen has been used (or `GRID_PERF_TEST` is set). Each change logs
@@ -580,7 +582,8 @@ normal game. Until F553 the panel had only 5 row texts, so the last three rows (
   One run therefore gives a table per switch.
 - The switches change only visibility, shadow maps, a camera's activity and log lines; the
   simulation is untouched.
-- Desktop: `GRID_PERF_TEST=auto` or a list such as `GRID_PERF_TEST=shadows,foliage`.
+- The two executor rows (F920) are listed under `mobile:` in the label (`perf_test=mobile:main_single+render_single`). The executors change at the end of a frame and log `perf_test version=1 event=executor world=main|render single=… schedules=N` (8 main and 4 render on the desktop). They test whether the phone's per-frame waits are thread hand-offs rather than work. On the desktop, both switches on changed nothing (avg 6.6 ms both ways, F920).
+- Desktop: `GRID_PERF_TEST=auto` or a list such as `GRID_PERF_TEST=shadows,foliage` (also `main_single`, `render_single`).
   Checked on the desktop [V]: the auto cycle logs ten steps and labels every `frame_stats`
   line. Renders with everything off show no shadows, HUD or grass, and car-only shows the
   car alone.

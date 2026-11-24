@@ -1297,7 +1297,6 @@ pub fn list_routes(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 impl Catalog {
     /// Every route the menu offers, in first-offered order, with its venue
     /// and `KEY:CAR` for each event type that runs it.
-    #[cfg(not(target_os = "android"))]
     pub fn routes(&self) -> Vec<(String, String, Vec<String>)> {
         let mut out: Vec<(String, String, Vec<String>)> = Vec::new();
         for t in &self.types {
@@ -1314,7 +1313,6 @@ impl Catalog {
 
     /// The default choice of the first event type offering `route`, and
     /// for a type with directions also the other direction.
-    #[cfg(not(target_os = "android"))]
     pub fn route_choices(&self, route: &str) -> Vec<(Kind, Choice)> {
         let Some(t) = self.types.iter().find(|t| t.layouts.iter().any(|l| l.route == route)) else {
             return Vec::new();

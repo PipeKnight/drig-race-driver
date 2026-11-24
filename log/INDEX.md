@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F920](F0920.md) | 2026-11-24 | Performance test: single-threaded executor switches for the main and render worlds |
 | [F919](F0919.md) | 2026-11-25 | Phone proxy: predicted Xiaomi frame from a phone-like desktop run |
 | [F918](F0918.md) | 2026-11-25 | Unified per-run logs on all platforms |
 | [F917](F0917.md) | 2026-11-24 | CI: Intel-only SSE host comparison, vendor-independent digest test |

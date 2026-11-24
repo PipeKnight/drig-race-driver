@@ -108,17 +108,21 @@ pub enum PerfRow {
     Effects,
     Hud,
     Samples,
+    MainThreads,
+    RenderThreads,
     Empty,
 }
 /// The Auto cycle row was removed (owner, 2026-10-23, F559); `GRID_PERF_TEST=auto`
 /// still runs it.
-const PERF_ROWS: [(PerfRow, &str, &str); 7] = [
+const PERF_ROWS: [(PerfRow, &str, &str); 9] = [
     (PerfRow::Shadows, "Shadows", "Shadow casting of every mesh (the sun keeps its shadow maps, empty)."),
     (PerfRow::Foliage, "Foliage", "Camera-facing tree and bush billboards."),
     (PerfRow::Ground, "Ground cover", "Grass and ground detail sprites."),
     (PerfRow::Effects, "Smoke, debris, skid marks", "Tyre smoke, wheel debris and skid marks."),
     (PerfRow::Hud, "HUD", "The race HUD and its OSD camera (touch zones stay)."),
     (PerfRow::Samples, "Sample logging", "The periodic drive_*_sample log lines."),
+    (PerfRow::MainThreads, "Game systems in parallel", "Off: game update systems run one after another on one thread."),
+    (PerfRow::RenderThreads, "Render systems in parallel", "Off: render systems run one after another on one thread."),
     (PerfRow::Empty, "Whole scene", "Off: only your car is drawn."),
 ];
 
@@ -500,6 +504,8 @@ impl FrontEnd {
                         PerfRow::Effects => p.effects = !p.effects,
                         PerfRow::Hud => p.hud = !p.hud,
                         PerfRow::Samples => p.samples = !p.samples,
+                        PerfRow::MainThreads => p.main_single = !p.main_single,
+                        PerfRow::RenderThreads => p.render_single = !p.render_single,
                         PerfRow::Empty => p.empty = !p.empty,
                     }
                 }
@@ -605,6 +611,8 @@ impl FrontEnd {
                             PerfRow::Effects => p.effects,
                             PerfRow::Hud => p.hud,
                             PerfRow::Samples => p.samples,
+                            PerfRow::MainThreads => p.main_single,
+                            PerfRow::RenderThreads => p.render_single,
                             PerfRow::Empty => p.empty,
                         };
                         let value = if off { "Off" } else { "On" };
@@ -1123,7 +1131,7 @@ mod tests {
         assert_eq!(front.screen, Screen::PerfTest);
         let view = front.view(&Labels::default());
         assert_eq!(view.title, "Performance test");
-        assert_eq!(view.rows.len(), 7);
+        assert_eq!(view.rows.len(), 9);
         // No Auto cycle row (F559): every switch is On.
         assert_eq!(view.rows[0].0, "Shadows");
         assert!(view.rows.iter().all(|r| r.1 == "On"));
@@ -1141,6 +1149,16 @@ mod tests {
         front.step(press(|n| n.up = true));
         front.step(press(|n| n.right = true));
         assert!(front.perf.empty);
+        // Above it, the two executor rows (F915).
+        front.step(press(|n| n.up = true));
+        front.step(press(|n| n.right = true));
+        front.step(press(|n| n.up = true));
+        front.step(press(|n| n.left = true));
+        assert!(front.perf.main_single && front.perf.render_single);
+        assert_eq!(
+            front.perf.label(),
+            "off:shadows+hud+empty_scene,mobile:main_single+render_single"
+        );
         // Ctrl/X resets everything; Back returns without a command.
         front.step(press(|n| n.button3 = true));
         assert_eq!(front.perf, crate::perf_test::Switches::default());
