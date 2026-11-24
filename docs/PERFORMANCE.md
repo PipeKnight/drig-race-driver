@@ -5390,3 +5390,35 @@ Timing (`local/ab/dd-ab.ps1 -Tag bgc -Only don-2560-enh -OffEnv GRID_BEVY_BIND_G
 - The two quietest runs per side give the cleaner frame-level picture: fps 111.3/111.2 → 114.6/113.6 (+2.6 %), render about −0.25 ms, worst window 103.5/102.7 → 105.9/106.6.
 - Verdict: kept (coordinator's decision, with the numbers above). The 100 fps worst-window goal is met in quiet runs on both sides, so the F892 figure of 97.1 was probably affected by load as well. It is not proven under load: loaded runs dropped to 62-95 fps with either setting.
 - Cost: a vendored bevy_pbr with 22 "DRIG patch" markers, which must be re-applied on a Bevy upgrade (third_party/README.md), and a 3-line Cargo.lock change, so the shared build seed needs one refresh.
+
+## Derby collision frames: `car_batch::refresh` outside rebuilds (F894)
+
+- Scene: windowed derby, Enhanced 1280x800, 11 cars, 275 groups, 1452 parts. Outside rebuilds, `refresh` cost
+  about 0.175 ms per frame (rev 6d864441).
+- Where it went (temporary section timers, 2 runs of 45 s, not committed):
+
+  | Section | ms per frame |
+  |---|---|
+  | `register` and the shadow-body bookkeeping | 0.011 |
+  | `Modified` events and the car poses | 0.004 |
+  | per-part placement check (1452 parts) | 0.122 |
+  | votes, level changes, fades | 0.005 |
+  | `select_levels` | 0.005 |
+  | group loop without rebuilds | 0.025 |
+  | shadow bodies, anchors | 0.001 |
+
+- The placement check ran about 84 ns per part. `Handle` equality compares ids, and a strong handle's id
+  lives behind its `Arc`, so `mesh.0 == member.mesh` and `material.0 == group.material` followed heap
+  pointers for every part on every frame. A part's handle and its member's are clones of one `Arc`.
+- The change:
+  - `same` compares two strong handles by `Arc` pointer first and falls back to the ids. The result is the
+    same as `==` (test `handles_compare_like_their_ids`);
+  - a member keeps its mesh id for the `Modified` lookups;
+  - the cheap `ours` test runs before `default_layers`;
+  - the batches' `Transform` is decomposed once per car (11) instead of once per group (275).
+- Result: placement check 0.122 → 0.055 ms, group loop 0.025 → 0.017 ms. In a 4-pair windowed A/B with the
+  order swapped every pair, refresh outside rebuilds went from 0.16-0.19 ms (0.27 ms in the first run, with
+  the CPU 41 % busy) to 0.10-0.14 ms per frame.
+- Images: offscreen fixed-step derby at ticks 1500 and 2400, before vs after, 0 differing pixels.
+- Frame level: 8 vs 9 main-gated windows (main 9.44 vs 9.33 ms), too few to show 0.075 ms. No clear
+  frame-level gain.

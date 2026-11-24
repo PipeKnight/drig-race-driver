@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F894](log/F0894.md) | 2026-11-24 | Derby collision frames: car_batch refresh outside rebuilds |
 | [F893](log/F0893.md) | 2026-11-24 | Bevy GPU-preprocessing bind-group cache (vendored bevy_pbr) |
 | [F892](log/F0892.md) | 2026-11-23 | wgpu-core: bind-group tracker insert once per render pass; empty internal command buffers skipped (no gain, not kept) |
 | [F891](log/F0891.md) | 2026-11-23 | Derby collision frames: patched car batches, DentSpread rerun, what holds AssetEventSystems |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F837](log/F0837.md) | 2026-11-17 | Mesh uploads per frame: crowd cards, car batches and part meshes stream in place |
 | [F836](log/F0836.md) | 2026-11-17 | Frame split in frame_stats for the Mac performance log |
 | [F835](log/F0835.md) | 2026-11-16 | Fence through smoke: scaled 3D image shown opaque |
-| [F834](log/F0834.md) | 2026-11-16 | Owner review 2026-11-16: Mac performance, accidental session, fence through smoke |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

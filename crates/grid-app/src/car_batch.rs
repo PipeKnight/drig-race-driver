@@ -171,6 +171,8 @@ struct Member {
     rest: Mat4,
     rest_inverse: Mat4,
     mesh: Handle<Mesh>,
+    /// `mesh`'s id, kept so the per-frame checks need not follow the handle.
+    id: AssetId<Mesh>,
     vertices: usize,
     batched: bool,
     /// In place this frame.
@@ -384,11 +386,11 @@ fn refresh(
         let ours = layers.is_some_and(|l| *l == hidden);
         member.placed = Some(group.slot) != loose_slot
             && *visibility != Visibility::Hidden
-            && (crate::car_reflections::default_layers(layers) || ours)
+            && (ours || crate::car_reflections::default_layers(layers))
             && (!shadowless || ours || group.shadow_body)
             && !ranged
-            && material.0 == group.material
-            && mesh.0 == member.mesh
+            && same(&material.0, &group.material)
+            && same(&mesh.0, &member.mesh)
             // A merged low-detail part keeps no pose: it is on its car.
             && pose.is_some_and(|p| group.level > 0 || in_place(transform.to_matrix(), p * member.rest));
     }
@@ -524,6 +526,8 @@ fn refresh(
             }
         }
     }
+    // The batches' transform, once per car.
+    let transforms: Vec<Option<Transform>> = poses.iter().map(|p| p.map(Transform::from_matrix)).collect();
     let mut stats = [0usize; 2]; // members, batched
     for group in &mut state.groups {
         stats[0] += group.members.len();
@@ -540,7 +544,7 @@ fn refresh(
             stats[1] += group.members.iter().filter(|m| m.batched).count();
             // A deformed member rebuilds once the car is placed again.
             for member in &mut group.members {
-                if modified.contains(&member.mesh.id()) {
+                if modified.contains(&member.id) {
                     member.stale = true;
                     group.dirty |= member.batched;
                 }
@@ -555,7 +559,7 @@ fn refresh(
                 0
             };
             let batched = member.placed && (member.batched || member.stable >= REJOIN_FRAMES);
-            let deformed = modified.contains(&member.mesh.id());
+            let deformed = modified.contains(&member.id);
             member.stale |= deformed || batched != member.batched;
             if batched != member.batched {
                 member.batched = batched;
@@ -598,8 +602,7 @@ fn refresh(
         }
         // Batches of a level the car does not show keep their pose; a level
         // fading out still follows the car.
-        if let Some(pose) = pose.filter(|_| state.shown[group.slot] == group.level || fading) {
-            let next = Transform::from_matrix(pose);
+        if let Some(next) = transforms[group.slot].filter(|_| state.shown[group.slot] == group.level || fading) {
             for &batch in &group.batches {
                 if let Ok((mut transform, ..)) = batches.get_mut(batch) {
                     transform.set_if_neq(next);
@@ -744,6 +747,7 @@ fn register(
             rest,
             rest_inverse: rest.inverse(),
             mesh: mesh.0.clone(),
+            id: mesh.0.id(),
             vertices,
             batched: false,
             placed: false,
@@ -1214,6 +1218,13 @@ fn collapse(mesh: &mut Mesh, parts: &[usize], kept: &[bool]) {
     }
 }
 
+/// Handle equality that compares two strong handles by pointer first. A
+/// part's handle and its member's are clones of one `Arc`; reading each id
+/// follows the handle into the heap, for every part every frame.
+fn same<A: Asset>(a: &Handle<A>, b: &Handle<A>) -> bool {
+    matches!((a, b), (Handle::Strong(x), Handle::Strong(y)) if std::sync::Arc::ptr_eq(x, y)) || a == b
+}
+
 fn in_place(matrix: Mat4, expected: Mat4) -> bool {
     (matrix.w_axis - expected.w_axis).abs().max_element() <= PLACE_METRES
         && [
@@ -1228,6 +1239,18 @@ fn in_place(matrix: Mat4, expected: Mat4) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handles_compare_like_their_ids() {
+        use bevy::asset::RenderAssetUsages;
+        let mut meshes = Assets::<Mesh>::default();
+        let empty = || Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        let (a, b) = (meshes.add(empty()), meshes.add(empty()));
+        let weak = Handle::<Mesh>::default();
+        for (x, y) in [(&a, &a.clone()), (&a, &b), (&b, &a), (&a, &weak), (&weak, &weak.clone())] {
+            assert_eq!(same(x, y), x.id() == y.id());
+        }
+    }
 
     #[test]
     fn a_dent_streams_only_the_changed_parts_vertices() {
