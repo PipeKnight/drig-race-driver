@@ -20,3 +20,12 @@ DRIG builds never contain game files or DLC files. Everything, including the DLC
 7. **Career window settings.** `--career` should follow the window, fullscreen and resolution options like the rest of the game (row 147).
 
 Fidelity work (handling, AI, damage, graphics and the rest of the backlog) continues alongside these steps.
+
+## Optional graphics improvements
+
+Experiments beyond the original look, off unless you ask for them. The original look stays the default.
+
+- **DLAA** (NVIDIA's anti-aliasing at native resolution) works, but only in a separate build made with `cargo build --release -p grid-app --features dlaa` and started with `Play GRID DLAA.cmd`. The releases and the normal build do not include it and use SMAA. On a GPU without support, the DLAA build falls back to SMAA ([NATIVE_DLAA.md](NATIVE_DLAA.md)).
+- **DLSS upscaling** and **ray tracing** (first candidates: car reflections and contact shadows) are planned, not built yet ([GRAPHICS_QUALITY_CONTRACT.md](GRAPHICS_QUALITY_CONTRACT.md)).
+
+The detailed graphics plan, in Russian: [GRAPHICS_ROADMAP_RU.md](GRAPHICS_ROADMAP_RU.md).

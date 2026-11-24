@@ -6,7 +6,7 @@ The repository contains **no game assets**. The engine reads tracks, cars, textu
 
 <img width="1280" height="720" alt="image" src="https://github.com/user-attachments/assets/f46aebc0-85d4-422a-9b75-f2b3b9c99744" />
 
-I also work on graphics improvement, testing technologies like DLSS/DLAA, RT etc
+Beyond the original look, I'm also experimenting with optional graphics improvements such as DLSS/DLAA and ray tracing (see the [roadmap](docs/ROADMAP.md)).
 
 <img width="820" height="370" alt="moving-bias-native01" src="https://github.com/user-attachments/assets/bec7f111-4d29-4e80-be70-c2d5ed45c4f9" />
 
