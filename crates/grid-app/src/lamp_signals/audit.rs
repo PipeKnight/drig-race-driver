@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 const MAX_RECEIVERS: usize = 4096;
 const MAX_BANKS: usize = 256;
 pub(crate) fn enabled() -> bool {
-    std::env::var_os("GRID_LAMP_AUDIT").as_deref() == Some(std::ffi::OsStr::new("1"))
+    crate::dev::var_os("GRID_LAMP_AUDIT").as_deref() == Some(std::ffi::OsStr::new("1"))
 }
 #[derive(Clone)]
 struct Queued {

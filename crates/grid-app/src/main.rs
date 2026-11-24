@@ -25,6 +25,8 @@ macro_rules! log_line {
     }};
 }
 mod log_out;
+mod dev;
+mod player;
 mod object_materials;
 mod water;
 mod water_probe;
@@ -777,7 +779,7 @@ impl DentSpread {
     fn defer(&mut self, ticks: u64) -> bool {
         let enabled = *self
             .enabled
-            .get_or_insert_with(|| std::env::var("GRID_DENT_SPREAD").map_or(true, |v| v != "0"));
+            .get_or_insert_with(|| crate::dev::var("GRID_DENT_SPREAD").map_or(true, |v| v != "0"));
         let ticked = std::mem::replace(&mut self.ticks, ticks) != ticks;
         let defer = enabled && ticked && !self.deferred;
         // Reset here: a frame without opponents (or one that projects) leaves nothing waiting.
@@ -1839,27 +1841,82 @@ fn shared_source_material_scene(settings: &graphics::Settings, scene: EnhancedMa
 fn main() {
     // Queued stdout lines are written when main returns.
     let _flush = log_out::FlushOnDrop;
+    // The player command line (player.rs, docs/SETTINGS.md section 6); its
+    // output goes to DATA_DIR/drig.log when no terminal started the player
+    // build, so this comes before the first line is printed.
+    #[cfg(not(target_os = "android"))]
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(not(target_os = "android"))]
+    let start = player::start(&args);
+    #[cfg(not(target_os = "android"))]
+    player::setup_output(&args, &start);
     #[cfg(target_os = "android")]
     android::init();
     // Mobile preset: more compute threads, before Bevy creates its pools.
-    mobile::init_threads();
+    // Not for the player's text-only answers, whose output launchers read.
+    #[cfg(not(target_os = "android"))]
+    let text_only = matches!(
+        start,
+        player::Start::Help | player::Start::Version | player::Start::ListTracks
+    );
+    #[cfg(target_os = "android")]
+    let text_only = false;
+    if !text_only {
+        mobile::init_threads();
+        #[cfg(not(target_os = "android"))]
+        player::keep_full_speed();
+    }
     // Bundled data still being copied (F451): the copy screen took over.
     #[cfg(target_os = "android")]
     if !android::data_ready() {
         android::log(false, "data not ready: the copy screen opened instead");
         return;
     }
-    #[cfg(not(target_os = "android"))]
-    let args: Vec<String> = std::env::args().skip(1).collect();
     // No command line on Android: the event menu, or the race it chose.
     #[cfg(target_os = "android")]
     let args = event_menu::android_args();
     if let Err(error)=native_smoke::validate_entry_args(&args) {
         eprintln!("grid-app: {error}");crate::log_out::exit(1);
     }
+    #[cfg(not(target_os = "android"))]
+    if start != player::Start::Developer {
+        let done = |result: Result<i32, Box<dyn std::error::Error>>| -> ! {
+            match result {
+                Ok(code) => crate::log_out::exit(code),
+                Err(error) => {
+                    eprintln!("DRIG: {error}");
+                    crate::log_out::exit(1);
+                }
+            }
+        };
+        let without = |flag: &str| -> Vec<String> { args.iter().filter(|a| *a != flag).cloned().collect() };
+        match start {
+            player::Start::Help => {
+                println!("{}", player::help().trim_end());
+                if dev::ENABLED {
+                    println!("This is a developer build: --help-dev lists the developer flags.");
+                }
+                crate::log_out::exit(0);
+            }
+            player::Start::Version => {
+                println!("{}", player::version());
+                crate::log_out::exit(0);
+            }
+            player::Start::ListTracks => done(event_menu::list_routes(&without("--list-tracks")).map(|()| 0)),
+            player::Start::Career => done(career_screen::supervise(&args)),
+            _ => {
+                player::set_quick_start(&args);
+                done(if dev::var("GRID_FRONT_END").is_ok_and(|v| v == "processes") {
+                    event_menu::supervise(&args)
+                } else {
+                    front_end_host::run(&args)
+                })
+            }
+        }
+    }
     // Isolated sample probe branches before menu/settings/game-root discovery.
     #[cfg(not(target_os = "android"))]
-    if args.iter().any(|arg| arg == "--coverage-sample-probe") {
+    if dev::ENABLED && args.iter().any(|arg| arg == "--coverage-sample-probe") {
         if let Err(error) = coverage_probe_entry::run(&args) {
             eprintln!("grid-app coverage probe: {error}");
             crate::log_out::exit(1);
@@ -1871,7 +1928,7 @@ fn main() {
     // (event_menu.rs).
     #[cfg(not(target_os = "android"))]
     if args.first().is_some_and(|a| a == "--menu") {
-        let result = if std::env::var("GRID_FRONT_END").is_ok_and(|v| v == "processes") {
+        let result = if crate::dev::var("GRID_FRONT_END").is_ok_and(|v| v == "processes") {
             event_menu::supervise(&args[1..])
         } else {
             front_end_host::run(&args[1..])
@@ -1886,7 +1943,7 @@ fn main() {
     }
     // `--speech-files`: the speech lines a bundled APK carries (speech_sound.rs).
     #[cfg(not(target_os = "android"))]
-    if args.first().is_some_and(|a| a == "--speech-files") {
+    if dev::ENABLED && args.first().is_some_and(|a| a == "--speech-files") {
         if let Err(error) = speech_sound::list_files(&args[1..]) {
             eprintln!("grid-app: {error}");
             crate::log_out::exit(1);
@@ -1907,7 +1964,7 @@ fn main() {
     // `--menu-routes`: every route the event menu offers, one line each
     // (tools/route_graphics_audit.py, docs/GRAPHICS_ROUTE_AUDIT.md).
     #[cfg(not(target_os = "android"))]
-    if args.first().is_some_and(|a| a == "--menu-routes") {
+    if dev::ENABLED && args.first().is_some_and(|a| a == "--menu-routes") {
         match event_menu::list_routes(&args[1..]) {
             Ok(()) => crate::log_out::exit(0),
             Err(error) => {
@@ -2311,7 +2368,7 @@ fn model_offset(runtime: &grid_tools::source_vehicle::Runtime) -> Mat4 {
 /// Grid-fill seed of a series event: GRID_SERIES_SEED, else the clock
 /// (docs/SERIES.md "Grid fill").
 fn series_seed(profile: Option<u32>) -> u32 {
-    std::env::var("GRID_SERIES_SEED")
+    crate::dev::var("GRID_SERIES_SEED")
         .ok()
         .and_then(|v| v.parse().ok())
         .or(profile)
@@ -2514,6 +2571,10 @@ pub(crate) fn race_app(
         smoke_policy_explicit |= smoke_boundary::explicit_policy_arg(&arg);
         match arg.as_str() {
             // Already read by settings::load.
+            // Already read by settings::load (player.rs overrides).
+            "--render-height" | "--quality" => {
+                args.next();
+            }
             "--settings" | "--data-dir" => {
                 if arg == "--data-dir" { native_smoke_data_dir_explicit = true; }
                 args.next();
@@ -3243,7 +3304,7 @@ pub(crate) fn race_app(
                     _ => return Err("unknown scene".into()),
                 };
             }
-            "--help" => {
+            "--help" | "--help-dev" if dev::ENABLED => {
                 println!("--lamp-signals off|live|brake|reverse|headlights: ordinary races use source main-lamp activation. off disables exterior lamp emission. Other modes are enhanced layered test controls.");
                 println!("--lamp-lenses off|pbr|normals|combined: independent default-off authored Lacetti cover pilot; source alpha/emission unchanged.");
                 println!("--lamp-reflectors off|pbr|normals|combined: default-off authored Lacetti inner-reflector pilot; covers/matt unchanged.");
@@ -3490,7 +3551,7 @@ pub(crate) fn race_app(
             && graphics.object_coverage == object_materials::CoverageMode::Off,
         route.path() == "tracks/usa/detroit/route_8" && route.subroute() == 0,
         lod == "LOD0_", output.is_some(), graphics.benchmark_frames,
-        std::env::var_os("GRID_PERF_TEST").is_none(),
+        crate::dev::var_os("GRID_PERF_TEST").is_none(),
     )?;
     let selected_actor_request=crowd_preview::selected_request_from_cli(
         crowd_preview,crowd_actor_context.as_deref(),crowd_actor_target.as_deref(),
@@ -3520,7 +3581,7 @@ pub(crate) fn race_app(
             && !graphics.dlaa_reset_every_frame && !graphics.thin_motion_antenna
             && geometry_pixel.is_none() && !audio_check && !reflection_calibration && !render_fixed_step
             && motion_sequence.is_none() && body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
-        no_perf:std::env::var_os("GRID_PERF_TEST").is_none() && std::env::var_os("GRID_PERF_TIMING").is_none(),
+        no_perf:crate::dev::var_os("GRID_PERF_TEST").is_none() && crate::dev::var_os("GRID_PERF_TIMING").is_none(),
         no_orbit:capture_orbit_rate.is_none(), no_menu:!from_menu, frames:graphics.benchmark_frames,
     };
     foundation_front.validate(foundation_context)?;
@@ -3531,7 +3592,7 @@ pub(crate) fn race_app(
     let coverage_context = object_materials::CoverageContext {
         enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
         render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
-        lod0: lod == "LOD0_", perf: std::env::var_os("GRID_PERF_TEST").is_some(),
+        lod0: lod == "LOD0_", perf: crate::dev::var_os("GRID_PERF_TEST").is_some(),
         compositor: smoke_compositor != smoke_compositor::Mode::Off,
         frames: graphics.benchmark_frames,
     };
@@ -3549,7 +3610,7 @@ pub(crate) fn race_app(
             solo:opponents.is_none() && opponent_cars.is_none() && series.is_none() && discipline.is_none() && trial_laps.is_none() && profile.time_limit.is_none() && grid_position.is_none(),
             no_menu:!from_menu,
             no_extra_diagnostics:*settings::diagnostics()==settings::Diagnostics::default()
-                && std::env::var_os("GRID_PERF_TIMING").is_none()
+                && crate::dev::var_os("GRID_PERF_TIMING").is_none()
                 && window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none() && temporal_colour_tick.is_none()
                 && window_transition_script.is_none() && !window_sort_current && !car_transparent_sort && smoke_order==tyre_smoke::SmokeOrder::Groups && skid_order==skid_marks::OrderMode::Off
                 && texture_override_path.is_none() && surface_rgb_override.is_none() && !graphics.dlaa_reset_every_frame && !graphics.thin_motion_antenna
@@ -3579,13 +3640,13 @@ pub(crate) fn race_app(
     if skid_order != skid_marks::OrderMode::Off && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || output.is_none() || headless || collision || lod != "LOD0_"
         || !ground_effect_assets::enabled() || smoke_compositor != smoke_compositor::Mode::Off
-        || std::env::var_os("GRID_PERF_TEST").is_some())
+        || crate::dev::var_os("GRID_PERF_TEST").is_some())
     {
         return Err("--skid-order requires bounded rendered baseline LOD0 drive with ground effects, compositor off and no GRID_PERF_TEST".into());
     }
     // Isolated has already passed the unchanged G248 baseline/bounded guards.
     if skid_reflectance.is_some() && (skid_order != skid_marks::OrderMode::Isolated
-        || std::env::var_os("GRID_PERF_TIMING").is_some()) {
+        || crate::dev::var_os("GRID_PERF_TIMING").is_some()) {
         return Err("--skid-reflectance requires --skid-order isolated and its bounded rendered baseline ground-effects/noPERF/compositorOff domain; no GRID_PERF_TIMING".into());
     }
     if motion_phase_profile.is_some() && !motion_phase_map {
@@ -3624,7 +3685,7 @@ pub(crate) fn race_app(
             || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
             || texture_override_path.is_some() || surface_rgb_override.is_some()
             || input_settings.device != input::Device::Keyboard
-            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || crate::dev::var_os("GRID_PERF_TEST").is_some() || crate::dev::var_os("GRID_PERF_TIMING").is_some()
             || diagnostics != settings::Diagnostics::default()
             || (output.is_some() && drive_ticks.is_none())
         {
@@ -3672,7 +3733,7 @@ pub(crate) fn race_app(
             || texture_override_path.is_some() || surface_rgb_override.is_some()
             || (input_settings.device != input::Device::Keyboard
                 && (output.is_some() || input_settings.device != input::Device::Auto))
-            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || crate::dev::var_os("GRID_PERF_TEST").is_some() || crate::dev::var_os("GRID_PERF_TIMING").is_some()
             || diagnostics != settings::Diagnostics::default()
         { return Err("--smoke-boundary grouped-live-derby requires baseline AA1/MSAA4/sky STK Detroit8/sub0 six-lap back-grid 11-STK-AI damage keyboard driving; ordinary SkidOff/Groups and other pilots off; bounded image fixture900/30/350x120/HB500 or unforced ordinary Window only".into()); }
     }
@@ -3695,7 +3756,7 @@ pub(crate) fn race_app(
             || window_phase_target.is_some() || oit_capacity_target.is_some()
             || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
             || window_sort_current || car_transparent_sort || graphics.window_pilot != window_response::Mode::Off
-            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || crate::dev::var_os("GRID_PERF_TEST").is_some() || crate::dev::var_os("GRID_PERF_TIMING").is_some()
             || diagnostics != settings::Diagnostics::default() || !ground_effect_assets::enabled()
             || input_settings.device != input::Device::Keyboard
             || !scripted.throttle.is_finite() || !scripted.steering.is_finite()
@@ -3722,7 +3783,7 @@ pub(crate) fn race_app(
             || window_phase_target.is_some() || oit_capacity_target.is_some()
             || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
             || window_sort_current || car_transparent_sort || graphics.window_pilot != window_response::Mode::Off
-            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || crate::dev::var_os("GRID_PERF_TEST").is_some() || crate::dev::var_os("GRID_PERF_TIMING").is_some()
             || diagnostics != settings::Diagnostics::default() || !ground_effect_assets::enabled()
             || input_settings.device != input::Device::Keyboard
             || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
@@ -3732,7 +3793,7 @@ pub(crate) fn race_app(
     if smoke_order == tyre_smoke::SmokeOrder::Sprites && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
         || smoke_compositor != smoke_compositor::Mode::Off
-        || !ground_effect_assets::enabled() || std::env::var_os("GRID_PERF_TEST").is_some())
+        || !ground_effect_assets::enabled() || crate::dev::var_os("GRID_PERF_TEST").is_some())
     {
         return Err("--smoke-order sprites requires bounded rendered baseline LOD0 drive, ground effects enabled, smoke compositor off and no GRID_PERF_TEST".into());
     }
@@ -3776,7 +3837,7 @@ pub(crate) fn race_app(
     #[cfg(feature = "dlaa")]
     let opaque_conservative_requested = {
         let requested = opaque_conservative_motion::requested()?;
-        if std::env::var_os("GRID_OPAQUE_REPLAY_AUDIT").is_some()
+        if crate::dev::var_os("GRID_OPAQUE_REPLAY_AUDIT").is_some()
             && (!requested || temporal_audit_tick != Some(1652) || temporal_colour_tick != Some(1652)
                 || graphics.width != 1920 || graphics.height != 1080) {
             return Err("replay fragment audit requires candidate On plus both temporal audits1652 at native1920x1080".into());
@@ -3789,7 +3850,7 @@ pub(crate) fn race_app(
         requested
     };
     #[cfg(not(feature = "dlaa"))]
-    if std::env::var_os("GRID_OPAQUE_CONSERVATIVE_MOTION").is_some() || std::env::var_os("GRID_OPAQUE_REPLAY_AUDIT").is_some() {
+    if crate::dev::var_os("GRID_OPAQUE_CONSERVATIVE_MOTION").is_some() || crate::dev::var_os("GRID_OPAQUE_REPLAY_AUDIT").is_some() {
         return Err("shared opaque MV diagnostic requires the dlaa feature".into());
     }
     if graphics.thin_motion_antenna && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive) {
@@ -3843,7 +3904,7 @@ pub(crate) fn race_app(
             clean:native_smoke::Clean {
                 explicit_data_dir:native_smoke_data_dir_explicit, loaded_files:profile.loaded_file_count,
                 diagnostics_clean:diagnostics==settings::Diagnostics::default(),
-                no_perf:std::env::var_os("GRID_PERF_TEST").is_none() && std::env::var_os("GRID_PERF_TIMING").is_none(),
+                no_perf:crate::dev::var_os("GRID_PERF_TEST").is_none() && crate::dev::var_os("GRID_PERF_TIMING").is_none(),
             },
             capture_profile:native_smoke_capture_profile.unwrap_or_default(),
             capture:native_smoke::Capture {
@@ -3929,7 +3990,7 @@ pub(crate) fn race_app(
         graphics.saved_sun = Some(sun);
         // GRID_BASELINE_FILL: linear (default), gamma or off (owner review);
         // linear-bevy is the fill before row 125, at Bevy's 0.45 ambient response.
-        let mode = std::env::var("GRID_BASELINE_FILL").unwrap_or_else(|_| "linear".into());
+        let mode = crate::dev::var("GRID_BASELINE_FILL").unwrap_or_else(|_| "linear".into());
         graphics.baseline_fill = match mode.as_str() {
             "off" => None,
             "linear" | "gamma" => graphics::Fill::from_lighting(&environment.lighting, graphics.sun_illuminance(), mode == "gamma"),
@@ -3939,7 +4000,7 @@ pub(crate) fn race_app(
         };
         println!("baseline_fill mode={mode} fill={:?}", graphics.baseline_fill);
         // GRID_SURFACE_AO_SCALE=N overrides it for review (1: the earlier full AO).
-        graphics.surface_ao_scale = std::env::var("GRID_SURFACE_AO_SCALE")
+        graphics.surface_ao_scale = crate::dev::var("GRID_SURFACE_AO_SCALE")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
             .or_else(|| environment.lighting.scalar("sao_scale"))
@@ -3948,7 +4009,7 @@ pub(crate) fn race_app(
         println!("surface_ao_scale sao_scale={}", graphics.surface_ao_scale);
         // GRID_BASELINE_SPECULAR: source (default) or bevy, Bevy's own
         // reflectance (owner review). Same colour decoding as the fill.
-        graphics.baseline_specular = match std::env::var("GRID_BASELINE_SPECULAR").as_deref() {
+        graphics.baseline_specular = match crate::dev::var("GRID_BASELINE_SPECULAR").as_deref() {
             Ok("bevy") => None,
             Ok("source") | Err(_) => graphics::Phong::from_lighting(&environment.lighting, graphics.sun_illuminance(), mode == "gamma"),
             _ => return Err("GRID_BASELINE_SPECULAR needs source or bevy".into()),
@@ -4494,7 +4555,7 @@ pub(crate) fn race_app(
         && !from_menu
         && career_result.is_none()
         && profile.event_menu != Some(false)
-        && (drive_ticks.is_none() || std::env::var_os("GRID_MENU_AUTO").is_some());
+        && (drive_ticks.is_none() || crate::dev::var_os("GRID_MENU_AUTO").is_some());
     if eye.is_some() != target.is_some() {
         return Err("provide both --camera and --look-at".into());
     }
@@ -4524,7 +4585,7 @@ pub(crate) fn race_app(
         }
     }
     if source_lighting_units.is_some() {
-        let linear_fill = std::env::var("GRID_BASELINE_FILL").map_or(true, |v| v == "linear");
+        let linear_fill = crate::dev::var("GRID_BASELINE_FILL").map_or(true, |v| v == "linear");
         source_light_trial::validate_context(drive, reference, headless, collision, (output.is_some() && track, drive_ticks), &graphics, linear_fill)?;
     }
     #[cfg(feature = "source-projector")]
@@ -4536,7 +4597,7 @@ pub(crate) fn race_app(
     // Night routes: street lights and car beams (docs/NIGHT_LIGHTS.md). The
     // research projector pilots replace the beams, so they exclude the pass.
     // GRID_NIGHT_LIGHTS=off leaves the pass out for matched before/after renders.
-    let night_off = std::env::var("GRID_NIGHT_LIGHTS").is_ok_and(|v| v == "off");
+    let night_off = crate::dev::var("GRID_NIGHT_LIGHTS").is_ok_and(|v| v == "off");
     let night_mode = if track && !collision && !headless && !night_off && source_projector_request.is_none() && headlight_lumens.is_none() {
         grid_tools::time_of_day::Mode::for_route(&root, &route).unwrap_or(grid_tools::time_of_day::Mode::None)
     } else {
@@ -4570,7 +4631,7 @@ pub(crate) fn race_app(
             return Err("--graphics-audit requires an offscreen --render of a track scene without driving".into());
         }
         graphics_audit::materials_report(&root, &route, &car.parts, &car.bindings, &car.textures, config)?;
-        if let Some(rays) = std::env::var_os("GRID_GRAPHICS_AUDIT_RAYS") {
+        if let Some(rays) = crate::dev::var_os("GRID_GRAPHICS_AUDIT_RAYS") {
             graphics_audit::ray_report(&root, &route, &car.parts, Path::new(&rays), graphics.width, graphics.height)?;
         }
     }
@@ -4805,7 +4866,7 @@ pub(crate) fn race_app(
             || temporal_centre.is_none()
             || graphics.anti_aliasing != 3
             || graphics.dlaa_reset_every_frame
-            || std::env::var_os("GRID_OPAQUE_CONSERVATIVE_MOTION").is_some())
+            || crate::dev::var_os("GRID_OPAQUE_CONSERVATIVE_MOTION").is_some())
     {
         return Err("consecutive audit needs same raw/HDR tick, explicit ROI centre, normal-history native DLAA and no conservative replay".into());
     }
@@ -5018,7 +5079,7 @@ pub(crate) fn race_app(
         let plugins = if hosted { front_end_host::hosted(plugins, front_end_host::Gpu::Race) } else { plugins };
         // Diagnostics GRID_MENU_LOOPS (front_end_host.rs): the scripted race
         // ends at its tick limit and goes back to the menu, as headless.
-        if hosted && drive && std::env::var_os("GRID_MENU_LOOPS").is_some() {
+        if hosted && drive && crate::dev::var_os("GRID_MENU_LOOPS").is_some() {
             app.add_systems(FixedLast, headless_exit);
         }
         // GRID_AUDIO=off: silent research runs (frame_pacing.rs).
@@ -5866,7 +5927,7 @@ fn setup(
     let object_two_sided_materials = car.object_two_sided_materials.clone();
     let object_opaque_csm_materials = car.object_opaque_csm_materials.clone();
     // GRID_OBJECT_EMISSIVE=off leaves the maps out (matched before/after review).
-    let object_emissive_materials = if std::env::var("GRID_OBJECT_EMISSIVE").as_deref() == Ok("off") {
+    let object_emissive_materials = if crate::dev::var("GRID_OBJECT_EMISSIVE").as_deref() == Ok("off") {
         Default::default()
     } else {
         car.object_emissive_materials.clone()
@@ -7574,7 +7635,7 @@ fn drive_present(
         .map_or_else(pause_menu::Options::default, |m| m.values);
     // `GRID_DENT_FAST=0` projects the dents of every car one by one on this
     // thread and writes every opponent part as before (comparisons).
-    let fast = *dent_fast.get_or_insert_with(|| std::env::var("GRID_DENT_FAST").map_or(true, |v| v != "0"));
+    let fast = *dent_fast.get_or_insert_with(|| crate::dev::var("GRID_DENT_FAST").map_or(true, |v| v != "0"));
     let defer_opponent_dents = dent_spread.defer(driving.runtime.ticks);
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -8722,13 +8783,13 @@ mod driving_tests {
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
     fn body_geometry_keyboard_pause_reset_and_failure_recovery() {
-        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let table = std::fs::read(crate::dev::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
         exercise_keyboard_recovery(Some(&table), false);
     }
     #[test]
     #[ignore = "requires purchased sources and private body/deformation inputs"]
     fn deformation_keyboard_pause_reset_and_failure_recovery() {
-        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let table = std::fs::read(crate::dev::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
         exercise_keyboard_recovery(Some(&table), true);
     }
     /// F864: each field's dents projected from a part's fixed data have the bits
@@ -9289,13 +9350,13 @@ mod driving_tests {
         });
         if table.is_some() {
             let parameters =
-                std::fs::read(std::env::var_os("GRID_BODY_EVENT_PARAMETERS").unwrap()).unwrap();
+                std::fs::read(crate::dev::var_os("GRID_BODY_EVENT_PARAMETERS").unwrap()).unwrap();
             runtime.body_events =
                 Some(grid_tools::body_impact_parameters::read(&parameters).unwrap());
         }
         if deformation {
             let (limit, bulk) = grid_tools::deformation_parameters::read(
-                &std::fs::read(std::env::var_os("GRID_DEFORMATION_PARAMETERS").unwrap()).unwrap(),
+                &std::fs::read(crate::dev::var_os("GRID_DEFORMATION_PARAMETERS").unwrap()).unwrap(),
             )
             .unwrap();
             runtime
@@ -10051,7 +10112,7 @@ mod driving_tests {
                 .unwrap();
         runtime.enable_lap_timing(root).unwrap();
         // Track and prop contacts as in the owner's build, when available.
-        let geometry = std::env::var_os("GRID_CONTACT_DIRECTIONS").map(|path| {
+        let geometry = crate::dev::var_os("GRID_CONTACT_DIRECTIONS").map(|path| {
             runtime
                 .prepare_body_geometry(root, &std::fs::read(path).unwrap())
                 .unwrap()

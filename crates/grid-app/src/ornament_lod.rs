@@ -84,11 +84,11 @@ const RAMP: f32 = 1.0e6;
 const STEPS: f32 = 16.;
 
 pub fn enabled() -> bool {
-    std::env::var("GRID_ORNAMENT_LOD").map_or(true, |v| v != "0")
+    crate::dev::var("GRID_ORNAMENT_LOD").map_or(true, |v| v != "0")
 }
 
 pub fn fade_enabled() -> bool {
-    std::env::var("GRID_ORNAMENT_FADE").map_or(true, |v| v != "0")
+    crate::dev::var("GRID_ORNAMENT_FADE").map_or(true, |v| v != "0")
 }
 
 /// The range a level entity carries: fully drawn (`step` 0 of a fade-out),
@@ -432,7 +432,7 @@ pub fn metric(min: Vec3, max: Vec3, eye: Vec3, k: f32, far: f32) -> f32 {
 /// `GRID_TREE_SWITCH=d0` keeps the earlier switch at d0, for review.
 pub fn impostor_switch(d0: f32, d1: f32) -> f32 {
     static AT_D0: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if d1 <= d0 || *AT_D0.get_or_init(|| std::env::var("GRID_TREE_SWITCH").is_ok_and(|v| v == "d0")) {
+    if d1 <= d0 || *AT_D0.get_or_init(|| crate::dev::var("GRID_TREE_SWITCH").is_ok_and(|v| v == "d0")) {
         d0
     } else {
         d0 + (d1 - d0) * 5. / 6.
@@ -585,7 +585,7 @@ pub(crate) fn select(
 /// `GRID_ORNAMENT_LOD_TRACE=1`: print each on-screen level change (research).
 pub fn trace_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("GRID_ORNAMENT_LOD_TRACE").is_ok_and(|v| v == "1"))
+    *ON.get_or_init(|| crate::dev::var("GRID_ORNAMENT_LOD_TRACE").is_ok_and(|v| v == "1"))
 }
 
 /// One level change of an instance whose box centre is in the view: its

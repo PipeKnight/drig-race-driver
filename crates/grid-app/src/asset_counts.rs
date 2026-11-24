@@ -14,7 +14,7 @@ use bevy::render::{Render, RenderApp, RenderSystems};
 const REPORT_FRAMES: u32 = 600;
 
 pub fn install(app: &mut App) {
-    if std::env::var_os("GRID_ASSET_COUNTS").is_none() {
+    if crate::dev::var_os("GRID_ASSET_COUNTS").is_none() {
         return;
     }
     // The mesh report needs every kind registered, spawned or not.

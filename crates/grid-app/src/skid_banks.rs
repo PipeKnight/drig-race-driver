@@ -175,7 +175,7 @@ pub(crate) fn supports_normal_layout(device: &RenderDevice) -> bool {
 
 fn normal_atlas_requested() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var("GRID_SKID_NORMAL_ATLAS").as_deref() != Ok("off"))
+    *ENABLED.get_or_init(|| crate::dev::var("GRID_SKID_NORMAL_ATLAS").as_deref() != Ok("off"))
 }
 
 /// Optional paired linear banks. The diffuse slot index is also the normal slot index.

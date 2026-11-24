@@ -25,7 +25,7 @@ const SETTLE_FRAMES: u32 = 30;
 const REST_EVERY: u32 = 60;
 
 pub fn enabled() -> bool {
-    std::env::var("GRID_LAZY_PIECES").map_or(true, |v| v != "0")
+    crate::dev::var("GRID_LAZY_PIECES").map_or(true, |v| v != "0")
 }
 
 /// Disabled pieces by breakable.

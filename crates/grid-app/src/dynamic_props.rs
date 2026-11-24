@@ -388,7 +388,7 @@ pub(crate) fn float_check(
     mut frame: Local<u64>,
 ) {
     *frame += 1;
-    let Some(out) = std::env::var_os("GRID_FLOAT_CHECK") else {
+    let Some(out) = crate::dev::var_os("GRID_FLOAT_CHECK") else {
         return;
     };
     let Some(driving) = driving else {

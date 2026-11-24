@@ -66,7 +66,7 @@ const PLACE_AXES: f32 = 1e-4;
 const REPORT_FRAMES: u64 = 1800;
 
 pub fn enabled() -> bool {
-    std::env::var("GRID_CAR_BATCH").map_or(true, |v| v != "0")
+    crate::dev::var("GRID_CAR_BATCH").map_or(true, |v| v != "0")
 }
 
 pub fn install(app: &mut App) {
@@ -1046,7 +1046,7 @@ fn rebuild(
 /// rebuilds every batch whole, for comparisons).
 fn patch_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var("GRID_BATCH_PATCH").map_or(true, |v| v != "0"))
+    *ENABLED.get_or_init(|| crate::dev::var("GRID_BATCH_PATCH").map_or(true, |v| v != "0"))
 }
 
 /// Smallest and largest corner of `positions` (as `Aabb::enclosing`); no

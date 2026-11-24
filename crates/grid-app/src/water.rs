@@ -226,7 +226,7 @@ pub fn install(app: &mut App, root: &Path, route: &Route) -> Result<(), Box<dyn 
     }
     source.environment = Some(sky_cube(root, route)?);
     // GRID_WATER_PROBE=0 reflects the baked sky cube only (F705's look; comparisons).
-    if std::env::var_os("GRID_WATER_PROBE").is_some_and(|v| v == "0") {
+    if crate::dev::var_os("GRID_WATER_PROBE").is_some_and(|v| v == "0") {
         for d in &mut source.draws {
             d.probe = None;
         }

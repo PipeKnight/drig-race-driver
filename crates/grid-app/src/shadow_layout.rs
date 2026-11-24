@@ -90,7 +90,7 @@ impl Quality {
 }
 
 pub fn enabled() -> bool {
-    std::env::var("GRID_SHADOW_LAYOUT").map_or(true, |v| v != "bevy")
+    crate::dev::var("GRID_SHADOW_LAYOUT").map_or(true, |v| v != "bevy")
 }
 
 /// Cascade 0's bounds are a placeholder the car map replaces; they put
@@ -450,14 +450,14 @@ const LAYOUT_IMPORT: &str = "sample_shadow_map, sample_shadow_map_pcss, sample_s
 /// `GRID_SHADOW_BIAS=bevy` keeps Bevy's depth and normal bias instead of the
 /// original's per-cascade depth offsets (comparisons).
 fn filter(quality: Quality) -> Filter {
-    let bevy = std::env::var("GRID_SHADOW_FILTER").is_ok_and(|v| v == "bevy");
-    let scale = |name| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(1.0_f32);
+    let bevy = crate::dev::var("GRID_SHADOW_FILTER").is_ok_and(|v| v == "bevy");
+    let scale = |name| crate::dev::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(1.0_f32);
     let mode = match (bevy, quality) {
         (true, _) => 0,
         (false, Quality::Medium) => 2,
         (false, _) => 1,
     };
-    let bias = u32::from(!std::env::var("GRID_SHADOW_BIAS").is_ok_and(|v| v == "bevy"));
+    let bias = u32::from(!crate::dev::var("GRID_SHADOW_BIAS").is_ok_and(|v| v == "bevy"));
     (mode, scale("GRID_SHADOW_SOFT"), scale("GRID_SHADOW_CAR_SOFT"), bias)
 }
 

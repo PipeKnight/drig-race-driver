@@ -122,7 +122,7 @@ pub fn prepare(
     offsets: &[Mat4],
     suits: Vec<Option<crate::suit::Tints>>,
 ) -> Result<Option<Pending>, Box<dyn Error>> {
-    if std::env::var("GRID_EXTERIOR_DRIVERS").is_ok_and(|v| v == "0") {
+    if crate::dev::var("GRID_EXTERIOR_DRIVERS").is_ok_and(|v| v == "0") {
         return Ok(None);
     }
     let model = Model::read(root)?;

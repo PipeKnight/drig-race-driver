@@ -652,7 +652,7 @@ mod tests {
     #[ignore = "reads the Bevy 0.19.1 shader sources (GRID_BEVY_SHADER_DIR or the cargo registry)"]
     fn installed_bevy_shaders_take_the_patch_once() {
         // GRID_BEVY_SHADER_DIR, else bevy_pbr 0.19.1 as cargo unpacked it.
-        let dir = std::env::var_os("GRID_BEVY_SHADER_DIR")
+        let dir = crate::dev::var_os("GRID_BEVY_SHADER_DIR")
             .map(std::path::PathBuf::from)
             .or_else(|| {
                 let home = std::env::var_os("CARGO_HOME").map(std::path::PathBuf::from).or_else(|| {

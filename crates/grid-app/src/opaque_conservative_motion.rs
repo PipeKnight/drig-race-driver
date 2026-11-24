@@ -133,7 +133,7 @@ fn has(defs: &[ShaderDefVal], name: &str) -> bool {
 
 /// Diagnostic admission only. Root integration must also reject the old name-specific thin pilot.
 pub fn requested() -> Result<bool, String> {
-    match std::env::var("GRID_OPAQUE_CONSERVATIVE_MOTION") {
+    match crate::dev::var("GRID_OPAQUE_CONSERVATIVE_MOTION") {
         Err(std::env::VarError::NotPresent) => Ok(false),
         Ok(v) if v == "1" => Ok(true),
         _ => Err("GRID_OPAQUE_CONSERVATIVE_MOTION must be absent or1".into()),

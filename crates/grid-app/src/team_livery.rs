@@ -316,7 +316,7 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        let png = std::env::var_os("GRID_TEAM_LIVERY_PNG").map(std::path::PathBuf::from);
+        let png = crate::dev::var_os("GRID_TEAM_LIVERY_PNG").map(std::path::PathBuf::from);
         if let Some(dir) = &png {
             std::fs::create_dir_all(dir).unwrap();
         }

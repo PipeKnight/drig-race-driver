@@ -85,7 +85,7 @@ impl Level {
 
     /// `GRID_CAR_REFLECTIONS`, when set and valid.
     pub fn from_env() -> Option<Self> {
-        Self::parse(&std::env::var("GRID_CAR_REFLECTIONS").ok()?)
+        Self::parse(&crate::dev::var("GRID_CAR_REFLECTIONS").ok()?)
     }
 
     pub fn size(self) -> u32 {
@@ -225,7 +225,7 @@ pub fn install(
         _ => {}
     }
     let size = level.size();
-    let per_frame = std::env::var("GRID_CAR_REFLECTIONS_FACES")
+    let per_frame = crate::dev::var("GRID_CAR_REFLECTIONS_FACES")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(6usize)
@@ -296,7 +296,7 @@ pub fn install(
                 .before(bevy::transform::TransformSystems::Propagate),
         ),
     );
-    if let Some(after) = std::env::var("GRID_CAR_REFLECTIONS_DUMP")
+    if let Some(after) = crate::dev::var("GRID_CAR_REFLECTIONS_DUMP")
         .ok()
         .and_then(|v| v.parse().ok())
     {

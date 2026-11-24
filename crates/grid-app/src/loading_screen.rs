@@ -50,7 +50,7 @@ pub fn app(args: &[String]) -> Result<App, Box<dyn std::error::Error>> {
         .add_systems(Update, animate);
     crate::frame_pacing::install_window_shots_as(&mut app, "loading");
     // `GRID_LOADING_WORLD=off`: the plain fallback, for A/B shots and its smoke.
-    let world = if std::env::var_os("GRID_LOADING_WORLD").is_some_and(|v| v == "off") {
+    let world = if crate::dev::var_os("GRID_LOADING_WORLD").is_some_and(|v| v == "off") {
         Err("GRID_LOADING_WORLD=off".to_owned())
     } else {
         crate::fe_world::install(&mut app, &root, &crate::fe_world::LOADING)
@@ -65,7 +65,7 @@ pub fn app(args: &[String]) -> Result<App, Box<dyn std::error::Error>> {
     // The stat panel of the player's profile facts (loading_stats.rs), in the
     // world; `GRID_LOADING_STATS=off` leaves it out for A/B shots.
     if let Some(camera) = camera
-        && !std::env::var_os("GRID_LOADING_STATS").is_some_and(|v| v == "off")
+        && !crate::dev::var_os("GRID_LOADING_STATS").is_some_and(|v| v == "off")
         && let Err(e) = crate::loading_stats::install(&mut app, &root, camera)
     {
         eprintln!("loading screen: no stat panel ({e})");

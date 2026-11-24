@@ -106,7 +106,7 @@ pub(crate) fn install(
     tick: u64,
     directory: &Path,
 ) -> std::io::Result<Option<Signals>> {
-    let requested = match std::env::var("GRID_OPAQUE_REPLAY_AUDIT") {
+    let requested = match crate::dev::var("GRID_OPAQUE_REPLAY_AUDIT") {
         Err(std::env::VarError::NotPresent) => return Ok(None),
         Ok(v) => v.parse::<u64>().ok(),
         _ => None,

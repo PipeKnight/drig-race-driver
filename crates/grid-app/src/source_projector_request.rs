@@ -82,9 +82,9 @@ pub(crate) fn requested(
     native: Option<f32>,
 ) -> Result<Option<Request>, String> {
     let fields = Fields {
-        units: std::env::var_os("GRID_SOURCE_PROJECTOR_UNITS"),
-        range: std::env::var_os("GRID_SOURCE_PROJECTOR_RANGE"),
-        snapshot: std::env::var_os("GRID_SOURCE_PROJECTOR_COLOUR_SNAPSHOT"),
+        units: crate::dev::var_os("GRID_SOURCE_PROJECTOR_UNITS"),
+        range: crate::dev::var_os("GRID_SOURCE_PROJECTOR_RANGE"),
+        snapshot: crate::dev::var_os("GRID_SOURCE_PROJECTOR_COLOUR_SNAPSHOT"),
     };
     let admitted = admit(
         &fields,

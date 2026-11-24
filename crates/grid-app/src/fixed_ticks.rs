@@ -70,7 +70,7 @@ impl Plugin for FixedTicksPlugin {
     fn cleanup(&self, app: &mut App) {
         let wrapped = wrap(app.world_mut(), self.label, self.revision);
         println!("{}", wrapped.start_line(self.revision));
-        if std::env::var("GRID_FIXED_TICK_NAMES").is_ok_and(|v| v == "1") {
+        if crate::dev::var("GRID_FIXED_TICK_NAMES").is_ok_and(|v| v == "1") {
             for line in wrapped.name_lines(self.revision, names_available()) {
                 println!("{line}");
             }

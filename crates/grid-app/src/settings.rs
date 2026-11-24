@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-pub const HELP: &str = "--settings FILE (repeatable): settings file, applied after DATA_DIR/settings.ini; command-line flags override it (docs/SETTINGS.md). --data-dir DIR: records, renders and the default settings file (default: local/ when the current folder has one, else the platform folder such as %APPDATA%\\GRID Reassembly). --game-root is optional: without it the Steam libraries are searched.";
+pub const HELP: &str = "--settings FILE (repeatable): settings file, applied after DATA_DIR/settings.ini; command-line flags override it (docs/SETTINGS.md). --data-dir DIR: records, renders and the default settings file (default: local/ when the current folder has one, else DRIG-data/ next to the executable, or the per-user folder such as %APPDATA%\\GRID Reassembly when that folder is not writable). --game-root is optional: without it the Steam libraries are searched.";
 
 /// Where a private parameter table comes from.
 #[derive(Clone, Debug, PartialEq)]
@@ -169,8 +169,8 @@ impl Diagnostics {
     /// The legacy `GRID_*` variables, still honoured on desktop as the base
     /// that the settings file overrides.
     pub fn from_env() -> Self {
-        let text = |name| std::env::var(name).ok();
-        let set = |name| std::env::var_os(name).is_some();
+        let text = |name| crate::dev::var(name).ok();
+        let set = |name| crate::dev::var_os(name).is_some();
         Self {
             free_look: text("GRID_FREE_LOOK"),
             effects_camera: text("GRID_EFFECTS_CAMERA"),
@@ -274,13 +274,89 @@ pub fn data_dir() -> &'static Path {
     DATA_DIR.get_or_init(default_data_dir)
 }
 
-/// The owner's checkout keeps its ignored `local/` (the launchers start in the
-/// repository root); elsewhere the platform's per-user application folder.
+/// The portable data folder's name, next to the executable (row 129).
+pub const PORTABLE_DIR: &str = "DRIG-data";
+
+/// The data dir without `--data-dir` (row 129, docs/SETTINGS.md "Data
+/// folder"), decided once per process:
+/// 1. `local/` when the current folder has one (the owner's checkout: the
+///    launchers start in the repository root);
+/// 2. Android: the app's own storage;
+/// 3. portable: [`PORTABLE_DIR`] next to the executable (macOS: next to the
+///    `.app` bundle; Linux AppImage: next to the `.AppImage` file), when that
+///    folder is writable;
+/// 4. otherwise the per-user folder (`%APPDATA%\GRID Reassembly`,
+///    `~/Library/Application Support/GRID Reassembly`,
+///    `$XDG_DATA_HOME/grid-reassembly`), with a `data_dir` log line saying why.
 pub fn default_data_dir() -> PathBuf {
+    static DEFAULT: OnceLock<PathBuf> = OnceLock::new();
+    DEFAULT.get_or_init(choose_data_dir).clone()
+}
+
+fn choose_data_dir() -> PathBuf {
     if Path::new("local").is_dir() {
         return "local".into();
     }
-    platform_data_dir().unwrap_or_else(|| "local".into())
+    if cfg!(target_os = "android") {
+        return platform_data_dir().unwrap_or_else(|| "local".into());
+    }
+    let anchor = std::env::current_exe().ok().and_then(|exe| {
+        let appimage = std::env::var_os("APPIMAGE").filter(|_| cfg!(target_os = "linux"));
+        portable_anchor(&exe, appimage.as_deref().map(Path::new))
+    });
+    let fallback = || platform_data_dir().unwrap_or_else(|| "local".into());
+    let Some(anchor) = anchor else {
+        let dir = fallback();
+        println!("data_dir mode=per-user reason=no-executable-path dir={}", dir.display());
+        return dir;
+    };
+    let portable = anchor.join(PORTABLE_DIR);
+    match writable(&anchor, &portable) {
+        Ok(()) => portable,
+        Err(error) => {
+            let dir = fallback();
+            println!(
+                "data_dir mode=per-user reason=not-writable portable={} error=\"{error}\" dir={}",
+                portable.display(),
+                dir.display()
+            );
+            dir
+        }
+    }
+}
+
+/// The folder the portable data folder goes in: the executable's folder;
+/// on macOS the folder holding `NAME.app` when the executable is
+/// `NAME.app/Contents/MacOS/EXE`; with a Linux AppImage (`$APPIMAGE`) the
+/// folder of the `.AppImage` file, since the executable runs from a
+/// read-only mount.
+pub fn portable_anchor(exe: &Path, appimage: Option<&Path>) -> Option<PathBuf> {
+    if let Some(image) = appimage.filter(|p| p.is_absolute()) {
+        return image.parent().map(Path::to_path_buf);
+    }
+    let dir = exe.parent()?;
+    let bundle = dir
+        .parent()
+        .filter(|contents| {
+            dir.file_name().is_some_and(|n| n == "MacOS")
+                && contents.file_name().is_some_and(|n| n == "Contents")
+        })
+        .and_then(Path::parent)
+        .filter(|app| app.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")));
+    match bundle {
+        Some(app) => app.parent().map(Path::to_path_buf),
+        None => Some(dir.to_path_buf()),
+    }
+}
+
+/// Whether the portable folder can be used: it exists and takes a file, or
+/// it does not exist yet and its parent takes a file (the probe is removed;
+/// the folder itself is made by the first writer).
+fn writable(anchor: &Path, portable: &Path) -> std::io::Result<()> {
+    let probe_dir = if portable.is_dir() { portable } else { anchor };
+    let probe = probe_dir.join(format!(".drig-write-test-{}", std::process::id()));
+    std::fs::write(&probe, b"")?;
+    std::fs::remove_file(&probe)
 }
 
 fn platform_data_dir() -> Option<PathBuf> {
@@ -422,6 +498,13 @@ pub struct Settings {
     pub frame_latency: Option<std::num::NonZero<u32>>,
     /// `[video] shadows`: off, low, medium, high or ultra (shadow_layout.rs).
     pub shadows: Option<crate::shadow_layout::Quality>,
+    /// `[video] window`: windowed or (borderless) fullscreen; the front end's
+    /// window (`--fullscreen`, `--windowed`; docs/SETTINGS.md section 6).
+    pub window: Option<WindowMode>,
+    /// `[video] resolution = WxH`: the front end's window size (`--resolution`).
+    pub window_resolution: Option<(u32, u32)>,
+    /// `[diagnostics]` keys the player build ignored (crate::dev).
+    pub ignored_diagnostics: usize,
     /// Optional general main-view display preferences; absent preserves current preset.
     pub tone_map: Option<String>,
     pub post_saturation: Option<f32>,
@@ -745,6 +828,19 @@ impl Settings {
                 ("video", "shadows") => {
                     self.shadows = Some(crate::shadow_layout::Quality::parse(value).map_err(at)?)
                 }
+                ("video", "window") => {
+                    self.window = Some(match value {
+                        "windowed" => WindowMode::Windowed,
+                        "fullscreen" => WindowMode::Fullscreen,
+                        _ => return Err(at("`window` is windowed or fullscreen".into())),
+                    })
+                }
+                ("video", "resolution") => {
+                    self.window_resolution = Some(
+                        parse_size(value)
+                            .ok_or_else(|| at("`resolution` is WIDTHxHEIGHT, e.g. 1920x1080".into()))?,
+                    )
+                }
                 ("video", "render_height") => {
                     self.render_height = Some(crate::render_scale::RenderHeight::parse(value).map_err(at)?)
                 }
@@ -788,7 +884,9 @@ impl Settings {
                     self.event.retain(|(k, _)| *k != key);
                     self.event.push((key.to_string(), value.to_string()));
                 }
-                ("diagnostics", key) => self.diagnostics.set(key, value).map_err(at)?,
+                ("diagnostics", key) if crate::dev::ENABLED => self.diagnostics.set(key, value).map_err(at)?,
+                // The player build runs the default path (row 132).
+                ("diagnostics", _) => self.ignored_diagnostics += 1,
                 (section, key) => {
                     return Err(at(format!("unknown setting `{key}` in [{section}]")));
                 }
@@ -1183,6 +1281,32 @@ fn profile_files(args: &[String], dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// The front end's window mode (`[video] window`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowMode {
+    Windowed,
+    /// Borderless full screen on the current display.
+    Fullscreen,
+}
+
+/// `WIDTHxHEIGHT` within 320x200 ..= 16384x16384.
+pub fn parse_size(value: &str) -> Option<(u32, u32)> {
+    let (w, h) = value.trim().split_once(['x', 'X'])?;
+    let (w, h) = (w.trim().parse::<u32>().ok()?, h.trim().parse::<u32>().ok()?);
+    ((320..=16384).contains(&w) && (200..=16384).contains(&h)).then_some((w, h))
+}
+
+/// The front end window's preferences: `settings.ini` in `dir` and the player
+/// flags, without the start-up side effects of [`load`].
+pub fn window_preferences(args: &[String], dir: &Path) -> (Option<WindowMode>, Option<(u32, u32)>) {
+    let mut settings = Settings::default();
+    if let Ok(text) = std::fs::read_to_string(dir.join("settings.ini")) {
+        let _ = settings.apply(text.trim_start_matches('\u{feff}'), dir);
+    }
+    let _ = settings.apply(&crate::player::overrides(args), dir);
+    (settings.window, settings.window_resolution)
+}
+
 /// Reads the data dir and selected settings files, then returns merged settings.
 pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
     let value = |flag: &str| -> Vec<String> {
@@ -1216,6 +1340,18 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
             .apply(std::fs::read_to_string(file)?.trim_start_matches('\u{feff}'), &dir)
             .map_err(|e| format!("settings file {}: {e}", file.display()))?;
         println!("settings_file path={}", file.display());
+    }
+    // The player flags (`--fullscreen`, `--resolution`, `--render-height`,
+    // `--quality`) override the files for this run (player.rs).
+    let overrides = crate::player::overrides(args);
+    if !overrides.is_empty() {
+        settings
+            .apply(&overrides, &dir)
+            .map_err(|e| format!("command line: {e}"))?;
+        println!("settings_override {}", overrides.lines().skip(1).collect::<Vec<_>>().join(", "));
+    }
+    if settings.ignored_diagnostics > 0 {
+        println!("settings_diagnostics ignored={} build=player", settings.ignored_diagnostics);
     }
     settings.loaded_file_count = files.len();
     println!("data_dir path={}", dir.display());
@@ -1296,6 +1432,44 @@ impl GridOption {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_anchor_is_the_executable_folder() {
+        let exe = Path::new("/games/DRIG/DRIG.exe");
+        assert_eq!(portable_anchor(exe, None), Some(PathBuf::from("/games/DRIG")));
+    }
+
+    #[test]
+    fn portable_anchor_skips_the_macos_bundle() {
+        let exe = Path::new("/Users/p/Games/DRIG.app/Contents/MacOS/drig");
+        assert_eq!(portable_anchor(exe, None), Some(PathBuf::from("/Users/p/Games")));
+        // Not a bundle: a folder merely named MacOS.
+        let exe = Path::new("/opt/Contents/MacOS/drig");
+        assert_eq!(portable_anchor(exe, None), Some(PathBuf::from("/opt/Contents/MacOS")));
+    }
+
+    #[test]
+    fn portable_anchor_uses_the_appimage_file() {
+        let exe = Path::new("/tmp/.mount_DRIGx/usr/bin/grid-app");
+        let image = std::env::temp_dir().join("Apps").join("DRIG-x86_64.AppImage");
+        assert_eq!(portable_anchor(exe, Some(&image)), Some(std::env::temp_dir().join("Apps")));
+        // A relative $APPIMAGE is not trusted.
+        assert_eq!(
+            portable_anchor(exe, Some(Path::new("DRIG.AppImage"))),
+            Some(PathBuf::from("/tmp/.mount_DRIGx/usr/bin"))
+        );
+    }
+
+    #[test]
+    fn writable_probe_leaves_no_file() {
+        let anchor = std::env::temp_dir().join(format!("drig-writable-{}", std::process::id()));
+        std::fs::create_dir_all(&anchor).unwrap();
+        let portable = anchor.join(PORTABLE_DIR);
+        writable(&anchor, &portable).unwrap();
+        assert!(!portable.exists(), "the probe must not create the data folder");
+        assert_eq!(std::fs::read_dir(&anchor).unwrap().count(), 0);
+        std::fs::remove_dir_all(&anchor).unwrap();
+    }
 
     const RACE: &str = r#"
 # A race profile

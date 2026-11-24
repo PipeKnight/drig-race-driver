@@ -46,7 +46,7 @@ struct Queued {
 }
 
 pub fn install(app: &mut App) {
-    if std::env::var("GRID_BLIT_PREWARM").is_ok_and(|v| v == "0") {
+    if crate::dev::var("GRID_BLIT_PREWARM").is_ok_and(|v| v == "0") {
         return; // comparison runs
     }
     if let Some(render) = app.get_sub_app_mut(RenderApp) {

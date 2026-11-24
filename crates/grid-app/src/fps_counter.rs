@@ -288,7 +288,7 @@ pub fn install(app: &mut App, shown: bool) {
     // Diagnostic frame cap (docs/AUDIO_RESEARCH.md 8): GRID_FRAME_CAP_HZ=20
     // sleeps at the end of each frame so a slow device's frame rate can be
     // reproduced on the desktop. Off by default.
-    if let Some(hz) = std::env::var("GRID_FRAME_CAP_HZ")
+    if let Some(hz) = crate::dev::var("GRID_FRAME_CAP_HZ")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|hz| (1. ..=1000.).contains(hz))

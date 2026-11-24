@@ -22,6 +22,11 @@ name = "grid_android"
 crate-type = ["cdylib"]
 
 [features]
+# Developer tooling (backlog row 132, docs/SETTINGS.md section 6): the GRID_*
+# diagnostic switches, [diagnostics] settings, `--help-dev` and the probe entry
+# points. On by default; the player release builds with --no-default-features.
+default = ["dev-tools"]
+dev-tools = []
 # Optional Windows/Linux Vulkan/RTX SDK path; ordinary and phone builds stay independent.
 dlaa = ["bevy/dlss"]
 # Optional material experiment; keep additional sampler bindings out of phone/default builds.
@@ -37,7 +42,8 @@ profile = ["bevy/trace", "bevy/debug"]
 
 [[bin]]
 name = "grid-app"
-path = "src/main.rs"
+# desktop_main.rs: the player build's Windows GUI subsystem, then main.rs.
+path = "src/desktop_main.rs"
 
 # Page faults per fixed tick (fixed_ticks.rs) and the Android calls.
 [target.'cfg(unix)'.dependencies]

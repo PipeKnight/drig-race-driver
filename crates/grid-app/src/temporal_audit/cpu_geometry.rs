@@ -65,7 +65,7 @@ fn pixels(value: &str) -> Result<Vec<UVec2>, String> {
     Ok(result)
 }
 pub(super) fn requested() -> Result<Option<Vec<UVec2>>, String> {
-    match std::env::var("GRID_TEMPORAL_CPU_GEOMETRY_PIXELS") {
+    match crate::dev::var("GRID_TEMPORAL_CPU_GEOMETRY_PIXELS") {
         Err(std::env::VarError::NotPresent) => Ok(None),
         Err(e) => Err(e.to_string()),
         Ok(value) => pixels(&value).map(Some),

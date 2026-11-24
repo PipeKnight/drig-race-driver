@@ -68,7 +68,7 @@ impl TougeEvent {
             penalties: Default::default(),
             times: [[None; 2]; 2],
             pill: None,
-            smoke_contact: std::env::var("GRID_SMOKE_CONTACT").ok().and_then(|v| v.parse().ok()),
+            smoke_contact: crate::dev::var("GRID_SMOKE_CONTACT").ok().and_then(|v| v.parse().ok()),
             length,
             waiting: 0.,
             last_tick: 0,

@@ -189,7 +189,7 @@ fn owner_label(world: &World, entity: Entity) -> String {
 }
 
 pub fn install(app: &mut App) {
-    if std::env::var("GRID_MESH_UPLOADS").as_deref() != Ok("1") {
+    if crate::dev::var("GRID_MESH_UPLOADS").as_deref() != Ok("1") {
         return;
     }
     crate::mesh_stream::tally_per_mesh();

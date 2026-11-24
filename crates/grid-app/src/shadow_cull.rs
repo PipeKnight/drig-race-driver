@@ -33,7 +33,7 @@ use bevy::prelude::*;
 const MARGIN_TEXELS: f32 = 10.;
 
 pub fn enabled() -> bool {
-    std::env::var("GRID_SHADOW_CULL").map_or(true, |v| v != "0")
+    crate::dev::var("GRID_SHADOW_CULL").map_or(true, |v| v != "0")
 }
 
 pub fn install(app: &mut App) {
@@ -43,7 +43,7 @@ pub fn install(app: &mut App) {
             cull.after(SimulationLightSystems::CheckLightVisibility),
         );
     }
-    if std::env::var("GRID_SHADOW_TRACE").is_ok_and(|v| v == "1") {
+    if crate::dev::var("GRID_SHADOW_TRACE").is_ok_and(|v| v == "1") {
         app.add_systems(
             PostUpdate,
             trace_dropouts

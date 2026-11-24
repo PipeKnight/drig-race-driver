@@ -19,7 +19,7 @@ use bevy::light::{ClusteredDecal, LightProbe, SimulationLightSystems};
 use bevy::prelude::*;
 
 pub fn install(app: &mut App, light_probes: bool) {
-    if std::env::var("GRID_LIGHT_CLUSTERS").is_ok_and(|v| v == "bevy") {
+    if crate::dev::var("GRID_LIGHT_CLUSTERS").is_ok_and(|v| v == "bevy") {
         return;
     }
     if !light_probes {

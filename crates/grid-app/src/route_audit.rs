@@ -60,7 +60,7 @@ impl Audit {
     /// `length`: the route's progress_track.xml length in metres (None or
     /// zero: no progress line, the time stand-in).
     pub fn from_env(length: Option<f32>) -> Result<Option<Self>, Box<dyn std::error::Error>> {
-        let Some(directory) = std::env::var_os("GRID_ROUTE_AUDIT").map(PathBuf::from) else {
+        let Some(directory) = crate::dev::var_os("GRID_ROUTE_AUDIT").map(PathBuf::from) else {
             return Ok(None);
         };
         std::fs::create_dir_all(&directory)?;

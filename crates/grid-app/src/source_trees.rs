@@ -851,7 +851,7 @@ fn atlas_view(world: Mat4, eye: Vec3) -> (u32, f32) {
 }
 fn blend_views() -> bool {
     static BLEND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *BLEND.get_or_init(|| std::env::var("GRID_CARD_BLEND").map_or(true, |v| v != "0"))
+    *BLEND.get_or_init(|| crate::dev::var("GRID_CARD_BLEND").map_or(true, |v| v != "0"))
 }
 /// The sun-facing shadow twin of a facing placement (row 122). The drawn mesh
 /// turns to the main camera every frame; cast from that, a tree's shadow
@@ -1089,7 +1089,7 @@ struct FacingCensusRun {
 struct FacingCensus(Option<FacingCensusRun>);
 impl FacingCensus {
     fn from_env() -> Self {
-        let Ok(value) = std::env::var("GRID_FACING_CENSUS") else {
+        let Ok(value) = crate::dev::var("GRID_FACING_CENSUS") else {
             return Self::default();
         };
         let Some((keys, budget)) = facing_census_config(&value) else {

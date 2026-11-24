@@ -56,7 +56,7 @@ const TOP_WRAPPERS: usize = 30;
 pub fn window_seconds() -> f32 {
     static SECONDS: OnceLock<f32> = OnceLock::new();
     *SECONDS.get_or_init(|| {
-        std::env::var("GRID_PROFILE_SECONDS")
+        crate::dev::var("GRID_PROFILE_SECONDS")
             .ok()
             .and_then(|v| v.parse().ok())
             .filter(|&s: &f32| s >= 1.)
@@ -69,7 +69,7 @@ pub fn window_seconds() -> f32 {
 fn top_work() -> usize {
     static TOP: OnceLock<usize> = OnceLock::new();
     *TOP.get_or_init(|| {
-        std::env::var("GRID_PROFILE_TOP")
+        crate::dev::var("GRID_PROFILE_TOP")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(TOP_WORK)
@@ -80,7 +80,7 @@ fn top_work() -> usize {
 /// `GRID_PROFILE_SLOW_MS`, default 20.
 fn slow_ms() -> f64 {
     static MS: OnceLock<f64> = OnceLock::new();
-    *MS.get_or_init(|| std::env::var("GRID_PROFILE_SLOW_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(20.))
+    *MS.get_or_init(|| crate::dev::var("GRID_PROFILE_SLOW_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(20.))
 }
 
 /// Spans listed per slow frame.

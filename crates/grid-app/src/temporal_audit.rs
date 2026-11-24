@@ -835,7 +835,7 @@ impl PairCapture {
     }
 }
 pub(crate) fn pair_requested() -> Result<bool, String> {
-    match std::env::var("GRID_TEMPORAL_CONSECUTIVE") {
+    match crate::dev::var("GRID_TEMPORAL_CONSECUTIVE") {
         Err(std::env::VarError::NotPresent) => Ok(false),
         Ok(v) if v == "0" => Ok(false),
         Ok(v) if v == "1" => Ok(true),

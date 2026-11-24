@@ -108,7 +108,7 @@ impl Mirror {
 
 pub fn install(app: &mut App) {
     let mut mirror = Mirror(Some((MIRROR_SIZE, 1)));
-    if let Ok(value) = std::env::var("GRID_MIRROR") {
+    if let Ok(value) = crate::dev::var("GRID_MIRROR") {
         match Mirror::parse(&value) {
             Some(m) => mirror = m,
             None => warn!("GRID_MIRROR: expected off or WIDTHxHEIGHT[/FRAMES], got {value:?}"),
@@ -267,7 +267,7 @@ fn smooth_wheel(driving: Option<Res<crate::Driving>>, mut wheel: ResMut<Wheel>) 
         }
         _ => wheel.s = target,
     }
-    if wheel.last != Some(now) && std::env::var_os("GRID_TRACE_WHEEL").is_some() {
+    if wheel.last != Some(now) && crate::dev::var_os("GRID_TRACE_WHEEL").is_some() {
         println!("cockpit_wheel tick={} applied={target:.4} shown={:.4}", now.1, wheel.s);
     }
     wheel.last = Some(now);

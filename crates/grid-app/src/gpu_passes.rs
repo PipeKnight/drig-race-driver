@@ -60,7 +60,7 @@ const FIELDS: [&str; 5] = [
 
 /// On in the profile build, or with `GRID_GPU_PASSES=1`.
 fn profiling_enabled() -> bool {
-    cfg!(feature = "profile") || std::env::var("GRID_GPU_PASSES").is_ok_and(|v| v == "1")
+    cfg!(feature = "profile") || crate::dev::var("GRID_GPU_PASSES").is_ok_and(|v| v == "1")
 }
 
 pub fn enabled() -> bool {
@@ -72,7 +72,7 @@ pub fn enabled() -> bool {
 fn window_seconds() -> f32 {
     static SECONDS: OnceLock<f32> = OnceLock::new();
     *SECONDS.get_or_init(|| {
-        std::env::var("GRID_PROFILE_SECONDS")
+        crate::dev::var("GRID_PROFILE_SECONDS")
             .ok()
             .and_then(|v| v.parse().ok())
             .filter(|&s: &f32| s >= 1.)
@@ -482,7 +482,7 @@ mod submissions {
     const MAX_MEMBERSHIPS: usize = 131_072;
     const KINDS: [&str; 4] = ["raw", "standard", "other", "unknown"];
     pub(super) fn budget() -> Option<u32> {
-        std::env::var("GRID_OBJECT_SUBMISSIONS")
+        crate::dev::var("GRID_OBJECT_SUBMISSIONS")
             .ok()?
             .parse::<u32>()
             .ok()

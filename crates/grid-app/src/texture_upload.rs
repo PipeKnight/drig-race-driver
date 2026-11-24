@@ -65,7 +65,7 @@ fn choose(bc: bool, etc2: bool, forced: Option<&str>) -> (u8, &'static str) {
 /// GPU without descriptor indexing.
 pub(crate) fn render_creation() -> bevy::render::settings::RenderCreation {
     let forced = crate::settings::diagnostics().texture_fallback.is_some();
-    let no_bindless = std::env::var("GRID_NO_BINDLESS").is_ok_and(|v| v == "1");
+    let no_bindless = crate::dev::var("GRID_NO_BINDLESS").is_ok_and(|v| v == "1");
     let mut disabled = WgpuFeatures::empty();
     disabled.set(WgpuFeatures::TEXTURE_COMPRESSION_BC, forced);
     disabled.set(
@@ -101,7 +101,7 @@ fn drop_unreachable_dx12(settings: &mut bevy::render::settings::WgpuSettings) {
     let Some(backends) = settings.backends else {
         return;
     };
-    let env_set = |name| std::env::var_os(name).is_some();
+    let env_set = |name| crate::dev::var_os(name).is_some();
     if cfg!(debug_assertions)
         || !backends.contains(Backends::DX12)
         || env_set("WGPU_BACKEND")

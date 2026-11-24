@@ -114,7 +114,7 @@ pub(crate) fn install(
     settings: &graphics::Settings,
     source_direction: bool,
 ) {
-    let linear = std::env::var("GRID_BASELINE_FILL").map_or(true, |m| m == "linear");
+    let linear = crate::dev::var("GRID_BASELINE_FILL").map_or(true, |m| m == "linear");
     let Some(timeline) = timeline else { return };
     if (!settings.enhanced() && (settings.baseline_fill.is_none() || !linear))
         || app.world().contains_resource::<source_light_trial::Trial>()

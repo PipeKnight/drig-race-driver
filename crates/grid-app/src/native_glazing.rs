@@ -59,7 +59,7 @@ pub(super) fn install(
     settings: &crate::graphics::Settings,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let native_requested = settings.anti_aliasing == 3 && settings.window_pilot == Mode::Off;
-    let zero = match std::env::var("GRID_DLAA_GLASS_FILTER").as_deref() {
+    let zero = match crate::dev::var("GRID_DLAA_GLASS_FILTER").as_deref() {
         Ok("stock") => return Ok(()),
         Err(std::env::VarError::NotPresent) if native_requested => true,
         Err(std::env::VarError::NotPresent) => return Ok(()),
@@ -86,7 +86,7 @@ pub(super) fn install(
     app.get_sub_app_mut(RenderApp)
         .ok_or("glass filter requires a render app")?
         .insert_resource(Staged {
-            trace: std::env::var("GRID_PIPELINE_TRACE").as_deref() == Ok("1"),
+            trace: crate::dev::var("GRID_PIPELINE_TRACE").as_deref() == Ok("1"),
             ..default()
         })
         .add_systems(

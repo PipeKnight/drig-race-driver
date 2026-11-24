@@ -162,7 +162,7 @@ pub fn install(app: &mut App) {
     let mut test = PerfTest::default();
     // Desktop diagnostics: GRID_PERF_TEST=auto, or the parts to turn off,
     // e.g. GRID_PERF_TEST=shadows,foliage (names as in the label).
-    if let Ok(value) = std::env::var("GRID_PERF_TEST") {
+    if let Ok(value) = crate::dev::var("GRID_PERF_TEST") {
         for part in value.split(',').map(str::trim) {
             let s = &mut test.switches;
             match part {

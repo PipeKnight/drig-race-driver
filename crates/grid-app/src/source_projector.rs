@@ -619,7 +619,7 @@ mod tests {
     #[ignore = "requires explicit installed Bevy primary shader directory; no native/GPU work"]
     fn pinned_primary_pair_anchors_preserve_native_code_and_split_lobes() {
         let dir = std::path::PathBuf::from(
-            std::env::var_os("GRID_BEVY_SHADER_DIR").expect("set primary shader path"),
+            crate::dev::var_os("GRID_BEVY_SHADER_DIR").expect("set primary shader path"),
         );
         let l = std::fs::read_to_string(dir.join("pbr_lighting.wgsl")).unwrap();
         let f = std::fs::read_to_string(dir.join("pbr_functions.wgsl")).unwrap();
@@ -709,7 +709,7 @@ mod actual_shader_asset_ecs_tests {
     }
     fn primary(name: &str) -> String {
         let dir = std::path::PathBuf::from(
-            std::env::var_os("GRID_BEVY_SHADER_DIR").expect("GRID_BEVY_SHADER_DIR required"),
+            crate::dev::var_os("GRID_BEVY_SHADER_DIR").expect("GRID_BEVY_SHADER_DIR required"),
         );
         std::fs::read_to_string(dir.join(name)).unwrap()
     }

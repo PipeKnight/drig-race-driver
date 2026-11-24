@@ -122,7 +122,7 @@ pub fn install(app: &mut App, origins: Vec<Vec3>) -> Vec<Handle<Image>> {
         copies: Arc::default(),
     })
     .insert_resource(Capture {
-        dump: std::env::var("GRID_WATER_PROBE_DUMP").is_ok_and(|v| v == "1"),
+        dump: crate::dev::var("GRID_WATER_PROBE_DUMP").is_ok_and(|v| v == "1"),
         ..default()
     })
     .init_resource::<SkyCentre>()

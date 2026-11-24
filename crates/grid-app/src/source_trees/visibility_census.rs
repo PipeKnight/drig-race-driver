@@ -287,7 +287,7 @@ fn active(run: Option<Res<Census>>) -> bool {
     run.is_some_and(|r| r.active())
 }
 pub(super) fn install(app: &mut App) {
-    let Ok(value) = std::env::var("GRID_FACING_VISIBILITY") else {
+    let Ok(value) = crate::dev::var("GRID_FACING_VISIBILITY") else {
         return;
     };
     let Some(n) = budget(&value) else {

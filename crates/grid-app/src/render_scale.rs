@@ -448,7 +448,7 @@ pub fn auto_range(rows: u32, scale_factor: f32) -> (u32, u32) {
 
 /// The dynamic height for `Auto`, unless `GRID_DYNAMIC_RES=0`.
 fn auto_dynamic(height: RenderHeight) -> Option<Dynamic> {
-    let off = std::env::var("GRID_DYNAMIC_RES").is_ok_and(|v| v == "0");
+    let off = crate::dev::var("GRID_DYNAMIC_RES").is_ok_and(|v| v == "0");
     // The desktop range waits for the window size (`adjust_height`).
     let (floor, ceiling) = if crate::mobile::enabled() { auto_range(0, 1.) } else { (0, 0) };
     (height == RenderHeight::Auto && !off).then(|| Dynamic::new(floor, ceiling))

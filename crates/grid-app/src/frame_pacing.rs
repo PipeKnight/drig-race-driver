@@ -34,7 +34,7 @@ fn trace_on() -> bool {
 }
 
 pub(crate) fn audio_off() -> bool {
-    std::env::var("GRID_AUDIO").is_ok_and(|v| v == "off")
+    crate::dev::var("GRID_AUDIO").is_ok_and(|v| v == "off")
 }
 
 /// Milliseconds since the first call (shared by both worlds).

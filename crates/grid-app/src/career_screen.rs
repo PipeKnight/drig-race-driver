@@ -1376,7 +1376,7 @@ pub fn write_result(
 /// payout; the supervisor runs the races as scripted runs (`--drive-ticks`),
 /// so `GRID_AUTOPILOT` drives and `GRID_RESULTS_CONTINUE` leaves the results.
 fn auto() -> Option<Auto> {
-    let v = std::env::var("GRID_CAREER_AUTO").ok()?;
+    let v = crate::dev::var("GRID_CAREER_AUTO").ok()?;
     if v == "offer" {
         return Some(Auto::FirstOffer);
     }
@@ -3136,7 +3136,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         save::load(&save_path)?
     } else {
         let mut c = new_career(&cat);
-        if std::env::var("GRID_CAREER_SEED").as_deref() == Ok("season") {
+        if crate::dev::var("GRID_CAREER_SEED").as_deref() == Ok("season") {
             seed_season(&cat, &mut c);
         }
         save::store(&save_path, &c)?;

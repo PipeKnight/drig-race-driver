@@ -19,7 +19,7 @@ static SETTING: OnceLock<Option<Setting>> = OnceLock::new();
 
 /// Reads the race set from the game's `cars/carlodsettings.xml` once.
 pub fn load(root: &Path) {
-    let enabled = std::env::var("GRID_CAR_LOD").map_or(true, |v| v != "0");
+    let enabled = crate::dev::var("GRID_CAR_LOD").map_or(true, |v| v != "0");
     let setting = enabled
         .then(|| std::fs::read_to_string(root.join("cars/carlodsettings.xml")).ok())
         .flatten()

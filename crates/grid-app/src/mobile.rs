@@ -34,7 +34,7 @@ pub const SMALL_RADIUS_METRES: f32 = 4.;
 /// (`GRID_MOBILE_PRESET=0` turns it off on Android for comparisons).
 pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| match std::env::var("GRID_MOBILE_PRESET").as_deref() {
+    *ENABLED.get_or_init(|| match crate::dev::var("GRID_MOBILE_PRESET").as_deref() {
         Ok("1") => true,
         Ok("0") => false,
         _ => cfg!(target_os = "android"),
@@ -111,12 +111,12 @@ pub fn pool_threads(cores: usize, preset: bool) -> usize {
 /// `main`. [`pool_threads`]; the preset split applies with the preset, or on
 /// the desktop with `GRID_COMPUTE_SPLIT=preset` (F573 measurement).
 pub fn init_threads() {
-    let requested = std::env::var("GRID_COMPUTE_SPLIT").is_ok_and(|v| v == "preset");
+    let requested = crate::dev::var("GRID_COMPUTE_SPLIT").is_ok_and(|v| v == "preset");
     let split = enabled() || requested;
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let mut threads = pool_threads(cores, split);
     // `GRID_COMPUTE_THREADS=N` sets the count outright (F860 measurement).
-    let forced = std::env::var("GRID_COMPUTE_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n >= 1);
+    let forced = crate::dev::var("GRID_COMPUTE_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n >= 1);
     if let Some(n) = forced {
         threads = n;
     }

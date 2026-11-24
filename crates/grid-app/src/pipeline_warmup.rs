@@ -53,7 +53,7 @@ fn compile_yield(covered: bool, waiting: bool, ms: u64) -> Option<std::time::Dur
 }
 
 fn env_on(name: &str) -> bool {
-    std::env::var(name).is_ok_and(|v| v == "1")
+    crate::dev::var(name).is_ok_and(|v| v == "1")
 }
 
 /// `GRID_CAPTURE_ASYNC_PIPELINES=1`: offscreen captures keep background compilation.
@@ -80,7 +80,7 @@ impl StartHold {
     /// Installed with the warm-up, for window runs.
     pub fn install(app: &mut App) {
         if app.world().contains_resource::<Warmup>()
-            && std::env::var("GRID_START_AFTER_WARMUP").map_or(true, |v| v != "0")
+            && crate::dev::var("GRID_START_AFTER_WARMUP").map_or(true, |v| v != "0")
         {
             app.init_resource::<StartHold>();
         }
@@ -179,7 +179,7 @@ pub fn install(app: &mut App) {
         return;
     };
     render.insert_resource(counters.clone()).add_systems(Render, count.in_set(RenderSystems::Cleanup));
-    let yield_ms = std::env::var("GRID_WARMUP_YIELD_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(YIELD_MS);
+    let yield_ms = crate::dev::var("GRID_WARMUP_YIELD_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(YIELD_MS);
     if yield_ms > 0 {
         render.add_systems(
             Render,
@@ -198,7 +198,7 @@ pub fn install(app: &mut App) {
         render.insert_resource(users.clone()).add_systems(Render, trace.in_set(RenderSystems::Cleanup));
         app.insert_resource(users).add_systems(Last, (describe_users, missed_casters, cascade_census));
     }
-    if std::env::var("GRID_PIPELINE_WARMUP").is_ok_and(|v| v == "0") {
+    if crate::dev::var("GRID_PIPELINE_WARMUP").is_ok_and(|v| v == "0") {
         return;
     }
     app.insert_resource(counters).init_resource::<Warmup>().add_systems(

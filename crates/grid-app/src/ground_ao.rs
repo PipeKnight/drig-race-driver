@@ -20,7 +20,7 @@ pub(crate) const BUFFER_BYTES: usize = MAX_CARS * 64;
 const HALF_HEIGHT: f32 = 0.7;
 
 pub(crate) fn enabled() -> bool {
-    std::env::var("GRID_SOURCE_ROAD_DYNAMIC_AO").as_deref() != Ok("off")
+    crate::dev::var("GRID_SOURCE_ROAD_DYNAMIC_AO").as_deref() != Ok("off")
 }
 
 #[derive(Clone, Copy)]

@@ -13,7 +13,7 @@ pub(super) struct DisplayLamp {
 }
 
 pub(super) fn install(app: &mut App, track_grade: bool) {
-    if track_grade && std::env::var("GRID_LAMP_SOURCE_DISPLAY").as_deref() != Ok("legacy") {
+    if track_grade && crate::dev::var("GRID_LAMP_SOURCE_DISPLAY").as_deref() != Ok("legacy") {
         // Track light specialization runs in Update. Extend the material
         // module only after it has installed its point/spot routines.
         app.init_resource::<DisplayLamp>()

@@ -236,7 +236,7 @@ fn sort_bias(alpha: Option<AlphaMode>) -> f32 {
 /// of the alpha gate, occlusion scale and the two floors, for comparisons
 /// with original frames (docs/CAR_REFLECTIONS.md 4.2).
 fn paint_override() -> Option<Vec4> {
-    let text = std::env::var("GRID_CAR_REFLECTIONS_PAINT").ok()?;
+    let text = crate::dev::var("GRID_CAR_REFLECTIONS_PAINT").ok()?;
     let v: Vec<f32> = text.split(',').filter_map(|t| t.trim().parse().ok()).collect();
     (v.len() == 4).then(|| Vec4::new(v[0].max(1e-3), v[1], v[2], v[3]))
 }

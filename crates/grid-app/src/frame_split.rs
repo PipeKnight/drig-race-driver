@@ -470,7 +470,7 @@ fn dump_transparent(
     allocator: Option<Res<bevy::render::mesh::allocator::MeshAllocator>>,
 ) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| std::env::var("GRID_TRN_DUMP").is_ok_and(|v| v == "1")) {
+    if !*ON.get_or_init(|| crate::dev::var("GRID_TRN_DUMP").is_ok_and(|v| v == "1")) {
         return;
     }
     let (Some(transparent), Some(materials)) = (transparent, materials) else {
@@ -968,7 +968,7 @@ impl FrameGpu {
 }
 
 fn gpu_reason(features: wgpu::Features) -> Result<(), &'static str> {
-    if std::env::var("GRID_FRAME_GPU").is_ok_and(|v| v == "0") {
+    if crate::dev::var("GRID_FRAME_GPU").is_ok_and(|v| v == "0") {
         return Err("GRID_FRAME_GPU=0");
     }
     if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {

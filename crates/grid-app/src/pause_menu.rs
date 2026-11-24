@@ -1044,7 +1044,7 @@ pub struct RestartScript {
 impl RestartScript {
     fn drive(&mut self, menu: &mut PauseMenu, nav: &mut Nav, now: f32) {
         let at = *self.at.get_or_insert_with(|| {
-            std::env::var("GRID_PAUSE_RESTART_AT").ok().and_then(|v| v.parse().ok())
+            crate::dev::var("GRID_PAUSE_RESTART_AT").ok().and_then(|v| v.parse().ok())
         });
         let Some(at) = at.filter(|&at| now >= at) else {
             return;

@@ -379,7 +379,7 @@ fn follow_camera(
 /// Day fraction a static render shows. Diagnostic: GRID_SKY_HOUR (0..24)
 /// sets it; a Le Mans drive follows its own clock.
 pub(crate) fn static_start() -> f64 {
-    std::env::var("GRID_SKY_HOUR")
+    crate::dev::var("GRID_SKY_HOUR")
         .ok()
         .and_then(|h| h.parse::<f64>().ok())
         .filter(|h| (0.0..24.0).contains(h))

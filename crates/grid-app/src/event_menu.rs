@@ -1095,6 +1095,8 @@ pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
             args[i].as_str(),
             "--game-root" | "--data-dir" | "--settings" | "--aa" | "--tone-map" | "--post-saturation"
                 | "--graphics" | "--grade" | "--motion-shutter" | "--lamp-signals"
+                // The player's render scale and quality (player.rs).
+                | "--render-height" | "--quality"
         ) && i + 1 < args.len()
         {
             out.extend_from_slice(&args[i..i + 2]);
@@ -1181,7 +1183,7 @@ fn auto_continue() -> bool {
 /// runs that race as a scripted run of TICKS ticks, so `GRID_AUTOPILOT` drives.
 #[cfg(not(target_os = "android"))]
 pub(crate) fn auto_ticks() -> Option<u64> {
-    std::env::var("GRID_MENU_AUTO").ok()?.parse().ok()
+    crate::dev::var("GRID_MENU_AUTO").ok()?.parse().ok()
 }
 
 /// Whether the saved choice is an experimental event (Le Mans Series).
@@ -1362,7 +1364,8 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
             .join(",")
     );
     let start = starting_event(&profile.event, crate::settings::data_dir());
-    let menu = Menu::new(catalog, &saved(&start));
+    let (first, quick) = quick_start(&catalog, saved(&start));
+    let menu = Menu::new(catalog, &first);
     let input_settings = profile.input()?;
     #[cfg(target_os = "android")]
     let touch_screen = crate::android::touch_screen();
@@ -1421,6 +1424,9 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
             input_settings.device == crate::input::Device::Auto,
         );
     }
+    if quick {
+        app.insert_resource(QuickGo(false));
+    }
     app.insert_resource(menu)
         .insert_resource(labels)
         .insert_resource(Saving {
@@ -1432,6 +1438,37 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
         .add_systems(Update, (update, present).chain());
     Ok(app)
 }
+
+/// The player's quick start (`--race`, `--track`, player.rs): the first menu
+/// of the run continues at once, with `saved` or the track's first event.
+/// An unknown track opens the menu as usual.
+fn quick_start(catalog: &Catalog, saved: Choice) -> (Choice, bool) {
+    let Some(quick) = crate::player::take_quick_start() else {
+        return (saved, false);
+    };
+    let Some(track) = quick.track.as_deref() else {
+        return (saved, true);
+    };
+    let routes = catalog.routes();
+    let route = crate::player::resolve_track(
+        track,
+        routes.iter().map(|(route, venue, _)| (route.as_str(), venue.as_str())),
+    );
+    match route.and_then(|route| catalog.route_choices(&route).into_iter().next()) {
+        Some((_, choice)) => {
+            println!("quick_start track={track} route={} type={}", choice.route, choice.key);
+            (choice, true)
+        }
+        None => {
+            println!("DRIG: no track matches {track:?} (--list-tracks lists them); the menu opens");
+            (saved, false)
+        }
+    }
+}
+
+/// Present while a quick start is due; true once it pressed Continue.
+#[derive(Resource)]
+struct QuickGo(bool);
 
 #[derive(Component)]
 struct Title;
@@ -1517,6 +1554,7 @@ fn update(
     mut fade: ResMut<crate::transition::Fade>,
     mut done: Local<bool>,
     sink: Option<Res<crate::hud_sound::HudSink>>,
+    quick: Option<ResMut<QuickGo>>,
 ) {
     if *done || fade.leaving() {
         return;
@@ -1526,6 +1564,15 @@ fn update(
     menu.repeat = repeat;
     // Escape is both Pause and Menu Back.
     nav.back |= nav.pause;
+    // The player's quick start: Continue once, as the menu shows.
+    if let Some(mut quick) = quick
+        && !quick.0
+        && time.elapsed_secs() >= 0.5
+    {
+        quick.0 = true;
+        menu.cursor = menu.rows().len() - 1;
+        nav.select = true;
+    }
     // Diagnostics GRID_MENU_AUTO: Continue with the current choice 3 s after
     // start (each menu is its own process or, in the host, its own app).
     #[cfg(not(target_os = "android"))]

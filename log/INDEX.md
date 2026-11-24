@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F906](F0906.md) | 2026-11-24 | DRIG v0.1.0 Windows player build: portable DRIG-data, dev-tools feature, player flags, exe release |
 | [F905](F0905.md) | 2026-11-24 | Atmosphere and SSAO bind groups through the bind-group cache |
 | [F904](F0904.md) | 2026-11-24 | Backlog: DualSense haptics row 146, release check note in row 131, no-zip release rule |
 | [F903](F0903.md) | 2026-11-24 | Native Linux x86_64 build and packaging (row 135) |

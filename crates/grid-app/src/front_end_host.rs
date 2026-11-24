@@ -156,7 +156,7 @@ mod host {
     use std::collections::HashMap;
     use bevy::prelude::*;
     use bevy::window::{
-        ExitCondition, PrimaryWindow, RawHandleWrapper, RawHandleWrapperHolder, WindowEvent,
+        ExitCondition, MonitorSelection, PrimaryWindow, RawHandleWrapper, RawHandleWrapperHolder, WindowEvent,
         WindowPosition,
     };
     use std::path::PathBuf;
@@ -279,6 +279,9 @@ mod host {
         loading_since: Option<Instant>,
         /// The logical size the host last gave the window.
         adopted: Vec2,
+        /// The player chose the window size or full screen (`--resolution`,
+        /// `--fullscreen`, settings.ini [video]): screens do not resize it.
+        fixed: bool,
         /// `GRID_SERIES_EXPERIMENTAL` was set by the user, not by the host.
         user_experimental: bool,
         loops: Option<Loops>,
@@ -339,14 +342,18 @@ mod host {
             .find(|w| w[0] == "--data-dir")
             .map(|w| PathBuf::from(&w[1]))
             .unwrap_or_else(crate::settings::default_data_dir);
-        let loops = std::env::var("GRID_MENU_LOOPS")
+        let loops = crate::dev::var("GRID_MENU_LOOPS")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .filter(|&n| n > 0);
         if loops.is_some() && event_menu::auto_ticks().is_none() {
             return Err("GRID_MENU_LOOPS needs GRID_MENU_AUTO=TICKS".into());
         }
-        let size = Vec2::new(1280., 800.);
+        // The player's window (player.rs, docs/SETTINGS.md section 6).
+        let (mode, resolution) = crate::settings::window_preferences(args, &dir);
+        let fullscreen = mode == Some(crate::settings::WindowMode::Fullscreen);
+        let fixed = fullscreen || resolution.is_some();
+        let size = resolution.map_or(Vec2::new(1280., 800.), |(w, h)| Vec2::new(w as f32, h as f32));
         // Started by a launcher race (the hand-off, docs/SCREEN_FLOW.md
         // section 2.3): the window opens hidden where the race's was and
         // shows once the first screen has drawn ([`Host::reveal`]).
@@ -381,6 +388,11 @@ mod host {
                     resolution: (size.x as u32, size.y as u32).into(),
                     position,
                     visible: !hidden,
+                    mode: if fullscreen {
+                        bevy::window::WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+                    } else {
+                        bevy::window::WindowMode::Windowed
+                    },
                     ..default()
                 }),
                 exit_condition: ExitCondition::OnAllClosed,
@@ -406,7 +418,8 @@ mod host {
             ready: Vec::new(),
             loading_since: None,
             adopted: size,
-            user_experimental: std::env::var_os("GRID_SERIES_EXPERIMENTAL").is_some(),
+            fixed,
+            user_experimental: crate::dev::var_os("GRID_SERIES_EXPERIMENTAL").is_some(),
             loops: loops.map(|races| Loops {
                 races,
                 done: 0,
@@ -662,6 +675,7 @@ mod host {
                 .unwrap_or(self.adopted);
             // The loading screen keeps the size of the screen before it.
             if screen != Screen::Loading
+                && !self.fixed
                 && let Some(mut window) = world.get_mut::<Window>(outer)
             {
                 let now = window.resolution.size();

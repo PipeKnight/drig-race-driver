@@ -2260,14 +2260,14 @@ mod tests {
     #[test]
     #[ignore]
     fn replay_live_trace() {
-        let (Ok(input), Ok(output)) = (std::env::var("GRID_CAMERA_TRACE"), std::env::var("GRID_CAMERA_OUT")) else {
+        let (Ok(input), Ok(output)) = (crate::dev::var("GRID_CAMERA_TRACE"), crate::dev::var("GRID_CAMERA_OUT")) else {
             return;
         };
         let root = std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT");
         let views = Views::load(Path::new(&root), "lac").unwrap();
         let idents = ["chase_close", "chase_far", "bumper", "bonnet", "head-cam"];
         // GRID_CAMERA_FPS=F replays on Clock::Fps(F), else one frame per row.
-        let clock = std::env::var("GRID_CAMERA_FPS").ok().and_then(|v| v.parse().ok()).map_or(Clock::Frame, Clock::Fps);
+        let clock = crate::dev::var("GRID_CAMERA_FPS").ok().and_then(|v| v.parse().ok()).map_or(Clock::Frame, Clock::Fps);
         let mut histories = vec![History::default(); idents.len()];
         let mut out = String::new();
         let mut previous: Option<f64> = None;
@@ -3339,7 +3339,7 @@ mod tests {
     #[test]
     #[ignore]
     fn shake_table_equals_the_emulated_table() {
-        let Ok(path) = std::env::var("GRID_SHAKE_TABLE") else {
+        let Ok(path) = crate::dev::var("GRID_SHAKE_TABLE") else {
             return;
         };
         let bytes = std::fs::read(path).unwrap();

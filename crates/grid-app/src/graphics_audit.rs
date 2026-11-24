@@ -673,7 +673,7 @@ fn measure(
         state.flagged += 1;
     }
     // GRID_GRAPHICS_AUDIT_FRAMES=all keeps every frame (matched before/after crops).
-    if flagged || std::env::var("GRID_GRAPHICS_AUDIT_FRAMES").as_deref() == Ok("all") {
+    if flagged || crate::dev::var("GRID_GRAPHICS_AUDIT_FRAMES").as_deref() == Ok("all") {
         image
             .clone()
             .try_into_dynamic()

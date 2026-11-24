@@ -51,7 +51,7 @@ const FRAME_SIGN: f32 = 1.;
 
 pub fn install(app: &mut App, cards: Cards) {
     // GRID_CARD_LIGHTING=0 keeps the cards on the plain material (F718), for review.
-    if cards.parts.is_empty() || std::env::var("GRID_CARD_LIGHTING").is_ok_and(|v| v == "0") {
+    if cards.parts.is_empty() || crate::dev::var("GRID_CARD_LIGHTING").is_ok_and(|v| v == "0") {
         return;
     }
     app.world_mut()

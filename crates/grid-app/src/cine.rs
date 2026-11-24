@@ -46,7 +46,7 @@ pub struct Cine {
 
 impl Cine {
     pub fn from_env(fps: Option<u32>) -> Result<Option<Self>, Box<dyn std::error::Error>> {
-        let Some(script) = std::env::var_os("GRID_CINE") else {
+        let Some(script) = crate::dev::var_os("GRID_CINE") else {
             return Ok(None);
         };
         let fps = fps.ok_or("GRID_CINE needs --render-fps")? as f32;

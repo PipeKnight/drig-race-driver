@@ -101,13 +101,16 @@ device=pad
 
 ## 2. Data dir
 
-`--data-dir DIR` sets it. Otherwise:
+`--data-dir DIR` sets it. Otherwise (backlog row 129, portable by default; `settings::default_data_dir`):
 
-- the owner's checkout: `local/` when the current folder has one (the launchers start in the repository root), so records stay at `local/playtest/time-trial-records.tsv` and renders under `local/` as before;
-- Windows: `%APPDATA%\GRID Reassembly`; macOS: `~/Library/Application Support/GRID Reassembly`; Linux: `$XDG_DATA_HOME/grid-reassembly` or `~/.local/share/grid-reassembly`;
-- Android: none yet; P9 sets it from `AndroidApp::internal_data_path()` / `external_data_path()`.
+1. the owner's checkout: `local/` when the current folder has one (the launchers start in the repository root), so records stay at `local/playtest/time-trial-records.tsv` and renders under `local/` as before;
+2. Android: the app's own storage (`AndroidApp::internal_data_path()` / `external_data_path()`, P9);
+3. portable: `DRIG-data/` next to the executable. On macOS it goes next to `DRIG.app`, not inside the bundle; in a Linux AppImage it goes next to the `.AppImage` file (`$APPIMAGE`), since the program runs from a read-only mount. The first file written makes the folder. At start a probe file is written and removed to check that the folder (or, before it exists, its parent) takes files;
+4. when that folder is not writable (for example under `C:\Program Files`), the per-user folder, and the log says `data_dir mode=per-user reason=not-writable`: Windows `%APPDATA%\GRID Reassembly`; macOS `~/Library/Application Support/GRID Reassembly`; Linux `$XDG_DATA_HOME/grid-reassembly` or `~/.local/share/grid-reassembly`.
 
-It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`), `camera.ini` (the last in-race view, `current_camera = IDENT`, written by the app on exit like the original's profile key; [CAMERA_VIEWS.md](CAMERA_VIEWS.md)) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs are still the launcher's redirect of stdout to `local\playtest\manual-*.log`; on Android stdout goes to logcat (P9).
+Builds before v0.1.0 used the per-user folder of step 4 whenever there was no `local/`. Data there is not moved: copy `settings.ini` and `playtest/` into `DRIG-data/` to keep it, or start with `--data-dir` naming the old folder.
+
+It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`), `camera.ini` (the last in-race view, `current_camera = IDENT`, written by the app on exit like the original's profile key; [CAMERA_VIEWS.md](CAMERA_VIEWS.md)) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs are still the launcher's redirect of stdout to `local\playtest\manual-*.log` in the owner's checkout; on Android stdout goes to logcat (P9).
 
 ## 3. Install discovery and case-insensitive index
 
@@ -166,6 +169,48 @@ CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_direct
 | Play GRID Drift Battle Istanbul Reverse.cmd | `settings/drift-battle-istanbul-reverse.ini` | Drift Battle on Istanbul Park route_3 (istanbul_int_r) |
 
 Changes in behaviour: BP01 and DF01 are now always derived from `grid.exe` instead of being used only when `local\*.bin` existed (the bytes are equal on this PC). The game folder argument is optional. `local\assists.txt`, `GRID_PLAY_ASSISTS`, `GRID_PLAY_INPUT`, `GRID_PLAY_OPPONENTS` and `GRID_PLAY_GRID` still work; the launcher turns them into command-line flags. Equivalent without any variables: `target\release\grid-app.exe --settings settings\race.ini`.
+
+The launchers are the owner's test fixtures (backlog row 133). They stay in the repository and are not part of the player package (section 6).
+
+## 6. Player flags and builds
+
+### Player flags (backlog row 134)
+
+These flags are the stable player command line. `--help` prints them, and third-party launchers may rely on them. With no flags, or with player flags only, the program opens the front end: the menu window, as `Play GRID.cmd` does (`player::start`, crates/grid-app/src/player.rs).
+
+| Flag | Meaning | Settings key |
+|---|---|---|
+| `--game-root PATH` | the GRID game folder; default: discovered (section 3) | `[game] root` |
+| `--data-dir DIR` | the data folder (section 2) | - |
+| `--fullscreen` / `--windowed` | borderless full screen on the current display, or a window (default) | `[video] window = fullscreen \| windowed` |
+| `--resolution WxH` | window size (default 1280x800); in full screen the display's size is used | `[video] resolution = WxH` |
+| `--render-height H` | render scale: `auto`, `native` or 240-4320 rows | `[video] render_height` |
+| `--quality Q` | quality preset `off \| low \| medium \| high \| ultra`; today it sets the shadow quality (default `high`) | `[video] shadows` |
+| `--race` | skip the menu and start the event last chosen in it (or the default event) | - |
+| `--track ROUTE` | start a race on that route; a route path (`tracks/europe/donington/route_0`), a path part (`donington`, first route) or a venue name as `--list-tracks` prints it; implies `--race` | - |
+| `--career` | open the career screen instead of the event menu | - |
+| `--list-tracks` | print the menu's routes (`menu_route route=… venue=… events=…`) | - |
+| `--skip-intro` | accepted for launchers; DRIG has no intro | - |
+| `--version`, `--help` | print the version or the help | - |
+
+The window, resolution, render-height and quality flags are applied after the settings files as an override layer (`player::overrides`, applied by `settings::load`). They therefore reach every screen and race the menu starts, and they are not written to `settings.ini`. `--race` and `--track` use the menu's normal start: the event menu presses Continue at once with the saved event and the route replaced. The race then writes `event-menu.ini` like a menu start, and leaving the race returns to the menu.
+
+Any other flag selects the developer command line (`--menu`, `--route`, `--drive`, `--render`, the profiles, …). A developer build lists those flags with `--help-dev`. The player build still accepts the ones the menu passes to its own screens.
+
+### Player build and developer build (backlog rows 130 and 132)
+
+The `dev-tools` Cargo feature of grid-app is on by default. The owner's builds, the launchers, the APK scripts and `tools\prepush.ps1` therefore keep all tools. The player release builds without it:
+
+    cargo build --release --locked -p grid-app --bin grid-app --no-default-features
+
+`tools\package_desktop.ps1` runs that build and writes the Windows release files with no archive (owner rule of 2026-11-24): `DRIG-vVERSION-windows-x86_64.exe`, `DRIG-vVERSION-LICENSES.txt` (the GPL and every bundled library and font notice in one file) and `SHA256SUMS.txt`. The exe embeds its font and shaders and runs from an otherwise empty folder. [PLAYER_README.md](PLAYER_README.md) is the source of the Windows section of the release notes. The player build differs from the developer build in four ways:
+
+- It reads no diagnostic `GRID_*` environment variable (`dev::var`, crates/grid-app/src/dev.rs). The variables it still reads are the ones the program passes to its own child processes (`GRID_SERIES_EXPERIMENTAL`, the screen hand-off variables in transition.rs) and the smoke switches `GRID_MENU_AUTO` / `GRID_MENU_LOOPS` ([EVENT_MENU.md](EVENT_MENU.md)). Every run takes the default path.
+- It ignores the `[diagnostics]` settings section and logs `settings_diagnostics ignored=N`.
+- On Windows it is a GUI program, so starting it opens no console window. When a terminal starts it, `--help`, `--version` and `--list-tracks` print to that terminal.
+- When it starts with no terminal and no redirect, stdout and stderr go to `DATA_DIR/drig.log`. The previous run's log is kept as `drig.previous.log`.
+
+Still in the player build: the developer flags (they need a command line and change nothing in a menu start), the CPU lap timers behind the frame split (one `Instant` per lap), and the per-tick race log lines, which now go to `drig.log`.
 
 ## Shared main-view display preferences (G360)
 

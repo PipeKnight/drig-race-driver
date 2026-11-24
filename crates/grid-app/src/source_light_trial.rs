@@ -31,7 +31,7 @@ pub(crate) struct Trial {
 }
 
 pub(crate) fn requested() -> Result<Option<f32>, String> {
-    match std::env::var("GRID_SOURCE_LIGHTING_UNITS") {
+    match crate::dev::var("GRID_SOURCE_LIGHTING_UNITS") {
         Err(std::env::VarError::NotPresent) => Ok(None),
         Err(_) => Err("source lighting units must be Unicode".into()),
         Ok(value) => parse_units(&value).map(Some),

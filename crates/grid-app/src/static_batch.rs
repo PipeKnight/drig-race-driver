@@ -33,7 +33,7 @@ const CELL_METRES: f32 = 64.;
 const COARSE: i32 = 4;
 
 fn cell_metres() -> f32 {
-    std::env::var("GRID_STATIC_BATCH_CELL")
+    crate::dev::var("GRID_STATIC_BATCH_CELL")
         .ok()
         .and_then(|v| v.parse().ok())
         .filter(|m: &f32| *m >= 8.)
@@ -45,7 +45,7 @@ const INTACT: &str = "dynamic/intact/";
 const PIECE: &str = "dynamic/piece/";
 
 pub fn enabled() -> bool {
-    std::env::var("GRID_STATIC_BATCH").map_or(true, |v| v != "0")
+    crate::dev::var("GRID_STATIC_BATCH").map_or(true, |v| v != "0")
 }
 
 pub fn install(app: &mut App) {

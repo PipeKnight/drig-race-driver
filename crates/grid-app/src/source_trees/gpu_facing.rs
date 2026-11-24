@@ -48,7 +48,7 @@ const SOURCE_FLOATS: usize = 12;
 
 /// Whether the GPU path may be used at all (`GRID_TREE_FACING=cpu` turns it off).
 fn wanted() -> bool {
-    std::env::var("GRID_TREE_FACING").map_or(true, |v| v != "cpu")
+    crate::dev::var("GRID_TREE_FACING").map_or(true, |v| v != "cpu")
 }
 
 /// Main-world state: placements and sources as the GPU holds them, and this frame's jobs.

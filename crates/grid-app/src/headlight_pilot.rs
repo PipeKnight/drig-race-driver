@@ -4,7 +4,7 @@ use grid_tools::{car::Car as CarModel, time_of_day::Mode};
 use std::path::Path;
 
 pub fn requested() -> Result<Option<f32>, String> {
-    match std::env::var("GRID_HEADLIGHT_PILOT_LUMENS") {
+    match crate::dev::var("GRID_HEADLIGHT_PILOT_LUMENS") {
         Err(std::env::VarError::NotPresent) => Ok(None),
         Ok(s) => parse_intensity(&s).map(Some),
         Err(_) => Err("headlight pilot intensity must be Unicode".into()),
