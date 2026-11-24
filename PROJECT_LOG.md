@@ -177,6 +177,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F901](log/F0901.md) | 2026-11-24 | Content source policy: other-platform DLC, mods, March 2008 prototype |
 | [F900](log/F0900.md) | 2026-11-24 | Backlog: rain look, cut content findings, career maintained damage, tyre wall regrowth |
 | [F899](log/F0899.md) | 2026-11-24 | Backlog row 143: split grid-app main.rs into modules |
 | [F898](log/F0898.md) | 2026-11-24 | Owner priority: spatial audio as in the original (reverb, multichannel, verified panning) |
@@ -236,7 +237,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F844](log/F0844.md) | 2026-11-18 | Main thread: flashback checkpoints pack the live words on the compute pool |
 | [F843](log/F0843.md) | 2026-11-18 | Main thread: skid-mark and smoke-boundary caches, slow-frame split |
 | [F842](log/F0842.md) | 2026-11-17 | Prop breaks copy one switch per box, not every box |
-| [F841](log/F0841.md) | 2026-11-17 | Tree facing: automatic CPU fallback decided from adapter limits, oversize meshes on the CPU |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

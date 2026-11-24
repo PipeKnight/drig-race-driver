@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F901](F0901.md) | 2026-11-24 | Content source policy: other-platform DLC, mods, March 2008 prototype |
 | [F900](F0900.md) | 2026-11-24 | Backlog: rain look, cut content findings, career maintained damage, tyre wall regrowth |
 | [F899](F0899.md) | 2026-11-24 | Backlog row 143: split grid-app main.rs into modules |
 | [F898](F0898.md) | 2026-11-24 | Owner priority: spatial audio as in the original (reverb, multichannel, verified panning) |
