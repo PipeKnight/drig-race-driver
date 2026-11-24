@@ -121,6 +121,10 @@ pub struct FpsCounter {
     /// since Android sizes the window after the first frames (a phone log
     /// showed the requested 1280x800 first).
     reported_setup: Option<UVec2>,
+    /// Frames of the current window drawn while the primary window had no
+    /// focus (`unfocused=`): a driver or the OS may limit a background
+    /// window to 60 fps, which is not the engine's cost (F895).
+    unfocused: u32,
 }
 
 #[derive(Component)]
@@ -180,6 +184,7 @@ fn update(
     if keys.is_some_and(|k| k.just_pressed(KeyCode::F9)) {
         counter.shown = !counter.shown;
         counter.window = Window::default();
+        counter.unfocused = 0;
         // The frame split's window starts with the counter's.
         let _ = crate::frame_split::window_report(0.);
     }
@@ -223,6 +228,9 @@ fn update(
             refresh.join(",")
         );
     }
+    if windows.iter().next().is_some_and(|w| !w.focused) {
+        counter.unfocused += 1;
+    }
     let pushed = counter.window.push(time.delta_secs_f64());
     let Some(stats) = pushed.or_else(|| if lift { counter.window.flush() } else { None }) else {
         return;
@@ -244,7 +252,7 @@ fn update(
     // Where the frame's time went (frame_split.rs, docs/PERFORMANCE.md).
     let (split, detail) = crate::frame_split::window_report(stats.seconds);
     println!(
-        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} p99_ms={:.2} over10={} over16={} frames={} sim_ticks_per_s={rate}{res}{}{split}{} ft_hist={}",
+        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} p99_ms={:.2} over10={} over16={} frames={} sim_ticks_per_s={rate}{res}{}{split}{} unfocused={} ft_hist={}",
         stats.fps,
         stats.mean_ms,
         stats.worst_ms,
@@ -254,6 +262,7 @@ fn update(
         stats.frames,
         crate::perf_test::stats_suffix(),
         if lift { " cover=tail" } else { "" },
+        std::mem::take(&mut counter.unfocused),
         stats.hist
     );
     for line in detail {
@@ -273,6 +282,7 @@ pub fn install(app: &mut App, shown: bool) {
         window: Window::default(),
         last_ticks: None,
         reported_setup: None,
+        unfocused: 0,
     })
     .add_systems(Update, (spawn, update).chain());
     // Diagnostic frame cap (docs/AUDIO_RESEARCH.md 8): GRID_FRAME_CAP_HZ=20

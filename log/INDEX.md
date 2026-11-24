@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F895](F0895.md) | 2026-11-24 | Goal matrix after F893/F894, and unfocused frames in frame_stats |
 | [F894](F0894.md) | 2026-11-24 | Derby collision frames: car_batch refresh outside rebuilds |
 | [F893](F0893.md) | 2026-11-24 | Bevy GPU-preprocessing bind-group cache (vendored bevy_pbr) |
 | [F892](F0892.md) | 2026-11-23 | wgpu-core: bind-group tracker insert once per render pass; empty internal command buffers skipped (no gain, not kept) |

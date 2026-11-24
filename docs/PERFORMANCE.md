@@ -5422,3 +5422,70 @@ Timing (`local/ab/dd-ab.ps1 -Tag bgc -Only don-2560-enh -OffEnv GRID_BEVY_BIND_G
 - Images: offscreen fixed-step derby at ticks 1500 and 2400, before vs after, 0 differing pixels.
 - Frame level: 8 vs 9 main-gated windows (main 9.44 vs 9.33 ms), too few to show 0.075 ms. No clear
   frame-level gain.
+
+## Goal matrix after F893/F894, and frames drawn without focus (F895)
+
+The owner's goal is that every 1-s window reaches at least 100 fps at any resolution up to 2560x1440. This matrix measures where that stands.
+
+- Cells: Donington race (`settings\race.ini`), Detroit derby (`settings\demolition-derby.ini`) and Haruna touge
+  (`settings\pro-touge.ini`), each at 1280x800 and 2560x1440, in Base and Enhanced.
+- Method: windowed native runs with `present_mode = auto_no_vsync`, 4200 ticks, 2 rounds per cell, each run under the build lock.
+  - A run counts as dirty when another grid process, a tracer, a game or GPU load ≥ 15 % was present, or any process used ≥ 30 CPU s. Dirty runs are retried once and excluded.
+  - Windows start 120 ticks after GO.
+  - The gate is the largest of main, render and GPU ms over the windows under 100 fps.
+- Scripts (machine-private, `local/ab/`): `mx-run.ps1`, `mx-goal.ps1`, `mx-goal.py`.
+
+### A 60 fps cap that is not the engine's
+
+The first matrix (rev 3bd9ceb6, exe D17B69835723) showed four cells with 28 to 57 windows at exactly
+60.0 fps (16.67 ms):
+
+- main, render and GPU were each 5-7 ms, with `outside_ms` about 11.5;
+- the engine logs `update_mode=continuous frame_cap=none` on a 165 Hz monitor;
+- the cap started partway through a run and lasted to its end.
+
+A limit applied to a background window (by the driver or the OS) fits these observations. That is an interpretation: no focus change was recorded at the time.
+
+`frame_stats` now ends with `unfocused=N`, the frames of the window that were drawn while the primary
+window had no focus (`Window::focused`). `tools/frame_split_smoke.ps1` requires the field and prints
+`unfocused_windows=`. `mx-goal.py` drops windows with `unfocused > 0`. For older logs it uses the 60 fps signature: 59-61 fps with `outside_ms` > 8.
+
+### Matrix at 53a84ea5 (rerun, exe EC5412FC2F16)
+
+23 of 24 runs were clean; don-1280-base round 1 was dirty on both tries. No window had unfocused frames, and none showed the 60 fps cap.
+
+| cell | fps | worst window | windows < 100 | main / render / GPU ms | gate |
+|---|---|---|---|---|---|
+| don-1280-base | 150.8 | 141.1 | 0/65 | 3.62 / 6.09 / 2.04 | render |
+| don-1280-enh | 114.6 | 98.9 | 1/130 | 4.32 / 8.18 / 1.95 | render |
+| don-2560-base | 137.2 | 117.3 | 0/131 | 3.80 / 6.73 / 4.17 | render |
+| don-2560-enh | 108.3 | 98.3 | 1/130 | 4.38 / 8.67 / 4.46 | render |
+| derby-1280-base | 161.5 | 145.7 | 0/132 | 3.41 / 5.70 / 2.14 | render |
+| derby-1280-enh | 133.7 | 107.0 | 0/130 | 3.72 / 7.09 / 2.09 | render |
+| derby-2560-base | 151.0 | 114.5 | 0/132 | 3.58 / 6.18 / 5.11 | render |
+| derby-2560-enh | 124.7 | 100.0 | 0/130 | 3.89 / 7.59 / 4.84 | render |
+| touge-1280-base | 162.6 | 143.9 | 0/130 | 3.02 / 5.64 / 2.00 | render |
+| touge-1280-enh | 127.7 | 112.3 | 0/130 | 3.35 / 7.33 / 2.38 | render |
+| touge-2560-base | 155.6 | 133.1 | 0/131 | 3.07 / 5.91 / 4.77 | render |
+| touge-2560-enh | 116.7 | 102.2 | 0/130 | 3.54 / 8.05 / 5.66 | render |
+
+- Two windows in the matrix are under 100 fps: Donington Enhanced at 1280 (98.9) and at 2560 (98.3). In both, the render thread averaged about 9.5 ms over the slow window.
+- Every cell is render-gated. Main is at most 4.4 ms. The GPU is at most 5.7 ms (touge 2560 Enhanced).
+- The margin is thin in Enhanced: derby-2560-enh has a worst window of 100.0, and touge-2560-enh of 102.2.
+
+### Where Enhanced's render time goes
+
+Donington 2560, Base → Enhanced, means over clean windows. The draw counts are the same in both: 148 → 149.
+
+| field | Base ms | Enhanced ms | change ms |
+|---|---|---|---|
+| render_ms | 6.74 | 8.68 | +1.94 |
+| r_encode | 2.80 | 3.92 | +1.12 |
+| of which enc_tail | 1.46 | 2.29 | +0.83 |
+| r_submit | 0.67 | 1.10 | +0.43 |
+| r_bind | 0.48 | 0.66 | +0.18 |
+| r_meshes | 0.92 | 1.02 | +0.10 |
+
+- Enhanced also submits more command buffers per frame: `enc_cbs` 21 → 31.
+- `r_submit` grows with resolution as well. In Enhanced it is 0.62 ms at 1280 and 1.10 ms at 2560; in Base, 0.38 ms and 0.67 ms.
+- The extra render-thread time is therefore in the Enhanced passes' encoding and submission (post-processing and the larger shadow maps), not in scene draws. This is the next render-side lead.

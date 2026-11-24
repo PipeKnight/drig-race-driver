@@ -13,7 +13,9 @@
 #     (frame_gpu_views) with the 3D view's passes and the sun cascades.
 # Prints a verdict, the mean split, the worst windows (min fps, frames over
 # 10 ms, the slowest window's split), whether the machine was idle (no cargo,
-# rustc or other grid process at the start and the end) and the log path.
+# rustc or other grid process at the start and the end), how many frames were
+# drawn without window focus (`unfocused=`, F895: a background window can be
+# held at 60 fps by the driver or the OS) and the log path.
 # Never runs the owner's
 # prototype path. -CheckOnly re-checks the log of an earlier run in -OutDir.
 param(
@@ -95,7 +97,7 @@ $drive = @($stats | Select-Object -Skip 2)
 if ($drive.Count -lt 5) { $fails.Add("only $($drive.Count) driving frame_stats windows after the first two") }
 $required = 'main_ms', 'fixed_ms', 'outside_ms', 'extract_ms', 'r_meshes', 'r_views', 'acquire', 'r_queue', 'r_sort',
     'r_prepare', 'r_bind', 'r_encode', 'r_submit', 'r_present', 'r_cleanup', 'render_ms', 'render_frames',
-    'd_opaque', 'd_alpha', 'd_shadow', 'd_transp', 'd_ui', 'shadow_views', 'vis', 'casters', 'mesh_up_s', 'mesh_kb_s', 'mesh_stream_kb_s'
+    'd_opaque', 'd_alpha', 'd_shadow', 'd_transp', 'd_ui', 'shadow_views', 'vis', 'casters', 'mesh_up_s', 'mesh_kb_s', 'mesh_stream_kb_s', 'unfocused'
 $missing = @($required | Where-Object { $k = $_; @($drive | Where-Object { -not $_.ContainsKey($k) }).Count -gt 0 })
 if ($missing.Count) { $fails.Add("frame_stats lack: $($missing -join ',')") }
 
@@ -185,7 +187,8 @@ Write-Output ("  fps={0:N1} avg_ms={1:N2} main_ms={2:N2} fixed_ms={3:N2} outside
     (Mean 'fps'), $avg, (Mean 'main_ms'), (Mean 'fixed_ms'), (Mean 'outside_ms'), (Mean 'extract_ms'), $render, (Mean 'r_encode'), (Mean 'r_submit'), (Mean 'r_present'), (Mean 'acquire'))
 if ($gpuLine) { Write-Output "  $gpuLine" }
 if ($dips) { Write-Output $dips }
-Write-Output "  idle: start=$idleStart end=$idleEnd"
+$unfocusedWin = @($drive | Where-Object { $_['unfocused'] -gt 0 }).Count
+Write-Output ("  idle: start=$idleStart end=$idleEnd unfocused_windows={0}/{1}" -f $unfocusedWin, $drive.Count)
 Write-Output ("  d_opaque={0:N0} d_alpha={1:N0} d_shadow={2:N0} d_transp={3:N0} shadow_views={4:N1} vis={5:N0} casters={6:N0} mesh_up_s={7:N1} mesh_kb_s={8:N0} mesh_stream_kb_s={9:N0}" -f
     (Mean 'd_opaque'), (Mean 'd_alpha'), (Mean 'd_shadow'), (Mean 'd_transp'), (Mean 'shadow_views'), (Mean 'vis'), (Mean 'casters'), (Mean 'mesh_up_s'), (Mean 'mesh_kb_s'), (Mean 'mesh_stream_kb_s'))
 if ($start) { Write-Output "  $start" }
