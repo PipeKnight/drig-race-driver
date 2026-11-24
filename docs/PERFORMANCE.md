@@ -5520,3 +5520,64 @@ Means over the last two thirds of the 1-s windows (`local/ab/fields.py bg`). Run
 - r_bind fell in three of four pairs and stayed equal in one, about −0.04 ms. This is the direct effect, and it is small: about ten bind groups and five views per frame against the 160-260 groups of F893.
 - render_ms moved by −0.53, −0.38, +0.40 and +0.06 ms. The run-to-run noise (0.5-0.8 ms) is as large as the effect, so frame-level timing neither shows nor rules out a gain.
 - Verdict: kept under the owner's rule (a measured cost cut, 0 px, no behaviour change). It does not close the don-*-enh cells on its own; the remaining Enhanced cost is pass encoding and submission.
+
+## Phone profile of 24 November: where the 38 ms frame goes (F912)
+
+24 November 2026, Claude Code. The owner ran the F897 profile APK (source 57c966e1, Donington, 12 Lacetti,
+chase camera, FPS counter shown) on the Xiaomi (Adreno 740, 2308 × 1080, `mobile_threads cores=8 compute=6`)
+and sent six logs (owner-private, main checkout `local/android-logs/2026-11-24-xiaomi/`). Three hold races
+with profile tables: 160330, 160501 and 161206. The other three end before a race starts. Summary:
+`py -I tools/phone_profile_summary.py LOG...`; output in this worktree's `local/phone-f911/summary.txt`.
+
+### Numbers [O]
+
+Race windows are the 1 s `frame_stats` windows with simulation running; values are medians over them.
+Every window rendered at 1026 × 480, the Auto floor, apart from two windows at 225 × 480 in 161206.
+
+| run | race windows | 1 s FPS min / median | main_ms (fixed) | render_ms | gpu_ms (g_opaque) | largest per window |
+|---|---|---|---|---|---|---|
+| 160330 | 15 | 20.8 / 25.9 | 25.8 (10.7) | 35.4 | 35.8 (26.6) | gpu 11, render 4 |
+| 160501 | 55 | 21.7 / 26.2 | 28.1 (12.2) | 34.9 | 35.5 (26.9) | gpu 39, render 16 |
+| 161206 | 149 | 17.9 / 24.3 | 33.8 (16.0) | 35.9 | 37.3 (29.4) | gpu 64, render 52, main 33 |
+
+- Frame times (`ft_hist`): about 80 % of frames take 33.3-50 ms and 13-15 % take 25-33.3 ms. In 161206, 9 % take 50 ms or more.
+- Main thread: it works about 1 ms per frame in its own spans and spends the rest of its 37-39 ms inside
+  schedule spans, waiting for systems that run on the compute pool. `drive_tick` takes 5.0, 7.2 and 11.3 ms per frame (1.6-3.1 ticks per frame,
+  about 3.1-3.7 ms per tick). `outside_ms` (waiting for the render thread) is 6-11 ms.
+- Render thread: 35.4-35.5 ms per frame in spans, of which 14.8-16.2 ms is its own span work.
+  - Stages: `r_encode` 12.4-13.6, `r_present` 5.2-7.7 (`present_frames` 3.9-5.2), `r_meshes` 3.2-4.7, `r_prepare` 3.4-3.9, `r_bind` 2.3-3.9 ms.
+  - The rest is time inside schedule spans but outside any system span. In the 160501 window at 47.5 s, the `Render` and `PostUpdate` schedules each hold about 11 ms of exclusive time per render frame, and `multithreaded executor` about 3.1 ms.
+  - The six compute threads each work 5-8 ms per frame (160501).
+- Top spans besides those (ms per frame):
+  - `prepare_preprocess_bind_groups` 1.7-2.9;
+  - `frame_split::gpu_begin` 1.7-1.9, a diagnostic that runs while the counter is shown;
+  - the shadow pass encode, about 1.7;
+  - `mesh_stream::resort`/`upload` 1.0-1.5;
+  - visibility `par_for_each` 1.3-2.0 each;
+  - `frame_split::transform_burst` 0.5-0.6;
+  - `car_batch::refresh` 0.5.
+- GPU: the frame_split markers, all inside one `queue_submit` of 27 command buffers per frame, put 35-37 ms
+  between the first and last marker, 27-29 ms of it in the opaque segment.
+  - Bevy's per-pass timestamps (`gpu_pass`, written inside the render passes) give `main_opaque_pass_3d` only
+    2.5-4.4 ms, with 1.5-1.9 M fragments.
+  - Shadow cascade 2 reports 2.8 M primitives per frame (161206, 62.5 s) while `view_triangles` counts 212 k
+    triangles in that cascade.
+- Resolution: `render_dynamic` went 720 → 552 at the start and reverted as `ineffective`: it gained 3.8 ms where a pixel-bound frame would gain 27.7 ms. Then it went to 480 and stayed. From 115 s on it logs `reason=cpu_bound` with `work_ms` 20-23.
+
+### Reading [I]
+
+- Not pixel-bound. The frame is at the 480-row floor, and the controller's own probe found about 14 % of the pixel-bound gain. Lower resolution will not raise FPS.
+- The render thread and the GPU timeline both sit at about 35 ms, the main thread at 26-34 ms. In 160330 and 160501 the main thread is clearly below the other two (26-28 against 35). So main-thread work is not what holds the phone at 26 FPS now. It becomes the next limit only once render and GPU drop under about 28 ms, and in long races `drive_tick` grows with ticks per frame.
+- The opaque GPU segment (27-29 ms) does not scale with pixels, and the in-pass timestamps see only 2.5-4.4 ms of it. On a tiling GPU, in-pass timestamps do not cover the binning (vertex) phase. With 2.8 M shadow primitives against 212 k triangles, per-bin geometry replay is the leading suspect, but it is not verified. The other candidates are the GPU preprocessing and indirect-draw path (`bin_unpacking`, `prepare_preprocess_bind_groups`) and query overhead.
+- About 11 ms per frame of exclusive schedule time on each of the main and render threads, with idle compute threads, points to executor and thread wake-up latency on the phone, not to system work. The 26 October profile (F571) showed the same pattern at a smaller scale: the render thread worked 8.5-10.7 of 23-26 ms.
+
+### Against earlier phone measurements
+
+- F571 (26 October, profile APK 3cdbf523, Donington, 12 BMW, 480 rows) [O]: frame 23-27 ms, Main 18-24 ms,
+  Render 21-25 ms, `drive_tick` 4.4-9.4 ms per frame.
+- F600 (27 October, grid start) [O]: a steady 35.4 ms frame, with `present_frames` 11-13 ms.
+- Now: frame 38-41 ms, main 26-34 ms, render about 35 ms. The phone is about 12 ms per frame slower in a race than on 26 October.
+  The F894 desktop main-thread work is in this APK: 53a84ea5 is an ancestor of 57c966e1.
+  - Not like for like: the field is Lacetti instead of BMW.
+  - F600 (`gpu_passes`, pipeline statistics in every pass) and F836 (`frame_split`, while the counter is shown) were added after 26 October and both run here.
+  - The desktop main-thread gains are 0.1-1 ms on a PC frame. They are too small to show against this.

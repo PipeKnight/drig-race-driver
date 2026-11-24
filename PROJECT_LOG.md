@@ -181,6 +181,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F912](log/F0912.md) | 2026-11-24 | Xiaomi profile APK 57c966e1: where the 38 ms phone frame goes |
 | [F911](log/F0911.md) | 2026-11-24 | README graphics line reworded; ROADMAP optional graphics entry |
 | [F910](log/F0910.md) | 2026-11-24 | README for players: download, bug reports, roadmap file |
 | [F909](log/F0909.md) | 2026-11-24 | Release v0.1.0 published |
@@ -240,7 +241,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F855](log/F0855.md) | 2026-11-18 | Archived worktree copies zipped into worktree-evidence |
 | [F854](log/F0854.md) | 2026-11-18 | Streamed minimap ribbon and crowd flash meshes: visibility no longer revisits every mesh each frame |
 | [F853](log/F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
-| [F852](log/F0852.md) | 2026-11-18 | Own-car dents on the compute pool; drive_present, solver and visibility probes |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

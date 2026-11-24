@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F912](F0912.md) | 2026-11-24 | Xiaomi profile APK 57c966e1: where the 38 ms phone frame goes |
 | [F911](F0911.md) | 2026-11-24 | README graphics line reworded; ROADMAP optional graphics entry |
 | [F910](F0910.md) | 2026-11-24 | README for players: download, bug reports, roadmap file |
 | [F909](F0909.md) | 2026-11-24 | Release v0.1.0 published |
