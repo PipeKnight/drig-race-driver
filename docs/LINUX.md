@@ -106,7 +106,7 @@ NVIDIA drivers on a real Linux machine. The F-entry that added this document has
 | Packages | tar listing and `build.json` as specified, `min_glibc` 2.35 |
 | v0.1.0 candidate files (player build of e4e5b0c9): `--version`, `--help` (tarball, AppImage with FUSE, AppImage extract-and-run) | `DRIG 0.1.0 (revision e4e5b0c9b99e)`, rc 0, no developer flags |
 | v0.1.0 candidate files: the race above without `--data-dir` (tarball and AppImage with FUSE) | 300 ticks; `DRIG-data` created next to `drig` and next to the `.AppImage` |
-| v0.1.0 release files (with the `--game-root` fix): menu start with only `--game-root PATH`, and `--list-tracks --game-root PATH`, no Steam library present | F907 has the results |
+| v0.1.0 release files (player build of 1ed1b050): `--version`, `--help`, menu start with only `--game-root PATH`, `--list-tracks --game-root PATH`, no Steam library present; the race above from the tarball | `DRIG 0.1.0 (revision 1ed1b05002e4)`; `built screen=Menu ok=true`; 77 routes, rc 0; 300 ticks (F908) |
 
 Not tested:
 - real GPUs and their drivers, frame rate, X11 versus Wayland differences on real desktops
