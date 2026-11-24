@@ -209,15 +209,16 @@ pub fn resolve_track<'a>(
     first
 }
 
-/// The player build's output (row 130): from a terminal the text goes there;
-/// started without one (Explorer, a desktop file, Finder) stdout and stderr go
-/// to `DATA_DIR/drig.log`, the previous run's to `drig.previous.log`. A
-/// redirect to a file or pipe is kept. The developer build leaves the output
-/// alone (the launchers redirect it).
+/// The run's output (row 130, docs/SETTINGS.md "Run logs"): from a terminal
+/// the text goes there; started without one (Explorer, a desktop file,
+/// Finder) stdout and stderr go to a new file
+/// `DATA_DIR/playtest/drig-<UTC yyyymmddTHHMMSSZ>-<revision>.log`, and only
+/// the newest [`RUN_LOGS_KEPT`] such files stay. A redirect to a file or pipe
+/// is kept, so the developer launchers' logs and a menu's child processes
+/// (which inherit the parent's log) are unchanged. One path for Windows,
+/// Linux and macOS, in both builds; Android writes its own files
+/// (CrashLog.java, same naming and count).
 pub fn setup_output(args: &[String], start: &Start) {
-    if crate::dev::ENABLED {
-        return;
-    }
     let console_text = matches!(start, Start::Help | Start::Version | Start::ListTracks);
     if !os::detached() {
         return;
@@ -227,14 +228,139 @@ pub fn setup_output(args: &[String], start: &Start) {
     }
     let dir = value(args, "--data-dir")
         .map(PathBuf::from)
-        .unwrap_or_else(crate::settings::default_data_dir);
+        .unwrap_or_else(crate::settings::default_data_dir)
+        .join("playtest");
     if std::fs::create_dir_all(&dir).is_err() {
         return;
     }
-    let log = dir.join("drig.log");
-    let _ = std::fs::rename(&log, dir.join("drig.previous.log"));
-    if let Ok(file) = std::fs::File::create(&log) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if let Ok((path, file)) = run_log::create(&dir, &run_log::utc_stamp(now), crate::BUILD_REVISION) {
         os::redirect(file);
+        println!("run_log path={}", path.display());
+        for old in run_log::prune(&dir, RUN_LOGS_KEPT) {
+            println!("run_log removed={}", old.display());
+        }
+    }
+}
+
+/// Run logs kept in `DATA_DIR/playtest/`, the new one included (as Android's
+/// `CrashLog.KEEP`).
+pub const RUN_LOGS_KEPT: usize = 10;
+
+/// The per-run log files (`setup_output`): naming, the same-second clash
+/// suffix and retention. Only names of exactly this form are counted or
+/// deleted; `drig.log`, `drig.previous.log`, the time-trial records and the
+/// developer launchers' logs in the same folder are never touched.
+mod run_log {
+    use std::fs::File;
+    use std::path::{Path, PathBuf};
+
+    /// `yyyymmddTHHMMSSZ` for seconds since the Unix epoch (UTC).
+    pub fn utc_stamp(unix_secs: u64) -> String {
+        let days = (unix_secs / 86_400) as i64;
+        let rest = unix_secs % 86_400;
+        // Civil date from days since 1970-01-01 (H. Hinnant's algorithm).
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = doy - (153 * mp + 2) / 5 + 1;
+        let month = if mp < 10 { mp + 3 } else { mp - 9 };
+        let year = yoe + era * 400 + i64::from(month <= 2);
+        format!(
+            "{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z",
+            rest / 3600,
+            rest / 60 % 60,
+            rest % 60
+        )
+    }
+
+    /// The revision part of the name: letters, digits and `-` only (a
+    /// `-dirty` mark stays); a longer hex hash is cut to 12 digits, as the
+    /// packagers set it.
+    pub fn revision_tag(revision: &str) -> String {
+        let tag: String = revision
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+        if tag.len() > 12 && tag.chars().all(|c| c.is_ascii_hexdigit()) {
+            tag[..12].to_owned()
+        } else if tag.is_empty() {
+            "unversioned".to_owned()
+        } else {
+            tag
+        }
+    }
+
+    /// `drig-STAMP-REV.log`; on a clash (two starts in one second)
+    /// `drig-STAMP-REV.N.log` with N from 2.
+    pub fn name(stamp: &str, revision: &str, clash: u32) -> String {
+        let revision = revision_tag(revision);
+        if clash < 2 {
+            format!("drig-{stamp}-{revision}.log")
+        } else {
+            format!("drig-{stamp}-{revision}.{clash}.log")
+        }
+    }
+
+    /// The order of a run log among the others (stamp, then clash number,
+    /// then name); `None` for every other file name.
+    pub fn key(name: &str) -> Option<(&str, u32, &str)> {
+        let body = name.strip_prefix("drig-")?.strip_suffix(".log")?;
+        let stamp = body.get(..16)?;
+        let b = stamp.as_bytes();
+        let stamp_ok = b[..8].iter().chain(&b[9..15]).all(u8::is_ascii_digit)
+            && b[8] == b'T'
+            && b[15] == b'Z';
+        let rest = body[16..].strip_prefix('-')?;
+        let (revision, clash) = match rest.rsplit_once('.') {
+            Some((revision, n)) => (revision, n.parse::<u32>().ok().filter(|n| *n >= 2)?),
+            None => (rest, 1),
+        };
+        let revision_ok =
+            !revision.is_empty() && revision.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+        (stamp_ok && revision_ok).then_some((stamp, clash, name))
+    }
+
+    /// Creates the run's file; a name another start already took gets the
+    /// next clash number (`create_new`, so two processes never share one).
+    pub fn create(dir: &Path, stamp: &str, revision: &str) -> std::io::Result<(PathBuf, File)> {
+        let mut last = None;
+        for clash in 1..=999 {
+            let path = dir.join(name(stamp, revision, clash));
+            match File::options().write(true).create_new(true).open(&path) {
+                Ok(file) => return Ok((path, file)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => last = Some(error),
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last.unwrap_or_else(|| std::io::Error::other("no free run log name")))
+    }
+
+    /// Deletes all but the newest `keep` run logs in `dir`; returns the
+    /// deleted paths. A file that cannot be deleted (still open on Windows)
+    /// stays until a later start.
+    pub fn prune(dir: &Path, keep: usize) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| key(name).is_some())
+            .collect();
+        names.sort_by(|a, b| key(b).cmp(&key(a)));
+        names
+            .into_iter()
+            .skip(keep)
+            .map(|name| dir.join(name))
+            .filter(|path| std::fs::remove_file(path).is_ok())
+            .collect()
     }
 }
 
@@ -462,5 +588,85 @@ mod tests {
         set_quick_start(&args("--track donington"));
         assert_eq!(take_quick_start().and_then(|q| q.track.as_deref()), Some("donington"));
         assert!(take_quick_start().is_none());
+    }
+
+    #[test]
+    fn run_log_names_carry_utc_time_and_revision() {
+        assert_eq!(run_log::utc_stamp(0), "19700101T000000Z");
+        // 2026-11-25 10:15:07 UTC; 2024-02-29 23:59:59 UTC (leap day).
+        assert_eq!(run_log::utc_stamp(1_795_601_707), "20261125T101507Z");
+        assert_eq!(run_log::utc_stamp(1_709_251_199), "20240229T235959Z");
+        let stamp = "20261125T101507Z";
+        assert_eq!(run_log::name(stamp, "1ed1b05002e4", 1), "drig-20261125T101507Z-1ed1b05002e4.log");
+        assert_eq!(run_log::name(stamp, "1ed1b05002e4", 2), "drig-20261125T101507Z-1ed1b05002e4.2.log");
+        // A full hash is cut to 12 digits; a dirty mark and odd characters.
+        assert_eq!(
+            run_log::name(stamp, "1ed1b05002e40000000000000000000000000000", 1),
+            "drig-20261125T101507Z-1ed1b05002e4.log"
+        );
+        assert_eq!(run_log::revision_tag("1ed1b05002e4-dirty"), "1ed1b05002e4-dirty");
+        assert_eq!(run_log::revision_tag("a/b.c"), "abc");
+        assert_eq!(run_log::revision_tag(""), "unversioned");
+        // Only this exact form counts as a run log.
+        for own in [run_log::name(stamp, "unversioned", 1), run_log::name(stamp, "123456789012", 3)] {
+            assert!(run_log::key(&own).is_some(), "{own}");
+        }
+        for other in [
+            "drig.log",
+            "drig.previous.log",
+            "time-trial-records.tsv",
+            "manual-6944-21324.log",
+            "drig-20261125T101507Z-1ed1b05002e4.Ab12Cd",
+            "drig-20261125T101507Z-1ed1b05002e4.1.log",
+            "drig-2026112XT101507Z-1ed1b05002e4.log",
+            "drig-20261125T101507Z-.log",
+            "drig-notes.log",
+        ] {
+            assert!(run_log::key(other).is_none(), "{other}");
+        }
+    }
+
+    #[test]
+    fn run_logs_get_a_clash_suffix_and_only_the_newest_stay() {
+        let dir = std::env::temp_dir().join(format!("drig-run-log-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let others = ["drig.log", "drig.previous.log", "time-trial-records.tsv", "manual-1-2.log", "drig-notes.log"];
+        for other in others {
+            std::fs::write(dir.join(other), other).unwrap();
+        }
+        // Three starts in one second: distinct files, in order.
+        let stamp = "20261125T101507Z";
+        let made: Vec<_> = (0..3).map(|_| run_log::create(&dir, stamp, "1ed1b05002e4").unwrap().0).collect();
+        let names: Vec<_> = made.iter().map(|p| p.file_name().unwrap().to_str().unwrap().to_owned()).collect();
+        assert_eq!(
+            names,
+            [
+                "drig-20261125T101507Z-1ed1b05002e4.log",
+                "drig-20261125T101507Z-1ed1b05002e4.2.log",
+                "drig-20261125T101507Z-1ed1b05002e4.3.log"
+            ]
+        );
+        // Ten older starts, one per second before.
+        for second in 0..10 {
+            run_log::create(&dir, &format!("20261125T1014{second:02}Z"), "0123456789ab").unwrap();
+        }
+        let removed = run_log::prune(&dir, RUN_LOGS_KEPT);
+        assert_eq!(removed.len(), 3);
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|name| run_log::key(name).is_some())
+            .collect();
+        left.sort();
+        assert_eq!(left.len(), RUN_LOGS_KEPT);
+        // The oldest three went; the same-second clash files all stayed.
+        assert_eq!(left[0], "drig-20261125T101403Z-0123456789ab.log");
+        assert!(names.iter().all(|n| left.contains(n)));
+        for other in others {
+            assert_eq!(std::fs::read_to_string(dir.join(other)).unwrap(), other);
+        }
+        assert!(run_log::prune(&dir, RUN_LOGS_KEPT).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

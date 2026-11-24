@@ -21,39 +21,48 @@ def git(root, *args):
 
 
 class RebuildTests(unittest.TestCase):
-    def test_same_second_launches_keep_distinct_logs(self):
+    def test_launcher_passes_one_data_dir_and_leaves_the_log_to_the_engine(self):
         spec = importlib.util.spec_from_file_location(
             "build_macos", Path(__file__).parents[1] / "build_macos.py")
         packager = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(packager)
-        with tempfile.TemporaryDirectory(prefix="DRIG log test ") as directory:
-            root = Path(directory)
+        with tempfile.TemporaryDirectory(prefix="DRIG launch test ") as directory:
+            # pwd -P in the launcher: macOS temp folders sit behind /var -> /private/var.
+            root = Path(directory).resolve()
             macos = root / "DRIG.app/Contents/MacOS"
             macos.mkdir(parents=True)
-            (macos.parent / "Resources/Grid").mkdir(parents=True)
+            game = macos.parent / "Resources/Grid"
+            game.mkdir(parents=True)
             launcher = macos / "DRIG"
-            launcher.write_text(packager.LAUNCHER.replace("@BUILD_REVISION@", "1ed1b05002e4"))
-            clock = root / "date"
-            clock.write_text("#!/bin/sh\necho 20261125T000100Z\n")
-            clock.chmod(0o755)
+            launcher.write_text(packager.LAUNCHER)
+            seen = root / "engine-args.txt"
             engine = macos / "grid-app"
-            engine.write_text("#!/bin/sh\nprintf 'race output\\n'\n")
+            engine.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{seen}'\nprintf 'race output\\n'\n")
             engine.chmod(0o755)
             data = root / "DRIG-data"
-            data.mkdir()
-            previous = data / "drig.log"
-            previous.write_text("earlier session")
-
-            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"])
+            env = dict(os.environ)
             env.pop("GRID_DATA_DIR", None)
-            subprocess.run(["sh", launcher], env=env, check=True)
-            [first] = (data / "playtest").iterdir()
-            subprocess.run(["sh", launcher], env=env, check=True)
-            logs = list((data / "playtest").glob("drig-20261125T000100Z-1ed1b05002e4.*"))
-            self.assertEqual(len(logs), 2)
-            self.assertIn(first, logs)
-            self.assertTrue(all(p.read_text() == "race output\n" for p in logs))
-            self.assertEqual(previous.read_text(), "earlier session")
+
+            def launch(*args, **extra):
+                result = subprocess.run(["sh", launcher, *args], env=dict(env, **extra), check=True,
+                                        capture_output=True, text=True)
+                # The launcher redirects nothing: the engine decides (player.rs setup_output).
+                self.assertEqual(result.stdout, "race output\n")
+                return seen.read_text().splitlines()
+
+            # Finder: no arguments.
+            self.assertEqual(launch(), ["--data-dir", str(data), "--game-root", str(game)])
+            self.assertTrue(data.is_dir())
+            self.assertFalse((data / "playtest").exists())
+            # Explicit flags get the same data folder; the user's game root comes last and wins.
+            self.assertEqual(launch("--windowed", "--game-root", "/g"),
+                             ["--game-root", str(game), "--data-dir", str(data), "--windowed", "--game-root", "/g"])
+            # The user's own --data-dir is kept and no other is added.
+            self.assertEqual(launch("--data-dir", "/d", "--help"),
+                             ["--game-root", str(game), "--data-dir", "/d", "--help"])
+            other = root / "other data"
+            self.assertEqual(launch(GRID_DATA_DIR=str(other)),
+                             ["--data-dir", str(other), "--game-root", str(game)])
 
     def test_installed_resources_are_preferred_and_explicit_path_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -102,6 +111,8 @@ class RebuildTests(unittest.TestCase):
                     if args[0] == "fixture-cargo":
                         self_outer.assertIn("--no-default-features", args)
                         self_outer.assertEqual(git(cwd, "rev-parse", "HEAD"), revision)
+                        # 12 hex digits in every build, as the other packagers (run log names).
+                        self_outer.assertEqual(env["GRID_BUILD_REVISION"], revision[:12])
                         self_outer.assertEqual((Path(cwd) / "tracked.txt").read_text(), "remote main\n")
                         if fail:
                             raise subprocess.CalledProcessError(9, args)

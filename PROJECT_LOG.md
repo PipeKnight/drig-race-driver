@@ -182,6 +182,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F918](log/F0918.md) | 2026-11-25 | Unified per-run logs on all platforms |
 | [F917](log/F0917.md) | 2026-11-24 | CI: Intel-only SSE host comparison, vendor-independent digest test |
 | [F916](log/F0916.md) | 2026-11-24 | Keep macOS player packaging and portable race logs |
 | [F915](log/F0915.md) | 2026-11-24 | Xiaomi Performance test A/B: shadows and scene off gain nothing, fixed per-frame CPU overhead wins |
@@ -241,7 +242,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F861](log/F0861.md) | 2026-11-19 | Main-world peaks: stdout writer thread, blended cover gathers async |
 | [F860](log/F0860.md) | 2026-11-19 | Compute pool capped at 8 threads: +1.4 to +2.8 fps; slow render frames rare when the PC is idle |
 | [F859](log/F0859.md) | 2026-11-19 | Per-frame mesh uploads: dents and car batches stream changed vertices; reflection overlays follow a part leaving its batch |
-| [F858](log/F0858.md) | 2026-11-19 | Owner priority 2026-11-19: portable data, few files, in-app update, release/debug split |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

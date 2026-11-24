@@ -110,7 +110,7 @@ device=pad
 
 Builds before v0.1.0 used the per-user folder of step 4 whenever there was no `local/`. Data there is not moved: copy `settings.ini` and `playtest/` into `DRIG-data/` to keep it, or start with `--data-dir` naming the old folder.
 
-It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`), `camera.ini` (the last in-race view, `current_camera = IDENT`, written by the app on exit like the original's profile key; [CAMERA_VIEWS.md](CAMERA_VIEWS.md)) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs are still the launcher's redirect of stdout to `local\playtest\manual-*.log` in the owner's checkout; on Android stdout goes to logcat (P9).
+It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`), `camera.ini` (the last in-race view, `current_camera = IDENT`, written by the app on exit like the original's profile key; [CAMERA_VIEWS.md](CAMERA_VIEWS.md)) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs: a start without a terminal or redirect writes `playtest/drig-<UTC time>-<revision>.log` (section 6, "Run logs"); the owner's launchers redirect stdout to `local\playtest\manual-*.log` themselves; on Android see [ANDROID.md](ANDROID.md) "Errors and the log file".
 
 ## 3. Install discovery and case-insensitive index
 
@@ -208,9 +208,19 @@ The `dev-tools` Cargo feature of grid-app is on by default. The owner's builds, 
 - It reads no diagnostic `GRID_*` environment variable (`dev::var`, crates/grid-app/src/dev.rs). The variables it still reads are the ones the program passes to its own child processes (`GRID_SERIES_EXPERIMENTAL`, the screen hand-off variables in transition.rs) and the smoke switches `GRID_MENU_AUTO` / `GRID_MENU_LOOPS` ([EVENT_MENU.md](EVENT_MENU.md)). Every run takes the default path.
 - It ignores the `[diagnostics]` settings section and logs `settings_diagnostics ignored=N`.
 - On Windows it is a GUI program, so starting it opens no console window. When a terminal starts it, `--help`, `--version` and `--list-tracks` print to that terminal.
-- When it starts with no terminal and no redirect, stdout and stderr go to `DATA_DIR/drig.log`. The previous run's log is kept as `drig.previous.log`.
 
-Still in the player build: the developer flags (they need a command line and change nothing in a menu start), the CPU lap timers behind the frame split (one `Instant` per lap), and the per-tick race log lines, which now go to `drig.log`.
+Still in the player build: the developer flags (they need a command line and change nothing in a menu start), the CPU lap timers behind the frame split (one `Instant` per lap), and the per-tick race log lines, which go to the run log.
+
+### Run logs (backlog row 130, owner decision 2026-11-25: the same everywhere)
+
+One mechanism for Windows, Linux and macOS, in both builds (`player::setup_output`, crates/grid-app/src/player.rs):
+
+- When the program starts with no terminal and no redirect (Explorer, a desktop file, the AppImage from a file manager, Finder), stdout and stderr go to a new file `DATA_DIR/playtest/drig-<UTC yyyymmddTHHMMSSZ>-<revision>.log`. The revision is `GRID_BUILD_REVISION` (12 hex digits in every packaged build; letters, digits and `-` only, `unversioned` when unset). Its first line is `run_log path=…`.
+- Two starts in the same second get `drig-STAMP-REV.2.log`, `.3.log`, …; the file is created with `create_new`, so two processes never share one.
+- Only the newest 10 run logs stay (by time stamp, then clash number); each deleted one is logged as `run_log removed=…`. Only names of exactly this form are counted or deleted: `drig.log` and `drig.previous.log` of builds up to v0.1.0, `time-trial-records.tsv` and the owner's `manual-*.log` / `menu-*.log` in the same folder are never touched.
+- A start from a terminal keeps its output there; a redirect to a file or pipe is kept (the owner's launchers, the smoke tools, the menu's child processes, which inherit their parent's log).
+- The macOS launcher (tools/build_macos.py) only chooses the data folder and the game folder; it no longer redirects anything. It passes the same `--data-dir` to every launch unless the command line has its own.
+- Android writes `Download/GRID-Reassembly/log-<UTC yyyyMMddTHHmmssZ>-<revision>.txt` through MediaStore with the same count of 10 (CrashLog.java, [ANDROID.md](ANDROID.md) "Errors and the log file").
 
 ## Shared main-view display preferences (G360)
 

@@ -19,12 +19,15 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 
 /**
  * Log files in the shared Downloads folder, Download/GRID-Reassembly/, where
  * the owner can open them with any file manager (docs/ANDROID.md). Written
  * through MediaStore, which needs no permission on Android 10 and newer. The
- * oldest files beyond {@link #KEEP} are deleted.
+ * oldest files beyond {@link #KEEP} are deleted. Names follow the desktop run
+ * logs (player.rs setup_output): {@code <prefix>-<UTC yyyyMMdd'T'HHmmss'Z'>-<revision>.txt},
+ * the revision being the build's {@code GRID_BUILD_REVISION} (12 hex digits).
  */
 final class CrashLog {
     static final String FOLDER = Environment.DIRECTORY_DOWNLOADS + "/GRID-Reassembly/";
@@ -44,12 +47,23 @@ final class CrashLog {
 
     private CrashLog() {}
 
-    /** Creates {@code <prefix>-<time>.txt}; null if MediaStore refuses. */
+    /**
+     * {@code <prefix>-<UTC time>-<revision>.txt}: letters, digits and '-' of
+     * the revision only, "unversioned" when none is left.
+     */
+    static String fileName(String prefix, long epochMillis, String revision) {
+        SimpleDateFormat format = new SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.ROOT);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        String tag = revision == null ? "" : revision.replaceAll("[^0-9A-Za-z-]", "");
+        return prefix + "-" + format.format(new Date(epochMillis)) + "-"
+                + (tag.isEmpty() ? "unversioned" : tag) + ".txt";
+    }
+
+    /** Creates {@code <prefix>-<time>-<revision>.txt}; null if MediaStore refuses. */
     static LogFile create(Context context, String prefix) {
         try {
             prune(context);
-            String name = prefix + "-"
-                    + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(new Date()) + ".txt";
+            String name = fileName(prefix, System.currentTimeMillis(), BuildConfig.GRID_REVISION);
             ContentValues values = new ContentValues();
             values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
             values.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");

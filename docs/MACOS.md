@@ -115,15 +115,21 @@ proprietary game resources: do not upload the image or application to GitHub.
 
 Settings, saves and caches go in `DRIG-data` next to the app, or in
 `~/Library/Application Support/GRID Reassembly/` when the adjacent folder is
-not writable. Each Finder launch writes a separate file under `playtest/`,
-named `drig-<UTC timestamp>-<commit>.<unique suffix>`. With an app installed
-in Applications, look in `/Applications/DRIG-data/playtest/`. Earlier player
-builds used `drig.log` and `drig.previous.log` in the data directory.
+not writable. Each Finder launch writes its own run log under `playtest/`,
+`drig-<UTC timestamp>-<12-digit commit>.log` (`.2.log`, … for two launches in
+the same second); the 10 newest are kept. The engine writes it, as on Windows
+and Linux (docs/SETTINGS.md section 6, "Run logs"); the launcher redirects
+nothing. With an app installed in Applications, look in
+`/Applications/DRIG-data/playtest/`. Earlier player builds used `drig.log` and
+`drig.previous.log` in the data directory, and the F916 launcher wrote
+`drig-<timestamp>-<commit>.<random suffix>` files without a limit; those are
+left as they are.
 
 Copy older settings, records and replays from Application Support with the app
 closed, or pass `--data-dir` to choose the old location from the command line.
-Launches with explicit flags keep their console output. `GRID_DATA_DIR`
-overrides the data location for a no-argument launch. `build.json` inside Resources
+Launches with explicit flags keep their console output and get the same data
+folder, unless they pass `--data-dir` themselves. `GRID_DATA_DIR` overrides
+the data location. `build.json` inside Resources
 records the source revision, architecture and whether game data is embedded.
 
 The DMG contains the complete app and a shortcut to Applications. Its checksum

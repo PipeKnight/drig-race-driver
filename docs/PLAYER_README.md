@@ -39,14 +39,25 @@ scale, quality, starting a race on a track directly.
 
 ## Your data
 
-Settings, records, replays and the log (drig.log) are kept in the DRIG-data
+Settings, records, replays and the run logs are kept in the DRIG-data
 folder next to the exe, so the whole game stays in one folder you can move or
 delete. If that folder cannot be written (for example under Program Files),
 DRIG uses %APPDATA%\GRID Reassembly instead. `--data-dir DIR` picks another
 folder.
 
+Every start writes its own log, DRIG-data\playtest\drig-<UTC time>-<revision>.log;
+the newest file is the last run. DRIG keeps the 10 newest and deletes older
+ones. Attach the log of the run that went wrong to a bug report.
+
 Earlier test builds kept their data in %APPDATA%\GRID Reassembly. To keep
 it, copy settings.ini and the playtest folder from there into DRIG-data.
+
+## Changes since v0.1.0
+
+- The log moved: each start now writes its own file in DRIG-data\playtest
+  (drig-<UTC time>-<revision>.log, the 10 newest kept) instead of
+  DRIG-data\drig.log and drig.previous.log. Old drig.log files are left as
+  they are; delete them when you no longer need them.
 
 ## Updating
 

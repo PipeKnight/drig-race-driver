@@ -137,7 +137,7 @@ def build(args, runner):
             # A separate detached clone, not a checkout/reset/stash of the user's branch.
             job.run(["git", "clone", "--shared", "--no-checkout", "--local", ROOT, source])
             job.run(["git", "checkout", "--detach", revision], cwd=source)
-            env = dict(os.environ, CARGO_TARGET_DIR=str(target), GRID_BUILD_REVISION=revision[:12] if args.code_only else revision)
+            env = dict(os.environ, CARGO_TARGET_DIR=str(target), GRID_BUILD_REVISION=revision[:12])
             env["CARGO_BUILD_BUILD_DIR"] = str(target / "build")
             env.pop("CARGO_BUILD_TARGET", None)
             compile_cmd = [*cargo, "build", "--locked", "--release", "--target", host,

@@ -15,27 +15,38 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Finder supplies no command line or useful working directory. Keep user data
-# and diagnostics outside the bundle, including in the menu's child processes.
+# Finder supplies no command line or useful working directory. The launcher
+# only chooses the data folder and the game folder and starts the engine. The
+# engine writes the run log itself (DATA_DIR/playtest/drig-*.log, the newest
+# 10 kept), as on Windows and Linux: a Finder start has no terminal, so the
+# engine redirects its own output; a terminal start keeps its console output.
+# Every launch gets the same data folder unless it passes --data-dir itself.
 LAUNCHER = r'''#!/bin/sh
 set -eu
 macos_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 engine="$macos_dir/grid-app"
 resources="$(dirname "$macos_dir")/Resources"
 cd "$resources"
-if [ "$#" -ne 0 ]; then
+user_args=$#
+own_data_dir=0
+for arg in "$@"; do
+    if [ "$arg" = "--data-dir" ]; then own_data_dir=1; fi
+done
+if [ "$own_data_dir" -eq 0 ]; then
+    bundle_dir="$(dirname "$(dirname "$(dirname "$macos_dir")")")"
+    data_dir="${GRID_DATA_DIR:-$bundle_dir/DRIG-data}"
+    if [ -z "${GRID_DATA_DIR:-}" ] && ! (mkdir -p "$data_dir" && probe=$(mktemp "$data_dir/.drig-write-test.XXXXXX") && rm "$probe") 2>/dev/null; then
+        data_dir="$HOME/Library/Application Support/GRID Reassembly"
+    fi
+    mkdir -p "$data_dir"
+    set -- --data-dir "$data_dir" "$@"
+fi
+if [ "$user_args" -ne 0 ]; then
     if [ -d "$resources/Grid" ]; then
         exec "$engine" --game-root "$resources/Grid" "$@"
     fi
     exec "$engine" "$@"
 fi
-bundle_dir="$(dirname "$(dirname "$(dirname "$macos_dir")")")"
-data_dir="${GRID_DATA_DIR:-$bundle_dir/DRIG-data}"
-if [ -z "${GRID_DATA_DIR:-}" ] && ! (mkdir -p "$data_dir" && probe=$(mktemp "$data_dir/.drig-write-test.XXXXXX") && rm "$probe") 2>/dev/null; then
-    data_dir="$HOME/Library/Application Support/GRID Reassembly"
-    mkdir -p "$data_dir"
-fi
-mkdir -p "$data_dir"
 if [ -d "$resources/Grid" ]; then
     game_root="$resources/Grid"
 else
@@ -48,13 +59,11 @@ else
             /usr/bin/osascript -e 'display alert "GRID game files not found" message "Select the complete Windows GRID 2008 installation folder."'
             exit 1
         fi
-        printf '%s\n' "$game_root" > "$root_file"
+        printf '%s
+' "$game_root" > "$root_file"
     fi
 fi
-mkdir -p "$data_dir/playtest"
-stamp=$(date -u +%Y%m%dT%H%M%SZ)
-log=$(mktemp "$data_dir/playtest/drig-$stamp-@BUILD_REVISION@.XXXXXX")
-exec "$engine" --data-dir "$data_dir" --game-root "$game_root" >"$log" 2>&1
+exec "$engine" --data-dir "$data_dir" --game-root "$game_root"
 '''
 
 
@@ -142,7 +151,7 @@ def main():
     shutil.copy2(binary, macos / "grid-app")
     launcher = macos / "DRIG"
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source_root, text=True).strip()
-    launcher.write_text(LAUNCHER.replace("@BUILD_REVISION@", revision[:12]), encoding="utf-8")
+    launcher.write_text(LAUNCHER, encoding="utf-8")
     launcher.chmod(0o755)
     icon = ROOT / "crates/grid-app/assets/macos/DRIG.icns"
     if icon.is_file():

@@ -125,7 +125,7 @@ Compilation needs no original game files; playing requires your own Windows GRID
 
 Testers are welcome, on any system and any hardware. Play a few events and tell us what breaks, what feels different from the original and how fast it runs. Open an [issue](https://github.com/PipeKnight/drig-race-driver/issues) and attach:
 
-- `DRIG-data/drig.log`, and after a crash also `DRIG-data/drig.previous.log`;
+- the run log: every start writes a new file `DRIG-data/playtest/drig-<UTC time>-<revision>.log` (the newest is the last run; the 10 newest are kept). On Android it is `Download/GRID-Reassembly/log-<UTC time>-<revision>.txt`. Builds up to v0.1.0 wrote `DRIG-data/drig.log` and `drig.previous.log` instead;
 - your GPU, CPU, graphics driver version and resolution;
 - the event, track and car, and what you did just before the problem.
 
