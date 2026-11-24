@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F899](F0899.md) | 2026-11-24 | Backlog row 143: split grid-app main.rs into modules |
 | [F898](F0898.md) | 2026-11-24 | Owner priority: spatial audio as in the original (reverb, multichannel, verified panning) |
 | [F897](F0897.md) | 2026-11-24 | Bundled APKs: stale event file lists, automatic stage check in build_android |
 | [F896](F0896.md) | 2026-11-24 | Profile APK f4e8d4123be7 for the main-thread phone measurement |
