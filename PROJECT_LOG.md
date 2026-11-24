@@ -138,6 +138,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - Build gate `tools/build_gate.ps1` and nightly soak (F524); shared seed build and rust-lld (F467);
   `tools/prune_build_dirs.ps1` (F438); grid-soak harness (docs/SOAK_TESTING.md); check levels and the
   identity check in docs/TOOLCHAIN.md.
+- F913: GitHub Actions CI without game data (docs/TOOLCHAIN.md, "Continuous integration").
 - F532: the log is split into log/ with `tools/log_entry.py`; open capture work is listed in
   [docs/CAPTURE_BACKLOG.md](docs/CAPTURE_BACKLOG.md).
 
@@ -181,6 +182,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F913](log/F0913.md) | 2026-11-24 | GitHub Actions CI: Linux Clippy and data-free tests, Windows Clippy |
 | [F912](log/F0912.md) | 2026-11-24 | Xiaomi profile APK 57c966e1: where the 38 ms phone frame goes |
 | [F911](log/F0911.md) | 2026-11-24 | README graphics line reworded; ROADMAP optional graphics entry |
 | [F910](log/F0910.md) | 2026-11-24 | README for players: download, bug reports, roadmap file |
@@ -240,7 +242,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F856](log/F0856.md) | 2026-11-18 | HUD drawn by an overlay pass in the frame's render graph; no OSD camera |
 | [F855](log/F0855.md) | 2026-11-18 | Archived worktree copies zipped into worktree-evidence |
 | [F854](log/F0854.md) | 2026-11-18 | Streamed minimap ribbon and crowd flash meshes: visibility no longer revisits every mesh each frame |
-| [F853](log/F0853.md) | 2026-11-18 | OSD camera on its own render schedule; post-lift worst frame is the covered tail |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

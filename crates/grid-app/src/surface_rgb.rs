@@ -226,10 +226,10 @@ mod tests {
             fs,
             time::{SystemTime, UNIX_EPOCH},
         };
-        let private = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../local")
-            .canonicalize()
-            .unwrap();
+        // The ignored local/ folder is the override root; a fresh clone (CI) has none yet.
+        let private = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local");
+        fs::create_dir_all(&private).unwrap();
+        let private = private.canonicalize().unwrap();
         let dir = private.join(format!(
             "surface-rgb-test-{}-{}",
             std::process::id(),

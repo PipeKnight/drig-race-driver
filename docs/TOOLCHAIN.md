@@ -95,6 +95,52 @@ self-test in the same commit.
 Measured on 2026-11-20 (this PC): the self-test makes 18 commits in about 21 s, about 1.2 s per
 commit including the git calls. Most of that is Python start-up and PowerShell for `.ps1` files.
 
+## Continuous integration (GitHub Actions)
+
+`.github/workflows/ci.yml` runs on every push to main, every pull request into main, and by hand
+(`workflow_dispatch`). It runs only what works without the proprietary game: no GRID files, keys
+or secrets are in the workflow, and its token can only read the repository.
+
+| Job | Runner | Steps |
+|---|---|---|
+| Linux | `ubuntu-24.04` | apt: `pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev` (bevy_audio's ALSA, gilrs' udev, winit's Wayland/xkbcommon); `cargo clippy --release --workspace --all-targets -- -D warnings`; `cargo t --no-fail-fast` |
+| Windows | `windows-2025` | the same Clippy command (Windows-only code, rust-lld from `.cargo/config.toml`) |
+
+Both jobs install the toolchain named by `rust-toolchain.toml` (`rustup toolchain install`) and use
+`Swatinem/rust-cache` v2.9.3; only main saves the cache, so pull requests reuse it without
+filling the 10 GB repository cache limit. Actions are pinned to commit hashes (checkout v7.0.1
+`3d3c42e5`, rust-cache v2.9.3 `d1527c8f`, read with `git ls-remote` on 2026-11-24). A pull
+request's run is cancelled by a newer push to it; pushes to main always finish.
+
+What CI leaves out, and why:
+- **Asset tests.** Every test that reads the purchased game or the private parameter files is
+  `#[ignore = "requires ..."]`; prepush runs them with `--include-ignored` and the `GRID_*`
+  paths, CI runs the default set (`cargo t` without `--include-ignored`, no `GRID_*` variables).
+  The game-root discovery finds no Steam library on a runner. The 2026-11-24 run found one non-ignored test that needed the ignored `local/` folder
+  (`surface_rgb::tests::transform_failure_in_later_row_keeps_all_purchased_cpu_maps` uses it as
+  its scratch root and panicked in `canonicalize`); it now creates the folder (F913). A new test
+  that needs the game or `local/` content must be `#[ignore = "requires ..."]`.
+- **`cargo fmt --check`.** The tree is not rustfmt-clean (2026-11-24: 4280 hunks in 273 files,
+  see "Git hooks"); the step joins CI when a formatting pass has landed.
+- **Render smoke, identity check, `grid-soak quick`.** They need the game data (prepush and the
+  build gate run them locally).
+- **Android, macOS, Linux packaging.** Built by the release tools, not by CI.
+
+CI does not replace `tools/prepush.ps1`: it runs none of the asset tests or identity checks, which
+are where simulation regressions show. It catches a change that breaks the build, Clippy or a
+data-free test on Linux or Windows, including pull requests from contributors who do not own the
+game. `.github/**` takes prepush's docs tier: the workflow is no cargo input.
+
+Local equivalent of the Linux job (validated in WSL Ubuntu 24.04 in a fresh clone, so no `local/`
+and no `GRID_*` variables):
+- `cargo clippy --release --workspace --all-targets -- -D warnings`: clean, 130 s cold (20 threads);
+- `cargo t --no-fail-fast`: 1539 passed, 0 failed, 329 ignored in 18 test binaries; 434 s, of which
+  7 min compile and about 1 s of test run; `target/` 3.2 GB.
+
+The Windows Clippy command passed on this PC in 100 s on a seeded build dir. GitHub's standard
+runners have 4 vCPUs, so a cold run takes several times longer than these numbers, and
+rust-cache shortens later runs; the first runs on GitHub give the real wall time (record it here).
+
 ## Pre-push tiers, build lock and release (F534)
 
 The full pre-push gate (release tests with `--include-ignored`, workspace Clippy, the identity
@@ -116,7 +162,7 @@ Exit code 0 when every check passed.
 
 | Tier | Runs | Chosen for |
 |---|---|---|
-| docs | no cargo: `git diff --check` (conflict markers fail, whitespace is listed), relative Markdown links on added lines must exist (links into `local/` are skipped), changed `.ps1` files must parse, changed `.py` files must parse, `tools/log_entry.py check` when that tool exists, no text file under `third_party/` may contain CR (F877) | `docs/`, `log/`, `*.md`, LICENSE, .git* files, launchers `*.cmd` (the build gate smoke-runs them), `android/` (no cargo check covers it: build an APK), `tools/` scripts that no Rust code names (comments do not count) |
+| docs | no cargo: `git diff --check` (conflict markers fail, whitespace is listed), relative Markdown links on added lines must exist (links into `local/` are skipped), changed `.ps1` files must parse, changed `.py` files must parse, `tools/log_entry.py check` when that tool exists, no text file under `third_party/` may contain CR (F877) | `docs/`, `log/`, `*.md`, LICENSE, .git* files, `.github/` (the CI workflow, no cargo input), launchers `*.cmd` (the build gate smoke-runs them), `android/` (no cargo check covers it: build an APK), `tools/` scripts that no Rust code names (comments do not count) |
 | crate | that crate's release tests with `--include-ignored` and `cargo clippy --release -p CRATE --all-targets -- -D warnings`; for grid-app also the render smoke (below) | `crates/grid-app/**` and `settings/**` (grid-app's tests read the profiles); `crates/grid-probes/**` (Clippy only); grid-tools binaries other than grid-opponent-race and grid-soak; grid-formats `tests/`/`examples/` |
 | workspace | the whole release test suite, workspace Clippy and the render smoke | grid-formats modules the simulation cannot reach; a `tools/` file named by Rust code outside comments |
 | full | workspace + `cargo build --release -p grid-tools --bin grid-opponent-race --bin grid-soak`, the identity check against `tools/identity.tsv`, `grid-soak quick` | `crates/grid-world/**`, the grid-tools library and its race/soak binaries, sim-reachable grid-formats modules and `lib.rs`, Cargo.lock, Cargo.toml files, build.rs, rust-toolchain, `.cargo/`, `tools/identity.tsv`, and any path the table does not name |

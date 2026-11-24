@@ -46,7 +46,7 @@ Decision table, first matching row wins; a path no row names is full:
   tools/**                                                 docs, unless Rust code (not a comment) names the
                                                            file (then workspace); tools/identity.tsv
                                                            is full
-  docs/**, log/**, *.md, LICENSE, .gitignore, .gitattributes, .githooks/**, *.cmd (launchers), android/**
+  docs/**, log/**, *.md, LICENSE, .gitignore, .gitattributes, .githooks/**, .github/**, *.cmd (launchers), android/**
                                                            docs (launchers: build gate smoke;
                                                            android/: build an APK yourself)
 
@@ -244,6 +244,7 @@ function Get-Class([string]$Path) {
         if ($hits.Count) { return New-Class 2 '' "tool named by crate source ($(($hits[0] -split ':')[0]))" }
         return New-Class 0 '' 'tool script, not used by any crate'
     }
+    if ($p -like '.github/*') { return New-Class 0 '' 'GitHub Actions CI: runs on GitHub, not a cargo input (docs/TOOLCHAIN.md, "Continuous integration")' }
     if ($p -like 'android/*') { return New-Class 0 '' 'Android project files: no cargo check covers them; build an APK (tools\build_android.ps1)' }
     if ($p -like '*.cmd') { return New-Class 0 '' 'launcher: covered by the build gate smoke runs, not here' }
     if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like '.githooks/*' -or $p -like '*.md' -or $p -in @('LICENSE', '.gitignore', '.gitattributes')) {
