@@ -411,7 +411,7 @@ pub fn report() -> String {
 
 /// Page faults of this process so far (soft and hard).
 #[cfg(windows)]
-fn page_faults() -> Option<u64> {
+pub(crate) fn page_faults() -> Option<u64> {
     #[repr(C)]
     #[derive(Default)]
     // Same layout as front_end_host.rs (PROCESS_MEMORY_COUNTERS_EX), so
@@ -446,7 +446,7 @@ fn page_faults() -> Option<u64> {
 
 /// Page faults of this process so far (minor and major).
 #[cfg(unix)]
-fn page_faults() -> Option<u64> {
+pub(crate) fn page_faults() -> Option<u64> {
     // SAFETY: getrusage writes the zeroed local it is given.
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
     let ok = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) } == 0;
@@ -454,7 +454,7 @@ fn page_faults() -> Option<u64> {
 }
 
 #[cfg(not(any(windows, unix)))]
-fn page_faults() -> Option<u64> {
+pub(crate) fn page_faults() -> Option<u64> {
     None
 }
 

@@ -17,6 +17,12 @@
 //!   waits for the GPU.
 //! - Counts: draw groups per phase, visible meshes, shadow casters and shadow
 //!   views, and mesh and image uploads per second.
+//! - Process: CPU time over wall time (`cpu_load`, 2.0 = two cores busy),
+//!   page faults (`faults`) and involuntary context switches (`ivcsw`, Unix
+//!   only, `-` elsewhere) of the window. A window whose stages all slow down
+//!   for the same work is told apart: more faults (memory pressure), more
+//!   involuntary switches (another process took the cores), or neither
+//!   (slower cores: power or thermal state).
 //!
 //! CPU parts are always measured (a few `Instant::now` per frame); GPU markers
 //! run only while the counter is shown, and `GRID_FRAME_GPU=0` turns them
@@ -1370,6 +1376,88 @@ impl Acc {
     }
 }
 
+/// Process counters so far: CPU time (user and system), page faults and
+/// involuntary context switches where the system counts them.
+#[derive(Clone, Copy)]
+struct Usage {
+    cpu_ns: u64,
+    faults: u64,
+    ivcsw: Option<u64>,
+}
+
+#[cfg(unix)]
+fn usage() -> Option<Usage> {
+    // SAFETY: getrusage writes the zeroed local it is given.
+    let mut u: libc::rusage = unsafe { std::mem::zeroed() };
+    let ok = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut u) } == 0;
+    let ns = |t: libc::timeval| t.tv_sec as u64 * 1_000_000_000 + t.tv_usec as u64 * 1_000;
+    ok.then(|| Usage {
+        cpu_ns: ns(u.ru_utime) + ns(u.ru_stime),
+        faults: (u.ru_minflt + u.ru_majflt) as u64,
+        ivcsw: Some(u.ru_nivcsw as u64),
+    })
+}
+
+#[cfg(windows)]
+fn usage() -> Option<Usage> {
+    #[repr(C)]
+    #[derive(Default)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn GetProcessTimes(
+            process: isize,
+            creation: *mut FileTime,
+            exit: *mut FileTime,
+            kernel: *mut FileTime,
+            user: *mut FileTime,
+        ) -> i32;
+    }
+    let [mut c, mut e, mut k, mut u] = std::array::from_fn(|_| FileTime::default());
+    // SAFETY: this process's pseudo handle and four out-pointers to locals.
+    let ok = unsafe { GetProcessTimes(GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u) } != 0;
+    let ns = |t: &FileTime| ((u64::from(t.high) << 32) | u64::from(t.low)) * 100;
+    if !ok {
+        return None;
+    }
+    Some(Usage {
+        cpu_ns: ns(&k) + ns(&u),
+        faults: crate::fixed_ticks::page_faults()?,
+        ivcsw: None,
+    })
+}
+
+#[cfg(not(any(windows, unix)))]
+fn usage() -> Option<Usage> {
+    None
+}
+
+/// `cpu_load`, `faults` and `ivcsw` since the previous call (the previous
+/// window); empty on the first call or where the counters are missing.
+fn usage_fields() -> String {
+    static LAST: Mutex<Option<(Instant, Usage)>> = Mutex::new(None);
+    let now = (Instant::now(), usage());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let previous = last.take();
+    let Some(current) = now.1 else { return String::new() };
+    *last = Some((now.0, current));
+    let Some((at, before)) = previous else { return String::new() };
+    let wall = now.0.duration_since(at).as_nanos().max(1) as f64;
+    let ivcsw = match (current.ivcsw, before.ivcsw) {
+        (Some(a), Some(b)) => a.saturating_sub(b).to_string(),
+        _ => "-".into(),
+    };
+    format!(
+        " cpu_load={:.2} faults={} ivcsw={ivcsw}",
+        current.cpu_ns.saturating_sub(before.cpu_ns) as f64 / wall,
+        current.faults.saturating_sub(before.faults),
+    )
+}
+
 /// Fields appended to `frame_stats` for a window of `seconds`, plus the
 /// per-view GPU detail lines when they are due. Resets the window.
 pub fn window_report(seconds: f64) -> (String, Vec<String>) {
@@ -1439,6 +1527,7 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
                 a.lap_over[i]
             );
         }
+        s += &usage_fields();
         let ms = |v: &[u64; lap::N], n: u32| -> String {
             v.iter().map(|&x| format!("{:.1}", per(x, n))).collect::<Vec<_>>().join("/")
         };

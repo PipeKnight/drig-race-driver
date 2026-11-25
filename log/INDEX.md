@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F926](F0926.md) | 2026-11-25 | Mac in-race dips: camera-flash pipelines under the warm-up cover, process counters per window |
 | [F925](F0925.md) | 2026-11-25 | Performance test switches: owner phone run 080140 never changed them; order-proof apply and a front-end perf log line |
 | [F924](F0924.md) | 2026-11-25 | Mac frame-dip capture steps: redirect a Terminal start to a file, developer build only |
 | [F923](F0923.md) | 2026-11-25 | Mac frame dips: cockpit mirror pipelines warmed under the cover |

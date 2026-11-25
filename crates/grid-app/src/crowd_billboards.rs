@@ -1458,6 +1458,7 @@ fn install_flash(
     prepared: Res<Prepared>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<super::flash_preview::FlashMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     settings: Res<super::graphics::Settings>,
 ) {
     let Some(dds) = &prepared.flash_dds else {
@@ -1484,7 +1485,9 @@ fn install_flash(
         commands.spawn((
             Name::new("crowd/source-camera-flash"),
             FlashCard(index, default()),
-            Mesh3d(default()),
+            // Its own asset (the pulse rewrites it in place) with the flash's
+            // layout, so the warm-up builds the flash pipelines under the cover.
+            Mesh3d(meshes.add(super::flash_preview::idle_mesh())),
             MeshMaterial3d(handle.clone()),
             // The pulse owns a tiny changing view-facing mesh.
             bevy::camera::visibility::NoFrustumCulling,

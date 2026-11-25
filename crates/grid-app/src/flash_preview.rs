@@ -254,10 +254,6 @@ pub(crate) fn event_mesh(
     phase: f32,
 ) -> Result<(Mesh, Vec3), &'static str> {
     let quad = flash_fixture::quad(attached, eye, [0., 1., 0.], phase)?;
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
     // Authored event-centred local mesh representation. Bevy0.19 sorts
     // transformed mesh AABB centres; static world-baked cards would also
     // have valid centres. This transform is not recovered source ABI.
@@ -265,12 +261,28 @@ pub(crate) fn event_mesh(
     let local = quad
         .positions
         .map(|v| (Vec3::from_array(v) - center).to_array());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, local.to_vec());
+    Ok((card_mesh(local, quad.uv, quad.opacity), center))
+}
+
+/// A card with the vertex layout of every [`event_mesh`] but no area and no
+/// opacity: the mesh a flash card holds before its first flash, so the
+/// pipeline warm-up (docs/PIPELINE_WARMUP.md 2.6) builds the flash's pipelines
+/// for every view under the cover instead of on the first flash.
+pub(crate) fn idle_mesh() -> Mesh {
+    card_mesh([[0.; 3]; 4], [[0.; 2]; 4], 0.)
+}
+
+fn card_mesh(positions: [[f32; 3]; 4], uv: [[f32; 2]; 4], opacity: f32) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.to_vec());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0., 0., 1.]; 4]);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, quad.uv.to_vec());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1., 1., 1., quad.opacity]; 4]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv.to_vec());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1., 1., 1., opacity]; 4]);
     mesh.insert_indices(Indices::U32(vec![0, 1, 2, 1, 3, 2]));
-    Ok((mesh, center))
+    mesh
 }
 #[cfg(test)]
 mod tests {
@@ -293,6 +305,26 @@ mod tests {
         assert_eq!(p.mode, Mode::Control);
         assert_eq!(p.anchors.len(), 3);
         assert!(p.dds.starts_with(b"DDS "));
+    }
+
+    /// The warm-up builds the flash pipelines from the idle card, so its vertex
+    /// layout (the pipeline key's part that comes from the mesh) must equal a
+    /// flashing card's (docs/PIPELINE_WARMUP.md 2.6).
+    #[test]
+    fn idle_card_has_the_vertex_layout_of_a_flash_card() {
+        let card = card_mesh(
+            [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]],
+            [[0., 0.], [1., 0.], [0., 1.], [1., 1.]],
+            0.5,
+        );
+        let idle = idle_mesh();
+        // The Ref compares interned pointers; compare the layouts themselves.
+        assert_eq!(
+            *idle.get_mesh_vertex_buffer_layout(&mut Default::default()).0,
+            *card.get_mesh_vertex_buffer_layout(&mut Default::default()).0
+        );
+        assert_eq!(idle.primitive_topology(), card.primitive_topology());
+        assert_eq!(idle.indices().map(|i| i.len()), Some(6));
     }
 
     #[test]

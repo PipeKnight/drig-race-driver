@@ -42,7 +42,9 @@ def main():
         if rank == 0:
             verdict = f"worst window L{i+1} max_ms={kv.get('max_ms')} held by {top_stage}"
         print(f"\n#{rank+1} L{i+1} max_ms={kv.get('max_ms')} fps={kv.get('fps')} frames={kv.get('frames')} "
-              f"over16={kv.get('over16')} render_ms={kv.get('render_ms')}")
+              f"over16={kv.get('over16')} render_ms={kv.get('render_ms')} main_ms={kv.get('main_ms')} "
+              f"fixed_ms={kv.get('fixed_ms')} cpu_load={kv.get('cpu_load', '-')} faults={kv.get('faults', '-')} "
+              f"ivcsw={kv.get('ivcsw', '-')}")
         print("   rworst: " + " ".join(f"{n}={v:g}" for n, v in stages.items()) + f" | enc={kv.get('enc', '-')[:120]}")
         for j, l in evs[-8:]:
             print(f"   L{j+1}: {l[:150]}")

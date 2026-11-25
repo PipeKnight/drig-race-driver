@@ -184,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F926](log/F0926.md) | 2026-11-25 | Mac in-race dips: camera-flash pipelines under the warm-up cover, process counters per window |
 | [F925](log/F0925.md) | 2026-11-25 | Performance test switches: owner phone run 080140 never changed them; order-proof apply and a front-end perf log line |
 | [F924](log/F0924.md) | 2026-11-25 | Mac frame-dip capture steps: redirect a Terminal start to a file, developer build only |
 | [F923](log/F0923.md) | 2026-11-25 | Mac frame dips: cockpit mirror pipelines warmed under the cover |
@@ -243,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F869](log/F0869.md) | 2026-11-19 | Render prepare: r_prepare split by system; one staging buffer per frame for streamed meshes gains nothing |
 | [F868](log/F0868.md) | 2026-11-19 | Render encode: drop wgpu indirect-call validation where DX12 cannot be chosen |
 | [F867](log/F0867.md) | 2026-11-19 | Owner roadmap order after the FPS series |
-| [F866](log/F0866.md) | 2026-11-19 | Future rows: rain, official DLC, cut content (owner request) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

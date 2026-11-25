@@ -204,7 +204,7 @@ pub fn install(app: &mut App) {
     if env_on("GRID_PIPELINE_TRACE") {
         let users = Users::default();
         render.insert_resource(users.clone()).add_systems(Render, trace.in_set(RenderSystems::Cleanup));
-        app.insert_resource(users).add_systems(Last, (describe_users, missed_casters, cascade_census));
+        app.insert_resource(users).add_systems(Last, (describe_users, missed_casters, cascade_census, meshless));
     }
     if crate::dev::var("GRID_PIPELINE_WARMUP").is_ok_and(|v| v == "0") {
         return;
@@ -414,6 +414,62 @@ fn find_users(
         }
     }
     found
+}
+
+/// Trace, once when the warm-up reaches Dither: meshes it shows that have no
+/// mesh asset, so no draw and no pipeline (docs/PIPELINE_WARMUP.md 2.6). An
+/// entity that fills its mesh later should start with a mesh of the final
+/// vertex layout instead.
+#[allow(clippy::type_complexity)]
+fn meshless(
+    warm: Option<Res<Warmup>>,
+    mut seen: Local<Option<Vec<Entity>>>,
+    mut filled: Local<usize>,
+    mut frame: Local<u64>,
+    assets: Res<Assets<Mesh>>,
+    meshes: Query<(
+        Entity,
+        &Mesh3d,
+        Option<&Visibility>,
+        Has<MeshMaterial3d<StandardMaterial>>,
+        Has<ChildOf>,
+        Has<bevy::camera::primitives::Aabb>,
+    )>,
+) {
+    *frame += 1;
+    let Some(warm) = warm else { return };
+    // At Dither: every entity whose Mesh3d has no asset, grouped by a few
+    // cheap facts (release builds carry no component names). `empty` counts
+    // the default handle, the rest are handles still loading.
+    if seen.is_none() && warm.phase == Phase::Dither {
+        let mut groups: HashMap<String, usize> = HashMap::new();
+        let mut list = Vec::new();
+        let mut empty = 0;
+        for (entity, mesh, visibility, material, parent, aabb) in meshes.iter().filter(|(_, mesh, ..)| !assets.contains(&mesh.0)) {
+            list.push(entity);
+            empty += usize::from(mesh.0 == Handle::default());
+            let label = format!("visibility={visibility:?}/standard_material={material}/parent={parent}/aabb={aabb}");
+            *groups.entry(label).or_default() += 1;
+        }
+        let mut groups: Vec<_> = groups.into_iter().collect();
+        groups.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        println!("pipeline_warmup_meshless count={} empty_handle={empty} first={:?}", list.len(), list.first());
+        for (label, n) in groups.into_iter().take(8) {
+            println!("pipeline_warmup_meshless_group n={n} {label}");
+        }
+        *seen = Some(list);
+        return;
+    }
+    // After the cover: any of them that gets a mesh would build its
+    // pipelines mid-race (on macOS inside the frame), as the flash cards did.
+    if warm.phase == Phase::Done && frame.is_multiple_of(60) {
+        let Some(list) = seen.as_ref() else { return };
+        let now = list.iter().filter(|&&e| meshes.get(e).is_ok_and(|(_, mesh, ..)| assets.contains(&mesh.0))).count();
+        if now != *filled {
+            *filled = now;
+            println!("pipeline_warmup_meshless_filled frame={} n={now} of={}", *frame, list.len());
+        }
+    }
 }
 
 /// At the end of the warm-up: shadow-level ornament parts that never got a

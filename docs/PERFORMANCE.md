@@ -3860,6 +3860,21 @@ Laps: `dt` drive_tick, `dp` drive_present, `dpo`/`dpn` own and opponent dents in
 `ground_detail::present`, `gdg` its gathers, `tp` transform propagation, `cb` visibility bounds,
 `out` stdout lines from the drive paths, `mt` the opponents' `multi.tick` inside drive_tick.
 
+## Process counters per window (F926)
+
+The owner's Mac logs of 25 November 2026 (build 90af0c75) had in-race windows of 25-45 fps where
+every CPU part slowed together for the same work: propagation of the same ~2250 changed
+`GlobalTransform`s took 3.9 ms instead of 1 ms, `cb`, `dt` and `mt` 4-6 times their median, and
+single render stages (sort 55 ms over 325 items) stalled with no upload or new pipeline. To tell
+the causes apart, `frame_stats` ends its lap fields with the process counters of the window:
+
+- `cpu_load`: process CPU time (user and system) over wall time; 2.0 means two cores busy;
+- `faults`: page faults (memory pressure shows as a rise);
+- `ivcsw`: involuntary context switches (Unix; `-` on Windows): another process took the cores.
+
+Same work, longer stages and neither counter up points to slower cores (power or thermal state).
+`tools/frame_dips.py` prints them with each worst window.
+
 ### What makes each peak
 
 | peak | cause | change |

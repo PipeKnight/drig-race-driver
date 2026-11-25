@@ -66,8 +66,9 @@ line `drive_start_hold event=released held_steps=N reason=warmup_done|limit|tick
 `GRID_START_AFTER_WARMUP=0` starts at once as before. Headless and offscreen runs never hold.
 
 Not covered: car levels hidden through `car_batch::hidden_layer()` and their demoted meshes (the
-levels the other cars show at the start share their materials and layouts), and meshes spawned
-after the warm-up.
+levels the other cars show at the start share their materials and layouts), meshes spawned
+after the warm-up, and entities whose `Mesh3d` handle has no asset under the cover (nothing to
+queue, so no pipeline; section 2.6).
 
 ### 2.1 Shadow variants built mid-race (row 115, F740)
 
@@ -234,6 +235,35 @@ new executable's cover time toward the warm 2-3 s; it does not change the frame 
   pipelines cached: 3.5 s). Without the fix the
   same compilations happen mid-race on the first cockpit frame instead (2.3 s on the owner's Mac).
   Not yet confirmed on the Mac (docs/MACOS.md, "Capturing a log of frame dips").
+
+### 2.6 Entities without a mesh asset under the cover: the crowd camera flash (Mac dips, F926)
+
+- [V] Owner's Mac logs of 25 November 2026 (build 90af0c75, `GRID_PIPELINE_TRACE=1`, chase camera
+  with view changes, cold and warm driver cache): both runs ended the warm-up with 188 pipelines
+  and still built two after Done, both `alpha_blend_mesh_pipeline` used by
+  `crowd/source-camera-flash`: id 188 (MSAA, main view) at the start and id 189 (no MSAA, the
+  mirror) on the first head-cam frame. On macOS each compiles with `block_on` on the render thread.
+- Cause: `crowd_billboards::install_flash` spawned its ten flash cards with an empty
+  `Mesh3d(default())`; `update_flash` gives a card its first mesh (`flash_preview::event_mesh`) on
+  the first flash. A handle without an asset is never queued, so the warm-up, which shows every mesh
+  entity, had nothing to draw and the flash's alpha-blend variant was first specialised mid-race.
+- Fix: each card now spawns with its own asset, `flash_preview::idle_mesh()`: the same vertex layout
+  as every `event_mesh` (position, normal, UV, vertex colour, `u32` indices) with zero area and zero
+  opacity. The warm-up shows it in every view like any mesh and builds the flash pipelines under the
+  cover; after the cover `update_flash` hides idle cards as before, and `SoupMesh`-style in-place
+  writes keep one asset per card. A card has no area, so nothing is drawn even where it is shown.
+- Census: with `GRID_PIPELINE_TRACE=1`, `pipeline_warmup_meshless count=N empty_handle=E` counts,
+  once at the Dither phase, the entities whose `Mesh3d` handle has no asset (E of them hold the
+  default handle), and `pipeline_warmup_meshless_group` lines group them by visibility, standard
+  material, parent and `Aabb` (release builds carry no component names). After Done,
+  `pipeline_warmup_meshless_filled frame=F n=N` reports (checked once a second) how many of them
+  have since received a mesh: each such entity can build pipelines mid-race, as the flash cards
+  did; give its spawner a placeholder mesh of the real layout.
+- Result on the PC (offscreen, synchronous compile like macOS; F926): the old exe already built the
+  flash pipelines under the cover there (frames 8/20/32, the first flash came early), the new one at
+  frames 2/15/28; Done at frame 43 with 190 pipelines in both, one pipeline after Done in both (the
+  screenshot pass), images 0 px. Whether the miss happens depends on when the first flash falls
+  relative to the cover, so the PC cannot show the Mac miss itself; the Mac run confirms it.
 
 ## 3. Evidence
 
