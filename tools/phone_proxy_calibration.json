@@ -1,0 +1,86 @@
+{
+ "check": {
+  "empty_scene": {
+   "bound": "gpu",
+   "phone_frame_ms": 40.49,
+   "predicted_frame_ms": 35.25
+  },
+  "normal": {
+   "bound": "gpu",
+   "phone_frame_ms": 40.32,
+   "predicted_frame_ms": 45.25
+  },
+  "shadows": {
+   "bound": "gpu",
+   "phone_frame_ms": 38.91,
+   "predicted_frame_ms": 39.21
+  }
+ },
+ "components": {
+  "gpu_ms": {
+   "a": 6.9441,
+   "b": 0.0,
+   "form": "ratio",
+   "loo_rms": {
+    "affine": 7.909,
+    "ratio": 3.567
+   },
+   "residuals": {
+    "empty_scene": 0.45,
+    "normal": 2.3,
+    "shadows": -3.12
+   }
+  },
+  "main_nonsim": {
+   "a": 2.2705,
+   "b": 0.0,
+   "form": "ratio",
+   "loo_rms": {
+    "affine": null,
+    "ratio": 3.939
+   },
+   "residuals": {
+    "empty_scene": -3.45,
+    "normal": 3.01,
+    "shadows": 0.05
+   }
+  },
+  "render_busy": {
+   "a": 2.0471,
+   "b": 0.0,
+   "form": "ratio",
+   "loo_rms": {
+    "affine": null,
+    "ratio": 4.418
+   },
+   "residuals": {
+    "empty_scene": -4.42,
+    "normal": 2.75,
+    "shadows": 0.8
+   }
+  },
+  "tick_ms": {
+   "a": 1.7513,
+   "b": 0.0,
+   "form": "ratio",
+   "loo_rms": {
+    "affine": null,
+    "ratio": 0.627
+   },
+   "residuals": {
+    "empty_scene": -0.56,
+    "normal": 0.08,
+    "shadows": 0.46
+   }
+  }
+ },
+ "gap_ms": 6.505,
+ "noise_ms": 3.6,
+ "proxy": "57c966e1 profile exe (the phone's APK source), mask F0000, two runs per state pooled; phone: owner's Xiaomi 13 Ultra logs of 24 November 2026 (F912, F915)",
+ "states": [
+  "normal",
+  "shadows",
+  "empty_scene"
+ ],
+ "version": 1
+}

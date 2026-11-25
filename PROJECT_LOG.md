@@ -133,6 +133,8 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   (F418), touch/tilt/pad controls (P11, F404), per-system profiling (F395); docs/ANDROID.md.
 - Open: the a11cddf7de27 APKs are not tested on the phone; CPU-bound at about 30–34 FPS (row 85);
   pad rumble and phone vibration are not felt on the phone yet (row 22).
+- Phone proxy (F919): `tools/phone_proxy.ps1 -Rev A -Compare B` predicts the Xiaomi frame delta from a
+  desktop run in about 8 minutes (noise about 2 ms with 3 runs); scene-work gains are an upper bound.
 
 ### Tooling and process
 - Build gate `tools/build_gate.ps1` and nightly soak (F524); shared seed build and rust-lld (F467);
@@ -182,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F919](log/F0919.md) | 2026-11-25 | Phone proxy: predicted Xiaomi frame from a phone-like desktop run |
 | [F918](log/F0918.md) | 2026-11-25 | Unified per-run logs on all platforms |
 | [F917](log/F0917.md) | 2026-11-24 | CI: Intel-only SSE host comparison, vendor-independent digest test |
 | [F916](log/F0916.md) | 2026-11-24 | Keep macOS player packaging and portable race logs |
@@ -241,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F862](log/F0862.md) | 2026-11-19 | Performance status matrix after the F837-F861 series: render-CPU bound in every cell |
 | [F861](log/F0861.md) | 2026-11-19 | Main-world peaks: stdout writer thread, blended cover gathers async |
 | [F860](log/F0860.md) | 2026-11-19 | Compute pool capped at 8 threads: +1.4 to +2.8 fps; slow render frames rare when the PC is idle |
-| [F859](log/F0859.md) | 2026-11-19 | Per-frame mesh uploads: dents and car batches stream changed vertices; reflection overlays follow a part leaving its batch |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

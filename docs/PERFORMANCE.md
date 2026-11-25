@@ -5599,3 +5599,138 @@ Medians over 1 s race windows [O]:
 - `main_ms + outside_ms` stays at 40-42 ms in every state.
 - The six compute threads each work 6-7 ms per frame (about 18 % busy) while the main thread waits about 30 ms inside its schedules.
 - [I] What gates the phone is a fixed CPU cost per frame, not scene work or GPU geometry. The likely causes are dependency chains of short systems that hop between pool threads, with wake-up latency at each hop, and possibly little cores. The next test is the single-threaded executor switch (F915).
+
+## Phone proxy: the phone's frame predicted from a desktop run (F919)
+
+25 November 2026, Claude Code. `tools/phone_proxy.ps1` answers "does this change make the Xiaomi faster or
+slower, and by about how much" in about 8 minutes plus the builds, without the phone. It is a relative tool: it predicts the
+phone's frame split from a phone-like desktop run through a per-component calibration against the owner's phone
+logs of 24 November (F912, F915). The owner rejected adb and phone-in-the-loop automation, so the phone's logs
+are the only ground truth and the calibration has to be redone when they are.
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\phone_proxy.ps1 -Rev <base> -Compare <change>
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\phone_proxy.ps1 -Compare HEAD     (working tree as base)
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\phone_proxy.ps1 -CheckOnly -OutDir <dir>
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\phone_proxy.ps1 -SelfTest
+
+### The desktop run [O]
+
+- Same race as the phone: the Android bundle's `settings.ini` and Donington `event.ini` (12 Lacetti, chase
+  camera), the event menu's Continue by `GRID_MENU_AUTO`, autopilot, muted, 2400 race ticks.
+- Same app setup: `GRID_MOBILE_PRESET=1`, `GRID_COMPUTE_THREADS=6` (the phone's `compute=6`),
+  `WGPU_VALIDATION_INDIRECT_CALL=1` (on Android; the desktop drops it otherwise), feature `profile` (the profile
+  APK), 480 render rows, no vsync. The window is the default 1280 × 800, so it renders 768 × 480 against the
+  phone's 1026 × 480: builds before F906 have no `[video] window`/`resolution` keys, and both sides of a
+  comparison must draw the same pixels.
+- Three runs of the normal state by default (`-States normal,shadows,empty_scene` sets `GRID_PERF_TEST` for a
+  calibration), base and change alternating, all under one build-lock hold; a run takes about 75 s. Executables are built by commit in a side worktree
+  (`local/phone-proxy/src`, cached in `local/phone-proxy/bin`); the main checkout's prototype is never built or run.
+- CPU limit: the process is started with `start /affinity <mask>` (per process, reversible; no power plan or
+  system setting changes).
+
+### Model [I]
+
+From each 1 s `frame_stats` race window (first 3 dropped), medians per state:
+
+- main thread = non-sim part (`main_ms - fixed_ms`) + per-tick sim cost × ticks per frame. The sim runs at 60 Hz,
+  so on the phone ticks per frame follow the predicted phone frame (at most 4); this is solved as a fixed point.
+- render thread = `render_ms - r_present - acquire` (busy, without swapchain waits).
+- GPU = `gpu_ms`.
+- phone frame = max(main, render, GPU) + gap. The gap (Fifo quantisation, waits) is fitted.
+
+Each component maps phone = k × proxy ("ratio") or a × proxy + b ("affine", only with a positive slope; a
+negative slope would predict the phone faster when the proxy gets slower). `fit` keeps the form with the
+smaller leave-one-out error.
+
+### Calibration [O]
+
+Phone side: normal = 224728, 224925 (F915) and 160330, 160501, 161206 (F912) pooled; shadows off = 225052;
+Whole scene off = 225310 (57c966e1 APK). Proxy side: the 57c966e1 profile exe.
+
+Fits per CPU mask (one run per state; pooled = two runs per state). Predicted phone frame against the phone's
+median frame (normal 40.3, shadows off 38.9, Whole scene off 40.5 ms):
+
+| mask | CPUs | normal | shadows off | Whole scene off | largest error | gap |
+|---|---|---|---|---|---|---|
+| F0055 | 4 P-core threads (0, 2, 4, 6) + 4 E-cores, 8 CPUs as the phone | 39.7 | 43.4 | 36.6 | 4.5 | 5.4 |
+| F0000 | 4 E-cores | 44.9 | 39.7 | 35.1 | 5.4 | 6.5 |
+| F0005 | 2 P-core threads + 4 E-cores | 43.1 | 41.5 | 35.1 | 5.4 | 6.2 |
+| FFFFF | all 20 | 37.0 | 45.3 | 37.4 | 6.4 | 6.1 |
+| F0055 pooled | | 38.9 | 44.7 | 36.1 | 5.8 | 6.1 |
+| F0000 pooled | | 45.2 | 39.2 | 35.2 | 5.3 | 6.5 |
+
+Desktop frame rate of the pooled runs, normal / shadows off / Whole scene off: F0055 114 / 117 / 132 fps,
+F0000 55 / 61 / 69 fps. The desktop gains 16-25 % from an empty scene; the phone gains nothing.
+
+Components of the shipped calibration (`tools/phone_proxy_calibration.json`, F0000 pooled), phone = k × proxy;
+residual = predicted - phone in ms. Every component chose the ratio form:
+
+| component | k | normal | shadows off | Whole scene off | leave-one-out rms |
+|---|---|---|---|---|---|
+| main non-sim | 2.27 | +3.0 | +0.1 | -3.5 | 3.9 |
+| sim per tick | 1.75 | +0.1 | +0.5 | -0.6 | 0.6 |
+| render busy | 2.05 | +2.8 | +0.8 | -4.4 | 4.4 |
+| GPU | 6.94 | +2.3 | -3.1 | +0.5 | 3.6 |
+
+Gap 6.5 ms. Predicted frame 45.3 / 39.2 / 35.3 ms against the phone's 40.3 / 38.9 / 40.5 ms: within about 5 ms
+in every state, but the proxy calls Whole scene off 10 ms faster than normal and the phone does not (see
+"Reading for the current frame").
+
+### Noise [O]
+
+Same exe (57c966e1 against 94b4f286, which differ only in documentation, packaging, CI and the F905 bind-group
+cache), normal state, three runs each, alternating, one build-lock hold (`local/phone-proxy/ab3-<mask>`):
+
+| mask | base runs (predicted frame) | change runs | delta | noise limit (2 standard errors) |
+|---|---|---|---|---|
+| F0000 | 45.5, 45.8, 44.6 | 44.9, 48.5, 46.9 | +0.9 | 2.2 |
+| F0055 | 50.2, 51.3, 52.3 | 38.8, 51.6, 46.5 | -3.8 | 7.5 |
+
+- F0055 (P-core threads included) scattered 13 ms between runs of one exe, and its base runs were 11 ms above
+  its own calibration run of two hours earlier: the P-cores are shared with the other sessions' builds and
+  runs on this PC. The four E-cores (F0000) stayed within 1.2-3.6 ms, and their base runs matched the
+  calibration (45.4 against 45.3). F0000 is the default and the shipped calibration.
+- One run against one run of the same revision differs by up to 3.6 ms of predicted phone frame
+  (`noise_ms` in the calibration). With the default three runs per revision the report marks a delta as noise
+  when it is within two standard errors (about 2 ms here, never below 3.6 / sqrt 3). A delta marked noise is
+  not a result.
+- HEAD of 24 November (94b4f286) against the phone's APK source (57c966e1): +0.9 ms, noise. The only counter
+  the report lists as moved is `vis` (-13 %, which race divergence explains).
+
+### What it cannot predict [I]
+
+- Phone DVFS and scheduling: in Whole scene off the phone's scene-independent CPU work (non-sim main, per-tick
+  sim) grows 15-25 % with no change in work. The proxy's main thread stays flat, so this shows up as residual.
+- The Adreno tiler: the desktop GPU is an immediate-mode RTX 4070 at a few ms per frame with clocks that
+  saw-tooth between about 1 and 3.3 ms per window at this load (with F0055). The GPU ratio (6.9× on F0000, 14× on F0055) carries a
+  ±2-3 ms residual; binning cost, per-bin geometry replay (F912) and bandwidth do not scale like desktop time.
+  For GPU-side changes, read the platform-independent counters (draws, `d_shadow`, `d_transp`, `vis`, pipeline
+  and material switches, uploads) in the report rather than the predicted GPU number.
+- Resolution: 768 × 480 against 1026 × 480; the phone's Auto controller raised the rows to 720 in Whole scene off
+  (F915), which the proxy does not do.
+- Races diverge between runs (F512): the same exe draws a different part of the field in the same window
+  (`d_transp` 160-344 at the start), which is most of the run-to-run noise.
+
+### Reading for the current frame [I]
+
+- Three of the four masks predict Whole scene off 3-10 ms faster than normal (all 20 CPUs: +0.4 ms); the phone
+  was 0.2 ms slower. The desktop's
+  CPU and GPU times follow scene work, the phone's do not: its render-thread busy time is 28.4 / 27.0 / 28.8 ms
+  in the three states and its non-sim main time rises from 16.8 to 21.1 ms with the scene removed.
+- So the phone's ~38-40 ms frame is mostly a cost the desktop does not have in proportion: fixed per-frame work
+  or latency (executor hand-offs and thread wake-ups, F915) plus phone DVFS. Scaled desktop CPU time does not
+  show it, and the proxy over-predicts the phone's gain from any cut in scene work (draws, culling, shadows,
+  materials). Read a predicted CPU gain from scene work as an upper bound.
+- On the proxy, as on the phone, the main thread works about 0.2 ms of its 4.3 ms in its own spans and waits
+  in its schedules for the compute pool (phone: about 1 of 37-39 ms). A change that removes per-frame hand-offs
+  (single-threaded schedules, fewer short systems in a chain) should show in the proxy's `main_nonsim` and in
+  the moved counters, but how much of it the phone gains is outside the calibration until a phone log of such
+  a change exists. Add that log to the calibration when it does.
+- After a GPU cut the phone would become main-bound at 30-36 ms (as in Whole scene off), so a GPU-only fix
+  cannot reach 40 FPS without a main-thread fix.
+
+### Not done
+
+- A check against an older phone measurement (F571, 3cdbf523) was not run: that revision has no
+  `GRID_COMPUTE_THREADS`, a different Cargo.lock (a full rebuild) and another car field, so it would not be the
+  same race. The calibration rests on one day of phone logs, three perf_test states and one APK.
