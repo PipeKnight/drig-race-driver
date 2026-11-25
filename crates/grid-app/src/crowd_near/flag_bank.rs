@@ -254,7 +254,7 @@ pub(in crate::crowd_billboards) fn prepare(
     let Some(geometry_path) = geometry_path else {
         return Ok(None);
     };
-    let data = std::fs::read(root.join(geometry_path))?;
+    let data = std::fs::read(grid_tools::install::resolve_case(root, geometry_path))?;
     let geometry = pssg::read_tree(&data)?;
     let catalogue = mesh::read_object_meshes(&geometry)?;
     let mut skins = (0..geometry.nodes.len()).filter(|&i| geometry.name(i) == b"SKINNODE");

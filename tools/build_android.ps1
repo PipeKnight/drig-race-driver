@@ -146,8 +146,12 @@ try {
         $checkTarget = Join-Path $root 'local\android\bundle-check'
         & cargo build --release -p grid-app --target-dir $checkTarget
         if ($LASTEXITCODE -ne 0) { throw 'the desktop build for the bundle check failed' }
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools\trace_bundle_files.ps1') -Event $Event -Stage (Join-Path $bundleRoot 'grid-data') -Exe (Join-Path $checkTarget 'release\grid-app.exe') -Characteristics $Characteristics -GameRoot $GameRoot | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "the staged $Event bundle failed its desktop run (trace_bundle_files.ps1 -Stage, log above): regenerate android/events/*.files with tools\trace_bundle_files.ps1 or add the file to push_android_data.ps1" }
+        # Every event the bundle's menu offers (Donington and the Viper race at
+        # Washington in every bundle, F615), on the case-sensitive stage (F921).
+        foreach ($checked in @($Event, 'donington', 'washington') | Select-Object -Unique) {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools\trace_bundle_files.ps1') -Event $checked -Stage (Join-Path $bundleRoot 'grid-data') -Exe (Join-Path $checkTarget 'release\grid-app.exe') -Characteristics $Characteristics -GameRoot $GameRoot | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "the staged bundle failed its desktop run of $checked (trace_bundle_files.ps1 -Stage, log above): regenerate android/events/*.files with tools\trace_bundle_files.ps1, add the file to push_android_data.ps1, or find the lookup that missed an unread file" }
+        }
     }
     $features = if ($Profile) { @('--features', 'profile') } else { @() }
     if ($Clippy) {

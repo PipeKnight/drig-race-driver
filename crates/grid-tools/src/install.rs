@@ -73,6 +73,37 @@ impl FileIndex {
     }
 }
 
+/// `root/relative` for a name the code derives (for example
+/// `interiors/{stem}/int_{stem}_anims.pssg`) when the shipped file spells it
+/// differently: the exact path when it exists, else the path whose components
+/// match ignoring ASCII case, else the exact path (so the caller's open or
+/// `is_file` reports it missing). Windows and macOS find every spelling
+/// anyway; Linux and Android storage do not, where the Viper's
+/// `int_VIP_anims.pssg` was missed and its cockpit wheel stood still (F921).
+/// Only a miss lists directories, one per path component.
+pub fn resolve_case(root: &Path, relative: &str) -> PathBuf {
+    let exact = root.join(relative);
+    if exact.exists() {
+        return exact;
+    }
+    walk_case(root, relative).unwrap_or(exact)
+}
+
+/// The on-disk spelling of `root/relative`, matching each component exactly
+/// first and then ignoring ASCII case; None when a component has no match.
+fn walk_case(root: &Path, relative: &str) -> Option<PathBuf> {
+    let mut path = root.to_path_buf();
+    for part in relative.split(['/', '\\']).filter(|p| !p.is_empty() && *p != ".") {
+        let names: Vec<_> = std::fs::read_dir(&path).ok()?.flatten().map(|e| e.file_name()).collect();
+        let name = names
+            .iter()
+            .find(|n| n.to_str() == Some(part))
+            .or_else(|| names.iter().find(|n| n.to_str().is_some_and(|n| n.eq_ignore_ascii_case(part))))?;
+        path.push(name);
+    }
+    Some(path)
+}
+
 fn key(relative: &str) -> String {
     relative
         .split(['/', '\\'])
@@ -306,6 +337,46 @@ mod tests {
         let empty = base.join("NoSteam");
         assert!(discover(&[empty]).is_err());
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A derived lowercase name finds the shipped mixed-case file on every
+    /// filesystem (the walk itself is checked, since Windows would find the
+    /// exact path anyway).
+    #[test]
+    fn resolve_case_finds_the_shipped_spelling() {
+        let base = std::env::temp_dir().join(format!("grid-resolve-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("Interiors/vip")).unwrap();
+        std::fs::write(base.join("Interiors/vip/int_VIP_anims.pssg"), b"x").unwrap();
+        let walked = walk_case(&base, "interiors/vip/int_vip_anims.pssg").unwrap();
+        assert!(walked.ends_with("Interiors/vip/int_VIP_anims.pssg"), "{walked:?}");
+        assert!(resolve_case(&base, "interiors/vip/int_vip_anims.pssg").is_file());
+        assert!(resolve_case(&base, "INTERIORS\\VIP\\INT_VIP_ANIMS.PSSG").is_file());
+        assert_eq!(walk_case(&base, "interiors/vip/int_vip_driver_anims.pssg"), None);
+        let missing = resolve_case(&base, "interiors/sal/int_sal_anims.pssg");
+        assert_eq!(missing, base.join("interiors/sal/int_sal_anims.pssg"));
+        assert!(!missing.exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Every interior's derived animation names reach the shipped files (the
+    /// Viper and Saleen spell them `int_VIP_*` and `int_Sal_*`, F921).
+    #[test]
+    #[ignore = "needs the purchased installation"]
+    fn derived_interior_names_resolve_in_the_installation() {
+        let root = PathBuf::from(std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"));
+        let mut mixed = 0;
+        for entry in std::fs::read_dir(root.join("interiors")).unwrap().flatten() {
+            let stem = entry.file_name().to_string_lossy().into_owned();
+            for suffix in ["", "_anims", "_driver_anims"] {
+                let relative = format!("interiors/{stem}/int_{stem}{suffix}.pssg");
+                let Some(found) = walk_case(&root, &relative) else { continue };
+                assert!(found.is_file(), "{relative}");
+                mixed += usize::from(!found.ends_with(&relative));
+            }
+        }
+        // int_VIP_anims, int_VIP_driver_anims, int_Sal_anims, int_Sal_driver_anims.
+        assert!(mixed >= 4, "only {mixed} mixed-case interior files");
     }
 
     /// The owner's install is found from the default Steam folders.

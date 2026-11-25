@@ -157,7 +157,7 @@ pub(super) fn bake(
     let Some(resource) = &template.mesh else {
         return Ok(None);
     };
-    let bytes = std::fs::read(root.join(&resource.relative_path))?;
+    let bytes = std::fs::read(grid_tools::install::resolve_case(root, &resource.relative_path))?;
     let geometry = pssg::read_tree(&bytes)?;
     let catalogue = mesh::read_object_meshes(&geometry)?;
 

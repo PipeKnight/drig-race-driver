@@ -429,7 +429,7 @@ impl Views {
     }
 
     pub fn load(root: &Path, stem: &str) -> Result<Self, String> {
-        let path = root.join(format!("cars/{stem}/cameras.xml"));
+        let path = grid_tools::install::resolve_case(root, &format!("cars/{stem}/cameras.xml"));
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let def = vehicle_views::read(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         Self::from_definition(&def)

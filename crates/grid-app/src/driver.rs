@@ -141,7 +141,7 @@ pub fn append(
     let Some(seat) = crate::cockpit::named(interior, b"NODE", b"D_bip_position") else {
         return Ok(None);
     };
-    let anims = root.join(format!("interiors/{stem}/int_{stem}_driver_anims.pssg"));
+    let anims = grid_tools::install::resolve_case(root, &format!("interiors/{stem}/int_{stem}_driver_anims.pssg"));
     if !anims.is_file() {
         return Ok(None);
     }
@@ -398,7 +398,7 @@ impl Model {
     /// whole pose (docs/COCKPIT.md "Drivers outside the head-cam"); `None`
     /// when the car has no such clip.
     pub fn neutral(&self, root: &Path, stem: &str) -> Result<Option<Vec<Mat4>>, Box<dyn Error>> {
-        let anims = root.join(format!("interiors/{stem}/int_{stem}_driver_anims.pssg"));
+        let anims = grid_tools::install::resolve_case(root, &format!("interiors/{stem}/int_{stem}_driver_anims.pssg"));
         if !anims.is_file() {
             return Ok(None);
         }

@@ -445,7 +445,7 @@ pub struct InteriorPart;
 /// parts. Draws of other shader groups than interior.fx, interior_alpha.fx,
 /// interior_windscreen.fx, mirror.fx, lcd_text.fx and motec.fx are skipped.
 pub fn append(root: &Path, stem: &str, car: &mut Car, anchor: Mat4, suit: Option<&crate::suit::Tints>) -> Result<Cockpit, Box<dyn Error>> {
-    let file = |stem: &str, ext: &str| root.join(format!("interiors/{stem}/int_{stem}.{ext}"));
+    let file = |stem: &str, ext: &str| grid_tools::install::resolve_case(root, &format!("interiors/{stem}/int_{stem}.{ext}"));
     let stem = if file(stem, "pssg").is_file() { stem } else { "n12" };
     let bytes = read(&file(stem, "pssg"))?;
     let tree = pssg::read_tree(&bytes)?;

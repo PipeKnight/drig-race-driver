@@ -49,7 +49,7 @@ impl Interior {
     /// The set of `stem`'s cockpit on the nodes of `tree` placed by
     /// `anchor`; `None` without the file.
     pub fn load(root: &Path, stem: &str, tree: &pssg::Tree, anchor: Mat4) -> Result<Option<Self>, Box<dyn Error>> {
-        let path = root.join(format!("interiors/{stem}/int_{stem}_anims.pssg"));
+        let path = grid_tools::install::resolve_case(root, &format!("interiors/{stem}/int_{stem}_anims.pssg"));
         if !path.is_file() {
             return Ok(None);
         }

@@ -8,8 +8,12 @@
 #       every file the run read (names only; push_android_data.ps1 bundles them)
 #   powershell -NoProfile -File tools\trace_bundle_files.ps1 -Event drift-nurburgring -Stage DIR
 #       on a push_android_data.ps1 -Stage folder: lists every file the app read
-#       outside the bundle's lists and every file error in its log; exit code 1
-#       when there is one
+#       outside the bundle's lists, every file error in its log and every file the
+#       event's list names that this run did not read; exit code 1 when there is
+#       one. The stage is case-sensitive like Android storage (F921), so a name
+#       the code derives in another case than the shipped file is caught even
+#       where the code skips a missing optional file silently (the Viper's
+#       int_VIP_anims.pssg). Any menu event can be checked on the same stage.
 #
 # How reads are seen without elevation (Procmon needs it): NTFS here updates a
 # file's last-access time on a read when the stored one is more than an hour
@@ -53,14 +57,15 @@ $old = [datetime]'2000-01-01'
 $files = Get-ChildItem -LiteralPath $gridRoot -Recurse -File -Force
 foreach ($f in $files) { $f.LastAccessTime = $old }
 
-# The phone's data dir: the bundle's drive profile and event, the game root.
+# The phone's data dir: the bundle's drive profile, the event's own profile
+# (a stage's event.ini is only its bundle's starting event, and every menu
+# offers Donington and Washington), the game root.
+Copy-Item -LiteralPath (Join-Path $root "android\events\$Event.ini") -Destination (Join-Path $data 'event.ini')
 if ($Stage) {
     $settings = [IO.File]::ReadAllText((Join-Path $Stage 'settings.ini'))
-    Copy-Item -LiteralPath (Join-Path $Stage 'event.ini') -Destination $data
     $tsv = Join-Path $Stage 'ai-driver-characteristics.tsv'
 } else {
     $settings = [IO.File]::ReadAllText((Join-Path $root 'android\app\src\main\assets\grid-import\settings.ini'))
-    Copy-Item -LiteralPath (Join-Path $root "android\events\$Event.ini") -Destination (Join-Path $data 'event.ini')
     $tsv = $Characteristics
 }
 if ($Event -eq 'drift-nurburgring' -and (Test-Path -LiteralPath $tsv)) { Copy-Item -LiteralPath $tsv -Destination $data }
@@ -112,8 +117,18 @@ if ($Stage) {
     }
     $unlisted = @($read | Where-Object { -not $listed.ContainsKey($_.ToLowerInvariant()) })
     $unlisted | ForEach-Object { Write-Output "  unlisted $_" }
-    Write-Output "trace_bundle_files stage=$Stage unlisted=$($unlisted.Count) file_errors=$($errors.Count) (log: $log)"
-    if ($unlisted.Count -or $errors.Count) { exit 1 }
+    # Every file the event's own desktop trace read must be read here too: a
+    # file the stage has but the app did not open was looked up under another
+    # name (F921). The speech lines after the marker are only played on cue.
+    $readKeys = @{}
+    $read | ForEach-Object { $readKeys[$_.ToLowerInvariant()] = $true }
+    $own = Get-Content -LiteralPath (Join-Path $root "android\events\$Event.files")
+    $marker = [Array]::FindIndex([string[]]$own, [Predicate[string]] { param($l) $l.StartsWith('# Speech lines') })
+    if ($marker -ge 0) { $own = $own[0..($marker - 1)] }
+    $unread = @($own | Where-Object { $_ -and -not $_.StartsWith('#') -and -not $readKeys.ContainsKey($_.ToLowerInvariant()) })
+    $unread | ForEach-Object { Write-Output "  unread $_" }
+    Write-Output "trace_bundle_files stage=$Stage event=$Event unlisted=$($unlisted.Count) unread=$($unread.Count) file_errors=$($errors.Count) (log: $log)"
+    if ($unlisted.Count -or $unread.Count -or $errors.Count) { exit 1 }
     return
 }
 # Speech streams one file per spoken line, so a run reads only the lines it

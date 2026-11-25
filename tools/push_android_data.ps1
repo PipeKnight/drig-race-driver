@@ -116,6 +116,21 @@ foreach ($item in $items) {
 
 if ($Stage) {
     $grid = Join-Path $Stage 'Grid'
+    # Android storage is case-sensitive and the installation keeps Windows
+    # spellings (int_VIP_anims.pssg). A fresh stage folder gets the per-directory
+    # case-sensitive flag (folders made inside inherit it), so the desktop run of
+    # trace_bundle_files.ps1 -Stage misses a file whose name the code derives in
+    # another case as the phone does (F921). No elevation is needed, but fsutil
+    # needs the "delete subfolders and files" right on the folder, which an
+    # inherited ACL (C:\Dev) may lack, and the folder must be empty. fsutil exits
+    # 0 when it fails, so the flag is read back.
+    if (-not (Test-Path -LiteralPath $grid)) {
+        New-Item -ItemType Directory -Force -Path $grid | Out-Null
+        & icacls.exe $grid /grant "$($env:USERNAME):(DC)" | Out-Null
+        & fsutil.exe file setCaseSensitiveInfo $grid enable | Out-Null
+        $state = "$(& fsutil.exe file queryCaseSensitiveInfo $grid)"
+        if ($state -notmatch 'is enabled') { throw "could not make $grid case-sensitive ($state); the stage check would not see case mismatches" }
+    }
     foreach ($item in $items) {
         $target = Join-Path $grid $item
         New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null

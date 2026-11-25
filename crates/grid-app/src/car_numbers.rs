@@ -267,7 +267,7 @@ pub fn apply(
             return Err("opponent body fallback would inherit player number".into());
         }
     }
-    let text = super::read(&root.join(format!("cars/{}/decals.xml", model.stem())))?;
+    let text = super::read(&grid_tools::install::resolve_case(root, &format!("cars/{}/decals.xml", model.stem())))?;
     let placements = grid_formats::car_decals::read_numbers(std::str::from_utf8(&text)?)?;
     let glyphs = font(root, number)?;
     let result = compose(dds, &placements, &glyphs, number)?;
@@ -287,7 +287,7 @@ fn prepared(
     dds: &[u8],
     number: Number,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
-    let text = super::read(&root.join(format!("cars/{}/decals.xml", model.stem())))?;
+    let text = super::read(&grid_tools::install::resolve_case(root, &format!("cars/{}/decals.xml", model.stem())))?;
     let placements = grid_formats::car_decals::read_numbers(std::str::from_utf8(&text)?)?;
     compose(dds, &placements, &font(root, number)?, number)
 }

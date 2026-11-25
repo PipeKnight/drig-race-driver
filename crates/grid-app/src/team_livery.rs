@@ -174,7 +174,7 @@ fn fill_gaps(rgba: &mut [u8], drawn: &[bool], w: usize, h: usize) {
 /// Every texture of `model`'s `livery_user` package, keyed `prefix` + id,
 /// with `<car>_main.tga` replaced by the composite of `design`.
 pub fn load(root: &Path, model: &CarModel, prefix: &str, design: &Design) -> Result<BTreeMap<String, Vec<u8>>, Box<dyn Error>> {
-    let bytes = super::read(&root.join(package(model)))?;
+    let bytes = super::read(&grid_tools::install::resolve_case(root, &package(model)))?;
     let tree = pssg::read_tree(&bytes)?;
     let main = model.texture("main");
     let mut out = BTreeMap::new();
@@ -210,7 +210,7 @@ pub fn load(root: &Path, model: &CarModel, prefix: &str, design: &Design) -> Res
 /// Whether `model` ships a `livery_user` package (the `*_user` rows of
 /// `vehicle_livery`).
 pub fn available(root: &Path, model: &CarModel) -> bool {
-    root.join(package(model)).is_file()
+    grid_tools::install::resolve_case(root, &package(model)).is_file()
 }
 
 /// Puts `design` on the player (`car.textures`) and on opponent `teammate`

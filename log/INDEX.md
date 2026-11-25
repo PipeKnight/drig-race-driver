@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F921](F0921.md) | 2026-11-25 | Android: Viper cockpit wheel fixed (file name case); tyre walls after a hit diagnosed, not fixed |
 | [F920](F0920.md) | 2026-11-24 | Performance test: single-threaded executor switches for the main and render worlds |
 | [F919](F0919.md) | 2026-11-25 | Phone proxy: predicted Xiaomi frame from a phone-like desktop run |
 | [F918](F0918.md) | 2026-11-25 | Unified per-run logs on all platforms |

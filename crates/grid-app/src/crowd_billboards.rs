@@ -231,7 +231,7 @@ fn append_group(
     Ok(true)
 }
 fn atlas(root: &Path, relative: &str) -> AnyResult<(Vec<u8>, Vec<u8>)> {
-    let bytes = std::fs::read(root.join(relative))?;
+    let bytes = std::fs::read(grid_tools::install::resolve_case(root, relative))?;
     let tree = pssg::read_tree(&bytes)?;
     atlas_from_tree(&tree)
 }
@@ -303,7 +303,7 @@ fn prepare_scene(root: &Path, route: &Route, flags_enabled: bool) -> AnyResult<P
     let dataset = population::dataset(&graph)?;
     let (user, region) = context(&dataset.pssg)?;
     let shared = grid_tools::tyre_smoke::read_xml(&root.join("anims/organism_static_dataset.xml"))?;
-    let raw = std::fs::read(root.join(shared_resource(&shared, "xml", "typeDefs")?))?;
+    let raw = std::fs::read(grid_tools::install::resolve_case(root, &shared_resource(&shared, "xml", "typeDefs")?))?;
     let defs = binxml::read(&raw)?;
     let bytes = std::fs::read(root.join(route.file("crowd_standing.bin")))?;
     let (source, moving) = match crowd_placements::read_with_paths(&bytes) {
@@ -336,13 +336,13 @@ fn prepare_scene(root: &Path, route: &Route, flags_enabled: bool) -> AnyResult<P
     let animation_bank_bytes = metadata
         .dataset_resources
         .get("hla")
-        .and_then(|resource| std::fs::read(root.join(&resource.relative_path)).ok());
+        .and_then(|resource| std::fs::read(grid_tools::install::resolve_case(root, &resource.relative_path)).ok());
     let animation_bank = animation_bank_bytes
         .as_deref()
         .and_then(|bytes| pssg::read_tree(bytes).ok());
     let selector_bytes = shared_resource(&shared, "binary", "hla")
         .ok()
-        .and_then(|path| std::fs::read(root.join(path)).ok());
+        .and_then(|path| std::fs::read(grid_tools::install::resolve_case(root, &path)).ok());
     let selector = selector_bytes
         .as_deref()
         .and_then(|bytes| binxml::read(bytes).ok());
@@ -477,8 +477,8 @@ fn prepare_scene(root: &Path, route: &Route, flags_enabled: bool) -> AnyResult<P
             )? else {
                 return Ok(None);
             };
-            let props = root.join(shared_resource(&shared, "pssg", "props")?);
-            let definitions = root.join(shared_resource(&shared, "binary", "props")?);
+            let props = grid_tools::install::resolve_case(root, &shared_resource(&shared, "pssg", "props")?);
+            let definitions = grid_tools::install::resolve_case(root, &shared_resource(&shared, "binary", "props")?);
             let rods = near::flag_rod::Rods::read(
                 &std::fs::read(props)?, &std::fs::read(definitions)?,
             )?;
@@ -591,7 +591,7 @@ fn prepare_scene(root: &Path, route: &Route, flags_enabled: bool) -> AnyResult<P
     let flash_dds = if let Some(resource) = metadata.dataset_resources.get("camFlash")
         && rows.iter().any(|row| row.has_camera)
     {
-        match super::flash_preview::source_dds(&root.join(&resource.relative_path)) {
+        match super::flash_preview::source_dds(&grid_tools::install::resolve_case(root, &resource.relative_path)) {
             Ok(dds) => Some(dds),
             Err(error) => {
                 eprintln!("crowd camera flash disabled on {}: {error}", route.path());
