@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F930](F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
 | [F929](F0929.md) | 2026-11-25 | Mac logs 22:26: GPU-query crash is a frame_split readback bug; countdown GPU-bound at the ceiling; memory pressure ruled out |
 | [F928](F0928.md) | 2026-11-25 | Lean render profile as the Android default; 120 Hz pacing A/B |
 | [F927](F0927.md) | 2026-11-25 | Phone GPU split rows and Android GPU research |

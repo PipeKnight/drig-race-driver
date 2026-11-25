@@ -184,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F930](log/F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
 | [F929](log/F0929.md) | 2026-11-25 | Mac logs 22:26: GPU-query crash is a frame_split readback bug; countdown GPU-bound at the ceiling; memory pressure ruled out |
 | [F928](log/F0928.md) | 2026-11-25 | Lean render profile as the Android default; 120 Hz pacing A/B |
 | [F927](log/F0927.md) | 2026-11-25 | Phone GPU split rows and Android GPU research |
@@ -243,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F873](log/F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |
 | [F872](log/F0872.md) | 2026-11-19 | Owner request: HDR monitor output and settings |
 | [F871](log/F0871.md) | 2026-11-19 | Owner approves the further settings list for row 140 |
-| [F870](log/F0870.md) | 2026-11-19 | Owner request: bloom and white-balance settings, more settings to choose |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

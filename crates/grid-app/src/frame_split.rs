@@ -39,7 +39,7 @@ use bevy::prelude::*;
 use bevy::render::camera::ExtractedCamera;
 use bevy::render::render_phase::{BinnedPhaseItem, ViewBinnedRenderPhases, ViewSortedRenderPhases};
 use bevy::render::render_resource::{
-    BufferDescriptor, BufferUsages, ComputePassDescriptor, MapMode, PollType,
+    ComputePassDescriptor, MapMode, PollType,
 };
 use bevy::render::renderer::{
     PendingCommandBuffers, RenderAdapterInfo, RenderContext, RenderDevice, RenderGraph,
@@ -932,12 +932,22 @@ enum SlotState {
     Pending,
 }
 
+/// Frames a submitted slot waits for its map before the ring gives up on it.
+const MAP_TIMEOUT_FRAMES: u32 = 60;
+
 struct Slot {
     marks: Vec<Mark>,
     state: SlotState,
-    /// 0 waiting, 1 mapped, 2 failed.
+    /// 0 waiting, 1 mapped, 2 failed. A fresh flag for every map, so the late
+    /// callback of a map the ring gave up on cannot speak for the next one.
     mapped: Arc<AtomicU8>,
-    /// Frames since submit, to drop a slot whose map never completes.
+    /// `map_async` was called on this slot's buffer and the buffer has not
+    /// been unmapped or replaced since. wgpu 29 has no map-state query; a copy
+    /// into such a buffer fails the whole submit and a second `map_async`
+    /// panics ("Buffer is already mapped", F929), so a slot records again
+    /// only with this clear.
+    map_outstanding: bool,
+    /// Frames since submit, to give up on a slot whose map never completes.
     age: u32,
 }
 
@@ -948,6 +958,135 @@ struct GpuInner {
     slots: Vec<Slot>,
     current: Option<usize>,
     frame: usize,
+}
+
+/// One frame read back: its marks and their GPU ticks.
+type ReadFrame = (Vec<Mark>, Vec<u64>);
+
+fn readback_buffer(device: &wgpu::Device) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("frame_split_readback"),
+        size: u64::from(SLOT_QUERIES) * 8,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+impl GpuInner {
+    fn new(device: &wgpu::Device, set: wgpu::QuerySet) -> Self {
+        let resolve = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame_split_resolve"),
+            size: u64::from(SLOT_QUERIES) * 8 * RING as u64,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        Self {
+            set,
+            resolve,
+            readback: (0..RING).map(|_| readback_buffer(device)).collect(),
+            slots: (0..RING)
+                .map(|_| Slot {
+                    marks: Vec::new(),
+                    state: SlotState::Free,
+                    mapped: Arc::new(AtomicU8::new(0)),
+                    map_outstanding: false,
+                    age: 0,
+                })
+                .collect(),
+            current: None,
+            frame: 0,
+        }
+    }
+
+    /// Collects the submitted slots whose maps finished: the marks and ticks
+    /// of every frame read, and how many slots were given up on. A slot whose
+    /// map failed or timed out gets a new buffer: wgpu unmaps the old one when
+    /// it is dropped (a pending map is aborted), while an explicit `unmap()`
+    /// of a buffer whose map failed is a validation error that Bevy turns into
+    /// a render error. The caller polls the device first.
+    fn collect(&mut self, device: &wgpu::Device) -> (Vec<ReadFrame>, u32) {
+        let mut read = Vec::new();
+        let mut lost = 0;
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            if slot.state != SlotState::Pending {
+                continue;
+            }
+            slot.age += 1;
+            let flag = slot.mapped.load(Ordering::Acquire);
+            if slot.map_outstanding && flag == 1 {
+                let len = slot.marks.len() as u64 * 8;
+                let ticks: Vec<u64> = {
+                    let data = self.readback[i].slice(..len).get_mapped_range();
+                    data.as_chunks::<8>()
+                        .0
+                        .iter()
+                        .map(|c| u64::from_le_bytes(*c))
+                        .collect()
+                };
+                self.readback[i].unmap();
+                slot.map_outstanding = false;
+                read.push((std::mem::take(&mut slot.marks), ticks));
+                slot.state = SlotState::Free;
+            } else if slot.map_outstanding && (flag == 2 || slot.age > MAP_TIMEOUT_FRAMES) {
+                self.readback[i] = readback_buffer(device);
+                slot.map_outstanding = false;
+                slot.state = SlotState::Free;
+                lost += 1;
+            } else if !slot.map_outstanding && slot.age > MAP_TIMEOUT_FRAMES {
+                // Submitted but never mapped: the buffer is idle.
+                slot.state = SlotState::Free;
+            }
+        }
+        (read, lost)
+    }
+
+    /// Opens this frame's slot when the counter is shown and the slot is free;
+    /// otherwise the frame records no GPU timings.
+    fn open(&mut self, shown: bool) {
+        self.current = None;
+        self.frame = self.frame.wrapping_add(1);
+        let i = self.frame % RING;
+        let slot = &mut self.slots[i];
+        if shown && slot.state == SlotState::Free && !slot.map_outstanding {
+            slot.marks.clear();
+            slot.state = SlotState::Recording;
+            slot.age = 0;
+            self.current = Some(i);
+        }
+    }
+
+    /// Closes this frame's slot: its readback buffer, first query and query
+    /// count, or `None` when it recorded nothing.
+    fn close(&mut self) -> Option<(wgpu::Buffer, u32, u32)> {
+        let i = self.current?;
+        let slot = &mut self.slots[i];
+        let used = slot.marks.len() as u32;
+        if used == 0 || slot.map_outstanding {
+            slot.state = SlotState::Free;
+            self.current = None;
+            return None;
+        }
+        slot.state = SlotState::Pending;
+        Some((self.readback[i].clone(), i as u32 * SLOT_QUERIES, used))
+    }
+
+    /// After submit: maps this frame's readback buffer.
+    fn start_map(&mut self) {
+        let Some(i) = self.current else {
+            return;
+        };
+        let slot = &mut self.slots[i];
+        if slot.state != SlotState::Pending || slot.map_outstanding {
+            return;
+        }
+        let flag = Arc::new(AtomicU8::new(0));
+        slot.mapped = flag.clone();
+        slot.map_outstanding = true;
+        let len = slot.marks.len() as u64 * 8;
+        self.readback[i].map_async(MapMode::Read, ..len, move |r| {
+            flag.store(if r.is_ok() { 1 } else { 2 }, Ordering::Release);
+        });
+    }
 }
 
 /// Render-world resource for the GPU markers (present only when the adapter
@@ -1011,94 +1150,27 @@ fn gpu_startup(
         ty: wgpu::QueryType::Timestamp,
         count: SLOT_QUERIES * RING as u32,
     });
-    let bytes = u64::from(SLOT_QUERIES) * 8;
-    let resolve = device.create_buffer(&BufferDescriptor {
-        label: Some("frame_split_resolve"),
-        size: bytes * RING as u64,
-        usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let readback = (0..RING)
-        .map(|_| {
-            device.create_buffer(&BufferDescriptor {
-                label: Some("frame_split_readback"),
-                size: bytes,
-                usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        })
-        .map(|b| (*b).clone())
-        .collect();
-    let slots = (0..RING)
-        .map(|_| Slot {
-            marks: Vec::new(),
-            state: SlotState::Free,
-            mapped: Arc::new(AtomicU8::new(0)),
-            age: 0,
-        })
-        .collect();
     commands.insert_resource(FrameGpu {
-        inner: Mutex::new(GpuInner {
-            set,
-            resolve: (*resolve).clone(),
-            readback,
-            slots,
-            current: None,
-            frame: 0,
-        }),
+        inner: Mutex::new(GpuInner::new(wgpu_device, set)),
         period_ns: f64::from(queue.get_timestamp_period()),
     });
 }
 
 /// Start of the render graph: collect finished slots, open this frame's.
 fn gpu_begin(gpu: Res<FrameGpu>, device: Res<RenderDevice>) {
-    let _ = device.wgpu_device().poll(PollType::Poll);
-    let mut finished = Vec::new();
-    {
+    let device = device.wgpu_device();
+    let _ = device.poll(PollType::Poll);
+    let (read, lost) = {
         let mut g = gpu.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let g = &mut *g;
-        for (i, slot) in g.slots.iter_mut().enumerate() {
-            if slot.state != SlotState::Pending {
-                continue;
-            }
-            slot.age += 1;
-            match slot.mapped.load(Ordering::Acquire) {
-                1 => {
-                    let len = slot.marks.len() as u64 * 8;
-                    let ticks: Vec<u64> = {
-                        let data = g.readback[i].slice(..len).get_mapped_range();
-                        data.as_chunks::<8>()
-                            .0
-                            .iter()
-                            .map(|c| u64::from_le_bytes(*c))
-                            .collect()
-                    };
-                    g.readback[i].unmap();
-                    finished.push(split(&slot.marks, &ticks, gpu.period_ns));
-                    slot.state = SlotState::Free;
-                }
-                2 => slot.state = SlotState::Free,
-                // A map that never completes would block the ring.
-                _ if slot.age > 60 => slot.state = SlotState::Free,
-                _ => {}
-            }
-        }
-        g.current = None;
-        g.frame = g.frame.wrapping_add(1);
-        let i = g.frame % RING;
-        if SHOWN.load(Ordering::Relaxed) && g.slots[i].state == SlotState::Free {
-            let slot = &mut g.slots[i];
-            slot.marks.clear();
-            slot.state = SlotState::Recording;
-            slot.age = 0;
-            slot.mapped.store(0, Ordering::Release);
-            g.current = Some(i);
-        }
-    }
-    if !finished.is_empty() {
+        let collected = g.collect(device);
+        g.open(SHOWN.load(Ordering::Relaxed));
+        collected
+    };
+    if !read.is_empty() || lost > 0 {
         with_acc(|a| {
-            for frame in finished {
-                a.add_gpu(frame);
+            a.gpu_lost += lost;
+            for (marks, ticks) in read {
+                a.add_gpu(split(&marks, &ticks, gpu.period_ns));
             }
         });
     }
@@ -1233,23 +1305,10 @@ fn frame_marker<const K: u8>(gpu: Option<Res<FrameGpu>>, mut ctx: RenderContext)
 fn gpu_resolve(gpu: Res<FrameGpu>, mut ctx: RenderContext) {
     let (set, resolve, readback, base, used) = {
         let mut g = gpu.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(i) = g.current else {
+        let Some((readback, base, used)) = g.close() else {
             return;
         };
-        let used = g.slots[i].marks.len() as u32;
-        if used == 0 {
-            g.slots[i].state = SlotState::Free;
-            g.current = None;
-            return;
-        }
-        g.slots[i].state = SlotState::Pending;
-        (
-            g.set.clone(),
-            g.resolve.clone(),
-            g.readback[i].clone(),
-            i as u32 * SLOT_QUERIES,
-            used,
-        )
+        (g.set.clone(), g.resolve.clone(), readback, base, used)
     };
     let encoder = ctx.command_encoder();
     let offset = u64::from(base) * 8;
@@ -1259,18 +1318,7 @@ fn gpu_resolve(gpu: Res<FrameGpu>, mut ctx: RenderContext) {
 
 /// After submit: map this frame's readback buffer.
 fn gpu_finish(gpu: Res<FrameGpu>) {
-    let g = gpu.inner.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(i) = g.current else {
-        return;
-    };
-    if g.slots[i].state != SlotState::Pending {
-        return;
-    }
-    let flag = g.slots[i].mapped.clone();
-    let len = g.slots[i].marks.len() as u64 * 8;
-    g.readback[i].map_async(MapMode::Read, ..len, move |r| {
-        flag.store(if r.is_ok() { 1 } else { 2 }, Ordering::Release);
-    });
+    gpu.inner.lock().unwrap_or_else(|e| e.into_inner()).start_map();
 }
 
 // ---------------------------------------------------------------------------
@@ -1339,6 +1387,8 @@ struct Acc {
     views3d: u64,
     gpu_frames: u32,
     gpu_bad: u32,
+    /// Readback slots given up on (map failed or timed out, F930).
+    gpu_lost: u32,
     gpu: [f64; 7],
     gpu_span: f64,
     /// render_ms of the last finished render frame (kept across resets).
@@ -1545,10 +1595,11 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
                 s += &format!(" {name}={:.2}", sum / n);
             }
             s += &format!(
-                " g_gap={:.2} g_frames={} g_bad={}",
+                " g_gap={:.2} g_frames={} g_bad={} g_lost={}",
                 (a.gpu_span - total) / n,
                 a.gpu_frames,
-                a.gpu_bad
+                a.gpu_bad,
+                a.gpu_lost
             );
         } else {
             s += if gpu_possible { " gpu=off" } else { " gpu=hidden" };
@@ -1885,5 +1936,109 @@ mod tests {
             "{}",
             lines[0]
         );
+    }
+
+    /// F930, the Mac crash of F929: a slot whose map timed out, or failed, is
+    /// reused when the ring comes round. Its copy must not land in a buffer
+    /// that is still mapped (a validation error that drops the frame's
+    /// command buffers) and its next map must not hit wgpu's "Buffer is
+    /// already mapped" panic. The device lives in a child process
+    /// (`gpu_test_process`, F922).
+    #[test]
+    fn readback_slot_is_reused_after_a_timed_out_or_failed_map() {
+        crate::gpu_test_process::in_own_process(check_readback_reuse);
+    }
+
+    fn check_readback_reuse() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) =
+            bevy::tasks::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        else {
+            println!("no GPU adapter, skipped");
+            return;
+        };
+        let (device, queue) =
+            bevy::tasks::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("a device");
+        let errors = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = errors.clone();
+        device.on_uncaptured_error(Arc::new(move |e| sink.lock().unwrap().push(e.to_string())));
+        // Occlusion needs no device feature; the ring never looks at the type.
+        let set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("frame_split_test"),
+            ty: wgpu::QueryType::Occlusion,
+            count: SLOT_QUERIES * RING as u32,
+        });
+        let mut g = GpuInner::new(&device, set);
+        let source = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame_split_test_source"),
+            size: 64,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let ticks = [1000_u64, 1001, 1002];
+        queue.write_buffer(&source, 0, &ticks.iter().flat_map(|t| t.to_le_bytes()).collect::<Vec<u8>>());
+        // One render frame: open, record two marks, copy, submit, map.
+        let frame = |g: &mut GpuInner| -> Option<usize> {
+            g.open(true);
+            let i = g.current?;
+            g.slots[i].marks.extend([m(Kind::FrameBegin, 0); 2]);
+            let (readback, _, used) = g.close()?;
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.copy_buffer_to_buffer(&source, 0, &readback, 0, u64::from(used) * 8);
+            queue.submit([encoder.finish()]);
+            g.start_map();
+            Some(i)
+        };
+        // Every slot records, then the GPU finishes and all three are read.
+        let check_round = |g: &mut GpuInner, what: &str| {
+            let recorded: Vec<usize> = (0..RING).filter_map(|_| frame(g)).collect();
+            assert_eq!(recorded.len(), RING, "{what}: every slot records again: {recorded:?}");
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            let (read, lost) = g.collect(&device);
+            assert_eq!(lost, 0, "{what}");
+            assert_eq!(read.len(), RING, "{what}: every slot is read");
+            for (marks, got) in read {
+                assert_eq!(marks.len(), 2, "{what}");
+                assert_eq!(got, ticks[..2], "{what}: the copied ticks come back");
+            }
+            assert!(errors.lock().unwrap().is_empty(), "{what}: {:?}", errors.lock().unwrap());
+        };
+        check_round(&mut g, "start");
+
+        // Timeout: a map that never completes (nothing polls the device).
+        let timed_out = frame(&mut g).expect("a free slot");
+        for _ in 0..MAP_TIMEOUT_FRAMES {
+            assert_eq!(g.collect(&device).1, 0, "gives up only after the timeout");
+        }
+        assert!(g.slots[timed_out].map_outstanding);
+        assert_eq!(g.collect(&device).1, 1, "the timed-out slot is given up on");
+        assert!(!g.slots[timed_out].map_outstanding && g.slots[timed_out].state == SlotState::Free);
+        check_round(&mut g, "after a timed-out map");
+
+        // Failure: the map callback reports an error.
+        let failed = frame(&mut g).expect("a free slot");
+        g.slots[failed].mapped.store(2, Ordering::Release);
+        assert_eq!(g.collect(&device).1, 1, "the failed slot is given up on");
+        check_round(&mut g, "after a failed map");
+
+        // While a slot's map is outstanding, its frame records no timings.
+        let busy = frame(&mut g).expect("a free slot");
+        let (mut opened, mut skipped) = (0, 0);
+        for _ in 0..RING {
+            g.open(true);
+            match g.current {
+                Some(i) => {
+                    assert_ne!(i, busy);
+                    opened += 1;
+                    g.close();
+                }
+                None => skipped += 1,
+            }
+        }
+        assert_eq!((opened, skipped), (RING - 1, 1));
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        assert_eq!(g.collect(&device).0.len(), 1);
+        assert!(errors.lock().unwrap().is_empty(), "{:?}", errors.lock().unwrap());
+        println!("readback ring: timed-out and failed slots reused without errors");
     }
 }

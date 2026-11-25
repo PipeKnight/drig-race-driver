@@ -5794,6 +5794,22 @@ scripts: scratchpad `macwin.py` and `share.py` (frame_stats per window, split at
   reused, and that frame records no markers. A failure
   then costs one frame of GPU timings, never a frame or the process. Test: a headless wgpu device test that
   forces the timeout path and reuses the slot.
+- Applied in F930, with one change to the proposal [O, wgpu-core 29.0.4 source]. After a failed map the
+  buffer is already back to idle, and an explicit `unmap()` of an idle buffer is a validation error. Bevy's
+  device error handler turns any such error into a render error state. So the success path still unmaps, but the
+  failure and timeout paths replace the slot's readback buffer instead. Dropping the last handle runs wgpu's own
+  `buffer_drop`, which unmaps a mapped buffer, aborts a pending map and ignores the idle case.
+  - Each map gets a fresh flag, which acts as the generation: a late callback from a buffer that was given up on
+    writes only to its own flag.
+  - A slot records again only when it is free and its `map_outstanding` bit is clear; otherwise that frame
+    records no GPU timings.
+  - Slots that were given up on are counted as `g_lost` in `frame_stats`.
+  - The test (`frame_split::tests::readback_slot_is_reused_after_a_timed_out_or_failed_map`, in its own process
+    on a real device) runs four rounds and checks that no device error is reported in any of them:
+    1. three frames read back;
+    2. a map that times out after 60 frames;
+    3. a failure forced through the flag;
+    4. the slot of a still-outstanding map is skipped, then reused.
 
 ### Countdown: GPU-bound at the 1440-row ceiling, held by the hysteresis band [O]
 
