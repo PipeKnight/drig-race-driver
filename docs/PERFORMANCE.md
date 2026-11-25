@@ -5764,3 +5764,83 @@ cache), normal state, three runs each, alternating, one build-lock hold (`local/
 - A check against an older phone measurement (F571, 3cdbf523) was not run: that revision has no
   `GRID_COMPUTE_THREADS`, a different Cargo.lock (a full rebuild) and another car field, so it would not be the
   same race. The calibration rests on one day of phone logs, three perf_test states and one APK.
+
+## Mac run of 25 November 22:26: readback crash, countdown at the ceiling, memory (F929)
+
+Owner's MacBook (Apple M4, Metal), build 9406cb12 (includes the F926 counters), Donington race, three runs:
+one that crashed with the F9 counter on, one windowed trace (2560x1600 screen) and one fullscreen trace
+(3024x1890). The logs stay under `local/mac-logs/2026-11-25-2226/` (owner-private, not committed). Analysis
+scripts: scratchpad `macwin.py` and `share.py` (frame_stats per window, split at `countdown remaining=GO`).
+
+### The aborted run is a crash in `frame_split`'s GPU timestamp readback [O]
+
+- 16.5 s into the race (60 FPS, no hitch before it) `Queue::submit` failed validation: the buffer labelled
+  `frame_split_readback` "is still mapped". Right after it `map_async` panicked in wgpu 29.0.4
+  (`buffer.rs:572`, "Buffer is already mapped", mapped range 0..112, i.e. an earlier 14-mark map), and the game
+  exited with code 1. The GPU and driver did not fail; the timestamp readback is ours.
+- Cause in the code [O]: `gpu_begin` frees a pending slot on two paths without calling `unmap()`: when its map
+  reports an error (`mapped == 2`) and when the map has not completed after 60 render frames (`age > 60`). wgpu
+  keeps the map context of a buffer until `unmap()` (a failed or still-pending map included). Three frames
+  later the slot is reused: `gpu_resolve` copies into the still-mapped buffer (the submit fails, and that whole
+  frame's command buffers are lost), then `gpu_finish` calls `map_async` again and hits the assertion.
+- Which of the two paths fired on the Mac is not known [I]: the log has no earlier error, so most likely a map
+  that did not complete within 60 frames. The markers run only while the F9 counter is shown, which is why the
+  two traces without the counter (`gpu=off` in every window) did not crash.
+- Proposed general fix (not applied): never let a slot leave `Pending` with a map outstanding. On the timeout
+  and error paths call `unmap()` (it aborts a pending map; its callback then reports an error, which the
+  flag must ignore for a slot no longer pending, e.g. by a per-use generation number). wgpu 29 has no
+  `map_state()` (only `unmap()` resets the map context, checked in its source), so each slot keeps its own
+  "map outstanding" bit, set in `gpu_finish` and cleared only by `unmap()`. A slot with the bit set is not
+  reused, and that frame records no markers. A failure
+  then costs one frame of GPU timings, never a frame or the process. Test: a headless wgpu device test that
+  forces the timeout path and reuses the slot.
+
+### Countdown: GPU-bound at the 1440-row ceiling, held by the hysteresis band [O]
+
+| run | countdown windows (3..GO) | race (after GO + 40 lines) |
+|---|---|---|
+| windowed | 2304x1440, 55.7-59.0 FPS, max 25-41 ms, acquire 12.6-12.8 ms, main 3.1 ms | median 1080 rows, 60.0 FPS, acquire 8.8 ms |
+| fullscreen | 2304x1440, 55.2-58.2 FPS, max 25-31 ms, acquire 12.5-13.0 ms, main 3.0-3.3 ms | median 1176 rows, 59.7 FPS, acquire 9.0 ms |
+
+- At the start the whole grid (all cars, stands, crowd) is in view at the ceiling height. The main thread
+  needs only 3 ms and the drawable wait (`acquire`, the GPU on Metal, see the dynres note) is 12.5-13 ms against
+  8.8-9.0 in the race: the countdown is GPU-bound.
+- The controller does not step down: the smoothed frame time (about 17.2-17.9 ms) stays inside the band between
+  `ON_TIME_MS` (17.2) and `LATE_MS` (18), where it holds by design. The first step down comes after GO
+  (windowed, 1440 -> 1368 rows) or at "1" (fullscreen, 1440 -> 1392). So about 5 s of 55-59 FPS with frames
+  alternating between one and two refresh periods [I: visible as judder, not as a freeze].
+- The 198-211 ms frame in the window that contains the fade (`fade_to_clear`) is in the encode stage, in a
+  window that also holds the last warm-up frames (Restore compiles at frame 28, Done at frame 38). No pipeline
+  is compiled after Done in either trace, so it is most likely still under the cover [I].
+- Proposal (not applied, no default change): start each race's controller at the height the warm-up frames
+  measured, or let a GPU-bound countdown (acquire above half the frame, main far below it) count as late. The
+  general form is to treat `acquire` as the GPU signal on Metal, as the dynres note proposed.
+
+### Windowed against fullscreen [O]
+
+- Same mean (60.0 / 59.7 FPS) and the same share of frames over 16 ms (47.8 % / 48.5 %: the controller runs
+  at the 60 FPS edge by design). Fullscreen held more rows (1176 against 1080) and had no window with a frame
+  over 50 ms; windowed had three and twice as many windows whose worst frame was over 25 ms (126 against 52).
+- The three windowed spikes have different stages: a 27 ms `prepare` (58 ms frame), a present and drawable stall
+  during a 64 MB/s image upload (100 ms frame, `r_present` 33 ms), and a 22 ms encode with a 11 ms submit (64 ms
+  frame). None repeats. [I] WindowServer composites the windowed game (32-45 % CPU in the state log, which
+  covers only the windowed run); fullscreen likely goes direct to the display.
+
+### Memory pressure does not explain the dips [O]
+
+- During the windowed run (state log 22:26-22:30): swap-outs did not change at all, and swap-ins rose by 684
+  pages in four minutes. The compressor grew from 9.1 to 11 GB while macOS compressed other apps to make room.
+  grid-app stayed at 2.95-3.08 GB resident. Thermal state was nominal and the Mac was on AC power.
+- The F926 counters show no link to the dips. In windows whose worst frame was over 40 ms, against windows
+  under 25 ms, the medians were:
+
+  | run | page faults per window | involuntary switches | cpu_load |
+  |---|---|---|---|
+  | windowed | 19.0k against 18.2k | 72k against 75k | 1.56 against 1.63 |
+  | fullscreen | 17.3k against 17.7k | 66k against 69k | 1.57 against 1.56 |
+
+  Only the 100 ms upload window had more faults (25.8k).
+- Background apps were not the cause of these dips, so no rerun with them closed is needed. One open
+  observation [I]: about 18k page faults and 60-75k involuntary context switches per second, steadily, also
+  while frames are clean. They are probably mostly soft faults (GPU-shared memory and allocator reuse). This is
+  worth a look as a constant cost, not as a dip cause.

@@ -184,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F929](log/F0929.md) | 2026-11-25 | Mac logs 22:26: GPU-query crash is a frame_split readback bug; countdown GPU-bound at the ceiling; memory pressure ruled out |
 | [F928](log/F0928.md) | 2026-11-25 | Lean render profile as the Android default; 120 Hz pacing A/B |
 | [F927](log/F0927.md) | 2026-11-25 | Phone GPU split rows and Android GPU research |
 | [F926](log/F0926.md) | 2026-11-25 | Mac in-race dips: camera-flash pipelines under the warm-up cover, process counters per window |
@@ -243,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F872](log/F0872.md) | 2026-11-19 | Owner request: HDR monitor output and settings |
 | [F871](log/F0871.md) | 2026-11-19 | Owner approves the further settings list for row 140 |
 | [F870](log/F0870.md) | 2026-11-19 | Owner request: bloom and white-balance settings, more settings to choose |
-| [F869](log/F0869.md) | 2026-11-19 | Render prepare: r_prepare split by system; one staging buffer per frame for streamed meshes gains nothing |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
