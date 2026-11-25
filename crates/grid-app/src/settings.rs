@@ -130,6 +130,10 @@ pub struct Diagnostics {
     /// `<data dir>/window-frames.rgb` (frame_pacing.rs; row 115,
     /// tools/blink_detect.py). Empty: off.
     pub window_frames: Vec<f32>,
+    /// `PERIOD,LOOK` seconds: the phone bench's camera presses without a
+    /// touch screen (input.rs `scripted_press`; tools/android_bench.ps1,
+    /// F927). Empty: off.
+    pub camera_presses: Vec<f32>,
     /// Performance test switches at start (`auto` or a list such as
     /// `shadows,foliage`; perf_test.rs, docs/ANDROID_GPU.md section 7).
     pub perf_test: Option<String>,
@@ -168,6 +172,7 @@ impl Default for Diagnostics {
             present_trace: false,
             window_shots: Vec::new(),
             window_frames: Vec::new(),
+            camera_presses: Vec::new(),
             perf_test: None,
             pre_rotation: false,
         }
@@ -208,6 +213,7 @@ impl Diagnostics {
             present_trace: text("GRID_PRESENT_TRACE").is_some_and(|v| v == "1"),
             window_shots: text("GRID_WINDOW_SHOTS").map_or_else(Vec::new, |v| seconds_list(&v).unwrap_or_default()),
             window_frames: text("GRID_WINDOW_FRAMES").map_or_else(Vec::new, |v| frame_range(&v).unwrap_or_default()),
+            camera_presses: text("GRID_CAMERA_PRESSES").map_or_else(Vec::new, |v| seconds_list(&v).unwrap_or_default()),
             perf_test: text("GRID_PERF_TEST"),
             pre_rotation: text("GRID_PRE_ROTATION").is_some_and(|v| v == "1"),
         }
@@ -252,6 +258,7 @@ impl Diagnostics {
             "present_trace" => self.present_trace = on(key, value)?,
             "window_shots" => self.window_shots = seconds_list(value).ok_or_else(|| number(key))?,
             "window_frames" => self.window_frames = frame_range(value).ok_or_else(|| number(key))?,
+            "camera_presses" => self.camera_presses = seconds_list(value).ok_or_else(|| number(key))?,
             "perf_test" => self.perf_test = text(),
             "pre_rotation" => self.pre_rotation = on(key, value)?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),

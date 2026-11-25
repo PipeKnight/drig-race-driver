@@ -707,6 +707,15 @@ impl Actions {
         self.state[action as usize].pressed
     }
 
+    /// Holds `action` down in this update on top of its bindings
+    /// (diagnostics `camera_presses`); `was_down` is its state before it.
+    fn hold(&mut self, action: Action, was_down: bool) {
+        let state = &mut self.state[action as usize];
+        state.pressed = !was_down;
+        state.down = true;
+        state.value = state.value.max(1.);
+    }
+
     /// The front-end camera stick of 0x47F660 [D]: `[Right − Left, Up −
     /// Down]` of the Fe View Tweak actions (camera_spring.rs).
     #[cfg_attr(not(windows), allow(dead_code))]
@@ -867,6 +876,7 @@ pub fn sample(
     keys: Option<Res<ButtonInput<KeyCode>>>,
     pads: Query<(Entity, &Gamepad), With<PlayerPad>>,
     mobile: Option<Res<crate::touch_controls::Mobile>>,
+    real: Option<Res<Time<Real>>>,
     mut actions: ResMut<Actions>,
     mut queue: ResMut<ShiftQueue>,
     #[cfg(windows)] mut traced: Local<Option<crate::force_feedback::windows::WheelState>>,
@@ -908,6 +918,9 @@ pub fn sample(
             state.pov[0]
         );
     }
+    let presses = &crate::settings::diagnostics().camera_presses;
+    let held = real.as_ref().and_then(|r| scripted_press(r.elapsed_secs(), presses));
+    let was_down = held.is_some_and(|a| actions.down(a));
     actions.update(|source| match source {
         Source::Key(k) => keys.as_ref().map(|k2| f32::from(k2.pressed(k))),
         Source::Unmapped => None,
@@ -921,8 +934,41 @@ pub fn sample(
         Source::WheelAxis(_) | Source::WheelButton(_) | Source::WheelPov(_) => None,
         _ => pad.and_then(|p| pad_raw(p, source)),
     });
+    if let Some(action) = held {
+        actions.hold(action, was_down);
+        if !was_down {
+            log_line!(
+                "camera_press action={} t_s={:.1}",
+                if action == Action::LookBack { "look" } else { "view" },
+                real.as_ref().map_or(0., |r| r.elapsed_secs())
+            );
+        }
+    }
     for shift in actions.shifts() {
         queue.push(shift);
+    }
+}
+
+/// Diagnostics `camera_presses = PERIOD,LOOK` (`GRID_CAMERA_PRESSES`): the
+/// phone bench's camera presses (tools/android_bench.ps1, F927) for a run
+/// without a touch screen. Every PERIOD seconds of real time from the app's
+/// start, Change View (held 150 ms, as the bench holds the VIEW zone) and
+/// Look Back (held LOOK seconds, default 5) in turn, Change View first.
+fn scripted_press(t: f32, presses: &[f32]) -> Option<Action> {
+    let (&period, rest) = presses.split_first()?;
+    let look = rest.first().copied().unwrap_or(5.);
+    if period.is_nan() || period <= 0. {
+        return None;
+    }
+    let n = (t / period).floor();
+    if n < 1. {
+        return None;
+    }
+    let since = t - n * period;
+    if (n as u64 - 1).is_multiple_of(2) {
+        (since < 0.15).then_some(Action::ChangeView)
+    } else {
+        (since < look).then_some(Action::LookBack)
     }
 }
 
@@ -1438,6 +1484,20 @@ fn read_preset(path: &std::path::Path) -> Result<(ActionMap, Vec<String>), Strin
 mod tests {
     use super::*;
     use CalibrationType::*;
+
+    #[test]
+    fn camera_presses_follow_the_phone_bench_schedule() {
+        let p = [30., 5.];
+        assert_eq!(scripted_press(29.9, &p), None);
+        assert_eq!(scripted_press(30.1, &p), Some(Action::ChangeView));
+        assert_eq!(scripted_press(30.2, &p), None);
+        assert_eq!(scripted_press(60.0, &p), Some(Action::LookBack));
+        assert_eq!(scripted_press(64.9, &p), Some(Action::LookBack));
+        assert_eq!(scripted_press(65.1, &p), None);
+        assert_eq!(scripted_press(90.05, &p), Some(Action::ChangeView));
+        assert_eq!(scripted_press(120.0, &[]), None);
+        assert_eq!(scripted_press(120.0, &[0.]), None);
+    }
 
     #[test]
     fn calibration_types_match_ad9ad0_and_ad9a80() {

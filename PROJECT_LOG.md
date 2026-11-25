@@ -184,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F931](log/F0931.md) | 2026-11-26 | Steam Deck estimate from E-core and UHD 770 stand-ins |
 | [F930](log/F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
 | [F929](log/F0929.md) | 2026-11-25 | Mac logs 22:26: GPU-query crash is a frame_split readback bug; countdown GPU-bound at the ceiling; memory pressure ruled out |
 | [F928](log/F0928.md) | 2026-11-25 | Lean render profile as the Android default; 120 Hz pacing A/B |
@@ -243,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F874](log/F0874.md) | 2026-11-19 | Render prepare: Bevy bind-group cache over two frames hits 72-77 % but r_prepare does not shrink; route closed |
 | [F873](log/F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |
 | [F872](log/F0872.md) | 2026-11-19 | Owner request: HDR monitor output and settings |
-| [F871](log/F0871.md) | 2026-11-19 | Owner approves the further settings list for row 140 |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
