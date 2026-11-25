@@ -595,6 +595,29 @@ Owner: "сборка стала занимать очень много врем�
 - **Package-cache lock.** Several cargo runs waited minutes on "Blocking waiting for file lock on package cache" (the seed build three times; a release build in this worktree 9 min; also G133). That lock is `~/.cargo/.package-cache`, taken exclusively during resolution and downloads by every cargo on the PC. On 19.10 09:44–09:55 a career-session cargo sat at 0 s CPU with that file open while two more queued, then went on. The holder was not identified. Restart Manager queries (which processes have the file open) every 2 s from 09:52 showed only that cargo and the two waiters; a non-blocking lock probe at 09:56 found the file free. `local/build-speed/package-cache-holders.log` keeps the record. Over 5 h of that logging every hold lasted 3 s or less except two, both by career's PowerShell-launched offline grid-app build (the BelowNormal launch path of the "Priority" pitfall above): 09:52–09:57 with two cargos queued behind it, and 42 s at 11:32. Likely a priority inversion: a starved low-priority cargo holding the machine-wide lock stops every other session's cargo at its start. Not proven; one more reason not to lower cargo's priority.
 - **Soak page faults.** Two running quick-soak scenarios caused about 180 000 page faults/s, nearly all demand-zero, and the System process used 34 % CPU zeroing pages. That points at per-tick allocations large enough to go back to the OS. Not investigated here (engine code).
 
+## Tests that open a GPU device (F922)
+
+A unit test that opens a real GPU device (`request_device`, `enumerate_adapters`, `request_adapter`,
+`RenderPlugin`, `DefaultPlugins`, `RenderCreation`) runs its device work through
+`crate::gpu_test_process::in_own_process(body)`. The helper re-runs the same test binary filtered to that
+one test (`--exact`, one thread) and checks that the child passed exactly one test. The parent never loads
+the driver, and the libtest process keeps running the CPU tests in parallel. The unit test
+`gpu_test_process::tests::device_tests_run_in_their_own_process` scans every `#[cfg(test)]` module in
+`crates/*/src` and fails on device code outside the helper. Integration tests in `crates/*/tests/` are
+processes of their own, so they need nothing; `bind_dedupe` already renders in child runs.
+
+Why: with NVIDIA driver 32.0.16.2101, the D3D12 user-mode driver's own worker threads (thread entry
+`nvwgf2umx.dll+0xfd2d56`) read freed memory at `+0x8040b2` minutes after the one test that opened and
+dropped a D3D12 device had passed. The whole grid-app test process then died with 0xc0000005, during
+unrelated CPU race tests (G433, F906). The whole binary crashed in 2 of 21 parallel runs; 10 runs of
+only the GPU test and the race tests never did. `RUST_TEST_THREADS=1` only hid it.
+
+Diagnosis tools: grid-app Windows test builds include `test_crash_report` (a vectored exception
+handler installed before `main`). On an access violation it writes the faulting module and offset,
+thread name and stack to stderr. `tools/test_crash_repro.ps1` runs a test binary N times under the
+build lock and reports passes, crashes, the event-1000 module, and whether `-WatchModule` was ever
+loaded in the test process.
+
 ## Research probes crate — 17 October 2026 (F352)
 
 The 158 one-off research probes moved with `git mv` from `crates/grid-tools/src/bin` to the new workspace crate `crates/grid-probes`. Their names, sources and outputs are unchanged, and they still build to `target/<profile>/<name>.exe`, so the `tools/validate_*.py` scripts that run those executables are unaffected.

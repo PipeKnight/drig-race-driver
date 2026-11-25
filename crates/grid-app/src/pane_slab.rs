@@ -280,9 +280,14 @@ mod tests {
     /// The gate is StandardMaterial's bindless condition on real devices. The
     /// data-only extension has no samplers, so it passes the sampler-array limit
     /// that StandardMaterial needs: a device below that limit (DX12 here) must
-    /// get no copies. Skips the devices this machine does not have.
+    /// get no copies. Skips the devices this machine does not have. The devices
+    /// live in a child process (`gpu_test_process`, F922).
     #[test]
     fn copies_run_only_where_standard_material_is_bindless() {
+        crate::gpu_test_process::in_own_process(check_devices);
+    }
+
+    fn check_devices() {
         let full = device(wgpu::Backends::VULKAN, |_| ());
         let few_samplers =
             device(wgpu::Backends::VULKAN, |limits| limits.max_binding_array_sampler_elements_per_shader_stage = 1);

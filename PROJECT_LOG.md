@@ -184,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F922](log/F0922.md) | 2026-11-25 | GPU unit tests run in their own process: NVIDIA D3D12 driver crash in the grid-app test process |
 | [F921](log/F0921.md) | 2026-11-25 | Android: Viper cockpit wheel fixed (file name case); tyre walls after a hit diagnosed, not fixed |
 | [F920](log/F0920.md) | 2026-11-24 | Performance test: single-threaded executor switches for the main and render worlds |
 | [F919](log/F0919.md) | 2026-11-25 | Phone proxy: predicted Xiaomi frame from a phone-like desktop run |
@@ -243,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F865](log/F0865.md) | 2026-11-19 | Render encode: bindless car reflection overlay merges transparent draws |
 | [F864](log/F0864.md) | 2026-11-19 | Contact dents: fixed lattice probes per part |
 | [F863](log/F0863.md) | 2026-11-19 | Render tail: the F862 1 % lows were background load; tick-frame and per-pass CPU split |
-| [F862](log/F0862.md) | 2026-11-19 | Performance status matrix after the F837-F861 series: render-CPU bound in every cell |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

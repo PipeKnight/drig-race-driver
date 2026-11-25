@@ -160,6 +160,10 @@ mod ground_skid_pass_core;
 mod smoke_pilot;
 mod team_livery;
 mod temporal_audit;
+#[cfg(all(test, windows))]
+mod test_crash_report;
+#[cfg(test)]
+mod gpu_test_process;
 #[cfg(feature = "dlaa")]
 mod temporal_colour;
 #[cfg(feature = "dlaa")]
