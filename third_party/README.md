@@ -140,3 +140,38 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
 - Upgrading Bevy: drop the patch if upstream keeps these bind groups itself; otherwise copy the new
   release here and re-apply the marked changes (`grep -rn "DRIG patch" third_party/bevy_pbr`).
   After any change here, the coordinator refreshes the shared build seed (`tools/build_seed.ps1`).
+
+## wgpu-hal 29.0.4 and bevy_core_pipeline 0.19.1 (Vulkan pre-rotation, F927)
+
+- Upstream: crates.io `wgpu-hal` 29.0.4, crate sha256
+  `97ace1c17727311c22a46e4e3faf56ea6de81af99dcc839bdfb54857b94d448d`, git commit
+  `e99f5305ded96ff7006f0714d043a7f735bd45c2` of gfx-rs/wgpu, path `wgpu-hal`; and crates.io
+  `bevy_core_pipeline` 0.19.1, crate sha256
+  `2564f1ba766532e8eeb20059133ff6703e8dd5c3864b92378d0d1c541096ef12`, git commit
+  `b56fc29d3016e641754765244b5ba3f9cc504671` of bevyengine/bevy, path `crates/bevy_core_pipeline`
+  (the `Cargo.lock` checksums and `.cargo_vcs_info.json`). Licence: MIT or Apache-2.0.
+- Copied unchanged from the registry source, then patched (F927), all behind one switch that is off
+  by default (`[diagnostics] pre_rotation = on` or `GRID_PRE_ROTATION=1`, docs/SETTINGS.md):
+  - `wgpu-hal/src/lib.rs`: `drig_pre_rotation::{ENABLED, DEGREES, degrees()}`; grid-app sets
+    `ENABLED` before the renderer exists.
+  - `wgpu-hal/src/vulkan/swapchain/native.rs`: while `ENABLED`, the surface capabilities record the
+    display's `currentTransform` (90, 180 or 270 degrees clockwise when supported, else 0) and the
+    swapchain is created with that `preTransform` instead of `IDENTITY`.
+  - `bevy_render/src/view/window/mod.rs`: the surface is configured with width and height swapped
+    for 90 and 270 (the panel's own orientation); the resize path queries the capabilities before
+    it sizes the surface. `drig_pre_rotation_degrees()` gives the rotation to the upscaling pass.
+  - `bevy_core_pipeline/src/upscaling/`: a camera that draws to a window uses a blit pipeline with
+    `DRIG_PRE_ROTATE_90/180/270` (`blit/blit.wgsl` samples the source at the rotated position), and
+    a camera viewport's scissor rotates with it. The camera's own views, sizes and UI stay in the
+    window's orientation; only the last pass, the one that writes the swapchain, rotates.
+- Why: wgpu always asks for an `IDENTITY` pre-transform, so on a phone held in landscape the
+  compositor rotates every frame (Android's Vulkan pre-rotation guide: extra composition or GPU
+  work per frame). docs/ANDROID_GPU.md section 4 and F927 hold the phone A/B.
+- With the switch off (default, every desktop and every saved setting) the code paths equal
+  upstream: `degrees()` is 0, the pre-transform stays `IDENTITY` and the usual blit pipeline is
+  used. Desktop Vulkan reports an `IDENTITY` current transform, so even with the switch on nothing
+  rotates there; the rotated path runs only on a rotated display (the phone).
+- Upgrading: drop the patch if wgpu chooses the current transform itself (and Bevy rotates its
+  last pass); otherwise copy the new releases here and re-apply the marked changes
+  (`grep -rn "DRIG patch (F927)" third_party`). After any change here, the coordinator refreshes the
+  shared build seed (`tools/build_seed.ps1`).

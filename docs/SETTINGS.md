@@ -79,6 +79,8 @@ Grammar:
 | | `present_trace` | interactive window only: one `present_frame` line per drawn frame and one `present_done` line per presented frame (frame time, tick, drawn simulation time, view, car and camera), for frame-pacing checks; works on a phone through its settings file (docs/FRAME_STEPPING.md §6) | `GRID_PRESENT_TRACE=1` |
 | | `window_shots` | interactive window only: `S,S,...` seconds of real time after loading at which the window is saved, HUD included, as `<data dir>/window-shot-S.png`; for checks of what the screen shows (tools/hud_window_check.py, docs/RACE_HUD.md §6.3) | `GRID_WINDOW_SHOTS=S,S,...` |
 | | `window_frames` | interactive window only: `START,SECONDS` of real time after loading over which every frame the window shows is appended, box-averaged by 8, to `<data dir>/window-frames.rgb`, and each capture prints `window_frame frame=N t_s=S`; for the blink detector (tools/blink_detect.py, backlog row 115). Reading every frame back slows the window | `GRID_WINDOW_FRAMES=START,SECONDS` |
+| | `perf_test` | Performance test switches at start: `auto` (the Auto cycle, 16 steps of 20 s from race start) or a list of parts to turn off, such as `shadows,foliage` or `lighting,msaa2` (names as in the `perf_test=` label; docs/ANDROID_GPU.md section 7). The phone has no environment variables, so tools/android_bench.ps1 sets it in `bench.ini` | `GRID_PERF_TEST=auto` or `=PARTS` |
+| | `pre_rotation` | Vulkan swapchain pre-rotation test switch, off by default: the swapchain takes the panel's orientation and the last (upscale) pass rotates the picture, so the phone's compositor does not rotate each frame (third_party/README.md, docs/ANDROID_GPU.md section 4). No effect on a display that is not rotated | `GRID_PRE_ROTATION=1` |
 
 Notes:
 

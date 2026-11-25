@@ -130,6 +130,13 @@ pub struct Diagnostics {
     /// `<data dir>/window-frames.rgb` (frame_pacing.rs; row 115,
     /// tools/blink_detect.py). Empty: off.
     pub window_frames: Vec<f32>,
+    /// Performance test switches at start (`auto` or a list such as
+    /// `shadows,foliage`; perf_test.rs, docs/ANDROID_GPU.md section 7).
+    pub perf_test: Option<String>,
+    /// Vulkan swapchain pre-rotation (third_party/wgpu-hal, F927): the swapchain takes
+    /// the panel's orientation and the last pass rotates the picture, so the compositor
+    /// does not. Test switch for the phone A/B; off by default.
+    pub pre_rotation: bool,
 }
 
 impl Default for Diagnostics {
@@ -161,6 +168,8 @@ impl Default for Diagnostics {
             present_trace: false,
             window_shots: Vec::new(),
             window_frames: Vec::new(),
+            perf_test: None,
+            pre_rotation: false,
         }
     }
 }
@@ -199,6 +208,8 @@ impl Diagnostics {
             present_trace: text("GRID_PRESENT_TRACE").is_some_and(|v| v == "1"),
             window_shots: text("GRID_WINDOW_SHOTS").map_or_else(Vec::new, |v| seconds_list(&v).unwrap_or_default()),
             window_frames: text("GRID_WINDOW_FRAMES").map_or_else(Vec::new, |v| frame_range(&v).unwrap_or_default()),
+            perf_test: text("GRID_PERF_TEST"),
+            pre_rotation: text("GRID_PRE_ROTATION").is_some_and(|v| v == "1"),
         }
     }
 
@@ -241,6 +252,8 @@ impl Diagnostics {
             "present_trace" => self.present_trace = on(key, value)?,
             "window_shots" => self.window_shots = seconds_list(value).ok_or_else(|| number(key))?,
             "window_frames" => self.window_frames = frame_range(value).ok_or_else(|| number(key))?,
+            "perf_test" => self.perf_test = text(),
+            "pre_rotation" => self.pre_rotation = on(key, value)?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
@@ -1511,6 +1524,8 @@ autopilot = on
 prop_script_speed = 12.5
 max_ticks_per_frame = 2
 tick_delay_ms = 20
+perf_test = auto
+pre_rotation = on
 "#;
 
     #[test]
@@ -1571,6 +1586,8 @@ tick_delay_ms = 20
         assert!(!s.diagnostics.ground_effects && s.diagnostics.autopilot);
         assert_eq!(s.diagnostics.prop_script_speed, Some(12.5));
         assert_eq!(s.diagnostics.max_ticks_per_frame, Some(2));
+        assert_eq!(s.diagnostics.perf_test.as_deref(), Some("auto"));
+        assert!(s.diagnostics.pre_rotation && !Diagnostics::default().pre_rotation);
         assert_eq!(s.diagnostics.tick_delay_ms, Some(20.));
     }
 

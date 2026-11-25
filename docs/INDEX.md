@@ -186,6 +186,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 ## Input, platforms and Android
 
 - [ANDROID.md](ANDROID.md) Android build (P9 skeleton, bundled data, error screen) — Plan and status: [PLATFORMS_AND_INPUT_RESEARCH.md](PLATFORMS_AND_INPUT_RESEARCH.md) section 7 (P9), tools: …
+- [ANDROID_GPU.md](ANDROID_GPU.md) Android GPU cost (P12, phone) — 25 November 2026, Claude Code.
 - [DRIVER_AIDS.md](DRIVER_AIDS.md) Driver Aids screen and graded aids — The front-end Driver Aids options screen of the playable app and the port's graded Traction Control and Braking Assist.
 - [DRIVING_ASSISTS_RESEARCH.md](DRIVING_ASSISTS_RESEARCH.md) Driving assists: research, port and test matrix — Static analysis only: Ghidra 12.1.4 (read-only private copy of the phase3 project, the original was locked by another …
 - [MACOS.md](MACOS.md) Native macOS build — Build the Rust engine on a Mac and package it as a code-only `DRIG.app`.

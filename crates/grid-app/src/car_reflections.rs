@@ -520,7 +520,10 @@ fn follow(
     mut probe_sun: Query<(&mut DirectionalLight, &mut Transform), (With<ProbeSun>, Without<FaceCamera>)>,
     mut selection: ResMut<Selection>,
     mut rotation: ResMut<Rotation>,
+    test: Option<Res<crate::perf_test::PerfTest>>,
 ) {
+    // The Performance test's `reflections` switch: no face is drawn.
+    let off = test.is_some_and(|t| t.switches.reflections);
     // A replay presents snapshot poses while the live runtime is paused.
     let pose = replay
         .as_deref()
@@ -537,7 +540,7 @@ fn follow(
     let frame = rotation.frame;
     rotation.frame += 1;
     for (entity, face, mut camera, mut transform, mut exposure) in &mut faces {
-        let drawn = drawn(face.0, frame, rotation.per_frame);
+        let drawn = !off && drawn(face.0, frame, rotation.per_frame);
         if camera.is_active != drawn {
             camera.is_active = drawn;
         }

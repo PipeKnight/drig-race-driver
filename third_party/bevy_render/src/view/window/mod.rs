@@ -408,10 +408,12 @@ pub fn create_surfaces(
                 } else {
                     None
                 };
+                // DRIG patch (F927): panel-oriented size under pre-rotation.
+                let (width, height) = drig_surface_size(window);
                 let configuration = SurfaceConfiguration {
                     format,
-                    width: window.physical_width,
-                    height: window.physical_height,
+                    width,
+                    height,
                     usage: TextureUsages::RENDER_ATTACHMENT,
                     present_mode,
                     desired_maximum_frame_latency: window
@@ -454,14 +456,37 @@ pub fn create_surfaces(
             )]
             drop(window.swap_chain_texture_view.take());
 
-            data.configuration.width = window.physical_width;
-            data.configuration.height = window.physical_height;
+            // DRIG patch (F927): query the capabilities first, so pre-rotation sees the
+            // current display transform, then size the surface for it.
             let caps = data.surface.get_capabilities(&render_adapter);
+            (data.configuration.width, data.configuration.height) = drig_surface_size(window);
             data.configuration.present_mode = present_mode(window, &caps);
             render_device.configure_surface(&data.surface, &data.configuration);
         }
 
         window_surfaces.configured_windows.insert(window.entity);
+    }
+}
+
+/// DRIG patch (F927): clockwise rotation the window's last pass applies under Vulkan
+/// pre-rotation (`wgpu_hal::drig_pre_rotation`); 0 when the switch is off.
+pub fn drig_pre_rotation_degrees() -> u32 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        wgpu::hal::drig_pre_rotation::degrees()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        0
+    }
+}
+
+/// DRIG patch (F927): the surface size, width and height swapped for a 90 or 270 degree
+/// pre-rotation (the panel's own orientation).
+fn drig_surface_size(window: &ExtractedWindow) -> (u32, u32) {
+    match drig_pre_rotation_degrees() {
+        90 | 270 => (window.physical_height, window.physical_width),
+        _ => (window.physical_width, window.physical_height),
     }
 }
 

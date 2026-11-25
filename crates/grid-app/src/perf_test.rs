@@ -5,12 +5,17 @@
 //! (`perf_test=...`); with Auto cycle the switches step through [`CYCLE`]
 //! every [`CYCLE_SECONDS`], so a single run gives a whole table.
 //!
-//! Only visibility, shadow casting (`NotShadowCaster`), a camera, log lines and
-//! which executor runs the schedules change, never the simulation, and nothing
-//! is saved: every start is the normal game.
+//! Only visibility, shadow casting (`NotShadowCaster`), the 3D camera's
+//! settings (MSAA, indirect drawing, environment maps), log lines and which
+//! executor runs the schedules change, never the simulation, and nothing is
+//! saved: every start is the normal game.
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::{RenderLayers, VisibilityRange};
-use bevy::light::{CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, NotShadowCaster};
+use bevy::light::{
+    CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, EnvironmentMapLight,
+    GeneratedEnvironmentMapLight, NotShadowCaster, ShadowFilteringMethod,
+};
+use bevy::render::view::NoIndirectDrawing;
 use bevy::ecs::schedule::{
     InternedScheduleLabel, MultiThreadedExecutor, ScheduleLabel, SingleThreadedExecutor,
 };
@@ -41,14 +46,70 @@ pub struct Switches {
     pub msaa_off: bool,
     /// The cockpit's rear-view mirror stops updating (head-cam only).
     pub mirror: bool,
+    /// The 3D camera renders with 2x MSAA (`msaa_off` wins).
+    pub msaa2: bool,
+    /// The 3D camera draws without GPU-built indirect draws
+    /// (`NoIndirectDrawing`, docs/ANDROID_GPU.md).
+    pub no_indirect: bool,
+    /// The cars' reflection overlays are hidden and the dynamic cube draws
+    /// no faces.
+    pub reflections: bool,
+    /// Direct and environment light off: every light is hidden and the 3D
+    /// camera's environment maps are removed, so the PBR fragment skips the
+    /// light loops, shadow lookups and cube samples. The opaque pass then
+    /// shows what the rest of the fragment work, the geometry and the
+    /// render targets cost (docs/ANDROID_GPU.md).
+    pub lighting: bool,
     /// The main world's update schedules ([`main_schedules`]) run on one
     /// thread; parallel queries inside systems still use the compute pool (F915).
     pub main_single: bool,
     /// The render world's schedules ([`render_schedules`]) run on one thread.
     pub render_single: bool,
+    /// The 3D cameras filter shadows with one hardware 2x2 compare
+    /// (`ShadowFilteringMethod::Hardware2x2`) instead of the Gaussian kernel.
+    pub hard_shadows: bool,
+    /// Point and spot lights are hidden (the sun and the sky light stay), so
+    /// the clustered light loop finds no lights.
+    pub local_lights: bool,
+    /// The 3D cameras' environment maps (the sky or scene cube every PBR
+    /// fragment samples) are removed; the lights stay. With `reflections`
+    /// this is the `no_reflections` word: no cube is drawn or sampled.
+    pub env_maps: bool,
+    /// The hard shadow cut: like `light_shadows` with a 256 map and the
+    /// cascades within 25 m (wins over `light_shadows`; set it before the
+    /// cut starts, the two do not swap while one is active).
+    pub tiny_shadows: bool,
 }
 
 impl Switches {
+    /// Turns on every switch `other` has on (a word such as `lean` adds to the others).
+    pub fn add(&mut self, other: Self) {
+        self.shadows |= other.shadows;
+        self.foliage |= other.foliage;
+        self.ground |= other.ground;
+        self.effects |= other.effects;
+        self.hud |= other.hud;
+        self.samples |= other.samples;
+        self.empty |= other.empty;
+        self.light_shadows |= other.light_shadows;
+        self.small_casters |= other.small_casters;
+        self.far_props |= other.far_props;
+        self.msaa_off |= other.msaa_off;
+        self.mirror |= other.mirror;
+        self.msaa2 |= other.msaa2;
+        self.no_indirect |= other.no_indirect;
+        self.reflections |= other.reflections;
+        self.lighting |= other.lighting;
+        self.main_single |= other.main_single;
+        self.render_single |= other.render_single;
+        self.hard_shadows |= other.hard_shadows;
+        self.local_lights |= other.local_lights;
+        self.env_maps |= other.env_maps;
+        self.tiny_shadows |= other.tiny_shadows;
+        if other.render_rows != 0 {
+            self.render_rows = other.render_rows;
+        }
+    }
     pub const NORMAL: Self = Self {
         shadows: false,
         foliage: false,
@@ -63,8 +124,34 @@ impl Switches {
         far_props: false,
         msaa_off: false,
         mirror: false,
+        msaa2: false,
+        no_indirect: false,
+        reflections: false,
+        lighting: false,
         main_single: false,
         render_single: false,
+        hard_shadows: false,
+        local_lights: false,
+        env_maps: false,
+        tiny_shadows: false,
+    };
+    /// `no_reflections`: what every reflection costs, apart from the other
+    /// cuts: no car overlay, no dynamic cube face, no camera environment map.
+    pub const NO_REFLECTIONS: Self = Self { reflections: true, env_maps: true, ..Self::NORMAL };
+    /// `lean`: every cheaper path at once, the ceiling of the mobile cuts
+    /// (docs/ANDROID_GPU.md section 7): no MSAA, a 256 sun shadow map within
+    /// 25 m with a 2x2 filter, small props cast no shadows and end at the far-prop range,
+    /// no car reflection overlays, no point or spot lights.
+    pub const LEAN: Self = Self {
+        msaa_off: true,
+        light_shadows: true,
+        small_casters: true,
+        far_props: true,
+        reflections: true,
+        hard_shadows: true,
+        local_lights: true,
+        tiny_shadows: true,
+        ..Self::NORMAL
     };
     pub const ALL_OFF: Self = Self {
         shadows: true,
@@ -87,6 +174,10 @@ impl Switches {
             (self.samples, "samples"),
             (self.empty, "empty_scene"),
             (self.mirror, "mirror"),
+            (self.reflections, "reflections"),
+            (self.lighting, "lighting"),
+            (self.local_lights, "local_lights"),
+            (self.env_maps, "env_maps"),
         ];
         let off: Vec<&str> = names.iter().filter(|(on, _)| *on).map(|(_, n)| *n).collect();
         let mut cheaper: Vec<String> = Vec::new();
@@ -98,6 +189,10 @@ impl Switches {
             (self.small_casters, "no_small_casters"),
             (self.far_props, "far_props"),
             (self.msaa_off, "msaa_off"),
+            (self.msaa2, "msaa2"),
+            (self.no_indirect, "no_indirect"),
+            (self.hard_shadows, "hard_shadows"),
+            (self.tiny_shadows, "tiny_shadows"),
             (self.main_single, "main_single"),
             (self.render_single, "render_single"),
         ] {
@@ -116,11 +211,14 @@ impl Switches {
     }
 }
 
-/// Auto cycle order: the normal frame, each part alone, everything, the car
-/// alone, then the resolution and anti-aliasing variants (`mobile:`). With
-/// the mobile preset the normal frame is the preset's, so `render1080` is
-/// the phone's full resolution. The last variant runs both worlds'
-/// schedules on one thread.
+/// Auto cycle order (docs/ANDROID_GPU.md section 7): the normal frame, each
+/// drawn part alone, all of them, the car alone, then the GPU variants: 720
+/// rows (F555's phone height), no MSAA, 2x MSAA, no indirect draws, no car
+/// reflections, no lighting, the cars alone without lighting, and the normal
+/// frame again, so a drift between the first and last steps shows heat. Only
+/// switches that can change GPU time are here; Sample logging, the mirror (no
+/// mirror in the chase view) and the executors stay screen-only (F915/F925).
+/// 16 steps of [`CYCLE_SECONDS`] take 5 min 20 s.
 pub const CYCLE: [Switches; 16] = {
     const N: Switches = Switches::NORMAL;
     [
@@ -130,19 +228,21 @@ pub const CYCLE: [Switches; 16] = {
         Switches { ground: true, ..N },
         Switches { effects: true, ..N },
         Switches { hud: true, ..N },
-        Switches { samples: true, ..N },
-        Switches { mirror: true, ..N },
         Switches::ALL_OFF,
         Switches { empty: true, ..Switches::ALL_OFF },
-        N,
-        Switches { render_rows: 1080, ..N },
-        Switches { render_rows: 540, ..N },
+        Switches { render_rows: 720, ..N },
         Switches { msaa_off: true, ..N },
-        Switches { main_single: true, render_single: true, ..N },
+        Switches { msaa2: true, ..N },
+        Switches { no_indirect: true, ..N },
+        Switches { reflections: true, ..N },
+        Switches { lighting: true, ..N },
+        Switches { lighting: true, empty: true, ..Switches::ALL_OFF },
         N,
     ]
 };
-pub const CYCLE_SECONDS: f32 = 8.;
+/// Seconds per Auto cycle step: long enough for a phone's GPU clock and the
+/// dynamic resolution to settle (owner, 2026-11-25: 20-30 s).
+pub const CYCLE_SECONDS: f32 = 20.;
 
 /// Live state, changed by the front end's Performance test screen.
 #[derive(Resource, Debug, Default)]
@@ -175,9 +275,10 @@ pub fn quiet_samples() -> bool {
 
 pub fn install(app: &mut App) {
     let mut test = PerfTest::default();
-    // Desktop diagnostics: GRID_PERF_TEST=auto, or the parts to turn off,
-    // e.g. GRID_PERF_TEST=shadows,foliage (names as in the label).
-    if let Ok(value) = crate::dev::var("GRID_PERF_TEST") {
+    // Diagnostics `perf_test` (settings) or GRID_PERF_TEST: auto, or the
+    // parts to turn off, e.g. shadows,foliage (names as in the label). The
+    // phone has no environment, so tools/android_bench.ps1 uses the setting.
+    if let Some(value) = crate::settings::diagnostics().perf_test.clone() {
         for part in value.split(',').map(str::trim) {
             let s = &mut test.switches;
             match part {
@@ -194,8 +295,18 @@ pub fn install(app: &mut App) {
                 "far_props" => s.far_props = true,
                 "msaa_off" => s.msaa_off = true,
                 "mirror" => s.mirror = true,
+                "msaa2" => s.msaa2 = true,
+                "no_indirect" => s.no_indirect = true,
+                "reflections" => s.reflections = true,
+                "lighting" => s.lighting = true,
                 "main_single" => s.main_single = true,
                 "render_single" => s.render_single = true,
+                "hard_shadows" => s.hard_shadows = true,
+                "local_lights" => s.local_lights = true,
+                "env_maps" => s.env_maps = true,
+                "tiny_shadows" => s.tiny_shadows = true,
+                "lean" => s.add(Switches::LEAN),
+                "no_reflections" => s.add(Switches::NO_REFLECTIONS),
                 rows if rows.starts_with("render") => {
                     s.render_rows = rows[6..].parse().unwrap_or(0);
                 }
@@ -390,9 +501,14 @@ fn churn(
     *s = Churn::default();
 }
 
-fn cycle(mut test: ResMut<PerfTest>, time: Res<Time<Real>>) {
+fn cycle(mut test: ResMut<PerfTest>, time: Res<Time<Real>>, race: Option<Res<crate::Driving>>) {
     if !test.auto {
         test.running = false;
+        return;
+    }
+    // In a race the cycle starts once the simulation runs, so loading and the
+    // Race Options screen do not fill the first step, and it holds while paused.
+    if race.is_some_and(|d| d.paused || d.runtime.ticks == 0) {
         return;
     }
     if test.running {
@@ -426,19 +542,44 @@ struct Restore {
     ranged: HashSet<Entity>,
     /// The render height before `render_rows`.
     height: Option<crate::render_scale::RenderHeight>,
-    /// The 3D camera's MSAA before `msaa_off`.
+    /// The 3D camera's MSAA before `msaa_off` or `msaa2`.
     msaa: Option<Msaa>,
+    /// Cameras given `NoIndirectDrawing` here.
+    no_indirect: HashSet<Entity>,
+    /// The environment maps `lighting` or `env_maps` removed from the 3D cameras.
+    environment: HashMap<Entity, (Option<EnvironmentMapLight>, Option<GeneratedEnvironmentMapLight>)>,
     /// Shadow map size and cascades before `light_shadows`.
     shadows: Option<(usize, Vec<(Entity, CascadeShadowConfig)>)>,
+    /// Shadow filters `hard_shadows` replaced, per camera.
+    filters: HashMap<Entity, Option<ShadowFilteringMethod>>,
 }
 
 /// The view settings the mobile-cost switches change.
 #[derive(bevy::ecs::system::SystemParam)]
+#[allow(clippy::type_complexity)]
 struct View<'w, 's> {
     scale: Option<ResMut<'w, crate::render_scale::RenderScale>>,
     shadow_map: Option<ResMut<'w, DirectionalLightShadowMap>>,
     cascades: Query<'w, 's, (Entity, &'static mut CascadeShadowConfig)>,
-    msaa: Query<'w, 's, &'static mut Msaa, With<crate::ViewerCamera>>,
+    cameras: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static mut Msaa,
+            Has<NoIndirectDrawing>,
+            Option<&'static EnvironmentMapLight>,
+            Option<&'static GeneratedEnvironmentMapLight>,
+            Option<&'static ShadowFilteringMethod>,
+        ),
+        With<crate::ViewerCamera>,
+    >,
+    /// Point and spot lights, for `local_lights`.
+    local: Query<'w, 's, Entity, Or<(With<PointLight>, With<SpotLight>)>>,
+    /// Every light, for `lighting`.
+    lights: Query<'w, 's, Entity, Or<(With<DirectionalLight>, With<PointLight>, With<SpotLight>)>>,
+    /// The cars' reflection overlays, for `reflections`.
+    overlays: Query<'w, 's, Entity, With<crate::car_reflection_overlay::OverlayOf>>,
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -502,19 +643,67 @@ fn apply(
             commands.entity(entity).remove::<VisibilityRange>();
         }
     }
-    for mut m in &mut view.msaa {
-        if s.msaa_off {
-            r.msaa.get_or_insert(*m);
-            if *m != Msaa::Off {
-                *m = Msaa::Off;
-            }
-        } else if let Some(before) = r.msaa
-            && *m != before
+    let want_msaa = if s.msaa_off {
+        Some(Msaa::Off)
+    } else if s.msaa2 {
+        Some(Msaa::Sample2)
+    } else {
+        None
+    };
+    for (entity, mut m, indirect_off, environment, generated, filter) in &mut view.cameras {
+        if s.hard_shadows && filter != Some(&ShadowFilteringMethod::Hardware2x2) {
+            r.filters.entry(entity).or_insert(filter.copied());
+            commands.entity(entity).insert(ShadowFilteringMethod::Hardware2x2);
+        } else if !s.hard_shadows
+            && let Some(before) = r.filters.remove(&entity)
         {
-            *m = before;
+            match before {
+                Some(f) => commands.entity(entity).insert(f),
+                None => commands.entity(entity).remove::<ShadowFilteringMethod>(),
+            };
+        }
+        match want_msaa {
+            Some(want) => {
+                r.msaa.get_or_insert(*m);
+                if *m != want {
+                    *m = want;
+                }
+            }
+            None => {
+                if let Some(before) = r.msaa
+                    && *m != before
+                {
+                    *m = before;
+                }
+            }
+        }
+        if s.no_indirect && !indirect_off {
+            commands.entity(entity).insert(NoIndirectDrawing);
+            r.no_indirect.insert(entity);
+        } else if !s.no_indirect && r.no_indirect.remove(&entity) {
+            commands.entity(entity).remove::<NoIndirectDrawing>();
+        }
+        let no_maps = s.lighting || s.env_maps;
+        if no_maps && (environment.is_some() || generated.is_some()) {
+            // A map added again later (a sky change) is removed again on the
+            // next pass; the first one taken is what comes back.
+            r.environment.entry(entity).or_insert((environment.cloned(), generated.cloned()));
+            commands
+                .entity(entity)
+                .remove::<(EnvironmentMapLight, GeneratedEnvironmentMapLight)>();
+        } else if !no_maps
+            && let Some((environment, generated)) = r.environment.remove(&entity)
+        {
+            let mut e = commands.entity(entity);
+            if let Some(map) = environment {
+                e.insert(map);
+            }
+            if let Some(map) = generated {
+                e.insert(map);
+            }
         }
     }
-    if !s.msaa_off {
+    if want_msaa.is_none() {
         r.msaa = None;
     }
     if let Some(scale) = view.scale.as_deref_mut() {
@@ -527,27 +716,29 @@ fn apply(
             scale.set_height(height);
         }
     }
-    if s.light_shadows && r.shadows.is_none() {
+    let cut = s.light_shadows || s.tiny_shadows;
+    let (cut_size, cut_first, cut_far) = if s.tiny_shadows { (256, 4., 25.) } else { (1024, 6., 60.) };
+    if cut && r.shadows.is_none() {
         let size = view.shadow_map.as_ref().map_or(2048, |m| m.size);
         let saved = view.cascades.iter().map(|(e, c)| (e, c.clone())).collect();
         r.shadows = Some((size, saved));
         if let Some(map) = view.shadow_map.as_deref_mut() {
-            map.size = 1024;
+            map.size = cut_size;
         } else {
-            commands.insert_resource(DirectionalLightShadowMap { size: 1024 });
+            commands.insert_resource(DirectionalLightShadowMap { size: cut_size });
         }
         for (_, mut config) in &mut view.cascades {
             // Same cascade count (changing it at run time is not safe in
             // Bevy 0.19.1), shorter reach.
             *config = CascadeShadowConfigBuilder {
                 num_cascades: config.bounds.len().max(1),
-                first_cascade_far_bound: 6.,
-                maximum_distance: 60.,
+                first_cascade_far_bound: cut_first,
+                maximum_distance: cut_far,
                 ..default()
             }
             .build();
         }
-    } else if !s.light_shadows
+    } else if !cut
         && let Some((size, saved)) = r.shadows.take()
     {
         if let Some(map) = view.shadow_map.as_deref_mut() {
@@ -601,6 +792,15 @@ fn apply(
     }
     if s.hud {
         want.extend(hud.iter());
+    }
+    if s.lighting {
+        want.extend(view.lights.iter());
+    }
+    if s.local_lights {
+        want.extend(view.local.iter());
+    }
+    if s.reflections {
+        want.extend(view.overlays.iter());
     }
     // Restore what no switch hides any more, then hide the rest.
     let keep: std::collections::HashSet<Entity> = want.iter().copied().collect();
@@ -672,5 +872,95 @@ mod tests {
         schedules.insert(Schedule::new(Update));
         assert_eq!(set_executors(&mut schedules, &main_schedules(), true), 1);
         assert_eq!(set_executors(&mut schedules, &render_schedules(), true), 0);
+    }
+
+    /// The GPU switches change the 3D camera, the lights and the reflection
+    /// overlays, and everything comes back exactly when they are off.
+    #[test]
+    fn gpu_switches_change_the_view_and_restore_it() {
+        use crate::car_reflection_overlay::OverlayOf;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<PerfTest>()
+            .add_systems(Update, apply);
+        let camera = app
+            .world_mut()
+            .spawn((
+                crate::ViewerCamera,
+                Msaa::Sample4,
+                EnvironmentMapLight { intensity: 7., ..default() },
+            ))
+            .id();
+        let sun = app.world_mut().spawn((DirectionalLight::default(), Visibility::Visible)).id();
+        let lamp = app.world_mut().spawn((PointLight::default(), Visibility::Inherited)).id();
+        let overlay = app.world_mut().spawn((OverlayOf, Visibility::Inherited)).id();
+        app.update();
+        let switches = |app: &mut App, s: Switches| {
+            app.world_mut().resource_mut::<PerfTest>().switches = s;
+            app.update();
+        };
+        let all = Switches {
+            msaa2: true,
+            no_indirect: true,
+            reflections: true,
+            lighting: true,
+            ..Switches::NORMAL
+        };
+        assert_eq!(all.label(), "off:reflections+lighting,mobile:msaa2+no_indirect");
+        switches(&mut app, all);
+        let w = app.world();
+        assert_eq!(*w.get::<Msaa>(camera).unwrap(), Msaa::Sample2);
+        assert!(w.get::<NoIndirectDrawing>(camera).is_some());
+        assert!(w.get::<EnvironmentMapLight>(camera).is_none());
+        for e in [sun, lamp, overlay] {
+            assert_eq!(*w.get::<Visibility>(e).unwrap(), Visibility::Hidden);
+        }
+        // `msaa_off` wins over `msaa2`.
+        switches(&mut app, Switches { msaa_off: true, ..all });
+        assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Off);
+        switches(&mut app, Switches::NORMAL);
+        let w = app.world();
+        assert_eq!(*w.get::<Msaa>(camera).unwrap(), Msaa::Sample4);
+        assert!(w.get::<NoIndirectDrawing>(camera).is_none());
+        assert_eq!(w.get::<EnvironmentMapLight>(camera).unwrap().intensity, 7.);
+        assert_eq!(*w.get::<Visibility>(sun).unwrap(), Visibility::Visible);
+        assert_eq!(*w.get::<Visibility>(lamp).unwrap(), Visibility::Inherited);
+        assert_eq!(*w.get::<Visibility>(overlay).unwrap(), Visibility::Inherited);
+        // `hard_shadows` and `local_lights`: the 2x2 filter and the point light go, the sun stays.
+        switches(&mut app, Switches { hard_shadows: true, local_lights: true, ..Switches::NO_REFLECTIONS });
+        let w = app.world();
+        assert!(w.get::<EnvironmentMapLight>(camera).is_none());
+        assert_eq!(*w.get::<Visibility>(overlay).unwrap(), Visibility::Hidden);
+        assert_eq!(*w.get::<ShadowFilteringMethod>(camera).unwrap(), ShadowFilteringMethod::Hardware2x2);
+        assert_eq!(*w.get::<Visibility>(lamp).unwrap(), Visibility::Hidden);
+        assert_eq!(*w.get::<Visibility>(sun).unwrap(), Visibility::Visible);
+        switches(&mut app, Switches::NORMAL);
+        let w = app.world();
+        assert!(w.get::<ShadowFilteringMethod>(camera).is_none());
+        assert_eq!(w.get::<EnvironmentMapLight>(camera).unwrap().intensity, 7.);
+        assert_eq!(*w.get::<Visibility>(lamp).unwrap(), Visibility::Inherited);
+    }
+
+    /// `no_reflections` turns off every cube draw and sample, and nothing else.
+    #[test]
+    fn no_reflections_takes_the_maps_and_keeps_the_lights() {
+        let mut s = Switches::NORMAL;
+        s.add(Switches::NO_REFLECTIONS);
+        assert!(s.reflections && s.env_maps && !s.lighting && !s.local_lights);
+        assert_eq!(s.label(), "off:reflections+env_maps");
+    }
+
+    /// `lean` adds every cheaper path to the words before and after it.
+    #[test]
+    fn lean_adds_to_the_other_switches() {
+        let mut s = Switches { hud: true, render_rows: 720, ..Switches::NORMAL };
+        s.add(Switches::LEAN);
+        assert!(s.hud && s.msaa_off && s.tiny_shadows && s.hard_shadows && s.local_lights);
+        assert!(s.small_casters && s.far_props && s.reflections && !s.lighting);
+        assert_eq!(s.render_rows, 720);
+        assert_eq!(
+            Switches::LEAN.label(),
+            "off:reflections+local_lights,mobile:light_shadows+no_small_casters+far_props+msaa_off+hard_shadows+tiny_shadows"
+        );
     }
 }

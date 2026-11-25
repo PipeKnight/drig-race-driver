@@ -2454,6 +2454,12 @@ pub(crate) fn race_app(
     println!("prototype_build revision={BUILD_REVISION}");
     // Settings files first (docs/SETTINGS.md); the flags below override them.
     let profile = settings::load(&args)?;
+    // Before the renderer exists: Vulkan pre-rotation test switch (third_party/wgpu-hal, F927).
+    #[cfg(not(target_arch = "wasm32"))]
+    if settings::diagnostics().pre_rotation {
+        wgpu::hal::drig_pre_rotation::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+        println!("render_pre_rotation on");
+    }
     let mut root = profile.root.clone();
     let mut route = match &profile.route {
         Some(path) => Route::new(path)?,

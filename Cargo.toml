@@ -38,3 +38,7 @@ wgpu-core = { path = "third_party/wgpu-core" }
 # DRIG patch (F874): bevy_pbr 0.19.1 keeps GPU preprocessing and generated
 # environment-map bind groups while their inputs are unchanged (third_party/README.md).
 bevy_pbr = { path = "third_party/bevy_pbr" }
+# DRIG patch (F927): wgpu-hal 29.0.4 and bevy_core_pipeline 0.19.1 add a Vulkan
+# swapchain pre-rotation test switch, off by default (third_party/README.md).
+wgpu-hal = { path = "third_party/wgpu-hal" }
+bevy_core_pipeline = { path = "third_party/bevy_core_pipeline" }

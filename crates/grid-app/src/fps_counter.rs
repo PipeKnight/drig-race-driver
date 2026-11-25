@@ -246,9 +246,15 @@ fn update(
         .as_ref()
         .filter(|s| s.render != UVec2::ZERO)
         .map(|s| (s.render, s.screen));
-    let res = sizes.map_or(String::new(), |(r, s)| {
+    let mut res = sizes.map_or(String::new(), |(r, s)| {
         format!(" render={}x{} screen={}x{}", r.x, r.y, s.x, s.y)
     });
+    // Vulkan pre-rotation test switch (F927): the rotation the swapchain really uses
+    // (0 when the display reported none), so an A/B cannot compare two identical paths.
+    #[cfg(not(target_arch = "wasm32"))]
+    if wgpu::hal::drig_pre_rotation::ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        res += &format!(" pre_rotation_deg={}", bevy::render::view::window::drig_pre_rotation_degrees());
+    }
     // Where the frame's time went (frame_split.rs, docs/PERFORMANCE.md).
     let (split, detail) = crate::frame_split::window_report(stats.seconds);
     println!(

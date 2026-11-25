@@ -108,19 +108,29 @@ pub enum PerfRow {
     Effects,
     Hud,
     Samples,
+    Msaa2,
+    MsaaOff,
+    Indirect,
+    Reflections,
+    Lighting,
     MainThreads,
     RenderThreads,
     Empty,
 }
 /// The Auto cycle row was removed (owner, 2026-10-23, F559); `GRID_PERF_TEST=auto`
 /// still runs it.
-const PERF_ROWS: [(PerfRow, &str, &str); 9] = [
+const PERF_ROWS: [(PerfRow, &str, &str); 14] = [
     (PerfRow::Shadows, "Shadows", "Shadow casting of every mesh (the sun keeps its shadow maps, empty)."),
     (PerfRow::Foliage, "Foliage", "Camera-facing tree and bush billboards."),
     (PerfRow::Ground, "Ground cover", "Grass and ground detail sprites."),
     (PerfRow::Effects, "Smoke, debris, skid marks", "Tyre smoke, wheel debris and skid marks."),
     (PerfRow::Hud, "HUD", "The race HUD and its OSD camera (touch zones stay)."),
     (PerfRow::Samples, "Sample logging", "The periodic drive_*_sample log lines."),
+    (PerfRow::Msaa2, "Anti-aliasing 4x", "Off: 2x MSAA instead of 4x (docs/ANDROID_GPU.md)."),
+    (PerfRow::MsaaOff, "Anti-aliasing", "Off: no MSAA."),
+    (PerfRow::Indirect, "GPU-built draws", "Off: no indirect drawing, the CPU builds every draw."),
+    (PerfRow::Reflections, "Car reflections", "Off: the cars' reflection overlays and dynamic cube."),
+    (PerfRow::Lighting, "Lighting", "Off: no sun, lamps or sky light; shows the rest of the shading cost."),
     (PerfRow::MainThreads, "Game systems in parallel", "Off: game update systems run one after another on one thread."),
     (PerfRow::RenderThreads, "Render systems in parallel", "Off: render systems run one after another on one thread."),
     (PerfRow::Empty, "Whole scene", "Off: only your car is drawn."),
@@ -504,6 +514,11 @@ impl FrontEnd {
                         PerfRow::Effects => p.effects = !p.effects,
                         PerfRow::Hud => p.hud = !p.hud,
                         PerfRow::Samples => p.samples = !p.samples,
+                        PerfRow::Msaa2 => p.msaa2 = !p.msaa2,
+                        PerfRow::MsaaOff => p.msaa_off = !p.msaa_off,
+                        PerfRow::Indirect => p.no_indirect = !p.no_indirect,
+                        PerfRow::Reflections => p.reflections = !p.reflections,
+                        PerfRow::Lighting => p.lighting = !p.lighting,
                         PerfRow::MainThreads => p.main_single = !p.main_single,
                         PerfRow::RenderThreads => p.render_single = !p.render_single,
                         PerfRow::Empty => p.empty = !p.empty,
@@ -611,6 +626,11 @@ impl FrontEnd {
                             PerfRow::Effects => p.effects,
                             PerfRow::Hud => p.hud,
                             PerfRow::Samples => p.samples,
+                            PerfRow::Msaa2 => p.msaa2,
+                            PerfRow::MsaaOff => p.msaa_off,
+                            PerfRow::Indirect => p.no_indirect,
+                            PerfRow::Reflections => p.reflections,
+                            PerfRow::Lighting => p.lighting,
                             PerfRow::MainThreads => p.main_single,
                             PerfRow::RenderThreads => p.render_single,
                             PerfRow::Empty => p.empty,
@@ -1145,7 +1165,7 @@ mod tests {
         assert_eq!(front.screen, Screen::PerfTest);
         let view = front.view(&Labels::default());
         assert_eq!(view.title, "Performance test");
-        assert_eq!(view.rows.len(), 9);
+        assert_eq!(view.rows.len(), 14);
         // No Auto cycle row (F559): every switch is On.
         assert_eq!(view.rows[0].0, "Shadows");
         assert!(view.rows.iter().all(|r| r.1 == "On"));
@@ -1172,6 +1192,20 @@ mod tests {
         assert_eq!(
             front.perf.label(),
             "off:shadows+hud+empty_scene,mobile:main_single+render_single"
+        );
+        // Above them, the GPU rows: Lighting, Car reflections, GPU-built
+        // draws, Anti-aliasing, Anti-aliasing 4x.
+        let mut gpu = Vec::new();
+        for _ in 0..5 {
+            front.step(press(|n| n.up = true));
+            front.step(press(|n| n.right = true));
+            gpu.push(front.perf);
+        }
+        assert!(gpu[0].lighting && gpu[1].reflections && gpu[2].no_indirect);
+        assert!(gpu[3].msaa_off && gpu[4].msaa2);
+        assert_eq!(
+            front.perf.label(),
+            "off:shadows+hud+empty_scene+reflections+lighting,mobile:msaa_off+msaa2+no_indirect+main_single+render_single"
         );
         // Ctrl/X resets everything; Back returns without a command.
         front.step(press(|n| n.button3 = true));

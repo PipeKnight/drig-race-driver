@@ -42,6 +42,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 
 | File | What it does | Doc |
 |---|---|---|
+| [android_bench.ps1](android_bench.ps1) | Phone GPU bench over USB with no touch (docs/ANDROID_GPU.md section 7): installs the profile APK, starts a scripted autopilot race with the Performance test Auto cycle, … | [ANDROID_GPU](../docs/ANDROID_GPU.md) |
 | [build_android.ps1](build_android.ps1) | Builds the Android debug APK of the prototype (P9, docs/ANDROID.md). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [push_android_data.ps1](push_android_data.ps1) | Copies the owner's own GRID data for a solo Donington drive to the phone (P9, docs/ANDROID.md). | [ANDROID](../docs/ANDROID.md) |
 
@@ -583,7 +584,7 @@ description is the first header found. Rows with a single file are validators wi
 | package_linux | Build the native Linux x86_64 player and package the code-only DRIG tarball and AppImage (docs/LINUX.md). | [package_linux.sh](package_linux.sh) | [LINUX](../docs/LINUX.md) |
 | package_linux | Builds the Linux x86_64 release packages of one commit in WSL2 (docs/LINUX.md). | [package_linux.ps1](package_linux.ps1) | [FIDELITY_BACKLOG](../docs/FIDELITY_BACKLOG.md) |
 | phantom_post | Original close-drift flag post geometry (0x7BBB70, 0x7BC370, 0x7BCDA0) and the pole's turn (acos 0xBF4067, axis-angle 0x772670) against the Rust port, FPP1. | [probe_phantom_post.c](probe_phantom_post.c), [validate_phantom_post.py](validate_phantom_post.py) | [JOINTS_RESEARCH](../docs/JOINTS_RESEARCH.md) |
-| phone_profile_summary | Summarise phone logs of the profile APK: CPU against GPU per race window, top spans, GPU passes. | [phone_profile_summary.py](phone_profile_summary.py) | [PERFORMANCE](../docs/PERFORMANCE.md) |
+| phone_profile_summary | Summarise phone logs of the profile APK: CPU against GPU per race window, top spans, GPU passes. | [phone_profile_summary.py](phone_profile_summary.py) | [ANDROID_GPU](../docs/ANDROID_GPU.md) |
 | phone_proxy | Phone proxy analysis: predict the phone frame split from a phone-like desktop run (docs/PERFORMANCE.md "Phone proxy"). | [phone_proxy.py](phone_proxy.py) |  |
 | phone_proxy | Phone proxy: predicts how a source change moves the Xiaomi 13 Ultra frame from a phone-like desktop run (docs/PERFORMANCE.md "Phone proxy"). | [phone_proxy.ps1](phone_proxy.ps1) | [PERFORMANCE](../docs/PERFORMANCE.md) |
 | phone_proxy_calibration | (no header comment) | [phone_proxy_calibration.json](phone_proxy_calibration.json) |  |

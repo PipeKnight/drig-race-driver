@@ -106,7 +106,11 @@ impl MaterialExtension for FrontPass {
         _: &MeshVertexBufferLayoutRef,
         _: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        source_front_pipeline(d).expect("foundation-front refused unsupported actual pipeline");
+        // Never panic in specialisation: keep Bevy's descriptor for an unknown variant.
+        if let Err(why) = source_front_pipeline(d) {
+            println!("foundation_front unsupported_variant samples={} reason={why:?} fallback=stock_descriptor", d.multisample.count);
+            return Ok(());
+        }
         static RECEIPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         if RECEIPTS
             .try_update(

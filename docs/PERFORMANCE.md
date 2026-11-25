@@ -573,6 +573,11 @@ normal game. Until F553 the panel had only 5 row texts, so the last three rows (
 | HUD | race HUD parts and the damage panel hidden, the OSD scene's camera inactive (touch zones stay) |
 | Sample logging | the periodic `drive_sample`/`drive_*_sample` "tick" reports skipped (events such as pause, reset and exit stay) |
 | Whole scene | Off: every mesh except the player's car hidden (prop pieces that their own system shows again may stay) |
+| Anti-aliasing 4x | Off: the 3D camera uses 2x MSAA (`mobile:msaa2`; [ANDROID_GPU.md](ANDROID_GPU.md)) |
+| Anti-aliasing | Off: no MSAA (`mobile:msaa_off`, wins over 2x) |
+| GPU-built draws | Off: `NoIndirectDrawing` on the 3D camera (`mobile:no_indirect`) |
+| Car reflections | Off: the cars' reflection overlays hidden, a dynamic cube draws no faces (`off:reflections`) |
+| Lighting | Off: every directional, point and spot light hidden and the camera's environment maps removed (`off:lighting`) |
 | Game systems in parallel | Off: the main world's First, PreUpdate, Fixed*, Update and PostUpdate schedules use Bevy's single-threaded executor (`main_single`); parallel queries inside a system still use the compute pool |
 | Render systems in parallel | Off: the render world's Render, RenderGraph, Core3d and Core2d schedules use the single-threaded executor (`render_single`) |
 
@@ -580,12 +585,18 @@ normal game. Until F553 the panel had only 5 row texts, so the last three rows (
   the screen has been used (or `GRID_PERF_TEST` is set). Each change logs
   `perf_test version=1 event=apply switches=…`, and each Auto cycle step logs `event=step`.
   One run therefore gives a table per switch.
-- The switches change only visibility, shadow maps, a camera's activity and log lines; the
-  simulation is untouched.
+- The switches change only visibility, shadow maps, a camera's activity and render settings
+  (MSAA, indirect drawing, environment maps) and log lines; the simulation is untouched.
+- The five GPU rows (2026-11-25) split the phone's GPU time; the measurements, the research on
+  tiled GPUs and the owner procedure are in [ANDROID_GPU.md](ANDROID_GPU.md).
 - The two executor rows (F920) are listed under `mobile:` in the label (`perf_test=mobile:main_single+render_single`). The executors change at the end of a frame and log `perf_test version=1 event=executor world=main|render single=… schedules=N` (8 main and 4 render on the desktop). They test whether the phone's per-frame waits are thread hand-offs rather than work. On the desktop, both switches on changed nothing (avg 6.6 ms both ways, F920).
 - The switches are live and never saved: each game start (also the event menu's relaunch into the race) begins all On, so set them in the launch that races. Every change on the screen logs `drive_front_end version=1 event=perf switches=<label>`, and a change made before `PerfTest` exists applies once it does (F925).
-- Desktop: `GRID_PERF_TEST=auto` or a list such as `GRID_PERF_TEST=shadows,foliage` (also `main_single`, `render_single`).
-  Checked on the desktop [V]: the auto cycle logs ten steps and labels every `frame_stats`
+- Desktop: `GRID_PERF_TEST=auto` or a list such as `GRID_PERF_TEST=shadows,foliage` (also `main_single`, `render_single`, and the phone words `hard_shadows`, `tiny_shadows`, `local_lights`, `env_maps`, `lean`, `no_reflections`: [ANDROID_GPU.md](ANDROID_GPU.md) section 7);
+  anywhere, also the phone: `[diagnostics] perf_test = auto` ([SETTINGS.md](SETTINGS.md)). Since 2026-11-25 the
+  Auto cycle has 16 steps of 20 s, starts at the first race tick, and begins and ends with the normal frame, so heat
+  drift shows; `tools/android_bench.ps1` runs it on a USB phone with no touch ([ANDROID_GPU.md](ANDROID_GPU.md)
+  section 7); it also presses Change View and Look Back every 30 s and splits the table by camera (same section).
+  Checked on the desktop [V] (F625-era cycle): the auto cycle logs its steps and labels every `frame_stats`
   line. Renders with everything off show no shadows, HUD or grass, and car-only shows the
   car alone.
 

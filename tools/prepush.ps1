@@ -13,7 +13,8 @@ untracked) and runs the checks of the highest tier any file needs. Windows Power
 
 Tiers (each also runs the ones above it):
   docs       no cargo. git diff --check (conflict markers fail), relative Markdown links on added
-             lines must point at existing files (links into local/ are not checked), changed
+             lines must point at existing files (links into local/ and vendored third_party/
+             files are not checked: their upstream links point at rustdoc pages), changed
              .ps1 files must parse, changed .py files must parse, tools/log_entry.py check
              when that tool exists, and no text file under third_party/ may contain CR (F877).
   crate      the changed leaf crates only: their release tests with --include-ignored, and
@@ -464,7 +465,8 @@ function Invoke-Sanity([string]$Log) {
     foreach ($c in $classes) {
         $file = Join-Path $repo $c.Path
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue }
-        if ($c.Path -like '*.md') {
+        # Vendored upstream Markdown keeps its rustdoc-relative links (F927).
+        if ($c.Path -like '*.md' -and $c.Path -notlike 'third_party/*') {
             if ($untracked -contains $c.Path) { $added = @(Get-Content -LiteralPath $file -Encoding UTF8) }
             else { $added = @(Invoke-Git diff -U0 --no-color $mergeBase -- $c.Path | Where-Object { $_ -like '+*' -and $_ -notlike '+++*' } | ForEach-Object { $_.Substring(1) }) }
             $dir = Split-Path -Parent $file

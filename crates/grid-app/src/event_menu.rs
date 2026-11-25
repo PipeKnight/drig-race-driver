@@ -42,6 +42,21 @@ pub const PROFILE: &str = "event-menu.ini";
 /// Android: present when the next start is the chosen race, not the menu.
 #[cfg(target_os = "android")]
 pub const GO_MARKER: &str = "event-menu.go";
+/// Android, developer builds: the next start's arguments, one per line, for
+/// an unattended bench run (tools/android_bench.ps1; consumed on start).
+#[cfg(target_os = "android")]
+pub const BENCH_ARGS: &str = "bench-args.txt";
+
+/// The arguments in a bench file: one per line, blank lines and `#` comments
+/// skipped.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn bench_args(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(String::from)
+        .collect()
+}
 
 /// Laps a lapped event offers (AUTHORED range; the original's free-race
 /// lap choices are not decoded).
@@ -1201,6 +1216,16 @@ pub(crate) fn experimental(dir: &Path) -> bool {
 #[cfg(target_os = "android")]
 pub fn android_args() -> Vec<String> {
     let dir = crate::settings::default_data_dir();
+    // Developer bench (tools/android_bench.ps1, docs/ANDROID_GPU.md): one
+    // argument per line, e.g. `--settings <dir>/bench.ini` and `--drive-ticks
+    // N`. Consumed first, like the marker, so the next start is normal.
+    let bench = dir.join(BENCH_ARGS);
+    if crate::dev::ENABLED && let Ok(text) = std::fs::read_to_string(&bench) {
+        let _ = std::fs::remove_file(&bench);
+        let args = bench_args(&text);
+        println!("android_bench args={args:?}");
+        return args;
+    }
     let marker = dir.join(GO_MARKER);
     if marker.is_file() {
         // Consumed first, so a crash in the race opens the menu next time.
@@ -1710,6 +1735,21 @@ fn present(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bench_file_gives_one_argument_per_line() {
+        let text = "# bench
+--settings
+/data/bench.ini
+
+  --drive-ticks 
+30000
+";
+        assert_eq!(
+            super::bench_args(text),
+            ["--settings", "/data/bench.ini", "--drive-ticks", "30000"]
+        );
+    }
+
     use super::*;
 
     #[test]

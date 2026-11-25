@@ -77,7 +77,14 @@ impl MaterialExtension for RawPass {
         _: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        specialize_source(d, key.mesh_key).expect("source coverage refused unsupported pass");
+        // Never panic in specialisation: a variant the source coverage does not know (an
+        // unexpected pass or sample count) keeps Bevy's stock descriptor and logs once.
+        if let Err(why) = specialize_source(d, key.mesh_key) {
+            static WARNED: AtomicBool = AtomicBool::new(false);
+            if !WARNED.swap(true, Ordering::Relaxed) {
+                println!("source_coverage unsupported_variant samples={} reason={why:?} fallback=stock_descriptor", d.multisample.count);
+            }
+        }
         Ok(())
     }
 }
@@ -121,8 +128,8 @@ fn attachment(d: &RenderPipelineDescriptor) -> Result<(), &'static str> {
     }
     let t = f.targets[0].as_ref().ok_or("no colour target")?;
     forward_colour(t, &f.shader_defs)?;
-    if d.multisample.count != 4 {
-        return Err("source raw coverage requires MSAA4");
+    if d.multisample.count < 2 {
+        return Err("source raw coverage requires MSAA (2x or 4x)");
     }
     let z = d.depth_stencil.as_ref().ok_or("no scene depth")?;
     if z.format != TextureFormat::Depth32Float
@@ -208,7 +215,8 @@ fn specialize_source(d: &mut RenderPipelineDescriptor, key: MeshPipelineKey) -> 
         }
         return specialize_auxiliary(d, key);
     }
-    if d.multisample.count == 4 { return specialize_raw(d); }
+    // Any multisampled main pass (the player's 2x or the default 4x) owns hardware A2C.
+    if d.multisample.count > 1 { return specialize_raw(d); }
     specialize_main_one(d)
 }
 
@@ -1167,6 +1175,19 @@ mod tests {
             // No new colour conversion define, alpha remap, quarter discard or sample-mask backend.
             assert!(!has_def(&d.fragment.as_ref().unwrap().shader_defs,"OBJECT_COVERAGE_QUARTER"));
         }
+    }
+
+    #[test]
+    fn msaa2_main_pass_takes_the_same_a2c_coverage_as_msaa4() {
+        // F927: the phone's 2x MSAA row panicked in specialize (only 1x and 4x were routed).
+        let mut four = pipe();
+        specialize_source(&mut four, MeshPipelineKey::NONE).unwrap();
+        let mut two = pipe();
+        two.multisample.count = 2;
+        specialize_source(&mut two, MeshPipelineKey::NONE).unwrap();
+        four.multisample.count = 2;
+        assert_eq!(two, four);
+        assert!(actual_pipeline(&two, true));
     }
 
     #[test]

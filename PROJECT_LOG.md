@@ -184,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F927](log/F0927.md) | 2026-11-25 | Phone GPU split rows and Android GPU research |
 | [F926](log/F0926.md) | 2026-11-25 | Mac in-race dips: camera-flash pipelines under the warm-up cover, process counters per window |
 | [F925](log/F0925.md) | 2026-11-25 | Performance test switches: owner phone run 080140 never changed them; order-proof apply and a front-end perf log line |
 | [F924](log/F0924.md) | 2026-11-25 | Mac frame-dip capture steps: redirect a Terminal start to a file, developer build only |
@@ -243,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F870](log/F0870.md) | 2026-11-19 | Owner request: bloom and white-balance settings, more settings to choose |
 | [F869](log/F0869.md) | 2026-11-19 | Render prepare: r_prepare split by system; one staging buffer per frame for streamed meshes gains nothing |
 | [F868](log/F0868.md) | 2026-11-19 | Render encode: drop wgpu indirect-call validation where DX12 cannot be chosen |
-| [F867](log/F0867.md) | 2026-11-19 | Owner roadmap order after the FPS series |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
