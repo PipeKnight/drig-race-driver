@@ -9,6 +9,13 @@
 //! settings (MSAA, indirect drawing, environment maps), log lines and which
 //! executor runs the schedules change, never the simulation, and nothing is
 //! saved: every start is the normal game.
+//!
+//! The mobile preset's render profile is built from the same switches
+//! ([`PerfTest::base`], [`base_for`]): with `mobile::enabled()` every start
+//! begins at [`Switches::LEAN`] (F928; owner 2026-11-25: the phone may show
+//! less detail and a worse picture), and the screen's or the setting's words
+//! add to it; the word `full` starts from [`Switches::NORMAL`] instead, for
+//! A/B runs. The desktop base is NORMAL, so the desktop picture is unchanged.
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::{RenderLayers, VisibilityRange};
 use bevy::light::{
@@ -244,9 +251,18 @@ pub const CYCLE: [Switches; 16] = {
 /// dynamic resolution to settle (owner, 2026-11-25: 20-30 s).
 pub const CYCLE_SECONDS: f32 = 20.;
 
+/// The switches every start begins from: [`Switches::LEAN`] with the
+/// mobile preset (the phone's render profile), else [`Switches::NORMAL`].
+pub fn base_for(mobile: bool) -> Switches {
+    if mobile { Switches::LEAN } else { Switches::NORMAL }
+}
+
 /// Live state, changed by the front end's Performance test screen.
 #[derive(Resource, Debug, Default)]
 pub struct PerfTest {
+    /// The platform's render profile ([`base_for`]); `full` resets it.
+    pub base: Switches,
+    /// The screen's, the setting's or the Auto cycle's switches, added to `base`.
     pub switches: Switches,
     pub auto: bool,
     running: bool,
@@ -259,7 +275,16 @@ pub struct PerfTest {
 static LABEL: Mutex<Option<String>> = Mutex::new(None);
 static QUIET_SAMPLES: AtomicBool = AtomicBool::new(false);
 
-/// ` perf_test=...` for `frame_stats`, empty when the screen was never used.
+impl PerfTest {
+    /// What is in effect: [`PerfTest::base`] plus [`PerfTest::switches`].
+    pub fn active(&self) -> Switches {
+        let mut s = self.base;
+        s.add(self.switches);
+        s
+    }
+}
+
+/// ` perf_test=...` for `frame_stats`, empty while everything is normal.
 pub fn stats_suffix() -> String {
     LABEL
         .lock()
@@ -274,7 +299,7 @@ pub fn quiet_samples() -> bool {
 }
 
 pub fn install(app: &mut App) {
-    let mut test = PerfTest::default();
+    let mut test = PerfTest { base: base_for(crate::mobile::enabled()), ..default() };
     // Diagnostics `perf_test` (settings) or GRID_PERF_TEST: auto, or the
     // parts to turn off, e.g. shadows,foliage (names as in the label). The
     // phone has no environment, so tools/android_bench.ps1 uses the setting.
@@ -283,6 +308,7 @@ pub fn install(app: &mut App) {
             let s = &mut test.switches;
             match part {
                 "auto" => test.auto = true,
+                "full" => test.base = Switches::NORMAL,
                 "shadows" => s.shadows = true,
                 "foliage" => s.foliage = true,
                 "ground" => s.ground = true,
@@ -370,7 +396,7 @@ fn set_executors(schedules: &mut Schedules, labels: &[InternedScheduleLabel], si
 /// `main_single`: a running schedule is out of `Schedules`, so this runs in
 /// `Last` and changes the others for the next frame, only when the switch changes.
 fn main_executors(world: &mut World, mut applied: Local<bool>) {
-    let single = world.get_resource::<PerfTest>().is_some_and(|t| t.switches.main_single);
+    let single = world.get_resource::<PerfTest>().is_some_and(|t| t.active().main_single);
     if single == *applied {
         return;
     }
@@ -385,7 +411,7 @@ fn render_executors(world: &mut World, mut applied: Local<bool>) {
     let single = world
         .get_resource::<bevy::render::MainWorld>()
         .and_then(|main| main.get_resource::<PerfTest>())
-        .is_some_and(|t| t.switches.render_single);
+        .is_some_and(|t| t.active().render_single);
     if single == *applied {
         return;
     }
@@ -609,7 +635,7 @@ fn apply(
     smoke: Option<Res<crate::tyre_smoke::TyreSmoke>>,
     handles: Query<(Entity, &Mesh3d)>,
 ) {
-    let s = test.switches;
+    let s = test.active();
     test.frames += 1;
     // New entities (a lost wheel, late assets) follow the switches too.
     if test.applied == Some(s) && !test.frames.is_multiple_of(60) {
@@ -948,6 +974,23 @@ mod tests {
         s.add(Switches::NO_REFLECTIONS);
         assert!(s.reflections && s.env_maps && !s.lighting && !s.local_lights);
         assert_eq!(s.label(), "off:reflections+env_maps");
+    }
+
+    /// The mobile preset starts from `lean`, the desktop from normal; the
+    /// words add to the base, and `full` drops it.
+    #[test]
+    fn mobile_base_is_lean_and_words_add_to_it() {
+        assert_eq!(base_for(false), Switches::NORMAL);
+        assert_eq!(base_for(true), Switches::LEAN);
+        let mut test = PerfTest { base: base_for(true), ..default() };
+        test.switches.hud = true;
+        test.switches.render_rows = 360;
+        let s = test.active();
+        assert!(s.hud && s.msaa_off && s.tiny_shadows && s.reflections);
+        assert_eq!(s.render_rows, 360);
+        test.base = Switches::NORMAL;
+        assert_eq!(test.active(), Switches { hud: true, render_rows: 360, ..Switches::NORMAL });
+        assert_eq!(PerfTest::default().active(), Switches::NORMAL);
     }
 
     /// `lean` adds every cheaper path to the words before and after it.

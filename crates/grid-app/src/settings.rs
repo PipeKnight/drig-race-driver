@@ -1310,7 +1310,8 @@ pub fn parse_size(value: &str) -> Option<(u32, u32)> {
 }
 
 /// The front end window's preferences: `settings.ini` in `dir` and the player
-/// flags, without the start-up side effects of [`load`].
+/// flags, without the start-up side effects of [`load`]. Desktop only.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub fn window_preferences(args: &[String], dir: &Path) -> (Option<WindowMode>, Option<(u32, u32)>) {
     let mut settings = Settings::default();
     if let Ok(text) = std::fs::read_to_string(dir.join("settings.ini")) {

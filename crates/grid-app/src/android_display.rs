@@ -80,9 +80,26 @@ fn update(mut display: ResMut<Display>, mut windows: Query<&mut Window, With<Pri
         // SAFETY: `native` keeps a reference to the window for this call.
         let result = unsafe { ANativeWindow_setFrameRate(ptr.cast(), hz, COMPATIBILITY_DEFAULT) };
         println!(
-            "android_frame_rate requested_hz={hz} result={result} display_hz={:?}",
-            crate::android::display_refresh_hz()
+            "android_frame_rate requested_hz={hz} result={result} display_hz={:?} modes_hz={:?}",
+            crate::android::display_refresh_hz(),
+            crate::android::display_modes_hz()
         );
+    }
+}
+
+/// `android_display_hz`: the display's current rate, once a second, logged
+/// when it changes. The rate after `setFrameRate` can switch later than the
+/// `android_frame_rate` line, or not at all (F928 pacing A/B).
+fn watch_rate(time: Res<Time<Real>>, mut next: Local<f32>, mut last: Local<Option<f32>>) {
+    let now = time.elapsed_secs();
+    if now < *next {
+        return;
+    }
+    *next = now + 1.;
+    let hz = crate::android::display_refresh_hz();
+    if hz.map(f32::round) != last.map(f32::round) {
+        println!("android_display_hz t={now:.1} hz={hz:?} was={:?}", *last);
+        *last = hz;
     }
 }
 
@@ -109,6 +126,6 @@ pub fn install(app: &mut App, refresh_hz: Option<f32>) {
         hinted: None,
         sent: false,
     })
-    .add_systems(PreUpdate, update)
+    .add_systems(PreUpdate, (update, watch_rate))
     .add_systems(Last, cap);
 }

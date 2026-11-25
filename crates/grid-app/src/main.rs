@@ -26,6 +26,9 @@ macro_rules! log_line {
 }
 mod log_out;
 mod dev;
+// The player command line is desktop only (`main` reads it outside Android);
+// the Android library keeps just the quick-start parts.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 mod player;
 mod object_materials;
 mod water;

@@ -198,8 +198,8 @@ Invoke-Adb @('pull', "$logs/$after", $log) | Out-Null
 Set-Content -Path (Join-Path $Out 'run.txt') -Value @(
     "apk=$Apk", "seconds=$Seconds", "ticks=$Ticks", "perf_test=$PerfTest", "pre_rotation=$PreRotation", "render_height=$RenderHeight", "refresh_hz=$RefreshHz",
     "temp_start_c=$tempStart", "temp_end_c=$tempEnd", "note=$Note", "log=$after")
-$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_frame_cap|android_frame_rate|event=step step=1 ' |
-    Select-Object -First 9 | ForEach-Object { $_.Line }
+$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_frame_cap|android_frame_rate|android_display_hz|mobile_preset|event=step step=1 ' |
+    Select-Object -First 14 | ForEach-Object { $_.Line }
 $seen | ForEach-Object { Write-Output "  $_" }
 Write-Output "battery: start $tempStart C, end $tempEnd C"
 $pressLines = @(Get-Content $presses | Where-Object { $_ -notmatch '^#' })

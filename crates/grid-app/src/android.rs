@@ -237,6 +237,26 @@ pub fn display_refresh_hz() -> Option<f32> {
     })
 }
 
+/// Refresh rates of the display's supported modes (`Display.getSupportedModes`),
+/// for the frame-cap choice and the pacing logs (F928).
+pub fn display_modes_hz() -> Option<Vec<f32>> {
+    with_activity(|env, activity| {
+        let display = env
+            .call_method(activity, "getDisplay", "()Landroid/view/Display;", &[])?
+            .l()?;
+        let modes = env
+            .call_method(&display, "getSupportedModes", "()[Landroid/view/Display$Mode;", &[])?
+            .l()?;
+        let modes = jni::objects::JObjectArray::from(modes);
+        let mut hz = Vec::new();
+        for i in 0..env.get_array_length(&modes)? {
+            let mode = env.get_object_array_element(&modes, i)?;
+            hz.push(env.call_method(&mode, "getRefreshRate", "()F", &[])?.f()?);
+        }
+        Ok(hz)
+    })
+}
+
 /// `MainActivity.dataReady()` (F451): false when the bundled game data is not
 /// fully copied; the copy screen has then been opened in place of the game,
 /// and the game must not read the data folder.

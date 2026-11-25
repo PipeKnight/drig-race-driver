@@ -523,7 +523,7 @@ fn follow(
     test: Option<Res<crate::perf_test::PerfTest>>,
 ) {
     // The Performance test's `reflections` switch: no face is drawn.
-    let off = test.is_some_and(|t| t.switches.reflections);
+    let off = test.is_some_and(|t| t.active().reflections);
     // A replay presents snapshot poses while the live runtime is paused.
     let pose = replay
         .as_deref()

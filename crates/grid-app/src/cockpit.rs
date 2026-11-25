@@ -425,7 +425,7 @@ fn place_mirror(
         glass.iter().any(|(t, aabb)| frustum.intersects_obb(aabb, &t.compute_affine(), true, true))
     });
     let due = mirror.0.is_some_and(|(_, every)| frame.0.is_multiple_of(every))
-        && !test.is_some_and(|t| t.switches.mirror);
+        && !test.is_some_and(|t| t.active().mirror);
     let active = shown && seen && due && !glass.is_empty();
     camera.is_active = active;
     if !active {

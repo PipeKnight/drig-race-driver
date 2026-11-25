@@ -9,14 +9,21 @@
 //!   (`settings::RENDER_HEIGHT_VERSION`);
 //! - the compute threads ([`init_threads`]), which do not change the picture;
 //! - the default sun shadow quality: low 512 instead of high 2048 (owner,
-//!   2026-10-31, the one exception to resolution-only; a saved
-//!   `[video] shadows` wins). `shadow_layout::Quality::default_for`.
+//!   2026-10-31; a saved `[video] shadows` wins).
+//!   `shadow_layout::Quality::default_for`;
+//! - the render profile `lean` (owner, 2026-11-25: the phone may show less
+//!   detail and a worse picture; F928): no MSAA, a 256 px sun shadow map
+//!   within 25 m with a 2x2 filter, small props cast no shadows and end at
+//!   [`FAR_PROPS_METRES`], no car reflection overlays, no point or spot
+//!   lights. It is the Performance test's base (`perf_test::base_for`); the
+//!   setting word `full` (`[diagnostics] perf_test = full`) turns it off.
+//!   Car parts, damage and detachment are untouched.
 //!
 //! F549 also cut the shadows, small-prop shadows and draw distance and the
 //! grass distance. The owner (2026-10-22, after testing 9ac27f9a958a) found the
 //! picture too poor and wants resolution as the only cut, so F555 removed
-//! them. The helpers [`small`] and [`far_range`] remain for the Performance
-//! test's `no_small_casters` and `far_props` switches.
+//! them; on 2026-11-25 the owner lifted that rule for the phone, and the
+//! `lean` profile above brought the cuts back, measured on the phone (F927).
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::VisibilityRange;
 use bevy::prelude::*;
@@ -171,7 +178,11 @@ pub fn install(_app: &mut App) {
     if !enabled() {
         return;
     }
-    log_line!("mobile_preset version=2 render_rows={RENDER_ROWS} other_cuts=none");
+    // The other cuts are the `lean` render profile (perf_test::base_for).
+    log_line!(
+        "mobile_preset version=3 render_rows={RENDER_ROWS} render_profile=lean ({})",
+        crate::perf_test::Switches::LEAN.label()
+    );
 }
 
 #[cfg(test)]
