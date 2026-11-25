@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F924](F0924.md) | 2026-11-25 | Mac frame-dip capture steps: redirect a Terminal start to a file, developer build only |
 | [F923](F0923.md) | 2026-11-25 | Mac frame dips: cockpit mirror pipelines warmed under the cover |
 | [F922](F0922.md) | 2026-11-25 | GPU unit tests run in their own process: NVIDIA D3D12 driver crash in the grid-app test process |
 | [F921](F0921.md) | 2026-11-25 | Android: Viper cockpit wheel fixed (file name case); tyre walls after a hit diagnosed, not fixed |

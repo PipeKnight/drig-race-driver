@@ -184,6 +184,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F924](log/F0924.md) | 2026-11-25 | Mac frame-dip capture steps: redirect a Terminal start to a file, developer build only |
 | [F923](log/F0923.md) | 2026-11-25 | Mac frame dips: cockpit mirror pipelines warmed under the cover |
 | [F922](log/F0922.md) | 2026-11-25 | GPU unit tests run in their own process: NVIDIA D3D12 driver crash in the grid-app test process |
 | [F921](log/F0921.md) | 2026-11-25 | Android: Viper cockpit wheel fixed (file name case); tyre walls after a hit diagnosed, not fixed |
@@ -243,7 +244,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F867](log/F0867.md) | 2026-11-19 | Owner roadmap order after the FPS series |
 | [F866](log/F0866.md) | 2026-11-19 | Future rows: rain, official DLC, cut content (owner request) |
 | [F865](log/F0865.md) | 2026-11-19 | Render encode: bindless car reflection overlay merges transparent draws |
-| [F864](log/F0864.md) | 2026-11-19 | Contact dents: fixed lattice probes per part |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

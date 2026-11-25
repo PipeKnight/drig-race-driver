@@ -167,23 +167,34 @@ it is not evidence that a race or a graphics backend has been tested.
 ## Capturing a log of frame dips
 
 The frame-rate overlay's log (`[osd] fps = on`) names the render stage of the
-worst frame of every second. To show which pipelines (shader variants) were
-built during play, start the app from Terminal with the pipeline trace on:
+worst frame of every second. `GRID_PIPELINE_TRACE=1` also adds one
+`pipeline_new` line per pipeline (shader variant) built during play, without
+changing the picture. Only the developer build reads it: the default
+`tools/rebuild_macos.py` build. A `--code-only` or `--release-tag` player build
+(`--no-default-features`) ignores every `GRID_*` diagnostic switch
+(docs/SETTINGS.md section 6).
+
+A start from Terminal writes no `playtest/drig-*.log`: the run log is created
+only when the output goes nowhere (a Finder start). So redirect the output to a
+file yourself. The data folder is the same as for a Finder start (`DRIG-data`
+next to the app), as long as the current folder has no `local` subfolder; hence
+the `cd ~`:
 
 ```sh
-GRID_PIPELINE_TRACE=1 /Applications/DRIG.app/Contents/MacOS/DRIG
+cd ~ && GRID_PIPELINE_TRACE=1 /Applications/DRIG.app/Contents/MacOS/DRIG > ~/Desktop/drig-trace-1.log 2>&1
 ```
 
-(Use the path where `DRIG.app` actually is.) The trace adds one `pipeline_new`
-line per pipeline built and does not change the picture.
+(Use the path where `DRIG.app` actually is.) The game window opens as usual;
+Terminal stays quiet until the game quits.
 
-1. Race as before. Switch camera views with Change View once the race runs,
-   including the interior (cockpit) view, and drive a full lap in it.
-2. Quit, then race the same event a second time in the same way. On macOS,
-   Metal keeps compiled shaders between launches, so the second run shows
-   which dips repeat.
-3. Send both newest `playtest/macos.*` logs from
-   `~/Library/Application Support/GRID Reassembly/`.
+1. With the frame-rate overlay on (F9 in the race, or `[osd] fps = on` in
+   `DRIG-data/settings.ini`), race as before. Once the race runs, switch camera
+   views with Change View, including the interior (cockpit) view, and drive a
+   full lap in it.
+2. Quit, then run the same command with `drig-trace-2.log` and race the same
+   event in the same way. On macOS, Metal keeps compiled shaders between
+   launches, so the second run shows which dips repeat.
+3. Send `~/Desktop/drig-trace-1.log` and `~/Desktop/drig-trace-2.log`.
 
 `py -I tools/frame_dips.py LOG` lists the worst windows of such a log with their
 render stage and the pipelines built after the warm-up, by camera view.
