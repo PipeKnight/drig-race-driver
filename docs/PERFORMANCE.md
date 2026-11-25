@@ -583,6 +583,7 @@ normal game. Until F553 the panel had only 5 row texts, so the last three rows (
 - The switches change only visibility, shadow maps, a camera's activity and log lines; the
   simulation is untouched.
 - The two executor rows (F920) are listed under `mobile:` in the label (`perf_test=mobile:main_single+render_single`). The executors change at the end of a frame and log `perf_test version=1 event=executor world=main|render single=… schedules=N` (8 main and 4 render on the desktop). They test whether the phone's per-frame waits are thread hand-offs rather than work. On the desktop, both switches on changed nothing (avg 6.6 ms both ways, F920).
+- The switches are live and never saved: each game start (also the event menu's relaunch into the race) begins all On, so set them in the launch that races. Every change on the screen logs `drive_front_end version=1 event=perf switches=<label>`, and a change made before `PerfTest` exists applies once it does (F925).
 - Desktop: `GRID_PERF_TEST=auto` or a list such as `GRID_PERF_TEST=shadows,foliage` (also `main_single`, `render_single`).
   Checked on the desktop [V]: the auto cycle logs ten steps and labels every `frame_stats`
   line. Renders with everything off show no shadows, HUD or grass, and car-only shows the

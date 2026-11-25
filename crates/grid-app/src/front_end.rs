@@ -727,23 +727,37 @@ pub fn update(
 /// the render cap, the present mode and (Android) the refresh-rate hint.
 /// Frame latency waits for the next start (wgpu reads it only when the
 /// swapchain is created).
-/// The Performance test screen's switches reach `perf_test` (live; never saved).
+/// What `apply_perf` has seen of the Performance test screen.
+#[derive(Default)]
+struct PerfSync {
+    /// The screen's switches last seen (all On at the start).
+    seen: crate::perf_test::Switches,
+    /// A change not yet given to `PerfTest`.
+    pending: bool,
+}
+
+/// The Performance test screen's switches reach `perf_test` (live; never
+/// saved). A change waits until `PerfTest` exists, in whatever order the two
+/// appear; a screen left untouched keeps the `GRID_PERF_TEST` switches.
 fn apply_perf(
     front: Res<FrontEnd>,
-    mut last: Local<Option<crate::perf_test::Switches>>,
+    mut sync: Local<PerfSync>,
     test: Option<ResMut<crate::perf_test::PerfTest>>,
 ) {
     let now = front.perf;
-    let Some(before) = last.replace(now) else {
-        return;
-    };
-    if before == now {
+    if sync.seen != now {
+        sync.seen = now;
+        sync.pending = true;
+        log_line!("drive_front_end version=1 event=perf switches={}", now.label());
+    }
+    if !sync.pending {
         return;
     }
     if let Some(mut test) = test {
         // A switch ends a `GRID_PERF_TEST=auto` cycle.
         test.auto = false;
         test.switches = now;
+        sync.pending = false;
     }
 }
 
@@ -1164,6 +1178,44 @@ mod tests {
         assert_eq!(front.perf, crate::perf_test::Switches::default());
         assert_eq!(front.step(press(|n| n.back = true)), None);
         assert_eq!(front.screen, Screen::RaceOptions);
+    }
+
+    /// Switches set before `PerfTest` exists apply once it does; later ones
+    /// apply at once; an untouched screen keeps the `GRID_PERF_TEST` state.
+    #[test]
+    fn performance_switches_reach_perf_test_in_any_order() {
+        use crate::perf_test::PerfTest;
+        let mut app = App::new();
+        app.insert_resource(FrontEnd::new(Assists::default(), video()))
+            .add_systems(Update, apply_perf);
+        app.update();
+        app.world_mut().resource_mut::<FrontEnd>().perf.main_single = true;
+        app.update();
+        app.world_mut().resource_mut::<FrontEnd>().perf.render_single = true;
+        app.update();
+        let mut env = PerfTest::default();
+        env.auto = true;
+        app.insert_resource(env);
+        app.update();
+        let test = app.world().resource::<PerfTest>();
+        assert!(test.switches.main_single && test.switches.render_single);
+        assert!(!test.auto);
+        // Live change while it exists.
+        app.world_mut().resource_mut::<FrontEnd>().perf.render_single = false;
+        app.update();
+        let test = app.world().resource::<PerfTest>();
+        assert!(test.switches.main_single && !test.switches.render_single);
+
+        // Untouched screen: the `GRID_PERF_TEST` switches stay.
+        let mut app = App::new();
+        let mut env = PerfTest::default();
+        env.switches.shadows = true;
+        app.insert_resource(env)
+            .insert_resource(FrontEnd::new(Assists::default(), video()))
+            .add_systems(Update, apply_perf);
+        app.update();
+        app.update();
+        assert!(app.world().resource::<PerfTest>().switches.shadows);
     }
 
     #[test]
