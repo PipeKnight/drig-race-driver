@@ -361,6 +361,7 @@ fn create_mirror(
     }
     let mut camera = commands.spawn((
         MirrorCamera,
+        crate::pipeline_warmup::WarmWhileCovered,
         Name::new("rear view mirror"),
         Camera3d::default(),
         Camera {

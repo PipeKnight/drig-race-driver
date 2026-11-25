@@ -126,6 +126,14 @@ enum Phase {
     Done,
 }
 
+/// A camera that its own system keeps inactive until the play needs it (the
+/// cockpit mirror): active from the viewer's eye while everything is drawn
+/// under the cover, so its view's pipeline variants (its own target format,
+/// MSAA and layers) compile then and not on the first frame it is shown.
+/// Its system takes it back when the warm-up restores the scene.
+#[derive(Component)]
+pub struct WarmWhileCovered;
+
 #[derive(Resource, Default)]
 pub struct Warmup {
     phase: Phase,
@@ -203,8 +211,41 @@ pub fn install(app: &mut App) {
     }
     app.insert_resource(counters).init_resource::<Warmup>().add_systems(
         PostUpdate,
-        step.after(crate::ornament_lod::select).before(VisibilitySystems::VisibilityPropagate),
+        (
+            step.after(crate::ornament_lod::select).before(VisibilitySystems::VisibilityPropagate),
+            // Before the light cascades and frusta are built for active cameras.
+            cover_cameras.before(bevy::transform::TransformSystems::Propagate),
+        ),
     );
+}
+
+/// Keeps the [`WarmWhileCovered`] cameras on, from the viewer's eye, while the
+/// warm-up draws everything under the cover, and switches them off once when it
+/// restores the scene; their own systems own them otherwise. It runs before
+/// transform propagation so the light cascades and frusta (built after it for
+/// active cameras) exist for them in the same frame.
+#[allow(clippy::type_complexity)]
+fn cover_cameras(
+    warm: Res<Warmup>,
+    mut was_on: Local<bool>,
+    viewer: Query<&GlobalTransform, With<crate::ViewerCamera>>,
+    mut spares: Query<(&mut Camera, &mut Transform), (With<WarmWhileCovered>, Without<crate::ViewerCamera>)>,
+) {
+    let on = warm.showing_all();
+    if on {
+        let eye = viewer.iter().next().map(GlobalTransform::compute_transform);
+        for (mut camera, mut transform) in &mut spares {
+            camera.is_active = true;
+            if let Some(eye) = eye {
+                *transform = eye;
+            }
+        }
+    } else if *was_on {
+        for (mut camera, _) in &mut spares {
+            camera.is_active = false;
+        }
+    }
+    *was_on = on;
 }
 
 fn count(cache: Res<PipelineCache>, counters: Res<Counters>) {
@@ -574,7 +615,9 @@ mod tests {
     fn warm_up_draws_unculled_then_dithered_then_restores_and_lifts_the_cover() {
         let mut app = App::new();
         let counters = Counters::default();
-        app.insert_resource(counters.clone()).init_resource::<Warmup>().add_systems(PostUpdate, step);
+        app.insert_resource(counters.clone())
+            .init_resource::<Warmup>()
+            .add_systems(PostUpdate, (cover_cameras, step).chain());
         let frame = |app: &mut App| app.world_mut().run_schedule(PostUpdate);
         let phase = |app: &App| app.world().resource::<Warmup>().phase;
         let covers = |app: &mut App| app.world_mut().query::<&Node>().iter(app.world()).count();
@@ -583,10 +626,20 @@ mod tests {
         frame(&mut app);
         assert_eq!(phase(&app), Phase::Scene);
         assert!(!app.world().resource::<Warmup>().ready());
-        app.world_mut().spawn(crate::ViewerCamera);
+        let eye = Transform::from_xyz(1., 2., 3.);
+        app.world_mut().spawn((crate::ViewerCamera, GlobalTransform::from(eye)));
+        let mirror = app
+            .world_mut()
+            .spawn((WarmWhileCovered, Camera { is_active: false, ..default() }, Transform::default()))
+            .id();
+        let mirror_on = |app: &App| app.world().get::<Camera>(mirror).unwrap().is_active;
         let mesh = app.world_mut().spawn(Mesh3d(Handle::default())).id();
         frame(&mut app);
         assert_eq!(phase(&app), Phase::Plain);
+        assert!(!mirror_on(&app), "the cover goes up first");
+        frame(&mut app);
+        assert!(mirror_on(&app), "an inactive scene camera draws under the cover");
+        assert_eq!(app.world().get::<Transform>(mirror), Some(&eye), "from the viewer's eye");
         assert!(!app.world().resource::<Warmup>().ready());
         assert_eq!(covers(&mut app), 1);
         frame(&mut app);
@@ -611,7 +664,10 @@ mod tests {
         frame(&mut app);
         assert_eq!(phase(&app), Phase::Dither);
         assert!(!app.world().resource::<Warmup>().ready());
+        // Its own system may switch it off between frames; the warm-up keeps it on.
+        app.world_mut().get_mut::<Camera>(mirror).unwrap().is_active = false;
         frame(&mut app);
+        assert!(mirror_on(&app));
         assert!(app.world().get::<VisibilityRange>(mesh) == Some(&crate::ornament_lod::fade_range(false, 0)));
 
         // A waiting pipeline also holds it.
@@ -628,6 +684,7 @@ mod tests {
         assert_eq!(phase(&app), Phase::Restore);
         assert!(!app.world().resource::<Warmup>().ready());
         frame(&mut app);
+        assert!(!mirror_on(&app), "handed back before the restored scene compiles");
         assert!(app.world().get::<VisibilityRange>(mesh).is_none());
         assert!(app.world().get::<NoFrustumCulling>(mesh).is_none());
         assert_eq!(app.world().get::<Visibility>(hidden), Some(&Visibility::Hidden));

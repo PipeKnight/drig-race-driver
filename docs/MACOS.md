@@ -164,6 +164,30 @@ The packaged app prompts for that folder on first launch. Its logs follow the
 Until actual game files are available, a missing-installation error is expected;
 it is not evidence that a race or a graphics backend has been tested.
 
+## Capturing a log of frame dips
+
+The frame-rate overlay's log (`[osd] fps = on`) names the render stage of the
+worst frame of every second. To show which pipelines (shader variants) were
+built during play, start the app from Terminal with the pipeline trace on:
+
+```sh
+GRID_PIPELINE_TRACE=1 /Applications/DRIG.app/Contents/MacOS/DRIG
+```
+
+(Use the path where `DRIG.app` actually is.) The trace adds one `pipeline_new`
+line per pipeline built and does not change the picture.
+
+1. Race as before. Switch camera views with Change View once the race runs,
+   including the interior (cockpit) view, and drive a full lap in it.
+2. Quit, then race the same event a second time in the same way. On macOS,
+   Metal keeps compiled shaders between launches, so the second run shows
+   which dips repeat.
+3. Send both newest `playtest/macos.*` logs from
+   `~/Library/Application Support/GRID Reassembly/`.
+
+`py -I tools/frame_dips.py LOG` lists the worst windows of such a log with their
+render stage and the pipelines built after the warm-up, by camera view.
+
 ## Validation on 26 October 2026
 
 On Apple Silicon, macOS 15.7.7 (24G720), Rust/Cargo 1.99.0 and Python 3.12.5:

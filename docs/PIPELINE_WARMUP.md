@@ -185,6 +185,56 @@ new executable's cover time toward the warm 2-3 s; it does not change the frame 
 - Cost: a `[patch.crates-io]` section, a seed refresh, an Android seed rebuild and a full-tier
   prepush for every Bevy update.
 
+### 2.5 Cameras that are off until play needs them: the cockpit mirror (Mac dips, F923)
+
+- [V] Owner's Mac log (M4, macOS 15.7.7, Donington BMW, revision 1ed1b05002e4, average 60+ fps):
+  the three worst 1 s windows had one frame of 2315, 450 and 446 ms. Each time the worst render
+  frame was all r_encode (2299, 438, 435 ms), and the per-camera split showed the mirror camera
+  (order -1) as the first segment. The 2.3 s frame was the mirror's first frame ever, right after
+  the switch from the bonnet camera to the head camera (`tools/frame_dips.py` lists them).
+- Mechanism: r_encode includes `PipelineCache::process_pipeline_queue_system`. In Bevy 0.19.1
+  (`render_resource/pipeline_cache.rs`, `create_pipeline_task`) macOS compiles every new pipeline
+  with `block_on` on the render thread; Windows, Linux and Android compile on the async pool and
+  skip the draw until it is ready (an object missing for some frames instead of a stall).
+- Cause: the mirror camera (`cockpit.rs`) is created at scene build but stays `is_active = false`
+  until the interior view shows a mirror. Its view key differs from the viewer's (Rgba8UnormSrgb
+  image target, MSAA off, render layer 0), so none of its mesh pipelines were compiled under the
+  warm-up cover; they compiled on the first cockpit frame (2.3 s on the Mac) and whenever a new
+  material entered the mirror (the 450 ms frames).
+- Fix: `pipeline_warmup::WarmWhileCovered`. A camera with the marker is kept active, looking from
+  the viewer's eye, during the Plain and Dither phases (every mesh drawn and unculled, the fade and
+  proxy variants), and handed back to its own system at Restore. The system that does it
+  (`cover_cameras`) runs in PostUpdate before transform propagation: Bevy builds the directional
+  light cascades and frusta for active cameras after propagation, and the render world unwraps a
+  cascade entry for every extracted active camera (`bevy_pbr` light.rs), so switching a camera on
+  later in PostUpdate (first attempt, inside the warm-up step) panicked on the first covered frame. The mirror carries it. Shared for
+  every track, car and view; any future camera that is off until play needs it only adds the
+  marker. The image after the cover is unchanged: the mirror's own system sets it active and places
+  it on every frame it is shown, so a picture drawn under the cover is never displayed.
+- Test: `pipeline_warmup::tests::warm_up_draws_unculled_then_dithered_then_restores_and_lifts_the_cover`
+  (the marked camera is on under the cover from the viewer's eye, stays on against its system,
+  off again at Restore).
+- Result [V] on the PC: offscreen runs compile pipelines synchronously
+  (`capture_pipeline_compilation synchronous=true`), like macOS, so they reproduce the stall. One
+  Donington Lacetti drive per exe, 1500 ticks at 60 render fps, `--window-transitions
+  600:C,660:C,720:C,780:C` (chase_close → chase_far → bumper → bonnet → head-cam),
+  `GRID_PIPELINE_TRACE=1`, warm driver shader cache, no other cargo or grid process (private
+  `local/ab/wt_ab.ps1`, runs `wt-a2`/`wt-b2`):
+
+  | | before (F905) | after |
+  |---|---|---|
+  | pipelines at warm-up Done | 143 | 190 |
+  | pipelines built after Done | 24 (20 on the head-cam frame, 3 later in head-cam, 1 screenshot) | 1 (screenshot) |
+  | worst render frame after the head-cam switch | 1786.8 ms (encode 1768.2) | 55.0 ms (encode 31.9) |
+  | warm-up cover time | 4.6 s | 5.7 s |
+  | final head-cam frame (tick 1500, mirror in view) | — | 0 px differ, max delta 0 |
+
+  The cover stays up about 1 s longer (warm driver cache). The fixed exe's first run, with the
+  mirror's pipelines not yet in the driver cache, kept the cover up 17.0 s (old exe with all its
+  pipelines cached: 3.5 s). Without the fix the
+  same compilations happen mid-race on the first cockpit frame instead (2.3 s on the owner's Mac).
+  Not yet confirmed on the Mac (docs/MACOS.md, "Capturing a log of frame dips").
+
 ## 3. Evidence
 
 Private, `local/blink/`: traces `t60.log` (before), `t60-fix*.log` (after), captures `w-*`,
