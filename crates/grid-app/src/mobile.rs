@@ -51,8 +51,39 @@ pub fn enabled() -> bool {
 /// Static mesh (not a car part) with a bounding radius under
 /// [`SMALL_RADIUS_METRES`].
 pub fn small(aabb: &Aabb, transform: &GlobalTransform) -> bool {
+    radius(aabb, transform) < SMALL_RADIUS_METRES
+}
+
+/// A mesh's bounding radius in metres.
+pub fn radius(aabb: &Aabb, transform: &GlobalTransform) -> f32 {
     let scale = transform.compute_transform().scale.abs().max_element();
-    Vec3::from(aabb.half_extents).length() * scale < SMALL_RADIUS_METRES
+    Vec3::from(aabb.half_extents).length() * scale
+}
+
+/// The size cull (`cullNNN`) never hides a mesh nearer than this.
+pub const SIZE_CULL_MIN_METRES: f32 = 40.;
+
+/// The draw range of a static mesh: `far_props` for a small one
+/// ([`far_range`]) and the size cull (`factor` times the bounding radius,
+/// measured from the box centre so meshes built in world space cull by
+/// their own place); the nearer of the two wins. `None` = no range.
+pub fn static_range(far_prop: bool, factor: u16, radius: Option<f32>) -> Option<VisibilityRange> {
+    let props = far_prop.then_some(FAR_PROPS_METRES);
+    let size = (factor > 0)
+        .then_some(radius)
+        .flatten()
+        .map(|r| (r * f32::from(factor)).max(SIZE_CULL_MIN_METRES));
+    match (props, size) {
+        (Some(p), Some(s)) if s < p => Some(size_range(s)),
+        (Some(p), _) => Some(far_range(p)),
+        (None, Some(s)) => Some(size_range(s)),
+        (None, None) => None,
+    }
+}
+
+/// The size cull's range: a 10 % fade, from the box centre.
+pub fn size_range(metres: f32) -> VisibilityRange {
+    VisibilityRange { start_margin: 0.0..0.0, end_margin: metres * 0.9..metres, use_aabb: true }
 }
 
 /// The draw-distance limit given to small meshes.
@@ -188,6 +219,22 @@ pub fn install(_app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `cullNNN` ranges every static mesh by its size, from 40 m up; the
+    /// nearer of it and `far_props` wins; nothing without a switch.
+    #[test]
+    fn static_range_takes_the_nearer_cull() {
+        assert!(static_range(false, 0, Some(3.)).is_none());
+        assert!(static_range(true, 0, Some(3.)) == Some(far_range(FAR_PROPS_METRES)));
+        // 3 m x 100 = 300 m: far_props (110 m) is nearer.
+        assert!(static_range(true, 100, Some(3.)) == Some(far_range(FAR_PROPS_METRES)));
+        // 0.2 m x 100 = 20 m, raised to 40 m: nearer than far_props.
+        assert!(static_range(true, 100, Some(0.2)) == Some(size_range(SIZE_CULL_MIN_METRES)));
+        let big = static_range(false, 100, Some(12.)).unwrap();
+        assert_eq!(big.end_margin, 1080.0..1200.0);
+        assert!(big.use_aabb);
+        assert!(static_range(false, 100, None).is_none());
+    }
 
     #[test]
     fn bevy_compute_threads_match_the_task_pool_plugin() {

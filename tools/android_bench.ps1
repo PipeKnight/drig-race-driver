@@ -13,7 +13,9 @@
 # app's files folder (bench.ini, bench-args.txt), am start / am force-stop of our package,
 # logcat, dumpsys battery/power/window (temperature, screen, focus), input swipe on the VIEW and
 # LOOK touch zones while our package has the focus, pull of the new Download/GRID-Reassembly
-# log, and rm of its own two files. It records only whether our game had the focus, never
+# log, rm of its own two files, and read-only cat of the Adreno clock files under
+# /sys/class/kgsl/kgsl-3d0 once a second during the run (gpu-clock.txt, docs/ANDROID_GPU.md
+# section 10: is the GPU clock low under the vsync-paced load?). It records only whether our game had the focus, never
 # which other app had it. It never uninstalls, never changes phone settings and never deletes
 # anything else: the app's data folder holds the owner's GRID copy and settings.ini.
 #
@@ -75,6 +77,31 @@ function Invoke-Adb([string[]]$a) {
     $text = & $Adb @a 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "adb $($a -join ' ') failed: $text" }
     $text
+}
+
+# One line a second from the phone's own shell for -Seconds: the Adreno clock (Hz), busy %, the
+# thermal power level (0 = no thermal cap), devfreq's current frequency and the GPU temperature.
+# A file the phone does not let the shell read prints empty; the run does not depend on it.
+$gpuScript = 'g=/sys/class/kgsl/kgsl-3d0; e=$(( $(date +%s) + SECONDS )); echo governor=$(cat $g/devfreq/governor 2>/dev/null) max_mhz=$(cat $g/max_clock_mhz 2>/dev/null); while [ $(date +%s) -lt $e ]; do echo t=$(date +%s) clk=$(cat $g/gpuclk 2>/dev/null) busy=$(cat $g/gpu_busy_percentage 2>/dev/null | tr -d '' %'') pwr=$(cat $g/thermal_pwrlevel 2>/dev/null) freq=$(cat $g/devfreq/cur_freq 2>/dev/null) temp=$(cat $g/temp 2>/dev/null); sleep 1; done'
+
+# The sampler's verdict line: clock median/p10/p90 in MHz, busy mean, the highest thermal level.
+function Get-GpuClockSummary([string]$path) {
+    if (-not (Test-Path $path)) { return 'gpu_clock: no samples (sampler did not run)' }
+    $lines = @(Get-Content $path)
+    $head = ($lines | Where-Object { $_ -match '^governor=' } | Select-Object -First 1)
+    $clk = @(); $busy = @(); $pwr = @()
+    foreach ($l in $lines) {
+        if ($l -match 'clk=(\d+)') { $v = [double]$Matches[1]; if ($v -gt 1e5) { $v /= 1e6 }; $clk += $v }
+        if ($l -match 'busy=(\d+)') { $busy += [double]$Matches[1] }
+        if ($l -match 'pwr=(\d+)') { $pwr += [int]$Matches[1] }
+    }
+    if ($clk.Count -eq 0) { return "gpu_clock: unreadable ($(@($lines).Count) lines; $head) $path" }
+    $s = $clk | Sort-Object
+    $q = { param($f) $s[[math]::Min($s.Count - 1, [int][math]::Floor($f * $s.Count))] }
+    $busyMean = if ($busy.Count) { '{0:F0}' -f (($busy | Measure-Object -Average).Average) } else { '-' }
+    $pwrMax = if ($pwr.Count) { ($pwr | Measure-Object -Maximum).Maximum } else { '-' }
+    'gpu_clock: samples={0} mhz_p10={1:F0} mhz_median={2:F0} mhz_p90={3:F0} busy_mean={4} thermal_pwrlevel_max={5} {6} ({7})' -f `
+        $clk.Count, (& $q 0.1), (& $q 0.5), (& $q 0.9), $busyMean, $pwrMax, $head, $path
 }
 
 function Get-TempC {
@@ -155,6 +182,11 @@ Invoke-Adb @('shell', 'am', 'force-stop', $Package) | Out-Null
 Invoke-Adb @('logcat', '-c') | Out-Null
 Invoke-Adb @('shell', 'am', 'start', '-n', "$Package/.LauncherActivity") | Out-Null
 Write-Output "started at $(Get-Date -Format HH:mm:ss), battery $tempStart C; waiting $Seconds s"
+$gpuFile = Join-Path $Out 'gpu-clock.txt'
+$gpuJob = Start-Job -ScriptBlock {
+    param($adb, $script, $file)
+    & $adb shell $script 2>$null | Set-Content -Path $file -Encoding ascii
+} -ArgumentList $Adb, ($gpuScript -replace 'SECONDS', [string]$Seconds), $gpuFile
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $presses = Join-Path $Out 'presses.txt'
 Set-Content -Path $presses -Value '# seconds since am start, action, result (touch_controls.rs zones; game log time ~= these seconds)'
@@ -193,6 +225,8 @@ $rest = $Seconds - $clock.Elapsed.TotalSeconds
 if ($rest -gt 0) { Start-Sleep -Milliseconds ([int]($rest * 1000)) }
 Invoke-Adb @('shell', 'am', 'force-stop', $Package) | Out-Null
 $tempEnd = Get-TempC
+Wait-Job $gpuJob -Timeout 20 | Out-Null
+Stop-Job $gpuJob -ErrorAction SilentlyContinue; Remove-Job $gpuJob -Force -ErrorAction SilentlyContinue
 & $Adb logcat -d -s 'grid:*' 'AndroidRuntime:E' > (Join-Path $Out 'logcat.txt') 2>$null
 Invoke-Adb @('shell', 'rm', '-f', "$files/bench.ini", "$files/bench-args.txt") | Out-Null
 
@@ -206,10 +240,11 @@ Invoke-Adb @('pull', "$logs/$after", $log) | Out-Null
 Set-Content -Path (Join-Path $Out 'run.txt') -Value @(
     "apk=$Apk", "seconds=$Seconds", "ticks=$Ticks", "perf_test=$PerfTest", "pre_rotation=$PreRotation", "sustained=$Sustained", "render_height=$RenderHeight", "refresh_hz=$RefreshHz",
     "temp_start_c=$tempStart", "temp_end_c=$tempEnd", "note=$Note", "log=$after")
-$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_sustained_performance|android_frame_cap|android_frame_rate|android_display_hz|mobile_preset|event=step step=1 ' |
-    Select-Object -First 14 | ForEach-Object { $_.Line }
+$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_sustained_performance|android_frame_cap|android_frame_rate|android_display_hz|mobile_preset|adpf version=1 event=open|event=step step=1 ' |
+    Select-Object -First 16 | ForEach-Object { $_.Line }
 $seen | ForEach-Object { Write-Output "  $_" }
 Write-Output "battery: start $tempStart C, end $tempEnd C"
+Write-Output (Get-GpuClockSummary $gpuFile)
 $pressLines = @(Get-Content $presses | Where-Object { $_ -notmatch '^#' })
 Write-Output "camera presses: $(@($pressLines | Where-Object { $_ -match ' sent' }).Count) sent, $(@($pressLines | Where-Object { $_ -match 'skipped' }).Count) skipped ($presses)"
 & py -I (Join-Path $PSScriptRoot 'phone_profile_summary.py') --table $log --presses $presses

@@ -22,6 +22,7 @@ use bevy::light::{
     CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, EnvironmentMapLight,
     GeneratedEnvironmentMapLight, NotShadowCaster, ShadowFilteringMethod,
 };
+use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::render::view::NoIndirectDrawing;
 use bevy::ecs::schedule::{
     InternedScheduleLabel, MultiThreadedExecutor, ScheduleLabel, SingleThreadedExecutor,
@@ -49,6 +50,11 @@ pub struct Switches {
     pub small_casters: bool,
     /// Small meshes beyond `mobile::FAR_PROPS_METRES` are not drawn.
     pub far_props: bool,
+    /// Size cull (`cullNNN`, docs/ANDROID_GPU.md section 10): every static
+    /// mesh is drawn only within NNN times its bounding radius (at least
+    /// `mobile::SIZE_CULL_MIN_METRES`), so the far, small-on-screen part of
+    /// a heavy view goes. 0 = off. Car parts never get a range.
+    pub cull_factor: u16,
     /// The 3D camera renders without MSAA.
     pub msaa_off: bool,
     /// The cockpit's rear-view mirror stops updating (head-cam only).
@@ -86,6 +92,17 @@ pub struct Switches {
     /// cascades within 25 m (wins over `light_shadows`; set it before the
     /// cut starts, the two do not swap while one is active).
     pub tiny_shadows: bool,
+    /// The 3D cameras draw without tonemapping and deband dithering
+    /// (`Tonemapping::None`, `DebandDither::Disabled`): the baseline view
+    /// tonemaps inside every PBR fragment with a 3D LUT sample (TonyMcMapface),
+    /// so this shows that sample's cost. Colours change (docs/ANDROID_GPU.md
+    /// section 10).
+    pub tonemap: bool,
+    /// Android ADPF performance hints (`adpf.rs`): a hint session for the
+    /// game's threads reports each frame's work against the frame budget, so
+    /// the CPU and, from API 35, the GPU governor see the missed budget
+    /// (docs/ANDROID_GPU.md section 10). No effect elsewhere.
+    pub adpf: bool,
 }
 
 impl Switches {
@@ -113,8 +130,16 @@ impl Switches {
         self.local_lights |= other.local_lights;
         self.env_maps |= other.env_maps;
         self.tiny_shadows |= other.tiny_shadows;
+        self.tonemap |= other.tonemap;
+        self.adpf |= other.adpf;
         if other.render_rows != 0 {
             self.render_rows = other.render_rows;
+        }
+        if other.cull_factor != 0 {
+            self.cull_factor = match self.cull_factor {
+                0 => other.cull_factor,
+                mine => mine.min(other.cull_factor),
+            };
         }
     }
     pub const NORMAL: Self = Self {
@@ -129,6 +154,7 @@ impl Switches {
         light_shadows: false,
         small_casters: false,
         far_props: false,
+        cull_factor: 0,
         msaa_off: false,
         mirror: false,
         msaa2: false,
@@ -141,6 +167,8 @@ impl Switches {
         local_lights: false,
         env_maps: false,
         tiny_shadows: false,
+        tonemap: false,
+        adpf: false,
     };
     /// `no_reflections`: what every reflection costs, apart from the other
     /// cuts: no car overlay, no dynamic cube face, no camera environment map.
@@ -185,11 +213,15 @@ impl Switches {
             (self.lighting, "lighting"),
             (self.local_lights, "local_lights"),
             (self.env_maps, "env_maps"),
+            (self.tonemap, "tonemap"),
         ];
         let off: Vec<&str> = names.iter().filter(|(on, _)| *on).map(|(_, n)| *n).collect();
         let mut cheaper: Vec<String> = Vec::new();
         if self.render_rows > 0 {
             cheaper.push(format!("render{}", self.render_rows));
+        }
+        if self.cull_factor > 0 {
+            cheaper.push(format!("cull{}", self.cull_factor));
         }
         for (on, name) in [
             (self.light_shadows, "light_shadows"),
@@ -200,6 +232,7 @@ impl Switches {
             (self.no_indirect, "no_indirect"),
             (self.hard_shadows, "hard_shadows"),
             (self.tiny_shadows, "tiny_shadows"),
+            (self.adpf, "adpf"),
             (self.main_single, "main_single"),
             (self.render_single, "render_single"),
         ] {
@@ -331,10 +364,15 @@ pub fn install(app: &mut App) {
                 "local_lights" => s.local_lights = true,
                 "env_maps" => s.env_maps = true,
                 "tiny_shadows" => s.tiny_shadows = true,
+                "tonemap" => s.tonemap = true,
+                "adpf" => s.adpf = true,
                 "lean" => s.add(Switches::LEAN),
                 "no_reflections" => s.add(Switches::NO_REFLECTIONS),
                 rows if rows.starts_with("render") => {
                     s.render_rows = rows[6..].parse().unwrap_or(0);
+                }
+                cull if cull.starts_with("cull") => {
+                    s.cull_factor = cull[4..].parse().unwrap_or(0);
                 }
                 _ => warn!("GRID_PERF_TEST: unknown part {part:?}"),
             }
@@ -564,8 +602,8 @@ type Hidden = HashMap<Entity, Visibility>;
 struct Restore {
     /// Entities given `NotShadowCaster` here.
     no_casters: HashSet<Entity>,
-    /// Entities given a `VisibilityRange` here.
-    ranged: HashSet<Entity>,
+    /// Entities given a `VisibilityRange` here, with the range given.
+    ranged: HashMap<Entity, VisibilityRange>,
     /// The render height before `render_rows`.
     height: Option<crate::render_scale::RenderHeight>,
     /// The 3D camera's MSAA before `msaa_off` or `msaa2`.
@@ -578,6 +616,8 @@ struct Restore {
     shadows: Option<(usize, Vec<(Entity, CascadeShadowConfig)>)>,
     /// Shadow filters `hard_shadows` replaced, per camera.
     filters: HashMap<Entity, Option<ShadowFilteringMethod>>,
+    /// Tonemapping and dithering `tonemap` replaced, per camera.
+    tonemap: HashMap<Entity, (Tonemapping, Option<DebandDither>)>,
 }
 
 /// The view settings the mobile-cost switches change.
@@ -598,6 +638,13 @@ struct View<'w, 's> {
             Option<&'static GeneratedEnvironmentMapLight>,
             Option<&'static ShadowFilteringMethod>,
         ),
+        With<crate::ViewerCamera>,
+    >,
+    /// The 3D cameras' display transform, for `tonemap`.
+    grade: Query<
+        'w,
+        's,
+        (Entity, &'static mut Tonemapping, Option<&'static mut DebandDither>),
         With<crate::ViewerCamera>,
     >,
     /// Point and spot lights, for `local_lights`.
@@ -659,14 +706,25 @@ fn apply(
         } else if !want_no_cast && r.no_casters.remove(&entity) {
             commands.entity(entity).remove::<NotShadowCaster>();
         }
-        let want_range = s.far_props && is_small;
-        if want_range && !ranged {
-            commands
-                .entity(entity)
-                .insert(crate::mobile::far_range(crate::mobile::FAR_PROPS_METRES));
-            r.ranged.insert(entity);
-        } else if !want_range && r.ranged.remove(&entity) {
-            commands.entity(entity).remove::<VisibilityRange>();
+        let want_range = crate::mobile::static_range(
+            !car && s.far_props && is_small,
+            if car { 0 } else { s.cull_factor },
+            aabb.map(|a| crate::mobile::radius(a, transform)),
+        );
+        match want_range {
+            // A range set elsewhere stays.
+            Some(_) if ranged && !r.ranged.contains_key(&entity) => {}
+            Some(range) => {
+                if r.ranged.get(&entity) != Some(&range) {
+                    commands.entity(entity).insert(range.clone());
+                    r.ranged.insert(entity, range);
+                }
+            }
+            None => {
+                if r.ranged.remove(&entity).is_some() {
+                    commands.entity(entity).remove::<VisibilityRange>();
+                }
+            }
         }
     }
     let want_msaa = if s.msaa_off {
@@ -731,6 +789,25 @@ fn apply(
     }
     if want_msaa.is_none() {
         r.msaa = None;
+    }
+    for (entity, mut tone, dither) in &mut view.grade {
+        if s.tonemap {
+            if *tone != Tonemapping::None {
+                r.tonemap.entry(entity).or_insert((*tone, dither.as_deref().copied()));
+                *tone = Tonemapping::None;
+            }
+            if let Some(mut d) = dither
+                && *d != DebandDither::Disabled
+            {
+                r.tonemap.entry(entity).or_insert((*tone, Some(*d)));
+                *d = DebandDither::Disabled;
+            }
+        } else if let Some((before, dither_before)) = r.tonemap.remove(&entity) {
+            *tone = before;
+            if let (Some(mut d), Some(b)) = (dither, dither_before) {
+                *d = b;
+            }
+        }
     }
     if let Some(scale) = view.scale.as_deref_mut() {
         // The steps compare fixed heights: the dynamic height waits.
@@ -915,6 +992,8 @@ mod tests {
                 crate::ViewerCamera,
                 Msaa::Sample4,
                 EnvironmentMapLight { intensity: 7., ..default() },
+                Tonemapping::TonyMcMapface,
+                DebandDither::Enabled,
             ))
             .id();
         let sun = app.world_mut().spawn((DirectionalLight::default(), Visibility::Visible)).id();
@@ -930,11 +1009,15 @@ mod tests {
             no_indirect: true,
             reflections: true,
             lighting: true,
+            tonemap: true,
+            adpf: true,
             ..Switches::NORMAL
         };
-        assert_eq!(all.label(), "off:reflections+lighting,mobile:msaa2+no_indirect");
+        assert_eq!(all.label(), "off:reflections+lighting+tonemap,mobile:msaa2+no_indirect+adpf");
         switches(&mut app, all);
         let w = app.world();
+        assert_eq!(*w.get::<Tonemapping>(camera).unwrap(), Tonemapping::None);
+        assert_eq!(*w.get::<DebandDither>(camera).unwrap(), DebandDither::Disabled);
         assert_eq!(*w.get::<Msaa>(camera).unwrap(), Msaa::Sample2);
         assert!(w.get::<NoIndirectDrawing>(camera).is_some());
         assert!(w.get::<EnvironmentMapLight>(camera).is_none());
@@ -946,6 +1029,8 @@ mod tests {
         assert_eq!(*app.world().get::<Msaa>(camera).unwrap(), Msaa::Off);
         switches(&mut app, Switches::NORMAL);
         let w = app.world();
+        assert_eq!(*w.get::<Tonemapping>(camera).unwrap(), Tonemapping::TonyMcMapface);
+        assert_eq!(*w.get::<DebandDither>(camera).unwrap(), DebandDither::Enabled);
         assert_eq!(*w.get::<Msaa>(camera).unwrap(), Msaa::Sample4);
         assert!(w.get::<NoIndirectDrawing>(camera).is_none());
         assert_eq!(w.get::<EnvironmentMapLight>(camera).unwrap().intensity, 7.);
@@ -991,6 +1076,19 @@ mod tests {
         test.base = Switches::NORMAL;
         assert_eq!(test.active(), Switches { hud: true, render_rows: 360, ..Switches::NORMAL });
         assert_eq!(PerfTest::default().active(), Switches::NORMAL);
+    }
+
+    /// `cullNNN` keeps the stronger (smaller) factor and names it.
+    #[test]
+    fn cull_factor_adds_and_labels() {
+        let mut s = Switches::NORMAL;
+        s.add(Switches { cull_factor: 200, ..Switches::NORMAL });
+        s.add(Switches { cull_factor: 100, ..Switches::NORMAL });
+        s.add(Switches { cull_factor: 150, ..Switches::NORMAL });
+        assert_eq!(s.cull_factor, 100);
+        s.add(Switches::LEAN);
+        assert_eq!(s.cull_factor, 100);
+        assert!(s.label().contains("mobile:cull100+"), "{}", s.label());
     }
 
     /// `lean` adds every cheaper path to the words before and after it.

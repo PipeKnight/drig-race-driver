@@ -67,6 +67,9 @@ mod android_pad;
 #[cfg(target_os = "android")]
 mod android_sensor;
 mod asset_counts;
+// ADPF hints for the `adpf` perf word; systems only on Android.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod adpf;
 mod assists;
 mod body_damage;
 mod body_occlusion;
@@ -5296,6 +5299,7 @@ pub(crate) fn race_app(
             }
             pause_menu::install(&mut app, menu, labels);
             perf_test::install(&mut app);
+            adpf::install(&mut app);
             // Android: the mobile preset (lower render resolution).
             mobile::install(&mut app);
             // The Race Options front end with Driver Aids before the race

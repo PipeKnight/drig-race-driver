@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F934](log/F0934.md) | 2026-11-26 | Phone GPU batch 1: size cull, tonemap and ADPF switches, GPU clock sampler |
 | [F933](log/F0933.md) | 2026-11-26 | Phone: lean default verified, dip anatomy, MIUI 60 Hz vote, physics stage split, thermal soaks (cap 30, sustained mode), bench env switches |
 | [F932](log/F0932.md) | 2026-11-26 | Dynamic resolution: a GPU-bound frame time in the hold band counts as late (Mac countdown) |
 | [F931](log/F0931.md) | 2026-11-26 | Steam Deck estimate from E-core and UHD 770 stand-ins |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F877](log/F0877.md) | 2026-11-20 | Bind-group cache re-timed on F875: misses the bar; vendored crates kept LF |
 | [F876](log/F0876.md) | 2026-11-20 | Car-glass pane proxy material and lamp write guard |
 | [F875](log/F0875.md) | 2026-11-20 | Render prepare: bin buffers uploaded only for changed batch sets (bevy_render patch); r_prepare -0.60 to -1.23 ms |
-| [F874](log/F0874.md) | 2026-11-19 | Render prepare: Bevy bind-group cache over two frames hits 72-77 % but r_prepare does not shrink; route closed |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

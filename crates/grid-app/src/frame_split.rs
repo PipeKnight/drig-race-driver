@@ -1181,10 +1181,23 @@ fn gpu_begin(gpu: Res<FrameGpu>, device: Res<RenderDevice>) {
         with_acc(|a| {
             a.gpu_lost += lost;
             for (marks, ticks) in read {
-                a.add_gpu(split(&marks, &ticks, gpu.period_ns));
+                let frame = split(&marks, &ticks, gpu.period_ns);
+                if frame.bad == 0 && frame.span > 0. {
+                    LAST_GPU_NS.store((frame.span * 1e6) as u64, Ordering::Relaxed);
+                }
+                a.add_gpu(frame);
             }
         });
     }
+}
+
+/// The GPU span (all markers) of the newest frame read back, in ns; 0 until
+/// one is read (no markers on this adapter, or none yet). `adpf.rs` reports it.
+static LAST_GPU_NS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn last_gpu_ns() -> u64 {
+    LAST_GPU_NS.load(Ordering::Relaxed)
 }
 
 fn write_marker(gpu: &FrameGpu, ctx: &mut RenderContext, mark: Mark) {

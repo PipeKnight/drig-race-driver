@@ -291,3 +291,83 @@ From `git log --since=2026-10-22 -- '*.wgsl'`. Bisect them once the rows show wh
    - no MSAA or depth store and load between the passes (discard, don't-care, or merged passes where Bevy allows);
    - fp16 in our own shaders;
    - a fix for any regressed shader the bisection finds, with no visible desktop change.
+
+## 10. Toward 20 ms GPU: switch candidates (2026-11-26)
+
+Goal (coordinator, 2026-11-26): the phone's GPU frame from about 25 ms toward 20 ms with no spikes, for a steady 30 FPS
+with headroom and ideally 40+. Starting point, lean default (F928) on the phone, 1026x480, 60 Hz, the phone session's
+run `f928-lean`: 38.1 FPS, GPU 21.47 ms; marker segments g_opaque 17.69, g_shadow 1.10, g_transp 0.97, g_ui 0.69,
+g_upscale 0.29, g_post 0.08 ms. The head-cam is the outlier: 28 FPS, 29.2 GPU ms, 116 opaque draws (cockpit and mirror).
+
+Throttling (phone session's 15-minute soak, lean, cap 60; coordinator 2026-11-26): after about 2 minutes FPS falls
+from 32 to about 25 and GPU ms rises from 23 to 27–30 (chase_close 27.4, head-cam 35.0). The real target is the warm
+phone: its GPU frame must fit 33 ms, which needs about 25 % headroom over the cool numbers. Energy per frame counts as
+well: fewer bytes and fewer ALU operations mean less heat. Every winner gets a warm repeat besides the cool pair.
+[I] This ranks the size cull and the fragment cuts (`tonemap`, rows) above `adpf`: hints may raise the clock and the
+heat, so `adpf` wins only if a warm run shows it.
+
+[I] The opaque pass is about 82 % of the GPU frame and hardly moves with content (section 7: all parts off still
+23.5 ms; the cars alone 15.4 ms of opaque from 11 draws). Two explanations fit: a fixed per-pixel cost of the PBR
+fragment, or a GPU clock that the governor holds low under the vsync-paced load. Batch 1 separates them.
+
+Every candidate is a runtime switch (`perf_test` word, `android_bench.ps1 -PerfTest '<words>'`), off by default; on
+the mobile preset the words add to `lean`. A switch becomes an Android default only after a phone gain beyond
+run-to-run noise. The desktop default draws the same pixels (offscreen `shot.ps1` check, race and derby ticks 600/1500).
+
+### Batch 1
+
+- **GPU clock sampler** (`tools/android_bench.ps1`, every run, no switch). The phone's own shell reads
+  `/sys/class/kgsl/kgsl-3d0/{gpuclk, gpu_busy_percentage, thermal_pwrlevel, devfreq/cur_freq, temp}` once a second
+  into `gpu-clock.txt`; the run prints `gpu_clock: mhz_p10/median/p90, busy_mean, thermal_pwrlevel_max, governor,
+  max_mhz`. Read-only; a file the shell may not read prints empty and the run goes on. Adreno 740 tops out near
+  680–720 MHz; a median well under that with busy below 90 % means the clock, not the work, sets the 21 ms.
+- **`adpf`** (`crates/grid-app/src/adpf.rs`): an Android performance hint session (API 33,
+  `APerformanceHint_createSession`) for the main, render and pool threads with a 16.67 ms target; every frame reports
+  the frame interval, and from API 35 (`reportActualWorkDuration2`) also the main thread's work and the newest GPU span
+  from `frame_split`. Symbols are looked up with `dlsym`, so an older phone logs `adpf ... result=unsupported`. Only
+  hints change, nothing is drawn differently. Expected: if the clock is low, a higher GPU clock and lower GPU ms in the
+  same frames; if not, no change.
+- **`tonemap`** (`perf_test.rs`): the 3D cameras draw with `Tonemapping::None` and `DebandDither::Disabled`. Without
+  HDR (the Baseline preset) Bevy tonemaps inside every PBR fragment (TonyMcMapface: a 3D LUT sample) and adds the
+  deband noise. The picture gets brighter highlights and loses the filmic curve, so this is a cost probe first; a
+  cheaper curve would follow only if it wins. Expected: 0.5–2 ms of g_opaque if the fragment is the limit.
+- **`cullNNN`** (`perf_test.rs`, `mobile::static_range`): every static mesh (not car parts: `MovingPart` never gets a
+  range) is drawn only within NNN times its bounding radius, never nearer than 40 m, measured from its box centre,
+  with a 10 % fade. Where `far_props` is nearer for a small prop, it wins. On 480 rows with a 60° view a mesh's
+  diameter is about 830 · radius / distance pixels, so `cull200` hides meshes under about 4 px, `cull100` under 8 px
+  and `cull60` under 14 px. The phone session's slow seconds (coordinator, 2026-11-26) are heavy views, not spikes:
+  GPU 34 vs 23 ms, 2600 vs 1800 visible entities, 96 vs 62 draws. This caps that visible set by what the screen can
+  show, for every track. Expected: fewer visible entities and draws in the heavy views, a lower p99 and fewer
+  ≥50 ms frames; the average moves less.
+- Existing words measured against plain lean, no new code: `lighting` (no sun or lights: the upper bound of shading
+  cost), `env_maps` (no cube samples), `mirror` (no cockpit mirror pass: the head-cam row), `render360` (fewer rows:
+  the per-pixel share), and `-PreRotation` (F927 measured it only under `normal`).
+- `shadows` (existing word): no sun shadow pass at all. Lean already draws the cheapest shadows (`tiny_shadows`: a
+  256 map, cascades within 25 m), so this is the ceiling of what shadow work is left in the heavy views.
+
+### Ranked table
+
+Cap 30 (phone session's soak, coordinator 2026-11-26): 28.6 FPS over the race and 1.2 % of frames ≥ 50 ms (cap 60:
+7.3 %), but the throttled heavy views still take GPU 29.5 ms and main thread 33.1 ms, so the heaviest minute misses
+the 33.3 ms budget. Target: heavy views at about 26 ms GPU or less when throttled, 15–20 % below now. The table is
+ranked by that heavy-view GPU time on the warm phone; cuts that also save energy (fewer passes, lower shadow or post
+resolution, fewer draws in heavy views) rank first among equals.
+
+Phone, lean base, 1026x480 unless the row says otherwise, ABAB runs of 200 s with matched start temperatures (heat
+alone costs about 4 FPS: 33.9 against 37.9 °C at the start). GPU ms and p99 are medians of race seconds 20+; Δ is
+against the paired lean run. Lean on the phone (F928 APK, 300 s, coordinator 2026-11-26): 32–38 FPS, GPU 21.5–23.5 ms,
+p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
+
+| Rank | Candidate | Words | Heavy GPU ms, warm | GPU ms | Δ GPU ms | FPS | p99 ms | GPU MHz median | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| – | lean (base) | – | 29.5 (cap 30) | 21.47 | – | 38.1 | – | – | default since F928 |
+| ? | size cull, ~8 px | `cull100` | pending | | | | | | phone A/B pending |
+| ? | size cull, ~4 px | `cull200` | pending | | | | | | phone A/B pending |
+| ? | ADPF hints | `adpf` | pending | | | | | | phone A/B pending |
+| ? | shading upper bound | `lighting` | pending | | | | | | probe only |
+| ? | no tonemap/dither | `tonemap` | pending | | | | | | phone A/B pending |
+| ? | fewer rows | `render360` | pending | | | | | | probe only |
+| ? | no cube samples | `env_maps` | pending | | | | | | phone A/B pending |
+| ? | no cockpit mirror | `mirror` | pending | | | | | | head-cam row |
+| ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
+| ? | no sun shadows | `shadows` | pending | | | | | | ceiling probe |
