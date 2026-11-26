@@ -371,7 +371,7 @@ pub fn install(app: &mut App, install_root: &Path, spec: &Spec) -> Result<Entity
                         };
                         let image = match found {
                             Some((dds, wrap)) => {
-                                let image = crate::texture_upload::image(
+                                let image = crate::texture_upload::image_ui(
                                     &dds,
                                     crate::osd_scene::sampler(wrap),
                                     RenderAssetUsages::RENDER_WORLD,

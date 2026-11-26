@@ -1343,7 +1343,7 @@ fn prepare(root: &Path) -> Result<Prepared, String> {
     for t in texture::read_named(&bundle, &ids).map_err(|e| format!("{BUNDLE}: {e}"))? {
         let wrap = texture::wrap(&bundle, t.id).unwrap_or([texture::Wrap::Repeat; 2]);
         let (dds, _) = t.validated_dds();
-        let image = crate::texture_upload::image_linear(&dds, osd_scene::sampler(wrap), RenderAssetUsages::RENDER_WORLD)
+        let image = crate::texture_upload::image_linear_ui(&dds, osd_scene::sampler(wrap), RenderAssetUsages::RENDER_WORLD)
             .map_err(|e| format!("{}: {e}", String::from_utf8_lossy(t.id)))?;
         images.insert(String::from_utf8_lossy(t.id).into_owned(), image);
     }

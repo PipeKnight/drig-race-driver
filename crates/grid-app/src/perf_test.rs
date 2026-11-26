@@ -376,6 +376,8 @@ pub fn install(app: &mut App) {
                 cull if cull.starts_with("cull") => {
                     s.cull_factor = cull[4..].parse().unwrap_or(0);
                 }
+                // Read at upload time by `texture_upload::mip_skip`.
+                skip if skip.starts_with("mipskip") => {}
                 _ => warn!("GRID_PERF_TEST: unknown part {part:?}"),
             }
         }
@@ -856,7 +858,12 @@ fn apply(
         }
     }
     if first {
-        *LABEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(s.label());
+        // The upload-time mip skip joins the label, so each bench row names it.
+        let label = match crate::texture_upload::mip_skip() {
+            Some(m) => format!("{},mipskip{}_{}", s.label(), m.levels, m.min_size),
+            None => s.label(),
+        };
+        *LABEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(label);
         QUIET_SAMPLES.store(s.samples, Ordering::Relaxed);
         log_line!(
             "perf_test version=1 event=apply switches={} meshes={} small_static={small_count}",

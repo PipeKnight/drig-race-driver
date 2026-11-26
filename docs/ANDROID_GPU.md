@@ -345,6 +345,36 @@ run-to-run noise. The desktop default draws the same pixels (offscreen `shot.ps1
 - `shadows` (existing word): no sun shadow pass at all. Lean already draws the cheapest shadows (`tiny_shadows`: a
   256 map, cascades within 25 m), so this is the ceiling of what shadow work is left in the heavy views.
 
+### Batch 2: texture mip skip
+
+The phone uploads every texture at full size: native BC (`texture upload ... path=bc` on the Adreno 740), the whole
+mip chain, no level dropped (owner's question via the coordinator, 2026-11-26).
+
+- **`mipskipN`, `mipskipN_M`** (`texture_upload::MipSkip`): at upload, every world texture loses its top N mip levels
+  (N = 1–3). With `_M`, only textures whose larger side is at least M texels lose them. One level leaves a quarter of
+  the base texels, two a sixteenth. Aspect and UVs stay, so only near detail goes: a surface the camera sees at less
+  than one texel per pixel already samples those smaller levels.
+- The rule is the same for every track, car and texture. Images are kept as they are when:
+  - they have no more levels than N;
+  - their new size would not hold whole BC blocks;
+  - they are arrays or cubes;
+  - they live only in the main world, where the CPU reads them at full size.
+- Screen art never shrinks: the HUD (OSD scene), the front-end 3D worlds, the livery carousel, the loading screen
+  statistics and the results art go through `image_ui` / `image_linear_ui`.
+- With the ETC2 path, a shrunk image keys its cache entry by its own levels.
+- The words are read once, before the first upload, from the `perf_test` setting. A mid-race change has no effect.
+- The `frame_stats` label gains `,mipskipN_M`.
+- The `texture upload summary` line gains `mip_skip=N_M mip_skipped=<images> mip_skipped_bytes=<bytes>`.
+  `upload_bytes` is then the texel memory after the skip, and `source_bytes` the memory before it.
+- Expected: less texture memory and bandwidth. Track and car textures of 1024–2048 texels lose 75 % (one level) or
+  94 % (two levels) of their bytes. Texture fetch costs less in near, magnified views; the heavy views are far and
+  minified, so they gain less. Load time falls by the bytes not uploaded. The look loses sharpness on road markings,
+  kerbs and car liveries close to the camera.
+- Phone A/B: lean vs `mipskip1_1024` vs `mipskip2_1024`, and `mipskip1` (all textures). Measure:
+  - heavy-view GPU ms when throttled;
+  - the summary's bytes;
+  - load time, from `loading_stats` / race start.
+
 ### Ranked table
 
 Cap 30 (phone session's soak, coordinator 2026-11-26): 28.6 FPS over the race and 1.2 % of frames ≥ 50 ms (cap 60:
@@ -352,6 +382,8 @@ Cap 30 (phone session's soak, coordinator 2026-11-26): 28.6 FPS over the race an
 the 33.3 ms budget. Target: heavy views at about 26 ms GPU or less when throttled, 15–20 % below now. The table is
 ranked by that heavy-view GPU time on the warm phone; cuts that also save energy (fewer passes, lower shadow or post
 resolution, fewer draws in heavy views) rank first among equals.
+
+Compare rows only within their own pair: between pairs 1 and 2 plain lean got slower (GPU 20.5 to 23.1 ms, heavy 24.0 to 27.4 ms) at the same start temperature and APK, while the owner changed Game Turbo settings (MIUI refresh vote 120 Hz; phone session, 2026-11-26).
 
 Phone, lean base, 1026x480 unless the row says otherwise, ABAB runs of 200 s with matched start temperatures (heat
 alone costs about 4 FPS: 33.9 against 37.9 °C at the start). GPU ms and p99 are medians of race seconds 20+; Δ is
@@ -361,8 +393,8 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | Rank | Candidate | Words | Heavy GPU ms, warm | GPU ms | Δ GPU ms | FPS | p99 ms | GPU MHz median | Verdict |
 |---|---|---|---|---|---|---|---|---|---|
 | – | lean (base) | – | 29.5 (cap 30) | 21.47 | – | 38.1 | – | – | default since F928 |
-| ? | size cull, ~8 px | `cull100` | pending | | | | | | phone A/B pending |
-| ? | size cull, ~4 px | `cull200` | pending | | | | | | phone A/B pending |
+| ? | size cull, ~8 px | `cull100` | cool 23.16 vs 23.95 | 21.53 vs 20.52 | heavy −0.79 (−3.4 %) | 34.8 vs 37.2 | 35.2 vs 32.5 | unreadable | cool pair: heavy vis −14 %, d_opaque −12 %; FPS mean pulled down by outlier run 2-B; warm repeat pending |
+| ? | size cull, ~4 px | `cull200` | 27.15 vs 27.43 (cool) | 22.73 vs 23.10 | heavy −0.28 (−1.0 %) | 37.9 vs 37.5 | 32.0 vs 32.1 | unreadable | ABAB, start ≤37 °C, 35 heavy s: heavy vis −6 %, d_opaque −4 %; weak, not beyond noise |
 | ? | ADPF hints | `adpf` | pending | | | | | | phone A/B pending |
 | ? | shading upper bound | `lighting` | pending | | | | | | probe only |
 | ? | no tonemap/dither | `tonemap` | pending | | | | | | phone A/B pending |
@@ -371,3 +403,6 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | ? | no cockpit mirror | `mirror` | pending | | | | | | head-cam row |
 | ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
 | ? | no sun shadows | `shadows` | pending | | | | | | ceiling probe |
+| ? | mip skip 1, ≥1024 | `mipskip1_1024` | pending | | | | | | batch 2; look: crop |
+| ? | mip skip 2, ≥1024 | `mipskip2_1024` | pending | | | | | | batch 2; look: crop |
+| ? | mip skip 1, all | `mipskip1` | pending | | | | | | batch 2; look: crop |

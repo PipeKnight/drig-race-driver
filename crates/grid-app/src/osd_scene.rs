@@ -789,7 +789,7 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         let mut assets = world.resource_mut::<Assets<Image>>();
         for (t, &wrap) in scene.textures.iter().zip(&scene.wraps) {
             let (dds, _) = t.validated_dds();
-            let image = crate::texture_upload::image(&dds, sampler(wrap), RenderAssetUsages::RENDER_WORLD).map_err(|e| e.to_string())?;
+            let image = crate::texture_upload::image_ui(&dds, sampler(wrap), RenderAssetUsages::RENDER_WORLD).map_err(|e| e.to_string())?;
             images.insert(String::from_utf8_lossy(t.id).into_owned(), assets.add(image));
         }
         for c in &scene.cubemaps {

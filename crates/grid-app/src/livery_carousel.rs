@@ -438,7 +438,7 @@ fn upload(tree: &pssg::Tree, ids: &[&[u8]], path: &str) -> Result<HashMap<String
     for t in texture::read_named(tree, ids).map_err(|e| format!("{path}: {e}"))? {
         let wrap = texture::wrap(tree, t.id).unwrap_or([texture::Wrap::Repeat; 2]);
         let (dds, _) = t.validated_dds();
-        let image = crate::texture_upload::image_linear(
+        let image = crate::texture_upload::image_linear_ui(
             &dds,
             osd_scene::sampler(wrap),
             RenderAssetUsages::RENDER_WORLD,

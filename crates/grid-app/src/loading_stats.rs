@@ -463,7 +463,7 @@ pub fn install(app: &mut App, root: &Path, camera: Entity) -> Result<(), String>
         for t in texture::read_named(&bundle, &[name.as_bytes()]).map_err(|e| format!("{}: {e}", spec.bundle))? {
             let wrap = texture::wrap(&bundle, t.id).unwrap_or([texture::Wrap::Repeat; 2]);
             let (dds, _) = t.validated_dds();
-            let image = crate::texture_upload::image_linear(&dds, osd_scene::sampler(wrap), RenderAssetUsages::RENDER_WORLD)
+            let image = crate::texture_upload::image_linear_ui(&dds, osd_scene::sampler(wrap), RenderAssetUsages::RENDER_WORLD)
                 .map_err(|e| format!("{name}: {e}"))?;
             images.insert(name.clone(), image);
         }

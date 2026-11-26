@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F936](log/F0936.md) | 2026-11-26 | Phone GPU batch 2: texture mip skip at upload (mipskipN_M) |
 | [F935](log/F0935.md) | 2026-11-26 | Android CPU batch 1: thread placement, thermal governor, parallel encoder finish and ADPF target switches |
 | [F934](log/F0934.md) | 2026-11-26 | Phone GPU batch 1: size cull, tonemap and ADPF switches, GPU clock sampler |
 | [F933](log/F0933.md) | 2026-11-26 | Phone: lean default verified, dip anatomy, MIUI 60 Hz vote, physics stage split, thermal soaks (cap 30, sustained mode), bench env switches |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F879](log/F0879.md) | 2026-11-20 | Render prepare: instance input upload probe; full upload is real car motion, cannot reach the bar |
 | [F878](log/F0878.md) | 2026-11-20 | Git hooks: pre-commit and commit-msg checks for every commit |
 | [F877](log/F0877.md) | 2026-11-20 | Bind-group cache re-timed on F875: misses the bar; vendored crates kept LF |
-| [F876](log/F0876.md) | 2026-11-20 | Car-glass pane proxy material and lamp write guard |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

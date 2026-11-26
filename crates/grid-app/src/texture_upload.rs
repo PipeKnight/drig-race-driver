@@ -250,7 +250,7 @@ pub(crate) fn image(
     sampler: ImageSampler,
     usage: RenderAssetUsages,
 ) -> Result<Image, TextureError> {
-    image_with_color_space(dds, sampler, usage, true)
+    image_with_color_space(dds, sampler, usage, true, true)
 }
 
 /// Linear data maps (normals and weights) use the same portable upload path.
@@ -259,7 +259,112 @@ pub(crate) fn image_linear(
     sampler: ImageSampler,
     usage: RenderAssetUsages,
 ) -> Result<Image, TextureError> {
-    image_with_color_space(dds, sampler, usage, false)
+    image_with_color_space(dds, sampler, usage, false, true)
+}
+
+/// [`image`] for screen art (the HUD, the front end and its 3D worlds),
+/// which [`MipSkip`] never shrinks: it is drawn near one texel per pixel.
+pub(crate) fn image_ui(
+    dds: &[u8],
+    sampler: ImageSampler,
+    usage: RenderAssetUsages,
+) -> Result<Image, TextureError> {
+    image_with_color_space(dds, sampler, usage, true, false)
+}
+
+/// [`image_linear`] for screen art, never shrunk (see [`image_ui`]).
+pub(crate) fn image_linear_ui(
+    dds: &[u8],
+    sampler: ImageSampler,
+    usage: RenderAssetUsages,
+) -> Result<Image, TextureError> {
+    image_with_color_space(dds, sampler, usage, false, false)
+}
+
+/// The phone mip-skip candidate (docs/ANDROID_GPU.md section 10): the perf
+/// test words `mipskipN` or `mipskipN_M` drop the top `N` (1-3) mip levels of
+/// every world texture at upload, or with `_M` only of those whose larger
+/// side is at least `M` texels. The image keeps its aspect and UVs, so the
+/// picture loses only near detail, and the GPU stores and samples a quarter
+/// (one level) or a sixteenth (two levels) of the texels. Off unless the word
+/// is given, on every platform; the words are read once, before any upload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MipSkip {
+    pub levels: u32,
+    pub min_size: u32,
+}
+
+impl MipSkip {
+    /// The last `mipskip` word of a perf test value, if any.
+    fn parse(words: &str) -> Option<Self> {
+        let mut found = None;
+        for word in words.split(',').map(str::trim) {
+            let Some(rest) = word.strip_prefix("mipskip") else { continue };
+            let (levels, min) = rest.split_once('_').unwrap_or((rest, "0"));
+            match (levels.parse::<u32>(), min.parse::<u32>()) {
+                (Ok(levels @ 1..=3), Ok(min_size)) => found = Some(Self { levels, min_size }),
+                _ => warn!("perf_test: bad mip skip word {word:?} (mipskip1..3, optionally _MINSIZE)"),
+            }
+        }
+        found
+    }
+}
+
+/// The active mip skip, read once from the `perf_test` setting.
+pub(crate) fn mip_skip() -> Option<MipSkip> {
+    static SKIP: std::sync::OnceLock<Option<MipSkip>> = std::sync::OnceLock::new();
+    *SKIP.get_or_init(|| {
+        let skip = crate::settings::diagnostics().perf_test.as_deref().and_then(MipSkip::parse);
+        if let Some(s) = skip {
+            println!("texture upload: mip_skip levels={} min_size={}", s.levels, s.min_size);
+        }
+        skip
+    })
+}
+
+static SKIPPED: AtomicU64 = AtomicU64::new(0);
+static SKIPPED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Drops the top `skip.levels` mip levels of a single 2D image that has more
+/// levels than that, is at least `skip.min_size` on its larger side, keeps
+/// whole blocks at its new size and is drawn by the GPU (an image kept only
+/// in the main world is read by the CPU at its full size). Returns the bytes
+/// dropped, 0 when the image is kept as it is.
+fn skip_mips(image: &mut Image, skip: MipSkip) -> usize {
+    let desc = &image.texture_descriptor;
+    let size = desc.size;
+    let format = desc.format;
+    let (bw, bh) = format.block_dimensions();
+    let n = skip.levels;
+    let (w, h) = (size.width >> n, size.height >> n);
+    let Some(block) = format.block_copy_size(None) else { return 0 };
+    if size.depth_or_array_layers != 1
+        || desc.dimension != bevy::render::render_resource::TextureDimension::D2
+        || desc.mip_level_count <= n
+        || size.width.max(size.height) < skip.min_size
+        || w == 0
+        || h == 0
+        || w % bw != 0
+        || h % bh != 0
+        || image.texture_view_descriptor.is_some()
+        || !image.asset_usage.contains(RenderAssetUsages::RENDER_WORLD)
+    {
+        return 0;
+    }
+    let dropped: usize = (0..n)
+        .map(|l| {
+            let (lw, lh) = ((size.width >> l).max(1), (size.height >> l).max(1));
+            (lw.div_ceil(bw) * lh.div_ceil(bh) * block) as usize
+        })
+        .sum();
+    let Some(data) = image.data.as_mut().filter(|d| d.len() > dropped) else { return 0 };
+    data.drain(..dropped);
+    image.texture_descriptor.size.width = w;
+    image.texture_descriptor.size.height = h;
+    image.texture_descriptor.mip_level_count -= n;
+    SKIPPED.fetch_add(1, Ordering::Relaxed);
+    SKIPPED_BYTES.fetch_add(dropped as u64, Ordering::Relaxed);
+    dropped
 }
 
 fn image_with_color_space(
@@ -267,6 +372,7 @@ fn image_with_color_space(
     sampler: ImageSampler,
     usage: RenderAssetUsages,
     srgb: bool,
+    world: bool,
 ) -> Result<Image, TextureError> {
     let mut image = Image::from_buffer(
         dds,
@@ -277,7 +383,13 @@ fn image_with_color_space(
         usage,
     )?;
     let source = image.data.as_ref().map_or(0, Vec::len) as u64;
-    convert(&mut image, Some(dds))?;
+    let skipped = match mip_skip() {
+        Some(skip) if world => skip_mips(&mut image, skip),
+        _ => 0,
+    };
+    // A shrunk image is not the DDS file any more: its ETC2 cache entry is
+    // keyed by its own levels.
+    convert(&mut image, (skipped == 0).then_some(dds))?;
     IMAGES.fetch_add(1, Ordering::Relaxed);
     SOURCE_BYTES.fetch_add(source, Ordering::Relaxed);
     UPLOAD_BYTES.fetch_add(
@@ -426,7 +538,7 @@ fn etc2_image(dds: &[u8], bc: &Image) -> Result<Option<Image>, String> {
 /// same again in the main world for MAIN_WORLD images).
 pub(crate) fn summary() -> String {
     format!(
-        "texture upload summary: path={} images={} decoded={} late_converted={} source_bytes={} upload_bytes={} decode_ms={:.1} {}",
+        "texture upload summary: path={} images={} decoded={} late_converted={} source_bytes={} upload_bytes={} decode_ms={:.1}{} {}",
         ["bc", "etc2", "rgba8"][usize::from(PATH.load(Ordering::Relaxed))],
         IMAGES.load(Ordering::Relaxed),
         DECODED.load(Ordering::Relaxed),
@@ -434,6 +546,13 @@ pub(crate) fn summary() -> String {
         SOURCE_BYTES.load(Ordering::Relaxed),
         UPLOAD_BYTES.load(Ordering::Relaxed),
         DECODE_NANOS.load(Ordering::Relaxed) as f64 / 1e6,
+        mip_skip().map_or_else(String::new, |s| format!(
+            " mip_skip={}_{} mip_skipped={} mip_skipped_bytes={}",
+            s.levels,
+            s.min_size,
+            SKIPPED.load(Ordering::Relaxed),
+            SKIPPED_BYTES.load(Ordering::Relaxed)
+        )),
         crate::texture_cache::summary()
     )
 }
@@ -743,5 +862,63 @@ mod tests {
         assert_eq!(alpha, (0..16).map(|n| n * 17).collect::<Vec<u8>>());
         assert_eq!(&out[..3], &[170, 170, 170]);
         assert!(decode_format_levels(&block[..15], 4, 4, 1, grid_formats::texture::Format::Bc2).is_none());
+    }
+}
+
+#[cfg(test)]
+mod mip_skip_tests {
+    use super::*;
+
+    #[test]
+    fn mip_skip_words_parse_levels_and_an_optional_minimum_size() {
+        assert_eq!(MipSkip::parse("lean,cull100"), None);
+        assert_eq!(MipSkip::parse("mipskip1"), Some(MipSkip { levels: 1, min_size: 0 }));
+        assert_eq!(MipSkip::parse("lean, mipskip2_1024"), Some(MipSkip { levels: 2, min_size: 1024 }));
+        assert_eq!(MipSkip::parse("mipskip0"), None);
+        assert_eq!(MipSkip::parse("mipskip4"), None);
+        assert_eq!(MipSkip::parse("mipskip1_x"), None);
+    }
+
+    /// A BC1 image with a full chain from `w` x `h`; each level's bytes hold
+    /// the level number, so the test sees which levels remain.
+    fn bc1(w: u32, h: u32, usage: RenderAssetUsages) -> Image {
+        let levels = w.max(h).ilog2() + 1;
+        let mut data = Vec::new();
+        for l in 0..levels {
+            let (lw, lh) = ((w >> l).max(1), (h >> l).max(1));
+            data.extend(std::iter::repeat_n(l as u8, (lw.div_ceil(4) * lh.div_ceil(4) * 8) as usize));
+        }
+        let mut image = Image { data: Some(data), asset_usage: usage, ..default() };
+        let d = &mut image.texture_descriptor;
+        d.format = TextureFormat::Bc1RgbaUnormSrgb;
+        d.size = bevy::render::render_resource::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
+        d.mip_level_count = levels;
+        image
+    }
+
+    #[test]
+    fn mip_skip_drops_the_top_levels_of_large_gpu_images_only() {
+        let all = RenderAssetUsages::default();
+        let skip2 = MipSkip { levels: 2, min_size: 1024 };
+
+        let mut big = bc1(1024, 512, all);
+        let full = big.data.as_ref().unwrap().len();
+        let dropped = skip_mips(&mut big, skip2);
+        assert_eq!(dropped, 1024 * 512 / 2 + 512 * 256 / 2);
+        assert_eq!(big.data.as_ref().unwrap().len(), full - dropped);
+        assert_eq!(big.data.as_ref().unwrap()[0], 2, "level 2 is the new base");
+        let d = &big.texture_descriptor;
+        assert_eq!((d.size.width, d.size.height, d.mip_level_count), (256, 128, 9));
+
+        // Below the minimum size, CPU-only, or too small for whole blocks: kept.
+        let mut small = bc1(512, 512, all);
+        assert_eq!(skip_mips(&mut small, skip2), 0);
+        assert_eq!(small.texture_descriptor.size.width, 512);
+        let mut cpu = bc1(1024, 1024, RenderAssetUsages::MAIN_WORLD);
+        assert_eq!(skip_mips(&mut cpu, skip2), 0);
+        let mut tiny = bc1(8, 8, all);
+        assert_eq!(skip_mips(&mut tiny, MipSkip { levels: 2, min_size: 0 }), 0);
+        assert_eq!(skip_mips(&mut tiny, MipSkip { levels: 1, min_size: 0 }), 32);
+        assert_eq!(tiny.texture_descriptor.size.width, 4);
     }
 }
