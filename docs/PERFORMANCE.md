@@ -5883,3 +5883,92 @@ scripts: scratchpad `macwin.py` and `share.py` (frame_stats per window, split at
   observation [I]: about 18k page faults and 60-75k involuntary context switches per second, steadily, also
   while frames are clean. They are probably mostly soft faults (GPU-shared memory and allocator reuse). This is
   worth a look as a constant cost, not as a dip cause.
+
+## Mac runs of 26 November 18:18 and 18:24: 120 Hz cadence, F9 invalid on Metal (F958)
+
+Owner's MacBook (Apple M4, Metal), build 1546e211 (includes F930 and F932), fullscreen 3024 x 1890, `Fifo`,
+`monitor_hz=[]`, `frame_cap=none`, F9 GPU split on. One race each at Donington and Istanbul; the bench script
+cycles chase close, chase far (60 s), bumper (180 s), bonnet (300 s), with look-back presses at 120 s and 240 s.
+Both races finished; `g_lost=0` in both runs, so the F930 readback fix holds.
+
+### Per phase [O]
+
+Medians of 1 s `frame_stats` windows. `over16` is the share of frames over 16.7 ms; dips are windows whose
+worst frame is over 33 ms.
+
+| track | phase | windows | fps | avg ms | over16 | main ms | acquire ms | rows | dips |
+|---|---|---|---|---|---|---|---|---|---|
+| Donington | countdown | 4 | 58.4 | 17.1 | - | 3.2 | 12.7 | 1440 | 0 |
+| Donington | chase close | 34 | 62.1 | 16.1 | 42 % | 3.9 | 10.2 | 1272 | 2 |
+| Donington | chase far | 119 | 64.5 | 15.5 | 40 % | - | 9.2 | 1296 | 5 |
+| Donington | bumper | 119 | 67.7 | 14.8 | 38 % | - | 8.7 | 1392 | 11 |
+| Donington | bonnet | 34 | 67.2 | 14.9 | 34 % | 4.2 | 8.0 | 1368 | 2 |
+| Istanbul | countdown | 5 | 52.1 | - | - | - | 13.1 | 1440 | - |
+| Istanbul | chase close | 53 | 64.9 | 15.4 | 39 % | 3.4 | 10.2 | 1296 | 6 |
+| Istanbul | chase far | 119 | 64.7 | - | - | - | 10.4 | 1392 | 5 |
+| Istanbul | bumper | 119 | 67.0 | - | - | - | 9.9 | 1440 | 3 |
+| Istanbul | bonnet | 14 | 70.4 | 14.2 | 27 % | - | - | 1440 | 0 |
+
+- The main thread costs 3.2-4.2 ms; the rest of each frame waits in `acquire` (8-13 ms). The game is GPU- or
+  display-bound on the M4; the main thread is not the limit.
+- The cold pipeline warm-up took 22.9 s at Donington and 2.7 s at Istanbul (cache warm from the first run).
+- Istanbul's countdown had one 208 ms frame at the fade-in.
+
+### The frame cadence changed: 120 Hz intervals instead of a steady 60 [O]
+
+Share of race frames per frame-time bucket (lower edge, ms):
+
+| run | < 9 | 12-13 | 16-17.5 | 20-25 | 25-33 |
+|---|---|---|---|---|---|
+| Donington 18:18 | 21.7 % | 27.0 % | 17.1 % | 20.8 % | 6.4 % |
+| Istanbul 18:24 | 19.5 % | 30.0 % | 19.4 % | 22.2 % | 5.9 % |
+| Donington 25 Nov fullscreen (F929) | 0.2 % | 1.5 % | 56.4 % | 0.8 % | 0.3 % |
+
+- The F929 run sat in one peak: 80 % of its frames took 14-17.5 ms. The new runs split into clusters near 7-8.5, 12-13, 16-17 and
+  20-25 ms. Race windows whose worst frame is over 25 ms: 273 of 306 (Donington) and 282 of 305 (Istanbul),
+  against 52 of 219 in the F929 fullscreen run.
+- The long-frame share does not depend on the render height: in the new runs, 26-35 % of frames are 20 ms or
+  longer at every height band from 1200 to 1440 rows; in the F929 run it was 0.7-2 % at every band.
+- The setup line is identical in both runs (`Fifo`, same size, `monitor_hz=[]`).
+- [I] The display ran at 120 Hz (ProMotion) this time and was held at 60 Hz in the F929 runs (frames under 9 ms
+  are impossible at 60 Hz). On 120 Hz, `Fifo` presents at multiples of 8.3 ms; the GPU needs 10-15 ms, so
+  frames land on 1, 2 or 3 intervals in turn. Dynamic resolution then raises the height until the average is
+  about 15 ms, which keeps the mix. The average fps is a little higher than in F929 (62-70 against 59-70 per
+  view) at higher heights (1272-1440 against 1056-1176 rows), but the uneven 8/17/25 ms cadence is a likely
+  visible judder. Why the display changed mode between the runs (power source, Low Power Mode, a macOS setting)
+  is not in the logs.
+
+### Dips [O]
+
+- About one 33-44 ms frame every 10 s: 20 race windows at Donington, 14 at Istanbul. In their `rworst`, acquire
+  is 26-37 ms and the main thread about 1 ms: GPU- or compositor-side stalls with nothing visible on the CPU side.
+- About half coincide with image uploads of about 10 MB/s; the other half have none, so uploads are not a
+  consistent cause.
+- Two single CPU-side spikes: Donington 51 ms (prepare 12, bind 16, encode 8 ms) and Istanbul 68 ms (encode 25,
+  submit 7.4 ms). Neither repeats.
+- Page faults (17-19k per s), involuntary switches (65-75k per s) and `cpu_load` are the same in dip windows as
+  in clean ones, as in F929.
+
+### F9 GPU timing is invalid on Metal [O]
+
+- `g_bad` totals 103 367 (Donington) and 102 703 (Istanbul): about five bad intervals per GPU frame (for
+  example `g_frames=64 g_bad=320`). `g_gap` reads tens to hundreds of thousands of ms, `gpu_ms` about 1 ms, and
+  each view has one non-zero segment.
+- [I] The F9 markers are empty compute passes with `timestamp_writes`. Metal has no timestamps inside passes
+  (`inside_passes=false`), and on Apple's tile-based GPUs an empty pass seems to return unordered or zero
+  samples. F9 therefore cannot split the GPU time on a Mac, and it did not catch the dips.
+- The owner's "interval trace" folder holds only the script; the log carries no Instruments data.
+
+### Countdown after F932 [O]
+
+- Istanbul stepped down from 1440 to 1344 rows in the countdown (fifth window, `gpu_late_ms` 3.4): the F932 rule
+  works.
+- Donington held 1440 rows at 58.3 fps through the countdown. Its smoothed frame time was about 17.1 ms, under
+  `ON_TIME_MS` 17.2, so the GPU rule could not fire. The first step came after GO (17.5 ms). In the race the
+  height moved between 1200 and 1392 rows.
+
+### Audio [O]
+
+The traces carry no audio counters (voice counts, mixer underruns, audio thread time): only the setup lines
+(`engine_audio ... rate=48000 voices=12 mixer=continuous_pair_scheduler`, 11 opponents at 10-175 m, `tyre_audio
+cars=12`). The owner's report of choppy chase-view engine sound is recorded in F958 for a separate audio session.
