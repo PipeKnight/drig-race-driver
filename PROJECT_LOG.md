@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F949](log/F0949.md) | 2026-11-26 | Token economy rules from the Claude session audit |
 | [F948](log/F0948.md) | 2026-11-26 | Phone GPU batch 1: lighting, render360, shadows and tonemap win on the phone; Game Turbo game list costs 3.4 GPU ms; Continue fixed |
 | [F947](log/F0947.md) | 2026-11-26 | Phone warm chain: main thread bound when warm; tonemap dropped |
 | [F946](log/F0946.md) | 2026-11-26 | Phone batch 1 verdicts: lighting is the lights, not env maps; -Shadows bench probe |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F892](log/F0892.md) | 2026-11-23 | wgpu-core: bind-group tracker insert once per render pass; empty internal command buffers skipped (no gain, not kept) |
 | [F891](log/F0891.md) | 2026-11-23 | Derby collision frames: patched car batches, DentSpread rerun, what holds AssetEventSystems |
 | [F890](log/F0890.md) | 2026-11-23 | grid-app test compute pool created at process start (TaskPool stack overflow root cause) |
-| [F889](log/F0889.md) | 2026-11-23 | Race countdown waits for the pipeline warm-up |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

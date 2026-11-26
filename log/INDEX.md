@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F949](F0949.md) | 2026-11-26 | Token economy rules from the Claude session audit |
 | [F948](F0948.md) | 2026-11-26 | Phone GPU batch 1: lighting, render360, shadows and tonemap win on the phone; Game Turbo game list costs 3.4 GPU ms; Continue fixed |
 | [F947](F0947.md) | 2026-11-26 | Phone warm chain: main thread bound when warm; tonemap dropped |
 | [F946](F0946.md) | 2026-11-26 | Phone batch 1 verdicts: lighting is the lights, not env maps; -Shadows bench probe |
