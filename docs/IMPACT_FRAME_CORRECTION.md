@@ -32,7 +32,7 @@ Seven semantic checks pass: bypass equality, main contact retention, tangent/unu
 
 Failures retained:
 
-- Overnight first execution was prevented by automatic approval review's service usage limit. It did not execute; no bypass. Owner resumed work later, and normal approval review then succeeded.
+- Overnight first execution was prevented because automatic approval review was unavailable. It did not execute; no bypass. Owner resumed work later, and normal approval review then succeeded.
 - Actual debug-01 execution completed original/repeat, then Rust panicked on an empty-contact case with stale span ends. Count selection fixed; debug-02 matches fully. Native fault was not involved.
 - A directory labelled release-02 contains another **debug** run because `--profile release` was omitted. It is not release evidence. The explicit release-final-03 report below identifies release and its distinct executable hash.
 - Earlier generated diagnostic discarded parsed optional settings; fixed and rebuilt before these comparisons. The historical draft handoff remains in IMPACT_FRAME.md and PROJECT_LOG.md; this completed verification supersedes that draft status.

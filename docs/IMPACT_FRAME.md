@@ -73,7 +73,7 @@ New authored research tools are `tools/probe_corrected_impact_frame.c`, `tools/b
 
 The native probe compiled with MSVC14.44.35207/SDK10.0.26100.0 (`/W4 /WX /O2 /MT /std:c17 /fp:strict /arch:SSE2`) and has SHA256 `d5061ab307ece7dae07d97e3a2915962facc6f5867f692a4377a7ce9e01acfbe`. The debug Rust diagnostic compiled with Rust/Cargo1.99.0. An initial unused-config warning revealed the new diagnostic still selected `None`; corrected to supply its parsed settings and rebuilt without that warning. Python3.12.14 is the intended validator runtime. No new tools were installed.
 
-The first attempted comparison, targeting `local/behavior/corrected-impact-frame-20261010-debug-01`, **did not execute**. Automatic approval review reported that its service usage limit had been reached and could not complete review. It explicitly distinguished review failure from an unsafe-action determination. No bypass, alternate execution route or successful comparison is claimed. Release compilation, final tests/fmt/Clippy and native malformed-input guards remain pending. F159's existing passing tests do not validate the modified working tree.
+The first attempted comparison, targeting `local/behavior/corrected-impact-frame-20261010-debug-01`, **did not execute**. Automatic approval review was unavailable and could not complete review. It explicitly distinguished review failure from an unsafe-action determination. No bypass, alternate execution route or successful comparison is claimed. Release compilation, final tests/fmt/Clippy and native malformed-input guards remain pending. F159's existing passing tests do not validate the modified working tree.
 
 Resume in a new authorized work session:
 

@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F937](F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
 | [F936](F0936.md) | 2026-11-26 | Phone GPU batch 2: texture mip skip at upload (mipskipN_M) |
 | [F935](F0935.md) | 2026-11-26 | Android CPU batch 1: thread placement, thermal governor, parallel encoder finish and ADPF target switches |
 | [F934](F0934.md) | 2026-11-26 | Phone GPU batch 1: size cull, tonemap and ADPF switches, GPU clock sampler |
@@ -595,7 +596,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 | [F343](F0343.md) | 2026-10-16 | playable 4ffec8b91921 with the gameplay wave |
 | [F342](F0342.md) | 2026-10-16 | grid-soak findings fixed: Nürburgring races start, no retirement from 0/0 damage, kerb and prop falls |
 | [F341](F0341.md) | 2026-10-16 | player auto-reset: a car nearly still on its side or roof for 2 s is put back on the line |
-| [F340](F0340.md) | 2026-10-16 | wheel detachment port scoped; the port waits for the weekly reset |
+| [F340](F0340.md) | 2026-10-16 | wheel detachment port scoped; the port waits until 19 October |
 | [F339](F0339.md) | 2026-10-16 | detached parts and driving: bumpers cost nothing, the rear spoiler never detaches, wheels are the gap |
 | [F338](F0338.md) | 2026-10-16 | car generalization: the BMW 320si drives, deforms and races alongside the Lacetti |
 | [F337](F0337.md) | 2026-10-16 | build-dir seeding |

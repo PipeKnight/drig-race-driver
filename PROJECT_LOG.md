@@ -10,7 +10,7 @@ Until 2026-10-21 (F532) the whole log was this one file; `git show d927d415:PROJ
 ## Current state (2026-10-21, after F531)
 
 Playable: `target/release/grid-app.exe` e57f2fd391e2 from source 6c8b4fad (origin/main a11cddf7 merged
-locally), the portable copy and APKs a11cddf7de27 (F531). Work paused at 50 % weekly usage (F531);
+locally), the portable copy and APKs a11cddf7de27 (F531). Work paused for several days (F531);
 child sessions resume on the owner's word. Every "Not checked" below is open, not verified.
 
 ### Driving and physics
@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F937](log/F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
 | [F936](log/F0936.md) | 2026-11-26 | Phone GPU batch 2: texture mip skip at upload (mipskipN_M) |
 | [F935](log/F0935.md) | 2026-11-26 | Android CPU batch 1: thread placement, thermal governor, parallel encoder finish and ADPF target switches |
 | [F934](log/F0934.md) | 2026-11-26 | Phone GPU batch 1: size cull, tonemap and ADPF switches, GPU clock sampler |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F880](log/F0880.md) | 2026-11-20 | PrepareMeshes: per-car moving entities counted; merging rigid followers cannot reach the bar |
 | [F879](log/F0879.md) | 2026-11-20 | Render prepare: instance input upload probe; full upload is real car motion, cannot reach the bar |
 | [F878](log/F0878.md) | 2026-11-20 | Git hooks: pre-commit and commit-msg checks for every commit |
-| [F877](log/F0877.md) | 2026-11-20 | Bind-group cache re-timed on F875: misses the bar; vendored crates kept LF |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

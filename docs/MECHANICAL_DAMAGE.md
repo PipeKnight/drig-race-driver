@@ -185,8 +185,8 @@ excludes wheels and is presentation-only, so no port car ever loses a wheel. Thi
 "wheel update" of step 4 is the presentation function 9FA6E0; the driving branches are the suspension
 substep 9C1F60 (inside 9F1E10) and the grip loop of A00E10.
 
-**Wheel detachment port scope (F340).** The owner chose to record the scope now and port it after the
-weekly usage reset on 19 October. No code was changed.
+**Wheel detachment port scope (F340).** The owner chose to record the scope now and port it on
+19 October. No code was changed.
 
 The producer is small:
 

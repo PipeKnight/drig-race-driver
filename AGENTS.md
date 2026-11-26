@@ -33,7 +33,7 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 
 ## Token economy (owner, 5 November 2026)
 
-Every model call re-reads the whole context, so the context size and the number of calls set the cost. From 29 October to 5 November, sessions read 2.8 billion cached tokens at about 280k per call, and 28 % of shell calls only waited or looked at logs (log/F0733.md).
+Every model call re-reads the whole context, so the context size and the number of calls set the cost. Calls that only wait or look at logs re-read the whole context too (log/F0733.md).
 - Do not poll. Start a long job with the shell tool's background option and wait for its completion notice. No `sleep`, `until` or `while` loops, no repeated `tail` of a log, no repeated `build_lock.ps1 -Status`. If you need a condition, use one blocking wait that returns when it holds.
 - Every background job and every wait has a deadline and ends with a verdict (pass/fail/timeout). Nothing waits open-ended on a process, a file or the build lock (F888).
 - Print verdicts, not logs. Scripts and commands end with a short summary: pass/fail, the key numbers, and the path of the full log. Read a full log only when the verdict says something failed, and then only the relevant part (`grep`, a line range).

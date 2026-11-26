@@ -21,7 +21,8 @@ Push flow (docs: AGENTS.md "Durable records"):
 
 check fails when two files carry the same number, when an entry's number on origin/main
 holds a different entry (another session's), when a change removes text from an entry that
-is already on origin/main (use --allow-edit N for a deliberate correction), when an entry
+is already on origin/main (use --allow-edit N, or GRID_LOG_ALLOW_EDIT=N,M for wrappers such as
+prepush, for a deliberate correction), when an entry
 still has the placeholder bullet, or when an index is stale. --fix repairs the first and the
 last automatically; it never pushes, commits or continues a rebase.
 """
@@ -472,13 +473,16 @@ def cmd_check(a):
         notes.append("HEAD is not on top of %s yet: run `git rebase %s`, then check again" % (base, base))
     blobs = local_blobs([p for _, _, p in files if p.name in tree])
     allowed = set(a.allow_edit or [])
+    # GRID_LOG_ALLOW_EDIT=F160,F531 lets wrappers such as tools/prepush.ps1 accept the same corrections.
+    allowed |= {x.strip() for x in os.environ.get("GRID_LOG_ALLOW_EDIT", "").split(",") if x.strip()}
     for s, n, p in files:
         if p.name not in tree or blobs.get(p) == tree[p.name]:
             continue
         mine, theirs = read(p), blob_text(tree[p.name])
         if mine == theirs:
             continue
-        if mine.split("\n", 1)[0] != theirs.split("\n", 1)[0]:
+        is_allowed = "%s%d" % (s, n) in allowed or str(n) in allowed
+        if mine.split("\n", 1)[0] != theirs.split("\n", 1)[0] and not is_allowed:
             if a.fix:
                 write(p, theirs)
                 move_entry(mine, s, n, numbers, changed_files)
@@ -489,7 +493,7 @@ def cmd_check(a):
         it = iter(mine.split("\n"))
         if all(line in it for line in theirs.split("\n")):
             notes.append("%s: adds text to an entry already on %s" % (p.name, base))
-        elif "%s%d" % (s, n) in allowed or str(n) in allowed:
+        elif is_allowed:
             notes.append("%s: edits an entry already on %s (allowed)" % (p.name, base))
         else:
             problems.append("%s: removes or changes text of an entry already on %s "
@@ -536,7 +540,7 @@ def main():
     p.add_argument("--date", help="YYYY-MM-DD, default today")
     p = sub.add_parser("check", parents=[common], help="check numbers and indexes before a push")
     p.add_argument("--fix", action="store_true", help="renumber colliding entries, regenerate indexes")
-    p.add_argument("--allow-edit", action="append", metavar="N", help="allow changing entry N (e.g. F512)")
+    p.add_argument("--allow-edit", action="append", metavar="N", help="allow changing entry N, its title line included (e.g. F512)")
     sub.add_parser("index", parents=[common], help="regenerate log/INDEX.md and the PROJECT_LOG.md index table")
     a = ap.parse_args()
     os.chdir(ROOT)
