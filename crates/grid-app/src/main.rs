@@ -78,6 +78,7 @@ mod body_specular;
 mod camera;
 mod cine;
 mod route_audit;
+mod route_cloth_cache;
 mod player_view_visibility;
 mod cockpit;
 mod ambience_sound;
@@ -1661,6 +1662,9 @@ fn append_entities(
     let placement_tree = pssg::read_tree(&placement_bytes)?;
     let type_tree = pssg::read_tree(&type_bytes)?;
     let entities = entities::read(&placement_tree, &type_tree)?;
+    if let Err(error) = route_cloth_cache::append(root, route, car, &type_tree, objects, &entities) {
+        eprintln!("route cloth unavailable: {error}");
+    }
     // Breakable entities draw their intact state as their own parts.
     let catalog = dynamic_props::catalog(root, route);
     let breakables = catalog
@@ -6045,6 +6049,9 @@ fn setup(
                         || name.starts_with("interior/alpha/")
                     {
                         AlphaMode::Mask(0.5)
+                    } else if name.starts_with(route_cloth_cache::MATERIAL_PREFIX) {
+                        // The source cloth draw passes alpha values greater than 25.
+                        AlphaMode::Mask((25.0_f32 / 255.0).next_up())
                     } else if glass {
                         AlphaMode::Blend
                     } else {
@@ -6227,7 +6234,10 @@ fn setup(
                 // and cull a tree whose centre leaves the frustum.
                 entity.insert((source.placed(matrix), bevy::camera::visibility::NoAutoAabb));
             }
-            if (decal_materials.contains(&part.material) || !source_trees::casts_sun_shadow(&part.name))
+            // Cached cloth draws contribute to colour, outside the static caster list.
+            if (part.material.starts_with(route_cloth_cache::MATERIAL_PREFIX)
+                || decal_materials.contains(&part.material)
+                || !source_trees::casts_sun_shadow(&part.name))
                 && let Some(entity) = &mut entity
             {
                 entity.insert(bevy::light::NotShadowCaster);
