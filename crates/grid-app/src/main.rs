@@ -5756,7 +5756,8 @@ pub(crate) fn race_app(
     if graphics.enhanced() && drive && graphics.wheel_geometry_shutter_seconds > 0. {
         wheel_exposure::install(&mut app);
     }
-    if graphics.enhanced() {
+    // The phone prints it too, for the mip skip's bytes (F956).
+    if graphics.enhanced() || mobile::enabled() {
         app.add_systems(Last, graphics_texture_state);
     }
     #[cfg(feature = "paint-specular")]

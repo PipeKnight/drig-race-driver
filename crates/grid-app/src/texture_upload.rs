@@ -290,8 +290,11 @@ pub(crate) fn image_linear_ui(
 /// The image keeps its aspect and UVs, so the picture loses only near detail,
 /// and the GPU stores and samples a quarter (one level) or a sixteenth (two
 /// levels) of the texels. A texture keeps at least [`MIP_SKIP_FLOOR`] texels on
-/// its shorter side, so small art is never shrunk. Off unless a word is given,
-/// on every platform; the words are read once, before any upload.
+/// its shorter side, so small art is never shrunk. The mobile preset starts
+/// from [`MOBILE_MIP_SKIP`] (phone pair neutral, F956); `mipskip0` turns the
+/// skip off and `full` drops the mobile default with the rest of lean. The
+/// desktop has none unless a word is given. The words are read once, before
+/// any upload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MipSkip {
     /// `(levels, min_size)`, largest `min_size` first.
@@ -301,6 +304,11 @@ pub(crate) struct MipSkip {
 /// The shortest side, in texels, that the mip skip may leave a texture with.
 pub(crate) const MIP_SKIP_FLOOR: u32 = 64;
 
+/// The mobile preset's mip skip (`mipskip2_1024+1`, the owner's phone look of
+/// 2026-11-26): two levels from textures of 1024 texels and more, one from the
+/// rest.
+pub(crate) const MOBILE_MIP_SKIP: [(u32, u32); 2] = [(2, 1024), (1, 0)];
+
 impl MipSkip {
     /// All `mipskip` rules of a perf test value, if any; a later rule with the
     /// same minimum size replaces an earlier one.
@@ -308,6 +316,9 @@ impl MipSkip {
         let mut rules: Vec<(u32, u32)> = Vec::new();
         for word in words.split(',').map(str::trim) {
             let Some(rest) = word.strip_prefix("mipskip") else { continue };
+            if rest == "0" {
+                continue;
+            }
             for part in rest.split('+') {
                 let (levels, min) = part.split_once('_').unwrap_or((part, "0"));
                 match (levels.parse::<u32>(), min.parse::<u32>()) {
@@ -321,6 +332,19 @@ impl MipSkip {
         }
         rules.sort_by_key(|a| std::cmp::Reverse(a.1));
         (!rules.is_empty()).then_some(Self { rules })
+    }
+
+    /// The skip for a perf test value and platform: the value's rules, else
+    /// on the mobile preset [`MOBILE_MIP_SKIP`]; `mipskip0` anywhere turns it
+    /// off, and `full` (the NORMAL base) drops the mobile default.
+    fn resolve(words: Option<&str>, mobile: bool) -> Option<Self> {
+        let words = words.unwrap_or("");
+        let has = |w: &str| words.split(',').map(str::trim).any(|x| x == w);
+        if has("mipskip0") {
+            return None;
+        }
+        Self::parse(words)
+            .or_else(|| (mobile && !has("full")).then(|| Self { rules: MOBILE_MIP_SKIP.to_vec() }))
     }
 
     /// Levels to drop from a texture whose larger side is `size`.
@@ -338,7 +362,7 @@ impl MipSkip {
 pub(crate) fn mip_skip() -> Option<&'static MipSkip> {
     static SKIP: std::sync::OnceLock<Option<MipSkip>> = std::sync::OnceLock::new();
     SKIP.get_or_init(|| {
-        let skip = crate::settings::diagnostics().perf_test.as_deref().and_then(MipSkip::parse);
+        let skip = MipSkip::resolve(crate::settings::diagnostics().perf_test.as_deref(), crate::mobile::enabled());
         if let Some(s) = &skip {
             println!("texture upload: mip_skip rules={} floor={MIP_SKIP_FLOOR}", s.label());
         }
@@ -913,6 +937,24 @@ mod mip_skip_tests {
         assert_eq!(MipSkip::parse("mipskip2_1024,lean,mipskip1"), owner);
         assert_eq!(owner.as_ref().unwrap().label(), "2_1024+1_0");
         assert_eq!(MipSkip::parse("mipskip1,mipskip2"), rules(&[(2, 0)]), "same minimum: the later wins");
+    }
+
+    #[test]
+    fn mobile_preset_defaults_to_the_owner_skip_and_the_desktop_to_none() {
+        let owner = rules(&[(2, 1024), (1, 0)]);
+        // Desktop: only an explicit word turns it on.
+        assert_eq!(MipSkip::resolve(None, false), None);
+        assert_eq!(MipSkip::resolve(Some("lean,cull100"), false), None);
+        assert_eq!(MipSkip::resolve(Some("mipskip1"), false), rules(&[(1, 0)]));
+        // Mobile: the default, replaced by explicit rules, off with mipskip0 or full.
+        assert_eq!(MipSkip::resolve(None, true), owner);
+        assert_eq!(MipSkip::resolve(Some("hud,cull100"), true), owner);
+        assert_eq!(MipSkip::resolve(Some("mipskip1"), true), rules(&[(1, 0)]));
+        assert_eq!(MipSkip::resolve(Some("mipskip0"), true), None);
+        assert_eq!(MipSkip::resolve(Some("mipskip1, mipskip0"), true), None);
+        assert_eq!(MipSkip::resolve(Some("full"), true), None);
+        assert_eq!(MipSkip::resolve(Some("full,mipskip2_1024+1"), true), owner);
+        assert_eq!(owner.as_ref().unwrap().rules, MOBILE_MIP_SKIP.to_vec());
     }
 
     /// A BC1 image with a full chain from `w` x `h`; each level's bytes hold

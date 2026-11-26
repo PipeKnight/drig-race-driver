@@ -389,6 +389,11 @@ mip chain, no level dropped (owner's question via the coordinator, 2026-11-26).
   - heavy-view GPU ms when throttled;
   - the summary's bytes;
   - load time, from `loading_stats` / race start.
+- Result (F956): neutral on the phone (table below), load time unchanged, so **the mobile preset now starts with
+  `mipskip2_1024+1`** (`MOBILE_MIP_SKIP`). An explicit `mipskip` word replaces it, **`mipskip0`** turns the skip
+  off for A/B, and `full` drops it with the rest of lean. The desktop has no mip skip unless a word asks for one.
+  The phone now prints the `texture upload summary` line too (before, only the enhanced preset did), so the next
+  phone log gives the bytes saved.
 
 ### Ranked table
 
@@ -419,8 +424,8 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
 | probe | no shadow casters | `shadows` | warm 27.70 → 25.80 (−1.9); cool 23.95 → 22.99 | 20.93 → 20.07 | heavy −0.96 (−4.0 %) | 36.8 → 38.5 | 33.0 → 31.6 | unreadable | ceiling probe; 33–50 ms frames 2.6 → 1.4 %. Only the shadow pass empties: the main pass still samples the sun's map |
 | ? | fast shadow filter | `-SetEnv GRID_SHADOW_FILTER=fast` | pending | | | | | | batch 4: 1 + 8 shadow compares per fragment instead of up to 108 |
-| ? | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` | pending | | | | | | batch 2; look approved by the owner |
-| probe | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | cool 24.80 → 23.23 | 21.52 → 20.41 | heavy −1.57 (−6 %) | 34.9 → 36.8 | 37.3 → 34.9 | unreadable | redo ABAB on APK 1546e211, all 60 Hz, starts 36.8–37 °C: both B runs beat both A runs on GPU ms; 33–50 ms frames 16.3 → 8.1 %, heavy main 22.7 → 21.7 ms, heavy r_encode 11.4 → 10.8 ms; logs confirm fill linear in A, off in B (first partial pair: −1.2). Small but consistent; a look change (the back fill goes, the ambient falls back to the plain white 450): needs the look sheets before a mobile default |
+| keep | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` (now the mobile default; `mipskip0` = off) | cool 24.74 → 24.41 (−0.3, noise) | 21.23 → 21.09 | heavy −0.33 (−1 %) | 35.0 → 35.4 | 37.4 → 37.2 | unreadable | ABAB on the phone: neutral, no regression; load time the same (~21.9 s); logs `mip_skip rules=2_1024+1_0 floor=64`. Owner's look; made the mobile default (F956) for memory and bandwidth headroom, not for GPU ms |
+| probe | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | cool 24.80 → 23.23 | 21.52 → 20.41 | heavy −1.57 (−6 %) | 34.9 → 36.8 | 37.3 → 34.9 | unreadable | redo ABAB on APK 1546e211, all 60 Hz, starts 36.8–37 °C: both B runs beat both A runs on GPU ms; 33–50 ms frames 16.3 → 8.1 %, heavy main 22.7 → 21.7 ms, heavy r_encode 11.4 → 10.8 ms; logs confirm fill linear in A, off in B (first partial pair: −1.2). Small but consistent, and not usable as it is: `off` also drops the fill's ambient (race 1881 bluish → plain white 450), so every shaded side darkens (sheets `local/shot/owner/fill-{race,derby}-{600,1500}.png`). Only the back directional light costs GPU time (the ambient is a uniform); it shines from below the horizon, opposite the sun, so a fold into the ambient would brighten the ground and also changes the look. Parked behind the shadow filter |
 | probe | no sun shadow map | `-Shadows off` | cool 23.88 → 17.02 | 21.03 → 16.59 | heavy −6.86 (−29 %) | 35.8 → 40.3 | 36.2 → 34.6 | unreadable | ABAB, APK 1546e211, 200 s: both B runs beat both A runs; no `d_shadow` draws in B; 33–50 ms frames 11.2 → 3.9 %, heavy main thread 22.5 → 19.4 ms, heavy r_encode 10.6 → 8.4 ms. Caveats: run 1 got 120 Hz from MIUI after a reboot, run 3's lean had a high 33–50 ms share. Nearly all of `lighting`'s 7 ms: with `shadows` (−1 to −1.9, the shadow pass) the main pass's shadow lookups cost about 5 ms. Look cost: no sun shadows |
 
 Batch 1 on the phone (APK f48e928c, phone session 2026-11-26): lean A against lean plus the word, 200 s runs

@@ -16,6 +16,8 @@
 //! less detail and a worse picture), and the screen's or the setting's words
 //! add to it; the word `full` starts from [`Switches::NORMAL`] instead, for
 //! A/B runs. The desktop base is NORMAL, so the desktop picture is unchanged.
+//! The mobile preset's upload-time mip skip follows the same rule
+//! (`texture_upload::MipSkip::resolve`; `mipskip0` turns it off).
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::{RenderLayers, VisibilityRange};
 use bevy::light::{
