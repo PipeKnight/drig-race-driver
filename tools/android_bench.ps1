@@ -43,6 +43,11 @@ param(
     # dynamic rows move between 480 and 720 with the frame time and blur the comparison). '' keeps the
     # phone's own setting (auto). The 720-row step still sets 720 itself.
     [string]$RenderHeight = '480',
+    # [video] shadows for the run: off, low, medium, high or ultra (shadow_layout.rs); '' keeps the
+    # phone's own setting (mobile default low). 'off' starts the sun without a shadow map, so the
+    # main pass makes no shadow lookups: a runtime perf word cannot do that (toggling
+    # shadow_maps_enabled panics in Bevy 0.19.1, perf_test.rs).
+    [string]$Shadows = '',
     [double]$MaxTempC = 40,
     # The run stops (force-stop, VERDICT fail, exit 4) when the battery passes this during a run.
     [double]$AbortTempC = 45,
@@ -158,6 +163,7 @@ if ($Sustained) { $benchIni += 'sustained_performance = on' }
 $video = @()
 if ($RenderHeight) { $video += @("render_height = $RenderHeight", 'render_height_version = 2') }
 if ($RefreshHz) { $video += @("refresh_hz = $RefreshHz", 'refresh_hz_version = 1') }
+if ($Shadows) { $video += "shadows = $Shadows" }
 if ($video) { $benchIni += @('[video]') + $video }
 [IO.File]::WriteAllText($ini, ($benchIni -join "`n") + "`n")
 $envLines = ($SetEnv | Where-Object { $_ } | ForEach-Object { "env $_`n" }) -join ''  # developer switches, e.g. GRID_PERF_TIMING=1
@@ -238,7 +244,7 @@ if (-not $after -or $after -eq $before) {
 $log = Join-Path $Out $after
 Invoke-Adb @('pull', "$logs/$after", $log) | Out-Null
 Set-Content -Path (Join-Path $Out 'run.txt') -Value @(
-    "apk=$Apk", "seconds=$Seconds", "ticks=$Ticks", "perf_test=$PerfTest", "pre_rotation=$PreRotation", "sustained=$Sustained", "render_height=$RenderHeight", "refresh_hz=$RefreshHz",
+    "apk=$Apk", "seconds=$Seconds", "ticks=$Ticks", "perf_test=$PerfTest", "pre_rotation=$PreRotation", "sustained=$Sustained", "render_height=$RenderHeight", "shadows=$Shadows", "refresh_hz=$RefreshHz",
     "temp_start_c=$tempStart", "temp_end_c=$tempEnd", "note=$Note", "log=$after")
 $seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_sustained_performance|android_frame_cap|android_frame_rate|android_display_hz|mobile_preset|adpf version=1 event=open|event=step step=1 ' |
     Select-Object -First 16 | ForEach-Object { $_.Line }
