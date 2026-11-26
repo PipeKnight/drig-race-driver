@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F940](log/F0940.md) | 2026-11-26 | Codex audit reads code-mode exec cells and wait calls |
 | [F939](log/F0939.md) | 2026-11-26 | Codex usage audit script in tools/; Codex defaults updated |
 | [F938](log/F0938.md) | 2026-11-26 | Codex working rules in AGENTS.md |
 | [F937](log/F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F883](log/F0883.md) | 2026-11-20 | FPS series summary: A 7dfed11e against B 7d21951e, 16 cell-phases |
 | [F882](log/F0882.md) | 2026-11-20 | Hidden batched opponent parts: not posing them saves no measurable main-thread time |
 | [F881](log/F0881.md) | 2026-11-20 | Pane copies gated on StandardMaterial bindless; DX12 vs Vulkan A/B |
-| [F880](log/F0880.md) | 2026-11-20 | PrepareMeshes: per-car moving entities counted; merging rigid followers cannot reach the bar |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

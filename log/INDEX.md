@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F940](F0940.md) | 2026-11-26 | Codex audit reads code-mode exec cells and wait calls |
 | [F939](F0939.md) | 2026-11-26 | Codex usage audit script in tools/; Codex defaults updated |
 | [F938](F0938.md) | 2026-11-26 | Codex working rules in AGENTS.md |
 | [F937](F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |

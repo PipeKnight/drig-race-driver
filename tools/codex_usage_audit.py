@@ -10,6 +10,11 @@ Nothing goes over the network and nothing is written except stdout:
 A root matches every rollout whose cwd lies under it. Codex sessions usually run in their own
 worktrees under ~/.codex/worktrees, so pass that folder too; the main checkout alone matches few threads.
 
+Newer Codex builds run tools in code mode: a top-level `exec` call holds a JavaScript cell that
+calls tools.exec_command, tools.write_stdin and others, and `wait` waits for a running cell. The
+audit reads the calls inside each cell (inner_tool_calls_by_name) and reports the share of
+top-level calls that only observe (observation_share_of_top_level_calls).
+
 The owner's token and usage figures are private: keep the output under local/ and never put its
 numbers into the repository, the log or commit messages (AGENTS.md, "Codex").
 """
@@ -53,6 +58,14 @@ WRAPPED_LOCK_STATUS = re.compile(
     r"[^\s]*build_lock\.ps1\s+.*?-status\b", re.IGNORECASE,
 )
 WIN = re.compile(r"^(?:[A-Za-z]:|\\\\|//)")
+# Codex code mode: one top-level `exec` call runs a JavaScript cell that calls tools.exec_command,
+# tools.write_stdin and other tools inside it; `wait` and `sleep` only wait for a running cell.
+CODE_CELLS = {"exec"}
+WAITS = {"wait", "sleep"}
+INNER_CALL = re.compile(r"\btools\.(\w+)\s*\(")
+JS_STRING = r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)"
+JS_KEY = r"[\"']?{0}[\"']?\s*:\s*"
+STILL_RUNNING = b"Script running"
 
 
 def mapping(value):
@@ -143,6 +156,56 @@ def status_only(command):
     return bool(STATUS.match(command) or WRAPPED_LOCK_STATUS.match(command))
 
 
+def js_literal(text):
+    """Value of a JavaScript string literal; template ${} parts stay as written."""
+    quote, body = text[0], text[1:-1]
+    if quote == '"':
+        try:
+            return json.loads(text)
+        except ValueError:
+            return body
+    return re.sub(r"\\(.)", r"\1", body)
+
+
+def call_span(source, start):
+    """Argument text of a call whose opening parenthesis ends at `start`, skipping strings."""
+    depth, index, quote = 1, start, None
+    while index < len(source):
+        char = source[index]
+        if quote:
+            if char == "\\":
+                index += 1
+            elif char == quote:
+                quote = None
+        elif char in "\"'`":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return source[start:index]
+        index += 1
+    return source[start:]
+
+
+def cell_calls(source):
+    """(name, args) for every tools.NAME(...) call in a code-mode cell; args hold the fields we read."""
+    calls = []
+    for match in INNER_CALL.finditer(source or ""):
+        text = call_span(source, match.end())
+        args = {}
+        for key in ("cmd", "command", "workdir", "chars"):
+            found = re.search(r"(?<![\w$])" + JS_KEY.format(key) + JS_STRING, text)
+            if found:
+                args[key] = js_literal(found.group(1))
+        session = re.search(r"(?<![\w$])" + JS_KEY.format("session_id") + r"([\w.\"'-]+)", text)
+        if session:
+            args["session_id"] = session.group(1).strip("\"'")
+        calls.append((match.group(1), args))
+    return calls
+
+
 def body_bytes(value):
     if isinstance(value, str):
         return value.encode("utf-8", errors="replace")
@@ -221,6 +284,8 @@ class Audit:
         self.roots = roots_for(args.project_root)
         self.quality = Counter()
         self.tools = Counter()
+        self.inner_tools = Counter()
+        self.observing_calls = 0
         self.flags = Counter()
         self.examples = defaultdict(list)
         self.compactions = 0
@@ -346,23 +411,34 @@ class Audit:
                 args = parse_args(payload.get("arguments", payload.get("input")))
                 if event == "local_shell_call":
                     args = mapping(payload.get("action"))
-                fingerprint = None
-                if name in EXEC:
-                    command = command_text(args)
-                    if command:
-                        fingerprint = (normalize(str(args.get("workdir") or cwd)), command)
-                    if status_only(command):
-                        self.flag("observation_or_wait_command", location)
-                elif name == "write_stdin" and "session_id" in args and args.get("chars", "") == "":
-                    session = args.get("session_id")
-                    self.flag("empty_write_stdin", location)
-                    if type(session) in {int, str}:
-                        fingerprint = ("process", str(session))
-                        if fingerprint in polled:
-                            self.flag("repeated_empty_write_stdin_within_turn", location)
-                        polled.add(fingerprint)
+                fingerprint, observing, call_kind = None, False, name
+                if name in CODE_CELLS:
+                    source = payload.get("input")
+                    if not isinstance(source, str):
+                        source = args.get("code") if isinstance(args.get("code"), str) else ""
+                    inner = cell_calls(source)
+                    results = []
+                    for inner_name, inner_args in inner:
+                        self.inner_tools[inner_name] += 1
+                        results.append(self.classify(inner_name, inner_args, cwd, location, polled))
+                    observing = bool(results) and all(seen for _, seen in results)
+                    if len(results) == 1:
+                        fingerprint = results[0][0]
+                elif name in WAITS:
+                    observing = True
+                    self.flag("cell_wait" if name == "wait" else "sleep_call", location)
+                    cell = args.get("cell_id")
+                    if name == "wait" and type(cell) in {int, str}:
+                        key = ("cell", str(cell))
+                        if key in polled:
+                            self.flag("repeated_wait_same_cell_within_turn", location)
+                        polled.add(key)
+                else:
+                    fingerprint, observing = self.classify(name, args, cwd, location, polled)
+                if observing:
+                    self.observing_calls += 1
                 if isinstance(call_id, str) and call_id:
-                    pending[call_id] = (fingerprint, location)
+                    pending[call_id] = (fingerprint, location, call_kind)
             elif kind == "response_item" and event in OUTPUTS:
                 call_id = payload.get("call_id")
                 call = pending.pop(call_id, None) if isinstance(call_id, str) else None
@@ -392,11 +468,34 @@ class Audit:
                 self.account(delta, "legacy_matching_delta" if single else "legacy_aggregate_delta",
                              single, recorded_context, thread)
 
+    def classify(self, name, args, cwd, location, polled):
+        """Return (fingerprint, observing) for one shell-like call, flagging waits and polls."""
+        if name in EXEC:
+            command = command_text(args)
+            fingerprint = (normalize(str(args.get("workdir") or cwd)), command) if command else None
+            if status_only(command):
+                self.flag("observation_or_wait_command", location)
+                return fingerprint, True
+            return fingerprint, False
+        if name == "write_stdin" and "session_id" in args and args.get("chars", "") == "":
+            session = args.get("session_id")
+            self.flag("empty_write_stdin", location)
+            fingerprint = None
+            if type(session) in {int, str}:
+                fingerprint = ("process", str(session))
+                if fingerprint in polled:
+                    self.flag("repeated_empty_write_stdin_within_turn", location)
+                polled.add(fingerprint)
+            return fingerprint, True
+        return None, False
+
     def count_output(self, payload, call, repeated):
-        fingerprint, location = call
+        fingerprint, location, kind = call
         data = body_bytes(payload.get("output", payload.get("tools")))
         if data is None:
             return
+        if kind == "wait" and STILL_RUNNING in data[:200]:
+            self.flag("wait_returned_still_running", location)
         self.outputs += 1
         self.output_bytes += len(data)
         self.max_output = max(self.max_output, len(data))
@@ -411,8 +510,10 @@ class Audit:
         repeated[fingerprint] = digest
 
     def summary(self):
-        shell = sum(self.tools[key] for key in EXEC | {"write_stdin"})
+        shell_names = EXEC | {"write_stdin"}
+        shell = sum(self.tools[key] + self.inner_tools[key] for key in shell_names)
         observations = self.flags["observation_or_wait_command"] + self.flags["empty_write_stdin"]
+        top_level = sum(self.tools.values())
         return {
             "rollout_files": dict(self.quality),
             "threads_in_window": len(self.selected_threads),
@@ -431,6 +532,16 @@ class Audit:
             "shell_calls_including_write_stdin": shell,
             "observation_candidate_share_of_shell_calls": (
                 round(observations / shell, 4) if shell else None
+            ),
+            # Calls made inside code-mode `exec` cells (tools.exec_command, tools.write_stdin, ...).
+            "inner_tool_calls_by_name": dict(self.inner_tools.most_common()),
+            # Each top-level call is one model response that re-reads the context. A call only
+            # observes when it is wait/sleep, a status-only command, an empty write_stdin, or an
+            # exec cell whose every inner call is one of those.
+            "top_level_tool_calls": top_level,
+            "top_level_observation_calls": self.observing_calls,
+            "observation_share_of_top_level_calls": (
+                round(self.observing_calls / top_level, 4) if top_level else None
             ),
             "persisted_tool_outputs": {
                 "records": self.outputs, "bytes": self.output_bytes, "largest_bytes": self.max_output,
