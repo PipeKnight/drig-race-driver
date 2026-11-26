@@ -129,8 +129,7 @@ fn base(dds: &[u8]) -> Result<(usize, usize, Vec<u8>), Box<dyn Error>> {
 pub(crate) fn opaque_dds(rgba: Vec<u8>, width: usize, height: usize) -> Vec<u8> {
     mip_dds(rgba, width, height, &table())
 }
-fn mip_dds(mut rgba: Vec<u8>, width: usize, height: usize, lut: &[f32; 256]) -> Vec<u8> {
-    let base_size = rgba.len();
+fn mip_rgba(mut rgba: Vec<u8>, width: usize, height: usize, lut: &[f32; 256]) -> (Vec<u8>, u32) {
     let (mut w, mut h, mut offset, mut levels) = (width, height, 0, 1);
     while w > 1 || h > 1 {
         let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
@@ -155,6 +154,16 @@ fn mip_dds(mut rgba: Vec<u8>, width: usize, height: usize, lut: &[f32; 256]) -> 
         (w, h, offset) = (nw, nh, next_offset);
         levels += 1;
     }
+    (rgba, levels)
+}
+
+fn mip_dds(rgba: Vec<u8>, width: usize, height: usize, lut: &[f32; 256]) -> Vec<u8> {
+    let (rgba, levels) = mip_rgba(rgba, width, height, lut);
+    body_dds(rgba, width, height, levels)
+}
+
+fn body_dds(mut rgba: Vec<u8>, width: usize, height: usize, levels: u32) -> Vec<u8> {
+    let base_size = width * height * 4;
     for p in rgba.as_chunks_mut::<4>().0 {
         p.swap(0, 2);
     }
@@ -170,6 +179,62 @@ fn mip_dds(mut rgba: Vec<u8>, width: usize, height: usize, lut: &[f32; 256]) -> 
     .validated_dds()
     .0
 }
+
+fn authored_mips(dds: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
+    let levels =
+        u32::from_le_bytes(dds[28..32].try_into().ok()?).min(1 + width.max(height).ilog2());
+    if levels <= 1 {
+        return None;
+    }
+    let format = match &dds[84..88] {
+        b"DXT1" => Format::Bc1,
+        b"DXT5" => Format::Bc3,
+        _ => Format::Bgra8,
+    };
+    super::texture_upload::decode_format_levels(
+        &dds[128..],
+        width as u32,
+        height as u32,
+        levels,
+        format,
+    )
+}
+
+fn number_mip_dds(
+    authored: Vec<u8>,
+    original_base: Vec<u8>,
+    numbered_base: Vec<u8>,
+    width: usize,
+    height: usize,
+    lut: &[f32; 256],
+) -> Vec<u8> {
+    let base_size = numbered_base.len();
+    let (mut numbered, levels) = mip_rgba(numbered_base, width, height, lut);
+    let (neutral, _) = mip_rgba(original_base, width, height, lut);
+    // Carry only the filtered decal change to the existing lower levels.
+    // Pixels outside the number retain the livery's authored mip colours.
+    for ((output, actual), before) in numbered[base_size..]
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(authored[base_size..].as_chunks::<4>().0)
+        .zip(neutral[base_size..].as_chunks::<4>().0)
+    {
+        if actual[3] != 255 {
+            continue;
+        }
+        for channel in 0..3 {
+            let delta = lut[output[channel] as usize] - lut[before[channel] as usize];
+            output[channel] = if delta == 0. {
+                actual[channel]
+            } else {
+                encoded((lut[actual[channel] as usize] + delta).clamp(0., 1.))
+            };
+        }
+    }
+    body_dds(numbered, width, height, levels)
+}
+
 fn compose(
     dds: &[u8],
     placements: &[Placement],
@@ -190,6 +255,7 @@ fn compose(
         .map(|p| bounds(*p, width, height))
         .collect::<Result<Vec<_>, _>>()?;
     let lut = table();
+    let authored = authored_mips(dds, width, height).map(|mips| (mips, rgba.clone()));
     for (p, b) in placements.iter().zip(boxes) {
         for y in b[1]..b[3] {
             for x in b[0]..b[2] {
@@ -214,7 +280,10 @@ fn compose(
             }
         }
     }
-    Ok(mip_dds(rgba, width, height, &lut))
+    Ok(match authored {
+        Some((mips, original)) => number_mip_dds(mips, original, rgba, width, height, &lut),
+        None => mip_dds(rgba, width, height, &lut),
+    })
 }
 fn font(root: &Path, number: Number) -> Result<BTreeMap<u8, Glyph>, Box<dyn Error>> {
     let bytes = super::read(&root.join("cars/user_liveries/numbers/font0.pssg"))?;
@@ -267,7 +336,10 @@ pub fn apply(
             return Err("opponent body fallback would inherit player number".into());
         }
     }
-    let text = super::read(&grid_tools::install::resolve_case(root, &format!("cars/{}/decals.xml", model.stem())))?;
+    let text = super::read(&grid_tools::install::resolve_case(
+        root,
+        &format!("cars/{}/decals.xml", model.stem()),
+    ))?;
     let placements = grid_formats::car_decals::read_numbers(std::str::from_utf8(&text)?)?;
     let glyphs = font(root, number)?;
     let result = compose(dds, &placements, &glyphs, number)?;
@@ -287,7 +359,10 @@ fn prepared(
     dds: &[u8],
     number: Number,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
-    let text = super::read(&grid_tools::install::resolve_case(root, &format!("cars/{}/decals.xml", model.stem())))?;
+    let text = super::read(&grid_tools::install::resolve_case(
+        root,
+        &format!("cars/{}/decals.xml", model.stem()),
+    ))?;
     let placements = grid_formats::car_decals::read_numbers(std::str::from_utf8(&text)?)?;
     compose(dds, &placements, &font(root, number)?, number)
 }
@@ -441,6 +516,39 @@ mod tests {
         let dds = mip_dds(rgba, 2, 2, &table());
         assert_eq!(&dds[144..148], [188, 188, 188, 255]);
         assert_eq!(u32::from_le_bytes(dds[28..32].try_into().unwrap()), 2);
+    }
+    #[test]
+    fn number_stamp_preserves_authored_mips_elsewhere_on_the_body() {
+        let base = [200, 200, 200, 255].repeat(64);
+        let authored = [92, 85, 110, 255];
+        let mut chain = base;
+        chain.extend(authored.repeat(16 + 4 + 1));
+        let dds = body_dds(chain, 8, 8, 4);
+        let slot = Placement {
+            centre: [0.25, 0.75],
+            size: [0.5, 0.5],
+            rotation_degrees: 0.,
+            flip: false,
+        };
+        let glyph = Glyph {
+            width: 2,
+            height: 2,
+            rgba: [0, 0, 0, 255].repeat(4),
+        };
+        let result = compose(
+            &dds,
+            &[slot],
+            &BTreeMap::from([(b'7', glyph)]),
+            Number::parse("7").unwrap(),
+        )
+        .unwrap();
+        let mip = authored_mips(&result, 8, 8).unwrap();
+        assert_eq!(mip.len(), 4 * (64 + 16 + 4 + 1));
+        assert_eq!(&mip[4 * 79..4 * 80], authored);
+        assert_eq!(&mip[4 * 83..4 * 84], authored);
+        let stamped = &mip[4 * 69..4 * 70];
+        assert!(stamped[0] < authored[0]);
+        assert_eq!(stamped[3], 255);
     }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
