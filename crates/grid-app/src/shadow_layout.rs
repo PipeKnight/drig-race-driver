@@ -283,7 +283,8 @@ const LAYOUT_FETCH: &str = "fn fetch_directional_shadow(
 }
 
 // 0: Bevy's filter; the original's with csm_smooth: 1 csm_wedge_shadow_1
-// (high), 2 csm_wedge_shadow_0 (medium: one centre tap per world cascade).
+// (high), 2 csm_wedge_shadow_0 (medium: one centre tap per world cascade);
+// 3 fast (phone probe): medium's world tap, the car's disc once unsmoothed.
 const GRID_FILTER: u32 = GRID_FILTER_VALUEu;
 // Scale of the original's disc radii (1: the original), and of the car's.
 const GRID_SOFT: f32 = GRID_SOFT_VALUE;
@@ -367,7 +368,7 @@ fn grid_cascade(
     }
     let array_index = i32((*light).depth_texture_base_index + cascade_index);
     let car = cascade_index == 0u;
-    if (!car && GRID_FILTER == 2u) {
+    if (!car && GRID_FILTER >= 2u) {
         // The smooth of nine equal taps leaves the tap.
         return sample_shadow_map_hardware(light_local.xy, light_local.z, array_index);
     }
@@ -378,6 +379,10 @@ fn grid_cascade(
     }
     radius *= GRID_SOFT;
     let angle = dot(floor(frag_coord_xy), GRID_ANGLE_STEP);
+    if (GRID_FILTER == 3u) {
+        // One kernel at the pixel's angle: 8 taps instead of 9 x 8.
+        return grid_kernel(car, light_local.xy, light_local.z, array_index, angle, radius);
+    }
     var lit = 0.0;
     for (var j = -1; j <= 1; j++) {
         for (var i = -1; i <= 1; i++) {
@@ -445,17 +450,19 @@ const LAYOUT_IMPORT: &str = "sample_shadow_map, sample_shadow_map_pcss, sample_s
 /// `maskQuality` (shadowMaskQuality0..2, 0x72ECD0): medium (1) the `_0`
 /// program, one centre tap per world cascade; high (2) `_1`, the 4-tap disc.
 /// Low and ultra take high's. `GRID_SHADOW_FILTER=bevy` keeps Bevy's
-/// filter, `GRID_SHADOW_SOFT` scales the disc radii and
+/// filter, `GRID_SHADOW_FILTER=fast` takes medium's world tap and the car's
+/// disc once without the smooth (a phone cost probe, docs/ANDROID_GPU.md 10), `GRID_SHADOW_SOFT` scales the disc radii and
 /// `GRID_SHADOW_CAR_SOFT` the car's again [research].
 /// `GRID_SHADOW_BIAS=bevy` keeps Bevy's depth and normal bias instead of the
 /// original's per-cascade depth offsets (comparisons).
 fn filter(quality: Quality) -> Filter {
-    let bevy = crate::dev::var("GRID_SHADOW_FILTER").is_ok_and(|v| v == "bevy");
+    let choice = crate::dev::var("GRID_SHADOW_FILTER").unwrap_or_default();
     let scale = |name| crate::dev::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(1.0_f32);
-    let mode = match (bevy, quality) {
-        (true, _) => 0,
-        (false, Quality::Medium) => 2,
-        (false, _) => 1,
+    let mode = match (choice.as_str(), quality) {
+        ("bevy", _) => 0,
+        ("fast", _) => 3,
+        (_, Quality::Medium) => 2,
+        (_, _) => 1,
     };
     let bias = u32::from(!crate::dev::var("GRID_SHADOW_BIAS").is_ok_and(|v| v == "bevy"));
     (mode, scale("GRID_SHADOW_SOFT"), scale("GRID_SHADOW_CAR_SOFT"), bias)

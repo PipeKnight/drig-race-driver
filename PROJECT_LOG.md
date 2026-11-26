@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F955](log/F0955.md) | 2026-11-26 | Phone GPU batch 4: shadow lookups cost ~5 ms; fast shadow filter probe |
 | [F954](log/F0954.md) | 2026-11-26 | Disk audit covers all repositories and agent projects on the PC |
 | [F953](log/F0953.md) | 2026-11-26 | Bundle list generator keeps played speech lines in the speech section |
 | [F952](log/F0952.md) | 2026-11-26 | Disk audit by owner: tools/disk_audit.py |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F898](log/F0898.md) | 2026-11-24 | Owner priority: spatial audio as in the original (reverb, multichannel, verified panning) |
 | [F897](log/F0897.md) | 2026-11-24 | Bundled APKs: stale event file lists, automatic stage check in build_android |
 | [F896](log/F0896.md) | 2026-11-24 | Profile APK f4e8d4123be7 for the main-thread phone measurement |
-| [F895](log/F0895.md) | 2026-11-24 | Goal matrix after F893/F894, and unfocused frames in frame_stats |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

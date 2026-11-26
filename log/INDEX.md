@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F955](F0955.md) | 2026-11-26 | Phone GPU batch 4: shadow lookups cost ~5 ms; fast shadow filter probe |
 | [F954](F0954.md) | 2026-11-26 | Disk audit covers all repositories and agent projects on the PC |
 | [F953](F0953.md) | 2026-11-26 | Bundle list generator keeps played speech lines in the speech section |
 | [F952](F0952.md) | 2026-11-26 | Disk audit by owner: tools/disk_audit.py |

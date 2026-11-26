@@ -418,9 +418,10 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | ? | no cockpit mirror | `mirror` | pending | | | | | | head-cam row |
 | ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
 | probe | no shadow casters | `shadows` | warm 27.70 → 25.80 (−1.9); cool 23.95 → 22.99 | 20.93 → 20.07 | heavy −0.96 (−4.0 %) | 36.8 → 38.5 | 33.0 → 31.6 | unreadable | ceiling probe; 33–50 ms frames 2.6 → 1.4 %. Only the shadow pass empties: the main pass still samples the sun's map |
+| ? | fast shadow filter | `-SetEnv GRID_SHADOW_FILTER=fast` | pending | | | | | | batch 4: 1 + 8 shadow compares per fragment instead of up to 108 |
 | ? | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` | pending | | | | | | batch 2; look approved by the owner |
-| probe | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | cool 23.96 → 22.78 (partial) | 20.81 → 20.37 | heavy −1.2 (−5 %) | 37.2 → 37.4 | 32.5 → 32.5 | – | partial: lean ×2 against one B run (the phone left adb before run 4); log `baseline_fill mode=off fill=None`; heavy r_encode 10.1 → 9.6 ms. Small: most of `lighting`'s 7 ms is not the fill, so the sun's lookups and BRDF are next (`-Shadows off`, not yet run) |
-| ? | no sun shadow map | `-Shadows off` | pending | | | | | | batch 3 probe: no shadow pass and no lookups; with `shadows` it splits lookups from casters |
+| probe | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | cool 24.80 → 23.23 | 21.52 → 20.41 | heavy −1.57 (−6 %) | 34.9 → 36.8 | 37.3 → 34.9 | unreadable | redo ABAB on APK 1546e211, all 60 Hz, starts 36.8–37 °C: both B runs beat both A runs on GPU ms; 33–50 ms frames 16.3 → 8.1 %, heavy main 22.7 → 21.7 ms, heavy r_encode 11.4 → 10.8 ms; logs confirm fill linear in A, off in B (first partial pair: −1.2). Small but consistent; a look change (the back fill goes, the ambient falls back to the plain white 450): needs the look sheets before a mobile default |
+| probe | no sun shadow map | `-Shadows off` | cool 23.88 → 17.02 | 21.03 → 16.59 | heavy −6.86 (−29 %) | 35.8 → 40.3 | 36.2 → 34.6 | unreadable | ABAB, APK 1546e211, 200 s: both B runs beat both A runs; no `d_shadow` draws in B; 33–50 ms frames 11.2 → 3.9 %, heavy main thread 22.5 → 19.4 ms, heavy r_encode 10.6 → 8.4 ms. Caveats: run 1 got 120 Hz from MIUI after a reboot, run 3's lean had a high 33–50 ms share. Nearly all of `lighting`'s 7 ms: with `shadows` (−1 to −1.9, the shadow pass) the main pass's shadow lookups cost about 5 ms. Look cost: no sun shadows |
 
 Batch 1 on the phone (APK f48e928c, phone session 2026-11-26): lean A against lean plus the word, 200 s runs
 started at 36.7–37.0 °C, cap 60 at 60 Hz. The first runs were slower because DRIG was on the MIUI Game Turbo list;
@@ -455,3 +456,13 @@ start-up probes the phone bench already supports: `-SetEnv GRID_BASELINE_FILL=of
 falls back to the plain white 450, a uniform of the same cost) and the new `-Shadows off` (`[video] shadows = off`: the sun spawns without a
 shadow map). If the fill costs milliseconds, a mobile fill folded into the ambient term is the candidate; if the
 lookups do, a cheaper mobile shadow sample is.
+
+Batch 3 result: the lookups. `-Shadows off` cuts 6.9 heavy GPU ms, the fill 1.6 (redo pair). The shadow pass is 1–2 of those, so about 5 ms is the main pass sampling the sun's maps. The cause is
+the layout's filter (`shadow_layout.rs`, SUN_SHADOWS 2.6): the phone's `low` quality runs high's
+`csm_wedge_shadow_1` with `csm_smooth`, a 3×3 tent of rotated discs per fragment: the world cascade takes
+9 × 4 hardware compares (72 in the cascade overlap), the car map 9 × 8 = 72 inside its box, each with a sin/cos.
+`hard_shadows` in `lean` does not reach it: `ShadowFilteringMethod` only applies to Bevy's own filter (mode 0).
+Batch 4 probe: `-SetEnv GRID_SHADOW_FILTER=fast` (filter 3): medium's single world tap and the car's disc once at
+the pixel's angle without the smooth, 1 + 8 compares instead of up to 108. It keeps the sun shadows; the look
+sheets are `local/shot/owner/shadow-*.png` (phone now / fast / off, baseline 1026×480). The desktop default is
+unchanged (filter 1 at high; identity check in the F entry).
