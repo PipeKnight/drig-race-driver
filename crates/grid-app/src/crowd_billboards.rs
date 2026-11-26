@@ -6,7 +6,10 @@ mod flag_render;
 use near::NEAR_FRAME_VERTEX_LIMIT;
 use super::{
     crowd_population as population,
-    crowd_preview::{self, Batch, CrowdMaterial, Spec, Tint},
+    crowd_preview::{self, Batch, BillboardLight, CrowdMaterial, Spec, Tint},
+    effective_lighting::{EffectiveLighting, PackedLighting},
+    le_mans_event::LeMansEvent,
+    timeline_lighting::TimelineLighting,
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -21,7 +24,8 @@ use grid_formats::{
     crowd_placements::{self, MovingActor, Placements, Standing},
     material, pssg, texture,
 };
-use grid_tools::route::Route;
+use grid_formats::track_lighting::Sun;
+use grid_tools::{environment::Environment, route::Route, time_of_day::Mode};
 use std::{
     collections::{BTreeMap, VecDeque},
     error::Error,
@@ -37,6 +41,7 @@ struct Row {
     source: [usize; 2],
     material: usize,
     has_camera: bool,
+    sun_visibility: f32,
 }
 #[derive(Debug)]
 struct Omitted {
@@ -226,6 +231,7 @@ fn append_group(
                 .definition_fields
                 .iter()
                 .any(|(key, value)| key == "hasCamera" && value == "1"),
+            sun_visibility: 1.,
         });
     }
     Ok(true)
@@ -460,6 +466,7 @@ fn prepare_scene(root: &Path, route: &Route, flags_enabled: bool) -> AnyResult<P
                     source: [index, ordinal],
                     material,
                     has_camera: false,
+                    sun_visibility: 1.,
                 }));
                 prepared_skin_groups.insert(index);
             }
@@ -714,7 +721,7 @@ fn spawn(
     view: Query<(&Transform, &Msaa), With<super::ViewerCamera>>,
     (mut meshes, mut images): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>),
     mut materials: ResMut<Assets<CrowdMaterial>>,
-    settings: Res<super::graphics::Settings>,
+    (settings, source_light): (Res<super::graphics::Settings>, Option<Res<CardLighting>>),
     (mut replay, mut rod_materials): (
         Option<ResMut<super::replay::Replay>>,
         Option<ResMut<Assets<StandardMaterial>>>,
@@ -724,14 +731,14 @@ fn spawn(
         return;
     };
 
-    let d = images.add(
-        super::texture_upload::image(
-            &prepared.diffuse,
-            settings.sampler(false),
-            RenderAssetUsages::default(),
-        )
-        .expect("validated billboard diffuse"),
-    );
+    let diffuse_upload = if source_light.is_some() {
+        super::texture_upload::image_linear
+    } else {
+        super::texture_upload::image
+    };
+    let d = images.add(diffuse_upload(
+        &prepared.diffuse, settings.sampler(false), RenderAssetUsages::default(),
+    ).expect("validated billboard diffuse"));
     let m = images.add(
         super::texture_upload::image_linear(
             &prepared.tint,
@@ -763,10 +770,15 @@ fn spawn(
                     colour0: s.colours[0],
                     colour1: s.colours[1],
                     colour2: s.colours[2],
+                    billboard_light: source_light.as_deref()
+                        .map_or(BillboardLight::default(), |light| light.initial),
                 },
             })
         })
         .collect();
+    if source_light.as_ref().is_some_and(|light| light.timeline) {
+        commands.insert_resource(TimelineCards { handles: handles.clone() });
+    }
     let mut batches: BTreeMap<(usize, u32), Vec<usize>> = BTreeMap::new();
     for (index, row) in prepared.rows.iter().enumerate() {
         batches
@@ -809,6 +821,7 @@ fn spawn(
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, batch.p);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, batch.n);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, batch.light_uv);
         mesh.insert_indices(Indices::U32(batch.indices));
         commands.spawn((
             Name::new(format!("crowd/material{material}/cell{cell}")),
@@ -862,6 +875,7 @@ fn spawn(
                     colour0: colours[0],
                     colour1: colours[1],
                     colour2: colours[2],
+                    billboard_light: BillboardLight::default(),
                 },
             });
             Some(NearModel {
@@ -947,7 +961,8 @@ fn make_batch(
 ) -> Result<Batch, &'static str> {
     let mut batch = Batch::default();
     for &index in rows {
-        let position = source.rows[index].position;
+        let row = &source.rows[index];
+        let position = row.position;
         let delta = eye - position;
         let horizontal = Vec3::new(delta.x, 0., delta.z);
         let forward = horizontal.try_normalize().unwrap_or(Vec3::Z);
@@ -958,6 +973,7 @@ fn make_batch(
         };
         let first = batch.p.len();
         crowd_preview::card_values(&mut batch, position, spec, camera_point)?;
+        batch.light_uv.extend([[row.sun_visibility, 0.]; 4]);
         let right = Vec3::new(-forward.z, 0., forward.x);
         let movement = (seconds * 2.2 + phase(index)).sin()
             * 0.10
@@ -1335,6 +1351,7 @@ fn update_cards(
                         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, batch.p);
                         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, batch.n);
                         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv);
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, batch.light_uv);
                         if !same {
                             mesh.insert_indices(Indices::U32(batch.indices));
                         }
@@ -1356,6 +1373,7 @@ fn pad_cards(batch: &mut Batch, cards: usize) {
         batch.p.extend([[0.; 3]; 4]);
         batch.n.extend([[0., 1., 0.]; 4]);
         batch.uv.extend([[0.; 2]; 4]);
+        batch.light_uv.extend([[0.; 2]; 4]);
         batch
             .indices
             .extend([first, first + 1, first + 2, first + 3, first + 2, first + 1]);
@@ -1363,14 +1381,15 @@ fn pad_cards(batch: &mut Batch, cards: usize) {
 }
 
 /// A card batch packed as `Mesh::write_packed_vertex_buffer_data` packs the
-/// cell's asset (POSITION, NORMAL, UV_0 in `layout`'s order).
+/// cell's asset (POSITION, NORMAL, UV_0, UV_1 in `layout`'s order).
 fn pack_cards(batch: &Batch, layout: &super::mesh_stream::VertexLayout, bytes: &mut Vec<u8>) {
     use super::mesh_stream::put;
     let at = |attribute| layout.offset(attribute).expect("card attribute");
-    let (p, n, uv) = (
+    let (p, n, uv, light) = (
         at(Mesh::ATTRIBUTE_POSITION),
         at(Mesh::ATTRIBUTE_NORMAL),
         at(Mesh::ATTRIBUTE_UV_0),
+        at(Mesh::ATTRIBUTE_UV_1),
     );
     let start = bytes.len();
     bytes.resize(start + batch.p.len() * layout.stride, 0);
@@ -1378,6 +1397,7 @@ fn pack_cards(batch: &Batch, layout: &super::mesh_stream::VertexLayout, bytes: &
         put(bytes, vertex + p, batch.p[k]);
         put(bytes, vertex + n, batch.n[k]);
         put(bytes, vertex + uv, batch.uv[k]);
+        put(bytes, vertex + light, batch.light_uv[k]);
     }
 }
 
@@ -1620,11 +1640,122 @@ fn update_flash(
 }
 /// Called by ordinary rendered driving. Routes with no standing population
 /// need no crowd material registration or asset lookup.
+#[derive(Resource)]
+struct CardLighting {
+    initial: BillboardLight,
+    timeline: bool,
+}
+
+#[derive(Resource)]
+struct TimelineCards {
+    handles: Vec<Handle<CrowdMaterial>>,
+}
+
+fn set_card_sun(
+    mut light: BillboardLight,
+    rgb: EffectiveLighting,
+    angles: Sun,
+) -> BillboardLight {
+    light.sun = Vec3::from_array(rgb.sun).extend(light.sun.w);
+    light.back = Vec3::from_array(rgb.back).extend(1.);
+    light.ambient = Vec3::from_array(rgb.ambient).extend(light.ambient.w);
+    light.direction = Vec3::from_array(angles.direction_to_light()).extend(light.direction.w);
+    light
+}
+
+fn install_card_lighting(
+    app: &mut App,
+    root: &Path,
+    route: &Route,
+    prepared: &mut Prepared,
+) -> AnyResult<()> {
+    let environment = Environment::for_route(root, route)?;
+    let raw = &environment.lighting;
+    let [height_degrees, rotation_degrees] = raw.sun().ok_or("crowd lighting sun angles missing")?;
+    let angles = Sun { height_degrees, rotation_degrees };
+    let (_, rgb) = PackedLighting::from_static(raw)?.resolve(Mode::None, None, 0.)?;
+    let fog = Vec3::from_array(raw.rgb("fogColour").unwrap_or([0.; 3]))
+        * raw.scalar("fogColourBrightness").unwrap_or(1.);
+    let defaults = BillboardLight {
+        sun: Vec3::ZERO.extend(raw.scalar("shadow_strength").unwrap_or(1.)),
+        ambient: Vec3::ZERO.extend(raw.scalar("fogDistance").unwrap_or(0.)),
+        direction: Vec3::ZERO.extend(raw.scalar("fogDensityCap").unwrap_or(0.)),
+        fog: fog.extend(0.),
+        ..default()
+    };
+    let timeline = environment.mode() == Mode::Timeline;
+    let initial = if timeline {
+        let source = app.world().get_resource::<TimelineLighting>()
+            .ok_or("crowd lighting timeline unavailable")?;
+        let (rgb, lights) = source.sample(super::sky::static_start())?;
+        set_card_sun(defaults, rgb, lights.sun_direction.unwrap_or(angles))
+    } else {
+        set_card_sun(defaults, rgb, angles)
+    };
+    if !initial.direction.is_finite() || !initial.fog.is_finite() {
+        return Err("nonfinite crowd card lighting".into());
+    }
+    let path = grid_tools::install::resolve_case(root, &route.file("route.clm"));
+    let bytes = super::read(&path)?;
+    let grid = grid_formats::shadow_grid::read(&bytes)?;
+    let mut shaded = 0;
+    for row in &mut prepared.rows {
+        if grid.shaded(row.position.x, row.position.z) {
+            row.sun_visibility = 0.;
+            shaded += 1;
+        }
+    }
+    println!(
+        "crowd_card_light source=route.clm shaded={shaded} cards={} timeline={timeline}",
+        prepared.rows.len(),
+    );
+    app.insert_resource(CardLighting { initial, timeline });
+    if timeline {
+        app.add_systems(PostUpdate, follow_card_lighting);
+    }
+    Ok(())
+}
+
+fn follow_card_lighting(
+    cards: Option<Res<TimelineCards>>,
+    source: Res<TimelineLighting>,
+    initial: Res<CardLighting>,
+    event: Option<Res<LeMansEvent>>,
+    mut materials: ResMut<Assets<CrowdMaterial>>,
+    mut last_time: Local<Option<f64>>,
+) {
+    let Some(cards) = cards else { return };
+    let time = event.as_deref().map_or_else(super::sky::static_start, |event| event.time_of_day);
+    if *last_time == Some(time) {
+        return;
+    }
+    *last_time = Some(time);
+    let Ok((rgb, lights)) = source.sample(time) else { return };
+    let Some(angles) = lights.sun_direction else { return };
+    let mut light = set_card_sun(initial.initial, rgb, angles);
+    if let Some(timeline) = event.as_deref().and_then(|event| event.timeline.as_ref()) {
+        light.sun.w = timeline.value("shadow_strength", time).unwrap_or(light.sun.w);
+    }
+    for handle in &cards.handles {
+        if materials.get(handle).is_some_and(|mat| mat.extension.billboard_light != light)
+            && let Some(mut mat) = materials.get_mut(handle)
+        {
+            mat.extension.billboard_light = light;
+        }
+    }
+}
+
 pub(crate) fn install_route(app: &mut App, root: &Path, route: &Route) -> AnyResult<()> {
     match std::fs::metadata(root.join(route.file("crowd_standing.bin"))) {
         Ok(_) => {
             let flags = app.world().contains_resource::<super::replay::Replay>();
-            install(app, prepare_scene(root, route, flags)?)
+            let mut prepared = prepare_scene(root, route, flags)?;
+            if !prepared.rows.is_empty()
+                && let Err(error) = install_card_lighting(app, root, route, &mut prepared)
+            {
+                eprintln!("crowd card lighting falls back to scene lighting: {error}");
+            }
+            install(app, prepared)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
@@ -1652,6 +1783,7 @@ mod tests {
                 source: [0, 0],
                 material: 0,
                 has_camera: false,
+                sun_visibility: 0.,
             }],
             specs: vec![spec.clone()],
             diffuse: Vec::new(),
@@ -1671,6 +1803,8 @@ mod tests {
         let a = make_batch(&source, &[0], &spec, eye, 0.).unwrap();
         let b = make_batch(&source, &[0], &spec, eye, 0.5).unwrap();
         assert_eq!(a.uv, b.uv);
+        assert_eq!(a.light_uv, vec![[0.; 2]; 4]);
+        assert_eq!(a.light_uv, b.light_uv);
         assert_eq!(a.indices, b.indices);
         assert_eq!(a.p[0], b.p[0]);
         assert_eq!(a.p[2], b.p[2]);
@@ -1686,12 +1820,14 @@ mod tests {
             p: (0..8).map(|i| [i as f32, 0.5 * i as f32, -1.25]).collect(),
             n: (0..8).map(|i| [0., 1., i as f32 * 0.1]).collect(),
             uv: (0..8).map(|i| [i as f32 * 0.125, 1.]).collect(),
+            light_uv: (0..8).map(|i| [f32::from(u8::from(i < 4)), 0.]).collect(),
             indices: vec![0, 1, 2, 3, 2, 1, 4, 5, 6, 7, 6, 5],
         };
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, batch.p.clone());
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, batch.n.clone());
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, batch.uv.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, batch.light_uv.clone());
         mesh.insert_indices(Indices::U32(batch.indices.clone()));
         let layout = crate::mesh_stream::VertexLayout::of(&mesh);
         let expected = mesh.create_packed_vertex_buffer_data();

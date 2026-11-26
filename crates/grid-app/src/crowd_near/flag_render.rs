@@ -169,6 +169,7 @@ impl Prepared {
                         colour0: group.colours[0],
                         colour1: group.colours[1],
                         colour2: group.colours[2],
+                        billboard_light: Default::default(),
                     },
                 })
             })

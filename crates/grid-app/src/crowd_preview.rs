@@ -8,7 +8,7 @@ use bevy::{
     mesh::{Indices, PrimitiveTopology},
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
-    render::render_resource::AsBindGroup,
+    render::render_resource::{AsBindGroup, ShaderType},
     shader::ShaderRef,
 };
 use grid_formats::{binxml, crowd_placements, pssg, texture};
@@ -599,6 +599,16 @@ pub(crate) fn flash_fixture_anchors(
 
 const SHADER: Handle<Shader> = uuid_handle!("3f1983b1-35cd-4ea7-986e-22b81999f3a2");
 pub(crate) type CrowdMaterial = ExtendedMaterial<StandardMaterial, Tint>;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+pub(crate) struct BillboardLight {
+    pub(crate) sun: Vec4,
+    pub(crate) back: Vec4,
+    pub(crate) ambient: Vec4,
+    pub(crate) direction: Vec4,
+    pub(crate) fog: Vec4,
+}
+
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct Tint {
     #[texture(100)]
@@ -610,6 +620,8 @@ pub struct Tint {
     pub(crate) colour1: Vec4,
     #[uniform(104)]
     pub(crate) colour2: Vec4,
+    #[uniform(105)]
+    pub(crate) billboard_light: BillboardLight,
 }
 impl MaterialExtension for Tint {
     fn fragment_shader() -> ShaderRef {
@@ -661,6 +673,7 @@ pub(crate) struct Batch {
     pub(crate) p: Vec<[f32; 3]>,
     pub(crate) n: Vec<[f32; 3]>,
     pub(crate) uv: Vec<[f32; 2]>,
+    pub(crate) light_uv: Vec<[f32; 2]>,
     pub(crate) indices: Vec<u32>,
 }
 fn card(batch: &mut Batch, row: &Row, s: &Spec, eye: Vec3) -> Result<(), &'static str> {
@@ -787,6 +800,7 @@ fn spawn(
                     colour0: s.colours[0],
                     colour1: s.colours[1],
                     colour2: s.colours[2],
+                    billboard_light: BillboardLight::default(),
                 },
             })
         })

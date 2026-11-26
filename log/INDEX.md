@@ -861,6 +861,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G436](G0436.md) | 2026-11-26 | Use route lighting data for distant spectators |
 | [G435](G0435.md) | 2026-11-26 | Restore authored route cloth across supported layouts |
 | [G434](G0434.md) | 2026-11-26 | Preserve authored livery mips when stamping race numbers |
 | [G433](G0433.md) | 2026-11-23 | Deliver verified shared graphics corrections |

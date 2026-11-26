@@ -109,4 +109,5 @@ impl<'a> Cursor<'a> {
     }
 }
 
+pub mod shadow_grid;
 pub mod track_lighting;
