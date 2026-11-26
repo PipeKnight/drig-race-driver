@@ -154,7 +154,7 @@ tracks/europe/donington/start_lights.xml
 tracks/europe/donington/tracksplit.pssg
 tracks/europe/donington/trees.pssg
 tracks/europe/donington/treestextures.pssg
-# Speech lines the ported events can play (grid-app --speech-files), not read by this run:
+# Speech lines the ported events can play (grid-app --speech-files), played only on cue:
 audio/speech/en/03_Damage/bodyDamage_1.raw
 audio/speech/en/03_Damage/bodyDamage_2.raw
 audio/speech/en/03_Damage/bodyDamage_3.raw

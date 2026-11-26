@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F953](log/F0953.md) | 2026-11-26 | Bundle list generator keeps played speech lines in the speech section |
 | [F952](log/F0952.md) | 2026-11-26 | Disk audit by owner: tools/disk_audit.py |
 | [F951](log/F0951.md) | 2026-11-26 | Android bundle lists regenerated for G435's route cloth files |
 | [F950](log/F0950.md) | 2026-11-26 | Phone fill-light probe (partial): about 1 heavy ms |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F896](log/F0896.md) | 2026-11-24 | Profile APK f4e8d4123be7 for the main-thread phone measurement |
 | [F895](log/F0895.md) | 2026-11-24 | Goal matrix after F893/F894, and unfocused frames in frame_stats |
 | [F894](log/F0894.md) | 2026-11-24 | Derby collision frames: car_batch refresh outside rebuilds |
-| [F893](log/F0893.md) | 2026-11-24 | Bevy GPU-preprocessing bind-group cache (vendored bevy_pbr) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

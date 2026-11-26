@@ -190,7 +190,7 @@ tracks/europe/nurburgring/start_lights.xml
 tracks/europe/nurburgring/tracksplit.pssg
 tracks/europe/nurburgring/trees.pssg
 tracks/europe/nurburgring/treestextures.pssg
-# Speech lines the ported events can play (grid-app --speech-files), not read by this run:
+# Speech lines the ported events can play (grid-app --speech-files), played only on cue:
 audio/speech/en/03_Damage/bodyDamage_1.raw
 audio/speech/en/03_Damage/bodyDamage_2.raw
 audio/speech/en/03_Damage/bodyDamage_3.raw

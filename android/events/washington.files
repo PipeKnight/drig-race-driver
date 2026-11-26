@@ -42,7 +42,6 @@ audio/GroupModeVolumes.bin
 audio/ImpactVarieties.bin
 audio/loc_usa.WIP
 audio/mec_vip.WIP
-audio/speech/en/08_accidents/accidentCloseSmall_1.raw
 cars/carlodsettings.xml
 cars/vip/cameras.xml
 cars/vip/livery_00/textures_high/vip_tex_high_00.pssg
@@ -150,7 +149,7 @@ tracks/usa/washington/start_lights.xml
 tracks/usa/washington/tracksplit.pssg
 tracks/usa/washington/trees.pssg
 tracks/usa/washington/treestextures.pssg
-# Speech lines the ported events can play (grid-app --speech-files), not read by this run:
+# Speech lines the ported events can play (grid-app --speech-files), played only on cue:
 audio/speech/en/03_Damage/bodyDamage_1.raw
 audio/speech/en/03_Damage/bodyDamage_2.raw
 audio/speech/en/03_Damage/bodyDamage_3.raw
@@ -1173,6 +1172,7 @@ audio/speech/en/07_performance/slipstream_3.raw
 audio/speech/en/08_accidents/bigAccident_1.raw
 audio/speech/en/08_accidents/bigAccident_2.raw
 audio/speech/en/08_accidents/bigAccident_3.raw
+audio/speech/en/08_accidents/accidentCloseSmall_1.raw
 audio/speech/en/08_accidents/bigAccidentbehind_1.raw
 audio/speech/en/08_accidents/bigAccidentbehind_2.raw
 audio/speech/en/08_accidents/bigAccidentbehind_3.raw

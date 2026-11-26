@@ -132,12 +132,14 @@ if ($Stage) {
     return
 }
 # Speech streams one file per spoken line, so a run reads only the lines it
-# played: every line the ported events can play is listed as well.
+# played: every line the ported events can play is listed as well, after the
+# marker, even one this run played. The stage check requires every file above
+# the marker, and a played line depends on the run's events (a crash cue, F951).
 $speech = @(& $exePath --speech-files --data-dir $data | Where-Object { $_ -like 'audio/*' })
 if ($LASTEXITCODE -ne 0 -or -not $speech.Count) { throw 'grid-app --speech-files failed' }
-$readKeys = @{}
-$read | ForEach-Object { $readKeys[$_.ToLowerInvariant()] = $true }
-$speech = @($speech | Where-Object { -not $readKeys.ContainsKey($_.ToLowerInvariant()) })
+$speechKeys = @{}
+$speech | ForEach-Object { $speechKeys[$_.ToLowerInvariant()] = $true }
+$read = @($read | Where-Object { -not $speechKeys.ContainsKey($_.ToLowerInvariant()) })
 if (-not $KeepMirror) { Remove-Item -LiteralPath $gridRoot -Recurse -Force }
 $list = Join-Path $root "android\events\$Event.files"
 $header = "# Files grid-app read for the $Event bundle in a desktop run of the event menu and a`n" +
@@ -145,7 +147,7 @@ $header = "# Files grid-app read for the $Event bundle in a desktop run of the e
     "# and fails when one is missing. Regenerate after a change that reads new game files.`n" +
     "# Paths relative to the GRID folder; names only.`n"
 $text = $header + (($read | ForEach-Object { "$_`n" }) -join '') +
-    "# Speech lines the ported events can play (grid-app --speech-files), not read by this run:`n" +
+    "# Speech lines the ported events can play (grid-app --speech-files), played only on cue:`n" +
     (($speech | ForEach-Object { "$_`n" }) -join '')
 [IO.File]::WriteAllText($list, $text)
 Write-Output "wrote $list ($($read.Count) files read, $($speech.Count) speech lines)"

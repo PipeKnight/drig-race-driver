@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F953](F0953.md) | 2026-11-26 | Bundle list generator keeps played speech lines in the speech section |
 | [F952](F0952.md) | 2026-11-26 | Disk audit by owner: tools/disk_audit.py |
 | [F951](F0951.md) | 2026-11-26 | Android bundle lists regenerated for G435's route cloth files |
 | [F950](F0950.md) | 2026-11-26 | Phone fill-light probe (partial): about 1 heavy ms |
