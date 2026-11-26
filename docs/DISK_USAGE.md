@@ -271,3 +271,32 @@ First run, 26 November 2026, with C: at 24.9 GB free of 931 GB:
   - the Codex worktree `grid-graphics-delivery`: 55.9 GB, with its staging checkouts under `local/source-staging`;
   - `~/.codex/sessions`: 16.9 GB of rollout logs;
   - the build dir of the idle `mac-perf` session: 23.0 GB.
+
+### 12.1 All repositories and agent projects (26 November 2026, later the same day)
+
+The owner asked to cover Codex's other projects, their repositories and sessions, and every repository on the PC. The script now does this, in about 30–55 s:
+- It finds repositories in two ways:
+  - a shallow scan for `.git`: C:/ and E:/ two levels deep, the home folder, Documents, OneDrive, `~/source/repos`;
+  - every folder the agents list as a project: `[projects.'…']` in `~/.codex/config.toml`, the `projects` keys of `~/.claude.json`, and the working folder (`cwd`) in the first record of every Codex session.
+- Repositories are grouped by their git common dir, and `git worktree list` gives each one's checkouts. Folders under `<repo>/.claude/worktrees` and `~/.codex/worktrees` that git no longer lists are shown as `(unregistered)`.
+- Another repository's main checkout belongs to the agent that works there, if only one agent does.
+- Each checkout's build dir is mapped with `cargo metadata`, so build dirs of other Rust repositories are no longer orphans.
+- Agent project folders outside every repository are measured as `<agent> folder: <path>`.
+- The session logs are split by project:
+  - Codex sessions by the `cwd` of their first record. Codex stores older sessions as `.jsonl.zst`; their first line is decompressed with Python 3.14's `compression.zstd`.
+  - Claude transcripts by matching the `~/.claude/projects` folder name against each known path, with every character other than A–Z, a–z and 0–9 replaced by `-`.
+- A new "By project" table sums every entry by repository or agent folder. The snapshot also lists the repositories found.
+
+Run of 26 November 2026, 16:15, after the `mac-perf` build dir was deleted (C: 44 GB free):
+
+| Project | Size, GB | Written in 24 h, GB |
+|---|---:|---:|
+| Reassembly (this project, all checkouts, build dirs, `local/`, E:, sessions) | 250.6 | 62.9 |
+| `C:/Dev/Decomps/toca-race-driver-3` (Codex) | 126.8 | 12.0 |
+| `C:/Dev/Rehancer` (Codex) | 23.4 | 0.0 |
+| `~/OneDrive/Документы/Reassembly` (the old project folder, not a repository; Codex sessions) | 11.6 | 4.4 |
+| `~/Documents/Codex` (Codex scratch folders and their sessions) | 2.1 | 0.0 |
+
+By owner: Codex 257 GB (38 GB written in 24 h), Claude 94 GB (41 GB), shared 68 GB (1 GB).
+- Codex's other projects are its largest share. The single largest checkout on the PC is Codex's `toca-race-driver-3`: 127 GB, 12 GB written in 24 h.
+- 11.4 GB of Codex session logs are still filed under the old OneDrive project path.
