@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F947](F0947.md) | 2026-11-26 | Phone warm chain: main thread bound when warm; tonemap dropped |
 | [F946](F0946.md) | 2026-11-26 | Phone batch 1 verdicts: lighting is the lights, not env maps; -Shadows bench probe |
 | [F945](F0945.md) | 2026-11-26 | Claude Code token audit script and findings |
 | [F944](F0944.md) | 2026-11-26 | Static driver figures off by default until the phone A/B |

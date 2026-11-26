@@ -406,13 +406,13 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | 1 | size cull, ~8 px | `cull100` | cool 23.16 vs 23.95 | 21.53 vs 20.52 | heavy −0.79 (−3.4 %) | 34.8 vs 37.2 | 35.2 vs 32.5 | unreadable | cool pair: heavy vis −14 %, d_opaque −12 %; FPS mean pulled down by outlier run 2-B; warm repeat pending |
 | ? | size cull, ~4 px | `cull200` | 27.15 vs 27.43 (cool) | 22.73 vs 23.10 | heavy −0.28 (−1.0 %) | 37.9 vs 37.5 | 32.0 vs 32.1 | unreadable | ABAB, start ≤37 °C, 35 heavy s: heavy vis −6 %, d_opaque −4 %; weak, not beyond noise |
 | drop | ADPF hints | `adpf` | B = plain lean, 24.38–24.74 | – | – | – | – | unreadable | unsupported here: `adpf version=1 event=open result=error tids=8` (APerformanceHint_createSession returns null on this phone), so the word changes nothing |
-| probe | shading upper bound | `lighting` | cool 23.98 → 16.53 | 20.91 → 15.96 | heavy −7.45 (−31 %) | 36.7 → 42.3 | 32.9 → 29.5 | unreadable | probe only (no light); 33–50 ms frames 2.8 → 0.7 %, heavy main thread 20.5 → 18.2 ms, r_encode 10.3 → 7.8 ms. On the phone's baseline preset this is the two directional lights (shadowed sun, shadowless back fill) and the sun's shadow lookups: no env map exists there |
-| 2 | no tonemap/dither | `tonemap` | cool 24.20 → 23.43 | 21.15 → 20.63 | heavy −0.77 (−3.2 %) | 36.3 → 37.0 | 33.8 → 32.5 | unreadable | against the clean pair-3 A run only; colours change, so it needs the owner's look check before it can be a default |
-| probe | fewer rows | `render360` | cool 24.19 → 21.24 | 20.86 → 19.48 | heavy −2.95 (−12 %) | 37.1 → 37.3 | 32.5 → 32.7 | unreadable | probe only: 44 % fewer pixels for 12 % less heavy GPU, so the heavy frame is mostly not per-pixel work at 480 rows |
+| probe | shading upper bound | `lighting` | warm 27.70 → 20.70 (−7.0); cool 23.98 → 16.53 | 20.91 → 15.96 | heavy −7.45 (−31 %) | 36.7 → 42.3 | 32.9 → 29.5 | unreadable | probe only (no light); 33–50 ms frames 2.8 → 0.7 %, heavy main thread 20.5 → 18.2 ms, r_encode 10.3 → 7.8 ms. On the phone's baseline preset this is the two directional lights (shadowed sun, shadowless back fill) and the sun's shadow lookups: no env map exists there |
+| drop | no tonemap/dither | `tonemap` | warm 27.70 → 27.61 (−0.1, noise); cool 24.20 → 23.43 | 21.15 → 20.63 | heavy −0.77 (−3.2 %) | 36.3 → 37.0 | 33.8 → 32.5 | unreadable | against the clean pair-3 A run only; nothing left warm, and colours change: dropped |
+| probe | fewer rows | `render360` | warm 27.70 → 25.80 (−1.9); cool 24.19 → 21.24 | 20.86 → 19.48 | heavy −2.95 (−12 %) | 37.1 → 37.3 | 32.5 → 32.7 | unreadable | probe only: 44 % fewer pixels for 12 % less heavy GPU, so the heavy frame is mostly not per-pixel work at 480 rows |
 | skip | no cube samples | `env_maps` | – | | | | | | no-op on the phone: the baseline preset installs neither the sky IBL nor the scene probe (both need enhanced; PC log `sky_ibl=false`), so there is no map to remove; do not spend a pair on it |
 | ? | no cockpit mirror | `mirror` | pending | | | | | | head-cam row |
 | ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
-| probe | no shadow casters | `shadows` | cool 23.95 → 22.99 | 20.93 → 20.07 | heavy −0.96 (−4.0 %) | 36.8 → 38.5 | 33.0 → 31.6 | unreadable | ceiling probe; 33–50 ms frames 2.6 → 1.4 %. Only the shadow pass empties: the main pass still samples the sun's map |
+| probe | no shadow casters | `shadows` | warm 27.70 → 25.80 (−1.9); cool 23.95 → 22.99 | 20.93 → 20.07 | heavy −0.96 (−4.0 %) | 36.8 → 38.5 | 33.0 → 31.6 | unreadable | ceiling probe; 33–50 ms frames 2.6 → 1.4 %. Only the shadow pass empties: the main pass still samples the sun's map |
 | ? | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` | pending | | | | | | batch 2; look approved by the owner |
 | ? | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | pending | | | | | | batch 3 probe: splits `lighting` (fill vs sun) |
 | ? | no sun shadow map | `-Shadows off` | pending | | | | | | batch 3 probe: no shadow pass and no lookups; with `shadows` it splits lookups from casters |
@@ -422,6 +422,24 @@ started at 36.7–37.0 °C, cap 60 at 60 Hz. The first runs were slower because 
 the owner removed it, and the clean A runs took 23.9–24.2 heavy GPU ms. The Adreno clock files were unreadable.
 One `adpf` B run lost the device during loading (DeviceLost at 16.8 s after a 2.7 s frame, then a panic in a
 wgpu destructor, wgpu-core queue.rs:208 / wgpu-hal native.rs:387); its rerun was clean, 1 of 73 logs.
+
+Warm chain (phone session, 2026-11-26): the same APK, seven 200 s runs back to back without cooling (start
+39.6–39.9 °C, end 40.6–41.0 °C), in the order warm-up, lean, `lighting`, `render360`, `shadows`, `tonemap`, lean.
+Heavy seconds are the 62 heavy seconds of the two lean runs. Lean drifted 1.2 ms between its two runs (28.30 / 27.10),
+so differences under about 1 ms are noise.
+
+| Run | FPS | GPU ms | Heavy GPU ms | Heavy main ms | p99 ms | 33–50 ms frames | ≥50 ms frames |
+|---|---|---|---|---|---|---|---|
+| lean (mean of 2) | 28.0 | 25.49 | 27.70 | 34.0 | 44.4 | 67 % | 1.4 % |
+| `lighting` | 32.1 | 19.95 | 20.70 | 29.4 | 38.4 | 31 % | 0.1 % |
+| `render360` | 28.2 | 24.11 | 25.80 | 33.5 | 43.9 | 67 % | 0.7 % |
+| `shadows` | 29.4 | 24.55 | 25.80 | 32.6 | 42.5 | 55 % | 0.2 % |
+| `tonemap` | 27.8 | 25.61 | 27.61 | 33.7 | 44.6 | 72 % | 0.9 % |
+
+Warm, the main thread decides: heavy main rises to 34.0 ms (cool 20.6) while heavy GPU is 27.7, so `render360`
+saves 1.9 GPU ms and no FPS. `shadows` and `lighting` also cut the heavy main thread (32.6 and 29.4 ms: fewer shadow
+draws and light work to prepare), which is why they are the only words that raise warm FPS. `tonemap` keeps nothing
+warm and is dropped. GPU cuts pay off on the warm phone only together with the main-thread work (CPU session).
 
 Reading: no batch-1 word is a free lean default. `tonemap` (−0.77) and `shadows` (−0.96) are small and change the
 look; `cull100` (−0.79) is the best look-neutral cut so far, waiting for its warm repeat. The big remaining cost is
