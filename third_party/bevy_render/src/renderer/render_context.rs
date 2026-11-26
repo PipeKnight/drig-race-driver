@@ -18,9 +18,41 @@ use bevy_log::info_span;
 use core::marker::PhantomData;
 use wgpu::CommandBuffer;
 
+// DRIG patch (F935): a pending item is a finished command buffer or, with
+// `GRID_BEVY_PARALLEL_FINISH=1`, a render system's encoder whose `finish` is
+// left for `take`. wgpu 29 records the backend commands in `finish`
+// (wgpu-core `CommandEncoder::encode_commands`), so finishing every system's
+// encoder in turn on the render thread costs most of the encode time; `take`
+// finishes them on the compute pool instead, keeping the submit order.
+enum PendingItem {
+    Buffer(CommandBuffer),
+    Encoder(CommandEncoder),
+}
+
+impl PendingItem {
+    fn finish(self) -> CommandBuffer {
+        match self {
+            PendingItem::Buffer(buffer) => buffer,
+            PendingItem::Encoder(encoder) => encoder.finish(),
+        }
+    }
+}
+
+/// DRIG patch (F935): whether render systems' encoders are finished together,
+/// in parallel, when the pending buffers are taken: `GRID_BEVY_PARALLEL_FINISH`,
+/// read once; `1` means on, anything else or no value off (upstream: each
+/// system's encoder is finished when its commands are applied).
+pub fn parallel_finish_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("GRID_BEVY_PARALLEL_FINISH").is_ok_and(|value| value.trim() == "1")
+    })
+}
+
 #[derive(Default)]
 struct PendingCommandBuffersInner {
-    buffers: Vec<CommandBuffer>,
+    // DRIG patch (F935): finished buffers and deferred encoders in submit order.
+    items: Vec<PendingItem>,
     encoders: Vec<CommandEncoder>,
 }
 
@@ -36,7 +68,15 @@ impl Default for PendingCommandBuffers {
 
 impl PendingCommandBuffers {
     pub fn push(&mut self, buffers: impl IntoIterator<Item = CommandBuffer>) {
-        self.0.buffers.extend(buffers);
+        // DRIG patch (F935)
+        self.0.items.extend(buffers.into_iter().map(PendingItem::Buffer));
+    }
+
+    /// DRIG patch (F935): queues an encoder in submit order, after the buffers
+    /// pushed so far; [`Self::take`] finishes it. Unlike [`Self::push_encoder`],
+    /// whose encoders go after every buffer.
+    pub fn push_unfinished(&mut self, encoder: CommandEncoder) {
+        self.0.items.push(PendingItem::Encoder(encoder));
     }
 
     pub fn push_encoder(&mut self, encoder: CommandEncoder) {
@@ -44,20 +84,45 @@ impl PendingCommandBuffers {
     }
 
     pub fn take(&mut self) -> Vec<CommandBuffer> {
+        // DRIG patch (F935): deferred encoders are finished here, in parallel
+        // when there are several; the order is kept.
+        let items = core::mem::take(&mut self.0.items);
+        let deferred = items
+            .iter()
+            .filter(|item| matches!(item, PendingItem::Encoder(_)))
+            .count();
+        let mut buffers = if deferred > 1 {
+            finish_in_parallel(items)
+        } else {
+            items.into_iter().map(PendingItem::finish).collect()
+        };
         let encoders: Vec<_> = self.0.encoders.drain(..).collect();
         for encoder in encoders {
-            self.0.buffers.push(encoder.finish());
+            buffers.push(encoder.finish());
         }
-        core::mem::take(&mut self.0.buffers)
+        buffers
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.buffers.is_empty() && self.0.encoders.is_empty()
+        self.0.items.is_empty() && self.0.encoders.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.0.buffers.len() + self.0.encoders.len()
+        self.0.items.len() + self.0.encoders.len()
     }
+}
+
+/// DRIG patch (F935): finishes `items` on the compute task pool (the calling
+/// thread helps), returning the command buffers in the order of `items`.
+fn finish_in_parallel(items: Vec<PendingItem>) -> Vec<CommandBuffer> {
+    let Some(pool) = bevy_tasks::ComputeTaskPool::try_get() else {
+        return items.into_iter().map(PendingItem::finish).collect();
+    };
+    pool.scope(|scope| {
+        for item in items {
+            scope.spawn(async move { item.finish() });
+        }
+    })
 }
 
 #[derive(Default)]
@@ -111,14 +176,25 @@ impl SystemBuffer for RenderContextState {
 
         let inner = &mut *self.0;
 
+        // DRIG patch (F935): with `GRID_BEVY_PARALLEL_FINISH=1` the encoder
+        // goes to the pending list unfinished, after this system's buffers.
+        let deferred = if parallel_finish_enabled() {
+            inner.command_encoder.take()
+        } else {
+            None
+        };
+
         // flush to ensure correct submission order
         if let Some(encoder) = inner.command_encoder.take() {
             inner.command_buffers.push(encoder.finish());
         }
 
-        if !inner.command_buffers.is_empty() {
+        if !inner.command_buffers.is_empty() || deferred.is_some() {
             let mut pending = world.resource_mut::<PendingCommandBuffers>();
             pending.push(core::mem::take(&mut inner.command_buffers));
+            if let Some(encoder) = deferred {
+                pending.push_unfinished(encoder);
+            }
         }
 
         inner.render_device = None;

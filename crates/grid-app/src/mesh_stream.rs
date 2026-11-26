@@ -87,6 +87,15 @@ pub(crate) fn queued_bytes() -> u64 {
     QUEUED_BYTES.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// `queue.write_buffer` calls made by [`upload`] since start (frame_split's
+/// `mesh_stream_writes`: each call stages its own copy in wgpu).
+static UPLOAD_WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Buffer writes made by the render-side upload since the app started.
+pub(crate) fn upload_writes() -> u64 {
+    UPLOAD_WRITES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Per-mesh byte tally for the upload probe (`GRID_MESH_UPLOADS=1`); `None` while off.
 static PER_MESH: Mutex<Option<HashMap<AssetId<Mesh>, u64>>> = Mutex::new(None);
 
@@ -251,6 +260,7 @@ fn upload(writes: Res<RenderWrites>, allocator: Res<MeshAllocator>, queue: Res<R
             }
         };
         queue.write_buffer(slice.buffer, (u64::from(slice.range.start) + first) * stride, bytes);
+        UPLOAD_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

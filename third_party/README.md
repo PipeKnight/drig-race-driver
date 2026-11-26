@@ -49,6 +49,26 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
   otherwise copy the new release here and re-apply the marked changes, checking that no new
   code path changes the two buffers without setting the flag. After any change here, the
   coordinator refreshes the shared build seed (`tools/build_seed.ps1`).
+- Patched again (F935), off by default: `GRID_BEVY_PARALLEL_FINISH=1` defers every render
+  system's `CommandEncoder::finish` to the submit and runs them in parallel on the compute pool.
+  - `src/renderer/render_context.rs`: `PendingCommandBuffers` keeps finished buffers and
+    deferred encoders in one list in push order (`PendingItem`, `push_unfinished`). `take`
+    finishes them, in parallel through `ComputeTaskPool::scope` when there are two or more, and
+    returns the buffers in that order, followed by the `push_encoder` encoders as upstream.
+    `RenderContextState`'s `SystemBuffer::queue` pushes its encoder unfinished while the switch
+    is on. `parallel_finish_enabled` reads the variable once and is re-exported from
+    `src/renderer/mod.rs`.
+  - Why: wgpu 29 records the backend commands only in `finish` (wgpu-core
+    `CommandEncoder::encode_commands`, under the encoder's own lock and a shared read of the
+    device's snatch lock). Upstream finishes each system's encoder in turn on the render thread
+    when it applies the system's commands. On the phone (F935) the 3D camera's finishes alone
+    took 4.2 ms of the 9.8 ms encode, between the 3D camera's last marker and the 2D camera's
+    first (frame_split `enc`).
+  - Test: `crates/grid-app/tests/parallel_finish.rs` pushes 24 copy encoders, deferred,
+    finished and trailing, and checks on the GPU that each one ran right after the one pushed
+    before it. It needs a GPU and runs in prepush's full tier.
+  - Upgrading Bevy: drop it if upstream finishes encoders in parallel itself; otherwise re-apply
+    it and check that every pending encoder still goes through `take`.
 
 ## wgpu-core 29.0.4
 

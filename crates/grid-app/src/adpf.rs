@@ -28,6 +28,16 @@ const COLLECT_FRAMES: u32 = 120;
 const MAX_TIDS: usize = 16;
 /// The frame budget: the game's 60 Hz cap (F928).
 pub const TARGET_NS: i64 = 16_666_667;
+
+/// The session's target: `GRID_ADPF_TARGET_MS` when set (1–1000 ms; e.g. 33.3
+/// under a 30 FPS cap, so the hint does not ask for 60 FPS clocks; F935),
+/// else [`TARGET_NS`].
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn target_ns(env: Option<&str>) -> i64 {
+    env.and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|ms| (1.0..=1000.0).contains(ms))
+        .map_or(TARGET_NS, |ms| (ms * 1e6).round() as i64)
+}
 /// A `report` log line every this many frames while the session is open.
 #[cfg(target_os = "android")]
 const REPORT_EVERY: u32 = 600;
@@ -254,8 +264,9 @@ mod imp {
         };
         if s.session.is_none() {
             let tids = TIDS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let target = super::target_ns(std::env::var("GRID_ADPF_TARGET_MS").ok().as_deref());
             // SAFETY: the manager from getManager, a valid tid slice.
-            let session = unsafe { (api.create)(api.manager as *mut c_void, tids.as_ptr(), tids.len(), TARGET_NS) };
+            let session = unsafe { (api.create)(api.manager as *mut c_void, tids.as_ptr(), tids.len(), target) };
             if session.is_null() {
                 log_line!("adpf version=1 event=open result=error tids={}", tids.len());
                 s.api = None;
@@ -269,7 +280,7 @@ mod imp {
                 "adpf version=1 event=open result=ok tids={} gpu_report={} target_ms={:.2}",
                 tids.len(),
                 api.api35.is_some(),
-                TARGET_NS as f64 * 1e-6
+                target as f64 * 1e-6
             );
         }
         let (Some(begin), Some(previous), Some(session)) = (s.begin, s.previous, s.session) else {
@@ -325,5 +336,13 @@ mod tests {
         // Zero is invalid for the totals and the CPU part; the CPU part never exceeds the total.
         assert_eq!(Work::new(0, 0, 0), Work { total_ns: 1, cpu_ns: 1, gpu_ns: 0 });
         assert_eq!(Work::new(5, 9, 0).cpu_ns, 5);
+    }
+
+    #[test]
+    fn target_from_env() {
+        assert_eq!(target_ns(None), TARGET_NS);
+        assert_eq!(target_ns(Some(" 33.3 ")), 33_300_000);
+        assert_eq!(target_ns(Some("0")), TARGET_NS);
+        assert_eq!(target_ns(Some("x")), TARGET_NS);
     }
 }

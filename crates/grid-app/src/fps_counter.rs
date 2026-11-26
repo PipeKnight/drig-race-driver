@@ -258,7 +258,7 @@ fn update(
     // Where the frame's time went (frame_split.rs, docs/PERFORMANCE.md).
     let (split, detail) = crate::frame_split::window_report(stats.seconds);
     println!(
-        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} p99_ms={:.2} over10={} over16={} frames={} sim_ticks_per_s={rate}{res}{}{split}{} unfocused={} ft_hist={}",
+        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} p99_ms={:.2} over10={} over16={} frames={} sim_ticks_per_s={rate}{res}{}{}{split}{} unfocused={} ft_hist={}",
         stats.fps,
         stats.mean_ms,
         stats.worst_ms,
@@ -267,6 +267,7 @@ fn update(
         stats.over16,
         stats.frames,
         crate::perf_test::stats_suffix(),
+        crate::cpu_place::window_report(stats.frames) + &crate::thermal::window_report(),
         if lift { " cover=tail" } else { "" },
         std::mem::take(&mut counter.unfocused),
         stats.hist

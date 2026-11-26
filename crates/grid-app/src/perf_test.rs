@@ -366,6 +366,8 @@ pub fn install(app: &mut App) {
                 "tiny_shadows" => s.tiny_shadows = true,
                 "tonemap" => s.tonemap = true,
                 "adpf" => s.adpf = true,
+                // CPU placement words (cpu_place.rs reads them itself).
+                w if crate::cpu_place::is_word(w) => {}
                 "lean" => s.add(Switches::LEAN),
                 "no_reflections" => s.add(Switches::NO_REFLECTIONS),
                 rows if rows.starts_with("render") => {

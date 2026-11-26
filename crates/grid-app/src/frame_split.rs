@@ -682,7 +682,8 @@ fn main_end(
     image_assets: Res<Assets<Image>>,
     cameras: Query<(Entity, &Camera, &VisibleEntities), With<Camera3d>>,
     lights: Query<&CascadesVisibleEntities>,
-    mut streamed_before: Local<u64>,
+    // mesh_stream totals at the previous frame: (queued bytes, write_buffer calls).
+    mut stream_before: Local<(u64, u64)>,
 ) {
     // The render world prepares each added or modified mesh once per frame, however many
     // events it got: count distinct ids. A mesh kept for the main world only is not uploaded.
@@ -727,7 +728,9 @@ fn main_end(
     }
     // Vertex bytes written in place (mesh_stream), not counted as uploads.
     let queued = crate::mesh_stream::queued_bytes();
-    let streamed = queued.saturating_sub(std::mem::replace(&mut *streamed_before, queued));
+    let streamed = queued.saturating_sub(std::mem::replace(&mut stream_before.0, queued));
+    let writes = crate::mesh_stream::upload_writes();
+    let stream_writes = writes.saturating_sub(std::mem::replace(&mut stream_before.1, writes));
     let laps: [u64; lap::N] = std::array::from_fn(|i| LAPS[i].swap(0, Ordering::Relaxed));
     {
         let mut m = MAIN_LAPS.lock().unwrap_or_else(|e| e.into_inner());
@@ -763,6 +766,7 @@ fn main_end(
         a.mesh_up += mesh.0;
         a.mesh_bytes += mesh.1;
         a.stream_bytes += streamed;
+        a.stream_writes += stream_writes;
         a.image_up += image.0;
         a.image_bytes += image.1;
         a.visible += visible;
@@ -1404,6 +1408,8 @@ struct Acc {
     mesh_up: u64,
     mesh_bytes: u64,
     stream_bytes: u64,
+    /// mesh_stream `write_buffer` calls (`mesh_stream_writes`, per main frame).
+    stream_writes: u64,
     image_up: u64,
     image_bytes: u64,
     visible: u64,
@@ -1635,13 +1641,14 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
         let m = f64::from(a.main_frames.max(1));
         let secs = seconds.max(1e-3);
         s += &format!(
-            " vis={:.0} casters={:.0} views3d={:.1} mesh_up_s={:.1} mesh_kb_s={:.0} mesh_stream_kb_s={:.0} img_up_s={:.1} img_kb_s={:.0}",
+            " vis={:.0} casters={:.0} views3d={:.1} mesh_up_s={:.1} mesh_kb_s={:.0} mesh_stream_kb_s={:.0} mesh_stream_writes={:.1} img_up_s={:.1} img_kb_s={:.0}",
             a.visible as f64 / m,
             a.casters as f64 / m,
             a.views3d as f64 / m,
             a.mesh_up as f64 / secs,
             a.mesh_bytes as f64 / 1024. / secs,
             a.stream_bytes as f64 / 1024. / secs,
+            a.stream_writes as f64 / m,
             a.image_up as f64 / secs,
             a.image_bytes as f64 / 1024. / secs,
         );

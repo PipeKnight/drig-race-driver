@@ -170,6 +170,8 @@ fn init_compute_pool(threads: usize) {
             .num_threads(threads)
             .thread_name("Compute Task Pool".into())
             .stack_size(COMPUTE_STACK)
+            // Thread ids for the CPU placement switches (cpu_place.rs).
+            .on_thread_spawn(crate::cpu_place::note_pool_thread)
             .build()
     });
 }

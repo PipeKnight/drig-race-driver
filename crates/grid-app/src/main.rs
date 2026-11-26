@@ -154,6 +154,8 @@ mod input;
 mod lean_pieces;
 mod mesh_stream;
 mod mobile;
+mod cpu_place;
+mod thermal;
 mod motion_capture;
 mod skid_phase_ledger;
 mod smoke_ct_neutral;
@@ -5302,6 +5304,12 @@ pub(crate) fn race_app(
             adpf::install(&mut app);
             // Android: the mobile preset (lower render resolution).
             mobile::install(&mut app);
+            // Phone CPU placement experiments and per-thread scheduler counters
+            // (cpu_place.rs, docs/ANDROID_CPU.md); off by default.
+            cpu_place::install(&mut app);
+            // Phone thermal headroom in frame_stats and the optional thermal
+            // governor (thermal.rs, GRID_THERMAL_GOV); the governor is off by default.
+            thermal::install(&mut app);
             // The Race Options front end with Driver Aids before the race
             // (docs/DRIVER_AIDS.md); not for scripted runs.
             if profile.front_end != Some(false)

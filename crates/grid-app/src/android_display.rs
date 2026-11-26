@@ -30,9 +30,17 @@ pub struct Display {
     hinted: Option<usize>,
     /// A hint was sent, so `None` must be sent as 0 (no preference).
     sent: bool,
+    /// The thermal governor's lower cap (thermal.rs, F935); the setting and
+    /// the display hint stay as they are.
+    thermal_hz: Option<f32>,
 }
 
 impl Display {
+    /// The thermal governor's cap, `None` to lift it.
+    pub fn set_thermal_cap(&mut self, hz: Option<f32>) {
+        self.thermal_hz = hz;
+    }
+
     /// A new hint from the Video screen, sent on the next frame.
     pub fn set_refresh(&mut self, hz: Option<f32>) {
         if self.refresh_hz != hz {
@@ -107,7 +115,11 @@ fn watch_rate(time: Res<Time<Real>>, mut next: Local<f32>, mut last: Local<Optio
 /// than the hint asks (a 120 Hz panel), and Fifo alone would then present at
 /// the panel's rate. Sleeps at the end of the main schedule; System has no cap.
 fn cap(display: Res<Display>, mut due: Local<Option<std::time::Instant>>) {
-    let Some(hz) = display.refresh_hz else {
+    let hz = match (display.refresh_hz, display.thermal_hz) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    let Some(hz) = hz else {
         *due = None;
         return;
     };
@@ -125,6 +137,7 @@ pub fn install(app: &mut App, refresh_hz: Option<f32>) {
         refresh_hz,
         hinted: None,
         sent: false,
+        thermal_hz: None,
     })
     .add_systems(PreUpdate, (update, watch_rate))
     .add_systems(Last, cap);

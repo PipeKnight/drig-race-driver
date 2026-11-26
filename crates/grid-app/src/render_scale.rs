@@ -435,6 +435,9 @@ pub struct RenderScale {
     pub dynamic: Option<Dynamic>,
     /// The Performance test holds the setting (no dynamic height).
     pub hold: bool,
+    /// The thermal governor's `scale` step (thermal.rs, F935): the dynamic
+    /// height's ceiling as a share of its normal value (never below the floor).
+    pub thermal_share: Option<f32>,
     image: Option<Handle<Image>>,
     display: Option<Entity>,
 }
@@ -684,6 +687,10 @@ fn adjust_height(mut scale: ResMut<RenderScale>, mut work: ResMut<Work>, time: R
     }
     let scale_factor = scale.scale_factor;
     let (floor, ceiling) = auto_range(scale.screen.y, scale_factor);
+    let ceiling = match scale.thermal_share {
+        Some(share) => ((ceiling as f32 * share) as u32).max(floor),
+        None => ceiling,
+    };
     let Some(d) = scale.dynamic.as_mut() else {
         return;
     };
@@ -721,6 +728,7 @@ pub fn install(app: &mut App, height: RenderHeight) {
         render: UVec2::ZERO,
         dynamic,
         hold: false,
+        thermal_share: None,
         image: None,
         display: None,
     })
