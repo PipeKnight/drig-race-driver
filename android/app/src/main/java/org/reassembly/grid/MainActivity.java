@@ -1,7 +1,11 @@
 package org.reassembly.grid;
 
+import android.app.GameManager;
+import android.app.GameState;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.os.Process;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -140,6 +144,28 @@ public class MainActivity extends GameActivity {
      */
     public void rumble(int left, int right) {
         runOnUiThread(() -> rumble.set(left, right, pads.first()));
+    }
+
+    /**
+     * Called by android.rs at start-up when `[diagnostics] sustained_performance = on`
+     * (docs/ANDROID_GPU.md): asks for the sustained performance mode on our window and
+     * tells the platform game service that gameplay runs (GameManager.setGameState, API 33).
+     * Returns what the device reports, for the bench log: whether the sustained mode is
+     * supported, and the game mode the user or the system chose for this app.
+     */
+    public String sustainedPerformance() {
+        PowerManager power = getSystemService(PowerManager.class);
+        boolean supported = power != null && power.isSustainedPerformanceModeSupported();
+        GameManager games = getSystemService(GameManager.class);
+        int mode = games != null ? games.getGameMode() : -1;
+        runOnUiThread(() -> {
+            getWindow().setSustainedPerformanceMode(true);
+            if (games != null && Build.VERSION.SDK_INT >= 33) {
+                games.setGameState(new GameState(false, GameState.MODE_GAMEPLAY_INTERRUPTIBLE));
+            }
+        });
+        return "supported=" + supported + " game_mode=" + mode + " game_state="
+                + (games != null && Build.VERSION.SDK_INT >= 33 ? "gameplay" : "none");
     }
 
     /**

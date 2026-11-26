@@ -2463,6 +2463,11 @@ pub(crate) fn race_app(
         wgpu::hal::drig_pre_rotation::ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
         println!("render_pre_rotation on");
     }
+    #[cfg(target_os = "android")]
+    if settings::diagnostics().sustained_performance {
+        let answer = android::sustained_performance();
+        println!("android_sustained_performance on {}", answer.as_deref().unwrap_or("call=failed"));
+    }
     let mut root = profile.root.clone();
     let mut route = match &profile.route {
         Some(path) => Route::new(path)?,

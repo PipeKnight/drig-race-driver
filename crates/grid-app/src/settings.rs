@@ -141,6 +141,10 @@ pub struct Diagnostics {
     /// the panel's orientation and the last pass rotates the picture, so the compositor
     /// does not. Test switch for the phone A/B; off by default.
     pub pre_rotation: bool,
+    /// Android: `Window.setSustainedPerformanceMode(true)` and the game state "gameplay"
+    /// (GameManager) at start-up, for the thermal soak A/B (docs/ANDROID_GPU.md); off by
+    /// default, no effect elsewhere.
+    pub sustained_performance: bool,
 }
 
 impl Default for Diagnostics {
@@ -175,6 +179,7 @@ impl Default for Diagnostics {
             camera_presses: Vec::new(),
             perf_test: None,
             pre_rotation: false,
+            sustained_performance: false,
         }
     }
 }
@@ -216,6 +221,7 @@ impl Diagnostics {
             camera_presses: text("GRID_CAMERA_PRESSES").map_or_else(Vec::new, |v| seconds_list(&v).unwrap_or_default()),
             perf_test: text("GRID_PERF_TEST"),
             pre_rotation: text("GRID_PRE_ROTATION").is_some_and(|v| v == "1"),
+            sustained_performance: text("GRID_SUSTAINED_PERFORMANCE").is_some_and(|v| v == "1"),
         }
     }
 
@@ -261,6 +267,7 @@ impl Diagnostics {
             "camera_presses" => self.camera_presses = seconds_list(value).ok_or_else(|| number(key))?,
             "perf_test" => self.perf_test = text(),
             "pre_rotation" => self.pre_rotation = on(key, value)?,
+            "sustained_performance" => self.sustained_performance = on(key, value)?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
@@ -1534,6 +1541,7 @@ max_ticks_per_frame = 2
 tick_delay_ms = 20
 perf_test = auto
 pre_rotation = on
+sustained_performance = on
 "#;
 
     #[test]
@@ -1596,6 +1604,7 @@ pre_rotation = on
         assert_eq!(s.diagnostics.max_ticks_per_frame, Some(2));
         assert_eq!(s.diagnostics.perf_test.as_deref(), Some("auto"));
         assert!(s.diagnostics.pre_rotation && !Diagnostics::default().pre_rotation);
+        assert!(s.diagnostics.sustained_performance && !Diagnostics::default().sustained_performance);
         assert_eq!(s.diagnostics.tick_delay_ms, Some(20.));
     }
 

@@ -185,6 +185,20 @@ lines are the arguments `--settings …/bench.ini --drive-ticks 30000`. A script
 Race Options screen and drives itself (`drive_autopilot enabled=true scope=scripted-validation`). The owner's settings.ini
 keeps its other keys (controls, video); bench.ini is read last and wins only on the keys it sets.
 
+The phone has no shell environment. `-SetEnv NAME=VALUE` (repeatable) writes `env NAME=VALUE` lines into
+`bench-args.txt`, and the game sets the `GRID_`-prefixed ones as environment variables before the app is built
+(`event_menu::bench_split`). An example is `-SetEnv GRID_PERF_TIMING=1` for the per-stage physics lines
+(`perf_timing`, `perf_rebounded`); the start line `android_bench args=[…] env=[…]` shows them. Any other `env` line
+stays an ordinary argument. `-PerfTest none` writes no `perf_test` key, so the run uses the app's own default (lean
+on the phone since F928).
+
+Thermal soaks: `-Sustained` writes `[diagnostics] sustained_performance = on`. At start-up the app then calls
+`Window.setSustainedPerformanceMode(true)` and, on Android 13+, `GameManager.setGameState` with gameplay
+(`MainActivity.sustainedPerformance`); the log line `android_sustained_performance on supported=… game_mode=…
+game_state=…` records `PowerManager.isSustainedPerformanceModeSupported()` and the game mode the user or system chose
+(0 unsupported, 1 standard, 2 performance, 3 battery, 4 custom). An app cannot set its own game mode. The verdict fails
+when the line is missing.
+
 The script uses only `adb install -r`, `push`, `pull`, `shell am start` / `force-stop`, `logcat` and `rm` of its own two
 files. It never uninstalls, never changes a phone setting and never touches the rest of the data folder, which holds the
 owner's GRID copy and settings.ini.

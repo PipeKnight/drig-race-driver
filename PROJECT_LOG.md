@@ -131,7 +131,8 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   actual races are not tested (no game data). See [docs/MACOS.md](docs/MACOS.md).
 - Android P9–P12: code-only APK importing the user's own GRID folder (F405), bundled event APKs
   (F418), touch/tilt/pad controls (P11, F404), per-system profiling (F395); docs/ANDROID.md.
-- Open: the a11cddf7de27 APKs are not tested on the phone; CPU-bound at about 30–34 FPS (row 85);
+- Open: lean default 33–38 FPS on a cool phone, throttled after 2 min to about 25 (cap 30: 28.6, 1.2 % frames ≥50 ms), dips are heavy views rounded to 50 ms (F933);
+  MIUI votes the app to 60 Hz above its setFrameRate hint, only the phone's settings lift it; no sustained mode or Game Mode on MIUI (F933);
   pad rumble and phone vibration are not felt on the phone yet (row 22).
 - Phone proxy (F919): `tools/phone_proxy.ps1 -Rev A -Compare B` predicts the Xiaomi frame delta from a
   desktop run in about 8 minutes (noise about 2 ms with 3 runs); scene-work gains are an upper bound.
@@ -184,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F933](log/F0933.md) | 2026-11-26 | Phone: lean default verified, dip anatomy, MIUI 60 Hz vote, physics stage split, thermal soaks (cap 30, sustained mode), bench env switches |
 | [F932](log/F0932.md) | 2026-11-26 | Dynamic resolution: a GPU-bound frame time in the hold band counts as late (Mac countdown) |
 | [F931](log/F0931.md) | 2026-11-26 | Steam Deck estimate from E-core and UHD 770 stand-ins |
 | [F930](log/F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
@@ -243,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F876](log/F0876.md) | 2026-11-20 | Car-glass pane proxy material and lamp write guard |
 | [F875](log/F0875.md) | 2026-11-20 | Render prepare: bin buffers uploaded only for changed batch sets (bevy_render patch); r_prepare -0.60 to -1.23 ms |
 | [F874](log/F0874.md) | 2026-11-19 | Render prepare: Bevy bind-group cache over two frames hits 72-77 % but r_prepare does not shrink; route closed |
-| [F873](log/F0873.md) | 2026-11-19 | Render prepare: Bevy bind-group cache for preprocess and environment maps never hits; not merged |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

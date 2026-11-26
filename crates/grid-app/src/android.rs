@@ -265,6 +265,20 @@ pub fn data_ready() -> bool {
         .unwrap_or(true)
 }
 
+/// `MainActivity.sustainedPerformance()`: `Window.setSustainedPerformanceMode(true)` and the
+/// game state "gameplay" (API 33), for `[diagnostics] sustained_performance` (thermal soak
+/// A/B, docs/ANDROID_GPU.md). Returns the device's answer, e.g. `supported=false game_mode=1
+/// game_state=gameplay`.
+pub fn sustained_performance() -> Option<String> {
+    with_activity(|env, activity| {
+        let text = env
+            .call_method(activity, "sustainedPerformance", "()Ljava/lang/String;", &[])?
+            .l()?;
+        let text = jni::objects::JString::from(text);
+        Ok(env.get_string(&text)?.into())
+    })
+}
+
 /// `MainActivity.rumble(left, right)`: vibration amplitudes 0..255 for a pad's two motors, or
 /// the phone's vibrator (force_feedback/android.rs). The FFB thread stays attached to the VM.
 pub fn rumble(left: u8, right: u8) {

@@ -31,7 +31,10 @@ param(
     [int]$Seconds = 450,
     # Fixed ticks of about 1/60 s; the game caps --drive-ticks at 72000.
     [int]$Ticks = 30000,
-    [string]$PerfTest = 'auto',
+    # Developer switches for the phone, NAME=VALUE (GRID_ only), e.g. -SetEnv GRID_PERF_TIMING=1:
+    # written to bench-args.txt as 'env' lines, which the dev build sets before the app starts.
+    [string[]]$SetEnv = @(),
+    [string]$PerfTest = 'auto',  # words for [diagnostics] perf_test; 'none' or '' writes none
     [int]$Laps = 10,
     [int]$Opponents = 11,
     # Fixed render rows for the whole run, so every step and A/B side renders the same pixels (the phone's
@@ -51,6 +54,9 @@ param(
     [switch]$NoInstall,
     # [diagnostics] pre_rotation = on: Vulkan swapchain pre-rotation (third_party/wgpu-hal, F927).
     [switch]$PreRotation,
+    # [diagnostics] sustained_performance = on: Window.setSustainedPerformanceMode and the
+    # GameManager game state at start-up (thermal soaks); the log line says if the phone supports it.
+    [switch]$Sustained,
     # [video] refresh_hz: the frame cap and display-rate hint (60, 90, 120 or system; F927 pacing A/B).
     [string]$RefreshHz = '',
     # Free text for run.txt, such as the phone's case (owner, 2026-11-25: runs before 18:50 were in the case).
@@ -119,14 +125,16 @@ $benchIni = @(
     '[input]', 'force_feedback = off',
     '[diagnostics]', 'autopilot = on'
 )
-if ($PerfTest) { $benchIni += "perf_test = $PerfTest" }
+if ($PerfTest -and $PerfTest -ne 'none') { $benchIni += "perf_test = $PerfTest" }  # 'none': the build's own default profile
 if ($PreRotation) { $benchIni += 'pre_rotation = on' }
+if ($Sustained) { $benchIni += 'sustained_performance = on' }
 $video = @()
 if ($RenderHeight) { $video += @("render_height = $RenderHeight", 'render_height_version = 2') }
 if ($RefreshHz) { $video += @("refresh_hz = $RefreshHz", 'refresh_hz_version = 1') }
 if ($video) { $benchIni += @('[video]') + $video }
 [IO.File]::WriteAllText($ini, ($benchIni -join "`n") + "`n")
-[IO.File]::WriteAllText($argsFile, "--settings`n$files/bench.ini`n--drive-ticks`n$Ticks`n")
+$envLines = ($SetEnv | Where-Object { $_ } | ForEach-Object { "env $_`n" }) -join ''  # developer switches, e.g. GRID_PERF_TIMING=1
+[IO.File]::WriteAllText($argsFile, "--settings`n$files/bench.ini`n--drive-ticks`n$Ticks`n$envLines")
 Invoke-Adb @('push', $ini, "$files/bench.ini") | Out-Null
 Invoke-Adb @('push', $argsFile, "$files/bench-args.txt") | Out-Null
 
@@ -196,9 +204,9 @@ if (-not $after -or $after -eq $before) {
 $log = Join-Path $Out $after
 Invoke-Adb @('pull', "$logs/$after", $log) | Out-Null
 Set-Content -Path (Join-Path $Out 'run.txt') -Value @(
-    "apk=$Apk", "seconds=$Seconds", "ticks=$Ticks", "perf_test=$PerfTest", "pre_rotation=$PreRotation", "render_height=$RenderHeight", "refresh_hz=$RefreshHz",
+    "apk=$Apk", "seconds=$Seconds", "ticks=$Ticks", "perf_test=$PerfTest", "pre_rotation=$PreRotation", "sustained=$Sustained", "render_height=$RenderHeight", "refresh_hz=$RefreshHz",
     "temp_start_c=$tempStart", "temp_end_c=$tempEnd", "note=$Note", "log=$after")
-$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_frame_cap|android_frame_rate|android_display_hz|mobile_preset|event=step step=1 ' |
+$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_sustained_performance|android_frame_cap|android_frame_rate|android_display_hz|mobile_preset|event=step step=1 ' |
     Select-Object -First 14 | ForEach-Object { $_.Line }
 $seen | ForEach-Object { Write-Output "  $_" }
 Write-Output "battery: start $tempStart C, end $tempEnd C"
@@ -209,6 +217,7 @@ if (-not ($seen -match 'android_bench args')) { Write-Output "VERDICT fail: the 
 if (-not ($seen -match 'drive_force_feedback off')) { Write-Output "VERDICT fail: force feedback was not off ($log)"; exit 1 }
 if ($RefreshHz -match '^\d+$' -and -not ($seen -match "android_frame_cap hz=Some\($RefreshHz(\.0)?\)")) { Write-Output "VERDICT fail: the frame cap is not $RefreshHz Hz ($log)"; exit 1 }
 if ($PreRotation -and -not ($seen -match 'render_pre_rotation on')) { Write-Output "VERDICT fail: pre-rotation was not switched on ($log)"; exit 1 }
+if ($Sustained -and -not ($seen -match 'android_sustained_performance on supported=')) { Write-Output "VERDICT fail: sustained performance was not requested ($log)"; exit 1 }
 $skipped = @($pressLines | Where-Object { $_ -match 'skipped' }).Count
 if ($skipped -gt 1) { Write-Output "VERDICT fail: $skipped presses found the game without focus (phone taken or locked?); not counted ($presses)"; exit 5 }
 Write-Output "VERDICT pass: battery $tempStart -> $tempEnd C, log $log"

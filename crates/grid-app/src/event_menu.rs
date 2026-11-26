@@ -58,6 +58,24 @@ fn bench_args(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Developer bench lines `env NAME=VALUE` (`android_bench.ps1 -SetEnv`): the
+/// phone has no shell environment, so they set a developer switch such as
+/// `GRID_PERF_TIMING`; the other lines are the arguments.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn bench_split(lines: Vec<String>) -> (Vec<String>, Vec<(String, String)>) {
+    let mut env = Vec::new();
+    let mut args = Vec::new();
+    for line in lines {
+        match line.strip_prefix("env ").and_then(|v| v.trim().split_once('=')) {
+            Some((name, value)) if name.starts_with("GRID_") => {
+                env.push((name.to_string(), value.to_string()));
+            }
+            _ => args.push(line),
+        }
+    }
+    (args, env)
+}
+
 /// Laps a lapped event offers (AUTHORED range; the original's free-race
 /// lap choices are not decoded).
 pub const MAX_LAPS: u32 = 10;
@@ -1222,8 +1240,14 @@ pub fn android_args() -> Vec<String> {
     let bench = dir.join(BENCH_ARGS);
     if crate::dev::ENABLED && let Ok(text) = std::fs::read_to_string(&bench) {
         let _ = std::fs::remove_file(&bench);
-        let args = bench_args(&text);
-        println!("android_bench args={args:?}");
+        let (args, env) = bench_split(bench_args(&text));
+        for (name, value) in &env {
+            // SAFETY: the developer bench start, before the app is built:
+            // no thread of ours reads the environment yet (the compute pool
+            // is idle), and the switches are read later, at their first use.
+            unsafe { std::env::set_var(name, value) };
+        }
+        println!("android_bench args={args:?} env={env:?}");
         return args;
     }
     let marker = dir.join(GO_MARKER);
@@ -1748,6 +1772,21 @@ mod tests {
             super::bench_args(text),
             ["--settings", "/data/bench.ini", "--drive-ticks", "30000"]
         );
+    }
+
+    #[test]
+    fn bench_env_lines_set_only_grid_switches() {
+        let (args, env) = super::bench_split(super::bench_args(
+            "--settings
+/data/bench.ini
+env GRID_PERF_TIMING=1
+env PATH=/x
+--drive-ticks
+30000
+",
+        ));
+        assert_eq!(args, ["--settings", "/data/bench.ini", "env PATH=/x", "--drive-ticks", "30000"]);
+        assert_eq!(env, [("GRID_PERF_TIMING".to_string(), "1".to_string())]);
     }
 
     use super::*;

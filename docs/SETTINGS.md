@@ -82,6 +82,7 @@ Grammar:
 | | `camera_presses` | `PERIOD,LOOK` seconds: the phone bench's camera presses on a PC (no touch screen): every PERIOD seconds of real time from the start, Change View (held 150 ms) and Look Back (held LOOK s) in turn, each logged as `camera_press`; tools/deck_estimate.ps1 uses `30,5` as tools/android_bench.ps1 (F927) | `GRID_CAMERA_PRESSES=30,5` |
 | | `perf_test` | Performance test switches at start: `auto` (the Auto cycle, 16 steps of 20 s from race start) or a list of parts to turn off, such as `shadows,foliage` or `lighting,msaa2` (names as in the `perf_test=` label; docs/ANDROID_GPU.md section 7). The phone has no environment variables, so tools/android_bench.ps1 sets it in `bench.ini` | `GRID_PERF_TEST=auto` or `=PARTS` |
 | | `pre_rotation` | Vulkan swapchain pre-rotation test switch, off by default: the swapchain takes the panel's orientation and the last (upscale) pass rotates the picture, so the phone's compositor does not rotate each frame (third_party/README.md, docs/ANDROID_GPU.md section 4). No effect on a display that is not rotated | `GRID_PRE_ROTATION=1` |
+| | `sustained_performance` | Android test switch, off by default: at start-up the app calls `Window.setSustainedPerformanceMode(true)` and, on Android 13+, `GameManager.setGameState` (gameplay), and logs `android_sustained_performance on supported=… game_mode=…` (docs/ANDROID_GPU.md). No effect elsewhere | `GRID_SUSTAINED_PERFORMANCE=1` |
 
 Notes:
 
