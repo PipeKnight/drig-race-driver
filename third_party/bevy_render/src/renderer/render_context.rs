@@ -40,13 +40,25 @@ impl PendingItem {
 
 /// DRIG patch (F935): whether render systems' encoders are finished together,
 /// in parallel, when the pending buffers are taken: `GRID_BEVY_PARALLEL_FINISH`,
-/// read once; `1` means on, anything else or no value off (upstream: each
-/// system's encoder is finished when its commands are applied).
+/// read once; `1` means on, any other value off (upstream: each system's
+/// encoder is finished when its commands are applied). Without the variable
+/// the value of [`set_parallel_finish_default`] applies, off unless the app
+/// set it (DRIG's mobile preset turns it on, F965).
 pub fn parallel_finish_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("GRID_BEVY_PARALLEL_FINISH").is_ok_and(|value| value.trim() == "1")
+    *ON.get_or_init(|| match std::env::var("GRID_BEVY_PARALLEL_FINISH") {
+        Ok(value) => value.trim() == "1",
+        Err(_) => PARALLEL_FINISH_DEFAULT.load(std::sync::atomic::Ordering::Relaxed),
     })
+}
+
+static PARALLEL_FINISH_DEFAULT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// DRIG patch (F965): the parallel finish when `GRID_BEVY_PARALLEL_FINISH` is
+/// not set. Call it before the render app runs; the first read keeps its value.
+pub fn set_parallel_finish_default(on: bool) {
+    PARALLEL_FINISH_DEFAULT.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[derive(Default)]

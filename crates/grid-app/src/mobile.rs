@@ -7,7 +7,8 @@
 //!   stretched over the screen. A row count is a fixed height, `native`
 //!   turns the scaling off. Heights saved before F559 are read as `auto`
 //!   (`settings::RENDER_HEIGHT_VERSION`);
-//! - the compute threads ([`init_threads`]), which do not change the picture;
+//! - the compute threads ([`init_threads`]), which do not change the picture,
+//!   and the parallel finish of the render encoders on them (F965);
 //! - the default sun shadow quality: low 512 instead of high 2048 (owner,
 //!   2026-10-31; a saved `[video] shadows` wins).
 //!   `shadow_layout::Quality::default_for`;
@@ -177,6 +178,15 @@ pub fn init_threads() {
     if split || forced.is_some() || threads != bevy_compute_threads(cores) {
         log_line!("mobile_threads version=1 cores={cores} compute={threads}");
     }
+    // The preset finishes the render systems' command encoders together on
+    // the compute pool (phone pair 6, F965: render thread 25.8 -> 21.6 ms,
+    // FPS median 35 -> 40, docs/ANDROID_CPU.md 5);
+    // `GRID_BEVY_PARALLEL_FINISH=0` turns it off, `=1` on the desktop.
+    bevy::render::renderer::set_parallel_finish_default(enabled());
+    if enabled() {
+        let on = bevy::render::renderer::parallel_finish_enabled();
+        log_line!("parallel_finish version=1 on={on}");
+    }
 }
 
 fn init_compute_pool(threads: usize) {
@@ -290,9 +300,17 @@ mod tests {
         // workers run (block_on does not run the pool's queue here) is on a
         // thread of `init_compute_pool`'s builder, not Bevy's
         // `TaskPool::default` "TaskPool (N)" threads with 2 MiB stacks.
+        // A thread inside the pool's `scope` (another test's App update, on
+        // a libtest or an unnamed big-stack thread) may also run a spawned
+        // task (F965: one full gate saw ""), so the check takes several
+        // tasks: none may run on a default-pool thread, and one must reach
+        // the large-stack pool's own workers.
         let pool = bevy::tasks::ComputeTaskPool::get();
-        let name = bevy::tasks::block_on(pool.spawn(async { std::thread::current().name().unwrap_or_default().to_owned() }));
-        assert!(name.starts_with("Compute Task Pool ("), "compute task ran on {name:?}");
+        let names: Vec<String> = (0..16)
+            .map(|_| bevy::tasks::block_on(pool.spawn(async { std::thread::current().name().unwrap_or_default().to_owned() })))
+            .collect();
+        assert!(!names.iter().any(|n| n.starts_with("TaskPool (")), "compute tasks ran on {names:?}");
+        assert!(names.iter().any(|n| n.starts_with("Compute Task Pool (")), "compute tasks ran on {names:?}");
         assert_eq!(pool.thread_num(), std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get));
     }
 

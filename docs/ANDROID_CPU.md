@@ -59,7 +59,7 @@ minor lever there. APK 50f84fe0 render breakdown (ms per frame): `r_encode` 9.78
 - **Serial encoder finish.** The 2D camera's first encode segment (4.24 ms) is not 2D work: it is the apply of
   the 3D camera's render systems, where Bevy's `RenderContextState` finishes each encoder one after another. In
   wgpu 29 `CommandEncoder::finish` does the actual Vulkan recording (`encode_commands`). Profile spans agree:
-  `timed_shadow_pass apply` 1.09, `main_opaque_pass_3d apply` 0.69. Switch: `GRID_BEVY_PARALLEL_FINISH=1`
+  `timed_shadow_pass apply` 1.09, `main_opaque_pass_3d apply` 0.69. Switch: `GRID_BEVY_PARALLEL_FINISH=1`, the mobile default since F965 (`=0` off)
   (vendored bevy_render, F935) keeps the encoders unfinished until `PendingCommandBuffers::take` and finishes
   them on the compute pool, in push order.
 - **Mesh-stream uploads.** `frame_split` prints `mesh_stream_writes` (write_buffer calls per frame; each
@@ -132,9 +132,9 @@ Filled from the phone's A/B pairs (section 6); rank = measured phone gain.
 
 | Rank | Candidate | Switch | Cool FPS (base → switch) | Throttled FPS (base → switch) | Verdict |
 |---|---|---|---|---|---|
-| 1 | 30 FPS cap, static or by the governor | static 30 cap (measured); `GRID_THERMAL_GOV=cap` pending | 32–38 → 30 (capped) | 25.9 → 28.6 (15 min race average) | measured, static cap: after minute 2 the share of seconds at 29+ FPS rises from 6 % to 66 %, and frames ≥ 50 ms fall from 7.3 % to 1.2 %. It does not remove every dip (the heaviest minute: GPU 29.5, main 33.1 ms). Governor A/B against the static cap pending |
-| (2) | Parallel encoder finish | `GRID_BEVY_PARALLEL_FINISH=1` | pending | pending | expected: render thread −2 to −3 ms when cool. Same work, spread over more cores, so about neutral for heat |
-| (3) | Render ceiling 0.8 when hot | `GRID_THERMAL_GOV=scale` | pending | pending | expected: little when cool (CPU-bound), but the hot GPU (27–30 ms) becomes a limit, so it helps the throttled state |
+| 1 | 30 FPS cap, static or by the governor | static 30 cap (measured); `GRID_THERMAL_GOV=cap` measured equal or slightly worse (pair 9) | 32–38 → 30 (capped) | 25.9 → 28.6 (15 min race average) | measured, static cap: after minute 2 the share of seconds at 29+ FPS rises from 6 % to 66 %, and frames ≥ 50 ms fall from 7.3 % to 1.2 %. It does not remove every dip (the heaviest minute: GPU 29.5, main 33.1 ms). Governor A/B against the static cap pending |
+| 2 | Parallel encoder finish | mobile default since F965; `GRID_BEVY_PARALLEL_FINISH=0` turns it off | 35 → 40 (median; p10 33 → 37) | pending (warm repeat) | measured, made the mobile default: render thread 25.8 → 21.6 ms, `r_encode` 10.4 → 4.6 ms, p99 38.1 → 34.9 ms, both on-runs beat both off-runs. Main (22 ms) is now the limit. Same work on more cores; heat not yet measured |
+| (3) | Render ceiling 0.8 when hot | `GRID_THERMAL_GOV=scale` | pending | not measured: pair 10 ran at a fixed 480-row height, where the step does nothing | expected: little when cool (CPU-bound), but the hot GPU (27–30 ms) becomes a limit, so it helps the throttled state |
 | (4) | ADPF session (`adpf.rs`) | `adpf`, `GRID_ADPF_TARGET_MS` | pending | pending | expected: the system picks the clocks for the target. With a 16.67 ms target and 26 ms actual it asks for a boost, so more heat. A 30 cap needs a 33.3 ms target |
 | (5) | Thread pinning, uclamp | `pin_*`, `uclamp` | pending | pending | expected: may help when cool. `uclamp` raises clocks, so it likely costs heat |
 | (6) | Bind-group cache off (control) | `GRID_BEVY_BIND_GROUP_CACHE=0` | pending | pending | measures the F893 cache's phone value |
@@ -156,6 +156,24 @@ Ranks in brackets are expectations before phone numbers (interpretation, not mea
 
 Reading: under heat, a heavy view still needs about 15–20 % less main and render work to hold 30. Battery temperature reacts too slowly to be a trigger, so the governor keys on the thermal headroom forecast.
 
+**Pair 6: parallel finish off → on** (phone executor, 2026-11-27; APK c2de04b7, lean, cap 60 at 60 Hz, cool ABAB, 200 s per run, every start at 36.9 °C; means of race seconds 20+; evidence `local/android-bench/cpu1/p6-parfinish`):
+- The log confirms `env=[("GRID_BEVY_PARALLEL_FINISH", "1")]` in the on-runs. Both on-runs beat both off-runs: FPS 35/35 off, 41/39 on; render thread 25.9/25.7 off, 21.0/22.1 on.
+- FPS median 35.0 → 40.0, p10 33 → 37; frame p99 38.1 → 34.9 ms; frames ≥ 50 ms 0.06 → 0.13 % (both rare).
+- Frame average 29.0 → 25.4 ms; main 23.0 → 22.0; render 25.8 → 21.6; `r_encode` 10.4 → 4.6; GPU 19.4 → 17.8 ms.
+- CPU run/wait ms per frame: main 4.94/1.62 → 4.71/1.12; render 13.8/0.53 → 9.7/0.65; compute pool 50.8/12.3 → 52.0/12.8.
+- `thermal_status` is 3 (SEVERE) in both arms already at 36.9 °C, with headroom about 1.0; the start line gives no thresholds (`thresholds=[]`). So this phone reports itself hot from the start, and the governor (section 4) counts it hot at once (pair 9).
+- Reading: the switch moves about 4 ms of encoder finishes off the render thread, as the proxy predicted (F935), and the frame follows because the cool phone was render-bound. Main (22 ms) is now the limit, so main-thread pairs come next. Made the mobile default (F965); the warm repeat at the end of the batch checks the throttled state.
+**Pair 9: static 30 cap against `GRID_THERMAL_GOV=cap`, 15-minute soak AB** (phone executor, 2026-11-27; APK c2de04b7, lean, 60000 ticks, battery 36.8 → 40.8 °C on both; evidence `local/android-bench/cpu1/p9-gov-cap`):
+- The governor went to level 1 (cap) at 13.4 s, before the race (`reason=headroom headroom=0.931 status=0`), and never stepped down. This phone's headroom is 0.93–0.95 when cool, 1.01 by minute 2 and 1.09 at the end, and `thermal_status` is 3 from minute 1. With hot 0.8 and cool 0.6 the governor cannot release here, so on this phone it is a static 30 cap.
+- Static cap vs governor: race average 28.1 vs 27.2 FPS; seconds at 29+ FPS after minute 2 52 % vs 38 %; frames ≥ 50 ms 2.57 vs 5.61 %; FPS median/p10 30/23 vs 28/22; frame 34.2 vs 36.4 ms; main 27.1 vs 29.1; render 30.3 vs 32.3; GPU 23.9 vs 24.2 ms.
+- Both runs dip in the same minutes (8 and 13; minute FPS 24.2/22.5 and 21.6/20.6). The about 1 FPS gap is one soak per side, so run-to-run drift rather than a governor cost (interpretation). Main rises from 24 to 33–37 ms by minute 13: the throttled state is main-bound.
+- Verdict: no gain over the static cap on this phone, so the governor stays off by default. Thresholds that release on this phone would need its own range; the system gives none (`thresholds=[]`), and a cool start already reads near SEVERE, so a 60 cap "while cool" has little room here. Row 1 stays the static cap. Pair 10 (`scale,cap`) pending.
+**Pair 10: static 30 cap against `GRID_THERMAL_GOV=scale,cap`, 15-minute soak AB** (phone executor, 2026-11-27; APK c2de04b7, lean, 60000 ticks, 36.7–36.8 → 40.9 °C on both; evidence `local/android-bench/cpu1/p10-gov-scalecap`):
+- Governor: scale at 13.4 s (headroom 0.925), cap at 19.5 s (0.933), never released; `thermal_h` 0.94 → 1.09, status 3 from minute 1.
+- Static cap vs `scale,cap`: race average 27.1 vs 27.9 FPS; seconds at 29+ FPS after minute 2 36 % vs 50 %; frames ≥ 50 ms 5.18 vs 3.34 %; FPS median/p10 28/22 vs 30/23; p99 47.6 vs 44.4 ms; main 29.3 vs 27.2; render 32.6 vs 30.6; GPU 24.3 vs 23.8 ms. Both decline the same way late (main 24 → 34–39 ms by minutes 11–14, 21 FPS in minute 13).
+- The scale step did nothing in this bench: its `bench.ini` sets `render_height = 480`, a fixed height, and `render_scale::adjust_height` returns at once unless the height is `auto`, so the thermal ceiling is never applied (no `render_dynamic` line in either log). Pair 10 therefore compares two 30-cap runs.
+- The static cap's own spread between soaks (pair 9: 28.1 FPS / 52 % / 2.57 %; pair 10: 27.1 / 36 % / 5.18 %) is as large as the pair-10 gap, so the gap is noise.
+- Verdict: no governor default. The `scale` step needs a test with `render_height = auto` (the player's mobile default), or a thermal ceiling that also applies to a fixed height; either is a follow-up, not a measured gain.
 **E-core proxy, parallel finish off → on** (F935; a cheap first read, not a phone result):
 - Predicted render thread 27.4 → 22.6 ms; `r_encode` 6.07 → 2.88 ms.
 - Frame unchanged: the proxy is main-bound (main 29.9 → 30.8 ms).

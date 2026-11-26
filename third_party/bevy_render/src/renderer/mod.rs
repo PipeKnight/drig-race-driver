@@ -8,7 +8,7 @@ pub use render_context::{
     CurrentView, FlushCommands, PendingCommandBuffers, RenderContext, RenderContextState, ViewQuery,
 };
 // DRIG patch (F935)
-pub use render_context::parallel_finish_enabled;
+pub use render_context::{parallel_finish_enabled, set_parallel_finish_default};
 pub use render_device::*;
 pub use wgpu_wrapper::WgpuWrapper;
 

@@ -49,14 +49,16 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
   otherwise copy the new release here and re-apply the marked changes, checking that no new
   code path changes the two buffers without setting the flag. After any change here, the
   coordinator refreshes the shared build seed (`tools/build_seed.ps1`).
-- Patched again (F935), off by default: `GRID_BEVY_PARALLEL_FINISH=1` defers every render
+- Patched again (F935): `GRID_BEVY_PARALLEL_FINISH=1` defers every render
   system's `CommandEncoder::finish` to the submit and runs them in parallel on the compute pool.
   - `src/renderer/render_context.rs`: `PendingCommandBuffers` keeps finished buffers and
     deferred encoders in one list in push order (`PendingItem`, `push_unfinished`). `take`
     finishes them, in parallel through `ComputeTaskPool::scope` when there are two or more, and
     returns the buffers in that order, followed by the `push_encoder` encoders as upstream.
     `RenderContextState`'s `SystemBuffer::queue` pushes its encoder unfinished while the switch
-    is on. `parallel_finish_enabled` reads the variable once and is re-exported from
+    is on. `parallel_finish_enabled` reads the variable once (without it, the value given to
+    `set_parallel_finish_default`, off unless the app sets it; DRIG's mobile preset turns it on
+    since F965, after phone pair 6: render thread 25.8 -> 21.6 ms) and both are re-exported from
     `src/renderer/mod.rs`.
   - Why: wgpu 29 records the backend commands only in `finish` (wgpu-core
     `CommandEncoder::encode_commands`, under the encoder's own lock and a shared read of the

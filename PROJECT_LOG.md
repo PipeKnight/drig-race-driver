@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F965](log/F0965.md) | 2026-11-27 | Phone: parallel encoder finish becomes the mobile default |
 | [F964](log/F0964.md) | 2026-11-26 | Refresh-divisor frame pacing for all platforms (macOS, Android; Windows opt-in) |
 | [F963](log/F0963.md) | 2026-11-27 | Phone GPU batch 7: mirror cost measured, mirror-only cut switches |
 | [F962](log/F0962.md) | 2026-11-27 | Phone: pre-rotation pair, mirror cost in the cockpit, Continue fix confirmed |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F908](log/F0908.md) | 2026-11-24 | Linux v0.1.0 release packages from 1ed1b050 and their WSLg smoke |
 | [F907](log/F0907.md) | 2026-11-24 | Linux v0.1.0 packages from e4e5b0c9; --game-root fix for player starts |
 | [F906](log/F0906.md) | 2026-11-24 | DRIG v0.1.0 Windows player build: portable DRIG-data, dev-tools feature, player flags, exe release |
-| [F905](log/F0905.md) | 2026-11-24 | Atmosphere and SSAO bind groups through the bind-group cache |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
