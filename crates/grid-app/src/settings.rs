@@ -535,6 +535,8 @@ pub struct Settings {
     /// screen saved the refresh rate.
     pub refresh_hz_version: Option<u32>,
     pub frame_latency: Option<std::num::NonZero<u32>>,
+    /// `[video] refresh_pacing`: auto, on or off (refresh_pace.rs).
+    pub refresh_pacing: Option<crate::refresh_pace::Mode>,
     /// `[video] shadows`: off, low, medium, high or ultra (shadow_layout.rs).
     pub shadows: Option<crate::shadow_layout::Quality>,
     /// `[video] window`: windowed or (borderless) fullscreen; the front end's
@@ -854,6 +856,9 @@ impl Settings {
                 ("video", "frame_latency") => {
                     self.frame_latency = Some(crate::render_scale::frame_latency(value).map_err(at)?)
                 }
+                ("video", "refresh_pacing") => {
+                    self.refresh_pacing = Some(crate::refresh_pace::Mode::parse(value).map_err(at)?)
+                }
                 ("video", "tone_map") => {
                     let mut display = crate::graphics::Settings::default();
                     display.tone_map(value).map_err(|e| at(e.into()))?;
@@ -955,6 +960,11 @@ impl Settings {
             Some(height) => height,
             None => RenderHeight::platform_default(),
         }
+    }
+
+    /// `[video] refresh_pacing`, default `auto`.
+    pub fn video_refresh_pacing(&self) -> crate::refresh_pace::Mode {
+        self.refresh_pacing.unwrap_or_default()
     }
 
     /// The refresh rate in use, also the frame cap on Android. With the

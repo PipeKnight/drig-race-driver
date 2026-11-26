@@ -173,6 +173,7 @@ fn update(
     scale: Option<Res<crate::render_scale::RenderScale>>,
     mut text: Query<(&mut Text, &mut Visibility), With<FpsText>>,
     warmup: Option<Res<crate::pipeline_warmup::Warmup>>,
+    pace: Option<Res<crate::refresh_pace::RefreshPace>>,
     mut was_ready: Local<bool>,
 ) {
     // The window ends when the warm-up cover lifts, so its covered frames
@@ -217,7 +218,7 @@ fn update(
         #[cfg(not(target_os = "android"))]
         let display = String::new();
         println!(
-            "frame_setup present_mode={:?} frame_latency={:?} physical={}x{} logical={}x{} scale={} monitor_hz=[{}]{display} update_mode=continuous frame_cap=none",
+            "frame_setup present_mode={:?} frame_latency={:?} physical={}x{} logical={}x{} scale={} monitor_hz=[{}]{display} update_mode=continuous refresh_pacing={}",
             w.present_mode,
             w.desired_maximum_frame_latency,
             w.physical_width(),
@@ -225,7 +226,8 @@ fn update(
             w.width(),
             w.height(),
             w.scale_factor(),
-            refresh.join(",")
+            refresh.join(","),
+            pace.as_ref().map_or("none".into(), |p| p.enabled().to_string())
         );
     }
     if windows.iter().next().is_some_and(|w| !w.focused) {
@@ -254,6 +256,10 @@ fn update(
     #[cfg(not(target_arch = "wasm32"))]
     if wgpu::hal::drig_pre_rotation::ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
         res += &format!(" pre_rotation_deg={}", bevy::render::view::window::drig_pre_rotation_degrees());
+    }
+    // The rate frames are held to (refresh_pace.rs): the pace or a fixed cap.
+    if let Some(p) = &pace {
+        res += &p.target_hz().map_or(" pace_hz=vsync".into(), |hz| format!(" pace_hz={hz:.2}"));
     }
     // Where the frame's time went (frame_split.rs, docs/PERFORMANCE.md).
     let (split, detail) = crate::frame_split::window_report(stats.seconds);

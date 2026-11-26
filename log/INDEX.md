@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F964](F0964.md) | 2026-11-26 | Refresh-divisor frame pacing for all platforms (macOS, Android; Windows opt-in) |
 | [F963](F0963.md) | 2026-11-27 | Phone GPU batch 7: mirror cost measured, mirror-only cut switches |
 | [F962](F0962.md) | 2026-11-27 | Phone: pre-rotation pair, mirror cost in the cockpit, Continue fix confirmed |
 | [F961](F0961.md) | 2026-11-26 | Phone GPU batch 6: the fast shadow filter becomes the mobile default |

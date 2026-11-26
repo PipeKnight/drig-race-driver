@@ -198,6 +198,7 @@ mod race_hud;
 mod race_osd;
 mod drift_osd;
 mod render_scale;
+mod refresh_pace;
 mod replay;
 mod replay_effects;
 mod scene_probe;
@@ -1853,6 +1854,12 @@ fn shared_source_material_scene(settings: &graphics::Settings, scene: EnhancedMa
         && !scene.collision
         && !scene.headless
 }
+/// Android's fixed frame cap, `[video] refresh_hz` (F378, refresh_pace.rs);
+/// none on the desktop, where the setting is the Android hint only.
+pub(crate) fn android_cap(profile: &settings::Settings) -> Option<f32> {
+    if cfg!(target_os = "android") { profile.video_refresh_hz() } else { None }
+}
+
 #[bevy_main]
 fn main() {
     // Queued stdout lines are written when main returns.
@@ -5127,6 +5134,9 @@ pub(crate) fn race_app(
         // and is stretched over the window; Android default auto (480-720
         // rows by the frame time).
         render_scale::install(&mut app, profile.video_render_height());
+        // [video] refresh_pacing: frames paced to an even share of the
+        // display's refresh, under Android's fixed cap (refresh_pace.rs).
+        refresh_pace::install(&mut app, profile.video_refresh_pacing(), android_cap(&profile));
         // Window size from the native surface, optional refresh-rate hint.
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.video_refresh_hz());

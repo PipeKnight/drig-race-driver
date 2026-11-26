@@ -1458,6 +1458,7 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
     let effects = profile.sound_effects.unwrap_or(crate::pause_menu::Options::default().effects);
     crate::hud_sound::install_front_end(&mut app, &root, effects);
     crate::frame_pacing::install_window_shots(&mut app);
+    crate::refresh_pace::install(&mut app, profile.video_refresh_pacing(), crate::android_cap(&profile));
     #[cfg(target_os = "android")]
     crate::android_display::install(&mut app, profile.video_refresh_hz());
     crate::input::install(&mut app, actions);

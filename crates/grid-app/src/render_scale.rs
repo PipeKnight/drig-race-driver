@@ -84,8 +84,7 @@ pub fn refresh_hz(value: &str) -> Result<Option<f32>, String> {
 /// due every `period` on a fixed schedule, so a slightly late frame lets the
 /// next one catch up and the average stays at the cap; a frame more than a
 /// whole period late restarts the schedule. AUTHORED.
-// Used by the Android display system and the tests.
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+// Used by refresh_pace.rs and the tests.
 pub fn pace(
     now: std::time::Instant,
     due: Option<std::time::Instant>,

@@ -5968,3 +5968,47 @@ follow. `acquire` and `gpu_late_ms` are CPU-side waits and stay valid. The logs 
 The traces carry no audio counters (voice counts, mixer underruns, audio thread time): only the setup lines
 (`engine_audio ... rate=48000 voices=12 mixer=continuous_pair_scheduler`, 11 opponents at 10-175 m, `tyre_audio
 cars=12`). The owner's report of choppy chase-view engine sound is recorded in F958 for a separate audio session.
+
+## Refresh pacing (F964)
+
+F958 showed the MacBook's 120 Hz panel turning 15 ms frames into 8.3/16.7/25 ms intervals under Fifo, while
+the same build on a 60 Hz display was steady (F929). `refresh_pace.rs` paces frames to an even share of the
+display's refresh rate, on every platform through one system in `Last` (the sleep mechanism of the Android
+cap, `render_scale::pace`, which now runs through it too):
+
+- **Refresh rate:** read once a second from winit's current monitor of the window (`WINIT_WINDOWS`, macOS
+  CGDisplayMode with the CVDisplayLink fallback), falling back to the primary monitor (macOS reports no current
+  monitor at window creation: `monitor_hz=[]` in the F958 traces), so a window moved to another screen is
+  followed; on Android from the Display (JNI). Unknown: no pacing. A change starts again at plain vsync.
+- **Rule** (`Pacer::second`, once a second): candidates are R/n at or above 59.5 Hz, so 60, 75 and 100 Hz keep
+  plain vsync and nothing drops to 30. A rate holds while the mean interval is at most its period × 1.1 and,
+  when paced, the 90th percentile frame time without the sleep is at most the period × 1.1. When it has not
+  held for two seconds the pacer moves to the fastest slower even rate that fits the mean (from vsync, which
+  rounds frames up to whole periods) or the p90 work × 1.1 (paced), or back to vsync; the rate it leaves is
+  blocked for 20 s, doubling to 160 s per rate, plain vsync included, so a presentation-limited 120 is not
+  retried every few seconds. The p90 work × 1.25 fitting a faster open rate for five seconds moves up. Unit
+  tests cover 60/75/100/120/144/165/240 Hz, the hysteresis, the back-off and a presentation-limited case (mean
+  15.3 ms at 120 Hz with 6 ms of work).
+- **Owner Mac traces with valid Metal GPU timing** (2026-11-26, Donington and Istanbul, M4 at 3024x1890, render
+  1248-1440 rows, Fifo; `tools/frame_cadence.py`): race medians GPU 2.1-2.3 ms (shadow 0.9-1.3,
+  opaque 0.12-0.15, transparent 0.3-0.6, post 0.13-0.15, 2D UI 0.13-0.29), main thread 3.4-4.0 ms, render CPU
+  without acquire 4.5-5.6 ms, acquire 9-10 ms, frame 15.1-15.2 ms (63-75 FPS). The frame's own work fits 8.3 ms;
+  the rest is the wait for a drawable. Intervals fall on a 240 Hz grid (k × 4.17 ms: k2 19-21 %, k3 31-33 %,
+  k4 21-23 %, k5 21 %, k6 4-5 %; only 45-48 % on the 120 Hz grid), so ProMotion's adaptive refresh
+  (120/80/60/48 Hz) sets the cadence. Dips (window max > 33 ms, 5 of 306 and 14 of 305 windows): worst frame
+  37-42 ms of which acquire 32-34 ms, window GPU unchanged; presentation waits, not GPU or main thread. Hence
+  60 (120/2, 240/4) is the even pace. Caveats: Apple TBDR timestamps at pass boundaries may undercount, and
+  the upscale and present tail are not measured (`near_present_marker=false`). The owner's Metal timing fix
+  (blit pass, read after completion) reaches main through PR 87.
+- **Setting:** `[video] refresh_pacing = auto | on | off`; `auto` is on for macOS, iOS and Android, off on
+  Windows and Linux, so the owner's 165 Hz PC (100+ FPS, possibly variable refresh) is unchanged. Only vsync
+  present modes are paced. Android's fixed `refresh_hz` cap and the thermal cap stay; the lower rate wins
+  (Android default 60 Hz: unchanged).
+- **System rate on ProMotion:** wgpu exposes neither Metal's `presentAfterMinimumDuration` nor a
+  CADisplayLink preferred frame rate range, so the pace is a sleep; the panel follows the steady cadence.
+- **Dynres:** still targets 60 FPS (16.7 ms). At 60 on a 120 Hz panel the two agree. A 72 or 82.5 pace holds
+  only while the frame already fits it: dynres sees those frames as on time and may raise the rows until the
+  pace no longer holds, and the pacer then returns to vsync. Making dynres target the pace period is open.
+- **Logs:** `refresh_pace mode=... enabled=... cap_hz=...` at start, `refresh_pace display_hz=...` when the
+  rate changes, `refresh_pace display_hz=... pace_hz=... mean_ms=... work_p90_ms=...` on each move,
+  `pace_hz=` in `frame_stats` and `refresh_pacing=` in `frame_setup` (was `frame_cap=none`).

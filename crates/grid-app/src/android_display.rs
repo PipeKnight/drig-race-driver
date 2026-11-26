@@ -113,22 +113,16 @@ fn watch_rate(time: Res<Time<Real>>, mut next: Local<f32>, mut last: Local<Optio
 
 /// Frame cap at `refresh_hz` (60 Hz by default): the display may run faster
 /// than the hint asks (a 120 Hz panel), and Fifo alone would then present at
-/// the panel's rate. Sleeps at the end of the main schedule; System has no cap.
-fn cap(display: Res<Display>, mut due: Local<Option<std::time::Instant>>) {
+/// the panel's rate. The shared pacer sleeps to it (refresh_pace.rs, with
+/// the refresh-divisor pace for `system`); System has no fixed cap.
+fn cap(display: Res<Display>, pace: Option<ResMut<crate::refresh_pace::RefreshPace>>) {
     let hz = match (display.refresh_hz, display.thermal_hz) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     };
-    let Some(hz) = hz else {
-        *due = None;
-        return;
-    };
-    let period = std::time::Duration::from_secs_f32(1. / hz);
-    let (sleep, next) = crate::render_scale::pace(std::time::Instant::now(), *due, period);
-    if !sleep.is_zero() {
-        std::thread::sleep(sleep);
+    if let Some(mut pace) = pace {
+        pace.set_cap(hz);
     }
-    *due = Some(next);
 }
 
 pub fn install(app: &mut App, refresh_hz: Option<f32>) {
@@ -139,6 +133,5 @@ pub fn install(app: &mut App, refresh_hz: Option<f32>) {
         sent: false,
         thermal_hz: None,
     })
-    .add_systems(PreUpdate, (update, watch_rate))
-    .add_systems(Last, cap);
+    .add_systems(PreUpdate, (update, watch_rate, cap));
 }
