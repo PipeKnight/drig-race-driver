@@ -64,6 +64,7 @@ cars/cor/cor_gen_low.pssg
 cars/cor/cor_highLOD.pssg
 cars/cor/cor_lowLOD.pssg
 cars/cor/livery_00/textures_high/cor_tex_high_00.pssg
+cars/cor/livery_01/textures_high/cor_tex_high_01.pssg
 cars/gto/gto.csv
 cars/gto/gto.ned
 cars/gto/gto.ppts
@@ -158,6 +159,7 @@ skidmarks/drift_tm.xml
 surface_materials.xml
 track_sponsors/bridgestone/sponsor_event.pssg
 track_sponsors/tag_heuer/sponsor_minor.pssg
+tracks/europe/nurburgring/cloth.xml
 tracks/europe/nurburgring/grass.grs
 tracks/europe/nurburgring/ground_cover.pssg
 tracks/europe/nurburgring/ground_cover.xml
@@ -171,6 +173,7 @@ tracks/europe/nurburgring/patchup_ot.pssg
 tracks/europe/nurburgring/route_1/ai_track.xml
 tracks/europe/nurburgring/route_1/ai_vehicle_track.xml
 tracks/europe/nurburgring/route_1/boundarylines.cqtc
+tracks/europe/nurburgring/route_1/clothFile.bin
 tracks/europe/nurburgring/route_1/crowd_standing.bin
 tracks/europe/nurburgring/route_1/grids.pssg
 tracks/europe/nurburgring/route_1/objects.ens

@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F951](log/F0951.md) | 2026-11-26 | Android bundle lists regenerated for G435's route cloth files |
 | [F950](log/F0950.md) | 2026-11-26 | Phone fill-light probe (partial): about 1 heavy ms |
 | [F949](log/F0949.md) | 2026-11-26 | Token economy rules from the Claude session audit |
 | [F948](log/F0948.md) | 2026-11-26 | Phone GPU batch 1: lighting, render360, shadows and tonemap win on the phone; Game Turbo game list costs 3.4 GPU ms; Continue fixed |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F894](log/F0894.md) | 2026-11-24 | Derby collision frames: car_batch refresh outside rebuilds |
 | [F893](log/F0893.md) | 2026-11-24 | Bevy GPU-preprocessing bind-group cache (vendored bevy_pbr) |
 | [F892](log/F0892.md) | 2026-11-23 | wgpu-core: bind-group tracker insert once per render pass; empty internal command buffers skipped (no gain, not kept) |
-| [F891](log/F0891.md) | 2026-11-23 | Derby collision frames: patched car batches, DentSpread rerun, what holds AssetEventSystems |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

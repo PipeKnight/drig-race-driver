@@ -122,6 +122,7 @@ skidmarks/road_tm.xml
 surface_materials.xml
 track_sponsors/bridgestone/sponsor_event.pssg
 track_sponsors/tag_heuer/sponsor_minor.pssg
+tracks/europe/donington/cloth.xml
 tracks/europe/donington/grass.grs
 tracks/europe/donington/ground_cover.pssg
 tracks/europe/donington/ground_cover.xml
@@ -135,6 +136,7 @@ tracks/europe/donington/patchup_ot.pssg
 tracks/europe/donington/route_0/ai_track.xml
 tracks/europe/donington/route_0/ai_vehicle_track.xml
 tracks/europe/donington/route_0/boundarylines.cqtc
+tracks/europe/donington/route_0/clothFile.bin
 tracks/europe/donington/route_0/crowd_standing.bin
 tracks/europe/donington/route_0/grids.pssg
 tracks/europe/donington/route_0/objects.ens
