@@ -5831,6 +5831,28 @@ scripts: scratchpad `macwin.py` and `share.py` (frame_stats per window, split at
 - Proposal (not applied, no default change): start each race's controller at the height the warm-up frames
   measured, or let a GPU-bound countdown (acquire above half the frame, main far below it) count as late. The
   general form is to treat `acquire` as the GPU signal on Metal, as the dynres note proposed.
+- Applied in F932 as the second form, the same on every platform (`render_scale::Dynamic::update` now takes
+  the swap-chain wait; `frame_split::last_acquire_ms` is the render world's last acquire, measured on every
+  frame, counter shown or not):
+  - A frame is GPU-late when it ran over `TARGET_MS` but would have been on time without its acquire wait
+    (`frame_ms - wait_ms <= TARGET_MS`); its time over the target is smoothed into `gpu_late_ms` (SMOOTHING
+    0.1, as the frame time).
+  - Inside the hold band (`ON_TIME_MS` < smoothed frame <= `LATE_MS`) a frame counts as late when
+    `gpu_late_ms >= GPU_LATE_SHARE (0.5) * (frame_ms - TARGET_MS)`: at least half of the lateness is GPU.
+    The step itself is unchanged (20 late frames, the warm-up, the probe and the blocks), so the countdown at
+    the ceiling now steps down about 0.35 s after the 3 s warm-up instead of after GO.
+  - Not late: frames late for the CPU (a long main frame that hardly waited), on-time frames with a long vsync
+    wait (no time over the target), and any frame above `LATE_MS` stays late as before. A 165 Hz desktop
+    (frames about 6 ms) and the phones (25-40 ms, far above `LATE_MS`) never reach the new rule; on a backend
+    where a GPU-bound frame waits somewhere other than acquire, `gpu_late_ms` stays low and the band holds as
+    before.
+  - Seeding the race height from the warm-up was not chosen: the warm-up frames are compile hitches
+    (197-211 ms), not a measure of the race's GPU cost.
+  - `render_dynamic` change lines print `gpu_late_ms=`, the install line `gpu_late_share=`.
+  - Test `dynamic_height_steps_down_when_the_gpu_holds_frames_in_the_band`: the Mac countdown's frame pattern
+    (every eighth frame 25 ms above 1392 rows, 4.5 ms of CPU, the rest waiting) steps down to 1392 rows at
+    about 3.4 s and keeps the band at the top under 12 s of 60; the same frames late for the CPU and 60 Hz
+    on-time frames change nothing.
 
 ### Windowed against fullscreen [O]
 

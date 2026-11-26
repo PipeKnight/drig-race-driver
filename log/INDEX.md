@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F932](F0932.md) | 2026-11-26 | Dynamic resolution: a GPU-bound frame time in the hold band counts as late (Mac countdown) |
 | [F931](F0931.md) | 2026-11-26 | Steam Deck estimate from E-core and UHD 770 stand-ins |
 | [F930](F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
 | [F929](F0929.md) | 2026-11-25 | Mac logs 22:26: GPU-query crash is a frame_split readback bug; countdown GPU-bound at the ceiling; memory pressure ruled out |

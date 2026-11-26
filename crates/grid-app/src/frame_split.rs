@@ -64,7 +64,17 @@ const SLOT_QUERIES: u32 = 256;
 const DETAIL_WINDOWS: u32 = 10;
 
 static SHOWN: AtomicBool = AtomicBool::new(false);
+/// The last finished render frame's swap-chain acquire, ns (render_scale
+/// steers on it, F932).
+static LAST_ACQUIRE_NS: AtomicU64 = AtomicU64::new(0);
 static ACC: Mutex<Option<Acc>> = Mutex::new(None);
+
+/// The last finished render frame's swap-chain acquire, ms: the wait for a
+/// free drawable, which is where a GPU-bound frame waits on Metal (F929).
+/// Measured on every frame, shown or not.
+pub fn last_acquire_ms() -> f32 {
+    LAST_ACQUIRE_NS.load(Ordering::Relaxed) as f32 / 1e6
+}
 
 /// The frame-rate counter calls this: GPU markers run only while it is shown.
 pub fn set_shown(shown: bool) {
@@ -280,6 +290,7 @@ fn point<const I: usize>() {
         f.start = None;
         drop(f);
         if let Some(done) = done {
+            LAST_ACQUIRE_NS.store(done[2], Ordering::Relaxed);
             let laps = laps_beside(drawn);
             with_acc(|a| {
                 a.render_frames += 1;
