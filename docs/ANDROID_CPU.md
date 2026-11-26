@@ -81,7 +81,7 @@ minor lever there. APK 50f84fe0 render breakdown (ms per frame): `r_encode` 9.78
   pushed to Bevy's `PendingCommandBuffers`. Queue writes run before the command buffers of the same submit, so
   Bevy's own writes to those slabs this frame still land first; unaligned ranges keep `write_buffer`.
 - **Static driver figures** (owner decision, 2026-11-26). Switch: `GRID_STATIC_DRIVERS` (`mobile::static_drivers`),
-  on with the mobile preset, never on the desktop. The opponents' figures were already baked static meshes.
+  phone-only by design, but off by default until the phone pair shows a gain (the body no longer leans, which the owner can see; F944). The opponents' figures were already baked static meshes.
   The player's figure outside the head-cam is now baked too, in its s = 0 pose, with no joint entities. The
   head-cam figure keeps joint entities only for the arms' moving joints. Every other joint's skin matrix is a
   fixed frame in its part or in the arm joint that carries it, folded into the inverse bind matrices. The body
@@ -140,7 +140,7 @@ Filled from the phone's A/B pairs (section 6); rank = measured phone gain.
 | (6) | Bind-group cache off (control) | `GRID_BEVY_BIND_GROUP_CACHE=0` | pending | pending | measures the F893 cache's phone value |
 | (7) | Lazy Transit command buffer (F943) | `GRID_WGPU_LAZY_TRANSIT=1` | pending | pending | expected: `queue_submit` (2.95 ms) shrinks by the empty Transit buffers. Proxy: no frame change outside noise (main-bound or GPU-bound proxy) |
 | (8) | Coalesced mesh-stream upload (F943) | `GRID_MESH_STREAM_COPY=1` | pending | pending | expected: fewer staging buffers on the render thread. Proxy: −2.0 ms in the quiet pair (noise limit 2.1 ms); one earlier set spiralled, not reproduced |
-| (9) | Static driver figures (F943, owner decision) | on with the mobile preset; control `GRID_STATIC_DRIVERS=0` | pending | pending | on by default. Proxy: −112 changed `GlobalTransform`s per frame (−5 %), propagation 2.01 → 1.94 ms median; frame change within noise |
+| (9) | Static driver figures (F943, owner decision) | `GRID_STATIC_DRIVERS=1` (off by default, F944) | pending | pending | off until the phone pair shows a gain. Proxy: −112 changed `GlobalTransform`s per frame (−5 %), propagation 2.01 → 1.94 ms median; frame change within noise |
 
 Ranks in brackets are expectations before phone numbers (interpretation, not measurement).
 
@@ -161,7 +161,7 @@ Reading: under heat, a heavy view still needs about 15–20 % less main and rend
 - Frame unchanged: the proxy is main-bound (main 29.9 → 30.8 ms).
 - GPU counter 2.15 → 3.91 ms with a different scene sample (`vis` 1413 → 1541); unexplained, so check it on the phone.
 
-**E-core proxy, batch 2** (F943; 3 repeats per arm unless noted, mobile preset, so the static figures are on in the base):
+**E-core proxy, batch 2** (F943; 3 repeats per arm unless noted, mobile preset, which then turned the static figures on, so they are on in the base; since F944 they are off by default):
 - The PC's background load changed between two sets of runs: the same base predicted 43.5 ms in the first set and 37.8 ms in the second (another session's capture ran beside the first). Only pairs from the same set are compared.
 - Set 1: lazy Transit −1.0 ms (noise). Mesh copy +24.4 ms, but two of its three repeats sat at the 4-tick catch-up limit with `r_prepare` 11 ms. The second set did not reproduce this, so it is put down to the outside load (interpretation). The base lost its third repeat to a stall in loading.
 - Set 2: mesh copy 37.8 → 35.8 ms (−2.0, noise limit 2.1), with `r_prepare` and `mesh_stream_kb_s` unchanged; figures skinned (`GRID_STATIC_DRIVERS=0`) 37.8 → 38.7 ms (+0.9, noise).
