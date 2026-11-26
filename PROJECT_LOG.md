@@ -185,8 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
-| [F959](log/F0959.md) | 2026-11-26 | Mac traces of build 1546e211 (Donington, Istanbul): 120 Hz cadence judder |
-| [F958](log/F0958.md) | 2026-11-26 | Mac traces of build 1546e211 (Donington, Istanbul): 120 Hz cadence judder, F9 invalid on Metal |
+| [F958](log/F0958.md) | 2026-11-26 | Mac traces of build 1546e211 (Donington, Istanbul): 120 Hz cadence judder |
 | [F957](log/F0957.md) | 2026-11-26 | Owner report: choppy mix of several car engines in the chase camera (backlog row 154) |
 | [F956](log/F0956.md) | 2026-11-26 | Phone GPU batch 5: mip skip 2 >=1024 + 1 becomes the mobile default |
 | [F955](log/F0955.md) | 2026-11-26 | Phone GPU batch 4: shadow lookups cost ~5 ms; fast shadow filter probe |
@@ -245,6 +244,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F902](log/F0902.md) | 2026-11-24 | Row 137: public builds never contain DLC or other original files |
 | [F901](log/F0901.md) | 2026-11-24 | Content source policy: other-platform DLC, mods, March 2008 prototype |
 | [F900](log/F0900.md) | 2026-11-24 | Backlog: rain look, cut content findings, career maintained damage, tyre wall regrowth |
+| [F899](log/F0899.md) | 2026-11-24 | Backlog row 143: split grid-app main.rs into modules |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
