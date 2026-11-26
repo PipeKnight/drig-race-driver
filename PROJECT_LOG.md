@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F957](log/F0957.md) | 2026-11-26 | Owner report: choppy mix of several car engines in the chase camera (backlog row 154) |
 | [F956](log/F0956.md) | 2026-11-26 | Phone GPU batch 5: mip skip 2 >=1024 + 1 becomes the mobile default |
 | [F955](log/F0955.md) | 2026-11-26 | Phone GPU batch 4: shadow lookups cost ~5 ms; fast shadow filter probe |
 | [F954](log/F0954.md) | 2026-11-26 | Disk audit covers all repositories and agent projects on the PC |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F900](log/F0900.md) | 2026-11-24 | Backlog: rain look, cut content findings, career maintained damage, tyre wall regrowth |
 | [F899](log/F0899.md) | 2026-11-24 | Backlog row 143: split grid-app main.rs into modules |
 | [F898](log/F0898.md) | 2026-11-24 | Owner priority: spatial audio as in the original (reverb, multichannel, verified panning) |
-| [F897](log/F0897.md) | 2026-11-24 | Bundled APKs: stale event file lists, automatic stage check in build_android |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
