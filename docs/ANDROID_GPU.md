@@ -392,8 +392,9 @@ mip chain, no level dropped (owner's question via the coordinator, 2026-11-26).
 - Result (F956): neutral on the phone (table below), load time unchanged, so **the mobile preset now starts with
   `mipskip2_1024+1`** (`MOBILE_MIP_SKIP`). An explicit `mipskip` word replaces it, **`mipskip0`** turns the skip
   off for A/B, and `full` drops it with the rest of lean. The desktop has no mip skip unless a word asks for one.
-  The phone now prints the `texture upload summary` line too (before, only the enhanced preset did), so the next
-  phone log gives the bytes saved.
+  The phone now prints the `texture upload summary` line too (before, only the enhanced preset did). First phone
+  log (APK 28491de6): `source_bytes=235747492 upload_bytes=34117796 mip_skipped=644` of 721 images: texel memory
+  235.7 → 34.1 MB (−86 %), as on the PC (236.3 → 34.6).
 
 ### Ranked table
 
@@ -413,17 +414,17 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | Rank | Candidate | Words | Heavy GPU ms, warm | GPU ms | Δ GPU ms | FPS | p99 ms | GPU MHz median | Verdict |
 |---|---|---|---|---|---|---|---|---|---|
 | – | lean (base) | – | 29.5 (cap 30) | 21.47 | – | 38.1 | – | – | default since F928 |
-| 1 | size cull, ~8 px | `cull100` | cool 23.16 vs 23.95 | 21.53 vs 20.52 | heavy −0.79 (−3.4 %) | 34.8 vs 37.2 | 35.2 vs 32.5 | unreadable | cool pair: heavy vis −14 %, d_opaque −12 %; FPS mean pulled down by outlier run 2-B; warm repeat pending |
+| drop | size cull, ~8 px | `cull100` | cool 23.16 vs 23.95; warm 27.77 vs bracket 26.60 | 21.53 vs 20.52; warm 27.33 vs 25.70 | cool heavy −0.79 (−3.4 %); warm none | 34.8 vs 37.2 | 35.2 vs 32.5 | unreadable | cool pair: heavy vis −14 %, d_opaque −12 %; FPS mean pulled down by outlier run 2-B. Warm chain (APK 28491de6, lean → cull100 → lean, 39 → 41.8 °C): heavy vis 2001 vs 2080–2432, but GPU no better than the hotter lean run after it (+0.5 GPU, +0.9 heavy ms); hot frames are main-bound (heavy main 34 ms). Not confirmed: dropped |
 | ? | size cull, ~4 px | `cull200` | 27.15 vs 27.43 (cool) | 22.73 vs 23.10 | heavy −0.28 (−1.0 %) | 37.9 vs 37.5 | 32.0 vs 32.1 | unreadable | ABAB, start ≤37 °C, 35 heavy s: heavy vis −6 %, d_opaque −4 %; weak, not beyond noise |
 | drop | ADPF hints | `adpf` | B = plain lean, 24.38–24.74 | – | – | – | – | unreadable | unsupported here: `adpf version=1 event=open result=error tids=8` (APerformanceHint_createSession returns null on this phone), so the word changes nothing |
 | probe | shading upper bound | `lighting` | warm 27.70 → 20.70 (−7.0); cool 23.98 → 16.53 | 20.91 → 15.96 | heavy −7.45 (−31 %) | 36.7 → 42.3 | 32.9 → 29.5 | unreadable | probe only (no light); 33–50 ms frames 2.8 → 0.7 %, heavy main thread 20.5 → 18.2 ms, r_encode 10.3 → 7.8 ms. On the phone's baseline preset this is the two directional lights (shadowed sun, shadowless back fill) and the sun's shadow lookups: no env map exists there |
 | drop | no tonemap/dither | `tonemap` | warm 27.70 → 27.61 (−0.1, noise); cool 24.20 → 23.43 | 21.15 → 20.63 | heavy −0.77 (−3.2 %) | 36.3 → 37.0 | 33.8 → 32.5 | unreadable | against the clean pair-3 A run only; nothing left warm, and colours change: dropped |
 | probe | fewer rows | `render360` | warm 27.70 → 25.80 (−1.9); cool 24.19 → 21.24 | 20.86 → 19.48 | heavy −2.95 (−12 %) | 37.1 → 37.3 | 32.5 → 32.7 | unreadable | probe only: 44 % fewer pixels for 12 % less heavy GPU, so the heavy frame is mostly not per-pixel work at 480 rows |
 | skip | no cube samples | `env_maps` | – | | | | | | no-op on the phone: the baseline preset installs neither the sky IBL nor the scene probe (both need enhanced; PC log `sky_ibl=false`), so there is no map to remove; do not spend a pair on it |
-| ? | no cockpit mirror | `mirror` | pending | | | | | | head-cam row |
+| ? | no cockpit mirror | `mirror` | invalid pair (neutral: heavy 24.63 both) | | | | | | head-cam row. The first ABAB (APK 28491de6) never reached the cockpit view, the only view with the mirror: VIEW presses at 30/90/150 s stop at bumper. Redo with `-PressSeconds 15` (the cockpit view for about 30 s per run) and compare the per-camera cockpit rows |
 | ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
 | probe | no shadow casters | `shadows` | warm 27.70 → 25.80 (−1.9); cool 23.95 → 22.99 | 20.93 → 20.07 | heavy −0.96 (−4.0 %) | 36.8 → 38.5 | 33.0 → 31.6 | unreadable | ceiling probe; 33–50 ms frames 2.6 → 1.4 %. Only the shadow pass empties: the main pass still samples the sun's map |
-| ? | fast shadow filter | `-SetEnv GRID_SHADOW_FILTER=fast` | pending | | | | | | batch 4: 1 + 8 shadow compares per fragment instead of up to 108 |
+| keep | fast shadow filter | `-SetEnv GRID_SHADOW_FILTER=fast` (now the mobile default; `=original` = off) | cool 24.52 → 20.14 | 21.55 → 19.06 | heavy −4.38 (−18 %) | 34.4 → 36.7 | 38.2 → 35.4 | unreadable | ABAB on APK 5dd27572, 60 Hz, starts 36.8–36.9 °C: both B runs beat both A runs; heavy main 23.45 → 21.15 ms, heavy r_encode 11.25 → 9.9 ms, 33–50 ms frames 17.5 → 8.1 %; logs A `filter=1`, B `filter=3`. 1 + 8 compares per fragment instead of up to 108; keeps 4.4 of the ~5 ms the lookups cost (`-Shadows off` −6.9) with the sun shadows kept. Made the mobile default (F961) |
 | keep | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` (now the mobile default; `mipskip0` = off) | cool 24.74 → 24.41 (−0.3, noise) | 21.23 → 21.09 | heavy −0.33 (−1 %) | 35.0 → 35.4 | 37.4 → 37.2 | unreadable | ABAB on the phone: neutral, no regression; load time the same (~21.9 s); logs `mip_skip rules=2_1024+1_0 floor=64`. Owner's look; made the mobile default (F956) for memory and bandwidth headroom, not for GPU ms |
 | probe | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | cool 24.80 → 23.23 | 21.52 → 20.41 | heavy −1.57 (−6 %) | 34.9 → 36.8 | 37.3 → 34.9 | unreadable | redo ABAB on APK 1546e211, all 60 Hz, starts 36.8–37 °C: both B runs beat both A runs on GPU ms; 33–50 ms frames 16.3 → 8.1 %, heavy main 22.7 → 21.7 ms, heavy r_encode 11.4 → 10.8 ms; logs confirm fill linear in A, off in B (first partial pair: −1.2). Small but consistent, and not usable as it is: `off` also drops the fill's ambient (race 1881 bluish → plain white 450), so every shaded side darkens (sheets `local/shot/owner/fill-{race,derby}-{600,1500}.png`). Only the back directional light costs GPU time (the ambient is a uniform); it shines from below the horizon, opposite the sun, so a fold into the ambient would brighten the ground and also changes the look. Parked behind the shadow filter |
 | probe | no sun shadow map | `-Shadows off` | cool 23.88 → 17.02 | 21.03 → 16.59 | heavy −6.86 (−29 %) | 35.8 → 40.3 | 36.2 → 34.6 | unreadable | ABAB, APK 1546e211, 200 s: both B runs beat both A runs; no `d_shadow` draws in B; 33–50 ms frames 11.2 → 3.9 %, heavy main thread 22.5 → 19.4 ms, heavy r_encode 10.6 → 8.4 ms. Caveats: run 1 got 120 Hz from MIUI after a reboot, run 3's lean had a high 33–50 ms share. Nearly all of `lighting`'s 7 ms: with `shadows` (−1 to −1.9, the shadow pass) the main pass's shadow lookups cost about 5 ms. Look cost: no sun shadows |
@@ -453,7 +454,7 @@ draws and light work to prepare), which is why they are the only words that rais
 warm and is dropped. GPU cuts pay off on the warm phone only together with the main-thread work (CPU session).
 
 Reading: no batch-1 word is a free lean default. `tonemap` (−0.77) and `shadows` (−0.96) are small and change the
-look; `cull100` (−0.79) is the best look-neutral cut so far, waiting for its warm repeat. The big remaining cost is
+look; `cull100` (−0.79 cool) did not hold in its warm repeat (dropped, F961). The big remaining cost is
 lighting: −7.45 heavy ms, of which the shadow pass is about 1. On the baseline preset the rest is the per-fragment
 work of the two directional lights (`main.rs`: the shadowed sun and, with `GRID_BASELINE_FILL` linear, the
 default, a shadowless back fill from opposite the sun) and the sun's cascade lookups. Batch 3 splits it with two
@@ -471,3 +472,14 @@ Batch 4 probe: `-SetEnv GRID_SHADOW_FILTER=fast` (filter 3): medium's single wor
 the pixel's angle without the smooth, 1 + 8 compares instead of up to 108. It keeps the sun shadows; the look
 sheets are `local/shot/owner/shadow-*.png` (phone now / fast / off, baseline 1026×480). The desktop default is
 unchanged (filter 1 at high; identity check in the F entry).
+Batch 4 result (F961): `fast` keeps 4.4 of those ~5 heavy ms (ABAB, both B runs beat both A runs), so **the mobile
+preset now takes filter 3 by default** (`shadow_layout::filter_mode`); `-SetEnv GRID_SHADOW_FILTER=original` gives
+the phone the quality's filter again for A/B. Sun shadows stay; edges are harder (sheets above). The desktop keeps
+the quality's filter. Warm repeat (APK 28491de6, back to back, 38.9 → 42.2 °C, throttled): fast still wins but by
+about 1 GPU ms (25.49 against 26.50 for the bracketing lean runs, heavy 26.47 against 27.17), because heavy main is
+about 33 ms in every hot run: there the CPU sets the frame.
+
+`-RenderHeight auto` on the phone (lean, 200 s, APK 28491de6): rows fall to 480 in the first 15 s and stay there
+(184 of 196 rows at 1026×480), so a player on auto gets the bench's fixed 480 (FPS 35.3, heavy GPU 25.39, the
+same as fixed-480 lean). Every step came from load and countdown hitches (frame_ms 45–75 with work_ms about 2),
+and a 35 FPS race never qualifies for an up step (`on_time_ms` 17.2 at 60 Hz).

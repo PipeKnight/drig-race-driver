@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F961](log/F0961.md) | 2026-11-26 | Phone GPU batch 6: the fast shadow filter becomes the mobile default |
 | [F960](log/F0960.md) | 2026-11-26 | Phone A/B night: shadow map, fill light, mip skip, shadow filter, auto rows, cull, mirror |
 | [F959](log/F0959.md) | 2026-11-26 | Metal GPU timestamps fixed (owner PR 87) |
 | [F958](log/F0958.md) | 2026-11-26 | Mac traces of build 1546e211 (Donington, Istanbul): 120 Hz cadence judder |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F904](log/F0904.md) | 2026-11-24 | Backlog: DualSense haptics row 146, release check note in row 131, no-zip release rule |
 | [F903](log/F0903.md) | 2026-11-24 | Native Linux x86_64 build and packaging (row 135) |
 | [F902](log/F0902.md) | 2026-11-24 | Row 137: public builds never contain DLC or other original files |
-| [F901](log/F0901.md) | 2026-11-24 | Content source policy: other-platform DLC, mods, March 2008 prototype |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
