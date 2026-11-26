@@ -145,6 +145,10 @@ pub struct Diagnostics {
     /// (GameManager) at start-up, for the thermal soak A/B (docs/ANDROID_GPU.md); off by
     /// default, no effect elsewhere.
     pub sustained_performance: bool,
+    /// Android: ask for the display mode whose refresh rate is closest to this (same
+    /// panel size) through our window's `preferredDisplayModeId`, for the display-mode
+    /// A/B (docs/ANDROID_GPU.md); off by default, no effect elsewhere.
+    pub display_mode_hz: Option<f32>,
 }
 
 impl Default for Diagnostics {
@@ -180,6 +184,7 @@ impl Default for Diagnostics {
             perf_test: None,
             pre_rotation: false,
             sustained_performance: false,
+            display_mode_hz: None,
         }
     }
 }
@@ -222,6 +227,7 @@ impl Diagnostics {
             perf_test: text("GRID_PERF_TEST"),
             pre_rotation: text("GRID_PRE_ROTATION").is_some_and(|v| v == "1"),
             sustained_performance: text("GRID_SUSTAINED_PERFORMANCE").is_some_and(|v| v == "1"),
+            display_mode_hz: text("GRID_DISPLAY_MODE_HZ").and_then(|v| v.parse().ok()).filter(|hz: &f32| *hz > 0.),
         }
     }
 
@@ -268,6 +274,12 @@ impl Diagnostics {
             "perf_test" => self.perf_test = text(),
             "pre_rotation" => self.pre_rotation = on(key, value)?,
             "sustained_performance" => self.sustained_performance = on(key, value)?,
+            "display_mode_hz" => {
+                self.display_mode_hz = match value {
+                    "" | "off" => None,
+                    _ => Some(value.parse::<f32>().ok().filter(|hz| *hz > 0.).ok_or_else(|| number(key))?),
+                }
+            }
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
@@ -1164,6 +1176,36 @@ pub const MOBILE_REFRESH_HZ: f32 = 60.;
 
 /// The Video screen's choice (front_end.rs) as settings keys: `[osd] fps`
 /// and `[video] render_height / present_mode / refresh_hz / frame_latency`.
+/// Saves a player file (settings, profile, event) by writing a temp file beside it and
+/// renaming it over the target. A crash cannot leave half a file, and a file the game may
+/// not write in place is still replaced while the folder is the game's own: on Android a
+/// file put there by `adb push` belongs to the shell user with mode 644, so writing it in
+/// place failed with "Permission denied" and Continue could not start a race (F948). A
+/// symbolic link is written through, and where the rename fails the old in-place write
+/// is tried.
+pub fn write_replacing(path: &Path, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static TEMP: AtomicU32 = AtomicU32::new(0);
+    let bytes = bytes.as_ref();
+    let link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    let Some(name) = path.file_name().filter(|_| !link) else {
+        return std::fs::write(path, bytes);
+    };
+    let temp = path.with_file_name(format!(
+        ".{}.{}-{}.tmp",
+        name.to_string_lossy(),
+        std::process::id(),
+        TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
+    match std::fs::write(&temp, bytes).and_then(|()| std::fs::rename(&temp, path)) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let _ = std::fs::remove_file(&temp);
+            std::fs::write(path, bytes)
+        }
+    }
+}
+
 pub fn save_video(path: &Path, video: &crate::front_end::Video) -> Result<(), String> {
     let old = match std::fs::read_to_string(path) {
         Ok(text) => text.trim_start_matches('\u{feff}').to_owned(),
@@ -1181,7 +1223,7 @@ pub fn save_video(path: &Path, video: &crate::front_end::Video) -> Result<(), St
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))
+    write_replacing(path, new).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Saves the Driver Aids choice in the settings file `path`
@@ -1209,7 +1251,7 @@ pub fn save_driver_aids(
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))
+    write_replacing(path, new).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// `[input]` keys the pause menu's Advanced screen owns.
@@ -1291,7 +1333,7 @@ pub fn save_options(path: &Path, o: &crate::pause_menu::Options, tunes: bool) ->
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))
+    write_replacing(path, new).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 // The bundled APK's event profile (track, discipline, field; replaced on
@@ -1474,6 +1516,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn write_replacing_swaps_the_file_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("grid-write-replacing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.ini");
+        write_replacing(&file, "[video]\n").unwrap();
+        write_replacing(&file, "[event]\nroute = x\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "[event]\nroute = x\n");
+        // A file the game may not write in place (on Android: pushed by adb as the shell
+        // user, mode 644) is replaced through the folder the game owns.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+            write_replacing(&file, "[event]\nroute = y\n").unwrap();
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), "[event]\nroute = y\n");
+        }
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, ["settings.ini"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn portable_anchor_is_the_executable_folder() {
         let exe = Path::new("/games/DRIG/DRIG.exe");
         assert_eq!(portable_anchor(exe, None), Some(PathBuf::from("/games/DRIG")));
@@ -1542,6 +1607,7 @@ tick_delay_ms = 20
 perf_test = auto
 pre_rotation = on
 sustained_performance = on
+display_mode_hz = 30
 "#;
 
     #[test]
@@ -1605,6 +1671,8 @@ sustained_performance = on
         assert_eq!(s.diagnostics.perf_test.as_deref(), Some("auto"));
         assert!(s.diagnostics.pre_rotation && !Diagnostics::default().pre_rotation);
         assert!(s.diagnostics.sustained_performance && !Diagnostics::default().sustained_performance);
+        assert_eq!(s.diagnostics.display_mode_hz, Some(30.));
+        assert_eq!(Diagnostics::default().display_mode_hz, None);
         assert_eq!(s.diagnostics.tick_delay_ms, Some(20.));
     }
 

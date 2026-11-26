@@ -132,7 +132,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - Android P9–P12: code-only APK importing the user's own GRID folder (F405), bundled event APKs
   (F418), touch/tilt/pad controls (P11, F404), per-system profiling (F395); docs/ANDROID.md.
 - Open: lean default 33–38 FPS on a cool phone, throttled after 2 min to about 25 (cap 30: 28.6, 1.2 % frames ≥50 ms), dips are heavy views rounded to 50 ms (F933);
-  MIUI votes the app to 60 Hz above its setFrameRate hint, only the phone's settings lift it; no sustained mode or Game Mode on MIUI (F933);
+  MIUI votes the app to 60 Hz above its setFrameRate hint, only the phone's settings lift it; no sustained mode or Game Mode on MIUI (F933); Game Turbo game-list membership adds about 3.4 heavy GPU ms and ADPF opens no session (F948);
   pad rumble and phone vibration are not felt on the phone yet (row 22).
 - Phone proxy (F919): `tools/phone_proxy.ps1 -Rev A -Compare B` predicts the Xiaomi frame delta from a
   desktop run in about 8 minutes (noise about 2 ms with 3 runs); scene-work gains are an upper bound.
@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F948](log/F0948.md) | 2026-11-26 | Phone GPU batch 1: lighting, render360, shadows and tonemap win on the phone; Game Turbo game list costs 3.4 GPU ms; Continue fixed |
 | [F947](log/F0947.md) | 2026-11-26 | Phone warm chain: main thread bound when warm; tonemap dropped |
 | [F946](log/F0946.md) | 2026-11-26 | Phone batch 1 verdicts: lighting is the lights, not env maps; -Shadows bench probe |
 | [F945](log/F0945.md) | 2026-11-26 | Claude Code token audit script and findings |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F891](log/F0891.md) | 2026-11-23 | Derby collision frames: patched car batches, DentSpread rerun, what holds AssetEventSystems |
 | [F890](log/F0890.md) | 2026-11-23 | grid-app test compute pool created at process start (TaskPool stack overflow root cause) |
 | [F889](log/F0889.md) | 2026-11-23 | Race countdown waits for the pipeline warm-up |
-| [F888](log/F0888.md) | 2026-11-23 | Build lock hold limit and step timeouts |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

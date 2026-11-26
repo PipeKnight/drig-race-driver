@@ -279,6 +279,19 @@ pub fn sustained_performance() -> Option<String> {
     })
 }
 
+/// `MainActivity.preferDisplayMode(hz)`: asks for the supported display mode of the current
+/// panel size whose refresh rate is closest to `hz` (our window's `preferredDisplayModeId`).
+/// Returns the chosen mode for the log.
+pub fn prefer_display_mode(hz: f32) -> Option<String> {
+    with_activity(|env, activity| {
+        let text = env
+            .call_method(activity, "preferDisplayMode", "(F)Ljava/lang/String;", &[JValue::Float(hz)])?
+            .l()?;
+        let text = jni::objects::JString::from(text);
+        Ok(env.get_string(&text)?.into())
+    })
+}
+
 /// `MainActivity.rumble(left, right)`: vibration amplitudes 0..255 for a pad's two motors, or
 /// the phone's vibrator (force_feedback/android.rs). The FFB thread stays attached to the VM.
 pub fn rumble(left: u8, right: u8) {

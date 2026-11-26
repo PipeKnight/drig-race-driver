@@ -1702,12 +1702,12 @@ fn go(saving: &Saving, kind: Kind, choice: &Choice) -> Result<(), String> {
         return Err("saved event choice does not read back".into());
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    std::fs::write(&saving.settings, new)
+    crate::settings::write_replacing(&saving.settings, new)
         .map_err(|e| format!("{}: {e}", saving.settings.display()))?;
-    std::fs::write(&saving.profile, profile(kind, choice))
+    crate::settings::write_replacing(&saving.profile, profile(kind, choice))
         .map_err(|e| format!("{}: {e}", saving.profile.display()))?;
     #[cfg(target_os = "android")]
-    std::fs::write(dir.join(GO_MARKER), b"go\n").map_err(|e| e.to_string())?;
+    crate::settings::write_replacing(&dir.join(GO_MARKER), b"go\n").map_err(|e| e.to_string())?;
     Ok(())
 }
 

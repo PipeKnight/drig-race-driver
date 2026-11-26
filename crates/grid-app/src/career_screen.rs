@@ -1357,7 +1357,7 @@ pub fn write_result(
         log_line!("drive_career version=1 event=race_result_missing");
         return;
     }
-    match std::fs::write(&path.0, write_race_out(&out)) {
+    match crate::settings::write_replacing(&path.0, write_race_out(&out)) {
         Ok(()) => log_line!(
             "drive_career version=1 event=race_result position={} cars={} flashbacks_used={} flashbacks_maximum={}",
             out.result.position(Entrant::Player).unwrap_or(0) + 1,
@@ -2770,7 +2770,7 @@ impl Screen {
                 out.result.position(Entrant::Player).unwrap_or(0) + 1
             );
             e.add(out);
-            std::fs::write(&event_path, e.write()).map_err(|err| err.to_string())?;
+            crate::settings::write_replacing(&event_path, e.write()).map_err(|err| err.to_string())?;
             let _ = std::fs::remove_file(&result_path);
         }
         let Some(e) = self.current.clone() else {
@@ -2974,7 +2974,7 @@ impl Screen {
             top_mph: None,
             lemans: series.map(|s| LeMansRun { series: s.into(), seed }),
         };
-        std::fs::write(self.dir.join(EVENT), e.write()).map_err(|err| err.to_string())?;
+        crate::settings::write_replacing(&self.dir.join(EVENT), e.write()).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=offer_taken offer={} car={} route={} laps={} grid={} seed={seed}",
             run.offer_id,
@@ -3028,7 +3028,7 @@ impl Screen {
             top_mph: None,
             lemans: series.map(|s| LeMansRun { series: s.into(), seed }),
         };
-        std::fs::write(self.dir.join(EVENT), e.write()).map_err(|err| err.to_string())?;
+        crate::settings::write_replacing(&self.dir.join(EVENT), e.write()).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=entered event_id={} car={} races={} seed={seed}",
             e.event_id,
@@ -3094,7 +3094,7 @@ impl Screen {
         profile = profile.replacen("[game]
 ", &format!("[game]
 {}{}{}", speech_lines(&self.cat, &self.career, e, next, points.as_deref()), rival_line(e, next, points.as_deref()), self.team_livery_line(e)), 1);
-        std::fs::write(self.dir.join(PROFILE), profile).map_err(|err| err.to_string())?;
+        crate::settings::write_replacing(&self.dir.join(PROFILE), profile).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=go event_id={} race={} route={} laps={} grid={}",
             e.event_id,

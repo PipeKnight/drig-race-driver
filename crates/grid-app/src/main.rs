@@ -2477,6 +2477,11 @@ pub(crate) fn race_app(
         let answer = android::sustained_performance();
         println!("android_sustained_performance on {}", answer.as_deref().unwrap_or("call=failed"));
     }
+    #[cfg(target_os = "android")]
+    if let Some(hz) = settings::diagnostics().display_mode_hz {
+        let answer = android::prefer_display_mode(hz);
+        println!("android_display_mode requested_hz={hz} {}", answer.as_deref().unwrap_or("call=failed"));
+    }
     let mut root = profile.root.clone();
     let mut route = match &profile.route {
         Some(path) => Route::new(path)?,

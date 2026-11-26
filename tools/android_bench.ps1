@@ -100,6 +100,8 @@ function Get-GpuClockSummary([string]$path) {
         if ($l -match 'busy=(\d+)') { $busy += [double]$Matches[1] }
         if ($l -match 'pwr=(\d+)') { $pwr += [int]$Matches[1] }
     }
+    $probe = $lines | Where-Object { $_ -match '^probe: ' } | Select-Object -First 1
+    if ($probe) { return "gpu_clock: not sampled, $probe" }
     if ($clk.Count -eq 0) { return "gpu_clock: unreadable ($(@($lines).Count) lines; $head) $path" }
     $s = $clk | Sort-Object
     $q = { param($f) $s[[math]::Min($s.Count - 1, [int][math]::Floor($f * $s.Count))] }
@@ -188,11 +190,20 @@ Invoke-Adb @('shell', 'am', 'force-stop', $Package) | Out-Null
 Invoke-Adb @('logcat', '-c') | Out-Null
 Invoke-Adb @('shell', 'am', 'start', '-n', "$Package/.LauncherActivity") | Out-Null
 Write-Output "started at $(Get-Date -Format HH:mm:ss), battery $tempStart C; waiting $Seconds s"
-$gpuFile = Join-Path $Out 'gpu-clock.txt'
-$gpuJob = Start-Job -ScriptBlock {
-    param($adb, $script, $file)
-    & $adb shell $script 2>$null | Set-Content -Path $file -Encoding ascii
-} -ArgumentList $Adb, ($gpuScript -replace 'SECONDS', [string]$Seconds), $gpuFile
+# Start-Job runs in the user's Documents folder, so the job needs an absolute path.
+$gpuFile = Join-Path (Resolve-Path $Out).Path 'gpu-clock.txt'
+# One probe first: where the shell may not read the clock (MIUI, F948), the loop is not started,
+# so its once-a-second shell work cannot touch the measurement.
+$gpuProbe = (& $Adb shell 'cat /sys/class/kgsl/kgsl-3d0/gpuclk 2>&1' 2>$null | Out-String).Trim()
+$gpuJob = $null
+if ($gpuProbe -match '^\d+$') {
+    $gpuJob = Start-Job -ScriptBlock {
+        param($adb, $script, $file)
+        & $adb shell $script 2>$null | Set-Content -Path $file -Encoding ascii
+    } -ArgumentList $Adb, ($gpuScript -replace 'SECONDS', [string]$Seconds), $gpuFile
+} else {
+    Set-Content -Path $gpuFile -Encoding ascii -Value "probe: $gpuProbe"
+}
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $presses = Join-Path $Out 'presses.txt'
 Set-Content -Path $presses -Value '# seconds since am start, action, result (touch_controls.rs zones; game log time ~= these seconds)'
@@ -231,8 +242,10 @@ $rest = $Seconds - $clock.Elapsed.TotalSeconds
 if ($rest -gt 0) { Start-Sleep -Milliseconds ([int]($rest * 1000)) }
 Invoke-Adb @('shell', 'am', 'force-stop', $Package) | Out-Null
 $tempEnd = Get-TempC
-Wait-Job $gpuJob -Timeout 20 | Out-Null
-Stop-Job $gpuJob -ErrorAction SilentlyContinue; Remove-Job $gpuJob -Force -ErrorAction SilentlyContinue
+if ($gpuJob) {
+    Wait-Job $gpuJob -Timeout 20 | Out-Null
+    Stop-Job $gpuJob -ErrorAction SilentlyContinue; Remove-Job $gpuJob -Force -ErrorAction SilentlyContinue
+}
 & $Adb logcat -d -s 'grid:*' 'AndroidRuntime:E' > (Join-Path $Out 'logcat.txt') 2>$null
 Invoke-Adb @('shell', 'rm', '-f', "$files/bench.ini", "$files/bench-args.txt") | Out-Null
 
@@ -246,7 +259,7 @@ Invoke-Adb @('pull', "$logs/$after", $log) | Out-Null
 Set-Content -Path (Join-Path $Out 'run.txt') -Value @(
     "apk=$Apk", "seconds=$Seconds", "ticks=$Ticks", "perf_test=$PerfTest", "pre_rotation=$PreRotation", "sustained=$Sustained", "render_height=$RenderHeight", "shadows=$Shadows", "refresh_hz=$RefreshHz",
     "temp_start_c=$tempStart", "temp_end_c=$tempEnd", "note=$Note", "log=$after")
-$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_sustained_performance|android_frame_cap|android_frame_rate|android_display_hz|mobile_preset|adpf version=1 event=open|event=step step=1 ' |
+$seen = Select-String -Path $log -Pattern 'android_bench args|drive_autopilot enabled|drive_force_feedback|drive_opponents|render_pre_rotation|android_sustained_performance|android_frame_cap|android_frame_rate|android_display_hz|android_display_mode |mobile_preset|adpf version=1 event=open|event=step step=1 ' |
     Select-Object -First 16 | ForEach-Object { $_.Line }
 $seen | ForEach-Object { Write-Output "  $_" }
 Write-Output "battery: start $tempStart C, end $tempEnd C"

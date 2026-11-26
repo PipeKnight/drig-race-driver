@@ -199,6 +199,11 @@ game_state=…` records `PowerManager.isSustainedPerformanceModeSupported()` and
 (0 unsupported, 1 standard, 2 performance, 3 battery, 4 custom). An app cannot set its own game mode. The verdict fails
 when the line is missing.
 
+Display mode: `-SetEnv GRID_DISPLAY_MODE_HZ=<n>` makes the app ask for the supported mode (same panel size) with the
+refresh rate closest to n through its own window's `preferredDisplayModeId` (`MainActivity.preferDisplayMode`); the log
+line `android_display_mode requested_hz=… mode_id=… hz=… current_id=… supported=…` records the choice, and
+`android_display_hz` the rate the system actually gave. Only our window attribute is set; no system setting.
+
 The script uses only `adb install -r`, `push`, `pull`, `shell am start` / `force-stop`, `logcat` and `rm` of its own two
 files. It never uninstalls, never changes a phone setting and never touches the rest of the data folder, which holds the
 owner's GRID copy and settings.ini.
@@ -393,7 +398,7 @@ the 33.3 ms budget. Target: heavy views at about 26 ms GPU or less when throttle
 ranked by that heavy-view GPU time on the warm phone; cuts that also save energy (fewer passes, lower shadow or post
 resolution, fewer draws in heavy views) rank first among equals.
 
-Compare rows only within their own pair: between pairs 1 and 2 plain lean got slower (GPU 20.5 to 23.1 ms, heavy 24.0 to 27.4 ms) at the same start temperature and APK, while the owner changed Game Turbo settings (MIUI refresh vote 120 Hz; phone session, 2026-11-26).
+Compare rows only within their own pair: between pairs 1 and 2 plain lean got slower (GPU 20.5 to 23.1 ms, heavy 24.0 to 27.4 ms) at the same start temperature and APK, while the owner changed Game Turbo settings (MIUI refresh vote 120 Hz; phone session, 2026-11-26). The cause was DRIG's membership in Game Turbo's game list (MIUI Joyose per-game profile, about +3.4 heavy GPU ms); after the owner removed DRIG from the list, lean was back at 24.1 heavy GPU ms without a reboot (F948). Rows measured after that (pair 3's second half onward) share pair 1's baseline.
 
 Phone, lean base, 1026x480 unless the row says otherwise, ABAB runs of 200 s with matched start temperatures (heat
 alone costs about 4 FPS: 33.9 against 37.9 °C at the start). GPU ms and p99 are medians of race seconds 20+; Δ is

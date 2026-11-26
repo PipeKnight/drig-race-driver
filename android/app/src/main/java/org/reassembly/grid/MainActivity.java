@@ -169,6 +169,48 @@ public class MainActivity extends GameActivity {
     }
 
     /**
+     * Called by android.rs at start-up when GRID_DISPLAY_MODE_HZ is set (display-mode
+     * A/B, docs/ANDROID_GPU.md): picks the supported mode with the current panel size
+     * and the refresh rate closest to {@code hz}, and asks for it through our own
+     * window's preferredDisplayModeId. Returns the choice and the supported rates.
+     */
+    public String preferDisplayMode(float hz) {
+        android.view.Display display = getDisplay();
+        if (display == null) {
+            return "display=none";
+        }
+        android.view.Display.Mode current = display.getMode();
+        android.view.Display.Mode best = null;
+        StringBuilder rates = new StringBuilder();
+        for (android.view.Display.Mode mode : display.getSupportedModes()) {
+            if (rates.length() > 0) {
+                rates.append(',');
+            }
+            rates.append(Math.round(mode.getRefreshRate()));
+            if (mode.getPhysicalWidth() != current.getPhysicalWidth()
+                    || mode.getPhysicalHeight() != current.getPhysicalHeight()) {
+                continue;
+            }
+            if (best == null || Math.abs(mode.getRefreshRate() - hz)
+                    < Math.abs(best.getRefreshRate() - hz)) {
+                best = mode;
+            }
+        }
+        if (best == null) {
+            return "mode=none supported=" + rates;
+        }
+        final int id = best.getModeId();
+        runOnUiThread(() -> {
+            WindowManager.LayoutParams attributes = getWindow().getAttributes();
+            attributes.preferredDisplayModeId = id;
+            getWindow().setAttributes(attributes);
+        });
+        return "mode_id=" + id + " hz=" + best.getRefreshRate() + " size="
+                + best.getPhysicalWidth() + "x" + best.getPhysicalHeight()
+                + " current_id=" + current.getModeId() + " supported=" + rates;
+    }
+
+    /**
      * Called by android.rs, from any thread, when the game stops on a
      * start-up error or a panic: shows the message in ErrorActivity, which
      * runs in its own process and outlives this one.
