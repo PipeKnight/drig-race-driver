@@ -499,6 +499,16 @@ pub enum QueueSubmitError {
     ValidateAsActionsError(#[from] crate::ray_tracing::ValidateAsActionsError),
 }
 
+// DRIG patch (F943): the memory init steps return either error kind.
+impl From<crate::command::InitMemoryError> for QueueSubmitError {
+    fn from(e: crate::command::InitMemoryError) -> Self {
+        match e {
+            crate::command::InitMemoryError::Destroyed(e) => e.into(),
+            crate::command::InitMemoryError::Device(e) => e.into(),
+        }
+    }
+}
+
 impl WebGpuError for QueueSubmitError {
     fn webgpu_error_type(&self) -> ErrorType {
         match self {
@@ -1293,11 +1303,13 @@ impl Queue {
                         };
 
                         // execute resource transitions
-                        if let Err(e) = baked.encoder.open_pass(hal_label(
-                            Some("(wgpu internal) Transit"),
-                            self.device.instance_flags,
-                        )) {
-                            break 'error Err(e.into());
+                        // DRIG patch (F943): with `GRID_WGPU_LAZY_TRANSIT=1` the Transit command
+                        // buffer is opened by the first step below that records into it, and is
+                        // left out when none does.
+                        if !crate::command::lazy_transit() {
+                            if let Err(e) = baked.encoder.ensure_transit_open() {
+                                break 'error Err(e.into());
+                            }
                         }
 
                         //Note: locking the trackers has to be done after the storages
@@ -1316,15 +1328,19 @@ impl Queue {
 
                         //Note: stateless trackers are not merged:
                         // device already knows these resources exist.
-                        CommandEncoder::insert_barriers_from_device_tracker(
-                            baked.encoder.raw.as_mut(),
+                        if let Err(e) = CommandEncoder::insert_barriers_from_device_tracker(
+                            &mut baked.encoder,
                             &mut trackers,
                             &baked.trackers,
                             &snatch_guard,
-                        );
-
-                        if let Err(e) = baked.encoder.close_and_push_front() {
+                        ) {
                             break 'error Err(e.into());
+                        }
+
+                        if baked.encoder.is_open {
+                            if let Err(e) = baked.encoder.close_and_push_front() {
+                                break 'error Err(e.into());
+                            }
                         }
 
                         // Transition surface textures into `Present` state.

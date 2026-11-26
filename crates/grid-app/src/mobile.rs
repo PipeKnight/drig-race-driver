@@ -48,6 +48,23 @@ pub fn enabled() -> bool {
     })
 }
 
+/// Static driver figures (owner, 2026-11-26, F943): with the preset, the
+/// drivers hold one pose and only the player's arms and hands in the head-cam
+/// move. The player's driver outside the head-cam is baked into static
+/// meshes like the opponents' (`exterior_driver`), and the head-cam driver
+/// keeps joint entities only for its arms (`driver::Driver::anchors`), so the
+/// still joints no longer cost a `GlobalTransform` each frame. Car parts,
+/// damage and detachment are untouched. `GRID_STATIC_DRIVERS=0`/`1`
+/// overrides it (comparisons).
+pub fn static_drivers() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| match crate::dev::var("GRID_STATIC_DRIVERS").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => enabled(),
+    })
+}
+
 /// Static mesh (not a car part) with a bounding radius under
 /// [`SMALL_RADIUS_METRES`].
 pub fn small(aabb: &Aabb, transform: &GlobalTransform) -> bool {

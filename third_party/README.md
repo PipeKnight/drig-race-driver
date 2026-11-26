@@ -102,6 +102,24 @@ registry source (`~/.cargo/registry/src/`), not through `git apply`, which write
   textured with images the GPU first sees in that frame, once with the dedupe and once with
   `GRID_WGPU_BIND_DEDUPE=0` (two child processes), and requires identical frames. It needs a GPU and
   runs in prepush's full tier.
+- Lazy Transit command buffer (F943, off by default, `GRID_WGPU_LAZY_TRANSIT=1`):
+  - `src/command/mod.rs`: `InnerCommandEncoder::ensure_transit_open` opens the submit-time
+    "(wgpu internal) Transit" hal command buffer unless it is open; `insert_barriers_from_device_tracker`
+    takes the inner encoder and opens it only when it has a barrier to record; `lazy_transit()` reads
+    the switch once.
+  - `src/command/memory_init.rs`: the buffer and texture init steps call `ensure_transit_open` before
+    each command they record; their error type `InitMemoryError` adds the device error of that open.
+  - `src/device/queue.rs`: `queue_submit` opens the Transit buffer up front only with the switch off,
+    and closes and pushes it in front of the submitted buffer only when it is open.
+  - Why: upstream begins, ends and submits one extra hal command buffer for every submitted command
+    buffer, also when it records nothing. Bevy submits about 27 command buffers per frame, and
+    `queue_submit` took 2.95 ms per frame on the phone's render thread (F928). In steady state most
+    of them need no barrier from the device tracker and no memory init. With the switch off the
+    order of calls is upstream's (open, barriers, close), so off is the unchanged path.
+  - Test: `crates/grid-app/tests/lazy_transit.rs` submits six command buffers, twice, with the switch
+    on: a never-written buffer and a never-drawn texture must read as zeros (memory init), a copy
+    chain across two command buffers and a render-pass clear read by the next command buffer must
+    arrive (barriers). It needs a GPU and runs in prepush's full tier.
 - Upgrading wgpu: drop the patch if upstream stops re-merging and re-registering a bind group already
   used in the pass; otherwise copy the new release here and re-apply the marked changes
   (`grep -rn "DRIG patch" third_party/wgpu-core`). After any change here, the coordinator refreshes

@@ -3864,8 +3864,9 @@ and reports them per window in `frame_stats`:
 - `lap_<name>=mean/max/over2ms`: mean ms per main frame, the largest, frames over 2 ms;
 - `rslow_laps=n:...`: the largest laps of the main frames beside the window's render frames of
   20 ms or more (the main frames after the one drawn, up to the running one);
-- `transform_burst`: with a transform propagation of 3 ms or more, the changed `Transform` and
-  `GlobalTransform` counts by hierarchy root.
+- `transform_burst`: with a transform propagation of 3 ms or more (`GRID_TRANSFORM_BURST_MS`, F943),
+  the changed `Transform` and `GlobalTransform` counts by hierarchy root. Below 3 ms it also counts
+  `same`: changed `Transform`s whose value equals the last one seen (written without a change).
 
 Laps: `dt` drive_tick, `dp` drive_present, `dpo`/`dpn` own and opponent dents inside it, `gd`
 `ground_detail::present`, `gdg` its gathers, `tp` transform propagation, `cb` visibility bounds,

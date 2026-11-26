@@ -17,6 +17,26 @@ use crate::{
 
 use super::{clear_texture, BakedCommands, ClearError};
 
+/// DRIG patch (F943): the memory init steps open the submit-time Transit command buffer
+/// themselves (`InnerCommandEncoder::ensure_transit_open`), which can fail with a device error.
+#[derive(Debug)]
+pub(crate) enum InitMemoryError {
+    Destroyed(DestroyedResourceError),
+    Device(crate::device::DeviceError),
+}
+
+impl From<DestroyedResourceError> for InitMemoryError {
+    fn from(e: DestroyedResourceError) -> Self {
+        Self::Destroyed(e)
+    }
+}
+
+impl From<crate::device::DeviceError> for InitMemoryError {
+    fn from(e: crate::device::DeviceError) -> Self {
+        Self::Device(e)
+    }
+}
+
 /// Surface that was discarded by `StoreOp::Discard` of a preceding renderpass.
 /// Any read access to this surface needs to be preceded by a texture initialization.
 #[derive(Clone)]
@@ -162,7 +182,7 @@ impl BakedCommands {
         &mut self,
         device_tracker: &mut DeviceTracker,
         snatch_guard: &SnatchGuard<'_>,
-    ) -> Result<(), DestroyedResourceError> {
+    ) -> Result<(), InitMemoryError> {
         profiling::scope!("initialize_buffer_memory");
 
         // Gather init ranges for each buffer so we can collapse them.
@@ -222,6 +242,7 @@ impl BakedCommands {
 
             let raw_buf = buffer.try_raw(snatch_guard)?;
 
+            self.encoder.ensure_transit_open()?; // DRIG patch (F943)
             unsafe {
                 self.encoder.raw.transition_buffers(
                     transition
@@ -263,7 +284,7 @@ impl BakedCommands {
         device_tracker: &mut DeviceTracker,
         device: &Device,
         snatch_guard: &SnatchGuard<'_>,
-    ) -> Result<(), DestroyedResourceError> {
+    ) -> Result<(), InitMemoryError> {
         profiling::scope!("initialize_texture_memory");
 
         let mut ranges: Vec<TextureInitRange> = Vec::new();
@@ -297,6 +318,7 @@ impl BakedCommands {
 
             // TODO: Could we attempt some range collapsing here?
             for range in ranges.drain(..) {
+                self.encoder.ensure_transit_open()?; // DRIG patch (F943)
                 let clear_result = clear_texture(
                     &texture_use.texture,
                     range,
@@ -312,7 +334,7 @@ impl BakedCommands {
                 // and now, this is out of our control so we have to handle
                 // it gracefully.
                 if let Err(ClearError::DestroyedResource(e)) = clear_result {
-                    return Err(e);
+                    return Err(e.into());
                 }
 
                 // Other errors are unexpected.

@@ -36,7 +36,8 @@ use bevy::{
         },
         render_asset::RenderAssets,
         render_phase::{ViewSortedRenderPhases, sort_phase_system},
-        renderer::RenderQueue,
+        render_resource::{Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor},
+        renderer::{PendingCommandBuffers, RenderDevice, RenderQueue},
     },
 };
 use bevy::{
@@ -204,6 +205,7 @@ pub(crate) fn install(app: &mut App) {
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
         render
             .init_resource::<RenderWrites>()
+            .init_resource::<Scratch>()
             .add_systems(ExtractSchedule, extract)
             .add_systems(
                 Render,
@@ -232,9 +234,37 @@ fn extract(main: Extract<Option<Res<MeshStream>>>, mut render: ResMut<RenderWrit
     std::mem::swap(&mut *writes, &mut render.0);
 }
 
+/// Whether [`upload`] coalesces the frame's writes (`GRID_MESH_STREAM_COPY=1`,
+/// F943). Off by default: one `queue.write_buffer` per streamed mesh.
+fn coalesce() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::dev::var("GRID_MESH_STREAM_COPY").is_ok_and(|v| v == "1"))
+}
+
+/// The render-side staging buffer of the coalesced upload; it only grows.
+#[derive(Resource, Default)]
+struct Scratch(Option<Buffer>);
+
 /// After Bevy (re)allocated this frame's extracted meshes, so a mesh that was
 /// also re-extracted keeps the streamed bytes (queue writes apply in order).
-fn upload(writes: Res<RenderWrites>, allocator: Res<MeshAllocator>, queue: Res<RenderQueue>) {
+///
+/// Every `queue.write_buffer` makes wgpu create, map and free its own staging
+/// buffer, about 90 per frame in a race (F943). With [`coalesce`] on, the
+/// frame's bytes go to [`Scratch`] in one write, and one command buffer,
+/// queued before the frame's render graph buffers in the same submit, copies
+/// each mesh's part to its slab. The queue runs the pending writes (Bevy's
+/// re-extracted meshes, the scratch write) before the submitted command
+/// buffers, so the streamed bytes still win, and the draws that read them come
+/// after.
+fn upload(
+    writes: Res<RenderWrites>,
+    allocator: Res<MeshAllocator>,
+    queue: Res<RenderQueue>,
+    device: Res<RenderDevice>,
+    mut scratch: ResMut<Scratch>,
+    pending: Option<ResMut<PendingCommandBuffers>>,
+) {
+    let mut copies = Vec::new();
     for (mesh, range, at) in &writes.0.meshes {
         // Not allocated yet (first frame of a new asset): its own data is drawn.
         let Some(slice) = allocator.mesh_vertex_slice(mesh) else {
@@ -259,9 +289,50 @@ fn upload(writes: Res<RenderWrites>, allocator: Res<MeshAllocator>, queue: Res<R
                 (0, (bytes.len() / vertices as usize) as u64)
             }
         };
-        queue.write_buffer(slice.buffer, (u64::from(slice.range.start) + first) * stride, bytes);
+        let offset = (u64::from(slice.range.start) + first) * stride;
+        let align = wgpu::COPY_BUFFER_ALIGNMENT;
+        if pending.is_some()
+            && coalesce()
+            && (range.start as u64).is_multiple_of(align)
+            && (bytes.len() as u64).is_multiple_of(align)
+            && offset.is_multiple_of(align)
+        {
+            copies.push((slice.buffer, offset, range.clone()));
+            continue;
+        }
+        queue.write_buffer(slice.buffer, offset, bytes);
         UPLOAD_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
+    let (Some(mut pending), Some(end)) = (pending, copies.iter().map(|c| c.2.end).max()) else {
+        return;
+    };
+    // The copies' sources sit at their offsets in the frame's byte vector, so
+    // the scratch holds that vector up to the last copied byte.
+    let size = end as u64;
+    if scratch.0.as_ref().is_none_or(|b| b.size() < size) {
+        scratch.0 = Some(device.create_buffer(&BufferDescriptor {
+            label: Some("mesh stream scratch"),
+            size: size.next_power_of_two().max(1 << 16),
+            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+    }
+    let Some(src) = scratch.0.as_ref() else { return };
+    queue.write_buffer(src, 0, &writes.0.bytes[..end]);
+    UPLOAD_WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("mesh stream upload"),
+    });
+    for (dst, offset, range) in copies {
+        encoder.copy_buffer_to_buffer(
+            src,
+            range.start as u64,
+            dst,
+            offset,
+            (range.end - range.start) as u64,
+        );
+    }
+    pending.push([encoder.finish()]);
 }
 
 /// After the queue systems and before the transparent sort, which recomputes

@@ -70,7 +70,7 @@ pub use self::{
 pub(crate) use self::{
     clear::clear_texture,
     encoder::EncodingState,
-    memory_init::CommandBufferTextureMemoryActions,
+    memory_init::{CommandBufferTextureMemoryActions, InitMemoryError},
     render::{get_dst_stride_of_indirect_args, get_src_stride_of_indirect_args, VertexLimits},
     transfer::{
         extract_texture_selector, validate_linear_texture_data, validate_texture_buffer_copy,
@@ -781,6 +781,32 @@ impl InnerCommandEncoder {
 
         Ok(self.raw.as_mut())
     }
+
+    /// DRIG patch (F943): begin the submit-time "Transit" command buffer unless it is already
+    /// open. With `GRID_WGPU_LAZY_TRANSIT=1` the queue opens it only before the first command it
+    /// records, so a command buffer that needs no barrier and no memory init gets no extra hal
+    /// command buffer at submit.
+    pub(crate) fn ensure_transit_open(&mut self) -> Result<(), DeviceError> {
+        if !self.is_open {
+            self.open_pass(hal_label(
+                Some("(wgpu internal) Transit"),
+                self.device.instance_flags,
+            ))?;
+        }
+        Ok(())
+    }
+}
+
+/// DRIG patch (F943): whether the queue opens the "Transit" command buffer lazily
+/// (`GRID_WGPU_LAZY_TRANSIT=1`). Off by default: the upstream path always opens it.
+pub(crate) fn lazy_transit() -> bool {
+    #[cfg(feature = "std")]
+    {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("GRID_WGPU_LAZY_TRANSIT").is_some_and(|v| v == "1"))
+    }
+    #[cfg(not(feature = "std"))]
+    false
 }
 
 impl Drop for InnerCommandEncoder {
@@ -980,12 +1006,15 @@ impl CommandEncoder {
         }
     }
 
+    // DRIG patch (F943): takes the inner encoder and opens the Transit command buffer only when
+    // there is a barrier to record or it is open already (the upstream path opens it beforehand,
+    // so it records the same, possibly empty, barrier lists as upstream).
     pub(crate) fn insert_barriers_from_device_tracker(
-        raw: &mut dyn hal::DynCommandEncoder,
+        encoder: &mut InnerCommandEncoder,
         base: &mut DeviceTracker,
         head: &Tracker,
         snatch_guard: &SnatchGuard,
-    ) {
+    ) -> Result<(), DeviceError> {
         profiling::scope!("insert_barriers_from_device_tracker");
 
         let buffer_barriers = base
@@ -998,10 +1027,15 @@ impl CommandEncoder {
             .set_from_tracker_and_drain_transitions(&head.textures, snatch_guard)
             .collect::<Vec<_>>();
 
-        unsafe {
-            raw.transition_buffers(&buffer_barriers);
-            raw.transition_textures(&texture_barriers);
+        if !encoder.is_open && buffer_barriers.is_empty() && texture_barriers.is_empty() {
+            return Ok(());
         }
+        encoder.ensure_transit_open()?;
+        unsafe {
+            encoder.raw.transition_buffers(&buffer_barriers);
+            encoder.raw.transition_textures(&texture_barriers);
+        }
+        Ok(())
     }
 
     fn encode_commands(

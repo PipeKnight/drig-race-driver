@@ -222,17 +222,33 @@ fn laps_beside(drawn: u64) -> [u64; lap::N] {
     out
 }
 
-/// With a transform propagation of 3 ms or more, logs what changed, by
-/// hierarchy root (`transform_burst`).
+/// With a transform propagation of 3 ms or more (`GRID_TRANSFORM_BURST_MS`
+/// sets another threshold), logs what changed, by hierarchy root
+/// (`transform_burst`). `same` counts the changed `Transform`s whose value
+/// equals the one they had when last seen changed: writes that dirty the
+/// hierarchy without moving anything (F943), with their roots in `same_roots`.
 fn transform_burst(
     global: Query<Entity, Changed<GlobalTransform>>,
-    local: Query<Entity, Changed<Transform>>,
+    local: Query<(Entity, &Transform), Changed<Transform>>,
     added: Query<(), Added<GlobalTransform>>,
     parents: Query<&ChildOf>,
     names: Query<&Name>,
+    mut seen: Local<std::collections::HashMap<Entity, Transform>>,
 ) {
+    static LIMIT: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    let limit = *LIMIT.get_or_init(|| {
+        crate::dev::var("GRID_TRANSFORM_BURST_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(3.)
+    });
     let ms = LAPS[lap::PROPAGATE].load(Ordering::Relaxed) as f64 * 1e-6;
-    if ms < 3. {
+    let mut same = Vec::new();
+    if limit < 3. {
+        for (e, t) in &local {
+            if seen.insert(e, *t) == Some(*t) {
+                same.push(e);
+            }
+        }
+    }
+    if ms < limit {
         return;
     }
     let root = |mut e: Entity| {
@@ -258,9 +274,10 @@ fn transform_burst(
         (n, s.join(","))
     };
     let (g, gs) = top(&mut global.iter());
-    let (l, ls) = top(&mut local.iter());
+    let (l, ls) = top(&mut local.iter().map(|(e, _)| e));
+    let (n, ss) = top(&mut same.into_iter());
     println!(
-        "transform_burst ms={ms:.2} global_changed={g} added={} transform_changed={l} global_roots={gs} transform_roots={ls}",
+        "transform_burst ms={ms:.2} global_changed={g} added={} transform_changed={l} same={n} global_roots={gs} transform_roots={ls} same_roots={ss}",
         added.iter().count()
     );
 }

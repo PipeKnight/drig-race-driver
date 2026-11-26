@@ -17,6 +17,9 @@
 //! opponent driver's level change fades like the car's (`ornament_lod::Fade`,
 //! F708). The player's driver and a camera cut switch at once.
 //!
+//! The phone's static figures (`crate::mobile::static_drivers`, F943) bake
+//! the player's driver too, in its s = 0 pose.
+//!
 //! `GRID_EXTERIOR_DRIVERS=0` leaves them out (comparisons).
 use crate::driver::Model;
 use bevy::{
@@ -257,31 +260,52 @@ fn spawn(
         let pose = Mat4::from_cols_array(&driving.runtime.pose());
         let root = commands.spawn((Name::new("driver/exterior"), Transform::from_matrix(pose * driver.root()), Visibility::Hidden)).id();
         let world = driver.exterior_pose(0.);
-        let skin: Vec<Entity> = (driver.skin().iter())
-            .map(|&j| {
-                let e = commands.spawn((Transform::from_matrix(world[j]), ChildOf(root))).id();
-                joints.push((e, j));
-                e
-            })
-            .collect();
-        let inverse = bindposes.add(SkinnedMeshInverseBindposes::from(driver.inverse_bind().to_vec()));
         let mut parts = Vec::new();
-        for instance in model.instances.iter().filter(|i| i.slot <= COARSEST as u32) {
-            let e = commands
-                .spawn((
-                    Name::new(format!("driver/exterior/{}", instance.id)),
-                    Mesh3d(meshes.add(instance.mesh.clone())),
-                    MeshMaterial3d(material(instance, suit(0))),
-                    SkinnedMesh { inverse_bindposes: inverse.clone(), joints: skin.clone() },
-                    // The bind-pose bounds do not follow the seated pose.
-                    NoFrustumCulling,
-                    Transform::default(),
-                    Visibility::Hidden,
-                    ChildOf(root),
-                    PlayerDriver,
-                ))
-                .id();
-            parts.push((instance.slot, e));
+        if crate::mobile::static_drivers() {
+            // The phone's static figure (F943): the s = 0 pose baked like an
+            // opponent's, no joint entities.
+            let skin: Vec<Mat4> = (driver.skin().iter().zip(driver.inverse_bind())).map(|(&j, inverse)| world[j] * *inverse).collect();
+            for instance in model.instances.iter().filter(|i| i.slot <= COARSEST as u32) {
+                let Some(mesh) = bake(&instance.mesh, &skin) else { continue };
+                let e = commands
+                    .spawn((
+                        Name::new(format!("driver/exterior/{}", instance.id)),
+                        Mesh3d(meshes.add(mesh)),
+                        MeshMaterial3d(material(instance, suit(0))),
+                        Transform::default(),
+                        Visibility::Hidden,
+                        ChildOf(root),
+                        PlayerDriver,
+                    ))
+                    .id();
+                parts.push((instance.slot, e));
+            }
+        } else {
+            let skin: Vec<Entity> = (driver.skin().iter())
+                .map(|&j| {
+                    let e = commands.spawn((Transform::from_matrix(world[j]), ChildOf(root))).id();
+                    joints.push((e, j));
+                    e
+                })
+                .collect();
+            let inverse = bindposes.add(SkinnedMeshInverseBindposes::from(driver.inverse_bind().to_vec()));
+            for instance in model.instances.iter().filter(|i| i.slot <= COARSEST as u32) {
+                let e = commands
+                    .spawn((
+                        Name::new(format!("driver/exterior/{}", instance.id)),
+                        Mesh3d(meshes.add(instance.mesh.clone())),
+                        MeshMaterial3d(material(instance, suit(0))),
+                        SkinnedMesh { inverse_bindposes: inverse.clone(), joints: skin.clone() },
+                        // The bind-pose bounds do not follow the seated pose.
+                        NoFrustumCulling,
+                        Transform::default(),
+                        Visibility::Hidden,
+                        ChildOf(root),
+                        PlayerDriver,
+                    ))
+                    .id();
+                parts.push((instance.slot, e));
+            }
         }
         seats.push(Seat { car: 0, rest: driver.root(), root, meshes: parts });
     }

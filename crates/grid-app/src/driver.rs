@@ -510,6 +510,40 @@ impl Driver {
         &self.inverse_bind
     }
 
+    /// The phone's static figure ([`crate::mobile::static_drivers`], F943):
+    /// per joint, the joint whose entity carries it. Only the arms move (the
+    /// two arm limbs and the joints below them); everything else holds
+    /// [`Driver::exterior_pose`]`(0)` and has `None` (fixed in the part). An
+    /// arm joint that no clip keys and no IK pass sets keeps its local
+    /// transform, so it rides on its nearest moving ancestor's entity.
+    fn anchors(&self) -> Vec<Option<usize>> {
+        let n = self.joints.len();
+        let mut moving = vec![false; n];
+        let keyed = |v: f32| v > 1e-12;
+        for pose in &self.steer {
+            for (m, (q, t)) in moving.iter_mut().zip(pose) {
+                *m |= q.is_some_and(|q| keyed(q.length_squared())) || t.is_some_and(|t| keyed(t.length_squared()));
+            }
+        }
+        if let Some(r) = &self.reaches {
+            for (j, _, _) in r.gear.iter().chain(&r.handbrake).chain([&r.handbrake_on]).flatten() {
+                moving[*j] = true;
+            }
+        }
+        for limb in &self.limbs {
+            for j in [limb.upper, limb.lower, limb.end] {
+                moving[j] = true;
+            }
+        }
+        let mut arm = vec![false; n];
+        let mut out: Vec<Option<usize>> = Vec::with_capacity(n);
+        for (j, joint) in self.joints.iter().enumerate() {
+            arm[j] = self.limbs[..2].iter().any(|l| l.upper == j) || joint.parent.is_some_and(|p| arm[p]);
+            out.push(if moving[j] && arm[j] { Some(j) } else { joint.parent.and_then(|p| out[p]) });
+        }
+        out
+    }
+
     /// The summed clip poses: Neutral, steering, reaches and lean.
     fn sums(&self, s: f32, reach: Option<&crate::reach::State>, lean: &[f32; 12]) -> Pose {
         let (left, right) = ((-s).max(0.), s.max(0.));
@@ -634,7 +668,10 @@ pub fn install(app: &mut App) {
     app.add_systems(Update, (attach, pose).chain().after(crate::cockpit::animate_interior).before(crate::drive_present));
 }
 
-/// Gives each driver part its joints once it is spawned.
+/// Gives each driver part its joints once it is spawned. The static figure
+/// ([`crate::mobile::static_drivers`]) spawns entities only for the arms'
+/// moving joints: a still joint's skin matrix is its fixed frame in the
+/// joint that carries it (or in the part) times its inverse bind matrix.
 fn attach(
     mut commands: Commands,
     cockpit: Option<Res<crate::cockpit::Cockpit>>,
@@ -644,16 +681,34 @@ fn attach(
     let Some(driver) = cockpit.as_ref().and_then(|c| c.driver.as_ref()) else {
         return;
     };
+    let still = crate::mobile::static_drivers();
     for (entity, name) in &parts {
         if !name.as_str().starts_with("interior/driver/") {
             continue;
         }
-        let rest = driver.world(&driver.joints.iter().map(|j| j.local).collect::<Vec<_>>());
-        let joints = (driver.skin.iter())
-            .map(|&j| commands.spawn((DriverJoint(j), Transform::from_matrix(rest[j]), ChildOf(entity))).id())
-            .collect();
+        let (rest, anchors) = if still {
+            (driver.exterior_pose(0.), driver.anchors())
+        } else {
+            (driver.world(&driver.joints.iter().map(|j| j.local).collect::<Vec<_>>()), (0..driver.joints.len()).map(Some).collect())
+        };
+        let mut spawned = std::collections::BTreeMap::new();
+        let (joints, inverse): (Vec<Entity>, Vec<Mat4>) = (driver.skin.iter().zip(&driver.inverse_bind))
+            .map(|(&j, inverse)| match anchors[j] {
+                Some(a) => {
+                    let e = *spawned
+                        .entry(a)
+                        .or_insert_with(|| commands.spawn((DriverJoint(a), Transform::from_matrix(rest[a]), ChildOf(entity))).id());
+                    (e, rest[a].inverse() * rest[j] * *inverse)
+                }
+                None => (entity, rest[j] * *inverse),
+            })
+            .unzip();
+        if still {
+            println!("cockpit_driver event=static joints={} skin={}", spawned.len(), driver.skin.len());
+        }
+        let inverse = if still { inverse } else { driver.inverse_bind.clone() };
         commands.entity(entity).insert((
-            SkinnedMesh { inverse_bindposes: bindposes.add(SkinnedMeshInverseBindposes::from(driver.inverse_bind.clone())), joints },
+            SkinnedMesh { inverse_bindposes: bindposes.add(SkinnedMeshInverseBindposes::from(inverse)), joints },
             NoFrustumCulling,
         ));
     }
@@ -678,7 +733,10 @@ fn pose(
         return;
     };
     let s = wheel.s;
-    let lean = leaning.lean.as_ref().map_or([0.; 12], |l| l.weights);
+    // The static figure leans no more: its body holds exterior_pose(0).
+    let lean = (leaning.lean.as_ref())
+        .filter(|_| !crate::mobile::static_drivers())
+        .map_or([0.; 12], |l| l.weights);
     let world = driver.pose(s, &interior.0, reaching.0.as_ref().filter(|_| cockpit.reach.is_some()), &lean);
     for (DriverJoint(j), mut transform) in &mut joints {
         *transform = Transform::from_matrix(world[*j]);
@@ -1042,5 +1100,83 @@ mod tests {
             checked += 1;
         }
         assert!(checked >= 40, "{checked} cockpits");
+    }
+
+    /// The phone's static figure (F943), every cockpit: only the arms' moving
+    /// joints (fingers included, the steering clip keys them) keep entities, and an arm joint carried by
+    /// another's entity lands where the full pose puts it, across the wheel's
+    /// travel (its local transform is fixed).
+    #[test]
+    #[ignore = "needs GRID_GAME_ROOT"]
+    fn static_figure_keeps_only_moving_arm_joints() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT"));
+        let mut stems: Vec<String> = std::fs::read_dir(root.join("interiors"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        stems.sort();
+        let (mut checked, mut kept, mut skinned) = (0, 0, 0);
+        for stem in stems {
+            let mut car = Car {
+                parts: Vec::new(),
+                textures: Default::default(),
+                bindings: Default::default(),
+                decal_materials: Default::default(),
+                object_glass_materials: Default::default(),
+                object_two_sided_materials: Default::default(),
+                object_opaque_csm_materials: Default::default(),
+                object_emissive_materials: Default::default(),
+                emissive_time: 0.,
+                center: Vec3::ZERO,
+                radius: 0.,
+                track: false,
+                liveries: Vec::new(),
+                low_lods: Vec::new(),
+                ornament_lods: Default::default(),
+                reflections: Default::default(),
+                piece_skins: Default::default(),
+                lamp_associations: Default::default(),
+            };
+            let Ok(cockpit) = crate::cockpit::append(&root, &stem, &mut car, Mat4::IDENTITY, None) else { continue };
+            let (Some(driver), Some(clips)) = (cockpit.driver, cockpit.interior) else { continue };
+            let Some(steering) = clips.clip("steering") else { continue };
+            let anchors = driver.anchors();
+            let carriers: std::collections::BTreeSet<usize> = driver.skin.iter().filter_map(|&j| anchors[j]).collect();
+            assert!(carriers.len() < driver.skin.len(), "{stem}: {} of {}", carriers.len(), driver.skin.len());
+            kept += carriers.len();
+            skinned += driver.skin.len();
+            for &a in &carriers {
+                assert_eq!(anchors[a], Some(a));
+                let arm = |mut j: usize| loop {
+                    if driver.limbs[..2].iter().any(|l| l.upper == j) {
+                        break true;
+                    }
+                    match driver.joints[j].parent {
+                        Some(p) => j = p,
+                        None => break false,
+                    }
+                };
+                assert!(arm(a), "{stem}: {} is not in an arm", driver.joints[a].name);
+            }
+            for limb in &driver.limbs[..2] {
+                assert!([limb.upper, limb.lower, limb.end].iter().all(|j| anchors[*j] == Some(*j)));
+            }
+            let rest = driver.exterior_pose(0.);
+            for s in [-1., -0.3, 0., 0.6, 1.] {
+                let interior = clips.worlds(&[(steering, (s + 1.) * 0.5 * clips.duration(steering), 1.)]);
+                let pose = driver.pose(s, &interior, None, &[0.; 12]);
+                for &j in &driver.skin {
+                    if let Some(a) = anchors[j] {
+                        let carried = pose[a] * rest[a].inverse() * rest[j];
+                        let gap = carried.w_axis.distance(pose[j].w_axis);
+                        assert!(gap < 1e-3, "{stem} s={s}: {} {gap} m off", driver.joints[j].name);
+                    }
+                }
+            }
+            println!("{stem}: {} of {} skin joints keep entities", carriers.len(), driver.skin.len());
+            checked += 1;
+        }
+        println!("{checked} cockpits: {kept} of {skinned} skin joints keep entities");
+        assert!(checked > 20, "{checked} cockpits");
     }
 }
