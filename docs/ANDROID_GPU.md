@@ -419,7 +419,7 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
 | probe | no shadow casters | `shadows` | warm 27.70 → 25.80 (−1.9); cool 23.95 → 22.99 | 20.93 → 20.07 | heavy −0.96 (−4.0 %) | 36.8 → 38.5 | 33.0 → 31.6 | unreadable | ceiling probe; 33–50 ms frames 2.6 → 1.4 %. Only the shadow pass empties: the main pass still samples the sun's map |
 | ? | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` | pending | | | | | | batch 2; look approved by the owner |
-| ? | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | pending | | | | | | batch 3 probe: splits `lighting` (fill vs sun) |
+| probe | no back fill light | `-SetEnv GRID_BASELINE_FILL=off` | cool 23.96 → 22.78 (partial) | 20.81 → 20.37 | heavy −1.2 (−5 %) | 37.2 → 37.4 | 32.5 → 32.5 | – | partial: lean ×2 against one B run (the phone left adb before run 4); log `baseline_fill mode=off fill=None`; heavy r_encode 10.1 → 9.6 ms. Small: most of `lighting`'s 7 ms is not the fill, so the sun's lookups and BRDF are next (`-Shadows off`, not yet run) |
 | ? | no sun shadow map | `-Shadows off` | pending | | | | | | batch 3 probe: no shadow pass and no lookups; with `shadows` it splits lookups from casters |
 
 Batch 1 on the phone (APK f48e928c, phone session 2026-11-26): lean A against lean plus the word, 200 s runs
