@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F962](F0962.md) | 2026-11-27 | Phone: pre-rotation pair, mirror cost in the cockpit, Continue fix confirmed |
 | [F961](F0961.md) | 2026-11-26 | Phone GPU batch 6: the fast shadow filter becomes the mobile default |
 | [F960](F0960.md) | 2026-11-26 | Phone A/B night: shadow map, fill light, mip skip, shadow filter, auto rows, cull, mirror |
 | [F959](F0959.md) | 2026-11-26 | Metal GPU timestamps fixed (owner PR 87) |
