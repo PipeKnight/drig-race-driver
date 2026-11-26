@@ -860,7 +860,7 @@ fn apply(
     if first {
         // The upload-time mip skip joins the label, so each bench row names it.
         let label = match crate::texture_upload::mip_skip() {
-            Some(m) => format!("{},mipskip{}_{}", s.label(), m.levels, m.min_size),
+            Some(m) => format!("{},mipskip{}", s.label(), m.label()),
             None => s.label(),
         };
         *LABEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(label);

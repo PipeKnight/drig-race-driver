@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F942](F0942.md) | 2026-11-26 | Phone mip skip: owner's combined look (mipskip2_1024+1) with a 64 px floor |
 | [F941](F0941.md) | 2026-11-26 | AGENTS.md: Codex waits use one long yield, no 1-second polling |
 | [F940](F0940.md) | 2026-11-26 | Codex audit reads code-mode exec cells and wait calls |
 | [F939](F0939.md) | 2026-11-26 | Codex usage audit script in tools/; Codex defaults updated |

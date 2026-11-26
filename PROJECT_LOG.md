@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F942](log/F0942.md) | 2026-11-26 | Phone mip skip: owner's combined look (mipskip2_1024+1) with a 64 px floor |
 | [F941](log/F0941.md) | 2026-11-26 | AGENTS.md: Codex waits use one long yield, no 1-second polling |
 | [F940](log/F0940.md) | 2026-11-26 | Codex audit reads code-mode exec cells and wait calls |
 | [F939](log/F0939.md) | 2026-11-26 | Codex usage audit script in tools/; Codex defaults updated |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F885](log/F0885.md) | 2026-11-23 | Dynamic resolution: no ineffective jump from vsync-quantized frames, holds verified (Mac M4) |
 | [F884](log/F0884.md) | 2026-11-20 | Spikes after the countdown in derby and Donington Enhanced: no lazy work, steady-load tails (classifier) |
 | [F883](log/F0883.md) | 2026-11-20 | FPS series summary: A 7dfed11e against B 7d21951e, 16 cell-phases |
-| [F882](log/F0882.md) | 2026-11-20 | Hidden batched opponent parts: not posing them saves no measurable main-thread time |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

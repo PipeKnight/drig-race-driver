@@ -354,6 +354,11 @@ mip chain, no level dropped (owner's question via the coordinator, 2026-11-26).
   (N = 1–3). With `_M`, only textures whose larger side is at least M texels lose them. One level leaves a quarter of
   the base texels, two a sixteenth. Aspect and UVs stay, so only near detail goes: a surface the camera sees at less
   than one texel per pixel already samples those smaller levels.
+- Rules combine, in one word joined by `+` or as several words: **`mipskip2_1024+1`** drops two levels from textures
+  of 1024 texels and more and one from the rest. Each texture takes the rule with the largest minimum it reaches.
+  This is the owner's chosen phone look (2026-11-26, from the before/after sheets: no visible difference by eye).
+- Floor: a texture keeps at least 64 texels on its shorter side (`MIP_SKIP_FLOOR`). The skip drops fewer levels, or
+  none, rather than go below it, so small art never collapses. A texture without mips is never shrunk.
 - The rule is the same for every track, car and texture. Images are kept as they are when:
   - they have no more levels than N;
   - their new size would not hold whole BC blocks;
@@ -361,16 +366,21 @@ mip chain, no level dropped (owner's question via the coordinator, 2026-11-26).
   - they live only in the main world, where the CPU reads them at full size.
 - Screen art never shrinks: the HUD (OSD scene), the front-end 3D worlds, the livery carousel, the loading screen
   statistics and the results art go through `image_ui` / `image_linear_ui`.
+  HUD text is drawn from font files, not DDS, and never passes here.
+- No LUT passes here: the tonemapping LUT is Bevy's own, and the car-number LUT is a CPU table. Track and car
+  occlusion and light textures do pass; they are low-frequency, the owner's sheets include them, and the HUD's
+  `LightMap` cube is both screen art and a cube.
 - With the ETC2 path, a shrunk image keys its cache entry by its own levels.
 - The words are read once, before the first upload, from the `perf_test` setting. A mid-race change has no effect.
-- The `frame_stats` label gains `,mipskipN_M`.
-- The `texture upload summary` line gains `mip_skip=N_M mip_skipped=<images> mip_skipped_bytes=<bytes>`.
+- The `frame_stats` label gains `,mipskip` and the rules, for example `,mipskip2_1024+1_0`.
+- The `texture upload summary` line gains `mip_skip=<rules> mip_skipped=<images> mip_skipped_bytes=<bytes>`.
   `upload_bytes` is then the texel memory after the skip, and `source_bytes` the memory before it.
 - Expected: less texture memory and bandwidth. Track and car textures of 1024–2048 texels lose 75 % (one level) or
   94 % (two levels) of their bytes. Texture fetch costs less in near, magnified views; the heavy views are far and
   minified, so they gain less. Load time falls by the bytes not uploaded. The look loses sharpness on road markings,
   kerbs and car liveries close to the camera.
-- Phone A/B: lean vs `mipskip1_1024` vs `mipskip2_1024`, and `mipskip1` (all textures). Measure:
+- Phone A/B: lean vs `mipskip2_1024+1`, the owner's look; it replaces the three single variants. It becomes the
+  Android default (lean) if the phone shows no regression in heavy-view GPU ms, load time and frames ≥ 50 ms. Measure:
   - heavy-view GPU ms when throttled;
   - the summary's bytes;
   - load time, from `loading_stats` / race start.
@@ -403,6 +413,4 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | ? | no cockpit mirror | `mirror` | pending | | | | | | head-cam row |
 | ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
 | ? | no sun shadows | `shadows` | pending | | | | | | ceiling probe |
-| ? | mip skip 1, ≥1024 | `mipskip1_1024` | pending | | | | | | batch 2; look: crop |
-| ? | mip skip 2, ≥1024 | `mipskip2_1024` | pending | | | | | | batch 2; look: crop |
-| ? | mip skip 1, all | `mipskip1` | pending | | | | | | batch 2; look: crop |
+| ? | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` | pending | | | | | | batch 2; look approved by the owner |

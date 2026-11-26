@@ -282,75 +282,102 @@ pub(crate) fn image_linear_ui(
 }
 
 /// The phone mip-skip candidate (docs/ANDROID_GPU.md section 10): the perf
-/// test words `mipskipN` or `mipskipN_M` drop the top `N` (1-3) mip levels of
-/// every world texture at upload, or with `_M` only of those whose larger
-/// side is at least `M` texels. The image keeps its aspect and UVs, so the
-/// picture loses only near detail, and the GPU stores and samples a quarter
-/// (one level) or a sixteenth (two levels) of the texels. Off unless the word
-/// is given, on every platform; the words are read once, before any upload.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// test word `mipskipN` drops the top `N` (1-3) mip levels of every world
+/// texture at upload; `mipskipN_M` only of those whose larger side is at least
+/// `M` texels. Rules combine, either as several words or joined by `+` in one
+/// (`mipskip2_1024+1`: two levels from textures of 1024 and more, one from the
+/// rest); each texture takes the rule with the largest minimum it reaches.
+/// The image keeps its aspect and UVs, so the picture loses only near detail,
+/// and the GPU stores and samples a quarter (one level) or a sixteenth (two
+/// levels) of the texels. A texture keeps at least [`MIP_SKIP_FLOOR`] texels on
+/// its shorter side, so small art is never shrunk. Off unless a word is given,
+/// on every platform; the words are read once, before any upload.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MipSkip {
-    pub levels: u32,
-    pub min_size: u32,
+    /// `(levels, min_size)`, largest `min_size` first.
+    pub rules: Vec<(u32, u32)>,
 }
 
+/// The shortest side, in texels, that the mip skip may leave a texture with.
+pub(crate) const MIP_SKIP_FLOOR: u32 = 64;
+
 impl MipSkip {
-    /// The last `mipskip` word of a perf test value, if any.
+    /// All `mipskip` rules of a perf test value, if any; a later rule with the
+    /// same minimum size replaces an earlier one.
     fn parse(words: &str) -> Option<Self> {
-        let mut found = None;
+        let mut rules: Vec<(u32, u32)> = Vec::new();
         for word in words.split(',').map(str::trim) {
             let Some(rest) = word.strip_prefix("mipskip") else { continue };
-            let (levels, min) = rest.split_once('_').unwrap_or((rest, "0"));
-            match (levels.parse::<u32>(), min.parse::<u32>()) {
-                (Ok(levels @ 1..=3), Ok(min_size)) => found = Some(Self { levels, min_size }),
-                _ => warn!("perf_test: bad mip skip word {word:?} (mipskip1..3, optionally _MINSIZE)"),
+            for part in rest.split('+') {
+                let (levels, min) = part.split_once('_').unwrap_or((part, "0"));
+                match (levels.parse::<u32>(), min.parse::<u32>()) {
+                    (Ok(levels @ 1..=3), Ok(min_size)) => {
+                        rules.retain(|r| r.1 != min_size);
+                        rules.push((levels, min_size));
+                    }
+                    _ => warn!("perf_test: bad mip skip word {word:?} (mipskipN[_MINSIZE][+N[_MINSIZE]], N 1..3)"),
+                }
             }
         }
-        found
+        rules.sort_by_key(|a| std::cmp::Reverse(a.1));
+        (!rules.is_empty()).then_some(Self { rules })
+    }
+
+    /// Levels to drop from a texture whose larger side is `size`.
+    fn levels_for(&self, size: u32) -> u32 {
+        self.rules.iter().find(|r| size >= r.1).map_or(0, |r| r.0)
+    }
+
+    /// `2_1024+1_0`: the rules for summaries and run labels.
+    pub(crate) fn label(&self) -> String {
+        self.rules.iter().map(|(n, m)| format!("{n}_{m}")).collect::<Vec<_>>().join("+")
     }
 }
 
 /// The active mip skip, read once from the `perf_test` setting.
-pub(crate) fn mip_skip() -> Option<MipSkip> {
+pub(crate) fn mip_skip() -> Option<&'static MipSkip> {
     static SKIP: std::sync::OnceLock<Option<MipSkip>> = std::sync::OnceLock::new();
-    *SKIP.get_or_init(|| {
+    SKIP.get_or_init(|| {
         let skip = crate::settings::diagnostics().perf_test.as_deref().and_then(MipSkip::parse);
-        if let Some(s) = skip {
-            println!("texture upload: mip_skip levels={} min_size={}", s.levels, s.min_size);
+        if let Some(s) = &skip {
+            println!("texture upload: mip_skip rules={} floor={MIP_SKIP_FLOOR}", s.label());
         }
         skip
     })
+    .as_ref()
 }
 
 static SKIPPED: AtomicU64 = AtomicU64::new(0);
 static SKIPPED_BYTES: AtomicU64 = AtomicU64::new(0);
 
-/// Drops the top `skip.levels` mip levels of a single 2D image that has more
-/// levels than that, is at least `skip.min_size` on its larger side, keeps
-/// whole blocks at its new size and is drawn by the GPU (an image kept only
-/// in the main world is read by the CPU at its full size). Returns the bytes
-/// dropped, 0 when the image is kept as it is.
-fn skip_mips(image: &mut Image, skip: MipSkip) -> usize {
+/// Drops the top mip levels that `skip` gives a single 2D image, as many as
+/// its chain, [`MIP_SKIP_FLOOR`] and whole blocks at the new size allow, when
+/// the GPU draws it (an image kept only in the main world is read by the CPU
+/// at its full size). Returns the bytes dropped, 0 when the image is kept.
+fn skip_mips(image: &mut Image, skip: &MipSkip) -> usize {
     let desc = &image.texture_descriptor;
     let size = desc.size;
     let format = desc.format;
     let (bw, bh) = format.block_dimensions();
-    let n = skip.levels;
-    let (w, h) = (size.width >> n, size.height >> n);
     let Some(block) = format.block_copy_size(None) else { return 0 };
     if size.depth_or_array_layers != 1
         || desc.dimension != bevy::render::render_resource::TextureDimension::D2
-        || desc.mip_level_count <= n
-        || size.width.max(size.height) < skip.min_size
-        || w == 0
-        || h == 0
-        || w % bw != 0
-        || h % bh != 0
         || image.texture_view_descriptor.is_some()
         || !image.asset_usage.contains(RenderAssetUsages::RENDER_WORLD)
     {
         return 0;
     }
+    let short = size.width.min(size.height);
+    let mut n = skip.levels_for(size.width.max(size.height)).min(desc.mip_level_count.saturating_sub(1));
+    while n > 0
+        && ((short >> n) < MIP_SKIP_FLOOR || !(size.width >> n).is_multiple_of(bw) || !(size.height >> n).is_multiple_of(bh))
+    {
+        n -= 1;
+    }
+    if n == 0 {
+        return 0;
+    }
+    let (w, h) = (size.width >> n, size.height >> n);
     let dropped: usize = (0..n)
         .map(|l| {
             let (lw, lh) = ((size.width >> l).max(1), (size.height >> l).max(1));
@@ -547,9 +574,8 @@ pub(crate) fn summary() -> String {
         UPLOAD_BYTES.load(Ordering::Relaxed),
         DECODE_NANOS.load(Ordering::Relaxed) as f64 / 1e6,
         mip_skip().map_or_else(String::new, |s| format!(
-            " mip_skip={}_{} mip_skipped={} mip_skipped_bytes={}",
-            s.levels,
-            s.min_size,
+            " mip_skip={} mip_skipped={} mip_skipped_bytes={}",
+            s.label(),
             SKIPPED.load(Ordering::Relaxed),
             SKIPPED_BYTES.load(Ordering::Relaxed)
         )),
@@ -869,14 +895,24 @@ mod tests {
 mod mip_skip_tests {
     use super::*;
 
+    fn rules(r: &[(u32, u32)]) -> Option<MipSkip> {
+        Some(MipSkip { rules: r.to_vec() })
+    }
+
     #[test]
     fn mip_skip_words_parse_levels_and_an_optional_minimum_size() {
         assert_eq!(MipSkip::parse("lean,cull100"), None);
-        assert_eq!(MipSkip::parse("mipskip1"), Some(MipSkip { levels: 1, min_size: 0 }));
-        assert_eq!(MipSkip::parse("lean, mipskip2_1024"), Some(MipSkip { levels: 2, min_size: 1024 }));
+        assert_eq!(MipSkip::parse("mipskip1"), rules(&[(1, 0)]));
+        assert_eq!(MipSkip::parse("lean, mipskip2_1024"), rules(&[(2, 1024)]));
         assert_eq!(MipSkip::parse("mipskip0"), None);
         assert_eq!(MipSkip::parse("mipskip4"), None);
         assert_eq!(MipSkip::parse("mipskip1_x"), None);
+        // Rules combine, largest minimum first, in one word or several.
+        let owner = rules(&[(2, 1024), (1, 0)]);
+        assert_eq!(MipSkip::parse("mipskip1+2_1024"), owner);
+        assert_eq!(MipSkip::parse("mipskip2_1024,lean,mipskip1"), owner);
+        assert_eq!(owner.as_ref().unwrap().label(), "2_1024+1_0");
+        assert_eq!(MipSkip::parse("mipskip1,mipskip2"), rules(&[(2, 0)]), "same minimum: the later wins");
     }
 
     /// A BC1 image with a full chain from `w` x `h`; each level's bytes hold
@@ -899,26 +935,45 @@ mod mip_skip_tests {
     #[test]
     fn mip_skip_drops_the_top_levels_of_large_gpu_images_only() {
         let all = RenderAssetUsages::default();
-        let skip2 = MipSkip { levels: 2, min_size: 1024 };
+        let skip2 = MipSkip { rules: vec![(2, 1024)] };
 
         let mut big = bc1(1024, 512, all);
         let full = big.data.as_ref().unwrap().len();
-        let dropped = skip_mips(&mut big, skip2);
+        let dropped = skip_mips(&mut big, &skip2);
         assert_eq!(dropped, 1024 * 512 / 2 + 512 * 256 / 2);
         assert_eq!(big.data.as_ref().unwrap().len(), full - dropped);
         assert_eq!(big.data.as_ref().unwrap()[0], 2, "level 2 is the new base");
         let d = &big.texture_descriptor;
         assert_eq!((d.size.width, d.size.height, d.mip_level_count), (256, 128, 9));
 
-        // Below the minimum size, CPU-only, or too small for whole blocks: kept.
+        // Below the minimum size or CPU-only: kept.
         let mut small = bc1(512, 512, all);
-        assert_eq!(skip_mips(&mut small, skip2), 0);
+        assert_eq!(skip_mips(&mut small, &skip2), 0);
         assert_eq!(small.texture_descriptor.size.width, 512);
         let mut cpu = bc1(1024, 1024, RenderAssetUsages::MAIN_WORLD);
-        assert_eq!(skip_mips(&mut cpu, skip2), 0);
-        let mut tiny = bc1(8, 8, all);
-        assert_eq!(skip_mips(&mut tiny, MipSkip { levels: 2, min_size: 0 }), 0);
-        assert_eq!(skip_mips(&mut tiny, MipSkip { levels: 1, min_size: 0 }), 32);
-        assert_eq!(tiny.texture_descriptor.size.width, 4);
+        assert_eq!(skip_mips(&mut cpu, &skip2), 0);
+    }
+
+    #[test]
+    fn mip_skip_combines_rules_and_keeps_the_floor() {
+        let all = RenderAssetUsages::default();
+        let owner = MipSkip::parse("mipskip2_1024+1").unwrap();
+        let shrink = |w, h| {
+            let mut image = bc1(w, h, all);
+            skip_mips(&mut image, &owner);
+            let d = &image.texture_descriptor;
+            (d.size.width, d.size.height)
+        };
+        assert_eq!(shrink(2048, 1024), (512, 256), "large: two levels");
+        assert_eq!(shrink(1024, 64), (1024, 64), "short side at the floor: kept");
+        assert_eq!(shrink(512, 512), (256, 256), "the rest: one level");
+        assert_eq!(shrink(128, 128), (64, 64), "down to the floor");
+        assert_eq!(shrink(64, 64), (64, 64), "at the floor: kept");
+        assert_eq!(shrink(1024, 128), (512, 64), "two levels capped by the floor");
+        // A texture without mips is never shrunk.
+        let mut flat = bc1(1024, 1024, all);
+        flat.texture_descriptor.mip_level_count = 1;
+        flat.data.as_mut().unwrap().truncate(1024 * 1024 / 2);
+        assert_eq!(skip_mips(&mut flat, &owner), 0);
     }
 }
