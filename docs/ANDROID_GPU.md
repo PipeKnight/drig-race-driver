@@ -421,8 +421,11 @@ p99 32–38 ms, 0–1.3 % of frames ≥50 ms; `full` 25 FPS, GPU 35 ms.
 | drop | no tonemap/dither | `tonemap` | warm 27.70 → 27.61 (−0.1, noise); cool 24.20 → 23.43 | 21.15 → 20.63 | heavy −0.77 (−3.2 %) | 36.3 → 37.0 | 33.8 → 32.5 | unreadable | against the clean pair-3 A run only; nothing left warm, and colours change: dropped |
 | probe | fewer rows | `render360` | warm 27.70 → 25.80 (−1.9); cool 24.19 → 21.24 | 20.86 → 19.48 | heavy −2.95 (−12 %) | 37.1 → 37.3 | 32.5 → 32.7 | unreadable | probe only: 44 % fewer pixels for 12 % less heavy GPU, so the heavy frame is mostly not per-pixel work at 480 rows |
 | skip | no cube samples | `env_maps` | – | | | | | | no-op on the phone: the baseline preset installs neither the sky IBL nor the scene probe (both need enhanced; PC log `sky_ibl=false`), so there is no map to remove; do not spend a pair on it |
-| ? | no cockpit mirror | `mirror` | invalid pair (neutral: heavy 24.63 both) | | | | | | head-cam row. The first ABAB (APK 28491de6) never reached the cockpit view, the only view with the mirror: VIEW presses at 30/90/150 s stop at bumper. Redo with `-PressSeconds 15` (the cockpit view for about 30 s per run) and compare the per-camera cockpit rows |
-| ? | pre-rotation | `-PreRotation` | pending | | | | | | phone A/B pending |
+| probe | no cockpit mirror | `mirror` | head-cam heavy 24.65 → 19.98 | head-cam 26.2 → 19.7 | head-cam −6.5 (−25 %); other cameras unchanged | ~34–35 both (main-bound) | – | unreadable | redo on APK c2de04b7 with `-PressSeconds 15` (the first pair never reached the cockpit view). The mirror camera draws the whole rear scene to 500 m every frame: heavy vis 2912 → 2183 (−730), d_opaque 108 → 74, heavy r_encode 14.6 → 10.5 ms. Off removes a feature (owner's call); the mirror-only cuts below keep it |
+| ? | mirror size cull | `mirror_cull100` (also 50, 200) | pending | | | | | | mirror camera only: static meshes beyond NNN × their bounding radius leave its visible list (`cockpit.rs` `thin_mirror`); cars always stay. At 100 the dropped mesh is under about 10 px in the 512x128 target (a few px of the mirror on screen) |
+| ? | mirror distance | `mirror_far200` | pending | | | | | | the mirror's visibility distance 500 → 200 m; beyond it the mirror shows its clear colour |
+| ? | mirror every 2nd or 3rd frame | `mirror_every2`, `mirror_every3` | pending | | | | | | owner allows it on the phone (2026-11-27): a half or a third of the mirror passes, the picture updates at that rate and GPU frames alternate (check the 33–50 ms share) |
+| drop | pre-rotation | `-PreRotation` | Δ −0.25 | Δ −0.1 | inside the 0.8 ms spread | – | – | unreadable | p16 pair: neutral; the swapchain stays as it is |
 | probe | no shadow casters | `shadows` | warm 27.70 → 25.80 (−1.9); cool 23.95 → 22.99 | 20.93 → 20.07 | heavy −0.96 (−4.0 %) | 36.8 → 38.5 | 33.0 → 31.6 | unreadable | ceiling probe; 33–50 ms frames 2.6 → 1.4 %. Only the shadow pass empties: the main pass still samples the sun's map |
 | keep | fast shadow filter | `-SetEnv GRID_SHADOW_FILTER=fast` (now the mobile default; `=original` = off) | cool 24.52 → 20.14 | 21.55 → 19.06 | heavy −4.38 (−18 %) | 34.4 → 36.7 | 38.2 → 35.4 | unreadable | ABAB on APK 5dd27572, 60 Hz, starts 36.8–36.9 °C: both B runs beat both A runs; heavy main 23.45 → 21.15 ms, heavy r_encode 11.25 → 9.9 ms, 33–50 ms frames 17.5 → 8.1 %; logs A `filter=1`, B `filter=3`. 1 + 8 compares per fragment instead of up to 108; keeps 4.4 of the ~5 ms the lookups cost (`-Shadows off` −6.9) with the sun shadows kept. Made the mobile default (F961) |
 | keep | mip skip 2 ≥1024, 1 rest | `mipskip2_1024+1` (now the mobile default; `mipskip0` = off) | cool 24.74 → 24.41 (−0.3, noise) | 21.23 → 21.09 | heavy −0.33 (−1 %) | 35.0 → 35.4 | 37.4 → 37.2 | unreadable | ABAB on the phone: neutral, no regression; load time the same (~21.9 s); logs `mip_skip rules=2_1024+1_0 floor=64`. Owner's look; made the mobile default (F956) for memory and bandwidth headroom, not for GPU ms |
@@ -483,3 +486,18 @@ about 33 ms in every hot run: there the CPU sets the frame.
 (184 of 196 rows at 1026×480), so a player on auto gets the bench's fixed 480 (FPS 35.3, heavy GPU 25.39, the
 same as fixed-480 lean). Every step came from load and countdown hitches (frame_ms 45–75 with work_ms about 2),
 and a 35 FPS race never qualifies for an up step (`on_time_ms` 17.2 at 60 Hz).
+
+Mirror (redo, APK c2de04b7, `-PressSeconds 15`): the rear-view mirror costs 6.5 GPU ms whenever the head-cam
+shows it, a quarter of that view's frame, because its camera (15°, 512x128, `cockpit.rs`) draws everything behind
+the car to 500 m every frame: +730 visible meshes and +34 opaque draws. Whole-run FPS did not move (main-bound,
+34–35 either way), so this is GPU and energy headroom for the head-cam. Turning the mirror off removes a feature
+and stays the owner's call. Three mirror-only perf_test words keep it and cut its cost, none in `lean` and none
+touching the driving view or the desktop: `mirror_cullNNN` (a size cull applied to the mirror's visible list only:
+a static mesh's diameter in the target is about 972 · radius / distance pixels, so `mirror_cull100` drops those
+under about 10 target px, a few screen px of the small on-screen mirror), `mirror_farNNN` (a shorter visibility
+distance) and `mirror_everyN` (an update interval; GPU frames then alternate, so its 33–50 ms share decides it).
+Owner decision (2026-11-27): on the phone the mirror may be switched off entirely, or updated every 2nd or 3rd
+frame if that gives a good result (between updates it keeps its last picture). Batch 7 therefore measures
+`mirror_every2` and `mirror_every3` against `mirror` (off) on cool head-cam ABAB runs; an interval that keeps most of
+the 6.5 ms without visible stutter becomes the mobile default, otherwise off does. The two detail cuts are the
+fallback.

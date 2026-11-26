@@ -61,6 +61,16 @@ pub struct Switches {
     pub msaa_off: bool,
     /// The cockpit's rear-view mirror stops updating (head-cam only).
     pub mirror: bool,
+    /// Mirror-only size cull (`mirror_cullNNN`): the mirror camera skips
+    /// every static mesh farther than NNN times its bounding radius; the
+    /// driving view keeps it. 0 = off.
+    pub mirror_cull: u16,
+    /// Mirror visibility distance in metres (`mirror_farNNN`) instead of the
+    /// original's 500 m. 0 = the original.
+    pub mirror_far: u16,
+    /// The mirror renders on every Nth frame (`mirror_everyN`) instead of the
+    /// `Mirror` resource's interval. 0 = the resource's.
+    pub mirror_every: u8,
     /// The 3D camera renders with 2x MSAA (`msaa_off` wins).
     pub msaa2: bool,
     /// The 3D camera draws without GPU-built indirect draws
@@ -143,6 +153,15 @@ impl Switches {
                 mine => mine.min(other.cull_factor),
             };
         }
+        // The stronger cut wins: the smaller factor or distance, the longer interval.
+        let stronger = |mine: u16, theirs: u16| match (mine, theirs) {
+            (0, t) => t,
+            (m, 0) => m,
+            (m, t) => m.min(t),
+        };
+        self.mirror_cull = stronger(self.mirror_cull, other.mirror_cull);
+        self.mirror_far = stronger(self.mirror_far, other.mirror_far);
+        self.mirror_every = self.mirror_every.max(other.mirror_every);
     }
     pub const NORMAL: Self = Self {
         shadows: false,
@@ -159,6 +178,9 @@ impl Switches {
         cull_factor: 0,
         msaa_off: false,
         mirror: false,
+        mirror_cull: 0,
+        mirror_far: 0,
+        mirror_every: 0,
         msaa2: false,
         no_indirect: false,
         reflections: false,
@@ -224,6 +246,15 @@ impl Switches {
         }
         if self.cull_factor > 0 {
             cheaper.push(format!("cull{}", self.cull_factor));
+        }
+        if self.mirror_cull > 0 {
+            cheaper.push(format!("mirror_cull{}", self.mirror_cull));
+        }
+        if self.mirror_far > 0 {
+            cheaper.push(format!("mirror_far{}", self.mirror_far));
+        }
+        if self.mirror_every > 1 {
+            cheaper.push(format!("mirror_every{}", self.mirror_every));
         }
         for (on, name) in [
             (self.light_shadows, "light_shadows"),
@@ -375,6 +406,9 @@ pub fn install(app: &mut App) {
                 rows if rows.starts_with("render") => {
                     s.render_rows = rows[6..].parse().unwrap_or(0);
                 }
+                m if m.starts_with("mirror_cull") => s.mirror_cull = m[11..].parse().unwrap_or(0),
+                m if m.starts_with("mirror_far") => s.mirror_far = m[10..].parse().unwrap_or(0),
+                m if m.starts_with("mirror_every") => s.mirror_every = m[12..].parse().unwrap_or(0),
                 cull if cull.starts_with("cull") => {
                     s.cull_factor = cull[4..].parse().unwrap_or(0);
                 }
@@ -1100,6 +1134,20 @@ mod tests {
         s.add(Switches::LEAN);
         assert_eq!(s.cull_factor, 100);
         assert!(s.label().contains("mobile:cull100+"), "{}", s.label());
+    }
+
+    /// The mirror words keep the stronger cut and name it; none is in `lean`.
+    #[test]
+    fn mirror_cuts_add_and_label() {
+        let mut s = Switches::LEAN;
+        assert_eq!((s.mirror_cull, s.mirror_far, s.mirror_every), (0, 0, 0));
+        s.add(Switches { mirror_cull: 200, mirror_far: 300, mirror_every: 2, ..Switches::NORMAL });
+        s.add(Switches { mirror_cull: 100, mirror_far: 0, mirror_every: 3, ..Switches::NORMAL });
+        assert_eq!((s.mirror_cull, s.mirror_far, s.mirror_every), (100, 300, 3));
+        let label = s.label();
+        for word in ["mirror_cull100", "mirror_far300", "mirror_every3"] {
+            assert!(label.contains(word), "{label}");
+        }
     }
 
     /// `lean` adds every cheaper path to the words before and after it.

@@ -134,6 +134,9 @@ pub fn install(app: &mut App) {
                 cull_mirror.after(bevy::camera::visibility::VisibilitySystems::UpdateFrusta).before(
                     bevy::camera::visibility::VisibilitySystems::CheckVisibility,
                 ),
+                thin_mirror.after(bevy::camera::visibility::VisibilitySystems::CheckVisibility).before(
+                    bevy::camera::visibility::VisibilitySystems::MarkNewlyHiddenEntitiesInvisible,
+                ),
                 no_mirror_shadows
                     .after(bevy::light::SimulationLightSystems::UpdateLightFrusta)
                     .before(bevy::light::SimulationLightSystems::CheckLightVisibility),
@@ -142,8 +145,16 @@ pub fn install(app: &mut App) {
 }
 
 /// The mirror's visibility frustum ends at 500 m (0x5FA440 builds the cull
-/// list with far 500 and draws with far 1000).
-fn cull_mirror(mut camera: Query<(&Camera, &GlobalTransform, &mut Frustum), With<MirrorCamera>>) {
+/// list with far 500 and draws with far 1000), or at the perf_test
+/// `mirror_farNNN` distance.
+fn cull_mirror(
+    test: Option<Res<crate::perf_test::PerfTest>>,
+    mut camera: Query<(&Camera, &GlobalTransform, &mut Frustum), With<MirrorCamera>>,
+) {
+    let far = match test.map_or(0, |t| t.active().mirror_far) {
+        0 => MIRROR_CULL,
+        metres => f32::from(metres),
+    };
     for (camera, transform, mut frustum) in &mut camera {
         if !camera.is_active {
             continue;
@@ -153,9 +164,40 @@ fn cull_mirror(mut camera: Query<(&Camera, &GlobalTransform, &mut Frustum), With
             &clip_from_world,
             &transform.translation(),
             &transform.back(),
-            MIRROR_CULL,
+            far,
         ));
     }
+}
+
+/// Whether the mirror's size cull drops a mesh of bounding `radius` whose
+/// centre is `distance` from the mirror eye: a static mesh beyond `factor`
+/// times its radius. Car parts and a factor of 0 keep everything.
+fn mirror_drops(factor: u16, car: bool, radius: f32, distance: f32) -> bool {
+    factor > 0 && !car && distance > f32::from(factor) * radius
+}
+
+/// The perf_test `mirror_cullNNN` size cull, for the mirror camera only: its
+/// visible list loses the static meshes that are small in its picture; the
+/// driving view's list is untouched (docs/ANDROID_GPU.md section 10).
+fn thin_mirror(
+    test: Option<Res<crate::perf_test::PerfTest>>,
+    mut mirror: Query<(&Camera, &GlobalTransform, &mut bevy::camera::visibility::VisibleEntities), With<MirrorCamera>>,
+    meshes: Query<(&Aabb, &GlobalTransform, Has<crate::MovingPart>)>,
+) {
+    let factor = test.map_or(0, |t| t.active().mirror_cull);
+    let Ok((camera, eye, mut visible)) = mirror.single_mut() else {
+        return;
+    };
+    if factor == 0 || !camera.is_active {
+        return;
+    }
+    let eye = eye.translation();
+    visible.get_mut(std::any::TypeId::of::<Mesh3d>()).retain(|&entity| {
+        meshes.get(entity).map_or(true, |(aabb, transform, car)| {
+            let centre = transform.transform_point(aabb.center.into());
+            !mirror_drops(factor, car, crate::mobile::radius(aabb, transform), centre.distance(eye))
+        })
+    });
 }
 
 /// The original renders no cascade shadows for the mirror (no cascade pass,
@@ -424,7 +466,11 @@ fn place_mirror(
     let seen = viewer.single().is_ok_and(|frustum| {
         glass.iter().any(|(t, aabb)| frustum.intersects_obb(aabb, &t.compute_affine(), true, true))
     });
-    let due = mirror.0.is_some_and(|(_, every)| frame.0.is_multiple_of(every))
+    let every = |own: u32| match test.as_ref().map_or(0, |t| t.active().mirror_every) {
+        0 => own,
+        n => u32::from(n),
+    };
+    let due = mirror.0.is_some_and(|(_, own)| frame.0.is_multiple_of(every(own)))
         && !test.is_some_and(|t| t.active().mirror);
     let active = shown && seen && due && !glass.is_empty();
     camera.is_active = active;
@@ -625,6 +671,15 @@ mod tests {
         assert_eq!(wheel.s, 0.99);
         wheel.step(-1., false, dt);
         assert_eq!(wheel.s, -1.);
+    }
+
+    /// The mirror's size cull drops only far static meshes, never a car part.
+    #[test]
+    fn mirror_size_cull_drops_far_statics_only() {
+        assert!(!mirror_drops(0, false, 1., 1000.));
+        assert!(mirror_drops(100, false, 1., 101.));
+        assert!(!mirror_drops(100, false, 1., 99.));
+        assert!(!mirror_drops(100, true, 1., 1000.));
     }
 
     #[test]
