@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F938](log/F0938.md) | 2026-11-26 | Codex working rules in AGENTS.md |
 | [F937](log/F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
 | [F936](log/F0936.md) | 2026-11-26 | Phone GPU batch 2: texture mip skip at upload (mipskipN_M) |
 | [F935](log/F0935.md) | 2026-11-26 | Android CPU batch 1: thread placement, thermal governor, parallel encoder finish and ADPF target switches |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F881](log/F0881.md) | 2026-11-20 | Pane copies gated on StandardMaterial bindless; DX12 vs Vulkan A/B |
 | [F880](log/F0880.md) | 2026-11-20 | PrepareMeshes: per-car moving entities counted; merging rigid followers cannot reach the bar |
 | [F879](log/F0879.md) | 2026-11-20 | Render prepare: instance input upload probe; full upload is real car motion, cannot reach the bar |
-| [F878](log/F0878.md) | 2026-11-20 | Git hooks: pre-commit and commit-msg checks for every commit |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -42,6 +42,16 @@ Every model call re-reads the whole context, so the context size and the number 
 - Tests must exercise every mode the player gets. If a change adds behaviour that only runs in an interactive window (interpolation, presentation, input), add a test or a smoke step that switches that mode on. Offscreen captures alone do not count (the F729/F730 HUD regression, row 116).
 - The coordinator gives each session one topic. Before a new task, it compacts the idle session or starts a fresh one with a full brief. Mechanical work (log entries, backlog rows, release notes) may run on a cheaper model or a lower effort.
 
+### Codex (owner, 26 November 2026)
+
+- Before starting routine work, select GPT-6.2 Sol at Standard speed and medium reasoning if available. Use low effort for bounded mechanical work where supported. Raise effort or switch to Astra when the task needs deeper diagnosis or cross-crate reasoning. Choose Fast or Ultrafast only for an explicitly time-sensitive turnaround. Check the selected speed at session start because the CLI remembers it.
+- For a running shell session, use empty `write_stdin` to collect a result only when it affects the next decision. Start with a bounded wait that fits the expected duration and the tool limit, then do independent work if the command is still running. If the client has no completion notification and the result gates the next step, use a bounded terminal wait or the existing deadline-aware DRIG wrapper. A live PTY ID by itself is no reason to poll.
+- Give shell calls an explicit output budget such as `max_output_tokens: 2000` where the tool supports it. Keep full diagnostics under `local/`. Increase the cap or request a targeted excerpt when output clipping hides evidence needed for the next decision.
+- Keep an existing thread for follow-up on the same issue. Before compacting a long thread or starting a new one, record the source revision, current finding, evidence paths and next verification step in the existing hand-off note. Use the installed client's compaction command when continuing the same topic. Keep the Codex compaction threshold at its model default until a local comparison supports an override.
+- For a local token audit, compare equivalent DRIG tasks at the same model, reasoning effort and speed before changing several settings together. Keep raw rollouts and audit output under machine-local storage.
+
+The owner's token, cost and usage-limit figures (Claude Code, Codex or any other platform) are private: never write them into the repository, its log, docs or commit messages (owner, 26 November 2026; F937).
+
 ## Original reference and provenance
 
 - Original installation: `C:\Program Files (x86)\Steam\steamapps\common\Grid`.

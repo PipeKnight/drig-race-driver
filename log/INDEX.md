@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F938](F0938.md) | 2026-11-26 | Codex working rules in AGENTS.md |
 | [F937](F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
 | [F936](F0936.md) | 2026-11-26 | Phone GPU batch 2: texture mip skip at upload (mipskipN_M) |
 | [F935](F0935.md) | 2026-11-26 | Android CPU batch 1: thread placement, thermal governor, parallel encoder finish and ADPF target switches |
