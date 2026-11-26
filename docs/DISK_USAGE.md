@@ -247,3 +247,27 @@ All targets, SHA and actual reports remain in the private G278 cleanup evidence.
 Explorer and `tools/disk_report.ps1` count every NTFS hard link in full, so `local/` looked like 80 GB while it held 29.7 GB on disk (`local/behavior`: 68.7 GB logical, 15.0 GB physical after the hard-link dedup). Reports give the physical size as well, counting each file id once.
 
 Finished sessions' worktrees are retired, not kept: once a session has had no activity for 7 days, has no tracked changes and no commits outside origin/main, the weekly report lists it, and after the owner's OK the coordinator zips its `local/` into `local/worktree-evidence/<name>/local.zip` (files up to 50 MB, no exe/pdb/so/apk/dll/spool, with a `NOT-COPIED.tsv` manifest and `local/handoff/` unzipped), prunes its build dir, removes the worktree and archives the session. The first run retired ten worktrees and freed 31 GB (F-entry "Ten idle worktrees retired").
+
+## 12. Who fills the disk: `tools/disk_audit.py` (26 November 2026)
+
+The owner often asks whether Claude or Codex filled the disk. `py -I tools/disk_audit.py` answers it in about 20 s, read-only.
+- It measures every checkout. The owner comes from the path: `.claude/worktrees` is Claude, `~/.codex/worktrees` is Codex, the main checkout is shared.
+- It maps each checkout to its build dir under `C:/cargo-build` with `cargo metadata`. A build dir that no live checkout uses is listed as `orphan` and can be removed with `prune_build_dirs.ps1`.
+- It also measures `local/*`, `E:/DRIG-local`, the Claude data folders (`~/.claude`, Temp/claude, the desktop app data), the Codex data folders (`~/.codex/sessions` and the rest), the toolchains and Temp.
+- Hard-linked files under `local/` and `target/` count once.
+- Each run saves a snapshot in the main checkout's `local/disk-audit/` and prints the growth per entry since the previous run, plus the bytes written in the last `--recent` hours (default 24). This shows the source of a sudden fill even on a first run.
+- The last line is the verdict: free space on C:, the bytes written per owner, and the top writer.
+
+First run, 26 November 2026, with C: at 24.9 GB free of 931 GB:
+
+| Owner | Size, GB | Written in 24 h, GB |
+|---|---:|---:|
+| Claude | 117.1 | 42.8 |
+| Codex | 106.7 | 26.0 |
+| Shared (main checkout, seed, E:) | 68.4 | 1.1 |
+
+- Each active worktree's build dir is 4–23 GB. Release builds and the Android targets go there, so the APK series wrote 13–14 GB each night in the GPU and phone-executor build dirs.
+- The largest single entries:
+  - the Codex worktree `grid-graphics-delivery`: 55.9 GB, with its staging checkouts under `local/source-staging`;
+  - `~/.codex/sessions`: 16.9 GB of rollout logs;
+  - the build dir of the idle `mac-perf` session: 23.0 GB.

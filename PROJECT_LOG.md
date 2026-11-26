@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F952](log/F0952.md) | 2026-11-26 | Disk audit by owner: tools/disk_audit.py |
 | [F951](log/F0951.md) | 2026-11-26 | Android bundle lists regenerated for G435's route cloth files |
 | [F950](log/F0950.md) | 2026-11-26 | Phone fill-light probe (partial): about 1 heavy ms |
 | [F949](log/F0949.md) | 2026-11-26 | Token economy rules from the Claude session audit |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F895](log/F0895.md) | 2026-11-24 | Goal matrix after F893/F894, and unfocused frames in frame_stats |
 | [F894](log/F0894.md) | 2026-11-24 | Derby collision frames: car_batch refresh outside rebuilds |
 | [F893](log/F0893.md) | 2026-11-24 | Bevy GPU-preprocessing bind-group cache (vendored bevy_pbr) |
-| [F892](log/F0892.md) | 2026-11-23 | wgpu-core: bind-group tracker insert once per render pass; empty internal command buffers skipped (no gain, not kept) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

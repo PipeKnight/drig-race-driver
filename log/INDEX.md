@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F952](F0952.md) | 2026-11-26 | Disk audit by owner: tools/disk_audit.py |
 | [F951](F0951.md) | 2026-11-26 | Android bundle lists regenerated for G435's route cloth files |
 | [F950](F0950.md) | 2026-11-26 | Phone fill-light probe (partial): about 1 heavy ms |
 | [F949](F0949.md) | 2026-11-26 | Token economy rules from the Claude session audit |
