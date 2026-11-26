@@ -11,10 +11,9 @@
 //!   (`r_*`), the swap-chain acquire (`acquire`), the render-graph encode
 //!   (`r_encode`), the queue submit (`r_submit`) and the present
 //!   (`r_present`).
-//! - GPU, with timestamp queries: empty compute passes as markers between the
-//!   passes of every camera, and the sun cascades timed by their own render
-//!   passes (gpu_passes::shadow_span). Read back two frames later; nothing
-//!   waits for the GPU.
+//! - GPU, with timestamp queries: markers between the passes of every
+//!   camera, and the sun cascades timed by their own render
+//!   passes (gpu_passes::shadow_span). Read back asynchronously.
 //! - Counts: draw groups per phase, visible meshes, shadow casters and shadow
 //!   views, and mesh and image uploads per second.
 //! - Process: CPU time over wall time (`cpu_load`, 2.0 = two cores busy),
@@ -55,9 +54,10 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// Frames in flight for GPU readback: a frame's timestamps are read when its
-/// slot comes round again, three frames later.
+/// Slots for recording and reading GPU timestamps asynchronously.
 const RING: usize = 3;
+/// Metal waits for a render submission and then a separate resolve submission.
+const METAL_RING: usize = 6;
 /// Timestamp queries per frame.
 const SLOT_QUERIES: u32 = 256;
 /// GPU per-view detail lines: once per this many `frame_stats` windows.
@@ -898,9 +898,11 @@ pub struct FrameTimes {
 /// Splits one frame's timestamps (ticks) into segments; `period_ns` is the
 /// queue's timestamp period.
 pub fn split(marks: &[Mark], ticks: &[u64], period_ns: f64) -> FrameTimes {
+    // Unwritten counters can be zero; Metal can also return MTLCounterErrorValue.
+    let valid_tick = |tick| tick != 0 && tick != u64::MAX;
     let ms = |t: u64| t as f64 * period_ns * 1e-6;
     let mut out = FrameTimes::default();
-    let valid: Vec<u64> = ticks.iter().copied().filter(|&t| t != 0).collect();
+    let valid: Vec<u64> = ticks.iter().copied().filter(|&t| valid_tick(t)).collect();
     if let (Some(min), Some(max)) = (valid.iter().min(), valid.iter().max()) {
         out.span = ms(max - min);
     }
@@ -908,13 +910,15 @@ pub fn split(marks: &[Mark], ticks: &[u64], period_ns: f64) -> FrameTimes {
     for (m, &t) in marks.iter().zip(ticks) {
         if !matches!(m.kind, Kind::FrameBegin | Kind::FrameEnd) {
             views.entry((m.order, m.view)).or_default().push((m.kind, t));
+        } else if !valid_tick(t) {
+            out.bad += 1;
         }
     }
     for ((order, view), list) in views {
         let at = |k: Kind| list.iter().find(|(x, _)| *x == k).map(|(_, t)| *t);
         let mut bad = 0;
         let mut d = |a: Option<u64>, b: Option<u64>| match (a, b) {
-            (Some(a), Some(b)) if b >= a && a != 0 => ms(b - a),
+            (Some(a), Some(b)) if b >= a && valid_tick(a) && valid_tick(b) => ms(b - a),
             (Some(_), Some(_)) => {
                 bad += 1;
                 0.
@@ -961,6 +965,7 @@ pub fn split(marks: &[Mark], ticks: &[u64], period_ns: f64) -> FrameTimes {
 enum SlotState {
     Free,
     Recording,
+    Submitted,
     Pending,
 }
 
@@ -970,6 +975,9 @@ const MAP_TIMEOUT_FRAMES: u32 = 60;
 struct Slot {
     marks: Vec<Mark>,
     state: SlotState,
+    /// Set by the queue once the Metal command buffers writing these queries
+    /// finish. The slot cannot be resolved or reused before this signal.
+    queries_done: Arc<AtomicBool>,
     /// 0 waiting, 1 mapped, 2 failed. A fresh flag for every map, so the late
     /// callback of a map the ring gave up on cannot speak for the next one.
     mapped: Arc<AtomicU8>,
@@ -1005,21 +1013,22 @@ fn readback_buffer(device: &wgpu::Device) -> wgpu::Buffer {
 }
 
 impl GpuInner {
-    fn new(device: &wgpu::Device, set: wgpu::QuerySet) -> Self {
+    fn new(device: &wgpu::Device, set: wgpu::QuerySet, ring: usize) -> Self {
         let resolve = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame_split_resolve"),
-            size: u64::from(SLOT_QUERIES) * 8 * RING as u64,
+            size: u64::from(SLOT_QUERIES) * 8 * ring as u64,
             usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         Self {
             set,
             resolve,
-            readback: (0..RING).map(|_| readback_buffer(device)).collect(),
-            slots: (0..RING)
+            readback: (0..ring).map(|_| readback_buffer(device)).collect(),
+            slots: (0..ring)
                 .map(|_| Slot {
                     marks: Vec::new(),
                     state: SlotState::Free,
+                    queries_done: Arc::new(AtomicBool::new(false)),
                     mapped: Arc::new(AtomicU8::new(0)),
                     map_outstanding: false,
                     age: 0,
@@ -1077,7 +1086,7 @@ impl GpuInner {
     fn open(&mut self, shown: bool) {
         self.current = None;
         self.frame = self.frame.wrapping_add(1);
-        let i = self.frame % RING;
+        let i = self.frame % self.slots.len();
         let slot = &mut self.slots[i];
         if shown && slot.state == SlotState::Free && !slot.map_outstanding {
             slot.marks.clear();
@@ -1087,37 +1096,60 @@ impl GpuInner {
         }
     }
 
-    /// Closes this frame's slot: its readback buffer, first query and query
-    /// count, or `None` when it recorded nothing.
-    fn close(&mut self) -> Option<(wgpu::Buffer, u32, u32)> {
-        let i = self.current?;
-        let slot = &mut self.slots[i];
-        let used = slot.marks.len() as u32;
-        if used == 0 || slot.map_outstanding {
-            slot.state = SlotState::Free;
-            self.current = None;
-            return None;
+    /// Resolves the current slot on backends that can resolve in the same
+    /// submission, or all completed render slots on Metal.
+    fn prepare_resolves(&mut self, metal: bool) -> Vec<(wgpu::Buffer, u32, u32)> {
+        let mut resolves = Vec::new();
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            let ready = if metal {
+                slot.state == SlotState::Submitted && slot.queries_done.load(Ordering::Acquire)
+            } else {
+                self.current == Some(i) && slot.state == SlotState::Recording
+            };
+            if !ready {
+                continue;
+            }
+            let used = slot.marks.len() as u32;
+            if used == 0 {
+                slot.state = SlotState::Free;
+                continue;
+            }
+            debug_assert!(!slot.map_outstanding);
+            slot.state = SlotState::Pending;
+            resolves.push((self.readback[i].clone(), i as u32 * SLOT_QUERIES, used));
         }
-        slot.state = SlotState::Pending;
-        Some((self.readback[i].clone(), i as u32 * SLOT_QUERIES, used))
+        resolves
     }
 
-    /// After submit: maps this frame's readback buffer.
-    fn start_map(&mut self) {
-        let Some(i) = self.current else {
+    fn finish_metal_queries(&mut self, queue: &wgpu::Queue) {
+        let Some(i) = self.current.take() else {
             return;
         };
         let slot = &mut self.slots[i];
-        if slot.state != SlotState::Pending || slot.map_outstanding {
+        if slot.marks.is_empty() {
+            slot.state = SlotState::Free;
             return;
         }
-        let flag = Arc::new(AtomicU8::new(0));
-        slot.mapped = flag.clone();
-        slot.map_outstanding = true;
-        let len = slot.marks.len() as u64 * 8;
-        self.readback[i].map_async(MapMode::Read, ..len, move |r| {
-            flag.store(if r.is_ok() { 1 } else { 2 }, Ordering::Release);
-        });
+        slot.state = SlotState::Submitted;
+        slot.queries_done.store(false, Ordering::Relaxed);
+        let done = Arc::clone(&slot.queries_done);
+        queue.on_submitted_work_done(move || done.store(true, Ordering::Release));
+    }
+
+    /// After submit, map every readback buffer resolved by that submission.
+    fn start_maps(&mut self) {
+        for (slot, buffer) in self.slots.iter_mut().zip(&self.readback) {
+            if slot.state != SlotState::Pending || slot.map_outstanding {
+                continue;
+            }
+            let flag = Arc::new(AtomicU8::new(0));
+            slot.mapped = flag.clone();
+            slot.map_outstanding = true;
+            let len = slot.marks.len() as u64 * 8;
+            buffer.map_async(MapMode::Read, ..len, move |r| {
+                flag.store(if r.is_ok() { 1 } else { 2 }, Ordering::Release);
+            });
+        }
     }
 }
 
@@ -1127,6 +1159,8 @@ impl GpuInner {
 pub struct FrameGpu {
     inner: Mutex<GpuInner>,
     period_ns: f64,
+    // A nonempty blit encoder writes a stage-boundary timestamp on Metal.
+    marker_blit: Option<wgpu::Buffer>,
 }
 
 impl FrameGpu {
@@ -1144,12 +1178,17 @@ impl FrameGpu {
     }
 }
 
-fn gpu_reason(features: wgpu::Features) -> Result<(), &'static str> {
+fn gpu_reason(backend: wgpu::Backend, features: wgpu::Features) -> Result<(), &'static str> {
     if crate::dev::var("GRID_FRAME_GPU").is_ok_and(|v| v == "0") {
         return Err("GRID_FRAME_GPU=0");
     }
     if !features.contains(wgpu::Features::TIMESTAMP_QUERY) {
         return Err("no_timestamp_query");
+    }
+    if backend == wgpu::Backend::Metal
+        && !features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
+    {
+        return Err("no_metal_encoder_timestamp");
     }
     Ok(())
 }
@@ -1161,7 +1200,7 @@ fn gpu_startup(
     info: Res<RenderAdapterInfo>,
 ) {
     let features = device.features();
-    let reason = gpu_reason(features);
+    let reason = gpu_reason(info.backend, features);
     println!(
         "frame_split version=1 backend={:?} adapter=\"{}\" timestamp_query={} inside_encoders={} inside_passes={} gpu_markers={} reason={} near_present_marker={}",
         info.backend,
@@ -1177,14 +1216,25 @@ fn gpu_startup(
         return;
     }
     let wgpu_device = device.wgpu_device();
+    let metal = info.backend == wgpu::Backend::Metal;
+    let ring = if metal { METAL_RING } else { RING };
     let set = wgpu_device.create_query_set(&wgpu::QuerySetDescriptor {
         label: Some("frame_split"),
         ty: wgpu::QueryType::Timestamp,
-        count: SLOT_QUERIES * RING as u32,
+        count: SLOT_QUERIES * ring as u32,
+    });
+    let marker_blit = metal.then(|| {
+        wgpu_device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame_split_marker_blit"),
+            size: wgpu::COPY_BUFFER_ALIGNMENT,
+            usage: wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
     });
     commands.insert_resource(FrameGpu {
-        inner: Mutex::new(GpuInner::new(wgpu_device, set)),
+        inner: Mutex::new(GpuInner::new(wgpu_device, set, ring)),
         period_ns: f64::from(queue.get_timestamp_period()),
+        marker_blit,
     });
 }
 
@@ -1225,19 +1275,23 @@ fn write_marker(gpu: &FrameGpu, ctx: &mut RenderContext, mark: Mark) {
     let Some((set, index)) = gpu.alloc(&[mark]) else {
         return;
     };
-    // An empty compute pass whose beginning writes the timestamp: needs only
-    // TIMESTAMP_QUERY (Metal has no timestamps inside passes, and Bevy avoids
-    // encoder timestamps there).
-    let _pass = ctx
-        .command_encoder()
-        .begin_compute_pass(&ComputePassDescriptor {
-            label: Some("frame_split_marker"),
-            timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
-                query_set: &set,
-                beginning_of_pass_write_index: Some(index),
-                end_of_pass_write_index: None,
-            }),
-        });
+    let encoder = ctx.command_encoder();
+    if let Some(scratch) = &gpu.marker_blit {
+        // Metal can skip a compute encoder with no dispatch. On stage-boundary
+        // GPUs wgpu emits the pending timestamp in a blit pass with a buffer fill.
+        encoder.write_timestamp(&set, index);
+        encoder.clear_buffer(scratch, 0, None);
+        return;
+    }
+    // Other backends only need TIMESTAMP_QUERY for this marker.
+    let _pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+        label: Some("frame_split_marker"),
+        timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
+            query_set: &set,
+            beginning_of_pass_write_index: Some(index),
+            end_of_pass_write_index: None,
+        }),
+    });
 }
 
 /// CPU side of the view markers: when each camera schedule reached each
@@ -1345,25 +1399,29 @@ fn frame_marker<const K: u8>(gpu: Option<Res<FrameGpu>>, mut ctx: RenderContext)
     write_marker(&gpu, &mut ctx, mark);
 }
 
-/// After the camera passes: resolve this frame's queries into its readback
-/// buffer (one command buffer, submitted with the frame).
+/// Metal can resolve the previous contents of a counter if the command
+/// buffers that sample it have only been submitted. Resolve those queries
+/// after the queue completes their submission, without blocking rendering.
 fn gpu_resolve(gpu: Res<FrameGpu>, mut ctx: RenderContext) {
-    let (set, resolve, readback, base, used) = {
+    let (set, resolve, readbacks) = {
         let mut g = gpu.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Some((readback, base, used)) = g.close() else {
-            return;
-        };
-        (g.set.clone(), g.resolve.clone(), readback, base, used)
+        let readbacks = g.prepare_resolves(gpu.marker_blit.is_some());
+        (g.set.clone(), g.resolve.clone(), readbacks)
     };
-    let encoder = ctx.command_encoder();
-    let offset = u64::from(base) * 8;
-    encoder.resolve_query_set(&set, base..base + used, &resolve, offset);
-    encoder.copy_buffer_to_buffer(&resolve, offset, &readback, 0, u64::from(used) * 8);
+    for (readback, base, used) in readbacks {
+        let encoder = ctx.command_encoder();
+        let offset = u64::from(base) * 8;
+        encoder.resolve_query_set(&set, base..base + used, &resolve, offset);
+        encoder.copy_buffer_to_buffer(&resolve, offset, &readback, 0, u64::from(used) * 8);
+    }
 }
 
-/// After submit: map this frame's readback buffer.
-fn gpu_finish(gpu: Res<FrameGpu>) {
-    gpu.inner.lock().unwrap_or_else(|e| e.into_inner()).start_map();
+fn gpu_finish(gpu: Res<FrameGpu>, queue: Res<RenderQueue>) {
+    let mut g = gpu.inner.lock().unwrap_or_else(|e| e.into_inner());
+    if gpu.marker_blit.is_some() {
+        g.finish_metal_queries(&queue);
+    }
+    g.start_maps();
 }
 
 // ---------------------------------------------------------------------------
@@ -1450,8 +1508,11 @@ struct Acc {
 
 impl Acc {
     fn add_gpu(&mut self, frame: FrameTimes) {
-        self.gpu_frames += 1;
         self.gpu_bad += frame.bad;
+        if frame.bad != 0 || frame.span <= 0. {
+            return;
+        }
+        self.gpu_frames += 1;
         self.gpu_span += frame.span;
         for v in frame.views {
             for (sum, x) in self.gpu.iter_mut().zip(v.segments) {
@@ -1641,15 +1702,15 @@ pub fn window_report(seconds: f64) -> (String, Vec<String>) {
             for (name, sum) in SEGMENTS.iter().zip(a.gpu) {
                 s += &format!(" {name}={:.2}", sum / n);
             }
-            s += &format!(
-                " g_gap={:.2} g_frames={} g_bad={} g_lost={}",
-                (a.gpu_span - total) / n,
-                a.gpu_frames,
-                a.gpu_bad,
-                a.gpu_lost
-            );
+            s += &format!(" g_gap={:.2}", (a.gpu_span - total) / n);
         } else {
             s += if gpu_possible { " gpu=off" } else { " gpu=hidden" };
+        }
+        if a.gpu_frames > 0 || a.gpu_bad > 0 || a.gpu_lost > 0 {
+            s += &format!(
+                " g_frames={} g_bad={} g_lost={}",
+                a.gpu_frames, a.gpu_bad, a.gpu_lost,
+            );
         }
         let c = f64::from(a.count_frames.max(1));
         for (name, sum) in COUNTS.iter().zip(a.counts) {
@@ -1938,6 +1999,26 @@ mod tests {
     }
 
     #[test]
+    fn invalid_gpu_frame_is_excluded_from_timing_averages() {
+        let marks = [
+            m(Kind::C3Start, 0),
+            m(Kind::C3Main, 0),
+            m(Kind::C3Transparent, 0),
+            m(Kind::FrameEnd, isize::MIN),
+        ];
+        let invalid = split(&marks, &[1000, 2500, u64::MAX, 0], 1000.);
+        assert_eq!(invalid.bad, 2);
+        assert_eq!(invalid.span, 1.5);
+
+        let mut acc = Acc::default();
+        acc.add_gpu(invalid);
+        assert_eq!(acc.gpu_bad, 2);
+        assert_eq!(acc.gpu_frames, 0);
+        assert_eq!(acc.gpu_span, 0.);
+        assert!(acc.detail.is_empty());
+    }
+
+    #[test]
     fn report_averages_and_resets() {
         with_acc(|a| {
             *a = Acc::default();
@@ -2016,7 +2097,7 @@ mod tests {
             ty: wgpu::QueryType::Occlusion,
             count: SLOT_QUERIES * RING as u32,
         });
-        let mut g = GpuInner::new(&device, set);
+        let mut g = GpuInner::new(&device, set, RING);
         let source = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame_split_test_source"),
             size: 64,
@@ -2030,11 +2111,11 @@ mod tests {
             g.open(true);
             let i = g.current?;
             g.slots[i].marks.extend([m(Kind::FrameBegin, 0); 2]);
-            let (readback, _, used) = g.close()?;
+            let (readback, _, used) = g.prepare_resolves(false).pop()?;
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             encoder.copy_buffer_to_buffer(&source, 0, &readback, 0, u64::from(used) * 8);
             queue.submit([encoder.finish()]);
-            g.start_map();
+            g.start_maps();
             Some(i)
         };
         // Every slot records, then the GPU finishes and all three are read.
@@ -2078,7 +2159,7 @@ mod tests {
                 Some(i) => {
                     assert_ne!(i, busy);
                     opened += 1;
-                    g.close();
+                    assert!(g.prepare_resolves(false).is_empty());
                 }
                 None => skipped += 1,
             }
