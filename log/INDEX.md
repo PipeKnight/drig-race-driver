@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F960](F0960.md) | 2026-11-26 | Phone A/B night: shadow map, fill light, mip skip, shadow filter, auto rows, cull, mirror |
 | [F959](F0959.md) | 2026-11-26 | Metal GPU timestamps fixed (owner PR 87) |
 | [F958](F0958.md) | 2026-11-26 | Mac traces of build 1546e211 (Donington, Istanbul): 120 Hz cadence judder |
 | [F957](F0957.md) | 2026-11-26 | Owner report: choppy mix of several car engines in the chase camera (backlog row 154) |

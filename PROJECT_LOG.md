@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F960](log/F0960.md) | 2026-11-26 | Phone A/B night: shadow map, fill light, mip skip, shadow filter, auto rows, cull, mirror |
 | [F959](log/F0959.md) | 2026-11-26 | Metal GPU timestamps fixed (owner PR 87) |
 | [F958](log/F0958.md) | 2026-11-26 | Mac traces of build 1546e211 (Donington, Istanbul): 120 Hz cadence judder |
 | [F957](log/F0957.md) | 2026-11-26 | Owner report: choppy mix of several car engines in the chase camera (backlog row 154) |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F903](log/F0903.md) | 2026-11-24 | Native Linux x86_64 build and packaging (row 135) |
 | [F902](log/F0902.md) | 2026-11-24 | Row 137: public builds never contain DLC or other original files |
 | [F901](log/F0901.md) | 2026-11-24 | Content source policy: other-platform DLC, mods, March 2008 prototype |
-| [F900](log/F0900.md) | 2026-11-24 | Backlog: rain look, cut content findings, career maintained damage, tyre wall regrowth |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
