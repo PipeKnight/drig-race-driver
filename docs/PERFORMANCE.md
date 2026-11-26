@@ -5884,7 +5884,7 @@ scripts: scratchpad `macwin.py` and `share.py` (frame_stats per window, split at
   while frames are clean. They are probably mostly soft faults (GPU-shared memory and allocator reuse). This is
   worth a look as a constant cost, not as a dip cause.
 
-## Mac runs of 26 November 18:18 and 18:24: 120 Hz cadence, F9 invalid on Metal (F958)
+## Mac runs of 26 November 18:18 and 18:24: 120 Hz cadence (F958)
 
 Owner's MacBook (Apple M4, Metal), build 1546e211 (includes F930 and F932), fullscreen 3024 x 1890, `Fifo`,
 `monitor_hz=[]`, `frame_cap=none`, F9 GPU split on. One race each at Donington and Istanbul; the bench script
@@ -5949,15 +5949,11 @@ Share of race frames per frame-time bucket (lower edge, ms):
 - Page faults (17-19k per s), involuntary switches (65-75k per s) and `cpu_load` are the same in dip windows as
   in clean ones, as in F929.
 
-### F9 GPU timing is invalid on Metal [O]
+### GPU timing columns are invalid [O]
 
-- `g_bad` totals 103 367 (Donington) and 102 703 (Istanbul): about five bad intervals per GPU frame (for
-  example `g_frames=64 g_bad=320`). `g_gap` reads tens to hundreds of thousands of ms, `gpu_ms` about 1 ms, and
-  each view has one non-zero segment.
-- [I] The F9 markers are empty compute passes with `timestamp_writes`. Metal has no timestamps inside passes
-  (`inside_passes=false`), and on Apple's tile-based GPUs an empty pass seems to return unordered or zero
-  samples. F9 therefore cannot split the GPU time on a Mac, and it did not catch the dips.
-- The owner's "interval trace" folder holds only the script; the log carries no Instruments data.
+The owner reports that the Mac GPU timing in these logs is wrong (`gpu_ms`, `g_*`, `frame_gpu_views`; `g_bad`
+about five per GPU frame) and is fixing that code. No conclusions are drawn from those columns; new traces
+follow. `acquire` and `gpu_late_ms` are CPU-side waits and stay valid. The logs carry no Instruments data.
 
 ### Countdown after F932 [O]
 
