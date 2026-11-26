@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F945](log/F0945.md) | 2026-11-26 | Claude Code token audit script and findings |
 | [F944](log/F0944.md) | 2026-11-26 | Static driver figures off by default until the phone A/B |
 | [F943](log/F0943.md) | 2026-11-26 | Android CPU batch 2: lazy Transit, coalesced mesh upload, static driver figures |
 | [F942](log/F0942.md) | 2026-11-26 | Phone mip skip: owner's combined look (mipskip2_1024+1) with a 64 px floor |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F888](log/F0888.md) | 2026-11-23 | Build lock hold limit and step timeouts |
 | [F887](log/F0887.md) | 2026-11-23 | Derby collision frames: opponent tick and propagation are not the gate; opponent dents leave tick frames |
 | [F886](log/F0886.md) | 2026-11-23 | Transparent phase: bind groups merged once per render pass in vendored wgpu-core |
-| [F885](log/F0885.md) | 2026-11-23 | Dynamic resolution: no ineffective jump from vsync-quantized frames, holds verified (Mac M4) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

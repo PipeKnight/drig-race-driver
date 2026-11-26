@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F945](F0945.md) | 2026-11-26 | Claude Code token audit script and findings |
 | [F944](F0944.md) | 2026-11-26 | Static driver figures off by default until the phone A/B |
 | [F943](F0943.md) | 2026-11-26 | Android CPU batch 2: lazy Transit, coalesced mesh upload, static driver figures |
 | [F942](F0942.md) | 2026-11-26 | Phone mip skip: owner's combined look (mipskip2_1024+1) with a 64 px floor |

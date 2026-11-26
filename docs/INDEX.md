@@ -10,6 +10,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 ## Project process, tooling and builds
 
 - [CAPTURE_BACKLOG.md](CAPTURE_BACKLOG.md) DRIG capture backlog — Open work parked until a live recording of the original grid.exe (research copy, see docs/OWNER_ASSISTED_TESTING.md and …
+- [CLAUDE_TOKEN_AUDIT.md](CLAUDE_TOKEN_AUDIT.md) Claude Code token audit: where the calls go and how to make fewer, smaller ones — Measured 2026-11-26 by Claude Code with `tools/claude_usage_audit.py` (F-entry in the log).
 - [DISK_USAGE.md](DISK_USAGE.md) Использование диска и план очистки — Замер 16 октября 2026, Claude Code (сессия очистки диска).
 - [FIDELITY_BACKLOG.md](FIDELITY_BACKLOG.md) Fidelity backlog: open discrepancies against the original — One table of every open discrepancy between the port and Race Driver: GRID (2008) that the project log and docs/ …
 - [FRAME_STEPPING.md](FRAME_STEPPING.md) Physics steps per rendered frame: original against the port — Question from the coordinator: does the original run one physics step per rendered frame with no catch-up?
