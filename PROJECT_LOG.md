@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F978](log/F0978.md) | 2026-11-27 | Owner's downloaded GRID mod archives: inventory and cleanup |
 | [F977](log/F0977.md) | 2026-11-27 | Content policy: separate content packs on separate hosting |
 | [F976](log/F0976.md) | 2026-11-27 | Backlog row 140: owner to test the Broski look mods |
 | [F975](log/F0975.md) | 2026-11-27 | Backlog: Broski GRID Overhaul findings (rows 138, 140, 157) |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F921](log/F0921.md) | 2026-11-25 | Android: Viper cockpit wheel fixed (file name case); tyre walls after a hit diagnosed, not fixed |
 | [F920](log/F0920.md) | 2026-11-24 | Performance test: single-threaded executor switches for the main and render worlds |
 | [F919](log/F0919.md) | 2026-11-25 | Phone proxy: predicted Xiaomi frame from a phone-like desktop run |
-| [F918](log/F0918.md) | 2026-11-25 | Unified per-run logs on all platforms |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
