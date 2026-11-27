@@ -186,11 +186,11 @@ membership, inputs or success criteria requires a new suite version so results r
 ## Featured in
 
 1. [Awesome Decomp Games](https://github.com/SubmitGame/awesome-decomp-games)
-2. [Game Decompilations](https://github.com/SamidyFR/Game-Decompilations)
-3. [Greates Games Decompilations List](https://github.com/Carter54git/Greates-Games-Decompilations-List)
-4. [Awesome Decomp Games RU](https://github.com/justxor/awesome-decomp-games-ru/blob/main/catalog/dekompilyacii.md)
-5. [recomp.gg](https://recomp.gg/p/drig-race-driver)
-6. [PlayPorted](https://playported.com/ports/2690-race-driver-grid/)
+2. [Awesome Decomp Games RU](https://github.com/justxor/awesome-decomp-games-ru/blob/main/catalog/dekompilyacii.md)
+3. [Game Decompilations](https://github.com/SamidyFR/Game-Decompilations)
+4. [Greates Games Decompilations List](https://github.com/Carter54git/Greates-Games-Decompilations-List)
+5. [PlayPorted](https://playported.com/ports/2690-race-driver-grid/)
+6. [recomp.gg](https://recomp.gg/p/drig-race-driver)
 
 <details>
 <summary>Pending catalog submissions</summary>
