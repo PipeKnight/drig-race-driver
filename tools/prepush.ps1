@@ -324,8 +324,9 @@ if ($HoldMinutes -le 0) { $HoldMinutes = if ($tier -eq 1) { 65 } else { 55 } }
 # A gate that passed records the key of everything its cargo steps depend on; a later run with the
 # same key (typically after a rebase onto docs- or log-only commits, or after log_entry.py check
 # --fix renumbered an entry) runs only the sanity step. The key covers the content of every path
-# outside documentation (all of crates/, settings, Cargo.*, toolchain, .cargo, tools/identity.tsv
-# and tools files Rust code names, any unknown path) in the working tree, not just the diff, so a
+# outside documentation and CI (all of crates/, settings, Cargo.*, toolchain, .cargo, tools/identity.tsv
+# and tools files Rust code names, any unknown path; not .github/, which only GitHub runs) in the
+# working tree, not just the diff, so a
 # pass never carries over to different upstream code; plus the tier, the step commands, this
 # script, rustc -vV, ~/.cargo/config.toml and the private inputs (path, size, time). Machine-wide
 # (C:\cargo-build\prepush-cache), so a pass in one checkout covers the same code in another.
@@ -333,7 +334,7 @@ $CacheRoot = 'C:\cargo-build\prepush-cache'
 function Test-KeyPath([string]$p, [hashtable]$NamedTools) {
     if ($p -like 'crates/*' -or $p -like 'settings/*' -or $p -eq 'android/app/src/main/assets/grid-import/settings.ini') { return $true }
     if ($p -like 'tools/*') { return ($p -eq 'tools/identity.tsv' -or $NamedTools.ContainsKey($p)) }
-    if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like '.githooks/*' -or $p -like 'android/*' -or $p -like '*.md' -or $p -like '*.cmd' -or $p -in @('LICENSE', '.gitignore')) { return $false }
+    if ($p -like 'docs/*' -or $p -like 'log/*' -or $p -like '.githooks/*' -or $p -like '.github/*' -or $p -like 'android/*' -or $p -like '*.md' -or $p -like '*.cmd' -or $p -in @('LICENSE', '.gitignore')) { return $false }
     return $true
 }
 function Get-CodeKey {

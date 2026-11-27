@@ -254,7 +254,7 @@ Three changes, none of which drops a check:
   prepush.ps1 itself, `rustc -vV`, `~/.cargo/config.toml`, the GRID_* paths and the size and time
   of the private inputs, and the git tree entry (mode, blob, path) of every working-tree file
   (tracked, modified, untracked) outside documentation. "Documentation" is `docs/`, `log/`,
-  `*.md` outside `crates/`, `android/` except grid-import's settings.ini, `*.cmd`, LICENSE,
+  `*.md` outside `crates/`, `.github/` (only GitHub runs the CI workflow), `android/` except grid-import's settings.ini, `*.cmd`, LICENSE,
   .gitignore and the `tools/` files that no Rust code outside comments names; everything else
   is in the key: all of `crates/` (including its Markdown), `settings/`, Cargo.*,
   rust-toolchain, `.cargo/`, .gitattributes, `tools/identity.tsv`, unknown paths. The key covers
@@ -285,6 +285,33 @@ main.rs names all of grid-app's modules, so a module-level map sends every chang
 tests; a finer map needs a call graph of main.rs (5,400 lines, Bevy systems, inherent impls in
 other modules) that regex parsing cannot give safely. With the split it could save at most about
 60 s of the crate tier.
+
+### Pushing to main (push_main.ps1)
+
+A gate used to test the base it had been rebased on before it queued for the build lock. When
+another session's code commit reached main during that wait, `log_entry.py check --fix`
+renumbered the entry, the key changed and the whole gate ran again. `tools/push_main.ps1` does
+the AGENTS.md push flow in one command and takes the lock before the rebase:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\push_main.ps1          # rebase, check, push
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\push_main.ps1 -DryRun  # everything but the push
+```
+
+1. fetch, rebase onto origin/main; a stop on `log/` or `PROJECT_LOG.md` is resolved with
+   `log_entry.py check --fix`, any other conflict aborts the rebase and fails. A renumbered entry
+   is amended into HEAD as the owner, and the old number in the commit message is replaced.
+2. `prepush -Plan`; when cargo steps will run (tier crate and up, no cached pass) it takes the
+   build lock (tier limit + 10 min) and goes back to 1.
+3. prepush runs nested in that lock (it does not give it back before `grid-soak quick`).
+4. fetch again; when main moved, give the lock back and repeat (at most `-MaxRounds`, 5);
+   otherwise push HEAD:main before giving the lock back.
+
+Every session's code gate runs under the lock, so while one holds it no other session's code
+reaches main and the push goes through on the first round. Docs-only pushes and pushes from
+outside the lock (owner pull requests, Codex) can still move main; a docs-only move costs
+seconds through the pass cache. Exit 0 after the push; the last line is
+`push_main: PUSHED <head> onto <base> in N s` (or `DRY RUN: …`).
 
 ### Build lock
 

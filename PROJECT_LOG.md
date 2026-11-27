@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F994](log/F0994.md) | 2026-11-27 | Push to main under the build lock; .github outside the pass key |
 | [F993](log/F0993.md) | 2026-11-27 | Correct macOS controller input and enable pad rumble |
 | [F992](log/F0992.md) | 2026-11-27 | Versioned gameplay scenario progress in CI |
 | [F991](log/F0991.md) | 2026-11-27 | Phone display-mode tests: MIUI ignores preferredDisplayModeId; cap 120 neutral |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F937](log/F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
 | [F936](log/F0936.md) | 2026-11-26 | Phone GPU batch 2: texture mip skip at upload (mipskipN_M) |
 | [F935](log/F0935.md) | 2026-11-26 | Android CPU batch 1: thread placement, thermal governor, parallel encoder finish and ADPF target switches |
-| [F934](log/F0934.md) | 2026-11-26 | Phone GPU batch 1: size cull, tonemap and ADPF switches, GPU clock sampler |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

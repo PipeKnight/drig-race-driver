@@ -31,6 +31,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [log_entry.py](log_entry.py) | Project log entries in log/: create, check and renumber them, regenerate the indexes. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [prepush.ps1](prepush.ps1) | Pre-push checks, scaled to what the branch changed (docs/TOOLCHAIN.md "Pre-push tiers"). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [prune_build_dirs.ps1](prune_build_dirs.ps1) | Delete cargo build dirs under C:\cargo-build that no live checkout uses. | [DISK_USAGE](../docs/DISK_USAGE.md) |
+| [push_main.ps1](push_main.ps1) | Rebase onto origin/main, run prepush and push HEAD to main, holding the build lock from the rebase to the push. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [rebuild_macos.py](rebuild_macos.py) | Rebuild fresh origin/main as a private macOS DMG without changing the current checkout. | [MACOS](../docs/MACOS.md) |
 | [release_playable.ps1](release_playable.ps1) | The coordinator's playable release: merge origin/main, rebuild the PC prototype, refresh the portable copy, build both private APKs and draft the log entry … | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [scenario_progress.py](scenario_progress.py) | Run the versioned gameplay scenario suite and report its results. |  |
