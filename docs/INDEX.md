@@ -392,6 +392,7 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [DLAA_INPUT_CONTRACT.md](DLAA_INPUT_CONTRACT.md) DLAA input contract follow-up — G202, 20 October2026.
 - [DLAA_PRESET_RESEARCH.md](DLAA_PRESET_RESEARCH.md) Supported DLAA preset hint experiment — G203, 20 October2026.
 - [EDGE_ATLAS_DRY_RESPONSE.md](EDGE_ATLAS_DRY_RESPONSE.md) Optional dry response in mixed edge atlases — 19October2026.
+- [EGO_MODDING_TOOLS.md](EGO_MODDING_TOOLS.md) EGO engine modding tools (community index) — Recorded 27 November 2026 (F970) at the owner's request: a pointer to the community's list of EGO engine modding tools …
 - [FLOATING_AUDIT.md](FLOATING_AUDIT.md) Floating and untextured track pieces: the all-route audit (row 102) — Owner's request (F657): on Washington some pieces hang in the air and part of a kerb seems slightly above the road.
 - [FRONT_END_FLOW.md](FRONT_END_FLOW.md) Front-end flow: menu, loading, race, results — 9 November 2026, Claude Code.
 - [LAMP_REFLECTOR_RESEARCH.md](LAMP_REFLECTOR_RESEARCH.md) Lamp reflector material research — Initial19 October2026 static purchased-resource observations.
