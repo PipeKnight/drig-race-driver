@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F973](log/F0973.md) | 2026-11-27 | Backlog row 138: Life Career mod ideas as data-driven extras |
 | [F972](log/F0972.md) | 2026-11-27 | Phone: CPU batch 1 pairs 1-5 and the parallel-finish soak |
 | [F971](log/F0971.md) | 2026-11-27 | Backlog row 138: any track and any car in Race Day extras |
 | [F970](log/F0970.md) | 2026-11-27 | EGO modding community tool index saved (docs/EGO_MODDING_TOOLS.md) |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F916](log/F0916.md) | 2026-11-24 | Keep macOS player packaging and portable race logs |
 | [F915](log/F0915.md) | 2026-11-24 | Xiaomi Performance test A/B: shadows and scene off gain nothing, fixed per-frame CPU overhead wins |
 | [F914](log/F0914.md) | 2026-11-24 | CI badge in the README |
-| [F913](log/F0913.md) | 2026-11-24 | GitHub Actions CI: Linux Clippy and data-free tests, Windows Clippy |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

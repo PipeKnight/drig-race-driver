@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F973](F0973.md) | 2026-11-27 | Backlog row 138: Life Career mod ideas as data-driven extras |
 | [F972](F0972.md) | 2026-11-27 | Phone: CPU batch 1 pairs 1-5 and the parallel-finish soak |
 | [F971](F0971.md) | 2026-11-27 | Backlog row 138: any track and any car in Race Day extras |
 | [F970](F0970.md) | 2026-11-27 | EGO modding community tool index saved (docs/EGO_MODDING_TOOLS.md) |
