@@ -191,7 +191,8 @@ membership, inputs or success criteria requires a new suite version so results r
 4. [Game Decompilations](https://github.com/SamidyFR/Game-Decompilations)
 5. [Greates Games Decompilations List](https://github.com/Carter54git/Greates-Games-Decompilations-List)
 6. [PlayPorted](https://playported.com/ports/2690-race-driver-grid/)
-7. [recomp.gg](https://recomp.gg/p/drig-race-driver)
+7. [Recomp](https://recompsoftware.com/p/drig-race-driver/)
+8. [recomp.gg](https://recomp.gg/p/drig-race-driver)
 
 <details>
 <summary>Pending catalog submissions</summary>
