@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F977](F0977.md) | 2026-11-27 | Content policy: separate content packs on separate hosting |
 | [F976](F0976.md) | 2026-11-27 | Backlog row 140: owner to test the Broski look mods |
 | [F975](F0975.md) | 2026-11-27 | Backlog: Broski GRID Overhaul findings (rows 138, 140, 157) |
 | [F974](F0974.md) | 2026-11-27 | Backlog row 138: owner to test Life Career Prestige handling and drift |
