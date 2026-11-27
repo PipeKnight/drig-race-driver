@@ -1,7 +1,7 @@
 //! Force feedback in the race (docs/FORCE_FEEDBACK.md): after every player physics tick, the
 //! snapshot `7E9D60` of the player's car goes to the GameFFB task, which runs on the device
 //! thread of `force_feedback::windows` (DirectInput wheel or XInput pad) or
-//! `force_feedback::android` (pad or phone vibrator). The original queues one snapshot per car
+//! `force_feedback::pad` (Android or macOS). The original queues one snapshot per car
 //! manager step; the port queues one per fixed 16 ms tick.
 
 use crate::force_feedback::{Body, Ffb, Setup, Snapshot};
@@ -9,8 +9,8 @@ use crate::input::{Device, Settings};
 use bevy::prelude::*;
 use std::sync::{Arc, Mutex};
 
-#[cfg(target_os = "android")]
-use crate::force_feedback::android as output;
+#[cfg(any(target_os = "android", target_os = "macos"))]
+use crate::force_feedback::pad as output;
 #[cfg(windows)]
 use crate::force_feedback::windows as output;
 
@@ -59,10 +59,15 @@ pub fn install(app: &mut App, root: &std::path::Path, settings: &Settings, wheel
         s.ffb = Some(ffb);
         s.rumble = !is_wheel;
         s.fed = None;
+        #[cfg(target_os = "macos")]
+        { s.levels = (0, 0); }
     }
     app.insert_resource(Feedback { setup, car: car.into(), last: None, shared: handle.shared.clone() })
         .add_systems(FixedUpdate, tick.after(super::drive_tick))
         .add_systems(Last, stop_on_exit);
+    #[cfg(target_os = "macos")]
+    app.add_message::<crate::macos_pad::Rumble>()
+        .add_systems(PostUpdate, send_rumble);
     let [force, friction, effects] = settings.feedback_gains();
     format!(
         "device={name:?} kind={} force={force} friction={friction} effects={effects}",
@@ -120,5 +125,33 @@ fn stop_on_exit(feedback: Res<Feedback>, mut exits: MessageReader<AppExit>) {
     {
         s.ffb = None;
         s.fed = None;
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_rumble(
+    feedback: Res<Feedback>,
+    pads: Query<Entity, With<crate::input::PlayerPad>>,
+    driving: Res<super::Driving>,
+    mut requests: MessageWriter<crate::macos_pad::Rumble>,
+    mut target: Local<(Option<Entity>, crate::force_feedback::Vibration)>,
+) {
+    use crate::macos_pad::Rumble;
+    let player = pads.iter().min();
+    if player != target.0 {
+        if let Some(pad) = target.0 {
+            requests.write(Rumble { pad, motors: (0, 0) });
+        }
+        *target = (player, crate::force_feedback::Vibration::default());
+    }
+    let Some(pad) = player else { return };
+    let now = std::time::Instant::now();
+    let levels = feedback.shared.lock().ok()
+        .filter(|s| !driving.paused && driving.failure.is_none()
+            && s.fed.is_some_and(|t| now.saturating_duration_since(t).as_millis() < 250))
+        .map(|s| s.levels)
+        .unwrap_or_default();
+    if let Some(motors) = target.1.due(now, levels) {
+        requests.write(Rumble { pad, motors });
     }
 }

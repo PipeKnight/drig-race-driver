@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +121,8 @@ def build(args, runner):
     work = destination / "work"
     source = work / "source"
     target = ROOT / "local/macos-build-cache/target" if args.keep_cache else work / "target"
+    build_dir = target / "build"
+    temporary_build = None
     stage = work / "stage"
     name = f"{'DRIG' if args.code_only else 'GRID'}-macos-{platform.machine()}-{revision[:8]}.dmg"
     if args.release_tag:
@@ -138,7 +141,18 @@ def build(args, runner):
             job.run(["git", "clone", "--shared", "--no-checkout", "--local", ROOT, source])
             job.run(["git", "checkout", "--detach", revision], cwd=source)
             env = dict(os.environ, CARGO_TARGET_DIR=str(target), GRID_BUILD_REVISION=revision[:12])
-            env["CARGO_BUILD_BUILD_DIR"] = str(target / "build")
+            # SDL's generated pkg-config flags do not escape whitespace in the install path.
+            if any(char.isspace() for char in str(build_dir)):
+                temp = Path(tempfile.gettempdir())
+                if any(char.isspace() for char in str(temp)):
+                    temp = Path("/private/tmp")
+                if args.keep_cache and temp != Path("/private/tmp"):
+                    key = hashlib.sha256(os.fsencode(build_dir)).hexdigest()[:16]
+                    build_dir = temp / f"drig-cargo-{key}"
+                else:
+                    temporary_build = tempfile.TemporaryDirectory(prefix="drig-cargo-", dir=temp)
+                    build_dir = Path(temporary_build.name)
+            env["CARGO_BUILD_BUILD_DIR"] = str(build_dir)
             env.pop("CARGO_BUILD_TARGET", None)
             compile_cmd = [*cargo, "build", "--locked", "--release", "--target", host,
                            "-p", "grid-app", "--bin", "grid-app"]
@@ -172,6 +186,8 @@ def build(args, runner):
         raise
     finally:
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        if temporary_build is not None:
+            temporary_build.cleanup()
         if work.exists():
             shutil.rmtree(work)
         print(f"\nЛог и сведения о сборке: {destination}", flush=True)

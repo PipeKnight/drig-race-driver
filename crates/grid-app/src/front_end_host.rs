@@ -34,7 +34,7 @@
 //!   supervisor (`event_menu::supervise`). The career screen and Android
 //!   still use their relaunch paths (docs/FRONT_END_FLOW.md).
 //! - Gamepads (AUTHORED): the host has the process's one gamepad backend
-//!   (`GilrsPlugin`; each gilrs instance leaves a thread behind when
+//!   (SDL on macOS, gilrs elsewhere; each gilrs instance leaves a thread behind when
 //!   dropped, gilrs 0.11.2 `ff::server`) and forwards the pads' connection,
 //!   button and axis messages to the attached app, each pad as an entity of
 //!   that app. An app attached while a pad is connected gets its connection
@@ -66,7 +66,7 @@ pub(crate) enum Gpu {
 static DEVICES: Mutex<Vec<(Gpu, RenderResources)>> = Mutex::new(Vec::new());
 
 /// The plugin group of an app the front end hosts: the host owns the event
-/// loop (winit), the global log subscriber and the gamepad backend (gilrs);
+/// loop (winit), the global log subscriber and the gamepad backend;
 /// the app renders with its kind's device if one was made ([`keep_device`]).
 pub(crate) fn hosted(plugins: PluginGroupBuilder, gpu: Gpu) -> PluginGroupBuilder {
     let plugins = plugins
@@ -402,6 +402,7 @@ mod host {
             bevy::app::TerminalCtrlCHandlerPlugin,
             bevy::asset::AssetPlugin::default(),
             bevy::winit::WinitPlugin::default(),
+            #[cfg(not(target_os = "macos"))]
             bevy::gilrs::GilrsPlugin,
             bevy::state::app::StatesPlugin,
         ))
@@ -410,6 +411,8 @@ mod host {
         .init_state::<FrontEnd>()
         .init_resource::<Forward>()
         .add_systems(Update, (collect, drive).chain());
+        #[cfg(target_os = "macos")]
+        crate::macos_pad::install(&mut app);
         let mut host = Host {
             flags,
             dir,
@@ -596,9 +599,11 @@ mod host {
                 return None;
             }
             forward(shown.app.world_mut(), shown.window, events);
-            forward_pads(shown, pads);
+            forward_pads(world, shown, pads);
             sync_in(world, outer, shown);
             shown.app.update();
+            #[cfg(target_os = "macos")]
+            forward_rumble(world, shown);
             sync_out(world, outer, shown);
             self.reveal(world, outer);
             let shown = self.shown.as_mut()?;
@@ -714,7 +719,11 @@ mod host {
                     RawGamepadEvent::Connection(GamepadConnectionEvent::new(*pad, c.clone()))
                 })
                 .collect();
-            forward_pads(&mut shown, &connections);
+            #[cfg(target_os = "macos")]
+            let connections: Vec<_> = connections.into_iter()
+                .chain(connected.iter().flat_map(|(pad, _)| crate::macos_pad::snapshot(world, *pad)))
+                .collect();
+            forward_pads(world, &mut shown, &connections);
             sync_in(world, outer, &mut shown);
             world
                 .resource_mut::<NextState<FrontEnd>>()
@@ -869,8 +878,8 @@ mod host {
 
     /// Host gamepad messages for the attached app, each pad as an entity of
     /// that app (spawned at its connection), written raw and typed as
-    /// `bevy_gilrs` writes them.
-    fn forward_pads(shown: &mut Shown, events: &[RawGamepadEvent]) {
+    /// the platform backend writes them.
+    fn forward_pads(#[cfg_attr(not(target_os = "macos"), allow(unused_variables))] host: &World, shown: &mut Shown, events: &[RawGamepadEvent]) {
         let world = shown.app.world_mut();
         for event in events {
             match event {
@@ -880,6 +889,10 @@ mod host {
                         Some(&pad) => pad,
                         None if connected => {
                             let pad = world.spawn_empty().id();
+                            #[cfg(target_os = "macos")]
+                            if crate::macos_pad::classified(host, c.gamepad) {
+                                world.entity_mut(pad).insert(crate::input::ClassifiedPad);
+                            }
                             shown.pads.insert(c.gamepad, pad);
                             pad
                         }
@@ -905,6 +918,19 @@ mod host {
                     world.write_message(RawGamepadEvent::from(event));
                     world.write_message(event);
                 }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn forward_rumble(world: &mut World, shown: &mut Shown) {
+        use crate::macos_pad::Rumble;
+        let Some(mut requests) = shown.app.world_mut().get_resource_mut::<Messages<Rumble>>() else {
+            return;
+        };
+        for request in requests.drain() {
+            if let Some((&pad, _)) = shown.pads.iter().find(|(_, target)| **target == request.pad) {
+                world.write_message(Rumble { pad, ..request });
             }
         }
     }
