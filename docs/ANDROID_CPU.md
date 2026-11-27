@@ -135,16 +135,18 @@ Filled from the phone's A/B pairs (section 6); rank = measured phone gain.
 | 1 | 30 FPS cap, static or by the governor | static 30 cap (measured); `GRID_THERMAL_GOV=cap` measured equal or slightly worse (pair 9) | 32–38 → 30 (capped) | 25.9 → 28.6 (15 min race average) | measured, static cap: after minute 2 the share of seconds at 29+ FPS rises from 6 % to 66 %, and frames ≥ 50 ms fall from 7.3 % to 1.2 %. It does not remove every dip (the heaviest minute: GPU 29.5, main 33.1 ms). Governor A/B against the static cap pending |
 | 2 | Single-threaded schedules | `main_single`, `render_single`; mobile default since F983; `main_multi`, `render_multi` turn them off | 39 → 42 (median; p10 32–33 → 38), with parallel finish on | 29.7 → 34.5 (15 min race average; seconds at 29+ FPS 32 → 85 %) | measured, made the mobile default; the throttled soak confirms it (queue 2): main 22.3 → 20.6 ms, render 21.9 → 19.1 ms, both on-runs beat both off-runs. CPU time per frame falls from about 67.7 to 55.1 ms over main, render and the pool, so less heat is likely |
 | 3 | Parallel encoder finish | mobile default since F965; `GRID_BEVY_PARALLEL_FINISH=0` turns it off | 35 → 40 (median; p10 33 → 37) | 30.2 → 31.2 (15 min race average) | measured, made the mobile default: render thread 25.8 → 21.6 ms, `r_encode` 10.4 → 4.6 ms, p99 38.1 → 34.9 ms, both on-runs beat both off-runs. Warm soak: a small edge, the same heat (pair 6w) |
-| (4) | Render ceiling 0.8 when hot | `GRID_THERMAL_GOV=scale` | pending | not measured: pair 10 ran at a fixed 480-row height, where the step does nothing | expected: little when cool (CPU-bound), but the hot GPU (27–30 ms) becomes a limit, so it helps the throttled state |
-| (5) | ADPF session (`adpf.rs`) | `adpf`, `GRID_ADPF_TARGET_MS` | pending | pending | expected: the system picks the clocks for the target. With a 16.67 ms target and 26 ms actual it asks for a boost, so more heat. A 30 cap needs a 33.3 ms target |
+| – | Render ceiling 0.8 when hot | `GRID_THERMAL_GOV=scale` | not measured | 30.4–30.5 in both arms (15-min soaks, `render_height = auto`, 30 cap) | measured no-op (pair 10a, F987): the governor applies `Scale`, the ceiling drops 720 → 576, but the dynamic height already sits at its 480-row floor in both arms, so there is nothing to cut on this phone. Off |
+| – | ADPF session (`adpf.rs`) | `adpf`, `GRID_ADPF_TARGET_MS` | not measured | 31/30 → 31/30 at a 30 cap | measured (pair 11, F987): neutral to slightly worse, main 22.4 → 23.1 ms, frames ≥ 50 ms 0.28 → 0.40 %. Off |
 | – | Thread pinning, uclamp | `pin_*`, `uclamp` | neutral (pairs 1, 2, 3 repeated, 4) | not measured | measured: no pin set beats the run-to-run spread; `uclamp` fails with EPERM on the phone, so it never applied. Off; closed |
 | – | Bind-group cache (F893) | default on; `GRID_BEVY_BIND_GROUP_CACHE=0` turns it off | 38/33 → 40/32 (median/p10, off → on); render 22.8 → 21.4 ms | not measured | measured (pair 7): both on-runs at or above both off-runs; stays on |
 | – | Compute pool threads | `GRID_COMPUTE_THREADS=4`, `=8` | 39/33.5 → 39/33.5 (4), 40/34.5 (8) | not measured | measured (pair 8): neutral, the `=8` edge is one run; no change |
-| (7) | Lazy Transit command buffer (F943) | `GRID_WGPU_LAZY_TRANSIT=1` | pending | pending | expected: `queue_submit` (2.95 ms) shrinks by the empty Transit buffers. Proxy: no frame change outside noise (main-bound or GPU-bound proxy) |
-| (8) | Coalesced mesh-stream upload (F943) | `GRID_MESH_STREAM_COPY=1` | pending | pending | expected: fewer staging buffers on the render thread. Proxy: −2.0 ms in the quiet pair (noise limit 2.1 ms); one earlier set spiralled, not reproduced |
-| (9) | Static driver figures (F943, owner decision) | `GRID_STATIC_DRIVERS=1` (off by default, F944) | pending | pending | off until the phone pair shows a gain. Proxy: −112 changed `GlobalTransform`s per frame (−5 %), propagation 2.01 → 1.94 ms median; frame change within noise |
+| – | Lazy Transit command buffer (F943) | `GRID_WGPU_LAZY_TRANSIT=1` | 44/40 → 45/40; avg 23.0 → 22.6 ms | not measured | measured (b1, F987, one run per arm): within the same-arm spread. Off |
+| – | Coalesced mesh-stream upload (F943) | `GRID_MESH_STREAM_COPY=1` | 44/40 → 44/41 | not measured | measured (b2, F987, one run per arm): within the spread, no catch-up spiral; frames ≥ 50 ms 0.13 → 0.21 %. Off |
+| – | Static driver figures (F943, owner decision) | `GRID_STATIC_DRIVERS=1` (off by default, F944) | 43/40 → 44/40 | not measured | measured (b3, F987, one run per arm): within the spread, so no gain that would justify the static figures. Stays off |
 
 Ranks in brackets are expectations before phone numbers (interpretation, not measurement).
+
+State after queue 3 (F987, F989): every candidate has a phone measurement. The measured wins are ranks 1–3 plus the bind-group cache; ranks 2 and 3 and the cache are mobile defaults; this series did not change the 30 cap (rank 1), a frame-cap setting that the governor did not beat (pairs 9, 10, 10a). Everything marked – stays off. On APK 2fde6a80, plain `lean` runs at 43–44 FPS (p10 40) from starts at ≤ 38 °C, against 38–40 in F972 and F984; that rise combines F983 and the GPU side's F967 and is not an A/B.
 
 ## 6. Phone A/B pairs
 
@@ -190,6 +192,11 @@ Reading: under heat, a heavy view still needs about 15–20 % less main and rend
 - Pair 7, bind-group cache off → on (the env reached the app): FPS median/p10 38/33 → 40/32; frame average 26.5 → 25.2 ms; main 22.6 → 21.7, render 22.8 → 21.4, `r_encode` 5.0 → 4.6 ms. Both on-runs (41, 39) at or above both off-runs (38, 38). The F893 cache stays on.
 - Pair 8, `GRID_COMPUTE_THREADS`: default 39/33.5, `=4` 39/33.5, `=8` 40/34.5; the `=8` edge comes from one run (41 against 39). Neutral; no change.
 - Pair 3 repeat: 38.75/32.5 → 38/32, main 22.4 → 22.9 ms; inside the spread. Pinning is closed as neutral.
+
+**Queue 3 on APK 2fde6a80** (phone executor, 2026-11-27, F987; plain `lean` now includes the single-threaded schedules; owner-approved shortcuts: starts at ≤ 38 °C, batch 2 as AB with one run per arm; evidence `local/android-bench/cpu1/p11-adpf`, `b1`…`b3`, `p10a-scale-auto`):
+- Pair 11, ADPF at a 30 cap: 31/30 FPS in both arms; main 22.4 → 23.1 ms; frames ≥ 50 ms 0.28 → 0.40 %. Neutral to slightly worse; not promoted.
+- Batch 2: lazy Transit 44/40 → 45/40 (avg 23.0 → 22.6 ms); mesh-stream copy 44/40 → 44/41, no catch-up spiral; static drivers 43/40 → 44/40. All three inside the same-arm spread, so no repeats; all stay off.
+- Pair 10a, `scale,cap` with `render_height = auto`, 15-minute soaks: the governor applies `steps=[Scale, Cap]` and the dynamic ceiling drops 720 → 576, but the height sits at its 480-row floor most of the time in both arms; 30.4–30.5 FPS and 98 % of seconds at 29+ in both. A measured no-op on this phone.
 
 **E-core proxy, parallel finish off → on** (F935; a cheap first read, not a phone result):
 - Predicted render thread 27.4 → 22.6 ms; `r_encode` 6.07 → 2.88 ms.

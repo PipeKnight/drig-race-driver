@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F989](log/F0989.md) | 2026-11-27 | Phone: CPU candidate table complete after queue 3 |
 | [F988](log/F0988.md) | 2026-11-27 | Phone mirror-off default confirmed in the GPU ranking |
 | [F987](log/F0987.md) | 2026-11-27 | Phone: ADPF, CPU batch 2, scale step and mirror confirm on the F983 APK |
 | [F986](log/F0986.md) | 2026-11-27 | Report fidelity backlog completion in CI and link DRIG catalog mentions |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F932](log/F0932.md) | 2026-11-26 | Dynamic resolution: a GPU-bound frame time in the hold band counts as late (Mac countdown) |
 | [F931](log/F0931.md) | 2026-11-26 | Steam Deck estimate from E-core and UHD 770 stand-ins |
 | [F930](log/F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
-| [F929](log/F0929.md) | 2026-11-25 | Mac logs 22:26: GPU-query crash is a frame_split readback bug; countdown GPU-bound at the ceiling; memory pressure ruled out |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
