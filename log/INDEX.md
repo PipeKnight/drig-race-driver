@@ -878,6 +878,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G441](G0441.md) | 2026-11-27 | Restore the source Type2 softening sample phase |
 | [G440](G0440.md) | 2026-11-27 | Restore the source Type2 final sampler coordinates |
 | [G439](G0439.md) | 2026-11-27 | Match the source Type2 final display conversion |
 | [G438](G0438.md) | 2026-11-27 | Use the source camera frame for spectator flashes |

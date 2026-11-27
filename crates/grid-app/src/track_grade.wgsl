@@ -158,7 +158,10 @@ fn bloom_merge(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 
 @fragment
 fn soften(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    return vec4(sample_src(input.uv) * textureLoad(extra, vec2<i32>(0), 0).y, 1.0);
+    // The source softening quad samples the corner of each quarter-resolution texel.
+    let source_uv = input.uv - 0.5 * fwidth(input.uv);
+    let exposure = textureLoad(extra, vec2<i32>(0), 0).y;
+    return vec4(sample_src(source_uv) * exposure, 1.0);
 }
 
 fn merge_uv(uv: vec2<f32>, size: vec2<u32>) -> vec2<f32> {
