@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F984](F0984.md) | 2026-11-27 | Phone: queue 2 confirms single-threaded schedules while throttled |
 | [F983](F0983.md) | 2026-11-27 | Phone: single-threaded schedules become the mobile default |
 | [F982](F0982.md) | 2026-11-27 | Cockpit wheel on keyboard steering turns 1.5x faster (WHEEL_RATE 3, owner's choice from comparison GIFs) |
 | [F981](F0981.md) | 2026-11-27 | Mac 82c88068 traces: spike causes and why 60 Hz pacing drops |

@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F984](log/F0984.md) | 2026-11-27 | Phone: queue 2 confirms single-threaded schedules while throttled |
 | [F983](log/F0983.md) | 2026-11-27 | Phone: single-threaded schedules become the mobile default |
 | [F982](log/F0982.md) | 2026-11-27 | Cockpit wheel on keyboard steering turns 1.5x faster (WHEEL_RATE 3, owner's choice from comparison GIFs) |
 | [F981](log/F0981.md) | 2026-11-27 | Mac 82c88068 traces: spike causes and why 60 Hz pacing drops |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F927](log/F0927.md) | 2026-11-25 | Phone GPU split rows and Android GPU research |
 | [F926](log/F0926.md) | 2026-11-25 | Mac in-race dips: camera-flash pipelines under the warm-up cover, process counters per window |
 | [F925](log/F0925.md) | 2026-11-25 | Performance test switches: owner phone run 080140 never changed them; order-proof apply and a front-end perf log line |
-| [F924](log/F0924.md) | 2026-11-25 | Mac frame-dip capture steps: redirect a Terminal start to a file, developer build only |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
