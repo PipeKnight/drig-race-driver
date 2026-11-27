@@ -154,6 +154,20 @@ from that view is at most .000303. The shared flash path uses those
 inputs on each active camera. Original event timing and the blend
 domain have independent validation requirements.
 
+The updater at `0x00762710` adds the absolute update delta to a binary32
+accumulator. It derives the interval from the number of actors in the
+current view's selected cells, with 0.5 seconds at 50 actors and 0.1
+seconds at 1,000. With a selected cell list, it consumes one interval
+for each attempt while the remainder is strictly above the interval.
+The clock retains the remaining time even when a selected cell has no
+eligible flash actor.
+
+The forward renderer uses the race simulation delta and checkpoints the
+remainder alongside its existing random state for Flashback. Instant
+replay displays stored events at their playback times. Matching individual
+original events still requires its global random state and animated
+attachment points.
+
 ## Source stance sway accumulator (G259)
 
 Bounded assembly identifies 0x007595B0 as the upper-corner sway phase updater. It adds saved swaySpeed times an incoming scalar to the phase, repeatedly subtracts 360 above 360 or adds 360 below zero, then calls the existing corner writer. Exactly 360 is retained. The incoming scalar is forwarded through the identified controller wrapper; its wall-clock origin is not established. This is independent of skeletal arm animation.

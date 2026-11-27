@@ -1424,21 +1424,46 @@ struct FlashEvent {
     born: f64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct FlashCadence {
+    pending: f32,
+}
+
+impl FlashCadence {
+    fn advance(&mut self, elapsed: f32, population: Option<u32>) -> usize {
+        // Each update retains the time left after emitting attempted flashes.
+        self.pending += elapsed;
+        let Some(population) = population else {
+            return 0;
+        };
+        let interval = match population {
+            0..=50 => 0.5,
+            1000.. => 0.1,
+            _ => (0.1_f32 - 0.5) * ((population - 50) as f32 / 950.) + 0.5,
+        };
+        let mut attempts = 0;
+        while interval < self.pending {
+            self.pending -= interval;
+            attempts += 1;
+        }
+        attempts
+    }
+}
+
 #[derive(Clone, Copy)]
 struct FlashCheckpoint {
     seconds: f64,
-    next: f64,
+    cadence: FlashCadence,
     random: u32,
 }
 
-const FLASH_FIRST_SECONDS: f64 = 0.1;
 const FLASH_INITIAL_RANDOM: u32 = 1;
 const FLASH_HISTORY_LIMIT: usize = 65_536;
 
 #[derive(Resource)]
 struct Flashes {
     segment: u64,
-    next: f64,
+    cadence: FlashCadence,
     last_live_time: f64,
     random: u32,
     history: VecDeque<FlashEvent>,
@@ -1465,7 +1490,7 @@ impl Flashes {
         }
         self.schedule.push_back(FlashCheckpoint {
             seconds,
-            next: self.next,
+            cadence: self.cadence,
             random: self.random,
         });
     }
@@ -1475,12 +1500,15 @@ impl Flashes {
         self.history.truncate(retained);
         let retained = self.schedule.partition_point(|step| step.seconds <= seconds);
         self.schedule.truncate(retained);
-        (self.next, self.random) = self
-            .schedule
-            .back()
-            .map_or((FLASH_FIRST_SECONDS, FLASH_INITIAL_RANDOM), |step| {
-                (step.next, step.random)
-            });
+        if let Some(step) = self.schedule.back() {
+            self.cadence = step.cadence;
+            self.random = step.random;
+            self.last_live_time = step.seconds;
+        } else {
+            self.cadence = FlashCadence::default();
+            self.random = FLASH_INITIAL_RANDOM;
+            self.last_live_time = 0.;
+        }
     }
 }
 
@@ -1506,7 +1534,7 @@ fn install_flash(
     });
     commands.insert_resource(Flashes {
         segment: 0,
-        next: FLASH_FIRST_SECONDS,
+        cadence: FlashCadence::default(),
         last_live_time: 0.,
         random: FLASH_INITIAL_RANDOM,
         history: VecDeque::new(),
@@ -1540,22 +1568,17 @@ fn flash_draw(state: &mut u32, count: usize) -> usize {
 const FLASH_LIFETIME: f64 = f32::from_bits(0x3e19_999a) as f64;
 const FLASH_REFERENCE_ANGLE: f32 = f32::from_bits(0x3f75_be0b);
 
-fn flash_interval(visible: u32) -> f64 {
-    let ratio = visible.clamp(50, 1000).saturating_sub(50) as f64 / 950.;
-    0.5 - 0.4 * ratio
-}
-
 fn update_flash(
     prepared: Res<Prepared>,
     clock: Res<CrowdClock>,
     mut flashes: Option<ResMut<Flashes>>,
+    mut cell_indices: Local<Vec<usize>>,
     view: Single<(&Transform, &Projection), With<super::ViewerCamera>>,
     mut cards: Query<
         (Entity, &mut FlashCard, &mut Transform, &mut Visibility, &mut Mesh3d),
         Without<super::ViewerCamera>,
     >,
-    mut meshes: ResMut<Assets<Mesh>>,
-    stream: Option<Res<super::mesh_stream::MeshStream>>,
+    (mut meshes, stream): (ResMut<Assets<Mesh>>, Option<Res<super::mesh_stream::MeshStream>>),
 ) {
     let Some(flashes) = flashes.as_deref_mut() else {
         return;
@@ -1565,7 +1588,7 @@ fn update_flash(
     let now = clock.seconds;
     if flashes.segment != clock.segment {
         flashes.segment = clock.segment;
-        flashes.next = FLASH_FIRST_SECONDS;
+        flashes.cadence = FlashCadence::default();
         flashes.last_live_time = 0.;
         flashes.random = FLASH_INITIAL_RANDOM;
         flashes.history.clear();
@@ -1575,10 +1598,9 @@ fn update_flash(
         // A Flashback cut abandons future effects along with future car state.
         flashes.cut(now);
     }
-    if !clock.replaying {
+    let elapsed = (now - flashes.last_live_time) as f32;
+    if !clock.replaying && elapsed > 0. {
         flashes.last_live_time = now;
-    }
-    if !clock.replaying && now >= flashes.next {
         let angle = match projection {
             Projection::Perspective(perspective)
                 if perspective.fov > 0. && perspective.fov < std::f32::consts::PI =>
@@ -1591,20 +1613,20 @@ fn update_flash(
         let distance = (40. * scale)..=(100. * scale);
         let cone = angle.cos();
         let forward = camera.forward();
-        let cells: Vec<_> = prepared
-            .flash_cells
-            .iter()
-            .filter(|cell| {
+        cell_indices.clear();
+        cell_indices.extend(
+            prepared.flash_cells.iter().enumerate().filter_map(|(index, cell)| {
                 let delta = cell.center - eye;
                 let length = delta.length();
-                distance.contains(&length) && delta.dot(*forward) >= cone * length
-            })
-            .take(1000)
-            .collect();
-        let population = cells.iter().map(|cell| cell.instances).sum();
-        flashes.next = now + flash_interval(population);
-        if !cells.is_empty() {
-            let cell = cells[flash_draw(&mut flashes.random, cells.len())];
+                (distance.contains(&length) && delta.dot(*forward) >= cone * length).then_some(index)
+            }).take(1000),
+        );
+        let population = (!cell_indices.is_empty()).then(|| {
+            cell_indices.iter().map(|&index| prepared.flash_cells[index].instances).sum()
+        });
+        for _ in 0..flashes.cadence.advance(elapsed, population) {
+            let index = cell_indices[flash_draw(&mut flashes.random, cell_indices.len())];
+            let cell = &prepared.flash_cells[index];
             if !cell.eligible.is_empty() && flashes.visible_at(now).len() < 10 {
                 let index = cell.eligible[flash_draw(&mut flashes.random, cell.eligible.len())];
                 let row = &prepared.rows[index];
@@ -1623,8 +1645,8 @@ fn update_flash(
                 });
             }
         }
-        // Searching can consume random choices even when this attempt makes
-        // no flash. Flashback restores the scheduler at the selected time.
+        // Retain the elapsed remainder as well as random choices, including
+        // updates that did not find an eligible flash.
         flashes.remember_schedule(now);
     }
 
@@ -1903,7 +1925,7 @@ mod tests {
         };
         let mut flashes = Flashes {
             segment: 0,
-            next: 1.5,
+            cadence: FlashCadence::default(),
             last_live_time: 1.4,
             random: 1,
             history: [event(1.0), event(1.1), event(1.4)].into(),
@@ -1920,19 +1942,54 @@ mod tests {
     }
 
     #[test]
+    fn interval_boundary_is_strict_and_retains_the_remainder() {
+        let mut cadence = FlashCadence::default();
+        assert_eq!(cadence.advance(0.5, Some(50)), 0);
+        assert_eq!(cadence.advance(0.125, Some(50)), 1);
+        assert_eq!(cadence.pending, 0.125);
+        assert_eq!(cadence.advance(0.375, Some(50)), 0);
+        assert_eq!(cadence.advance(0.125, Some(50)), 1);
+        assert_eq!(cadence.pending, 0.125);
+    }
+
+    #[test]
+    fn a_new_view_uses_its_own_population_and_consumes_outstanding_attempts() {
+        let mut cadence = FlashCadence::default();
+        assert_eq!(cadence.advance(0.25, None), 0);
+        assert_eq!(cadence.advance(0.125, Some(51)), 0);
+        assert_eq!(cadence.advance(0.140625, Some(1000)), 5);
+        assert!((cadence.pending - 0.015625).abs() < f32::EPSILON);
+        assert_eq!(FlashCadence::default().advance(0.1, Some(1000)), 0);
+    }
+
+    #[test]
+    fn restoring_a_checkpoint_preserves_time_between_attempts() {
+        let mut cadence = FlashCadence::default();
+        assert_eq!(cadence.advance(0.0625, Some(1000)), 0);
+        let checkpoint = cadence;
+        assert_eq!(cadence.advance(0.25, Some(1000)), 3);
+        cadence = checkpoint;
+        assert_eq!(cadence.advance(0.03125, Some(1000)), 0);
+        assert_eq!(cadence.advance(0.03125, Some(1000)), 1);
+    }
+
+    #[test]
     fn flashback_resumes_the_last_retained_attempt_even_if_it_emitted_nothing() {
         let mut flashes = Flashes {
             segment: 0,
-            next: FLASH_FIRST_SECONDS,
+            cadence: FlashCadence::default(),
             last_live_time: 0.,
             random: FLASH_INITIAL_RANDOM,
             history: VecDeque::new(),
             schedule: VecDeque::new(),
         };
-        for (now, interval) in [(0.1, 0.3), (0.4, 0.5), (0.9, 0.1)] {
-            flash_draw(&mut flashes.random, 21);
-            flashes.next = now + interval;
+        let mut previous = 0.;
+        for (now, population) in [(0.1, Some(1000)), (0.4, Some(50)), (0.9, Some(400))] {
+            for _ in 0..flashes.cadence.advance((now - previous) as f32, population) {
+                flash_draw(&mut flashes.random, 21);
+            }
             flashes.remember_schedule(now);
+            previous = now;
         }
         let retained = flashes.schedule[1];
         assert_eq!(retained.seconds, 0.4);
@@ -1941,12 +1998,15 @@ mod tests {
         flashes.cut(0.45);
         assert!(flashes.history.is_empty());
         assert_eq!(flashes.schedule.len(), 2);
-        assert_eq!(flashes.next, retained.next);
+        assert_eq!(flashes.cadence, retained.cadence);
+        assert_eq!(flashes.last_live_time, retained.seconds);
         assert_eq!(flashes.random, retained.random);
         assert_eq!(flash_draw(&mut flashes.random, 21), future_choice);
         flashes.cut(0.05);
         assert!(flashes.schedule.is_empty());
-        assert_eq!((flashes.next, flashes.random), (FLASH_FIRST_SECONDS, FLASH_INITIAL_RANDOM));
+        assert_eq!(flashes.cadence, FlashCadence::default());
+        assert_eq!(flashes.random, FLASH_INITIAL_RANDOM);
+        assert_eq!(flashes.last_live_time, 0.);
     }
 
     #[test]
