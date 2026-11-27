@@ -32,6 +32,14 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
                   c / 12.92, c <= vec3(0.04045));
 }
 
+fn source_display_codes(colour: vec3<f32>) -> vec3<f32> {
+    // The D3D9 display target truncates to a 12-bit bucket before its UNORM8
+    // conversion. At a half-code boundary the smaller code wins.
+    let bucket = vec3<u32>(saturate(colour) * 4096.0);
+    let code = (bucket * 255u + 2047u) >> vec3<u32>(12u);
+    return vec3<f32>(code) / 255.0;
+}
+
 fn sample_src(uv: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(src, linear_sampler, uv, 0.0).rgb;
 }
@@ -188,5 +196,5 @@ fn final_merge(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let vignette_weight = fx.tint.w * z * z * (3.0 - 2.0 * z);
     let shaded = mix(tinted, fx.vignette.rgb, vignette_weight);
     let graded = clamp(shaded * fx.balance.x + fx.balance.y, vec3(0.0), vec3(fx.balance.z));
-    return vec4(to_linear(graded), texel.a);
+    return vec4(to_linear(source_display_codes(graded)), texel.a);
 }

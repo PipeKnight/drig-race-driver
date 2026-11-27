@@ -866,6 +866,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G439](G0439.md) | 2026-11-27 | Match the source Type2 final display conversion |
 | [G438](G0438.md) | 2026-11-27 | Use the source camera frame for spectator flashes |
 | [G437](G0437.md) | 2026-11-27 | Match authored crowd card sample coverage |
 | [G436](G0436.md) | 2026-11-26 | Use route lighting data for distant spectators |
