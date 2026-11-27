@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F968](F0968.md) | 2026-11-27 | Backlog row 155: owner question on windscreen and body dirt build-up during a race |
 | [F967](F0967.md) | 2026-11-27 | Phone GPU batch 8: no cockpit mirror pass on the mobile preset |
 | [F966](F0966.md) | 2026-11-27 | Phone: mirror update interval and mirror cull/far measured in the cockpit |
 | [F965](F0965.md) | 2026-11-27 | Phone: parallel encoder finish becomes the mobile default |

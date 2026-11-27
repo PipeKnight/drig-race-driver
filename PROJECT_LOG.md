@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F968](log/F0968.md) | 2026-11-27 | Backlog row 155: owner question on windscreen and body dirt build-up during a race |
 | [F967](log/F0967.md) | 2026-11-27 | Phone GPU batch 8: no cockpit mirror pass on the mobile preset |
 | [F966](log/F0966.md) | 2026-11-27 | Phone: mirror update interval and mirror cull/far measured in the cockpit |
 | [F965](log/F0965.md) | 2026-11-27 | Phone: parallel encoder finish becomes the mobile default |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F911](log/F0911.md) | 2026-11-24 | README graphics line reworded; ROADMAP optional graphics entry |
 | [F910](log/F0910.md) | 2026-11-24 | README for players: download, bug reports, roadmap file |
 | [F909](log/F0909.md) | 2026-11-24 | Release v0.1.0 published |
-| [F908](log/F0908.md) | 2026-11-24 | Linux v0.1.0 release packages from 1ed1b050 and their WSLg smoke |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
