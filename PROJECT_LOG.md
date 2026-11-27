@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F997](log/F0997.md) | 2026-11-27 | Phone shadow filter back to the quality's filter: fast filter caused present stalls |
 | [F996](log/F0996.md) | 2026-11-27 | Owner APK from 31a276ca: Mac gamepad and dynres on main |
 | [F995](log/F0995.md) | 2026-11-27 | Dynamic resolution: a frame that only waited for the display is not late |
 | [F994](log/F0994.md) | 2026-11-27 | Push to main under the build lock; .github outside the pass key |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F940](log/F0940.md) | 2026-11-26 | Codex audit reads code-mode exec cells and wait calls |
 | [F939](log/F0939.md) | 2026-11-26 | Codex usage audit script in tools/; Codex defaults updated |
 | [F938](log/F0938.md) | 2026-11-26 | Codex working rules in AGENTS.md |
-| [F937](log/F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

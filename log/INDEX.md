@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F997](F0997.md) | 2026-11-27 | Phone shadow filter back to the quality's filter: fast filter caused present stalls |
 | [F996](F0996.md) | 2026-11-27 | Owner APK from 31a276ca: Mac gamepad and dynres on main |
 | [F995](F0995.md) | 2026-11-27 | Dynamic resolution: a frame that only waited for the display is not late |
 | [F994](F0994.md) | 2026-11-27 | Push to main under the build lock; .github outside the pass key |
