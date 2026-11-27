@@ -1138,3 +1138,16 @@ again. Together with G388's ordinary walking actors and G386's decoded crowd
 audio, this checks the shared spectator behavior across the existing source
 layouts. The selected replay camera and physical audio output remain unmeasured
 for this comparison.
+
+### Billboard coverage with multisampling
+
+The original card pass uses its texture alpha to select which samples write
+colour and depth. A later sky draw can still fill the uncovered samples. An
+archived Jarama draw and a separate live Vulkan colour marker distinguish this
+edge coverage from the card colour and sky texture. On nine partially covered
+pixels with matching card alpha, the previous hardware mask covers both samples
+where the original leaves one open.
+
+The shared Vulkan material selects the measured coverage order for 2× and 4×
+MSAA and uses one alpha coverage calculation. Single-sample mode still applies
+the regular material cutout. The measurements and runtime checks are in [G437](../log/G0437.md).

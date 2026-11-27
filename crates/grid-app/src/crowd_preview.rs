@@ -5,10 +5,10 @@
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     light::NotShadowCaster,
-    mesh::{Indices, PrimitiveTopology},
-    pbr::{ExtendedMaterial, MaterialExtension},
+    mesh::{Indices, MeshVertexBufferLayoutRef, PrimitiveTopology},
+    pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline},
     prelude::*,
-    render::render_resource::{AsBindGroup, ShaderType},
+    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError},
     shader::ShaderRef,
 };
 use grid_formats::{binxml, crowd_placements, pssg, texture};
@@ -610,6 +610,7 @@ pub(crate) struct BillboardLight {
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+#[bind_group_data(CardCoverageKey)]
 pub struct Tint {
     #[texture(100)]
     #[sampler(101)]
@@ -622,10 +623,49 @@ pub struct Tint {
     pub(crate) colour2: Vec4,
     #[uniform(105)]
     pub(crate) billboard_light: BillboardLight,
+    pub(crate) source_sample_coverage: bool,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CardCoverageKey {
+    enabled: bool,
+}
+
+impl From<&Tint> for CardCoverageKey {
+    fn from(material: &Tint) -> Self {
+        Self { enabled: material.source_sample_coverage }
+    }
+}
+
 impl MaterialExtension for Tint {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
+    }
+
+    fn specialize(
+        _: &MaterialExtensionPipeline,
+        pipeline: &mut RenderPipelineDescriptor,
+        _: &MeshVertexBufferLayoutRef,
+        key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        let coverage_definition = match pipeline.multisample.count {
+            2 => "GRID_CARD_COVERAGE_2",
+            4 => "GRID_CARD_COVERAGE_4",
+            _ => return Ok(()),
+        };
+        if key.bind_group_data.enabled
+            && pipeline.multisample.alpha_to_coverage_enabled
+            && let Some(fragment) = &mut pipeline.fragment
+            && fragment.shader == SHADER
+        {
+            // The original maps unsharpened atlas alpha to a coverage mask.
+            // Disable Bevy's sharpen and the driver's second coverage test.
+            fragment.shader_defs.retain(|def| super::foundation_backing::def_name(def) != "ALPHA_TO_COVERAGE");
+            fragment.shader_defs.push("GRID_SOURCE_CARD_COVERAGE".into());
+            fragment.shader_defs.push(coverage_definition.into());
+            pipeline.multisample.alpha_to_coverage_enabled = false;
+        }
+        Ok(())
     }
 }
 pub(crate) fn install_shader(app: &mut App) -> AnyResult<()> {
@@ -801,6 +841,7 @@ fn spawn(
                     colour1: s.colours[1],
                     colour2: s.colours[2],
                     billboard_light: BillboardLight::default(),
+                    source_sample_coverage: false,
                 },
             })
         })

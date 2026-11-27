@@ -21,8 +21,37 @@ fn display_to_linear(display: vec3<f32>) -> vec3<f32> {
     return select(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, c <= vec3(0.04045));
 }
 
+#ifdef GRID_SOURCE_CARD_COVERAGE
+struct CardOutput {
+    @location(0) color: vec4<f32>,
+    @builtin(sample_mask) samples: u32,
+}
+
+fn card_output(colour: vec4<f32>) -> CardOutput {
+    let alpha = colour.a;
+#ifdef GRID_CARD_COVERAGE_2
+    let covered = select(select(0u, 1u, alpha >= 0.25), 3u, alpha >= 0.75);
+#else
+    // Original sample order at standard Vulkan 4x locations: 3, 0, 1, 2.
+    let low = select(0u, 8u, alpha >= 0.125);
+    let mid = select(low, 9u, alpha >= 0.375);
+    let high = select(mid, 11u, alpha >= 0.625);
+    let covered = select(high, 15u, alpha >= 0.875);
+#endif
+    return CardOutput(vec4(colour.rgb, 1.0), covered);
+}
+#else
+alias CardOutput = FragmentOutput;
+
+fn card_output(colour: vec4<f32>) -> CardOutput {
+    var out: FragmentOutput;
+    out.color = colour;
+    return out;
+}
+#endif
+
 @fragment
-fn fragment(in:VertexOutput,@builtin(front_facing) front:bool)->FragmentOutput{
+fn fragment(in:VertexOutput,@builtin(front_facing) front:bool)->CardOutput{
     var pbr=pbr_input_from_standard_material(in,front);
     let mask=textureSample(tint_map,tint_sampler,in.uv).rgb;
     let rest=clamp(1.0-mask.r-mask.g-mask.b,0.0,1.0);
@@ -40,13 +69,11 @@ fn fragment(in:VertexOutput,@builtin(front_facing) front:bool)->FragmentOutput{
         let haze = saturate((range - 30.0) / max(billboard_light.ambient.w, 0.001))
             * billboard_light.direction.w;
         let display = mix(base.rgb * tint * illumination, billboard_light.fog.rgb, haze);
-        var source: FragmentOutput;
-        source.color = vec4(display_to_linear(display), base.a);
-        return source;
+        return card_output(vec4(display_to_linear(display), base.a));
     }
 #endif
     pbr.material.base_color=vec4<f32>(pbr.material.base_color.rgb*tint,pbr.material.base_color.a);
     pbr.material.base_color=alpha_discard(pbr.material,pbr.material.base_color);
     var out:FragmentOutput;out.color=apply_pbr_lighting(pbr);
-    out.color=main_pass_post_lighting_processing(pbr,out.color);return out;
+    return card_output(main_pass_post_lighting_processing(pbr,out.color));
 }

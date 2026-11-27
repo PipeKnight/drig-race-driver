@@ -721,7 +721,11 @@ fn spawn(
     view: Query<(&Transform, &Msaa), With<super::ViewerCamera>>,
     (mut meshes, mut images): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>),
     mut materials: ResMut<Assets<CrowdMaterial>>,
-    (settings, source_light): (Res<super::graphics::Settings>, Option<Res<CardLighting>>),
+    (settings, source_light, adapter): (
+        Res<super::graphics::Settings>,
+        Option<Res<CardLighting>>,
+        Option<Res<bevy::render::renderer::RenderAdapterInfo>>,
+    ),
     (mut replay, mut rod_materials): (
         Option<ResMut<super::replay::Replay>>,
         Option<ResMut<Assets<StandardMaterial>>>,
@@ -730,6 +734,11 @@ fn spawn(
     let Ok((camera, msaa)) = view.single() else {
         return;
     };
+    let source_sample_coverage = source_light.is_some()
+        && adapter.is_some_and(|info| info.backend == wgpu::Backend::Vulkan);
+    if source_sample_coverage && matches!(msaa, Msaa::Sample2 | Msaa::Sample4) {
+        println!("crowd_source_coverage samples={}", msaa.samples());
+    }
 
     let diffuse_upload = if source_light.is_some() {
         super::texture_upload::image_linear
@@ -772,6 +781,7 @@ fn spawn(
                     colour2: s.colours[2],
                     billboard_light: source_light.as_deref()
                         .map_or(BillboardLight::default(), |light| light.initial),
+                    source_sample_coverage,
                 },
             })
         })
@@ -876,6 +886,7 @@ fn spawn(
                     colour1: colours[1],
                     colour2: colours[2],
                     billboard_light: BillboardLight::default(),
+                    source_sample_coverage: false,
                 },
             });
             Some(NearModel {
