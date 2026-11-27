@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F971](F0971.md) | 2026-11-27 | Backlog row 138: any track and any car in Race Day extras |
 | [F970](F0970.md) | 2026-11-27 | EGO modding community tool index saved (docs/EGO_MODDING_TOOLS.md) |
 | [F969](F0969.md) | 2026-11-27 | Backlog row 156: owner request to study Dirt 3 (light halos, glass glints, format compatibility) |
 | [F968](F0968.md) | 2026-11-27 | Backlog row 155: owner question on windscreen and body dirt build-up during a race |
