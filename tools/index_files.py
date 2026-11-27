@@ -58,7 +58,7 @@ FAMILY_TOPICS = [
 # Groups for single files, in order; the first rule whose pattern matches the path wins.
 GROUPS = [
     ("Process: log, indexes, pre-push, release, builds and disk", [
-        r"tools/(log_entry|split_project_log|index_files|fidelity_progress)\.py",
+        r"tools/(log_entry|split_project_log|index_files|fidelity_progress|scenario_progress)\.py",
         r"tools/tests/test_fidelity_progress", r"tools/prepush\.ps1", r"tools/release_playable",
         r"tools/update_prototype", r"tools/build_gate", r"tools/build_seed", r"tools/build_macos",
         r"tools/rebuild_macos", r"tools/tests/test_rebuild_macos", r"tools/seed_build_dir",
