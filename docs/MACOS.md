@@ -40,7 +40,9 @@ without compiling. `--code-only` builds the player executable with
 and names the image `DRIG-vX.Y.Z-macos-<arch>.dmg`. Use the same tag as the
 other platforms. `--keep-cache` retains
 `local/macos-build-cache/target` to speed later builds; omit it for automatic
-cleanup. Both modes are local only. A lock prevents two instances of this
+cleanup. For checkout paths with spaces, Cargo intermediates go in a
+space-free location under the system temporary directory so SDL3 can link.
+Both modes are local only. A lock prevents two instances of this
 rebuild script from compiling at the same time. If main pins a Rust version not
 installed on this Mac, the error prints the required rustup installation command.
 Packaging uses the maintained local helper/icon and the frozen main revision's
@@ -55,6 +57,7 @@ Application Support `game-root.txt`. Use `--game-root` to override that search. 
 ### Manual build
 
 - Xcode Command Line Tools (`xcode-select --install` if absent).
+- CMake for building the bundled SDL3 gamepad library (`brew install cmake` if absent).
 - Rust 1.99.0, as pinned in `rust-toolchain.toml`; Python 3 for packaging.
 - A native Rust compiler: `aarch64-apple-darwin` for Apple Silicon or
   `x86_64-apple-darwin` for Intel. Leave Cargo's `build.target` and

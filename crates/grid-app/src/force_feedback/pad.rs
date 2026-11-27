@@ -1,11 +1,10 @@
-//! Android rumble [A] (docs/FORCE_FEEDBACK.md §7.2): the original's `XBOX360 Controller` device,
-//! whose motors carry only the effect samples (surfaces, kerbs, gear changes, collisions, skids,
-//! wheel damage), played on a connected pad's vibrators, else on the phone's own vibrator.
-//!
-//! The task runs on its own thread as on Windows (`Sleep(10)`, then `7ECAC0`); the levels go to
-//! `MainActivity.rumble` through `Vibration`'s rate limit.
+//! Shared effect task for Android and macOS. The worker evaluates the same pad effects
+//! as Windows every 10 ms. Android submits them to its vibrator API, while macOS reads
+//! the latest motor levels on the thread that owns the SDL gamepad.
 
-use super::{Ffb, Output, Vibration, motors};
+#[cfg(target_os = "android")]
+use super::Vibration;
+use super::{Ffb, Output, motors};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -18,6 +17,8 @@ pub struct Shared {
     pub rumble: bool,
     /// When the race last queued a snapshot; the outputs go to zero 0.25 s after [A].
     pub fed: Option<Instant>,
+    #[cfg(target_os = "macos")]
+    pub levels: (u16, u16),
 }
 
 pub struct Handle {
@@ -35,14 +36,19 @@ pub fn device() -> &'static Handle {
             .name("FFB updateTask".into())
             .spawn(move || run(&thread_shared))
         {
+            #[cfg(target_os = "android")]
             crate::android::log(true, &format!("ffb: no thread: {error}"));
+            #[cfg(target_os = "macos")]
+            eprintln!("ffb: no thread: {error}");
         }
         Handle { shared }
     })
 }
 
 fn run(shared: &Arc<Mutex<Shared>>) {
+    #[cfg(target_os = "android")]
     crate::android::attach_thread();
+    #[cfg(target_os = "android")]
     let mut vibration = Vibration::default();
     let mut last = Instant::now();
     loop {
@@ -50,7 +56,9 @@ fn run(shared: &Arc<Mutex<Shared>>) {
         let now = Instant::now();
         let dt = (now - last).as_secs_f64();
         last = now;
-        let levels = {
+        #[cfg(target_os = "android")]
+        let levels;
+        {
             let Ok(mut s) = shared.lock() else { return };
             let fed = s.fed.is_some_and(|t| now - t < Duration::from_millis(250));
             let out = match &s.ffb {
@@ -60,8 +68,17 @@ fn run(shared: &Arc<Mutex<Shared>>) {
             if let Some(ffb) = s.ffb.as_mut() {
                 ffb.process(dt);
             }
-            motors(&out)
-        };
+            let levels_now = motors(&out);
+            #[cfg(target_os = "macos")]
+            {
+                s.levels = levels_now;
+            }
+            #[cfg(target_os = "android")]
+            {
+                levels = levels_now;
+            }
+        }
+        #[cfg(target_os = "android")]
         if let Some((left, right)) = vibration.due(now, levels) {
             crate::android::rumble(left, right);
         }

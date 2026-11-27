@@ -9,7 +9,7 @@ import android.view.InputDevice;
 
 /**
  * Pad rumble and phone vibration (AUTHORED, docs/FORCE_FEEDBACK.md section 7.2): the
- * original's two XInput motor levels from force_feedback/android.rs, as 100 ms one-shots
+ * original's two XInput motor levels from force_feedback/pad.rs, as 100 ms one-shots
  * that the Rust side renews while they last. A connected pad with vibrators gets them,
  * left motor on its first vibrator and right on its second; a pad without vibrators gets
  * nothing; with no pad the phone vibrates at the larger level. Called on the UI thread.

@@ -111,11 +111,13 @@ mod damage_parts;
 mod drift_event;
 mod dynamic_props;
 mod engine_sound;
-// Device output on Windows and Android; the pure task builds everywhere.
-#[cfg_attr(not(any(windows, target_os = "android")), allow(dead_code))]
+// The pure task also builds on platforms without a force feedback backend.
+#[cfg_attr(not(any(windows, target_os = "android", target_os = "macos")), allow(dead_code))]
 mod force_feedback;
-#[cfg(any(windows, target_os = "android"))]
+#[cfg(any(windows, target_os = "android", target_os = "macos"))]
 mod ffb;
+#[cfg(target_os = "macos")]
+mod macos_pad;
 mod event_menu;
 mod front_end_host;
 #[cfg(not(target_os = "android"))]
@@ -5116,6 +5118,8 @@ pub(crate) fn race_app(
                 }),
         );
         let plugins = if hosted { front_end_host::hosted(plugins, front_end_host::Gpu::Race) } else { plugins };
+        #[cfg(target_os = "macos")]
+        let plugins = if hosted { plugins } else { plugins.disable::<bevy::gilrs::GilrsPlugin>() };
         // Diagnostics GRID_MENU_LOOPS (front_end_host.rs): the scripted race
         // ends at its tick limit and goes back to the menu, as headless.
         if hosted && drive && crate::dev::var_os("GRID_MENU_LOOPS").is_some() {
@@ -5127,6 +5131,10 @@ pub(crate) fn race_app(
         } else {
             plugins
         });
+        #[cfg(target_os = "macos")]
+        if !hosted {
+            macos_pad::install(&mut app);
+        }
         if !drive {
             app.add_systems(Update, update_orbit);
         }
@@ -5279,8 +5287,8 @@ pub(crate) fn race_app(
             }
         }
         if let Some(actions) = drive_input.take() {
-            #[cfg(any(windows, target_os = "android"))]
-            {
+            #[cfg(any(windows, target_os = "android", target_os = "macos"))]
+            if interactive || !cfg!(target_os = "macos") {
                 let status = ffb::install(&mut app, &root, &input_settings, actions.wheel(), field.models[0].stem());
                 println!("drive_force_feedback {status}");
             }

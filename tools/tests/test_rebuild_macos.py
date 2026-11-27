@@ -111,6 +111,7 @@ class RebuildTests(unittest.TestCase):
                     if args[0] == "fixture-cargo":
                         self_outer.assertIn("--no-default-features", args)
                         self_outer.assertEqual(git(cwd, "rev-parse", "HEAD"), revision)
+                        self_outer.assertFalse(any(c.isspace() for c in env["CARGO_BUILD_BUILD_DIR"]))
                         # 12 hex digits in every build, as the other packagers (run log names).
                         self_outer.assertEqual(env["GRID_BUILD_REVISION"], revision[:12])
                         self_outer.assertEqual((Path(cwd) / "tracked.txt").read_text(), "remote main\n")
@@ -132,7 +133,9 @@ class RebuildTests(unittest.TestCase):
             self_outer = self
             args = argparse.Namespace(code_only=True, game_root=None, dry_run=False, release_tag=release_tag, keep_cache=keep_cache)
             with patch.object(MOD, "ROOT", root), patch.object(MOD, "Runner", CompilerFixture), \
+                 patch.object(MOD.shutil, "disk_usage") as disk_usage, \
                  patch.object(MOD, "rust_commands", return_value=(["fixture-cargo"], "aarch64-apple-darwin")):
+                disk_usage.return_value.free = 8 * MOD.GIB
                 if fail:
                     with self.assertRaises(subprocess.CalledProcessError):
                         MOD.build(args, CompilerFixture())
