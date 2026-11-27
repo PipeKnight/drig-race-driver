@@ -1535,8 +1535,8 @@ fn flash_draw(state: &mut u32, count: usize) -> usize {
 }
 
 // Source constructor: 40–100 m at the reference angle, 50–1000 actors,
-// intervals .5–.1 and .15 lifetime. The port uses ordinary game time and
-// the viewer's vertical half-FOV for the still-unresolved original caller.
+// intervals .5–.1 and .15 lifetime. The flash job receives the full vertical
+// field of view before scene projection halves it (0x0063A819–0x0063A84D).
 const FLASH_LIFETIME: f64 = f32::from_bits(0x3e19_999a) as f64;
 const FLASH_REFERENCE_ANGLE: f32 = f32::from_bits(0x3f75_be0b);
 
@@ -1580,7 +1580,11 @@ fn update_flash(
     }
     if !clock.replaying && now >= flashes.next {
         let angle = match projection {
-            Projection::Perspective(perspective) => (perspective.fov * 0.5).clamp(0.1, 1.5),
+            Projection::Perspective(perspective)
+                if perspective.fov > 0. && perspective.fov < std::f32::consts::PI =>
+            {
+                perspective.fov
+            }
             _ => FLASH_REFERENCE_ANGLE,
         };
         let scale = FLASH_REFERENCE_ANGLE / angle;
@@ -1625,6 +1629,7 @@ fn update_flash(
     }
 
     let active = flashes.visible_at(now);
+    let up = (*camera.up()).to_array();
     for (entity, mut card, mut transform, mut visibility, mut handle) in &mut cards {
         *visibility = Visibility::Hidden;
         let index = active.start + card.0;
@@ -1636,7 +1641,7 @@ fn update_flash(
         };
         let phase = ((now - event.born) / FLASH_LIFETIME) as f32;
         if let Ok((mesh, center)) =
-            super::flash_preview::event_mesh(event.anchor, eye.to_array(), phase)
+            super::flash_preview::event_mesh(event.anchor, eye.to_array(), up, phase)
         {
             if let Some(added) =
                 card.1

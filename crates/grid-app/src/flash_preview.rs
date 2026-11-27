@@ -233,7 +233,7 @@ fn spawn(
     for anchor in &p.anchors {
         let mut attached = *anchor;
         attached.position[1] += 1.2; // AUTHORED sitting-camera fixture offset; no node binding claim.
-        let (mesh, center) = event_mesh(attached, view.translation.to_array(), 0.5)
+        let (mesh, center) = event_mesh(attached, view.translation.to_array(), [0., 1., 0.], 0.5)
             .expect("validated authored flash card");
         commands.spawn((
             Name::new(format!(
@@ -251,9 +251,10 @@ fn spawn(
 pub(crate) fn event_mesh(
     attached: Anchor,
     eye: [f32; 3],
+    up: [f32; 3],
     phase: f32,
 ) -> Result<(Mesh, Vec3), &'static str> {
-    let quad = flash_fixture::quad(attached, eye, [0., 1., 0.], phase)?;
+    let quad = flash_fixture::quad(attached, eye, up, phase)?;
     // Authored event-centred local mesh representation. Bevy0.19 sorts
     // transformed mesh AABB centres; static world-baked cards would also
     // have valid centres. This transform is not recovered source ABI.
@@ -287,6 +288,24 @@ fn card_mesh(positions: [[f32; 3]; 4], uv: [[f32; 2]; 4], opacity: f32) -> Mesh 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_mesh_uses_tilted_view_up() {
+        let anchor = Anchor {
+            source_index: 0,
+            source_cell: 0,
+            position: [0.; 3],
+        };
+        let up = Vec3::new(0., 1., 1.).normalize();
+        let (mesh, center) = event_mesh(anchor, [0., 0., 10.], up.to_array(), 0.25).unwrap();
+        assert_eq!(center, Vec3::ZERO);
+        let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
+        let bevy::mesh::VertexAttributeValues::Float32x3(positions) = positions else {
+            panic!("expected flash positions as XYZ vectors");
+        };
+        let [a, b, c, d]: [Vec3; 4] = std::array::from_fn(|i| Vec3::from_array(positions[i]));
+        assert!(((a + b - c - d) * 0.25).abs_diff_eq(up * 0.875, 1e-6));
+    }
     #[test]
     #[ignore = "requires purchased GRID_GAME_ROOT; CPU only, no GPU"]
     fn purchased_source_flash_control_prepares_exact_three_anchors_and_full_dds() {

@@ -143,6 +143,17 @@ Two selected saved camera-flash shader programs now close the vertex-scalar ambi
 
 Selected VP SHA:f2399e34d331d9c3d83238afcdd532b6bd6f09337637ccd8bbd127681b54e920; FP SHA:202ea16028955f875ab99ecaf00010786446220f4325cd6c3f3c19f660c57690. Evidence remains private under local/handoff/drafts/stadium-crowd01/.
 
+The ordinary flash job at `0x0076D4AA` passes its time step and camera
+angle from offsets `+0x0C` and `+0x50`. The angle is read from camera
+offset `+0xD0` through the plugin copy at `0x0063A0F6`. The projection
+passes the same field to the half-angle calculation at
+`0x0063A819–0x0063A84D`. Flash eligibility therefore uses the full
+vertical field of view. Two original flash quads confirm that their
+vertical axis follows the active camera. The normalized axis error
+from that view is at most .000303. The shared flash path uses those
+inputs on each active camera. Original event timing and the blend
+domain have independent validation requirements.
+
 ## Source stance sway accumulator (G259)
 
 Bounded assembly identifies 0x007595B0 as the upper-corner sway phase updater. It adds saved swaySpeed times an incoming scalar to the phase, repeatedly subtracts 360 above 360 or adds 360 below zero, then calls the existing corner writer. Exactly 360 is retained. The incoming scalar is forwarded through the identified controller wrapper; its wall-clock origin is not established. This is independent of skeletal arm animation.
