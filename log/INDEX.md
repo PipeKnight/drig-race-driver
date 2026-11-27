@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F979](F0979.md) | 2026-11-27 | Owner: SimBin models from the WTCC mod may be used, never in the repo |
 | [F978](F0978.md) | 2026-11-27 | Owner's downloaded GRID mod archives: inventory and cleanup |
 | [F977](F0977.md) | 2026-11-27 | Content policy: separate content packs on separate hosting |
 | [F976](F0976.md) | 2026-11-27 | Backlog row 140: owner to test the Broski look mods |
