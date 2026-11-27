@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F982](log/F0982.md) | 2026-11-27 | Cockpit wheel on keyboard steering turns 1.5x faster (WHEEL_RATE 3, owner's choice from comparison GIFs) |
 | [F981](log/F0981.md) | 2026-11-27 | Mac 82c88068 traces: spike causes and why 60 Hz pacing drops |
 | [F980](log/F0980.md) | 2026-11-27 | Row 138: derby on any track and a larger field |
 | [F979](log/F0979.md) | 2026-11-27 | Owner: SimBin models from the WTCC mod may be used, never in the repo |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F925](log/F0925.md) | 2026-11-25 | Performance test switches: owner phone run 080140 never changed them; order-proof apply and a front-end perf log line |
 | [F924](log/F0924.md) | 2026-11-25 | Mac frame-dip capture steps: redirect a Terminal start to a file, developer build only |
 | [F923](log/F0923.md) | 2026-11-25 | Mac frame dips: cockpit mirror pipelines warmed under the cover |
-| [F922](log/F0922.md) | 2026-11-25 | GPU unit tests run in their own process: NVIDIA D3D12 driver crash in the grid-app test process |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

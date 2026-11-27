@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F982](F0982.md) | 2026-11-27 | Cockpit wheel on keyboard steering turns 1.5x faster (WHEEL_RATE 3, owner's choice from comparison GIFs) |
 | [F981](F0981.md) | 2026-11-27 | Mac 82c88068 traces: spike causes and why 60 Hz pacing drops |
 | [F980](F0980.md) | 2026-11-27 | Row 138: derby on any track and a larger field |
 | [F979](F0979.md) | 2026-11-27 | Owner: SimBin models from the WTCC mod may be used, never in the repo |

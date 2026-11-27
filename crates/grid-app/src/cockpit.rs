@@ -293,9 +293,10 @@ pub struct Wheel {
 }
 
 /// The fastest the shown wheel turns with assisted steering, in s per second
-/// (2 = lock to lock): centre to full lock in 0.5 s, where the front wheels
-/// take about 0.16 s (Lacetti, at rest).
-pub const WHEEL_RATE: f32 = 2.;
+/// (2 = lock to lock): centre to full lock in 0.33 s, where the front wheels
+/// take about 0.16 s (Lacetti, at rest). The owner chose 3 on 2026-11-27 from
+/// comparison GIFs of 2, 3, 4 and no limit (F687 had 2).
+pub const WHEEL_RATE: f32 = 3.;
 
 impl Wheel {
     /// One step toward `target` over `dt` seconds.
