@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F980](F0980.md) | 2026-11-27 | Row 138: derby on any track and a larger field |
 | [F979](F0979.md) | 2026-11-27 | Owner: SimBin models from the WTCC mod may be used, never in the repo |
 | [F978](F0978.md) | 2026-11-27 | Owner's downloaded GRID mod archives: inventory and cleanup |
 | [F977](F0977.md) | 2026-11-27 | Content policy: separate content packs on separate hosting |
