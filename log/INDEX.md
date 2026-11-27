@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F987](F0987.md) | 2026-11-27 | Phone: ADPF, CPU batch 2, scale step and mirror confirm on the F983 APK |
 | [F986](F0986.md) | 2026-11-27 | Report fidelity backlog completion in CI and link DRIG catalog mentions |
 | [F985](F0985.md) | 2026-11-27 | Refresh pacing: the drawable wait is not frame work; re-anchor after a missed refresh |
 | [F984](F0984.md) | 2026-11-27 | Phone: queue 2 confirms single-threaded schedules while throttled |

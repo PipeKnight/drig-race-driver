@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F987](log/F0987.md) | 2026-11-27 | Phone: ADPF, CPU batch 2, scale step and mirror confirm on the F983 APK |
 | [F986](log/F0986.md) | 2026-11-27 | Report fidelity backlog completion in CI and link DRIG catalog mentions |
 | [F985](log/F0985.md) | 2026-11-27 | Refresh pacing: the drawable wait is not frame work; re-anchor after a missed refresh |
 | [F984](log/F0984.md) | 2026-11-27 | Phone: queue 2 confirms single-threaded schedules while throttled |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F930](log/F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
 | [F929](log/F0929.md) | 2026-11-25 | Mac logs 22:26: GPU-query crash is a frame_split readback bug; countdown GPU-bound at the ceiling; memory pressure ruled out |
 | [F928](log/F0928.md) | 2026-11-25 | Lean render profile as the Android default; 120 Hz pacing A/B |
-| [F927](log/F0927.md) | 2026-11-25 | Phone GPU split rows and Android GPU research |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
