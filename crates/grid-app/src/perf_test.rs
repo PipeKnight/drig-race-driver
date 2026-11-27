@@ -12,10 +12,11 @@
 //!
 //! The mobile preset's render profile is built from the same switches
 //! ([`PerfTest::base`], [`base_for`]): with `mobile::enabled()` every start
-//! begins at [`Switches::LEAN`] (F928; owner 2026-11-25: the phone may show
-//! less detail and a worse picture), and the screen's or the setting's words
-//! add to it; the word `full` starts from [`Switches::NORMAL`] instead, for
-//! A/B runs. The desktop base is NORMAL, so the desktop picture is unchanged.
+//! begins at [`Switches::MOBILE`], `lean` with single-threaded schedules
+//! (F928, F972; owner 2026-11-25: the phone may show less detail and a worse
+//! picture), and the screen's or the setting's words add to it; the word
+//! `full` starts from [`Switches::NORMAL`] instead, and `main_multi` and
+//! `render_multi` drop the executor switches, for A/B runs. The desktop base is NORMAL, so the desktop picture is unchanged.
 //! The mobile preset's upload-time mip skip follows the same rule
 //! (`texture_upload::MipSkip::resolve`; `mipskip0` turns it off).
 use bevy::camera::primitives::Aabb;
@@ -212,6 +213,12 @@ impl Switches {
         tiny_shadows: true,
         ..Self::NORMAL
     };
+    /// The mobile preset's base: [`Switches::LEAN`] with the main and the
+    /// render world's schedules on one thread each (phone pair p5, F972:
+    /// FPS median 39 -> 42, p10 32 -> 38, main 22.3 -> 20.6 ms, render
+    /// 21.9 -> 19.1 ms, docs/ANDROID_CPU.md 5). The words `main_multi` and
+    /// `render_multi` give a schedule its multi-threaded executor back.
+    pub const MOBILE: Self = Self { main_single: true, render_single: true, ..Self::LEAN };
     pub const ALL_OFF: Self = Self {
         shadows: true,
         foliage: true,
@@ -317,10 +324,10 @@ pub const CYCLE: [Switches; 16] = {
 /// dynamic resolution to settle (owner, 2026-11-25: 20-30 s).
 pub const CYCLE_SECONDS: f32 = 20.;
 
-/// The switches every start begins from: [`Switches::LEAN`] with the
+/// The switches every start begins from: [`Switches::MOBILE`] with the
 /// mobile preset (the phone's render profile), else [`Switches::NORMAL`].
 pub fn base_for(mobile: bool) -> Switches {
-    if mobile { Switches::LEAN } else { Switches::NORMAL }
+    if mobile { Switches::MOBILE } else { Switches::NORMAL }
 }
 
 /// Live state, changed by the front end's Performance test screen.
@@ -370,59 +377,68 @@ pub fn install(app: &mut App) {
     // parts to turn off, e.g. shadows,foliage (names as in the label). The
     // phone has no environment, so tools/android_bench.ps1 uses the setting.
     if let Some(value) = crate::settings::diagnostics().perf_test.clone() {
-        for part in value.split(',').map(str::trim) {
-            let s = &mut test.switches;
-            match part {
-                "auto" => test.auto = true,
-                "full" => test.base = Switches::NORMAL,
-                "shadows" => s.shadows = true,
-                "foliage" => s.foliage = true,
-                "ground" => s.ground = true,
-                "effects" => s.effects = true,
-                "hud" => s.hud = true,
-                "samples" => s.samples = true,
-                "empty_scene" | "empty" => s.empty = true,
-                "light_shadows" => s.light_shadows = true,
-                "no_small_casters" => s.small_casters = true,
-                "far_props" => s.far_props = true,
-                "msaa_off" => s.msaa_off = true,
-                "mirror" => s.mirror = true,
-                "msaa2" => s.msaa2 = true,
-                "no_indirect" => s.no_indirect = true,
-                "reflections" => s.reflections = true,
-                "lighting" => s.lighting = true,
-                "main_single" => s.main_single = true,
-                "render_single" => s.render_single = true,
-                "hard_shadows" => s.hard_shadows = true,
-                "local_lights" => s.local_lights = true,
-                "env_maps" => s.env_maps = true,
-                "tiny_shadows" => s.tiny_shadows = true,
-                "tonemap" => s.tonemap = true,
-                "adpf" => s.adpf = true,
-                // CPU placement words (cpu_place.rs reads them itself).
-                w if crate::cpu_place::is_word(w) => {}
-                "lean" => s.add(Switches::LEAN),
-                "no_reflections" => s.add(Switches::NO_REFLECTIONS),
-                rows if rows.starts_with("render") => {
-                    s.render_rows = rows[6..].parse().unwrap_or(0);
-                }
-                m if m.starts_with("mirror_cull") => s.mirror_cull = m[11..].parse().unwrap_or(0),
-                m if m.starts_with("mirror_far") => s.mirror_far = m[10..].parse().unwrap_or(0),
-                m if m.starts_with("mirror_every") => s.mirror_every = m[12..].parse().unwrap_or(0),
-                cull if cull.starts_with("cull") => {
-                    s.cull_factor = cull[4..].parse().unwrap_or(0);
-                }
-                // Read at upload time by `texture_upload::mip_skip`.
-                skip if skip.starts_with("mipskip") => {}
-                _ => warn!("GRID_PERF_TEST: unknown part {part:?}"),
-            }
-        }
+        apply_words(&mut test, &value);
     }
     app.insert_resource(test)
         .add_systems(Last, (cycle, apply, main_executors).chain())
         .add_systems(Last, churn);
     if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
         render.add_systems(bevy::render::ExtractSchedule, render_executors);
+    }
+}
+
+/// Applies the `perf_test` words (diagnostics setting or GRID_PERF_TEST):
+/// auto, or the parts to turn off, e.g. shadows,foliage (names as in the label).
+pub fn apply_words(test: &mut PerfTest, value: &str) {
+    for part in value.split(',').map(str::trim) {
+        let s = &mut test.switches;
+        match part {
+            "auto" => test.auto = true,
+            "full" => test.base = Switches::NORMAL,
+            // The off arms of the mobile base's executor switches (F972).
+            "main_multi" => test.base.main_single = false,
+            "render_multi" => test.base.render_single = false,
+            "shadows" => s.shadows = true,
+            "foliage" => s.foliage = true,
+            "ground" => s.ground = true,
+            "effects" => s.effects = true,
+            "hud" => s.hud = true,
+            "samples" => s.samples = true,
+            "empty_scene" | "empty" => s.empty = true,
+            "light_shadows" => s.light_shadows = true,
+            "no_small_casters" => s.small_casters = true,
+            "far_props" => s.far_props = true,
+            "msaa_off" => s.msaa_off = true,
+            "mirror" => s.mirror = true,
+            "msaa2" => s.msaa2 = true,
+            "no_indirect" => s.no_indirect = true,
+            "reflections" => s.reflections = true,
+            "lighting" => s.lighting = true,
+            "main_single" => s.main_single = true,
+            "render_single" => s.render_single = true,
+            "hard_shadows" => s.hard_shadows = true,
+            "local_lights" => s.local_lights = true,
+            "env_maps" => s.env_maps = true,
+            "tiny_shadows" => s.tiny_shadows = true,
+            "tonemap" => s.tonemap = true,
+            "adpf" => s.adpf = true,
+            // CPU placement words (cpu_place.rs reads them itself).
+            w if crate::cpu_place::is_word(w) => {}
+            "lean" => s.add(Switches::LEAN),
+            "no_reflections" => s.add(Switches::NO_REFLECTIONS),
+            rows if rows.starts_with("render") => {
+                s.render_rows = rows[6..].parse().unwrap_or(0);
+            }
+            m if m.starts_with("mirror_cull") => s.mirror_cull = m[11..].parse().unwrap_or(0),
+            m if m.starts_with("mirror_far") => s.mirror_far = m[10..].parse().unwrap_or(0),
+            m if m.starts_with("mirror_every") => s.mirror_every = m[12..].parse().unwrap_or(0),
+            cull if cull.starts_with("cull") => {
+                s.cull_factor = cull[4..].parse().unwrap_or(0);
+            }
+            // Read at upload time by `texture_upload::mip_skip`.
+            skip if skip.starts_with("mipskip") => {}
+            _ => warn!("GRID_PERF_TEST: unknown part {part:?}"),
+        }
     }
 }
 
@@ -1111,7 +1127,8 @@ mod tests {
     #[test]
     fn mobile_base_is_lean_and_words_add_to_it() {
         assert_eq!(base_for(false), Switches::NORMAL);
-        assert_eq!(base_for(true), Switches::LEAN);
+        assert_eq!(base_for(true), Switches::MOBILE);
+        assert_eq!(Switches { main_single: false, render_single: false, ..Switches::MOBILE }, Switches::LEAN);
         let mut test = PerfTest { base: base_for(true), ..default() };
         test.switches.hud = true;
         test.switches.render_rows = 360;
@@ -1121,6 +1138,27 @@ mod tests {
         test.base = Switches::NORMAL;
         assert_eq!(test.active(), Switches { hud: true, render_rows: 360, ..Switches::NORMAL });
         assert_eq!(PerfTest::default().active(), Switches::NORMAL);
+    }
+
+    /// The mobile base runs the schedules single-threaded; `main_multi` and
+    /// `render_multi` give each its multi-threaded executor back (F972), and
+    /// the desktop base is untouched by them.
+    #[test]
+    fn executor_words_clear_the_mobile_base() {
+        let mut test = PerfTest { base: base_for(true), ..default() };
+        apply_words(&mut test, "lean");
+        let s = test.active();
+        assert!(s.main_single && s.render_single && s.msaa_off);
+        assert!(s.label().ends_with("+main_single+render_single"), "{}", s.label());
+        apply_words(&mut test, "main_multi");
+        assert!(!test.active().main_single && test.active().render_single);
+        apply_words(&mut test, " render_multi ");
+        assert_eq!(test.active(), Switches::LEAN);
+        let mut desktop = PerfTest { base: base_for(false), ..default() };
+        apply_words(&mut desktop, "main_multi,render_multi");
+        assert_eq!(desktop.active(), Switches::NORMAL);
+        apply_words(&mut desktop, "main_single");
+        assert!(desktop.active().main_single);
     }
 
     /// `cullNNN` keeps the stronger (smaller) factor and names it.

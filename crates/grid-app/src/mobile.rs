@@ -16,8 +16,11 @@
 //!   detail and a worse picture; F928): no MSAA, a 256 px sun shadow map
 //!   within 25 m with a 2x2 filter, small props cast no shadows and end at
 //!   [`FAR_PROPS_METRES`], no car reflection overlays, no point or spot
-//!   lights. It is the Performance test's base (`perf_test::base_for`); the
-//!   setting word `full` (`[diagnostics] perf_test = full`) turns it off.
+//!   lights. With it the main and the render world's schedules run on one
+//!   thread each (`main_single`, `render_single`; phone pair p5, F972). It is
+//!   the Performance test's base (`perf_test::Switches::MOBILE`, `base_for`);
+//!   the setting word `full` (`[diagnostics] perf_test = full`) turns it off,
+//!   `main_multi` and `render_multi` only the executor part.
 //!   Car parts, damage and detachment are untouched.
 //!
 //! F549 also cut the shadows, small-prop shadows and draw distance and the
@@ -236,10 +239,11 @@ pub fn install(_app: &mut App) {
     if !enabled() {
         return;
     }
-    // The other cuts are the `lean` render profile (perf_test::base_for).
+    // The other cuts are the `lean` render profile with single-threaded
+    // schedules (perf_test::Switches::MOBILE, base_for).
     log_line!(
-        "mobile_preset version=3 render_rows={RENDER_ROWS} render_profile=lean ({})",
-        crate::perf_test::Switches::LEAN.label()
+        "mobile_preset version=4 render_rows={RENDER_ROWS} render_profile=lean ({})",
+        crate::perf_test::Switches::MOBILE.label()
     );
 }
 
