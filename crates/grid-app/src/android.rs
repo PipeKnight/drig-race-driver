@@ -293,7 +293,7 @@ pub fn prefer_display_mode(hz: f32) -> Option<String> {
 }
 
 /// `MainActivity.rumble(left, right)`: vibration amplitudes 0..255 for a pad's two motors, or
-/// the phone's vibrator (force_feedback/android.rs). The FFB thread stays attached to the VM.
+/// the phone's vibrator (force_feedback/pad.rs). The FFB thread stays attached to the VM.
 pub fn rumble(left: u8, right: u8) {
     with_activity(|env, activity| {
         env.call_method(

@@ -5,6 +5,7 @@ Optionally embed private game data and create a portable DMG.
 
 import argparse
 import json
+import os
 from pathlib import Path
 import plistlib
 import platform
@@ -115,9 +116,6 @@ def main():
                 parser.error(f"incomplete game folder: {marker} is missing")
     if args.dmg and args.dmg.exists():
         parser.error("DMG already exists; choose a new output path")
-    if not args.no_build:
-        subprocess.run(["cargo", "build", "--release", "--locked", "-p", "grid-app",
-                        "--bin", "grid-app"], cwd=source_root, check=True)
     if args.binary:
         binary = args.binary.resolve()
         release = binary.parent
@@ -126,6 +124,16 @@ def main():
             ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=source_root))
         release = Path(metadata["target_directory"]) / "release"
         binary = release / "grid-app"
+        if not args.no_build:
+            command = ["cargo", "build", "--release", "--locked", "-p", "grid-app", "--bin", "grid-app"]
+            build_directory = metadata.get("build_directory", metadata["target_directory"])
+            if any(char.isspace() for char in build_directory):
+                # SDL's generated pkg-config flags truncate library paths at whitespace.
+                with tempfile.TemporaryDirectory(prefix="drig-cargo-", dir="/private/tmp") as build:
+                    env = dict(os.environ, CARGO_BUILD_BUILD_DIR=build)
+                    subprocess.run(command, env=env, cwd=source_root, check=True)
+            else:
+                subprocess.run(command, cwd=source_root, check=True)
     if not binary.is_file():
         parser.error(f"native release binary missing: {binary}; unset CARGO_BUILD_TARGET/build.target")
     subprocess.run(["lipo", str(binary), "-verify_arch", platform.machine()], check=True)

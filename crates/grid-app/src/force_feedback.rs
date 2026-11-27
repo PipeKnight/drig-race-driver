@@ -4,13 +4,13 @@
 //! snapshot `7E9D60` read from the vehicle record, the FFB task `7ECAC0` with its effects and
 //! vibration samples, and the DirectInput device's software damping (`B8CD80`) and XInput motor
 //! scaling. The device output is `force_feedback/windows.rs` (wheel and XInput pad) and
-//! `force_feedback/android.rs` (pad or phone vibrator); the Bevy glue is `ffb.rs`.
+//! `force_feedback/pad.rs` (Android and macOS gamepads); the Bevy glue is `ffb.rs`.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-#[cfg(target_os = "android")]
-pub mod android;
+#[cfg(any(target_os = "android", target_os = "macos"))]
+pub mod pad;
 #[cfg(windows)]
 pub mod windows;
 
@@ -1147,14 +1147,14 @@ pub fn motors(out: &Output) -> (u16, u16) {
 /// more, and a vibrator cannot follow faster changes. The motor speeds become 8-bit amplitudes;
 /// a change is sent at most every 30 ms, a stop at once, and a running level again every 60 ms
 /// (the Java side plays 100 ms one-shots).
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "android", target_os = "macos")), allow(dead_code))]
 #[derive(Default)]
 pub struct Vibration {
     sent: (u8, u8),
     at: Option<Instant>,
 }
 
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "android", target_os = "macos")), allow(dead_code))]
 impl Vibration {
     const CHANGE: Duration = Duration::from_millis(30);
     const REFRESH: Duration = Duration::from_millis(60);

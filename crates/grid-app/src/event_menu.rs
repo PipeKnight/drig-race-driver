@@ -1446,7 +1446,13 @@ pub fn screen_app(args: &[String], hosted: bool) -> Result<App, Box<dyn std::err
     } else {
         plugins
     };
+    #[cfg(target_os = "macos")]
+    let plugins = if hosted { plugins } else { plugins.disable::<bevy::gilrs::GilrsPlugin>() };
     app.add_plugins(if hosted { crate::front_end_host::hosted(plugins, crate::front_end_host::Gpu::Ui) } else { plugins });
+    #[cfg(target_os = "macos")]
+    if !hosted {
+        crate::macos_pad::install(&mut app);
+    }
     crate::ui_font::install(&mut app);
     // The original's overlay fade (docs/SCREEN_FLOW.md): the menu fades in
     // from black, and out to "Loading" on Continue.

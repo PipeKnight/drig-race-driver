@@ -842,7 +842,7 @@ pub fn recognised(name: &str, vendor: Option<u16>) -> Result<(), &'static str> {
 /// applies, since pad names such as "8BitDo Pro 2" need not say "pad".
 /// AUTHORED.
 #[derive(Component)]
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "android", target_os = "macos")), allow(dead_code))]
 pub struct ClassifiedPad;
 
 /// The wheel half of [`recognised`].

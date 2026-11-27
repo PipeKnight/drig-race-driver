@@ -139,7 +139,7 @@ public class MainActivity extends GameActivity {
     }
 
     /**
-     * Called by the FFB thread (force_feedback/android.rs): vibration levels 0..255 for a pad's
+     * Called by the FFB thread (force_feedback/pad.rs): vibration levels 0..255 for a pad's
      * left and right motor, or the phone's vibrator when no pad is connected (Rumble.java).
      */
     public void rumble(int left, int right) {

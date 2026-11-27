@@ -257,7 +257,8 @@ Slots: +0 tick `B8CD80`, +4 is-wheel `B8CD40` (constant-force effect exists), +8
 | XInput pad motors | same file, `XInputSetState` to the first connected pad | ORIGINAL scaling; pad choice [A] |
 | One snapshot of the player's car per physics tick; pause | `crates/grid-app/src/ffb.rs` | ORIGINAL data, per tick [A] |
 | Wheel input: `win_con_di_*` sources, the original preset whose deviceType equals the wheel's product name (G25, MOMO, DFP, RGT), else a generic preset; `device=auto` with a wheel gives the wheel class (unassisted steering) | `crates/grid-app/src/input.rs` | ORIGINAL presets; generic preset [A] |
-| Android pad rumble and phone vibration (§7.2) | `crates/grid-app/src/force_feedback/android.rs`, `android.rs` `rumble`, `android/.../Rumble.java` | [A] |
+| Android pad rumble and phone vibration (§7.2) | `crates/grid-app/src/force_feedback/pad.rs`, `android.rs` `rumble`, `android/.../Rumble.java` | [A] |
+| macOS gamepad rumble (§7.3) | `crates/grid-app/src/force_feedback/pad.rs` and `macos_pad.rs` run the same pad effects and send both motor levels via SDL3 | [A] |
 
 Why a hand-written binding: the `windows` crate (0.62.2, already in Cargo.lock through Bevy) has
 the DirectInput 8 COM wrappers, but enabling its HumanInterfaceDevice feature in grid-app adds a
@@ -312,6 +313,16 @@ reach motors (§5), so nothing buzzes in a plain corner.
   else on from level 128. Each call plays a 100 ms one-shot, renewed while the level lasts.
 - The manifest asks for `android.permission.VIBRATE`, a normal permission granted at install.
 - `[input] force_feedback = off` stops it; `feedback_effects` (0..10, default 5) scales it.
+
+### 7.3 macOS gamepad output [A]
+
+SDL3 handles controller input and rumble on macOS. Its HID drivers supply the
+mapped controls for each connection and support native reports for pads such as
+Stadia. The force-feedback worker calculates the same effects as the Android
+pad path. The race routes both motor levels to its selected controller, and
+the host translates the race entity to the physical gamepad. Motor commands
+expire automatically if the race or window stops updating. Device support
+depends on the controller and its connection.
 
 ## 8. Open
 
