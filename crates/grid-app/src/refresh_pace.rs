@@ -63,6 +63,51 @@ pub const MAX_BACKOFF_SECONDS: u32 = 160;
 const EPS_MS: f32 = 0.05;
 /// Frames longer than this (loading, a pause) are left out.
 const HITCH_MS: f32 = 250.;
+/// A paced frame whose swap-chain acquire waited longer than this, ms, got
+/// ahead of the display: its queue of drawables was full.
+pub const ANCHOR_MS: f32 = 1.0;
+/// Frames after a re-anchor before the next one: the acquire read then
+/// still belongs to frames queued before it (the render world runs a frame
+/// behind the main one).
+const ANCHOR_HOLD_FRAMES: u8 = 2;
+
+/// The frame's own time, ms: the interval without the pacing sleep and
+/// without the wait for a drawable, which is presentation, not work. Owner
+/// Mac traces of 2026-11-27: that wait came back at 2-11 ms per frame while
+/// main, render CPU and GPU were unchanged, and counted as work it dropped
+/// 60 Hz pacing to plain vsync.
+pub fn frame_work(interval_ms: f32, slept_ms: f32, acquire_ms: f32) -> f32 {
+    (interval_ms - slept_ms - acquire_ms).max(0.)
+}
+
+/// Locks the pace deadline to the display. The pace is a timer of its own;
+/// when its frames get ahead of the display (a catch-up after a late frame,
+/// clock drift), the drawable queue fills and stays full, and every frame
+/// then waits in acquire for most of a period. Moving the deadline later by
+/// that wait drains the queue, so the paced frames land before the next
+/// refresh again.
+#[derive(Default)]
+struct Anchor {
+    hold: u8,
+    /// Re-anchors since the last report.
+    count: u32,
+}
+
+impl Anchor {
+    /// The deadline after `next` once the last frame waited `acquire_ms`.
+    fn next(&mut self, next: Instant, acquire_ms: f32, period: Duration) -> Instant {
+        if self.hold > 0 {
+            self.hold -= 1;
+            return next;
+        }
+        if acquire_ms <= ANCHOR_MS {
+            return next;
+        }
+        self.hold = ANCHOR_HOLD_FRAMES;
+        self.count += 1;
+        next + Duration::from_secs_f32(acquire_ms / 1000.).min(period)
+    }
+}
 
 /// `[video] refresh_pacing`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -143,7 +188,7 @@ impl Pacer {
     }
 
     /// One second at `refresh_hz`: `mean_ms` is the mean frame interval,
-    /// `work_ms` the 90th percentile frame time without the pacing sleep.
+    /// `work_ms` the 90th percentile of [`frame_work`].
     /// Returns the divisor to pace with (1: plain vsync).
     pub fn second(&mut self, refresh_hz: f32, mean_ms: f32, work_ms: f32) -> u32 {
         if (refresh_hz - self.refresh_hz).abs() > 0.5 || self.n == 0 {
@@ -205,6 +250,7 @@ pub struct RefreshPace {
     second: Option<Instant>,
     intervals: Vec<f32>,
     work: Vec<f32>,
+    anchor: Anchor,
 }
 
 impl RefreshPace {
@@ -220,6 +266,7 @@ impl RefreshPace {
             second: None,
             intervals: Vec::with_capacity(256),
             work: Vec::with_capacity(256),
+            anchor: Anchor::default(),
         }
     }
 
@@ -285,17 +332,22 @@ fn pace(
 ) {
     let state = &mut *state;
     let now = Instant::now();
+    let acquire = crate::frame_split::last_acquire_ms();
     if let Some(last) = state.last {
         let interval = (now - last).as_secs_f32() * 1000.;
         if interval < HITCH_MS {
             state.intervals.push(interval);
-            state.work.push(interval - state.slept.as_secs_f32() * 1000.);
+            state.work.push(frame_work(interval, state.slept.as_secs_f32() * 1000., acquire));
         }
     }
     state.last = Some(now);
     let start = *state.second.get_or_insert(now);
     if now - start >= Duration::from_secs(1) {
         state.second = Some(now);
+        if state.anchor.count > 0 {
+            println!("refresh_pace anchors={} acquire_ms={acquire:.2} pace_hz={:?}", state.anchor.count, state.pace_hz());
+            state.anchor.count = 0;
+        }
         let refresh = refresh_hz();
         if refresh.map(f32::round) != state.refresh_hz.map(f32::round) {
             println!("refresh_pace display_hz={refresh:?} was={:?} enabled={}", state.refresh_hz, state.enabled);
@@ -335,7 +387,7 @@ fn pace(
         std::thread::sleep(sleep);
     }
     state.slept = sleep;
-    state.due = Some(next);
+    state.due = Some(state.anchor.next(next, acquire, period));
 }
 
 /// Paces this app's frames (`mode` from `[video] refresh_pacing`, `cap_hz`
@@ -425,6 +477,43 @@ mod tests {
         assert_eq!(run(&mut p, 120., 2, 15.3, 15.3), 60.);
         assert_eq!(run(&mut p, 120., 43, 16.7, 6.), 60.);
         assert_eq!(run(&mut p, 120., 1, 16.7, 6.), 120.);
+    }
+
+    #[test]
+    fn frame_work_leaves_out_sleep_and_drawable_wait() {
+        assert_eq!(frame_work(16.5, 6.5, 0.), 10.);
+        assert_eq!(frame_work(25., 1., 10.), 14.);
+        assert_eq!(frame_work(16.7, 10., 9.), 0.);
+    }
+
+    /// Owner Mac traces of 2026-11-27: paced at 60, the drawable wait came
+    /// back at about 10 ms per frame with main, render CPU and GPU
+    /// unchanged. Counted as work (24 ms), it dropped pacing to vsync;
+    /// without it (14 ms) 60 holds.
+    #[test]
+    fn a_drawable_wait_does_not_leave_60() {
+        let mut p = Pacer::default();
+        assert_eq!(run(&mut p, 120., 3, 15.3, 15.3), 60.);
+        assert_eq!(run(&mut p, 120., 120, 16.9, frame_work(25., 1., 10.)), 60.);
+        assert_eq!(run(&mut p, 120., 2, 16.9, 25. - 1.), 120.);
+    }
+
+    #[test]
+    fn anchor_moves_the_deadline_once_per_full_queue() {
+        let mut a = Anchor::default();
+        let t = Instant::now();
+        let period = Duration::from_secs_f32(1. / 60.);
+        let ms = |d: Instant| (d - t).as_secs_f32() * 1000.;
+        // No wait (or within ANCHOR_MS): the timer's own deadline.
+        assert_eq!(a.next(t, 0.05, period), t);
+        assert_eq!(a.next(t, ANCHOR_MS, period), t);
+        // A full queue: later by the wait, then held while the frames
+        // queued before it still report theirs.
+        assert!((ms(a.next(t, 9., period)) - 9.).abs() < 0.01);
+        assert_eq!(a.next(t, 9., period), t);
+        assert_eq!(a.next(t, 9., period), t);
+        // At most one period.
+        assert!((ms(a.next(t, 40., period)) - 16.667).abs() < 0.01);
     }
 
     #[test]

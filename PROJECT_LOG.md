@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F985](log/F0985.md) | 2026-11-27 | Refresh pacing: the drawable wait is not frame work; re-anchor after a missed refresh |
 | [F984](log/F0984.md) | 2026-11-27 | Phone: queue 2 confirms single-threaded schedules while throttled |
 | [F983](log/F0983.md) | 2026-11-27 | Phone: single-threaded schedules become the mobile default |
 | [F982](log/F0982.md) | 2026-11-27 | Cockpit wheel on keyboard steering turns 1.5x faster (WHEEL_RATE 3, owner's choice from comparison GIFs) |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F928](log/F0928.md) | 2026-11-25 | Lean render profile as the Android default; 120 Hz pacing A/B |
 | [F927](log/F0927.md) | 2026-11-25 | Phone GPU split rows and Android GPU research |
 | [F926](log/F0926.md) | 2026-11-25 | Mac in-race dips: camera-flash pipelines under the warm-up cover, process counters per window |
-| [F925](log/F0925.md) | 2026-11-25 | Performance test switches: owner phone run 080140 never changed them; order-proof apply and a front-end perf log line |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

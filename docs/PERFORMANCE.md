@@ -5982,7 +5982,8 @@ cap, `render_scale::pace`, which now runs through it too):
   followed; on Android from the Display (JNI). Unknown: no pacing. A change starts again at plain vsync.
 - **Rule** (`Pacer::second`, once a second): candidates are R/n at or above 59.5 Hz, so 60, 75 and 100 Hz keep
   plain vsync and nothing drops to 30. A rate holds while the mean interval is at most its period × 1.1 and,
-  when paced, the 90th percentile frame time without the sleep is at most the period × 1.1. When it has not
+  when paced, the 90th percentile frame time without the sleep and without the swap-chain acquire wait
+  (F985: a frame that only waited for a drawable did no work) is at most the period × 1.1. When it has not
   held for two seconds the pacer moves to the fastest slower even rate that fits the mean (from vsync, which
   rounds frames up to whole periods) or the p90 work × 1.1 (paced), or back to vsync; the rate it leaves is
   blocked for 20 s, doubling to 160 s per rate, plain vsync included, so a presentation-limited 120 is not
@@ -6000,6 +6001,11 @@ cap, `render_scale::pace`, which now runs through it too):
   60 (120/2, 240/4) is the even pace. Caveats: Apple TBDR timestamps at pass boundaries may undercount, and
   the upscale and present tail are not measured (`near_present_marker=false`). The owner's Metal timing fix
   (blit pass, read after completion) reaches main through PR 87.
+- **Re-anchoring (F985):** the pace sleep runs on its own clock. When the phase between that clock and the
+  display drifts, a paced present just misses a refresh, the drawable queue fills, and every following acquire
+  waits most of a period (F981, owner Mac traces: 2-11 ms per frame before each drop from 60 to vsync). An
+  acquire wait above `ANCHOR_MS` (1 ms) moves the next deadline later by that wait (at most one pace period),
+  then holds for two frames; `refresh_pace anchors=N` reports it once a second.
 - **Setting:** `[video] refresh_pacing = auto | on | off`; `auto` is on for macOS, iOS and Android, off on
   Windows and Linux, so the owner's 165 Hz PC (100+ FPS, possibly variable refresh) is unchanged. Only vsync
   present modes are paced. Android's fixed `refresh_hz` cap and the thermal cap stay; the lower rate wins
