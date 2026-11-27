@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F967](log/F0967.md) | 2026-11-27 | Phone GPU batch 8: no cockpit mirror pass on the mobile preset |
 | [F966](log/F0966.md) | 2026-11-27 | Phone: mirror update interval and mirror cull/far measured in the cockpit |
 | [F965](log/F0965.md) | 2026-11-27 | Phone: parallel encoder finish becomes the mobile default |
 | [F964](log/F0964.md) | 2026-11-26 | Refresh-divisor frame pacing for all platforms (macOS, Android; Windows opt-in) |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F910](log/F0910.md) | 2026-11-24 | README for players: download, bug reports, roadmap file |
 | [F909](log/F0909.md) | 2026-11-24 | Release v0.1.0 published |
 | [F908](log/F0908.md) | 2026-11-24 | Linux v0.1.0 release packages from 1ed1b050 and their WSLg smoke |
-| [F907](log/F0907.md) | 2026-11-24 | Linux v0.1.0 packages from e4e5b0c9; --game-root fix for player starts |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

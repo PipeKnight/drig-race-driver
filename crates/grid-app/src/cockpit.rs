@@ -88,8 +88,10 @@ pub struct MirrorGlass;
 pub struct MirrorCamera;
 
 /// The mirror's target size and update interval in frames; `None` draws no
-/// mirror. The original's own values unless `GRID_MIRROR` (AUTHORED
-/// diagnostics: `off`, or `WIDTHxHEIGHT` with an optional `/FRAMES`).
+/// mirror (the glass shows a flat dim tint). The original's own values on the
+/// desktop, none on the mobile preset ([`default_mirror`]), unless
+/// `GRID_MIRROR` (AUTHORED diagnostics: `off`, or `WIDTHxHEIGHT` with an
+/// optional `/FRAMES`).
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct Mirror(pub Option<(UVec2, u32)>);
 
@@ -106,8 +108,17 @@ impl Mirror {
     }
 }
 
+/// The mirror by default: the original's on the desktop; none on the mobile
+/// preset, where its camera cost about 6.5 GPU ms of the head-cam frame on
+/// the phone and neither an update interval nor a mirror-only cull kept the
+/// gain (docs/ANDROID_GPU.md section 10; the owner allows the phone's mirror
+/// off). `GRID_MIRROR=512x128` brings it back for A/B.
+fn default_mirror(mobile: bool) -> Mirror {
+    Mirror((!mobile).then_some((MIRROR_SIZE, 1)))
+}
+
 pub fn install(app: &mut App) {
-    let mut mirror = Mirror(Some((MIRROR_SIZE, 1)));
+    let mut mirror = default_mirror(crate::mobile::enabled());
     if let Ok(value) = crate::dev::var("GRID_MIRROR") {
         match Mirror::parse(&value) {
             Some(m) => mirror = m,
@@ -384,6 +395,17 @@ fn create_mirror(
         return;
     }
     let Mirror(Some((size, every))) = *mirror else {
+        // No mirror pass: the glass shows the pass's clear colour at the
+        // mirror's tint, a dim reflection without a picture.
+        let flat = materials.add(StandardMaterial {
+            base_color: Color::from(MIRROR_CLEAR.to_linear() * MIRROR_TINT).with_alpha(1.),
+            unlit: true,
+            ..default()
+        });
+        for entity in &glass {
+            commands.entity(entity).insert(MeshMaterial3d(flat.clone()));
+        }
+        println!("cockpit_mirror off glass={}", glass.iter().count());
         return;
     };
     let target = images.add(Image::new_target_texture(
@@ -680,6 +702,13 @@ mod tests {
         assert!(mirror_drops(100, false, 1., 101.));
         assert!(!mirror_drops(100, false, 1., 99.));
         assert!(!mirror_drops(100, true, 1., 1000.));
+    }
+
+    /// The desktop keeps the original's mirror; the mobile preset has none.
+    #[test]
+    fn mobile_preset_has_no_mirror_and_the_desktop_the_original() {
+        assert_eq!(default_mirror(false), Mirror(Some((MIRROR_SIZE, 1))));
+        assert_eq!(default_mirror(true), Mirror(None));
     }
 
     #[test]
