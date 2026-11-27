@@ -5868,6 +5868,24 @@ scripts: scratchpad `macwin.py` and `share.py` (frame_stats per window, split at
     (every eighth frame 25 ms above 1392 rows, 4.5 ms of CPU, the rest waiting) steps down to 1392 rows at
     about 3.4 s and keeps the band at the top under 12 s of 60; the same frames late for the CPU and 60 Hz
     on-time frames change nothing.
+- Replaced in F995. The owner's Mac traces of F981 show that the acquire wait is not a GPU signal: GPU 2 ms
+  and acquire 9-11 ms per frame at vsync, and "late" steps moved at smoothed frame times of 17.6-18.4 ms
+  between 1224 and 1440 rows, which no height can change.
+  - `Dynamic::busy_ms` smooths the frame time without the swap-chain wait (SMOOTHING 0.1).
+  - A smoothed frame time above `LATE_MS` but at most `NEAR_MS` (1.25 × `TARGET_MS`, 20.8 ms: one missed
+    refresh) with `busy_ms <= ON_TIME_MS` is display-bound and holds. Beyond `NEAR_MS` a frame is late
+    whatever its wait, so a GPU-bound frame that waits in acquire still steps down there.
+  - The hold band below `LATE_MS` holds again, as before F932. `GPU_LATE_SHARE` and `gpu_late_ms` are
+    removed.
+  - `render_dynamic version=5`: change lines print `busy_ms=`, the install line
+    `display_bound=near_ms+on_time_ms`.
+  - Trade-off [I]: a GPU-bound frame of 18-20.8 ms that waits in acquire now holds where it stepped down
+    before. Phones wait in present, not acquire (F981), and are far above `NEAR_MS`, so they are unaffected.
+  - Tests: `dynamic_height_holds_when_frames_only_wait_for_the_display` (the countdown pattern, the Mac
+    vsync pattern at 19.4 ms with 6 ms of work, and 60 Hz on-time frames hold; the same vsync frame times
+    with no wait step down) and `dynamic_height_steps_down_when_the_gpu_holds_the_drawable` (30 ms of GPU at
+    1440 rows that waits in acquire: late within 1.5 s of the warm-up, settles at 1080-1104 rows, no
+    `ineffective`).
 
 ### Windowed against fullscreen [O]
 

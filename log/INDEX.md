@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F995](F0995.md) | 2026-11-27 | Dynamic resolution: a frame that only waited for the display is not late |
 | [F994](F0994.md) | 2026-11-27 | Push to main under the build lock; .github outside the pass key |
 | [F993](F0993.md) | 2026-11-27 | Correct macOS controller input and enable pad rumble |
 | [F992](F0992.md) | 2026-11-27 | Versioned gameplay scenario progress in CI |

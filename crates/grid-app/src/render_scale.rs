@@ -148,14 +148,13 @@ pub fn scaled_size(physical: UVec2, height: RenderHeight) -> Option<UVec2> {
 /// changed, not that the pixels do not matter (F642: −46 ms against 2 ms as
 /// smoke thickened): the probe is inconclusive and the lower height stays.
 ///
-/// Between [`ON_TIME_MS`] and [`LATE_MS`] the height holds, unless the time
-/// above [`TARGET_MS`] comes from frames that waited for the swap chain and
-/// would have been on time without the wait (at least [`GPU_LATE_SHARE`] of
-/// it): the GPU is what keeps them from 60 FPS, so they count as late (F932:
-/// the Mac's countdown ran at 55-59 FPS at the ceiling with 12.5-13 ms of
-/// acquire, and the first step came only after the start). Frames late for
-/// the CPU (a long main frame, waiting little) keep the band; so do frames on
-/// time, however long their vsync wait.
+/// Between [`ON_TIME_MS`] and [`LATE_MS`] the height holds. Frames up to
+/// [`NEAR_MS`] that would be on time without their swap-chain wait (the
+/// smoothed frame time minus the acquire wait at most [`ON_TIME_MS`]) are
+/// not late either: they waited for the display, which a lower height does
+/// not change (the owner's Mac traces of F981: GPU 2 ms, acquire 9-11
+/// ms, "late" moves at 17.6-18.4 ms between 1224 and 1440 rows). F932
+/// counted such waits as GPU time inside the band; that rule is gone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dynamic {
     pub floor: u32,
@@ -167,9 +166,8 @@ pub struct Dynamic {
     /// Frame time smoothed over a few frames, for judging a probe.
     recent_ms: f32,
     pub work_ms: f32,
-    /// Smoothed time above [`TARGET_MS`] of frames that waited for the swap
-    /// chain longer than they ran over, ms (the GPU's share of the lateness).
-    pub gpu_late_ms: f32,
+    /// Smoothed frame time without the swap-chain (acquire) wait, ms.
+    pub busy_ms: f32,
     warm: f32,
     since_change: f32,
     good_for: f32,
@@ -227,10 +225,6 @@ pub const NEAR_MS: f32 = 1.25 * TARGET_MS;
 pub const NEAR_SHARE: f32 = 0.25;
 /// Seconds at the probe's start height after a step that did not help.
 pub const HOLD_SECONDS: f32 = 60.;
-/// Between [`ON_TIME_MS`] and [`LATE_MS`], frames count as late when at least
-/// this share of their time above [`TARGET_MS`] is GPU-bound: frames that
-/// waited for the swap chain and fit the target without the wait (F932).
-pub const GPU_LATE_SHARE: f32 = 0.5;
 /// A step down waits for this many late frames, so that a sudden load is
 /// probed against a settled frame time (88 % of the change).
 pub const LATE_FRAMES: u32 = 20;
@@ -252,7 +246,7 @@ impl Dynamic {
             frame_ms: TARGET_MS,
             recent_ms: TARGET_MS,
             work_ms: 0.,
-            gpu_late_ms: 0.,
+            busy_ms: TARGET_MS,
             warm: 0.,
             since_change: 0.,
             good_for: 0.,
@@ -310,13 +304,7 @@ impl Dynamic {
         self.frame_ms += (frame_ms - self.frame_ms) * SMOOTHING;
         self.recent_ms += (frame_ms - self.recent_ms) * PROBE_SMOOTHING;
         self.work_ms += (work_ms - self.work_ms) * SMOOTHING;
-        // Over the target, and on time without the wait: the GPU made it late.
-        let gpu_late = if frame_ms - wait_ms <= TARGET_MS {
-            (frame_ms - TARGET_MS).max(0.)
-        } else {
-            0.
-        };
-        self.gpu_late_ms += (gpu_late - self.gpu_late_ms) * SMOOTHING;
+        self.busy_ms += ((frame_ms - wait_ms).max(0.) - self.busy_ms) * SMOOTHING;
         self.warm += dt;
         self.since_change += dt;
         if let Some((_, left)) = &mut self.blocked {
@@ -379,9 +367,10 @@ impl Dynamic {
             self.good_for = 0.;
             return Some("verify_late");
         }
-        let gpu_bound = self.frame_ms > ON_TIME_MS
-            && self.gpu_late_ms >= GPU_LATE_SHARE * (self.frame_ms - TARGET_MS);
-        let late = self.frame_ms > LATE_MS || gpu_bound;
+        // Within a missed refresh of the target and on time without the
+        // swap-chain wait: the frames waited for the display, not late.
+        let display_bound = self.frame_ms <= NEAR_MS && self.busy_ms <= ON_TIME_MS;
+        let late = self.frame_ms > LATE_MS && !display_bound;
         self.late_frames = if late { self.late_frames + 1 } else { 0 };
         let cpu_bound = self.work_ms > CPU_SHARE * self.frame_ms || self.work_ms > CPU_MS;
         self.good_for = if self.frame_ms < ON_TIME_MS { self.good_for + dt } else { 0. };
@@ -695,15 +684,15 @@ fn adjust_height(mut scale: ResMut<RenderScale>, mut work: ResMut<Work>, time: R
     };
     if d.set_range(floor, ceiling) {
         println!(
-            "render_dynamic version=4 event=range floor={floor} ceiling={ceiling} scale_factor={scale_factor}"
+            "render_dynamic version=5 event=range floor={floor} ceiling={ceiling} scale_factor={scale_factor}"
         );
     }
     let from = d.rows;
     let wait_ms = crate::frame_split::last_acquire_ms();
     if let Some(reason) = d.update(time.delta_secs() * 1000., work_ms, wait_ms, ceiling) {
         println!(
-            "render_dynamic version=4 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} probe_gain_ms={:.2} pixel_gain_ms={:.2} floor={} ceiling={ceiling} gpu_late_ms={:.2}",
-            d.rows, d.frame_ms, d.work_ms, d.gain.0, d.gain.1, d.floor, d.gpu_late_ms
+            "render_dynamic version=5 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} probe_gain_ms={:.2} pixel_gain_ms={:.2} floor={} ceiling={ceiling} busy_ms={:.2}",
+            d.rows, d.frame_ms, d.work_ms, d.gain.0, d.gain.1, d.floor, d.busy_ms
         );
     }
 }
@@ -713,7 +702,7 @@ pub fn install(app: &mut App, height: RenderHeight) {
     let dynamic = auto_dynamic(height);
     if let Some(d) = &dynamic {
         println!(
-            "render_dynamic version=4 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}..{MAX_DOWN_SHARE}/{DOWN_SECONDS}s hidpi_ceiling={HIDPI_CEILING_ROWS} hitch_ms={HITCH_MS} up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS} probe_s={PROBE_SECONDS} gpu_share={GPU_SHARE} near_ms={NEAR_MS:.1}..{NEAR_SHARE} hold_s={HOLD_SECONDS} gpu_late_share={GPU_LATE_SHARE}",
+            "render_dynamic version=5 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}..{MAX_DOWN_SHARE}/{DOWN_SECONDS}s hidpi_ceiling={HIDPI_CEILING_ROWS} hitch_ms={HITCH_MS} up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS} probe_s={PROBE_SECONDS} gpu_share={GPU_SHARE} near_ms={NEAR_MS:.1}..{NEAR_SHARE} hold_s={HOLD_SECONDS} display_bound=near_ms+on_time_ms",
             d.floor, d.rows
         );
     }
@@ -1051,70 +1040,85 @@ mod tests {
         assert!(seen.iter().all(|(r, _)| *r != "ineffective"), "{seen:?}");
     }
 
-    /// F932, the Mac's countdown (F929): at the 1440-row ceiling every eighth
-    /// frame missed the 120 Hz refresh after the target (25 ms, the rest
-    /// 16.67: 17.7 ms on average, inside the hold band) with 4.5 ms of CPU
-    /// work and the rest waiting for the swap chain. At 1392 rows and below
-    /// every frame is on time.
-    fn countdown_frame(rows: u32, n: u32, cpu_late: bool) -> (f32, f32) {
-        let ms = if rows > 1392 && n.is_multiple_of(8) { 25. } else { TARGET_MS };
-        // CPU-late variant: the long frame is a long main frame that hardly
-        // waits; on-time frames wait for vsync either way.
-        let wait = if cpu_late && ms > TARGET_MS { 1. } else { ms - 4.5 };
-        (ms, wait)
-    }
-
-    type Changes = Vec<(f32, &'static str, u32)>;
-
-    fn run_countdown(d: &mut Dynamic, seconds: f32, cpu_late: bool) -> (Changes, f32) {
-        let (mut seen, mut band_at_top, mut t, mut n) = (Vec::new(), 0., 0., 0);
+    /// Feeds `seconds` of frames from `frame(rows, n)` = (frame ms, swap-chain
+    /// wait ms) with 4.5 ms of main work; returns each change with its time.
+    fn run_waits(
+        d: &mut Dynamic,
+        seconds: f32,
+        frame: impl Fn(u32, u32) -> (f32, f32),
+    ) -> Vec<(f32, &'static str, u32)> {
+        let (mut seen, mut t, mut n) = (Vec::new(), 0., 0);
         while t < seconds * 1000. {
-            let (ms, wait) = countdown_frame(d.rows, n, cpu_late);
+            let (ms, wait) = frame(d.rows, n);
             (t, n) = (t + ms, n + 1);
-            if d.rows > 1392 && d.frame_ms > ON_TIME_MS {
-                band_at_top += ms / 1000.;
-            }
             if let Some(reason) = d.update(ms, 4.5, wait, 1440) {
                 seen.push((t / 1000., reason, d.rows));
             }
         }
-        (seen, band_at_top)
+        seen
     }
 
-    #[test]
-    fn dynamic_height_steps_down_when_the_gpu_holds_frames_in_the_band() {
+    fn mac_range() -> Dynamic {
         let mut d = Dynamic::new(0, 0);
         d.set_range(720, 1440);
-        let (seen, band_at_top) = run_countdown(&mut d, 60., false);
-        // The first step comes right after the warm-up and stays (the frames
-        // are on time below 1392 rows).
-        let (t, reason, rows) = seen[0];
-        assert!(reason == "late" && rows <= 1392 && t < WARM_SECONDS + 1.5, "{seen:?}");
-        assert!(seen.iter().all(|(_, r, _)| *r != "ineffective"), "{seen:?}");
-        // Retries of the blocked heights are short: under a fifth of the minute
-        // above 1392 rows with frames in the band.
-        assert!(band_at_top < 12., "{band_at_top} s: {seen:?}");
-        assert!(d.rows >= 1296, "{seen:?}");
+        d
+    }
 
-        // The same frame times late for the CPU: the band holds, as before.
-        let mut d = Dynamic::new(0, 0);
-        d.set_range(720, 1440);
-        let (seen, _) = run_countdown(&mut d, 60., true);
-        assert!(seen.is_empty(), "{seen:?}");
-        assert!(d.gpu_late_ms < 0.05, "{}", d.gpu_late_ms);
+    /// Frames that only waited for the display keep the height (F981).
+    #[test]
+    fn dynamic_height_holds_when_frames_only_wait_for_the_display() {
+        // The Mac's countdown (F929/F932): every eighth frame missed the 120 Hz
+        // refresh (25 ms, the rest 16.67: 17.7 ms on average, inside the hold
+        // band) with 4.5 ms of CPU and the rest waiting. F932 stepped down here.
+        let mut d = mac_range();
+        let seen = run_waits(&mut d, 60., |_, n| {
+            let ms = if n.is_multiple_of(8) { 25. } else { TARGET_MS };
+            (ms, ms - 4.5)
+        });
+        assert!(seen.is_empty() && d.rows == 1440, "{seen:?}");
+
+        // The Mac at vsync (F981): every third frame a refresh late, 19.4 ms on
+        // average (late before this rule) with 6 ms of render work and the rest
+        // waiting for a drawable, whatever the height.
+        let mac_vsync = |_: u32, n: u32| {
+            let ms = if n.is_multiple_of(3) { 25. } else { TARGET_MS };
+            (ms, ms - 6.)
+        };
+        let mut d = mac_range();
+        let seen = run_waits(&mut d, 60., mac_vsync);
+        assert!(seen.is_empty() && d.rows == 1440, "{seen:?}");
+        assert!(d.frame_ms > LATE_MS && d.frame_ms <= NEAR_MS, "{}", d.frame_ms);
+        assert!(d.busy_ms < 6.5, "{}", d.busy_ms);
+
+        // The same frame times without the wait (the frame's own work): late.
+        let mut d = mac_range();
+        let seen = run_waits(&mut d, 10., |rows, n| (mac_vsync(rows, n).0, 0.3));
+        assert_eq!(seen.first().map(|c| c.1), Some("late"), "{seen:?}");
 
         // On-time frames at a 60 Hz refresh wait for vsync most of the frame:
         // not late, and the height stays at the ceiling.
-        let mut d = Dynamic::new(0, 0);
-        d.set_range(720, 1440);
-        let mut seen = Vec::new();
-        for n in 0..3600 {
-            let ms = TARGET_MS + if n % 2 == 0 { 0.3 } else { -0.3 };
-            if let Some(r) = d.update(ms, 2., ms - 3., 1440) {
-                seen.push(r);
-            }
-        }
+        let mut d = mac_range();
+        let seen = run_waits(&mut d, 60., |_, n| {
+            let ms = TARGET_MS + if n.is_multiple_of(2) { 0.3 } else { -0.3 };
+            (ms, ms - 3.)
+        });
         assert!(seen.is_empty() && d.rows == 1440, "{seen:?}");
+    }
+
+    /// A GPU-bound frame waits for a drawable too (Metal, F929): beyond a
+    /// missed refresh ([`NEAR_MS`]) the frame is late, wait or not. GPU time
+    /// 30 ms at 1440 rows, following the pixels; 4.5 ms of CPU.
+    #[test]
+    fn dynamic_height_steps_down_when_the_gpu_holds_the_drawable() {
+        let mut d = mac_range();
+        let seen = run_waits(&mut d, 30., |rows, _| {
+            let ms = (30. * (rows as f32 / 1440.).powi(2)).max(TARGET_MS);
+            (ms, ms - 4.5)
+        });
+        let (t, reason, rows) = seen[0];
+        assert!(reason == "late" && rows <= 1104 && t < WARM_SECONDS + 1.5, "{seen:?}");
+        assert!(seen.iter().all(|(_, r, _)| *r != "ineffective"), "{seen:?}");
+        assert!((1080..=1104).contains(&d.rows), "{seen:?}");
     }
 
     #[test]
