@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F996](log/F0996.md) | 2026-11-27 | Owner APK from 31a276ca: Mac gamepad and dynres on main |
 | [F995](log/F0995.md) | 2026-11-27 | Dynamic resolution: a frame that only waited for the display is not late |
 | [F994](log/F0994.md) | 2026-11-27 | Push to main under the build lock; .github outside the pass key |
 | [F993](log/F0993.md) | 2026-11-27 | Correct macOS controller input and enable pad rumble |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F939](log/F0939.md) | 2026-11-26 | Codex usage audit script in tools/; Codex defaults updated |
 | [F938](log/F0938.md) | 2026-11-26 | Codex working rules in AGENTS.md |
 | [F937](log/F0937.md) | 2026-11-26 | Owner usage figures removed from the repo |
-| [F936](log/F0936.md) | 2026-11-26 | Phone GPU batch 2: texture mip skip at upload (mipskipN_M) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
