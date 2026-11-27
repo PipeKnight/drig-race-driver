@@ -33,6 +33,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [prune_build_dirs.ps1](prune_build_dirs.ps1) | Delete cargo build dirs under C:\cargo-build that no live checkout uses. | [DISK_USAGE](../docs/DISK_USAGE.md) |
 | [rebuild_macos.py](rebuild_macos.py) | Rebuild fresh origin/main as a private macOS DMG without changing the current checkout. | [MACOS](../docs/MACOS.md) |
 | [release_playable.ps1](release_playable.ps1) | The coordinator's playable release: merge origin/main, rebuild the PC prototype, refresh the portable copy, build both private APKs and draft the log entry … | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
+| [scenario_progress.py](scenario_progress.py) | Run the versioned gameplay scenario suite and report its results. |  |
 | [seed_build_dir.ps1](seed_build_dir.ps1) | Seed this checkout's empty cargo build dir from another checkout's build dir. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [split_project_log.py](split_project_log.py) | Split the old single-file PROJECT_LOG.md into one file per entry under log/. |  |
 | [tests/test_fidelity_progress.py](tests/test_fidelity_progress.py) | Regression tests for the fidelity backlog report and its status conventions. |  |

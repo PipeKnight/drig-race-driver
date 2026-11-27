@@ -163,6 +163,26 @@ The [Fidelity Backlog](docs/FIDELITY_BACKLOG.md) tracks known discrepancies and 
 reports open and closed items and publishes a JSON report for each run. The percentage is backlog
 completion. Game parity and matching decompilation require separate measurements.
 
+## Fixed gameplay scenarios
+
+[GitHub Actions](https://github.com/PipeKnight/drig-race-driver/actions/workflows/scenario-progress.yml)
+runs the [versioned scenario suite](tools/scenario_progress.py) and publishes a per-commit summary
+and a JSON report. Suite v1 covers lap timing and race classification, flashbacks, drift scoring
+and career rules, and reserves two headless driving scenarios that still need automated checks.
+Its verified percentage is the share of the fixed scenario list that passed.
+It measures headless behavior within that suite. Binary matching, graphics, audio and full races
+in the interactive app are outside its scope.
+
+CI runs the scenarios that need no original files. To include scenarios that use the original
+career tables and drift settings, run locally with your copy of the game:
+
+```sh
+python3 -I tools/scenario_progress.py --game-root "/path/to/GRID" --json scenario-progress.json
+```
+
+The report keeps passed, failed and not-run scenarios in the denominator. Changing scenario
+membership, inputs or success criteria requires a new suite version so results remain comparable.
+
 ## Featured in
 
 1. [Awesome Decomp Games](https://github.com/SubmitGame/awesome-decomp-games)
