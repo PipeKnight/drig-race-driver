@@ -161,11 +161,18 @@ fn soften(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     return vec4(sample_src(input.uv) * textureLoad(extra, vec2<i32>(0), 0).y, 1.0);
 }
 
+fn merge_uv(uv: vec2<f32>, size: vec2<u32>) -> vec2<f32> {
+    return uv + 0.5 / vec2<f32>(size);
+}
+
 @fragment
 fn final_merge(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let texel = textureSampleLevel(src, linear_sampler, input.uv, 0.0);
-    let soft = textureSampleLevel(extra, linear_sampler, input.uv, 0.0).rgb;
-    let bloom = textureSampleLevel(history, linear_sampler, input.uv, 0.0).rgb;
+    // The source quad supplies (pixel + 0.4) / output size. Each input
+    // then adds half a texel measured in its own texture dimensions.
+    let pixel_uv = input.uv - 0.1 * fwidth(input.uv);
+    let texel = textureSampleLevel(src, linear_sampler, merge_uv(pixel_uv, textureDimensions(src)), 0.0);
+    let soft = textureSampleLevel(extra, linear_sampler, merge_uv(pixel_uv, textureDimensions(extra)), 0.0).rgb;
+    let bloom = textureSampleLevel(history, linear_sampler, merge_uv(pixel_uv, textureDimensions(history)), 0.0).rgb;
     let scene_rgb = to_display(texel.rgb);
     let exposure = textureLoad(adapted_luminance, vec2<i32>(0), 0).y;
     let no_blur = fx.tone_threshold.w > 0.0;
@@ -186,7 +193,7 @@ fn final_merge(input: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let merged = scene + bloom * fx.mix_amounts.y * bloom_gate;
     let tinted = mix(vec3(dot(merged, LUMA)), merged, fx.balance.w) * fx.tint.rgb;
 
-    let p = vec2(2.0 * input.uv.x - 1.0, 1.0 - 2.0 * input.uv.y);
+    let p = 2.0 * pixel_uv - vec2(1.0);
     let c = fx.rotation.x;
     let s = fx.rotation.y;
     let r = vec2(c * p.x - s * p.y, c * p.y + s * p.x);
