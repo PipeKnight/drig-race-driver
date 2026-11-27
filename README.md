@@ -156,6 +156,38 @@ Forks, bug reports and pull requests are welcome. Most of the code is written by
 
 After cloning, install the git hooks once: `py -I tools/hooks/install.py` (or `python3 tools/hooks/install.py`). On every commit they refuse game files, binaries, large files, conflict markers, broken Markdown links and scripts that do not parse ([docs/TOOLCHAIN.md](docs/TOOLCHAIN.md), "Git hooks").
 
+## Fidelity backlog progress
+
+The [Fidelity Backlog](docs/FIDELITY_BACKLOG.md) tracks known discrepancies and related tasks.
+[GitHub Actions](https://github.com/PipeKnight/drig-race-driver/actions/workflows/fidelity-progress.yml)
+reports open and closed items and publishes a JSON report for each run. The percentage is backlog
+completion. Game parity and matching decompilation require separate measurements.
+
+## Featured in
+
+1. [Awesome Decomp Games](https://github.com/SubmitGame/awesome-decomp-games)
+2. [Game Decompilations](https://github.com/SamidyFR/Game-Decompilations)
+3. [Greates Games Decompilations List](https://github.com/Carter54git/Greates-Games-Decompilations-List)
+4. [Awesome Decomp Games RU](https://github.com/justxor/awesome-decomp-games-ru/blob/main/catalog/dekompilyacii.md)
+5. [recomp.gg](https://recomp.gg/p/drig-race-driver)
+
+<details>
+<summary>Pending catalog submissions</summary>
+
+- [Open Source Game Clones](https://github.com/opengaming/osgameclones/pull/5201)
+- [Awesome Game Remakes](https://github.com/radek-sprta/awesome-game-remakes/pull/96)
+- [Awesome Game Decompilations](https://github.com/CharlotteCross1998/awesome-game-decompilations/pull/65)
+- [Awesome Rebuilt Games](https://github.com/no7z/awesome-rebuilt-games/pull/1)
+- [Awesome REA (yibie)](https://github.com/yibie/awesome-rea/pull/10)
+- [Reverse Engineering Atlas](https://github.com/jammyfu/reverse-engineering-atlas/pull/8)
+- [Awesome Open Source Games](https://github.com/djeada/awesome-open-source-games-list/pull/2)
+- [Open Source Games List](https://github.com/Trilarion/opensourcegames/issues/517)
+- [Awesome REA (kaixinbaba)](https://github.com/kaixinbaba/awesome-rea/issues/454)
+- [RemakeList](https://github.com/CharlexH/awesome-remakelist/issues/1)
+- [Recompendium](https://github.com/Nio03/unricopie/issues/104)
+
+</details>
+
 ## Legal
 
 DRIG is an independent project. It is not affiliated with, endorsed by or connected to Codemasters or Electronic Arts. "Race Driver: GRID" and related names are trademarks of their respective owners. You need your own copy of the original game to play.

@@ -1,0 +1,42 @@
+name: Fidelity backlog progress
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/FIDELITY_BACKLOG.md
+      - tools/fidelity_progress.py
+      - tools/tests/test_fidelity_progress.py
+      - .github/workflows/fidelity-progress.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - docs/FIDELITY_BACKLOG.md
+      - tools/fidelity_progress.py
+      - tools/tests/test_fidelity_progress.py
+      - .github/workflows/fidelity-progress.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fidelity-progress:
+    name: Fidelity backlog progress
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test the report
+        run: python3 -I -m unittest discover -s tools/tests -p test_fidelity_progress.py
+      - name: Report open and closed backlog items
+        shell: bash
+        run: |
+          python3 -I tools/fidelity_progress.py --json fidelity-progress.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload the machine-readable report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fidelity-progress
+          path: fidelity-progress.json
+          if-no-files-found: error

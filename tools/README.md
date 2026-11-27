@@ -23,6 +23,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [build_seed.ps1](build_seed.ps1) | Build a new cargo build-dir seed beside C:\cargo-build\seed and swap it in. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [dedup_hardlinks.py](dedup_hardlinks.py) | Replace byte-identical files under a directory with NTFS hard links. | [DISK_USAGE](../docs/DISK_USAGE.md) |
 | [disk_report.ps1](disk_report.ps1) | Report disk usage of the project folder: cargo target dirs, worktrees and local/ captures. | [DISK_USAGE](../docs/DISK_USAGE.md) |
+| [fidelity_progress.py](fidelity_progress.py) | Report closed and open Fidelity Backlog items for the GitHub Actions summary. |  |
 | [identity.tsv](identity.tsv) | Solo-lap identity check (docs/TOOLCHAIN.md "Identity check"): sha256 of the standard output of target/release/grid-opponent-race ROOT CD01 BP01 <args> env "-": … | [PERFORMANCE](../docs/PERFORMANCE.md) |
 | [index_files.py](index_files.py) | Generate tools/README.md and docs/INDEX.md: one line per tool and per document. |  |
 | [install_native_build_tools.ps1](install_native_build_tools.ps1) | Install authorized native development prerequisites from official sources. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
@@ -34,6 +35,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [release_playable.ps1](release_playable.ps1) | The coordinator's playable release: merge origin/main, rebuild the PC prototype, refresh the portable copy, build both private APKs and draft the log entry … | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [seed_build_dir.ps1](seed_build_dir.ps1) | Seed this checkout's empty cargo build dir from another checkout's build dir. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [split_project_log.py](split_project_log.py) | Split the old single-file PROJECT_LOG.md into one file per entry under log/. |  |
+| [tests/test_fidelity_progress.py](tests/test_fidelity_progress.py) | Regression tests for the fidelity backlog report and its status conventions. |  |
 | [tests/test_rebuild_macos.py](tests/test_rebuild_macos.py) | Exercise rebuild isolation and cleanup with real Git repos and a simulated compiler. |  |
 | [time_build.ps1](time_build.ps1) | Time one build or test command and record the machine load while it runs. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [update_prototype.ps1](update_prototype.ps1) | (no header comment) | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
