@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F991](F0991.md) | 2026-11-27 | Phone display-mode tests: MIUI ignores preferredDisplayModeId; cap 120 neutral |
 | [F990](F0990.md) | 2026-11-27 | Row 149: lazy pieces wait for the warm-up and a hidden ViewVisibility |
 | [F989](F0989.md) | 2026-11-27 | Phone: CPU candidate table complete after queue 3 |
 | [F988](F0988.md) | 2026-11-27 | Phone mirror-off default confirmed in the GPU ranking |

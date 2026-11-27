@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F991](log/F0991.md) | 2026-11-27 | Phone display-mode tests: MIUI ignores preferredDisplayModeId; cap 120 neutral |
 | [F990](log/F0990.md) | 2026-11-27 | Row 149: lazy pieces wait for the warm-up and a hidden ViewVisibility |
 | [F989](log/F0989.md) | 2026-11-27 | Phone: CPU candidate table complete after queue 3 |
 | [F988](log/F0988.md) | 2026-11-27 | Phone mirror-off default confirmed in the GPU ranking |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F934](log/F0934.md) | 2026-11-26 | Phone GPU batch 1: size cull, tonemap and ADPF switches, GPU clock sampler |
 | [F933](log/F0933.md) | 2026-11-26 | Phone: lean default verified, dip anatomy, MIUI 60 Hz vote, physics stage split, thermal soaks (cap 30, sustained mode), bench env switches |
 | [F932](log/F0932.md) | 2026-11-26 | Dynamic resolution: a GPU-bound frame time in the hold band counts as late (Mac countdown) |
-| [F931](log/F0931.md) | 2026-11-26 | Steam Deck estimate from E-core and UHD 770 stand-ins |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
