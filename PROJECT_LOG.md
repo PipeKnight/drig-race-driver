@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F990](log/F0990.md) | 2026-11-27 | Row 149: lazy pieces wait for the warm-up and a hidden ViewVisibility |
 | [F989](log/F0989.md) | 2026-11-27 | Phone: CPU candidate table complete after queue 3 |
 | [F988](log/F0988.md) | 2026-11-27 | Phone mirror-off default confirmed in the GPU ranking |
 | [F987](log/F0987.md) | 2026-11-27 | Phone: ADPF, CPU batch 2, scale step and mirror confirm on the F983 APK |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F933](log/F0933.md) | 2026-11-26 | Phone: lean default verified, dip anatomy, MIUI 60 Hz vote, physics stage split, thermal soaks (cap 30, sustained mode), bench env switches |
 | [F932](log/F0932.md) | 2026-11-26 | Dynamic resolution: a GPU-bound frame time in the hold band counts as late (Mac countdown) |
 | [F931](log/F0931.md) | 2026-11-26 | Steam Deck estimate from E-core and UHD 770 stand-ins |
-| [F930](log/F0930.md) | 2026-11-26 | frame_split GPU readback: no slot reuse with a map outstanding (Mac crash) |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

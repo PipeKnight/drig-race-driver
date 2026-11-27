@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F990](F0990.md) | 2026-11-27 | Row 149: lazy pieces wait for the warm-up and a hidden ViewVisibility |
 | [F989](F0989.md) | 2026-11-27 | Phone: CPU candidate table complete after queue 3 |
 | [F988](F0988.md) | 2026-11-27 | Phone mirror-off default confirmed in the GPU ranking |
 | [F987](F0987.md) | 2026-11-27 | Phone: ADPF, CPU batch 2, scale step and mirror confirm on the F983 APK |

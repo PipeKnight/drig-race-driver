@@ -1237,11 +1237,25 @@ cost CPU every frame in each pass that walks the mesh entities. On the phone (lo
 
 `lean_pieces.rs` (every build) gives a hidden piece of an unbroken breakable Bevy's `Disabled`, which
 the default query filter skips. Timing:
-- from frame 30 on, then again every 60 frames (after a restart clears the breaks);
+- 30 frames after the pipeline warm-up is done (or after the start without one), then again every
+  60 frames (after a restart clears the breaks);
 - the piece wakes, losing `Disabled`, before `dynamic_props::present`, in the frame its breakable
   breaks.
 Such a piece is never drawn, so the picture does not change. `GRID_LAZY_PIECES=0` turns it off. The
-log shows `lean_pieces version=1 event=rest frame= disabled= dormant=`.
+log shows `lean_pieces version=2 event=rest frame= disabled= still_shown= dormant=` (frames counted
+from the end of the warm-up) and, per break, `lean_pieces version=2 event=wake breakable= pieces=
+stale_visible=`.
+
+**Seen hidden first (row 149, F574 follow-up).** A piece is disabled only once the renderer has seen
+it hidden (its `ViewVisibility` is off); the others count as `still_shown` and are retried at the next
+round. `Disabled` freezes an entity's whole state: the warm-up's restore, visibility and render
+extraction all skip it. On the owner's Xiaomi (F897 APK) the pipeline warm-up still showed every
+piece at frame 30 (it ended at frame 159), so the old rule disabled 10,794 pieces with a visible
+`ViewVisibility` and the warm-up's temporary components. A woken piece then had no visibility change,
+which is what Bevy's skin and mesh extraction react to; the owner saw a tyre wall's tyres vanish and
+a few top tyres hang in the air after a big hit. A desktop run with the phone's timing reproduces the
+stale state (34 of 34 woken pieces) but not the missing tyres, so the fix is defensive: it removes
+the stale state on every device, and the wake line's `stale_visible` shows whether it ever recurs.
 
 **Checks (26 Oct 2026, 14:28–14:36, after 14:07):**
 - Image A/B on the Detroit derby at tick 2,700 with `--render-fixed-step`, 1600 × 900, 6 breaks
