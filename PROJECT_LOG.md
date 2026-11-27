@@ -185,6 +185,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F975](log/F0975.md) | 2026-11-27 | Backlog: Broski GRID Overhaul findings (rows 138, 140, 157) |
 | [F974](log/F0974.md) | 2026-11-27 | Backlog row 138: owner to test Life Career Prestige handling and drift |
 | [F973](log/F0973.md) | 2026-11-27 | Backlog row 138: Life Career mod ideas as data-driven extras |
 | [F972](log/F0972.md) | 2026-11-27 | Phone: CPU batch 1 pairs 1-5 and the parallel-finish soak |
@@ -244,7 +245,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F918](log/F0918.md) | 2026-11-25 | Unified per-run logs on all platforms |
 | [F917](log/F0917.md) | 2026-11-24 | CI: Intel-only SSE host comparison, vendor-independent digest test |
 | [F916](log/F0916.md) | 2026-11-24 | Keep macOS player packaging and portable race logs |
-| [F915](log/F0915.md) | 2026-11-24 | Xiaomi Performance test A/B: shadows and scene off gain nothing, fixed per-frame CPU overhead wins |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
